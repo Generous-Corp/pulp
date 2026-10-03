@@ -220,10 +220,11 @@ keeps sparse `ParameterEventQueue` automation and dense
 `AudioRateModulationView` lanes as separate borrowed views.
 
 `ProcessContext::process_mode` tells a processor whether the current block is
-live realtime audio or an offline render. Existing adapters default to
-`ProcessMode::Realtime`; headless and export-style hosts should set
-`ProcessMode::Offline` explicitly when they drive deterministic non-live
-processing. Use the helper predicates instead of comparing raw enum values in
+live realtime audio or an offline render. The VST3, AU v2, AU v3, CLAP, and
+AAX (AudioSuite) adapters report `ProcessMode::Offline` when the host announces
+an offline render (see the format guide for each host signal); headless and
+export-style hosts should set `ProcessMode::Offline` explicitly when they drive
+deterministic non-live processing. Use the helper predicates instead of comparing raw enum values in
 hot code. A realtime block with a slower-than-realtime hint is still an
 audio-thread callback. Bypass, tail-drain, reset, and transport-jump flags are
 block metadata for processors that need to distinguish those host states

@@ -348,6 +348,8 @@ DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
 # program this repo builds is what its spawn edges, or a reviewed
 # pulp_test_spawns(NONE), say.
 SPAWN_CLASSES = ("ChildProcess", "ChildProcessManager", "ConnectedChildProcess")
+# And its free functions that run a program.
+SPAWN_FUNCTIONS = ("exec",)
 # The repo's plugin and module loaders (core/host): PluginSlot::load, the
 # scanner calls that open bundles from disk, and the dlopen shim. PluginSlot alone is an interface that
 # tests implement in memory, so only its loader counts.
@@ -355,6 +357,7 @@ LOAD_APIS = (r"PluginSlot::load\s*\(", r"scan_clap_bundle\s*\(", r"scan_vst3_bun
              r"scan_lv2_bundle\s*\(", r"scan_directory\s*\(", r"scan_audio_units\s*\(", r"dl_open\s*\(")
 SPAWN_SIGNAL = re.compile(
     r"\b(?:%s)\b" % "|".join(SPAWN_CLASSES)
+    + r"|(?<![\w.>])(?:%s)\s*\(" % "|".join(SPAWN_FUNCTIONS)
     + r"|\bposix_spawnp?\s*\(|\bpopen\s*\(|(?:\bstd::|(?<![\w.>:]))system\s*\(|\bexec[lv]p?e?\s*\("
     + r"|\bfork\s*\(|\bNSTask\b|\bCreateProcess[AW]?\s*\("
     # Loading a module or plugin bundle at run time is the same edge as running

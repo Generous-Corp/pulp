@@ -34,6 +34,8 @@ from typing import Any, Callable, Iterable, Iterator
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / "ci"))
+import link_members  # noqa: E402
 from reuse_policy_replay import (  # noqa: E402
     FAIL_OUTCOMES, GREEN_CONCLUSIONS, MIN_SELECTED_PERCENT, PAIR_SCHEMA, RUN_SCHEMA,
     SCRIPT_INPUTS_PATH, TEST_SCHEMA, _parse_time, validate_run, write_jsonl,
@@ -436,8 +438,11 @@ class Collector:
                             bound_known = False
                         elif row["commit_bound"] and exe:
                             bound_exes.add(exe)
+            # A record link_members cannot vouch for (unknown schema, an
+            # unmodelled kind such as a shared library, a link it could not
+            # see) is no record: every reader then rebuilds as if none existed.
             link = None
-            if links is not None:
+            if links is not None and link_members.unusable(links) is None:
                 names = links.get("members") or {}
                 link = {exe.removeprefix("<build>/"): {
                             "objects": [o.removeprefix("<build>/") for o in rec.get("objects") or []],
@@ -464,7 +469,7 @@ class Collector:
                     "digest_schema": None if model is None else model.get("schema"),
                     "generated_headers": None if model is None else model.get("generated_headers"),
                     "declared_commit_bound": declared}
-        return self._cached(f"record-v4/{run_id}.json.gz", fetch)
+        return self._cached(f"record-v5/{run_id}.json.gz", fetch)
 
     def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
         """The per-target codemodel digests a run recorded, or None."""
@@ -966,7 +971,9 @@ def _is_cmake(path: str) -> bool:
 
 
 def _declared_hit(inputs: Iterable[str], changed: Iterable[str]) -> bool:
-    inputs = [i.rstrip("/") for i in inputs]
+    # `!path` (pulp_test_data ABSENT) is a probed path expected missing; a
+    # change to it is its creation.
+    inputs = [(i[1:] if i.startswith("!") else i).rstrip("/") for i in inputs]
     return any(f == i or f.startswith(i + "/") for f in changed for i in inputs)
 
 

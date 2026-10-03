@@ -78,8 +78,9 @@ public:
                  const audio::BufferView<const float>& input,
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& midi_out,
-                 const format::ProcessContext&) override {
+                 const format::ProcessContext& context) override {
         ++process_calls;
+        last_process_mode = context.process_mode;
         seen_output_channels = output.num_channels();
         seen_input_channels = input.num_channels();
 
@@ -104,6 +105,7 @@ public:
     }
 
     int process_calls = 0;
+    format::ProcessMode last_process_mode = format::ProcessMode::Realtime;
     std::size_t seen_output_channels = 99;
     std::size_t seen_input_channels = 99;
     int prepared_input_channels = -1;
@@ -286,6 +288,50 @@ TEST_CASE("AU v2 MIDI processor reaches a classic process() with no audio buses"
     REQUIRE(g_live_processor->process_calls == 1);
     REQUIRE(g_live_processor->seen_input_channels == 0);
     REQUIRE(g_live_processor->seen_output_channels == 0);
+}
+
+// A host bouncing offline (Logic, REAPER) writes kAudioUnitProperty_OfflineRender
+// before rendering. AUBase rejects the property, so the adapter must accept it,
+// reflect it, and hand the processor ProcessMode::Offline until it is cleared.
+TEST_CASE("AU v2 MIDI processor reports host offline rendering to the processor",
+          "[au][au-v2][midi-processor][offline]")
+{
+    ScopedFactoryRegistration registration;
+    LiveMidiProcessor live;
+
+    UInt32 size = 0;
+    bool writable = false;
+    REQUIRE(live.unit.DispatchGetPropertyInfo(kAudioUnitProperty_OfflineRender,
+                                              kAudioUnitScope_Global, 0, size,
+                                              writable) == noErr);
+    REQUIRE(size == sizeof(UInt32));
+    REQUIRE(writable);
+
+    REQUIRE(live.render() == noErr);
+    REQUIRE(g_live_processor->last_process_mode == format::ProcessMode::Realtime);
+
+    UInt32 offline = 1;
+    REQUIRE(live.unit.DispatchSetProperty(kAudioUnitProperty_OfflineRender,
+                                          kAudioUnitScope_Global, 0, &offline,
+                                          sizeof(offline)) == noErr);
+    UInt32 reflected = 0;
+    REQUIRE(live.unit.DispatchGetProperty(kAudioUnitProperty_OfflineRender,
+                                          kAudioUnitScope_Global, 0,
+                                          &reflected) == noErr);
+    REQUIRE(reflected == 1);
+    REQUIRE(live.render() == noErr);
+    REQUIRE(g_live_processor->last_process_mode == format::ProcessMode::Offline);
+
+    offline = 0;
+    REQUIRE(live.unit.DispatchSetProperty(kAudioUnitProperty_OfflineRender,
+                                          kAudioUnitScope_Global, 0, &offline,
+                                          sizeof(offline)) == noErr);
+    REQUIRE(live.render() == noErr);
+    REQUIRE(g_live_processor->last_process_mode == format::ProcessMode::Realtime);
+
+    REQUIRE(live.unit.DispatchSetProperty(kAudioUnitProperty_OfflineRender,
+                                          kAudioUnitScope_Input, 0, &offline,
+                                          sizeof(offline)) == kAudioUnitErr_InvalidScope);
 }
 
 TEST_CASE("AU v2 MIDI processor round-trips SysEx",

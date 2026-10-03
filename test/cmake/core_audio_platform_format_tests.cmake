@@ -702,6 +702,10 @@ if("${_pulp_core_only_links}" MATCHES "pulp(::|-)format-view"
 endif()
 unset(_pulp_core_only_links)
 
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-nsis-installer NONE)           # makensis
+
 # The MCP server tests read the root CMakeLists.txt (pulp_compat), the server's
 # own source (a tool-list contract), the generated timeline tool schema, the
 # GPU UX evidence fixtures and two timeline fixtures from the checkout.
@@ -712,7 +716,9 @@ if(TARGET pulp-test-mcp-server)
         core/timeline/schema/timeline_mcp_tools.json
         test/fixtures/gpu-ux
         test/fixtures/timeline/v1/minimal.json
-        test/fixtures/timeline/v4/sequence-markers.json)
+        test/fixtures/timeline/v4/sequence-markers.json
+        # pulp_compat checks the root for an SDK-pinning pulp.toml first.
+        ABSENT pulp.toml)
 endif()
 
 # The session cases read two timeline fixtures from the checkout.

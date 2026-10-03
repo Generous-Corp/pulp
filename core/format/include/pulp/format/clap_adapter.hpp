@@ -21,6 +21,7 @@
 #include <clap/clap.h>
 #include <clap/ext/params.h>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <thread>
@@ -152,6 +153,12 @@ struct PulpClapPlugin {
     //     being-activated]`, so the push waits for the activate this latch
     //     survives a deactivate to reach.
     bool latency_restart_pending = false;
+
+    // Host render mode from the `clap.render` extension. A host doing an
+    // offline (faster-than-realtime) render calls render->set(OFFLINE) on the
+    // main thread; every block then reports ProcessMode::Offline. Atomic because
+    // a host may switch modes while the plugin is active.
+    std::atomic<bool> render_offline{false};
 
     // Audio working state
     double sample_rate = 48000.0;

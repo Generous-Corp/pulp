@@ -171,6 +171,8 @@ OSStatus PulpAUInstrument::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitSc
                                            AudioUnitElement inElement, UInt32& outDataSize,
                                            bool& outWritable)
 {
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.property_info(inScope, outDataSize, outWritable);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_property_info(store_, inScope, outDataSize,
                                                   outWritable);
@@ -196,6 +198,8 @@ OSStatus PulpAUInstrument::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitSc
 OSStatus PulpAUInstrument::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
                                        AudioUnitElement inElement, void* outData)
 {
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.get(inScope, outData);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_name(store_, inScope, outData);
     if (inID == kAudioUnitProperty_SupportsMPE)
@@ -217,6 +221,15 @@ OSStatus PulpAUInstrument::GetProperty(AudioUnitPropertyID inID, AudioUnitScope 
         return g_cocoa_view_info_filler(outData) ? noErr : kAudioUnitErr_InvalidProperty;
     }
     return MusicDeviceBase::GetProperty(inID, inScope, inElement, outData);
+}
+
+OSStatus PulpAUInstrument::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                                       AudioUnitElement inElement, const void* inData,
+                                       UInt32 inDataSize)
+{
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.set(inScope, inData, inDataSize);
+    return MusicDeviceBase::SetProperty(inID, inScope, inElement, inData, inDataSize);
 }
 
 OSStatus PulpAUInstrument::Initialize()
@@ -314,7 +327,7 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 
     ProcessContext ctx = make_render_process_context(
         GetOutput(0)->GetStreamFormat().mSampleRate,
-        static_cast<int>(inNumberFrames));
+        static_cast<int>(inNumberFrames), offline_render_.offline());
 
     apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 

@@ -52,3 +52,8 @@ catch_discover_tests(pulp-test-cli-content-commands)
 
 # The path it stages its fake screenshot tool at is named for the real one.
 pulp_test_spawns(pulp-test-cli-kit-commands NOT_RUN pulp-screenshot)
+
+# It links the kit runner, whose screenshot path (pulp-screenshot) it never
+# reaches, and the package registry's curl/powershell download.
+pulp_test_spawns(pulp-test-cli-content-commands NONE)
+pulp_test_spawns(pulp-test-cli-content-commands NOT_RUN pulp-screenshot)

@@ -264,6 +264,8 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
                                        AudioUnitElement inElement, UInt32& outDataSize,
                                        bool& outWritable)
 {
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.property_info(inScope, outDataSize, outWritable);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_property_info(store_, inScope, outDataSize,
                                                   outWritable);
@@ -319,6 +321,8 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
 OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
                                    AudioUnitElement inElement, void* outData)
 {
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.get(inScope, outData);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_name(store_, inScope, outData);
     if (inID == kAudioUnitProperty_SupportsMPE)
@@ -375,6 +379,8 @@ OSStatus PulpAUEffect::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
                                    AudioUnitElement inElement, const void* inData,
                                    UInt32 inDataSize)
 {
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.set(inScope, inData, inDataSize);
     // The host installs (or clears) the MIDI-output delivery callback here on the
     // main thread; the render thread reads it each block. Publish the
     // (callback, userData) pair atomically via a double-buffered slot so the
@@ -698,7 +704,8 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     midi_in.sort();
 
     ProcessContext ctx = make_render_process_context(
-        GetSampleRate(), static_cast<int>(inFramesToProcess));
+        GetSampleRate(), static_cast<int>(inFramesToProcess),
+        offline_render_.offline());
 
     apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 

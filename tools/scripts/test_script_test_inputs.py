@@ -397,6 +397,8 @@ def spawn_evidence(repo: Repo) -> None:
     write(repo.root, "test/test_hidden.cpp", '#include "support/runner.hpp"\nint x = run_it();\n')
     write(repo.root, "test/support/runner.hpp", "inline int run_it() { return fork(); }\n")
     write(repo.root, "test/test_loader.cpp", "auto slot = PluginSlot::load(info);\n")
+    write(repo.root, "test/test_exec.cpp", "auto r = pulp::platform::exec(tool, {\"--version\"}, 1000);\n")
+    write(repo.root, "test/test_member_exec.cpp", "auto m = pattern.exec(text);\nauto n = db->exec(sql);\n")
     write(repo.root, "test/test_scanner.cpp", "auto found = scanner.scan_directory(dir, PluginFormat::CLAP);\n")
     write(repo.root, "test/test_fake_slot.cpp", "struct FakeSlot : PluginSlot { bool is_loaded() const; };\n")
     write(repo.root, "test/test_member.cpp",
@@ -415,6 +417,8 @@ def spawn_evidence(repo: Repo) -> None:
         "pulp-test-member": row("test/test_member.cpp"),
         "pulp-test-both": row("test/test_both.cpp", defines=["PULP_SOURCE_DIR"]),
         "pulp-test-loader": row("test/test_loader.cpp"),
+        "pulp-test-exec": row("test/test_exec.cpp"),
+        "pulp-test-member-exec": row("test/test_member_exec.cpp"),
         "pulp-test-scanner": row("test/test_scanner.cpp"),
         "pulp-test-fake-slot": row("test/test_fake_slot.cpp"),
         }}), encoding="utf-8")
@@ -499,6 +503,9 @@ class SpawnScanTests(unittest.TestCase):
             self.assertNotIn("pulp-test-member", ex)
             # Loading a plugin is a runtime edge; implementing the interface is not.
             self.assertEqual(ex["pulp-test-loader"]["spawns"], "undeclared")
+            # The process API's free exec() runs a program; a member exec() does not.
+            self.assertEqual(ex["pulp-test-exec"]["spawns"], "undeclared")
+            self.assertNotIn("pulp-test-member-exec", ex)
             # So is a scanner call that opens bundles from disk.
             self.assertEqual(ex["pulp-test-scanner"]["spawns"], "undeclared")
             self.assertNotIn("pulp-test-fake-slot", ex)
@@ -515,6 +522,11 @@ class SpawnScanTests(unittest.TestCase):
             starters |= {name for name, body in zip(parts[1::2], parts[2::2]) if decl.search(body)}
         self.assertGreaterEqual(len(starters), 3, starters)  # the parse found the API at all
         self.assertLessEqual(starters, set(sti.SPAWN_CLASSES))
+        # Free functions that run a program and hand back its result.
+        header = (HERE.parents[1] / "core/platform/include/pulp/platform/child_process.hpp").read_text(encoding="utf-8")
+        runners = set(re.findall(r"^ProcessResult\s+(\w+)\s*\(", header, re.M))
+        self.assertGreaterEqual(len(runners), 1, runners)
+        self.assertLessEqual(runners, set(sti.SPAWN_FUNCTIONS))
 
     def test_every_listed_loader_still_exists_in_core_host(self) -> None:
         host = "\n".join((HERE.parents[1] / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")

@@ -4,24 +4,25 @@
 #   link-members-launcher.sh <build-root> <link command...>
 #
 # Runs the link command with one extra `-Wl,-map,<file>` and exits with the
-# linker's status. After a successful executable or loadable-module (`-bundle`,
-# a CMake MODULE_LIBRARY such as a plug-in bundle) link it keeps the head of the
-# map (output path and "# Object files:" list, not the multi-megabyte symbol
-# table) as <build-root>/link-members/<name>-<id>.objects, and the link
-# arguments as .args, for tools/ci/link_members.py to read; the map itself is
-# deleted. Shared libraries and partial links are run untouched, and
-# so is any link whose record directory cannot be written: recording never
-# changes whether a link succeeds. See tools/cmake/PulpLinkMaps.cmake.
+# linker's status. After a successful executable, loadable-module (`-bundle`,
+# a CMake MODULE_LIBRARY such as a plug-in bundle) or shared-library link it
+# keeps the head of the map (output path and "# Object files:" list, not the
+# multi-megabyte symbol table) as <build-root>/link-members/<name>-<id>.objects,
+# and the link arguments as .args, for tools/ci/link_members.py to read; the map
+# itself is deleted. A partial link (`-r`) runs untouched and leaves only a
+# <name>-<id>.unrecorded marker, so the collector counts it instead of missing
+# it. A link whose record directory cannot be written also runs untouched:
+# recording never changes whether a link succeeds. See
+# tools/cmake/PulpLinkMaps.cmake.
 
 root=$1
 shift
 out=""
 prev=""
+partial=""
 for arg in "$@"; do
     [ "$prev" = "-o" ] && out=$arg
-    case $arg in
-        -dynamiclib|-shared|-r) exec "$@" ;;
-    esac
+    [ "$arg" = "-r" ] && partial=1
     prev=$arg
 done
 [ -n "$out" ] || exec "$@"
@@ -35,7 +36,11 @@ case $out in
 esac
 id=$(printf '%s' "$abs" | cksum | cut -d' ' -f1)
 base="$dir/${out##*/}-$id"
-rm -f "$base.objects" "$base.args"
+rm -f "$base.objects" "$base.args" "$base.unrecorded"
+if [ -n "$partial" ]; then
+    : > "$base.unrecorded" 2>/dev/null
+    exec "$@"
+fi
 
 "$@" "-Wl,-map,$base.map"
 rc=$?
