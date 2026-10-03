@@ -621,3 +621,5 @@ pulp_test_spawns(pulp-test-cli-skew-banner NONE)          # bash on a temp drive
 if(TARGET pulp-test-cli-skew-banner)
     pulp_test_data(pulp-test-cli-skew-banner NO_DEFINE PATHS tools/scripts/cli_version_check.sh)
 endif()
+# The lifecycle case stages a fake broker script at the real broker's name.
+pulp_test_spawns(pulp-test-cli-shellout-lifecycle NOT_RUN pulp-control-broker)
