@@ -89,6 +89,9 @@ CORPUS_HOSTS = (
 )
 
 URL_HOST = re.compile(r"\bhttps?://([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+# A step that runs a repository shell script downloads whatever that script
+# does, so the script's shell text is scanned as part of the step.
+STEP_SCRIPT = re.compile(r"(?:^|[\s;&|(])(?:bash|sh)\s+(tools/[\w./-]+\.sh)\b")
 NON_MACOS_IF = re.compile(
     r"runner\.os\s*==\s*'(?:Linux|Windows)'|runner\.os\s*!=\s*'macOS'")
 MACOS_RUNS_ON = re.compile(r"macos|self-hosted|matrix\.", re.IGNORECASE)
@@ -202,13 +205,22 @@ def required_hosts(workflow_text: str, repo_root: Path = REPO_ROOT
     errors: list[str] = []
     for step in macos_steps(workflow_text):
         code = "\n".join(_shell_lines(step.run))
-        where = f"build.yml job `{step.job}` step at line {step.line}"
-        for host in URL_HOST.findall(code):
-            need.setdefault(host.lower(), []).append(f"{where} (literal URL)")
-        for tool, (pattern, hosts) in PACKAGE_MANAGER_HOSTS.items():
-            if pattern.search(code):
-                for host in hosts:
-                    need.setdefault(host, []).append(f"{where} ({tool})")
+        step_where = f"build.yml job `{step.job}` step at line {step.line}"
+        sources = [(step_where, code)]
+        for script in STEP_SCRIPT.findall(code):
+            try:
+                text = (repo_root / script).read_text(encoding="utf-8")
+            except OSError:
+                errors.append(f"{step_where} runs {script}, which does not exist")
+                continue
+            sources.append((f"{step_where} via {script}", "\n".join(_shell_lines(text))))
+        for where, text in sources:
+            for host in URL_HOST.findall(text):
+                need.setdefault(host.lower(), []).append(f"{where} (literal URL)")
+            for tool, (pattern, hosts) in PACKAGE_MANAGER_HOSTS.items():
+                if pattern.search(text):
+                    for host in hosts:
+                        need.setdefault(host, []).append(f"{where} ({tool})")
     for item in CORPUS_HOSTS:
         path = repo_root / item.source
         try:

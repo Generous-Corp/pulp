@@ -1881,6 +1881,22 @@ to the event commit; only other fetch errors print `bounded fetch failed`.
 Before attributing a hydrate-step red to a vanished queue branch, check that the
 run's workflow commit carries the event-commit fallback at all.
 
+Every job that runs a broad ctest installs the set through
+`tools/ci/install_visual_python_deps.sh <build-dir>`; a workflow that runs ctest
+without it makes `visual-python-deps-present` red in every run (the sanitizer
+jobs did, main-wide). `test_visual_python_deps_step.py` pins both the script's
+behaviour and which jobs call it.
+`relay_contract_check.py` scans a shell script a gate step runs (`bash
+tools/...sh`) as part of the step, so moving the install into the script kept
+`pypi.org` derived; without that, the relay contract would have stopped
+requiring PyPI egress for the gate.
+
+`test-pch-wiring` reads compile flags back from the generator. Ninja lists one
+compile line per object; the Makefile generator, which the hosted sanitizer jobs
+use by default, writes a target's PCH flags per object as a `# PCH options:`
+comment in `flags.make`, not in `CXX_FLAGS`. Reading only `CXX_FLAGS` reported
+every consumer of a correctly wired Makefiles tree as "flags name no PCH".
+
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
 both produce a green step. `visual-python-deps-present` exists for that: it
