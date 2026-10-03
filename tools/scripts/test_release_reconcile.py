@@ -9,6 +9,8 @@ was dead and cancelling it.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -1128,7 +1130,8 @@ def sweep(states: list[TagState]) -> tuple[dict[str, str], list[str]]:
         rr.redispatch = lambda repo, tag, dry: redispatched.append(tag)
         rr.datetime = FrozenDatetime
         os.environ.update({"REPO": "example/repo", "DRY_RUN": "true"})
-        assert rr.main() == 0
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert rr.main() == 0
     finally:
         os.environ.clear()
         os.environ.update(old_env)

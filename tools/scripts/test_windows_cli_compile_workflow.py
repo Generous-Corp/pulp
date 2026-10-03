@@ -59,11 +59,28 @@ class CompileLane(unittest.TestCase):
 
     def test_names_the_pretag_check_reads_exist(self) -> None:
         self.assertEqual(self.compile["name"], precheck.COMPILE_JOB)
-        step(self.compile, precheck.COMPILE_STEP)
+        build = step(self.compile, precheck.COMPILE_STEP)
+        self.assertEqual(self.lane["jobs"]["verdict"]["name"], precheck.VERDICT_CHECK)
         self.assertEqual(
             precheck.WORKFLOW_FILE, "windows-cli-compile.yml",
-            "the pre-tag check must read this workflow's runs",
+            "the pre-tag check must read this workflow's checks",
         )
+        self.assertEqual(build["id"], "build")
+        self.assertEqual(
+            self.compile["outputs"]["build_outcome"], "${{ steps.build.outcome }}"
+        )
+
+    def test_verdict_reflects_the_build_step_not_the_job(self) -> None:
+        verdict = self.lane["jobs"]["verdict"]
+        self.assertIn("always()", verdict["if"])
+        self.assertIn("needs.compile.outputs.build_outcome == 'success'", verdict["if"])
+        self.assertIn("needs.compile.outputs.build_outcome == 'failure'", verdict["if"])
+        self.assertIn('test "$BUILD_OUTCOME" = success', verdict["steps"][-1]["run"])
+
+    def test_precheck_push_paths_match_the_trigger(self) -> None:
+        globs = triggers(self.lane)["push"]["paths"]
+        as_pathspecs = tuple(g[:-3] if g.endswith("/**") else g for g in globs)
+        self.assertEqual(sorted(as_pathspecs), sorted(precheck.PUSH_PATHS))
 
     def test_runs_on_the_release_image_and_never_a_paid_or_shared_pool(self) -> None:
         self.assertEqual(self.compile["runs-on"], "windows-latest")
@@ -166,8 +183,11 @@ class AutoReleaseWiring(unittest.TestCase):
         cls.workflow = load("auto-release.yml")
         cls.tag = cls.workflow["jobs"]["tag"]
 
-    def test_can_read_actions_but_not_cancel(self) -> None:
-        self.assertEqual(self.workflow["permissions"].get("actions"), "read")
+    def test_reads_checks_and_holds_no_actions_scope(self) -> None:
+        # No `actions` scope at all is what keeps auto-release unable to cancel
+        # a release (test_release_workflow_test_step.py pins it too).
+        self.assertEqual(self.workflow["permissions"].get("checks"), "read")
+        self.assertNotIn("actions", self.workflow["permissions"])
 
     def test_precheck_runs_before_tagging_and_gates_only_the_sdk(self) -> None:
         names = [s.get("name") for s in self.tag["steps"]]

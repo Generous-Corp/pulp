@@ -380,16 +380,20 @@ only caught here when the file is under `tools/cli/` or `tools/mcp/` (the
 nightly `cross-platform-check.yml` builds everything).
 
 **Release time (blocking).** The same workflow runs on every push to `main`
-that touches the CLI's source trees, without cancelling earlier pushes. Before
-`auto-release.yml` creates an SDK tag, `windows_cli_release_precheck.py` finds
-the newest of those runs whose commit is an ancestor of the tagged commit and
-whose `Build CLI targets (MSVC)` step actually ran. A failure there withholds
-the `vX.Y.Z` tag (the plugin tag is never held), with an `SDK tag withheld`
-annotation and step summary naming the failing run. The version stays untagged,
+that touches the CLI's source trees, without cancelling earlier pushes, and
+posts a `Windows CLI compile verdict` check on the pushed commit. That job runs
+only when the `Build CLI targets (MSVC)` step ran and fails only when that step
+failed, so runner or bootstrap trouble leaves no verdict rather than a red one.
+Before `auto-release.yml` creates an SDK tag, `windows_cli_release_precheck.py`
+walks main's first-parent history back from the tagged commit (commits that
+touched those trees, and the up-to-four a merge-queue batch can push above one)
+and reads the newest verdict. A failure withholds the `vX.Y.Z` tag (the plugin
+tag is never held), with an `SDK tag withheld` annotation and step summary
+naming the failing run. It reads check runs (`checks: read`), so
+`auto-release.yml` still holds no `actions` scope and cannot cancel anything. The version stays untagged,
 which Layer 3 reports, and the first push to `main` after a clean compile tags
 the then-current version, because tagging compares HEAD's version with the
-latest tag. Missing or unreadable evidence, or a run that failed before
-compiling (runner or bootstrap trouble), never withholds a tag. Set the
+latest tag. Missing or unreadable evidence never withholds a tag. Set the
 repository variable `PULP_RELEASE_WINDOWS_PRECHECK=off` to disable the check.
 
 The pre-tag check cannot stop the first tag after a bad merge if that tag is cut

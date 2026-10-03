@@ -3941,10 +3941,13 @@ caught it had been cancelled on both preceding nights.
 `tools/scripts/windows_cli_compile_scope.py` says the change can reach them
 (`tools/cli/`, `tools/mcp/`, `tools/cmake/`, or C/C++ carrying a Windows/MSVC
 marker) — ~3 merges a day, one hosted Windows job each, against the four jobs per
-PR this section removed. It is advisory. Its main-push runs feed a **blocking**
-pre-tag check in `auto-release.yml` (`windows_cli_release_precheck.py`): while the
-newest compiled verdict for an ancestor of the tagged commit is a failure, the SDK
-tag is withheld and the step summary says why. Read it as:
+PR this section removed. It is advisory. Its main-push runs post a
+`Windows CLI compile verdict` check, which feeds a **blocking** pre-tag check in
+`auto-release.yml` (`windows_cli_release_precheck.py`): while the newest verdict
+for an ancestor of the tagged commit is a failure, the SDK tag is withheld and the
+step summary says why. The check reads check runs with `checks: read` — do not
+"simplify" it to the workflow-runs API, which needs an `actions` scope that
+auto-release deliberately does not hold. Read it as:
 
 - **`SDK tag withheld` on an auto-release run** — main does not compile with MSVC.
   Fix the code; the first push after a clean `Windows CLI compile (MSVC)` run tags
@@ -3953,8 +3956,8 @@ tag is withheld and the step summary says why. Read it as:
   variable disables the check).
 - **A red `Windows CLI compile (MSVC)` on your PR** — it cannot flake on code: it
   runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
-  failure in an earlier step (bootstrap, toolchain) is runner trouble and the
-  pre-tag check ignores it too.
+  failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
+  job is skipped, so the pre-tag check ignores it too.
 - **Promoting it to required** needs a `merge_group` trigger plus the ruleset
   entry. The scope job always reports and an irrelevant change skips the compile
   job (a skipped job satisfies a required check), so nothing else changes.

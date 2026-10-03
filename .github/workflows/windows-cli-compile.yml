@@ -25,8 +25,9 @@ name: Windows CLI compile
 # `Windows CLI compile (MSVC)` to required needs only a merge_group trigger and
 # the ruleset change, not a redesign. Until then the release-time backstop is
 # auto-release.yml's pre-tag check (tools/scripts/windows_cli_release_precheck.py),
-# which reads this workflow's push runs on main and withholds an SDK tag while
-# the latest compiled verdict for an ancestor of the tagged commit is a failure.
+# which reads the `Windows CLI compile verdict` check this workflow posts on
+# main's commits and withholds an SDK tag while the newest verdict for an
+# ancestor of the tagged commit is a failure.
 #
 # Push runs on main are what that check reads. They carry no concurrency group,
 # so a newer push never cancels an older one's verdict, and each run judges only
@@ -121,6 +122,10 @@ jobs:
     # Windows legs on (tools/scripts/test_windows_runner_policy.py pins both).
     runs-on: windows-latest
     timeout-minutes: 60
+    outputs:
+      # The MSVC build step's own outcome, separate from the job's: a job that
+      # dies in bootstrap says nothing about whether the code compiles.
+      build_outcome: ${{ steps.build.outcome }}
     env:
       CCACHE_DIR: ${{ github.workspace }}\.ccache
       CCACHE_MAXSIZE: 1G
@@ -223,6 +228,7 @@ jobs:
       # The explicit job count is the runner's visible cores: a GitHub-hosted
       # Windows runner is single-tenant, so there is no shared host to divide.
       - name: Build CLI targets (MSVC)
+        id: build
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -256,3 +262,25 @@ jobs:
             echo "release-cli.yml Windows configure. A failure here is the error the"
             echo "Windows release legs would hit after the next tag."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The release-time evidence. It runs only when the MSVC build step itself ran
+  # and fails only when that step failed, so its check on a main commit is a
+  # pure compile verdict: runner or bootstrap trouble leaves it skipped rather
+  # than red. auto-release.yml's pre-tag check reads this check by name
+  # (tools/scripts/windows_cli_release_precheck.py VERDICT_CHECK).
+  verdict:
+    name: Windows CLI compile verdict
+    needs: [scope, compile]
+    if: >-
+      always()
+      && (needs.compile.outputs.build_outcome == 'success'
+          || needs.compile.outputs.build_outcome == 'failure')
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    steps:
+      - name: Report the MSVC compile outcome
+        env:
+          BUILD_OUTCOME: ${{ needs.compile.outputs.build_outcome }}
+        run: |
+          echo "MSVC build of the release CLI targets: ${BUILD_OUTCOME}"
+          test "$BUILD_OUTCOME" = success

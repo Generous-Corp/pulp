@@ -35,7 +35,7 @@ concurrency:
 permissions:
   contents: write   # tag push
   issues: write     # open the "stranded fix/feat" tracker (issue #1009)
-  actions: read     # the Windows CLI pre-tag check reads windows-cli-compile.yml runs
+  checks: read      # the Windows CLI pre-tag check reads the compile-verdict check
   # NO `actions: write`. This workflow must not be able to cancel a workflow
   # run. It held that scope to cancel "superseded" release builds, which is how
   # healthy in-flight releases were destroyed. Withholding the scope is what
@@ -374,9 +374,11 @@ jobs:
       # `#ifdef _WIN32` reaches main unseen and then fails release-cli.yml's
       # Windows legs on every tag until it is fixed: each such tag builds for
       # ~50 minutes and publishes nothing. windows-cli-compile.yml compiles the
-      # CLI targets with MSVC on every push that can affect them; when its newest
-      # compiled verdict for an ancestor of HEAD is a failure, the SDK tag is
-      # withheld here instead.
+      # CLI targets with MSVC on every push that can affect them and posts a
+      # `Windows CLI compile verdict` check; when the newest verdict for an
+      # ancestor of HEAD is a failure, the SDK tag is withheld here instead. It
+      # reads check runs, not workflow runs, so this workflow still holds no
+      # `actions` scope and cannot cancel a release.
       #
       # Withholding is self-healing, not sticky: the version stays untagged
       # (release-cadence-check.yml reports it), and auto-release tags whatever

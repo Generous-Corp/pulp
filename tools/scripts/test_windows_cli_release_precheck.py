@@ -23,133 +23,101 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import windows_cli_release_precheck as pre  # noqa: E402
 
 
-def run(run_id: int, sha: str, created: str, conclusion: str = "success") -> dict:
+def check(conclusion: str, completed: str = "2026-10-03T10:00:00Z",
+          name: str | None = None, run_id: int = 1) -> dict:
     return {
-        "id": run_id,
-        "head_sha": sha,
-        "created_at": created,
+        "name": name or pre.VERDICT_CHECK,
         "status": "completed",
         "conclusion": conclusion,
+        "completed_at": completed,
         "html_url": f"https://example.invalid/runs/{run_id}",
     }
 
 
-def jobs(compile_step: str | None, job_conclusion: str | None = None) -> list[dict]:
-    """A run's jobs; compile_step None means the compile job was skipped."""
-    scope = {"name": "Windows CLI compile scope", "conclusion": "success", "steps": []}
-    if compile_step is None:
-        return [scope, {"name": pre.COMPILE_JOB, "conclusion": "skipped", "steps": []}]
-    return [
-        scope,
-        {
-            "name": pre.COMPILE_JOB,
-            "conclusion": job_conclusion
-            or ("failure" if compile_step in ("failure", "skipped") else "success"),
-            "steps": [
-                {"name": "Bootstrap dependencies", "conclusion": "success"},
-                {"name": pre.COMPILE_STEP, "conclusion": compile_step},
-            ],
-        },
-    ]
+def checks(table: dict[str, list[dict]]):
+    calls: list[str] = []
 
+    def lookup(sha: str) -> list[dict]:
+        calls.append(sha)
+        return table.get(sha, [])
 
-def everything_is_ancestor(_: str) -> bool:
-    return True
+    return lookup, calls
 
 
 class Decide(unittest.TestCase):
-    def test_latest_compiled_failure_blocks(self) -> None:
-        runs = [run(1, "a" * 40, "2026-10-03T10:00:00Z", "failure")]
-        verdict = pre.decide(
-            runs, is_ancestor=everything_is_ancestor, jobs_for=lambda _: jobs("failure")
-        )
+    def test_newest_failed_verdict_blocks(self) -> None:
+        lookup, _ = checks({"a" * 40: [check("failure", run_id=1)]})
+        verdict = pre.decide(["a" * 40], checks_for=lookup)
         self.assertEqual(verdict.action, pre.BLOCK)
         self.assertIn("aaaaaaaaaaaa", verdict.reason)
         self.assertTrue(verdict.run_url.endswith("/1"))
 
-    def test_later_clean_compile_clears_an_older_failure(self) -> None:
-        runs = [
-            run(1, "a" * 40, "2026-10-03T10:00:00Z", "failure"),
-            run(2, "b" * 40, "2026-10-03T11:00:00Z"),
-        ]
-        by_id = {1: jobs("failure"), 2: jobs("success")}
-        verdict = pre.decide(
-            runs, is_ancestor=everything_is_ancestor, jobs_for=by_id.__getitem__
-        )
+    def test_newer_clean_verdict_clears_an_older_failure(self) -> None:
+        lookup, _ = checks({"b" * 40: [check("success")], "a" * 40: [check("failure")]})
+        verdict = pre.decide(["b" * 40, "a" * 40], checks_for=lookup)
         self.assertEqual(verdict.action, pre.ALLOW)
 
-    def test_skipped_compiles_are_looked_through(self) -> None:
-        # Most push runs skip compiling; they must not mask an older failure.
-        runs = [
-            run(1, "a" * 40, "2026-10-03T10:00:00Z", "failure"),
-            run(2, "b" * 40, "2026-10-03T11:00:00Z"),
-            run(3, "c" * 40, "2026-10-03T12:00:00Z"),
-        ]
-        by_id = {1: jobs("failure"), 2: jobs(None), 3: jobs(None)}
-        verdict = pre.decide(
-            runs, is_ancestor=everything_is_ancestor, jobs_for=by_id.__getitem__
+    def test_commits_without_a_verdict_are_looked_through(self) -> None:
+        # Most commits never compile (their range could not reach the CLI);
+        # they must not mask an older failure.
+        lookup, calls = checks({"a" * 40: [check("failure")]})
+        verdict = pre.decide(["c" * 40, "b" * 40, "a" * 40], checks_for=lookup)
+        self.assertEqual(verdict.action, pre.BLOCK)
+        self.assertEqual(len(calls), 3)
+
+    def test_skipped_verdict_is_not_evidence(self) -> None:
+        # The verdict job is skipped when the runner broke before compiling.
+        lookup, _ = checks(
+            {"b" * 40: [check("skipped")], "a" * 40: [check("failure")]}
         )
+        verdict = pre.decide(["b" * 40, "a" * 40], checks_for=lookup)
         self.assertEqual(verdict.action, pre.BLOCK)
 
-    def test_failure_on_a_commit_the_tag_does_not_contain_is_ignored(self) -> None:
-        runs = [
-            run(1, "a" * 40, "2026-10-03T10:00:00Z"),
-            run(2, "b" * 40, "2026-10-03T11:00:00Z", "failure"),
-        ]
-        by_id = {1: jobs("success"), 2: jobs("failure")}
-        verdict = pre.decide(
-            runs, is_ancestor=lambda sha: sha.startswith("a"), jobs_for=by_id.__getitem__
+    def test_other_checks_on_the_commit_are_ignored(self) -> None:
+        lookup, _ = checks(
+            {"a" * 40: [check("failure", name="Windows CLI compile (MSVC)")]}
         )
+        verdict = pre.decide(["a" * 40], checks_for=lookup)
+        self.assertEqual(verdict.action, pre.ALLOW, "only the verdict check counts")
+
+    def test_rerun_on_the_same_commit_takes_the_newest(self) -> None:
+        lookup, _ = checks(
+            {"a" * 40: [check("failure", "2026-10-03T10:00:00Z"),
+                        check("success", "2026-10-03T11:00:00Z")]}
+        )
+        verdict = pre.decide(["a" * 40], checks_for=lookup)
         self.assertEqual(verdict.action, pre.ALLOW)
 
-    def test_infrastructure_failure_does_not_block(self) -> None:
-        # The job failed before its compile step ran: nothing is known about
-        # the code, so the release must not be withheld on it.
-        runs = [run(1, "a" * 40, "2026-10-03T10:00:00Z", "failure")]
-        verdict = pre.decide(
-            runs,
-            is_ancestor=everything_is_ancestor,
-            jobs_for=lambda _: jobs("skipped", job_conclusion="failure"),
-        )
-        self.assertEqual(verdict.action, pre.ALLOW)
-        self.assertIn("before compiling", verdict.reason)
-
-    def test_cancelled_runs_are_not_evidence(self) -> None:
-        runs = [
-            run(1, "a" * 40, "2026-10-03T10:00:00Z", "failure"),
-            run(2, "b" * 40, "2026-10-03T11:00:00Z", "cancelled"),
-        ]
-        calls: list[int] = []
-
-        def jobs_for(run_id: int) -> list[dict]:
-            calls.append(run_id)
-            return jobs("failure")
-
-        verdict = pre.decide(runs, is_ancestor=everything_is_ancestor, jobs_for=jobs_for)
-        self.assertEqual(verdict.action, pre.BLOCK)
-        self.assertEqual(calls, [1])
-
-    def test_no_runs_means_no_hold(self) -> None:
-        verdict = pre.decide(
-            [], is_ancestor=everything_is_ancestor, jobs_for=lambda _: []
-        )
-        self.assertEqual(verdict.action, pre.ALLOW)
+    def test_no_verdict_means_no_hold(self) -> None:
+        lookup, _ = checks({})
+        self.assertEqual(pre.decide([], checks_for=lookup).action, pre.ALLOW)
+        self.assertEqual(pre.decide(["a" * 40], checks_for=lookup).action, pre.ALLOW)
 
     def test_inspection_is_bounded(self) -> None:
-        runs = [
-            run(i, f"{i:040d}", f"2026-10-03T{i:02d}:00:00Z") for i in range(1, 6)
-        ]
-        calls: list[int] = []
-
-        def jobs_for(run_id: int) -> list[dict]:
-            calls.append(run_id)
-            return jobs(None)
-
-        verdict = pre.decide(
-            runs, is_ancestor=everything_is_ancestor, jobs_for=jobs_for, max_runs=2
-        )
+        lookup, calls = checks({})
+        verdict = pre.decide([f"{i:040d}" for i in range(10)], checks_for=lookup,
+                             max_commits=3)
         self.assertEqual(verdict.action, pre.ALLOW)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
+
+
+class SelectCandidates(unittest.TestCase):
+    def test_a_batch_head_above_a_touching_merge_is_a_candidate(self) -> None:
+        # The run reports on the push's head; a 5-PR queue batch can put four
+        # unrelated merges above the one that touched tools/cli.
+        history = ["h0", "h1", "h2", "h3", "t4", "u5", "u6", "u7", "u8", "u9", "u10"]
+        picked = pre.select_candidates(history, {"t4"})
+        self.assertEqual(picked, ["h0", "h1", "h2", "h3", "t4"])
+
+    def test_nothing_touching_means_nothing_to_ask(self) -> None:
+        self.assertEqual(pre.select_candidates(["a", "b", "c"], set()), [])
+
+    def test_order_is_newest_first(self) -> None:
+        picked = pre.select_candidates(["n", "m", "t1", "x", "y", "z", "q", "t2"],
+                                       {"t1", "t2"})
+        self.assertEqual(picked[0], "n")
+        self.assertEqual(picked, sorted(picked, key=["n", "m", "t1", "x", "y", "z",
+                                                     "q", "t2"].index))
 
 
 class MainShell(unittest.TestCase):
@@ -171,6 +139,7 @@ class MainShell(unittest.TestCase):
         gh.chmod(0o755)
 
     def invoke(self, extra_env: dict[str, str] | None = None) -> dict:
+        repo = Path(__file__).resolve().parent.parent.parent
         env = {
             **os.environ,
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
@@ -184,7 +153,7 @@ class MainShell(unittest.TestCase):
             capture_output=True,
             text=True,
             env=env,
-            cwd=Path(__file__).resolve().parent,
+            cwd=repo,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout.strip().splitlines()[-1])
@@ -203,18 +172,20 @@ class MainShell(unittest.TestCase):
         self.assertIn("disabled", verdict["reason"])
 
     def test_blocking_verdict_reaches_github_output(self) -> None:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        # A real commit that touches tools/cli, so candidate selection (which
+        # runs real git) offers it; the stub reports a failed verdict on it.
+        repo = Path(__file__).resolve().parent.parent.parent
+        sha = subprocess.run(
+            ["git", "rev-list", "--first-parent", "-n", "1", "HEAD", "--", "tools/cli"],
+            capture_output=True, text=True, check=True, cwd=repo,
         ).stdout.strip()
-        listing = {"workflow_runs": [run(7, head, "2026-10-03T10:00:00Z", "failure")]}
-        payload = {"jobs": jobs("failure")}
+        self.assertTrue(sha, "control: this checkout must have a tools/cli commit")
+        failed = {"check_runs": [check("failure", run_id=9)]}
         self.stub_gh(
-            'case "$2" in\n'
-            f"  *jobs*) cat <<'J'\n{json.dumps(payload)}\nJ\n;;\n"
-            f"  *) cat <<'L'\n{json.dumps(listing)}\nL\n;;\n"
-            "esac\n"
+            f'case "$2" in\n  *{sha}*) cat <<\'J\'\n{json.dumps(failed)}\nJ\n;;\n'
+            '  *) echo \'{"check_runs": []}\';;\nesac\n'
         )
-        verdict = self.invoke({"HEAD_SHA": head})
+        verdict = self.invoke({"HEAD_SHA": sha})
         self.assertEqual(verdict["action"], pre.BLOCK)
         self.assertIn("block=1", self.output.read_text(encoding="utf-8"))
 
