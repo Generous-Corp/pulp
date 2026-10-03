@@ -2,7 +2,7 @@
 
 Date: 2026-10-02
 Work package: D (MLX Apple Silicon provider)
-Related receipt: `docs/reports/neural-mlx-worker-receipt-20261002.md`
+Related receipt: `docs/reports/neural-mlx-execution-receipt-20261002.md`
 Status: design and evidence requirements only; no measurements claimed
 
 ## Gate comparison

@@ -9,6 +9,14 @@ different weights and several lanes have passing scaffolding without a product
 gate. The current disposition is **two lanes substantially evidenced, four
 lanes partial or open, and no full program sign-off**.
 
+The performance standard is recorded in
+[`neural-competitive-proof-plan-20261003.md`](../reports/neural-competitive-proof-plan-20261003.md).
+It makes the user's outperformance objective measurable: matched models and
+state semantics, quality parity, 100,000 paced blocks, p95/p99 deadline
+margin, safety counters, provider proof, and reproducible receipts. Until
+those conditions pass, this workstream must describe results as experiments or
+capability evidence rather than broad superiority.
+
 ## Six-session disposition
 
 | CMUX surface | Lane | Disposition | Evidence / remaining gate |
@@ -52,8 +60,28 @@ lanes partial or open, and no full program sign-off**.
 
 ## Resume anchors
 
-- Parent worktree: `/Users/danielraffel/Code/pulp-dsp-next-20261001`
-- Branch: `codex/dsp-next-20261001`
+### Follow-up implementation (2026-10-03)
+
+The follow-up branch contains the previously missing runtime chain: the
+streaming contract, neural processor facade, versioned model manifest and
+sidecar persistence, NAM/TCN adapter, benchmark registration, and MLX worker
+harness. Focused validation on this branch passes:
+
+* `pulp-test-streaming-model-contract`: 82 assertions in 17 cases, including
+  planted allocation and lock traps;
+* `pulp-test-nam-tcn-adapter`: 14 assertions in 3 cases;
+* `pulp-test-streaming-model-benchmark`: 99 assertions with CPU-oracle parity,
+  zero allocations, and 1/2/4-channel 44.1/48/96 kHz cases; and
+* `pulp-test-group-core-gpu-audio-private`: 9,782 assertions in 61 cases,
+  including manifest validation.
+
+These are branch-local receipts until the follow-up is merged and rechecked
+against `origin/main`.
+
+- Follow-up worktree: `/Users/danielraffel/Code/pulp-neural-followup-20261003`
+- Branch: `codex/neural-followup-20261003`
+- The earlier parent worktree `/Users/danielraffel/Code/pulp-dsp-next-20261001`
+  remains a historical resume anchor; do not edit it for this follow-up.
 - Parent status commits include `49ba136fdc` (session probe correction),
   `63b9409953` (stale Dawn receipt reconciliation), and the current planning
   pointer commit after those changes.

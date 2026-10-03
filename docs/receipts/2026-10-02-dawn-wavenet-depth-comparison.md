@@ -1,7 +1,7 @@
 # Dawn production WaveNet depth comparison (2026-10-02)
 
-> **Audit-only synthetic negative control.** This receipt records a temporary
-> test seam, not a landed implementation or an exact-provider hardware result.
+> **Audit-only synthetic negative control.** This receipt records the landed
+> telemetry/test seam, not an exact-provider hardware result.
 
 ## Claim under test
 
