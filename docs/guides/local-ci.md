@@ -1005,7 +1005,14 @@ base and merge tree, suite, outcome, attempts, duration, executable, runner
 image fingerprint, and the per-test receipt key where the merge-group shadow
 computed one), `identity.json` with each executable's sha256 and the
 digest of its runtime closure (the non-system dylibs and frameworks it loads,
-a script's interpreter), and `job.json` with the context and sizes. Outcomes
+a script's interpreter), and `job.json` with the context and sizes. `job.json`
+names the host that wrote it (`platform`, `darwin-arm64` or `linux-x86_64`).
+An alias `macos` job runs on Linux, so a reader that wants the macOS build
+refuses any record whose platform is not `darwin-*`. The runner image fields
+take the SDK version and build from `xcrun`, and from the SDK's own
+`SDKSettings.json` and `SystemVersion.plist` when `xcrun` cannot answer. The
+digest does not depend on which source answered, and `runner_image.probe`
+records why a probe failed. Outcomes
 come from ctest's JUnit report and attempts from its `LastTest.log`, which the
 test step keeps as `LastTest.full.log` because any later ctest call in the
 build directory replaces it. An alias `macos` job that ran no suite uploads a

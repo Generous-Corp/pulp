@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -195,6 +196,72 @@ def fat(slices: list[bytes]) -> bytes:
         table += struct.pack(">iiIII", 0x0100000C, 0, offset + len(body), len(s), 12)
         body += s.ljust(4096, b"\0")
     return (header + table).ljust(offset, b"\0") + body
+
+
+class RunnerImageTests(unittest.TestCase):
+    def fake_sdk(self, tmp: str) -> str:
+        sdk = Path(tmp) / "Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+        (sdk / "System/Library/CoreServices").mkdir(parents=True)
+        (sdk / "SDKSettings.json").write_text(json.dumps({"Version": "26.4", "CanonicalName": "macosx26.4"}))
+        import plistlib
+        with (sdk / "System/Library/CoreServices/SystemVersion.plist").open("wb") as fh:
+            plistlib.dump({"ProductVersion": "26.4", "ProductBuildVersion": "25E241"}, fh)
+        return tmp
+
+    def test_the_sdk_files_answer_when_xcrun_cannot(self) -> None:
+        # Gate VMs recorded sdk_version/sdk_build "unknown" while xcode-select
+        # and clang answered; the SDK's own files carry the same two values.
+        with tempfile.TemporaryDirectory() as tmp:
+            dev = self.fake_sdk(tmp)
+
+            def probe(cmd, why=None):
+                if cmd[0] == "xcrun":
+                    if why is not None:
+                        why[cmd[-1]] = "exit 1: xcrun: error"
+                    return "unknown"
+                return dev if cmd[0] == "xcode-select" else "x"
+
+            with mock.patch.object(rr.platform, "system", return_value="Darwin"), \
+                    mock.patch.object(rr, "_probe", side_effect=probe):
+                image = rr.runner_image({})
+        self.assertEqual((image["fields"]["sdk_version"], image["fields"]["sdk_build"]), ("26.4", "25E241"))
+        self.assertEqual(image["probe"]["sources"], {"sdk_version": "sdk-files", "sdk_build": "sdk-files"})
+        self.assertEqual(image["probe"]["failed"]["--show-sdk-version"], "exit 1: xcrun: error")
+
+    def test_the_digest_does_not_depend_on_which_probe_answered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dev = self.fake_sdk(tmp)
+            answers = {"--show-sdk-version": "26.4", "--show-sdk-build-version": "25E241"}
+
+            def via(xcrun_works):
+                def probe(cmd, why=None):
+                    if cmd[0] == "xcrun":
+                        return answers[cmd[-1]] if xcrun_works else "unknown"
+                    return dev if cmd[0] == "xcode-select" else "x"
+                with mock.patch.object(rr.platform, "system", return_value="Darwin"), \
+                        mock.patch.object(rr, "_probe", side_effect=probe):
+                    return rr.runner_image({})["digest"]
+
+            self.assertEqual(via(True), via(False))
+
+    def test_a_missing_sdk_stays_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(rr.sdk_from_files(tmp), ("unknown", "unknown"))
+
+    def test_the_platform_names_the_host(self) -> None:
+        with mock.patch.object(rr.platform, "system", return_value="Linux"), \
+                mock.patch.object(rr.platform, "machine", return_value="x86_64"):
+            self.assertEqual(rr.platform_id(), "linux-x86_64")
+
+    def test_every_record_carries_its_platform(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir", tmp,
+                                   "--no-suite-reason", "no suite: alias job"],
+                                  capture_output=True, text=True, timeout=60,
+                                  env={**os.environ, "GITHUB_EVENT_NAME": "push"})
+            job = json.loads((Path(tmp) / "job.json").read_text())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(job["platform"], rr.platform_id())
 
 
 class ClosureTests(unittest.TestCase):

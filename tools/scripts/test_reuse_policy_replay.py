@@ -802,7 +802,7 @@ class CodemodelTests(unittest.TestCase):
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("codemodel-abc.json", json.dumps({"targets": {"a": dict(self.HEAD["a"], sources="s")}}))
-            zf.writestr("job.json", "{}")
+            zf.writestr("job.json", json.dumps({"platform": "darwin-arm64"}))
         gh = mock.Mock()
         gh.repository = "o/r"
         gh.json.return_value = {"artifacts": [{"name": "reuse-record-macos", "expired": False,
@@ -889,7 +889,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v5"
+        cache = corpus / "cache" / "record-v6"
         cache.mkdir(parents=True)
         # group-a is rebuilt but its bytes came out the same (over-approximation);
         # group-b's bytes changed but nothing in the drift reaches it: the
@@ -932,7 +932,7 @@ class RecordedGraphTests(unittest.TestCase):
             rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
             rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
             rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
-            cache = corpus / "cache" / "record-v5"
+            cache = corpus / "cache" / "record-v6"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": {"test/group-c": "3"}}),
                              ("g1", {"link": self.link, "executables": {"ta": "test/group-a"},
@@ -969,7 +969,7 @@ class RecordedGraphTests(unittest.TestCase):
             link = dict(self.link)
             if recorded:
                 link["test/plug.so"] = {"objects": [], "members": {"core/liba.a": ["b.cpp.o"]}}
-            cache = corpus / "cache" / "record-v5"
+            cache = corpus / "cache" / "record-v6"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": None}),
                              ("g1", {"link": link, "executables": {"ta": "test/group-a"}, "binaries": None})):
@@ -996,7 +996,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v5"
+        cache = corpus / "cache" / "record-v6"
         cache.mkdir(parents=True)
         recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
                 "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
@@ -1030,7 +1030,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
         targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
                    for n in ("group-a", "group-b", "group-c")}
-        cache = corpus / "cache" / "record-v5"
+        cache = corpus / "cache" / "record-v6"
         cache.mkdir(parents=True)
         common = {"targets": targets, "binaries": None, "generated_headers": headers}
         recs = {"p1": {**common, "link": None, "executables": None, "digest_schema": head_schema,
@@ -1092,7 +1092,8 @@ class RecordedGraphTests(unittest.TestCase):
     def record_from(self, files: dict) -> dict:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
-            for name, body in files.items():
+            # Every real record carries its host; the reader refuses one without.
+            for name, body in {"job.json": json.dumps({"platform": "darwin-arm64"}), **files}.items():
                 zf.writestr(name, body)
         gh = mock.Mock()
         gh.repository = "o/r"
@@ -1130,6 +1131,7 @@ class RecordedGraphTests(unittest.TestCase):
     def test_the_record_expands_link_members_and_test_executables(self):
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("job.json", json.dumps({"platform": "darwin-arm64"}))
             zf.writestr("link-members-abc.json", json.dumps({
                 "schema": "pulp-link-members/v1",
                 "members": {"<build>/core/liba.a": ["a.cpp.o", "b.cpp.o"]},
@@ -1151,6 +1153,17 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual(rec["executables"], {"t1": "test/x"})
         self.assertEqual(rec["link"]["test/x"], {"objects": ["test/CMakeFiles/x.dir/t.cpp.o"], "members": {"core/liba.a": ["b.cpp.o"]}})
         self.assertEqual(rec["link"]["test/y"]["members"], {"core/liba.a": ["a.cpp.o", "b.cpp.o"]})
+
+    def test_a_record_written_off_macos_is_no_record(self):
+        # The gate's alias jobs upload a no-suite record under the macOS
+        # artifact name from a Linux runner.
+        model = json.dumps({"targets": {"t": {"digest": "d", "type": "EXECUTABLE"}}})
+        files = [{"job.json": json.dumps(job), "codemodel-a.json": model} for job in (
+            {"platform": "darwin-arm64"}, {"platform": "linux-x86_64"},
+            {"runner_image": {"fields": {"os": "Darwin", "arch": "arm64"}}},
+            {"runner_image": {"fields": {"os": "Linux", "arch": "x86_64"}}}, {})]
+        got = [self.record_from(f)["targets"] is not None for f in files]
+        self.assertEqual(got, [True, False, True, False, False])
 
     def test_a_link_record_the_reader_cannot_vouch_for_is_no_record(self):
         # An unknown schema, a kind the replay does not model (a shared library

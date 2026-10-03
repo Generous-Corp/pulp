@@ -260,6 +260,19 @@ def _days(since: dt.datetime, until: dt.datetime) -> Iterator[str]:
         day += dt.timedelta(days=1)
 
 
+def record_platform(job: dict | None) -> str:
+    """`<os>-<arch>` of the host that wrote a reuse record: its `platform`
+    field, or for a record written before that field, its runner image."""
+    if not job:
+        return "unknown"
+    if job.get("platform"):
+        return str(job["platform"])
+    fields = (job.get("runner_image") or {}).get("fields") or {}
+    if fields.get("os") and fields.get("arch"):
+        return f"{str(fields['os']).lower()}-{str(fields['arch']).lower()}"
+    return "unknown"
+
+
 class Collector:
     def __init__(self, gh: GitHub, out: Path, repo: Path, workers: int) -> None:
         self.gh = gh
@@ -410,12 +423,18 @@ class Collector:
             listing = self.gh.json(f"repos/{self.gh.repository}/actions/runs/{run_id}/artifacts?per_page=100")
             art = next((a for a in listing.get("artifacts", [])
                         if a.get("name") == REUSE_RECORD_ARTIFACT and not a.get("expired")), None)
+            empty = {"targets": None, "link": None, "executables": None, "binaries": None,
+                     "digest_schema": None, "generated_headers": None, "declared_commit_bound": None}
             if art is None:
-                return {"targets": None, "link": None, "executables": None, "binaries": None,
-                        "digest_schema": None, "generated_headers": None, "declared_commit_bound": None}
+                return empty
             with self.gh._request(art["archive_download_url"], "application/vnd.github+json") as resp:
                 blob = resp.read()
             with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                # The gate's alias jobs write a no-suite record under the same
+                # artifact name from a Linux runner: only a macOS host's record
+                # describes the macOS build.
+                if not record_platform(member(zf, "job.json")).startswith("darwin-"):
+                    return empty
                 model, links, identity = member(zf, "codemodel-"), member(zf, "link-members-"), member(zf, "identity.json")
                 tests = None
                 # Executables of tests the record marks commit_bound. A row
@@ -469,7 +488,7 @@ class Collector:
                     "digest_schema": None if model is None else model.get("schema"),
                     "generated_headers": None if model is None else model.get("generated_headers"),
                     "declared_commit_bound": declared}
-        return self._cached(f"record-v5/{run_id}.json.gz", fetch)
+        return self._cached(f"record-v6/{run_id}.json.gz", fetch)
 
     def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
         """The per-target codemodel digests a run recorded, or None."""
