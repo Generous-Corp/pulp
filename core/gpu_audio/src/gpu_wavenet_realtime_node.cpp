@@ -281,13 +281,13 @@ struct GpuWaveNetRealtimeNode::Impl {
                     }
                 }
                 if (pending == nullptr) {
-                    fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                    fail(detail::SharedIoRecoveryReason::ProviderFailure, result->sequence);
                     continue;
                 }
                 const auto bit = UINT64_C(1) << ch;
                 if ((pending->completed_mask & bit) != 0) {
                     pending->outcome = detail::SharedIoTraceOutcome::CompletionFailed;
-                    fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                    fail(detail::SharedIoRecoveryReason::ProviderFailure, result->sequence);
                     continue;
                 }
                 pending->completed_mask |= bit;
@@ -295,7 +295,7 @@ struct GpuWaveNetRealtimeNode::Impl {
                 if (result->status != GpuWaveNetBlockStatus::GpuDelivered) {
                     if (pending->outcome == detail::SharedIoTraceOutcome::Success)
                         pending->outcome = detail::SharedIoTraceOutcome::CompletionFailed;
-                    fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                    fail(detail::SharedIoRecoveryReason::ProviderFailure, result->sequence);
                 } else {
                     std::copy_n(worker_output.data() + ch * n, n, pending->output.data() + ch * n);
                 }
@@ -330,7 +330,7 @@ struct GpuWaveNetRealtimeNode::Impl {
                     trace_terminal(pending, detail::SharedIoTraceOutcome::LateRejected,
                                    detail::SharedIoGpuTerminalDisposition::LateRejected,
                                    detail::SharedIoFallbackReason::InputSaturated, true);
-                    fail(detail::SharedIoRecoveryReason::InputSaturated);
+                    fail(detail::SharedIoRecoveryReason::InputSaturated, pending.stamp.sequence);
                 } else {
                     trace_terminal(pending, detail::SharedIoTraceOutcome::Success,
                                    detail::SharedIoGpuTerminalDisposition::CompletedAccepted,
@@ -343,8 +343,9 @@ struct GpuWaveNetRealtimeNode::Impl {
         }
         return produced;
     }
-    void fail(detail::SharedIoRecoveryReason reason) noexcept {
-        bridge->request_recovery(reason);
+    void fail(detail::SharedIoRecoveryReason reason,
+              std::uint64_t sequence = std::numeric_limits<std::uint64_t>::max()) noexcept {
+        bridge->request_recovery(reason, sequence);
     }
 };
 
@@ -531,7 +532,7 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
                              detail::SharedIoGpuTerminalDisposition::StaleRejected,
                              detail::SharedIoFallbackReason::SequenceGap);
             pending.reset();
-            s.fail(detail::SharedIoRecoveryReason::SequenceGap);
+            s.fail(detail::SharedIoRecoveryReason::SequenceGap, stamp.sequence);
             (void)s.bridge->release_input(*input);
             break;
         }
@@ -549,7 +550,7 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
                 submission_ok = false;
                 pending.completed_mask |= UINT64_C(1) << ch;
                 pending.outcome = detail::SharedIoTraceOutcome::SubmissionRejected;
-                s.fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                s.fail(detail::SharedIoRecoveryReason::ProviderFailure, stamp.sequence);
             }
         }
         s.trace_stage(pending, detail::SharedIoTraceStage::SubmitEnd);
@@ -591,8 +592,19 @@ void GpuWaveNetRealtimeNode::delivered(void* self, std::uint64_t sequence, std::
             visible);
 }
 void detail::WaveNetRealtimeTestAccess::request_recovery(GpuWaveNetRealtimeNode& node,
-                                                         SharedIoRecoveryReason reason) noexcept {
-    node.impl_->bridge->request_recovery(reason);
+                                                         SharedIoRecoveryReason reason,
+                                                         std::uint64_t sequence) noexcept {
+    node.impl_->bridge->request_recovery(reason, sequence);
+}
+detail::SharedIoRecoveryReason
+detail::WaveNetRealtimeTestAccess::recovery_reason(const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->bridge ? node.impl_->bridge->recovery_reason()
+                              : SharedIoRecoveryReason::None;
+}
+std::uint64_t
+detail::WaveNetRealtimeTestAccess::recovery_sequence(const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->bridge ? node.impl_->bridge->recovery_sequence()
+                              : std::numeric_limits<std::uint64_t>::max();
 }
 void detail::WaveNetRealtimeTestAccess::observe_trace(
     GpuWaveNetRealtimeNode& node, SharedIoTraceDrainObserver observer) noexcept {

@@ -16,18 +16,6 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
-  "pulp-test-au-v2-param-display": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
-    "test/test_au_v2_param_display.mm"
-   ],
-   "spawns": "none",
-   "undeclared_sources": []
-  },
   "pulp-test-authoring-capsule-hostile": {
    "data": "declared",
    "inputs": [
@@ -950,25 +938,30 @@
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [],
+   "runtime_targets": [
+    "PulpGain_CLAP",
+    "PulpSynth_CLAP"
+   ],
    "sources": [],
    "spawning_sources": [
     "test/test_host.cpp",
     "test/test_plugin_slot_au.mm"
    ],
-   "spawns": "none",
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-host-regression": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [],
+   "runtime_targets": [
+    "PulpGain_CLAP"
+   ],
    "sources": [],
    "spawning_sources": [
     "test/test_host_regression.cpp"
    ],
-   "spawns": "none",
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-import-design-tool": {
@@ -1230,12 +1223,14 @@
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [],
+   "runtime_targets": [
+    "PulpGain_CLAP"
+   ],
    "sources": [],
    "spawning_sources": [
     "test/test_timeline_graph_automation_delivery.cpp"
    ],
-   "spawns": "none",
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-timeline-journal": {
@@ -1310,12 +1305,6 @@
   "pulp-test-analysis-frontends",
   "pulp-test-anticipation-lane",
   "pulp-test-ara-scaffold",
-  "pulp-test-au-bundle-entry",
-  "pulp-test-au-param-visibility",
-  "pulp-test-au-plugin-state",
-  "pulp-test-au-v2-cocoa-ui",
-  "pulp-test-au-v2-instrument-rt",
-  "pulp-test-au-v2-param-display",
   "pulp-test-audio",
   "pulp-test-audio-contracts",
   "pulp-test-audio-device-manager",
@@ -1555,7 +1544,6 @@
   "pulp-test-group-dsp-rt-midi",
   "pulp-test-group-dsp-rt-signal",
   "pulp-test-group-dsp-rt-signal-fft",
-  "pulp-test-group-fmt-au-v2",
   "pulp-test-group-fmt-audio",
   "pulp-test-group-fmt-format",
   "pulp-test-group-fmt-format-view",
@@ -1842,16 +1830,6 @@
   "pulp-test-visualization",
   "pulp-test-voice-modulation-sources",
   "pulp-test-voice-runtime-facade",
-  "pulp-test-vst3-audio-parity",
-  "pulp-test-vst3-bundle-entry",
-  "pulp-test-vst3-connection",
-  "pulp-test-vst3-editor",
-  "pulp-test-vst3-host-process-clock",
-  "pulp-test-vst3-hosted-editor",
-  "pulp-test-vst3-note-names",
-  "pulp-test-vst3-param-display",
-  "pulp-test-vst3-plugin-state",
-  "pulp-test-vst3-state-sync",
   "pulp-test-wam-adapter",
   "pulp-test-wam-wclap",
   "pulp-test-wav-memory-decoder",

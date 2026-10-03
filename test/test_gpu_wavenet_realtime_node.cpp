@@ -884,6 +884,16 @@ TEST_CASE("WaveNet stale terminal preserves the bridge recovery cause",
     }
 }
 
+TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
+          "[gpu_audio][wavenet][diagnostic]") {
+    using Recovery = detail::SharedIoRecoveryReason;
+    Harness h;
+    detail::WaveNetRealtimeTestAccess::request_recovery(h.node, Recovery::ProviderFailure, 37);
+    detail::WaveNetRealtimeTestAccess::request_recovery(h.node, Recovery::InputSaturated, 38);
+    CHECK(detail::WaveNetRealtimeTestAccess::recovery_reason(h.node) == Recovery::ProviderFailure);
+    CHECK(detail::WaveNetRealtimeTestAccess::recovery_sequence(h.node) == 37);
+}
+
 TEST_CASE("WaveNet failed destructor release discloses unresolved physical ownership",
           "[gpu_audio][wavenet][trace]") {
     for (bool fail_release : {false, true}) {
