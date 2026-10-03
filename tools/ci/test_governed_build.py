@@ -160,7 +160,7 @@ class GovernedBuildTests(unittest.TestCase):
         taskpolicy = cls.bindir / "taskpolicy"
         taskpolicy.write_text('#!/usr/bin/env bash\n'
                               'echo "TASKPOLICY=$1"\n'
-                              'shift\n'
+                              'if [ "$1" = "-c" ]; then shift 2; else shift; fi\n'
                               'exec "$@"\n')
         taskpolicy.chmod(0o755)
         # Pay any first-exec security scan once, outside the timed assertions.
@@ -543,6 +543,67 @@ class GovernedBuildTests(unittest.TestCase):
             env={**os.environ, "PULP_TARTCI_LEASES": "0"},
         )
         self.assertEqual(r.returncode, 7, r.stderr)
+
+    def test_build_output_and_exit_status_are_preserved(self) -> None:
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "sh", "-c",
+             "printf 'build stdout\\n'; printf 'build stderr\\n' >&2; exit 23"],
+            capture_output=True, text=True, check=False,
+            env={**os.environ, "PULP_TARTCI_LEASES": "0"},
+        )
+        self.assertEqual(r.returncode, 23, r.stdout + r.stderr)
+        self.assertIn("build stdout", r.stdout)
+        self.assertIn("build stderr", r.stderr)
+
+    def test_focused_target_arguments_are_passed_verbatim(self) -> None:
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "sh", "-c",
+             "printf 'arg=%s\\n' \"$@\"", "child",
+             "--target", "pulp-view-core", "--target=pulp-test-widgets",
+             "--", "-sdk", "iphonesimulator"],
+            capture_output=True, text=True, check=False,
+            env={**os.environ, "PULP_TARTCI_LEASES": "0"},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            [line for line in r.stdout.splitlines() if line.startswith("arg=")],
+            ["arg=--target", "arg=pulp-view-core", "arg=--target=pulp-test-widgets",
+             "arg=--", "arg=-sdk", "arg=iphonesimulator"],
+        )
+
+    def test_dry_run_emits_bounded_receipt_without_running_or_acquiring(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "ran"
+            calls = Path(tmp) / "tartci-calls"
+            tartci = Path(tmp) / "tartci"
+            tartci.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\n' \"$*\" >> {calls}\n"
+                f"exec {self.bindir / 'tartci'} \"$@\"\n"
+            )
+            tartci.chmod(0o755)
+            r = subprocess.run(
+                ["bash", str(SCRIPT), "--dry-run", "sh", "-c",
+                 f"touch {marker}; exit 9", "child", "--target", "pulp-view-core"],
+                capture_output=True, text=True, check=False,
+                env={**os.environ, "PULP_TARTCI_BIN": str(tartci),
+                     "STUB_PROFILE_JOBS": "8", "STUB_FREE_CORES": "8",
+                     "STUB_MAX_GRANT": "8", "PULP_BUILD_METRICS": "0"},
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertFalse(marker.exists())
+            self.assertIn("governed-build dry-run receipt:", r.stdout)
+            self.assertIn("--target", r.stdout)
+            self.assertIn("pulp-view-core", r.stdout)
+            self.assertNotIn("leases acquire", calls.read_text() if calls.exists() else "")
+
+    def test_dry_run_requires_a_command(self) -> None:
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "--dry-run"], capture_output=True, text=True,
+            check=False, env={**os.environ, "PULP_TARTCI_LEASES": "0"},
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("requires a build command", r.stderr)
 
     # --- an unresolvable build command must name itself ----------------------
     #
@@ -1083,7 +1144,7 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
             shim.chmod(0o755)
             taskpolicy = tmp / "taskpolicy"
             taskpolicy.write_text('#!/usr/bin/env bash\n'
-                                  'echo "TASKPOLICY=$1"; shift; exec "$@"\n')
+                                  'echo "TASKPOLICY=$1"; if [ "$1" = "-c" ]; then shift 2; else shift; fi; exec "$@"\n')
             taskpolicy.chmod(0o755)
             env = {k: v for k, v in os.environ.items()
                    if k not in ("PULP_BUILD_JOBS", "PULP_TARTCI_LEASES",
@@ -1100,7 +1161,8 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
                 capture_output=True, text=True, check=False, env=env)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("JOBS=3", r.stdout, r.stderr)
-            self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
+            expected_qos = "TASKPOLICY=-c" if "utility QoS" in r.stderr else "TASKPOLICY=-b"
+            self.assertIn(expected_qos, r.stdout, r.stderr)
             after = subprocess.run(
                 [self.tartci, "leases", "status", *common, "--json"],
                 capture_output=True, text=True, check=False)
@@ -1146,7 +1208,7 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
             shim.chmod(0o755)
             taskpolicy = tmp / "taskpolicy"
             taskpolicy.write_text('#!/usr/bin/env bash\n'
-                                  'echo "TASKPOLICY=$1"; shift; exec "$@"\n')
+                                  'echo "TASKPOLICY=$1"; if [ "$1" = "-c" ]; then shift 2; else shift; fi; exec "$@"\n')
             taskpolicy.chmod(0o755)
             env = {k: v for k, v in os.environ.items()
                    if k not in ("PULP_BUILD_JOBS", "PULP_TARTCI_LEASES",

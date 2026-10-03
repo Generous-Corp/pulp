@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-a1-governed-build-20261003-watch",
+  "created_at": "2026-10-03T05:56:22Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "A1 replaces duplicated build invocation assembly with the governed build wrapper in cmd_design.cpp; no design-import, Chromium, rendering, or packaging authority moves. Watch-only event; authority remains unchanged.",
+  "tests": [
+    "python3 tools/ci/test_build_governance_paths.py",
+    "python3 tools/ci/test_governed_build.py",
+    "python3 tools/local-ci/test_desktop_video_matrix_commands_cli.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

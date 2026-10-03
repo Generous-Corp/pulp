@@ -250,14 +250,14 @@ if [ "$SMOKE_ONLY" = true ]; then
     configure_args+=(-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF)
 fi
 run_or_dump "configure" "$configure_log" cmake "${configure_args[@]}"
-run_or_dump "build" "$build_log" cmake --build "$build_dir" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
+run_or_dump "build" "$build_log" bash "$src_dir/tools/ci/governed-build.sh" cmake --build "$build_dir"
 run_or_dump "install" "$install_log" cmake --install "$build_dir" --prefix "$install_dir"
 
 mkdir -p "$smoke_dir"
 run_or_dump "install smoke configure" "$smoke_log" \
     cmake -S "$src_dir/tools/validation/sdk-smoke" -B "$smoke_dir/build" -DCMAKE_PREFIX_PATH="$install_dir"
 run_or_dump "install smoke build" "$smoke_build_log" \
-    cmake --build "$smoke_dir/build" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
+    bash "$src_dir/tools/ci/governed-build.sh" cmake --build "$smoke_dir/build"
 
 write_prepared_state
 
