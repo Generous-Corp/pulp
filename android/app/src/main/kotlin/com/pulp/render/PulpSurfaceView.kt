@@ -69,29 +69,39 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     private var renderThread: HandlerThread? = null
     private var renderHandler: Handler? = null
+    // Surface callbacks can overlap during Activity transitions. Keep the
+    // thread/handler pair owned by exactly one callback at a time so a new
+    // surface cannot overwrite the pair while the old one is joining.
+    private val lifecycleLock = Any()
     @Volatile private var safeAreaInsets = FloatArray(4)
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        Log.i(TAG, "surfaceCreated — launching GPU init on render thread")
-        if (PulpApplication.nativeLoaded) {
-            // Run Dawn/Skia initialization on a dedicated thread to avoid ANR.
-            // Dawn shader compilation takes 10-15 seconds on the emulator.
-            // The render thread becomes the owner of the GPU context and
-            // AChoreographer render loop.
-            val thread = HandlerThread("PulpRenderThread").also { it.start() }
-            val handler = Handler(thread.looper)
-            renderThread = thread
-            renderHandler = handler
-            val surface = holder.surface
-            val density = resources.displayMetrics.density
-            val safe = safeAreaInsets
-            handler.post {
-                Log.i(TAG, "Render thread started")
-                nativeSetDisplayDensity(density)
-                nativeSetSafeAreaInsets(safe[0], safe[1], safe[2], safe[3])
-                nativeOnSurfaceCreated(surface)
-                recordGpuAdapterIdentity()
-                Log.i(TAG, "Dawn init complete, servicing choreographer callbacks")
+        synchronized(lifecycleLock) {
+            Log.i(TAG, "surfaceCreated — launching GPU init on render thread")
+            if (renderThread?.isAlive == true) {
+                Log.w(TAG, "surfaceCreated while render thread is still alive; ignoring duplicate")
+                return
+            }
+            if (PulpApplication.nativeLoaded) {
+                // Run Dawn/Skia initialization on a dedicated thread to avoid ANR.
+                // Dawn shader compilation takes 10-15 seconds on the emulator.
+                // The render thread becomes the owner of the GPU context and
+                // AChoreographer render loop.
+                val thread = HandlerThread("PulpRenderThread").also { it.start() }
+                val handler = Handler(thread.looper)
+                renderThread = thread
+                renderHandler = handler
+                val surface = holder.surface
+                val density = resources.displayMetrics.density
+                val safe = safeAreaInsets
+                handler.post {
+                    Log.i(TAG, "Render thread started")
+                    nativeSetDisplayDensity(density)
+                    nativeSetSafeAreaInsets(safe[0], safe[1], safe[2], safe[3])
+                    nativeOnSurfaceCreated(surface)
+                    recordGpuAdapterIdentity()
+                    Log.i(TAG, "Dawn init complete, servicing choreographer callbacks")
+                }
             }
         }
     }
@@ -104,47 +114,49 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        Log.i(TAG, "surfaceDestroyed — waiting for render-thread teardown")
-        val thread = renderThread ?: return
-        val handler = renderHandler ?: return
-        renderHandler = null
-        // The destroy command follows any in-progress initialization, resize,
-        // or input dispatch on the same Looper as Choreographer. Do not return
-        // while that owner can still use SurfaceHolder's native window.
-        val stopped = CountDownLatch(1)
-        val destroyOnOwner = Runnable {
-            try {
-                nativeOnSurfaceDestroyed()
-            } finally {
-                thread.quit()
-                stopped.countDown()
+        synchronized(lifecycleLock) {
+            Log.i(TAG, "surfaceDestroyed — waiting for render-thread teardown")
+            val thread = renderThread ?: return
+            val handler = renderHandler ?: return
+            renderHandler = null
+            // The destroy command follows any in-progress initialization, resize,
+            // or input dispatch on the same Looper as Choreographer. Do not return
+            // while that owner can still use SurfaceHolder's native window.
+            val stopped = CountDownLatch(1)
+            val destroyOnOwner = Runnable {
+                try {
+                    nativeOnSurfaceDestroyed()
+                } finally {
+                    thread.quit()
+                    stopped.countDown()
+                }
             }
-        }
-        if (!handler.post(destroyOnOwner)) {
-            // A render Looper can disappear after an uncaught native exception.
-            // There can be no queued Choreographer callback once its Looper is
-            // gone, so finish the native barrier directly instead of throwing
-            // from SurfaceHolder.Callback on the UI thread.
-            try {
-                nativeOnSurfaceDestroyed()
-            } finally {
-                thread.quitSafely()
-                stopped.countDown()
+            if (!handler.post(destroyOnOwner)) {
+                // A render Looper can disappear after an uncaught native exception.
+                // There can be no queued Choreographer callback once its Looper is
+                // gone, so finish the native barrier directly instead of throwing
+                // from SurfaceHolder.Callback on the UI thread.
+                try {
+                    nativeOnSurfaceDestroyed()
+                } finally {
+                    thread.quitSafely()
+                    stopped.countDown()
+                }
             }
-        }
-        var interrupted = false
-        while (true) {
-            try {
-                stopped.await()
-                thread.join()
-                break
-            } catch (_: InterruptedException) {
-                interrupted = true
+            var interrupted = false
+            while (true) {
+                try {
+                    stopped.await()
+                    thread.join()
+                    break
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                }
             }
+            if (interrupted) Thread.currentThread().interrupt()
+            renderThread = null
+            Log.i(TAG, "surfaceDestroyed: render thread stopped")
         }
-        if (interrupted) Thread.currentThread().interrupt()
-        renderThread = null
-        Log.i(TAG, "surfaceDestroyed: render thread stopped")
     }
 
     // ── Touch Input ───────────────────────────────────────────────────────

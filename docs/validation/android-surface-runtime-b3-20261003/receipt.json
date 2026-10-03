@@ -2,7 +2,7 @@
   "receipt_version": 1,
   "status": "BLOCKED",
   "scope": "B3 Android SurfaceRuntime",
-  "tested_commit": "0a9fd46eb6822f82f9a7b75fafb8ee6cf638c123",
+  "tested_commit": "a2ae8dfb31fdb97c41b6e3fb9b45f0953c198e8a",
   "worktree_branch": "codex/b3-android-surface-runtime-20261003",
   "scope_audit": {
     "android_files": [
@@ -81,7 +81,7 @@
       "result": "PASS"
     }
   },
-  "required_follow_up": "Investigate and eliminate the native-memory growth across repeated Android SurfaceView destroy/create cycles, then rerun strict GPU smoke, lifecycle, clean-shutdown, and leak checks. The MIDI JNI export and strict GPU initialization are now verified.",
+  "required_follow_up": "Investigate and eliminate the native-memory growth across repeated Android SurfaceView destroy/create cycles, likely in common Dawn/Skia or the emulator Vulkan driver, then rerun strict GPU smoke, lifecycle, clean-shutdown, and leak checks. The Android callback ownership race fix is committed; the MIDI JNI export and strict GPU initialization are verified.",
   "lifecycle_fix": {
     "file": "tools/cmake/PulpAndroid.cmake",
     "mechanism": "pulp-midi INTERFACE --undefined link options retain the Java callbacks in libpulp.so without whole-archiving MIDI",
@@ -120,7 +120,13 @@
     "cycles": 8,
     "markers": "8 SurfaceRuntime destroy complete events and 9 Dawn initialized events; no FATAL EXCEPTION or Fatal signal.",
     "native_pss_kb": "~30,584 before the first probe; ~129,689 after eight cycles (about +12 MB per recreation).",
-    "follow_up_experiment": "Two temporary teardown experiments were tested and reverted: wgpu::Device::Destroy() before Dawn handle release, and Skia Context::freeGpuResources() after synchronous completion. Neither changed the observed growth: a five-cycle run still rose from 42,969 KB to 92,549 KB native PSS. The experiments are not part of the committed five-file Android scope.",
+    "follow_up_experiment": "Two temporary teardown experiments were tested and reverted: wgpu::Device::Destroy() before Dawn handle release, and Skia Context::freeGpuResources() after synchronous completion. Neither changed the observed growth: a five-cycle run still rose from 42,969 KB to 92,549 KB native PSS. The experiments are not part of the committed five-file Android scope. The Android lifecycle-lock fix was then built and exercised for five more cycles; native PSS still rose from 42,905 KB to 92,553 KB, confirming the growth is not caused by an overwritten HandlerThread pair.",
     "classification": "GPU lifecycle is functional, but repeated surface recreation retains substantial native memory. The growth persists after explicit Dawn device destruction and Skia resource purging, so full B3 leak acceptance is failed and the root cause likely requires common Dawn/Skia or emulator-driver investigation outside this isolated five-file Android slice."
+  },
+  "lifecycle_thread_ownership_fix": {
+    "file": "android/app/src/main/kotlin/com/pulp/render/PulpSurfaceView.kt",
+    "change": "Serialize surfaceCreated and surfaceDestroyed with a lifecycle lock so callbacks cannot overwrite the renderThread/Handler pair during teardown.",
+    "build": "PASS with arm64 GPU APK",
+    "probe": "No duplicate surfaceCreated warning; each observed surfaceDestroyed reported render thread stopped. Native PSS growth remained unchanged, so this fixes the callback race defensively but not the GPU-memory blocker."
   }
 }
