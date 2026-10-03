@@ -297,6 +297,9 @@ TEST_CASE("Ink & Signal applies brand-faithful overrides",
     // accent.error under red-green CVD. meter.green below is unchanged --
     // that pairing is what proves only the semantic role moved.
     REQUIRE(dark.color("accent.success").value() == color_from_hex(0x8CE8B0));
+    // The light theme takes its own status.success from the token file; the
+    // dark ink is far too pale to read on a white card.
+    REQUIRE(light.color("accent.success").value() == color_from_hex(0x2BA85E));
     REQUIRE(dark.color("accent.warning").value() == color_from_hex(0xF6B847));
 
     // on-ink: dark text that sits on bright accent fills (differs per mode).
@@ -327,6 +330,15 @@ TEST_CASE("Ink & Signal honours its screenprint AA-contrast promise",
     // "dark ink rides on bright accent fills" commitment).
     REQUIRE(meets_contrast(dark.color("accent.text").value(),
                            dark.color("accent.primary").value(),
+                           ContrastLevel::aa_large));
+
+    // Status text sits on a card (InlineBanner draws its message in the tone
+    // colour), so the success ink must stay legible there in both themes.
+    REQUIRE(meets_contrast(dark.color("accent.success").value(),
+                           dark.color("bg.elevated").value(),
+                           ContrastLevel::aa_large));
+    REQUIRE(meets_contrast(light.color("accent.success").value(),
+                           light.color("bg.elevated").value(),
                            ContrastLevel::aa_large));
 }
 

@@ -361,17 +361,20 @@ static std::vector<ThemePreset> build_presets() {
         ink.light = SC(0xEDEFF2, 0x14171C, 0xFFFFFF, 0x10B6A3, 0xE0E4E9, 0xD0D6DD, 0x8B6CF5, 0xFF5C4D, 0xB5BDC7, 0xE6E9EE, 0xFF5C4D, 0x16DAC2, 0x8B6CF5, 0xF6B847, 0x5E78FF, 0xFF7AA8);
         ink.dark  = SC(0x161A21, 0xF3F6F9, 0x1E2530, 0x16DAC2, 0x28303C, 0x2A323D, 0x8B6CF5, 0xFF5C4D, 0x39414A, 0x0E1116, 0xFF5C4D, 0x16DAC2, 0x8B6CF5, 0xF6B847, 0x5E78FF, 0xFF7AA8);
 
-        // Brand-faithful overrides shared by both appearances; only the
-        // on-ink text color differs (text that sits on a bright accent fill).
-        auto brand = [](uint32_t on_ink) {
+        // Brand-faithful overrides shared by both appearances. Two inks differ
+        // per mode: on-ink text (text that sits on a bright accent fill) and
+        // the semantic success role, which follows the token file's per-theme
+        // status.success.
+        auto brand = [](uint32_t on_ink, uint32_t success) {
             Theme t;
             t.colors["meter.green"]    = hex(0x3FCF77); // ink.leaf
             t.colors["meter.yellow"]   = hex(0xF6B847); // ink.amber
-            // ink.leaf-bright, not ink.leaf: the semantic success role has to
-            // stay separable from accent.error under red-green colour
-            // blindness, which the plain leaf does not. meter.green above
-            // keeps the original ink -- a meter is a level, not a verdict.
-            t.colors["accent.success"] = hex(0x8CE8B0); // ink.leaf-bright
+            // Dark: ink.leaf-bright, not ink.leaf, so the semantic success
+            // role stays separable from accent.error under red-green colour
+            // blindness. Light: the token file's #2BA85E, because leaf-bright
+            // on a white card is ~1.5:1 and unreadable as text. meter.green
+            // above keeps the original ink -- a meter is a level, not a verdict.
+            t.colors["accent.success"] = hex(success);
             t.colors["accent.warning"] = hex(0xF6B847); // ink.amber
             t.colors["accent.text"]    = hex(on_ink);   // on-ink (text on bright fills)
             // Navigation selected-row treatment (opt-in SelectionStyle::accent
@@ -391,8 +394,8 @@ static std::vector<ThemePreset> build_presets() {
             t.strings["font.family"]   = "Jost";
             return t;
         };
-        ink.light_overrides = brand(0x042420);
-        ink.dark_overrides  = brand(0x052320);
+        ink.light_overrides = brand(0x042420, 0x2BA85E); // light status.success
+        ink.dark_overrides  = brand(0x052320, 0x8CE8B0); // ink.leaf-bright
         p.push_back(std::move(ink));
     }
 
