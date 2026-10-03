@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "d7da76a4484a7fa38066e071009256280c431ff7",
-          "object_id": "e592b71bb1648414856ee23ba7ccd4bbb6f6aff2",
+          "revision": "9a4c4de904f3fd359c803fd30bfabf5b8e6ff783",
+          "object_id": "1c34c1abe0688de942e8f1d9bd621ab7a8b2f938",
           "object_type": "blob"
         },
         {
