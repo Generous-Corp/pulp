@@ -53,6 +53,10 @@ sys.path.insert(0, str(HERE))
 from affected_tests_shadow import classify_changes, declared_hit, executable_name, is_binary_test  # noqa: E402
 
 SCHEMA = "pulp-read-audit/v1"
+# A manifest `data` value for a test that may read anything in the checkout (a
+# tree walker such as `pulp doctor`): the selector never skips it, so no read
+# of it is a finding.
+WHOLE_CHECKOUT = "whole_checkout"
 MANIFEST = Path("test") / "ctest_script_inputs.json"
 STRACE_FILTER = "trace=%file,%process,fchdir,getdents64"
 CONTROL_NAME = "read-audit-control"
@@ -294,7 +298,10 @@ def checkout_accesses(trace: Trace, root: Path, excluded: list[Path], files: set
     return {(rel, kind): program for rel, (kind, program) in best.items()}
 
 
-def findings_for(accesses: dict[tuple[str, str], str], inputs: list[str]) -> tuple[list[Finding], int]:
+def findings_for(accesses: dict[tuple[str, str], str], inputs: list[str],
+                 data: str | None = None) -> tuple[list[Finding], int]:
+    if data == WHOLE_CHECKOUT:
+        return [], len(accesses)
     found, covered = [], 0
     for (rel, kind), program in sorted(accesses.items()):
         if covered_by(rel, inputs):
@@ -361,7 +368,7 @@ def audit_group(g: Group, build_dir: Path, root: Path, work: Path, files: set[st
         rec["status"] = "unobserved"  # strace saw no process besides ctest: nothing ran
         return rec
     accesses = checkout_accesses(trace, root, [build_dir], files, dirs)
-    found, covered = findings_for(accesses, inputs)
+    found, covered = findings_for(accesses, inputs, data)
     rec.update(status="audited", processes=len(trace.pids), unresolved=trace.unresolved,
                checkout_accesses=len(accesses), covered=covered)
     if found and len(g.tests) > 1 and len(g.tests) <= per_test_limit:

@@ -120,6 +120,12 @@ class DiffTests(unittest.TestCase):
             ("test/fixtures/other/b.json", "read"), ("tools/helper.py", "read")])
         self.assertEqual(covered, 2)  # the declared fixture and the CMake file
 
+    def test_a_whole_checkout_declaration_covers_every_access(self) -> None:
+        found, covered = ra.findings_for(self.accesses(), [], ra.WHOLE_CHECKOUT)
+        self.assertEqual((found, covered), ([], 6))
+        found, _ = ra.findings_for(self.accesses(), [], "none")
+        self.assertEqual(len(found), 5)
+
     def test_a_glob_declaration_covers_what_the_selector_would(self) -> None:
         found, _ = ra.findings_for({("test/fixtures/other/b.json", "read"): "x"}, ["test/fixtures/*/b.json"])
         self.assertEqual(found, [])
