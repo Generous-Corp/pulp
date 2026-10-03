@@ -5,6 +5,7 @@
 #include "fig_lane.hpp"
 #include "node_runtime.hpp"
 #include "render_artifact_path.hpp"
+#include "support/isolated_pulp_home.hpp"
 
 #include <iostream>
 
@@ -37,6 +38,10 @@ namespace fs = std::filesystem;
 #endif
 
 namespace {
+
+// Every case below runs the CLI or the import tool against an empty home, so
+// a host's ~/.pulp config cannot change what they emit.
+const pulp_test_cli::IsolatedPulpHome isolated_home;
 
 fs::path tool_binary() {
     if (const char* env = std::getenv("PULP_IMPORT_DESIGN_TOOL_PATH"); env && *env) {
@@ -3684,4 +3689,15 @@ TEST_CASE("pulp-import-design requires a validation pass for --fail-on-unvalidat
     CHECK(r.exit_code != 2);
     CHECK(r.stderr_output.find("--fail-on-unvalidated requires --validate")
           == std::string::npos);
+}
+
+TEST_CASE("import-design-tool runs against an isolated, empty PULP_HOME", "[cli][import-design][isolation]") {
+    const char* home = std::getenv("PULP_HOME");
+    REQUIRE(home != nullptr);
+    REQUIRE(std::filesystem::path(home) == isolated_home.path());
+    REQUIRE(std::filesystem::is_directory(home));
+    REQUIRE_FALSE(std::filesystem::exists(std::filesystem::path(home) / "config.toml"));
+    const char* check = std::getenv("PULP_UPDATE_CHECK_DISABLED");
+    REQUIRE(check != nullptr);
+    REQUIRE(std::string(check) == "1");
 }

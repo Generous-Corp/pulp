@@ -621,3 +621,14 @@ endif()
 pulp_test_spawns(pulp-test-cli-validator-discovery NONE)  # `<validator> --version` and `command -v` on system paths
 pulp_test_spawns(pulp-test-cli-mac-runtime-validators NONE) # plutil and auval, behind an injected runner
 pulp_test_spawns(pulp-test-cli-package-commands NONE)     # links the registry's runner but never runs a tool
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-cli-skew-banner NONE)          # bash on a temp driver, with a temp `pulp` shim
+# It sources the version-check helper from the checkout, found by walking up
+# from its working directory.
+if(TARGET pulp-test-cli-skew-banner)
+    pulp_test_data(pulp-test-cli-skew-banner NO_DEFINE PATHS tools/scripts/cli_version_check.sh)
+endif()
+# The lifecycle case stages a fake broker script at the real broker's name.
+pulp_test_spawns(pulp-test-cli-shellout-lifecycle NOT_RUN pulp-control-broker)
