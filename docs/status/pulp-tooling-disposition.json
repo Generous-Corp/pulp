@@ -3680,6 +3680,38 @@
               {
                 "name": "--min-os",
                 "required": false
+              },
+              {
+                "name": "--sign-key-file",
+                "required": false
+              },
+              {
+                "name": "--build-number",
+                "required": false
+              },
+              {
+                "name": "--notes-html-file",
+                "required": false
+              },
+              {
+                "name": "--release-notes-url",
+                "required": false
+              },
+              {
+                "name": "--full-release-notes-url",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "required": false
+              },
+              {
+                "name": "--installation-type",
+                "required": false
+              },
+              {
+                "name": "--pub-date",
+                "required": false
               }
             ],
             "subcommands": []
