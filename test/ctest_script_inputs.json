@@ -28,7 +28,7 @@
    "kind": "compiled",
    "runtime_targets": [],
    "sources": [
-    "build-gate/tools/cli/generated/migration_index.cpp",
+    "${CMAKE_BINARY_DIR}/tools/cli/generated/migration_index.cpp",
     "tools/cli/atomic_text_file.cpp",
     "tools/cli/au_info_plist.cpp",
     "tools/cli/authority_navigation.cpp",

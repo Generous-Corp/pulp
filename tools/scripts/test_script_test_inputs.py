@@ -589,6 +589,30 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(ex["pulp-test-a"]["detected_sources"], ["test/test_a.cpp"])
             self.assertEqual(ex["pulp-test-b"]["detected_sources"], ["test/test_b.cpp"])
 
+    def test_a_generated_source_in_an_in_checkout_build_dir_records_the_token(self) -> None:
+        # Two in-checkout build directories must write the same compiled entry
+        # for a configure-generated source, or every other configuration
+        # reports the entry stale.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            write(repo.root, "test/test_gen.cpp", 'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a";\n')
+            seen = []
+            for name in ("build-gate", "build-linux"):
+                build = repo.root / name
+                ev = build / "test" / "test-data"
+                ev.mkdir(parents=True)
+                gen = f"{name}/tools/cli/generated/index.cpp"
+                (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+                    "pulp-gen": {"sources": ["test/test_gen.cpp", gen], "tree_defines": ["PULP_SOURCE_DIR"]}}}),
+                    encoding="utf-8")
+                (ev / "pulp-gen.inputs.json").write_text(json.dumps({
+                    "schema": "pulp-test-data-inputs/v1", "executable": "pulp-gen", "kind": "compiled",
+                    "whole_checkout": True, "sources": ["test/test_gen.cpp", gen], "inputs": []}), encoding="utf-8")
+                seen.append(sti.compiled_entries(repo.root, build)["pulp-gen"])
+            self.assertEqual(seen[0], seen[1])
+            self.assertIn("${CMAKE_BINARY_DIR}/tools/cli/generated/index.cpp", seen[0]["sources"])
+            self.assertFalse(any(s.startswith("build-") for s in seen[0]["sources"]))
+
     def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)

@@ -594,6 +594,18 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
         return None
     out = {}
     artifacts = load_runtime_artifacts(build_dir)
+    # A configure-generated source (tools/cli/generated/*.cpp) arrives
+    # repo-relative under the build directory's own name when that directory
+    # sits inside the checkout. Record it under the token instead, as entry
+    # scripts are, so the list does not depend on which build dir wrote it.
+    build_rel = _rel(build_dir, root)
+
+    def tokenized(paths) -> list[str]:
+        if not build_rel or build_rel == ".":
+            return sorted(paths)
+        prefix = build_rel + "/"
+        return sorted(f"{BINARY_DIR_TOKEN}/{p[len(prefix):]}" if p.startswith(prefix) else p for p in paths)
+
     for exe, rec in sorted(index.items()):
         target = rec.get("target", exe)
         decl = _read_json(build_dir / TEST_DATA_DIR / f"{target}.inputs.json") or {}
@@ -611,12 +623,12 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
                  "data": ("whole_checkout" if whole else
                           ("undeclared" if undeclared else "declared") if data_sources else "none"),
                  "inputs": sorted(set(decl.get("inputs") or [])),
-                 "sources": sorted(data_sources), "undeclared_sources": undeclared}
+                 "sources": tokenized(data_sources), "undeclared_sources": tokenized(undeclared)}
         if data_sources or whole:
             # Only the sources a signal matched, so a reader can tell a scan
             # that saw the declared readers from one that only echoes
             # pulp_test_data's SOURCES.
-            entry["detected_sources"] = sorted(reading)
+            entry["detected_sources"] = tokenized(reading)
         if spawns is not None:
             entry["spawns"] = spawns
             entry["spawning_sources"] = spawning
