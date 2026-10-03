@@ -1645,6 +1645,7 @@ TEST_CASE("SignalGraph prepared publication serializes telemetry toggle overlap"
 
         std::atomic<bool> start{false};
         std::thread toggler([&] {
+            // unbounded-wait: allow the flag is published immediately by this test thread before join
             while (!start.load(std::memory_order_acquire))
                 std::this_thread::yield();
             graph.set_live_dsp_telemetry_enabled(true);

@@ -1,3 +1,5 @@
+#include "chrome_no_leak_test_support.hpp"
+
 // ── the seam is live, not merely harmless ────────────────────────────────────
 //
 // The tests above prove the three existing products are untouched. On their own

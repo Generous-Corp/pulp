@@ -1,4 +1,5 @@
 // Shared private support for the split WidgetBridge test translation units.
+#pragma once
 
 #include <cstdlib>
 #include <string_view>
