@@ -82,8 +82,8 @@ class NoteDelay {
         if (spec.gate_percent == 0)
             return 0;
         const auto stride = repeat_stride(spec, block);
-        return std::max<std::int64_t>(
-            1, (stride * static_cast<std::int64_t>(spec.gate_percent)) / 100);
+        return std::max<std::int64_t>(1, (stride * static_cast<std::int64_t>(spec.gate_percent)) /
+                                             100);
     }
 
     /// Absolute sample of repeat `index` (1-based; index 0 is the dry note).
@@ -286,9 +286,8 @@ class NoteDelay {
             }
             slot->start = utility_detail::saturating_sample_add(
                 absolute, stride * static_cast<std::int64_t>(index));
-            slot->end = gate == 0
-                            ? note_schedule::kArmedEnd
-                            : utility_detail::saturating_sample_add(slot->start, gate);
+            slot->end = gate == 0 ? note_schedule::kArmedEnd
+                                  : utility_detail::saturating_sample_add(slot->start, gate);
             slot->channel = event.channel();
             slot->note = *pitch;
             slot->velocity = repeat_velocity(spec_, event.velocity(), index);

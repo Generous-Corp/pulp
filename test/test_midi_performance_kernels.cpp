@@ -730,11 +730,10 @@ TEST_CASE("note delay gate zero preserves source-held echo lifecycle",
     spec.repeats = 1;
     spec.gate_percent = 0;
     midi::NoteDelay<> delay{spec};
-    auto out = render(
-        [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
-            delay.process(in, o, constant_block(start, count));
-        },
-        15'000, kRaggedBlocks, input);
+    auto out =
+        render([&](const auto& in, auto& o, std::int64_t start,
+                   std::int32_t count) { delay.process(in, o, constant_block(start, count)); },
+               15'000, kRaggedBlocks, input);
 
     std::vector<std::int64_t> attacks;
     std::vector<std::int64_t> releases;
@@ -748,8 +747,7 @@ TEST_CASE("note delay gate zero preserves source-held echo lifecycle",
     REQUIRE(releases == std::vector<std::int64_t>{1'500, 7'500});
 }
 
-TEST_CASE("note delay accepts an authorable echo gate",
-          "[midi][note-delay][gate]") {
+TEST_CASE("note delay accepts an authorable echo gate", "[midi][note-delay][gate]") {
     // A non-zero gate is measured from the authored delay stride, not from the
     // source note's release. The source release arrives before the first echo,
     // so this also proves the fixed gate does not inherit source-held length.
@@ -762,11 +760,10 @@ TEST_CASE("note delay accepts an authorable echo gate",
     spec.velocity_decay_percent = 100;
     midi::NoteDelay<> delay{spec};
     REQUIRE(midi::NoteDelay<>::repeat_gate(spec, constant_block(0, 512)) == 1'500);
-    auto out = render(
-        [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
-            delay.process(in, o, constant_block(start, count));
-        },
-        15'000, kRaggedBlocks, input);
+    auto out =
+        render([&](const auto& in, auto& o, std::int64_t start,
+                   std::int32_t count) { delay.process(in, o, constant_block(start, count)); },
+               15'000, kRaggedBlocks, input);
 
     std::vector<std::int64_t> attacks;
     std::vector<std::int64_t> releases;
