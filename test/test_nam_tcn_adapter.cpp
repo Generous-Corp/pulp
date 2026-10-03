@@ -229,7 +229,8 @@ TEST_CASE("serialized NAM artifact matches CPU oracle at 64 and 128 frames with 
     REQUIRE(model.release());
 }
 
-TEST_CASE("serialized NAM loader rejects unsupported layer state offsets", "[gpu_audio][neural][nam]") {
+TEST_CASE("serialized NAM loader rejects unsupported layer state offsets",
+          "[gpu_audio][neural][nam]") {
     std::ifstream source(fixture_path());
     std::stringstream contents;
     contents << source.rdbuf();
@@ -239,11 +240,37 @@ TEST_CASE("serialized NAM loader rejects unsupported layer state offsets", "[gpu
     auto text = contents.str();
     text.replace(position, marker.size(), "\"state_offset\": 0, \"input_size\": 1");
     const auto path = std::filesystem::temp_directory_path() / "pulp-nam-state-offset.nam";
-    { std::ofstream output(path); output << text; }
+    {
+        std::ofstream output(path);
+        output << text;
+    }
     NamTcnArtifact artifact;
     std::string error;
     CHECK_FALSE(artifact.load(path.string(), &error));
     CHECK(error.find("state offsets") != std::string::npos);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+TEST_CASE("serialized NAM loader rejects divergent runtime head scale",
+          "[gpu_audio][neural][nam]") {
+    std::ifstream source(fixture_path());
+    std::stringstream contents;
+    contents << source.rdbuf();
+    const auto marker = std::string("\"head_scale\": 0.02");
+    const auto position = contents.str().find(marker);
+    REQUIRE(position != std::string::npos);
+    auto text = contents.str();
+    text.replace(position, marker.size(), "\"head_scale\": 0.5");
+    const auto path = std::filesystem::temp_directory_path() / "pulp-nam-head-scale-mismatch.nam";
+    {
+        std::ofstream output(path);
+        output << text;
+    }
+    NamTcnArtifact artifact;
+    std::string error;
+    CHECK_FALSE(artifact.load(path.string(), &error));
+    CHECK(error.find("head_scale") != std::string::npos);
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
 }

@@ -1793,6 +1793,20 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-nam-tcn-adapter": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_nam_tcn_adapter.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_nam_tcn_adapter.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-native-core-processor": {
    "data": "none",
    "inputs": [],
