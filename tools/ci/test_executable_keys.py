@@ -157,6 +157,22 @@ class KeyTests(unittest.TestCase):
         other = {**TOOLCHAIN, "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)"}
         self.assertNotEqual(ek.key_of("d", TOOLCHAIN, ["p"], {"p": "1"}), ek.key_of("d", other, ["p"], {"p": "1"}))
 
+    def test_a_linked_library_whose_flags_moved_changes_the_key(self):
+        # Flags, definitions and generated inputs of a library's objects are
+        # in the library target's digest, not the executable's.
+        head = self.head(**{"docs/readme.md": "new\n"})
+        self.fx.head_targets["liba"]["digest"] = "flags-moved"
+        keys = self.fx.keys(head)
+        self.assertFalse(self.equal(keys, EXE))
+        self.assertTrue(self.equal(keys, OTHER))   # links nothing from liba
+
+    def test_an_archive_no_target_owns_is_unrecorded(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        self.fx.base_targets["liba"]["artifacts"] = ["<build>/core/elsewhere.a"]
+        keys = self.fx.keys(head)
+        self.assertEqual(keys[EXE]["always_run"], "unrecorded")
+        self.assertIsNone(keys[OTHER]["always_run"])
+
     def test_a_record_from_another_toolchain_keys_nothing(self):
         head = self.head(**{"docs/readme.md": "new\n"})
         for field, value in (("clang", "Apple clang version 21.0.0 (clang-2100.3.34.2)"), ("sdk_build", "26A425"),

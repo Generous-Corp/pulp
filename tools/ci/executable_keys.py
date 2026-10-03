@@ -14,6 +14,11 @@ has to come from a build of one of the two compared trees: a warm build
 directory's dependency log comes from whatever commit it last built, and
 equal content over that set proves nothing.
 
+Each object's flags, definitions and generated build-tree inputs belong to
+the target that compiled it, so the key carries the codemodel digest of the
+executable's own target and of every library target whose archive or
+objects its link pulled.
+
 What a key cannot see is made an always_run reason, never a guess:
 
     base_unrecorded    no usable reuse record for the base commit, or its
@@ -323,6 +328,29 @@ class InputSets:
                     return None
         return out
 
+    def linked_targets(self, artifact: str, targets: dict[str, dict]) -> set[str] | None:
+        """The targets whose objects an executable's link pulled: the ones
+        owning its object directories (`CMakeFiles/<t>.dir/`) and in-build
+        archives. Their codemodel digests key the flags and generated files
+        those objects were compiled with. None when an in-build archive has
+        no owning target."""
+        rec = self.links.get(BUILD + artifact)
+        if rec is None:
+            return None
+        owner = {a: n for n, t in targets.items() for a in t.get("artifacts") or []}
+        out: set[str] = set()
+        for obj in rec["objects"]:
+            _, sep, rest = obj.partition("CMakeFiles/")
+            if sep and rest.split("/", 1)[0].endswith(".dir"):
+                out.add(rest.split("/", 1)[0][:-len(".dir")])
+        for archive in rec["archives"]:
+            if not archive.startswith(BUILD) or archive.startswith(BUILD + "_deps/"):
+                continue
+            if archive not in owner:
+                return None
+            out.add(owner[archive])
+        return out
+
 
 def data_paths(inputs: list[str], *trees: dict[str, str]) -> set[str]:
     """Every path of either tree a declared data input names: the path, what
@@ -342,7 +370,9 @@ def data_paths(inputs: list[str], *trees: dict[str, str]) -> set[str]:
     return found
 
 
-def key_of(digest: str, toolchain: dict | None, paths: Iterable[str], blobs: dict[str, str]) -> str:
+def key_of(digest: str | dict, toolchain: dict | None, paths: Iterable[str], blobs: dict[str, str]) -> str:
+    """`digest`: the executable's codemodel digest, or {target: digest} for
+    it and every target its link pulled objects from."""
     body = {"codemodel": digest, "toolchain": toolchain,
             "inputs": [[p, blobs.get(p, "absent")] for p in sorted(paths)]}
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -404,6 +434,11 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
         kind = "module" if target.get("type") == "MODULE_LIBRARY" else "executable"
         tests = regs.get(artifact, [])
         paths = sets.of(artifact) if sets else None
+        linked = (sets.linked_targets(artifact, base_targets) if sets else None)
+        if linked is not None:
+            linked = linked | {name}
+        if paths is not None and linked is None:
+            paths = None  # an archive no target owns: its flags are unknown
         dstate, dinputs = data_status(artifact, data_scan)
         sstate = spawn_status(artifact, spawn_scan)
         reason = (
@@ -411,7 +446,8 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             "toolchain_unknown" if not record.get("toolchain") or not toolchain else
             "base_other_toolchain" if record["toolchain"] != toolchain else
             "dependency_pin" if pins else
-            "codemodel_unknown" if not keyed or not base_target.get("digest") or not target.get("digest") else
+            "codemodel_unknown" if not keyed or not base_target.get("digest") or not target.get("digest")
+            or any(not (base_targets.get(n) or {}).get("digest") for n in linked or ()) else
             "commit_bound" if target.get("commit_bound") or base_target.get("commit_bound") else
             "environment" if any(environment_bound(t) or ALWAYS_RUN_NAME_RE.search(t["name"] or "")
                                  for t in tests) else
@@ -428,8 +464,9 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
         if paths is not None and reason not in ("base_unrecorded", "toolchain_unknown", "base_other_toolchain",
                                                 "codemodel_unknown"):
             keyed_paths = paths | (data_paths(dinputs, base_tree, head_tree) if dstate == "declared" else set())
-            entry["base_key"] = key_of(base_target["digest"], record["toolchain"], keyed_paths, base_tree)
-            entry["head_key"] = key_of(target["digest"], toolchain, keyed_paths, head_tree)
+            digests = lambda side: {n: (side.get(n) or {}).get("digest", "absent") for n in sorted(linked)}  # noqa: E731
+            entry["base_key"] = key_of(digests(base_targets), record["toolchain"], keyed_paths, base_tree)
+            entry["head_key"] = key_of(digests(head_targets), toolchain, keyed_paths, head_tree)
         out[artifact] = entry
     counts: dict[str, int] = {}
     for e in out.values():
