@@ -43,6 +43,7 @@ COPIED = [
     "tools/scripts/gates.sh",
     "tools/scripts/gates_script_inputs.py",
     "tools/scripts/script_test_inputs.py",
+    "tools/scripts/gate_common.py",
     "tools/ci/source_selftests.py",
     "tools/ci/ctest_gate_args.py",
 ]
