@@ -3037,6 +3037,14 @@
    ],
    "kind": "python"
   },
+  "find-pluginval-selftest": {
+   "entry": "tools/ci/test_find_pluginval.py",
+   "inputs": [
+    "tools/ci/test_find_pluginval.py",
+    "tools/cmake/PulpFindPluginval.cmake"
+   ],
+   "kind": "python"
+  },
   "findskia-arch-assert-selftest": {
    "entry": "tools/scripts/test_findskia_arch_assert.py",
    "inputs": [

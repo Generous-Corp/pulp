@@ -113,7 +113,7 @@ if(TARGET pulp::gpu-audio AND TARGET pulp::render)
     endif()
 
     if(PULP_HAS_VST3)
-        find_program(PLUGINVAL pluginval)
+        _pulp_find_pluginval(PLUGINVAL)
         if(PLUGINVAL)
             add_test(NAME pluginval-SpectralLab-VST3
                 COMMAND ${PLUGINVAL} --validate ${CMAKE_BINARY_DIR}/VST3/SpectralLab.vst3 --strictness-level 5 --timeout-ms 10000)

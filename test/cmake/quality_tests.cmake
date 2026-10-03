@@ -693,6 +693,10 @@ if(Python3_Interpreter_FOUND)
         # identity carry the `commit-bound` label a reuse policy keys on.
         add_test(NAME commit-bound-labels-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_commit_bound_labels.py")
+        # pluginval lookup survives CMake's doubled app-bundle path.
+        add_test(NAME find-pluginval-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_find_pluginval.py")
+        set_tests_properties(find-pluginval-selftest PROPERTIES TIMEOUT 120)
         # The commit-bound helpers label catch-discovered tests and write the
         # declarations the reuse record reads (configures a small project).
         add_test(NAME commit-bound-cmake-selftest COMMAND ${Python3_EXECUTABLE}
