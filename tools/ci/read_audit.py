@@ -584,8 +584,16 @@ def cmd_run(a: argparse.Namespace) -> int:
                 print(f"::warning title=undeclared test read::{exe} {f['kind']}s {f['path']} "
                       f"(tests: {', '.join(f['tests'][:3]) or 'unattributed'}; declared data: {rec['data']})")
     shutil.rmtree(work, ignore_errors=True)
-    return 1 if a.fail_on_findings and report["totals"]["finding_reads"] + report["totals"]["finding_listings"] \
-        else 0
+    return exit_code(report["stage0"]["verdict"], a.fail_on_findings)
+
+
+def exit_code(verdict: str, fail_on_findings: bool) -> int:
+    """0 when the run may pass. With --fail-on-findings the run passes only on
+    the Stage 0 verdict `clean`, so the job's colour and the streak count read
+    the same thing: findings exit 1, a run that cannot vouch for itself 2."""
+    if not fail_on_findings:
+        return 0
+    return {"clean": 0, "findings": 1}.get(verdict, 2)
 
 
 def main(argv: list[str]) -> int:
@@ -602,7 +610,7 @@ def main(argv: list[str]) -> int:
                    help="attribute findings per registration only for executables with at most this many")
     r.add_argument("--only", help="audit only executables whose name matches this regex")
     r.add_argument("--fail-on-findings", action="store_true",
-                   help="exit 1 when an undeclared read or listing is found (probes never fail the run)")
+                   help="exit 0 only on a clean Stage 0 verdict: 1 on any finding, 2 when incomplete")
     r.set_defaults(func=cmd_run)
     a = ap.parse_args(argv[1:])
     return a.func(a)

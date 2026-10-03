@@ -839,7 +839,10 @@ declaring it. To fix a finding, add the path to the test's `pulp_test_data()`.
 Never treat a clean audit as proof for macOS-only tests: Linux does not
 register them, and the report lists them as not covered. A run whose control
 was not flagged has no verdict, because strace saw nothing, and it fails for
-that reason.
+that reason. Once the first run came back clean the nightly
+switched to `--fail-on-findings`: its exit follows the `read-audit stage0:`
+verdict (clean 0, findings 1, incomplete 2). A red nightly is a broken
+Stage 0 streak, not a flake. Read the stage0 line before rerunning it.
 
 ### Only a ready-to-land PR head issues a receipt
 
