@@ -155,6 +155,64 @@ TEST_CASE("GPU plug-in host: backing layer and first frame are the declared back
 }
 #endif
 
+// ── Content-first open ───────────────────────────────────────────────────────
+//
+// A content-first open mounts the document inside the host's view-creation
+// call and presents that frame before the host shows the view. The GPU host
+// paints into its CAMetalLayer with no window at all, so the layer already
+// holds the document when the host (or AUHostingService, out of process)
+// composites it; the display link's later frames take over from there.
+
+namespace {
+
+class CountingRoot : public View {
+public:
+    int paints = 0;
+    void paint(pulp::canvas::Canvas&) override { ++paints; }
+};
+
+}  // namespace
+
+#ifdef PULP_HAS_SKIA
+TEST_CASE("GPU plug-in host: present_first_frame paints the tree before the view has a window",
+          "[plugin-view-host][first-frame][content-first][macos][gpu]") {
+    [NSApplication sharedApplication];
+    CountingRoot root;
+    auto host = PluginViewHost::create(root, options(true, kDeclared));
+    REQUIRE(host);
+    if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
+    NSView* view = (__bridge NSView*)host->native_handle();
+    REQUIRE(view.window == nil);
+
+    CHECK(root.paints == 0);
+    CHECK(host->present_first_frame());
+    // The mounted tree was painted into the layer, not just marked dirty.
+    CHECK(root.paints == 1);
+    // A presented drawable is the layer's content from here on, window or not.
+    [CATransaction flush];
+    CHECK(view.layer.contents != nil);
+
+    // Once a frame went out, the display link owns painting: a second call
+    // only asks for one and never presents out of turn.
+    CHECK_FALSE(host->present_first_frame());
+    CHECK(root.paints == 1);
+}
+#endif
+
+TEST_CASE("CPU plug-in host: present_first_frame leaves the first paint to the display pass",
+          "[plugin-view-host][first-frame][content-first][macos]") {
+    [NSApplication sharedApplication];
+    CountingRoot root;
+    auto host = PluginViewHost::create(root, options(false, kDeclared));
+    REQUIRE(host);
+    NSView* view = (__bridge NSView*)host->native_handle();
+    view.needsDisplay = NO;
+    // CoreGraphics paints only in -drawRect:, which AppKit runs in the first
+    // display pass of the window the host puts the view in; asking marks it.
+    CHECK_FALSE(host->present_first_frame());
+    CHECK(view.needsDisplay);
+}
+
 // ── A host resize queued behind the document mount ────────────────────────────
 //
 // Out of process (Logic's AUHostingService) the host applies the size its

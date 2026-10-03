@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::view {
@@ -35,6 +36,15 @@ inline bool dev_editor_hot_reload_enabled() {
         case '1': case 't': case 'T': case 'y': case 'Y': return true;
         default: return false;
     }
+}
+
+/// Whether a DAW-hosted editor opens content-first (the default) or view-first.
+/// `PULP_EDITOR_OPEN=view-first` in the host's environment selects view-first,
+/// for an A/B of the two or a host that must not block in its view-creation
+/// call. Read once per editor open.
+inline bool editor_content_first_open_enabled() {
+    const char* v = std::getenv("PULP_EDITOR_OPEN");
+    return !(v && std::string_view(v) == "view-first");
 }
 
 /// Role of a view attached to a ViewBridge. The primary editor is
@@ -79,6 +89,17 @@ public:
         /// for harnesses that inspect the mounted tree right after open().
         bool defer_document_load = false;
 
+        /// Hand the host an editor whose first frame is already the settled
+        /// document (see `prepare_first_frame()`). A view-first open shows the
+        /// host's window with the editor's empty background for as long as the
+        /// document takes to mount, and the window opening on that empty frame
+        /// reads as three stages: small (the window's open animation), the
+        /// right size but empty, then the UI. Content-first finishes the
+        /// deferred mount inside the view-creation call instead, so the host
+        /// window appears with the UI in it. On for every host-embedded editor;
+        /// `PULP_EDITOR_OPEN=view-first` turns it off.
+        bool content_first_open = false;
+
         /// Options for a primary editor embedded in a host: hot reload follows
         /// the developer's `PULP_DEV_HOT_RELOAD` opt-in, role is Editor.
         ///
@@ -94,7 +115,8 @@ public:
         static Options hosted_editor() {
             return Options{.enable_hot_reload = dev_editor_hot_reload_enabled(),
                            .role = ViewRole::Editor,
-                           .defer_document_load = true};
+                           .defer_document_load = true,
+                           .content_first_open = editor_content_first_open_enabled()};
         }
     };
 
@@ -118,6 +140,31 @@ public:
     /// parent window. This split avoids firing `on_view_opened` before
     /// the host attach step succeeds.
     bool open(std::string* error = nullptr);
+
+    /// Content-first open: make `host`'s first frame the settled document.
+    /// Every adapter calls this once its host exists, the GPU surface is bound
+    /// and the view is attached (or, for AU v2, right before the factory
+    /// returns the view). With `Options::content_first_open` it
+    ///
+    ///   1. evaluates a document `open()` deferred (`ScopedDeferredDocumentLoad`)
+    ///      now, after the host and its GPU surface exist, so the document sees
+    ///      the same environment it would on its deferred idle tick;
+    ///   2. pumps the editor's idle work while the document asks for settle
+    ///      rounds (`ScriptedUiSession::settling()`), at most
+    ///      `kFirstFrameSettleRounds` rounds and `kFirstFrameSettleBudgetMs`;
+    ///   3. asks the host to present that frame now
+    ///      (`PluginViewHost::present_first_frame()`), so the view's layer holds
+    ///      the UI before the host composites it.
+    ///
+    /// A document that fails to mount reports through its loaded callback as
+    /// it would from the idle tick, and the host presents whatever the root
+    /// holds (a fallback editor, or the editor's background). Without the
+    /// option, or for an editor with no pending document, only step 3 runs.
+    /// Returns true when the host presented a frame. Main thread only.
+    bool prepare_first_frame(view::PluginViewHost& host);
+
+    static constexpr int kFirstFrameSettleRounds = 8;
+    static constexpr double kFirstFrameSettleBudgetMs = 120.0;
 
     /// Fire `on_view_opened(view)` — called by the adapter once the
     /// view has been attached to its native parent. Idempotent: a

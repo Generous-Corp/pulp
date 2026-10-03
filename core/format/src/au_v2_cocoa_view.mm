@@ -445,6 +445,12 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
         });
     bridge->notify_attached();
 
+    // Content-first: the host shows this view the moment the call returns
+    // (out of process, AUHostingService sends it on arrival), so the view's
+    // layer must already hold the mounted document. See
+    // ViewBridge::prepare_first_frame().
+    bridge->prepare_first_frame(*host);
+
     // Transfer C++ ownership to an ObjC wrapper attached to the NSView.
     // When the NSView is deallocated, the wrapper's dealloc closes the
     // bridge (fires Processor::on_view_closed) and frees the host.

@@ -170,6 +170,9 @@ private:
         }
 
         bridge_->notify_attached();
+        // Content-first: the first composited frame is the mounted document
+        // (ViewBridge::prepare_first_frame()).
+        bridge_->prepare_first_frame(*host_);
 
         runtime::log_info("AAX editor: attached ({}x{}, mode={}, gpu={})",
                           plan.width, plan.height, gpu.mode, host_->is_gpu_backed());

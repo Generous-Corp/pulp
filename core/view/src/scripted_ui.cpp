@@ -281,6 +281,10 @@ bool ScriptedUiSession::load_deferrable(std::string* error) {
     return load_now(error);
 }
 
+bool ScriptedUiSession::settling() const noexcept {
+    return bridge_ != nullptr && bridge_->pending_runtime_settle_rounds() > 0;
+}
+
 bool ScriptedUiSession::complete_pending_load(std::string* error) {
     if (!document_load_pending_) return bridge_ != nullptr;
     return load_now(error);

@@ -2400,6 +2400,21 @@ public:
         needs_repaint_.store(true, std::memory_order_relaxed);
     }
 
+    // Content-first open: paint and present the mounted tree into the
+    // CAMetalLayer now, inside the host's view-creation call. A presented
+    // drawable becomes the layer's contents whether or not the view is in a
+    // window yet, so the host composites this frame the moment it shows the
+    // view (out of process, AUHostingService mirrors it on arrival) instead of
+    // the backing colour. Skipped once the display link has painted.
+    bool present_first_frame() override {
+        if (frame_ok_count_ > 0) {
+            needs_repaint_.store(true, std::memory_order_relaxed);
+            return false;
+        }
+        needs_repaint_.store(true, std::memory_order_relaxed);
+        return render_frame();
+    }
+
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
         @autoreleasepool {

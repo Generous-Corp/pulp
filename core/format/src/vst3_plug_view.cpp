@@ -142,6 +142,10 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
     // Attach succeeded — now fire Processor::on_view_opened.
     bridge_.notify_attached();
 
+    // Content-first: the view's first frame is the mounted document, painted
+    // before attached() returns (ViewBridge::prepare_first_frame()).
+    bridge_.prepare_first_frame(*editor_host_);
+
     runtime::log_info("VST3 editor: attached ({}x{}, mode={}, gpu={})",
                       hints.preferred_width, hints.preferred_height,
                       gpu.mode, editor_host_->is_gpu_backed());

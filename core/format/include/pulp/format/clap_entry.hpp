@@ -849,6 +849,9 @@ inline bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* win
 #endif
     if (attached && p->bridge) {
         p->bridge->notify_attached();
+        // Content-first: the first frame the host composites is the mounted
+        // document (ViewBridge::prepare_first_frame()).
+        p->bridge->prepare_first_frame(*p->editor_host);
     }
     return attached;
 }

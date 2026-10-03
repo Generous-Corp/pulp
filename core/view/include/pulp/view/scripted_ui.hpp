@@ -107,6 +107,12 @@ public:
     bool load_deferrable(std::string* error = nullptr);
     /// True between a deferred load() and the poll() that evaluates it.
     bool document_load_pending() const noexcept { return document_load_pending_; }
+
+    /// True while the mounted document still owes host frames to settle its
+    /// commits (see WidgetBridge::pending_runtime_settle_rounds()). Each
+    /// poll() serves one. A content-first editor open pumps these before its
+    /// first frame so that frame is the settled document, not a partial one.
+    bool settling() const noexcept;
     /// Evaluate a deferred document now (a harness that needs the mounted tree
     /// without pumping frames). Returns whether the document is loaded.
     bool complete_pending_load(std::string* error = nullptr);

@@ -180,6 +180,19 @@ public:
     // Request a repaint (call when parameters change)
     virtual void repaint() = 0;
 
+    // Present one frame of the current tree NOW, before the host shows the
+    // view, so the first thing it composites is that frame rather than the
+    // backing layer's colour. `ViewBridge::prepare_first_frame()` calls this
+    // once the document is mounted (content-first open). A host that can paint
+    // without a window (the macOS GPU host draws into its CAMetalLayer) does so
+    // and returns true; one that only paints from the platform's display pass
+    // marks itself dirty, so that first pass draws the tree, and returns false.
+    // Main thread only.
+    virtual bool present_first_frame() {
+        repaint();
+        return false;
+    }
+
     // ── Bounded repaint damage ──────────────────────────────────────────
     //
     // Mirrors WindowHost's pending-damage surface so `View::request_repaint(Rect)`
