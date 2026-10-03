@@ -180,6 +180,31 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("3 script-driven tests", text)
 
 
+class Stage0Tests(unittest.TestCase):
+    @staticmethod
+    def report(ok=True, **recs) -> dict:
+        return {"control": {"ok": ok}, "executables": recs}
+
+    def test_clean_needs_every_declared_executable_audited_and_no_finding(self) -> None:
+        audited = {"status": "audited"}
+        got = ra.stage0(self.report(a=audited, b=audited, c=audited), {"a", "b", "mac-only"})
+        self.assertEqual((got["verdict"], got["declared"], got["declared_audited"], got["declared_clean"]),
+                         ("clean", 3, 2, 2))
+        self.assertEqual(got["declared_not_registered"], ["mac-only"])
+
+    def test_a_finding_anywhere_is_not_clean(self) -> None:
+        bad = {"status": "audited", "findings": [{"path": "x"}]}
+        got = ra.stage0(self.report(a={"status": "audited"}, z=bad), {"a"})
+        self.assertEqual((got["verdict"], got["undeclared_with_findings"]), ("findings", ["z"]))
+        got = ra.stage0(self.report(a=bad), {"a"})
+        self.assertEqual((got["verdict"], got["declared_with_findings"], got["declared_clean"]), ("findings", ["a"], 0))
+
+    def test_a_blind_control_or_an_unaudited_declared_executable_is_incomplete(self) -> None:
+        self.assertEqual(ra.stage0(self.report(ok=False, a={"status": "audited"}), {"a"})["verdict"], "incomplete")
+        got = ra.stage0(self.report(a={"status": "error"}), {"a"})
+        self.assertEqual((got["verdict"], got["declared_not_audited"]), ("incomplete", ["a"]))
+
+
 @unittest.skipUnless(shutil.which("strace") and shutil.which("ctest"), "strace runs on Linux only; "
                      "the nightly audit runs this control itself and fails without it")
 class LiveControlTests(unittest.TestCase):

@@ -937,7 +937,11 @@ ctest and strace path. It reads one undeclared and one declared tracked
 file, and the run fails with no verdict unless only the undeclared one is
 flagged. The report names what it cannot see: macOS-only executables, targets
 that did not build, script-driven tests, and relative paths whose directory
-was unknown.
+was unknown. Each run ends with one
+`read-audit stage0:` line and a `stage0` block in the report. The verdict is
+`clean` only when the control was flagged, every declared executable this
+platform registers was audited, and no audited executable has a finding.
+`incomplete` means the run cannot vouch for itself.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
