@@ -754,14 +754,18 @@ TEST_CASE("Editor open: content-first serves the document's settle rounds before
     p.set_state_store(&store);
     p.define_parameters(store);
     p.enable_runtime_import = true;
-    // A document whose last commit lands a frame after the mount, the way a
-    // React root finishes in an effect, and that asks the host to settle it.
+    // A document whose last commit lands two frames after the mount, the way
+    // a React root finishes in an effect: the load itself drains the first
+    // animation frame, which asks the host to settle and schedules the commit
+    // on the next one. Only the host's frames can deliver it.
     p.script_path = write_editor_script(
         "pulp-editor-content-first-settle",
         "createLabel('status', 'mounted', '');\n"
-        "if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(3);\n"
-        "else createLabel('no-settle-api', '', '');\n"
-        "requestAnimationFrame(function () { createLabel('late', 'settled', ''); });\n");
+        "if (typeof __pulpRuntimeSettle__ !== 'function') createLabel('no-settle-api', '', '');\n"
+        "requestAnimationFrame(function () {\n"
+        "  if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(3);\n"
+        "  requestAnimationFrame(function () { createLabel('late', 'settled', ''); });\n"
+        "});\n");
 
     auto options = format::ViewBridge::Options::hosted_editor();
     options.content_first_open = true;

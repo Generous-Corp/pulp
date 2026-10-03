@@ -418,45 +418,53 @@ TEST_CASE("GPU plug-in host: an in-window first frame composites as the frame, n
           "[.][composite][content-first][macos][gpu]") {
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-    SolidRoot root;
-    PluginViewHost::Options o = options(true, kDeclared);
-    o.size = {240, 160};
-    auto host = PluginViewHost::create(root, o);
-    REQUIRE(host);
-    if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
-    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 240, 160)
-                                                   styleMask:NSWindowStyleMaskBorderless
-                                                     backing:NSBackingStoreBuffered
-                                                       defer:NO];
-    window.releasedWhenClosed = NO;
-    window.animationBehavior = NSWindowAnimationBehaviorNone;
-    window.backgroundColor = [NSColor colorWithSRGBRed:1 green:0 blue:1 alpha:1];
-    [window orderFrontRegardless];
-    Composite before;
-    const auto shown = std::chrono::steady_clock::now();
-    while ((!composite_of(window, before) || before.magenta < 0.99) &&
-           std::chrono::steady_clock::now() - shown < std::chrono::seconds(2))
-        spin_main(0.01);
-    if (before.magenta < 0.99) SKIP("no window server composite in this session");
+    // Whether the backing colour wins the race shows up on some opens and not
+    // others, so open several times and count every image.
+    constexpr int kOpens = 6;
+    int background_images = 0, content_images = 0, opens = 0;
+    for (int n = 0; n < kOpens; ++n) {
+        SolidRoot root;
+        PluginViewHost::Options o = options(true, kDeclared);
+        o.size = {240, 160};
+        auto host = PluginViewHost::create(root, o);
+        REQUIRE(host);
+        if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
+        NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 240, 160)
+                                                       styleMask:NSWindowStyleMaskBorderless
+                                                         backing:NSBackingStoreBuffered
+                                                           defer:NO];
+        window.releasedWhenClosed = NO;
+        window.animationBehavior = NSWindowAnimationBehaviorNone;
+        window.backgroundColor = [NSColor colorWithSRGBRed:1 green:0 blue:1 alpha:1];
+        [window orderFrontRegardless];
+        // The host's window is on screen, showing only itself, before it
+        // attaches the editor.
+        Composite before;
+        const auto shown = std::chrono::steady_clock::now();
+        while ((!composite_of(window, before) || before.magenta < 0.99) &&
+               std::chrono::steady_clock::now() - shown < std::chrono::seconds(2))
+            spin_main(0.01);
+        if (before.magenta < 0.99) SKIP("no window server composite in this session");
 
-    host->attach_to_parent((__bridge void*)window.contentView);
-    REQUIRE(host->present_first_frame());
-    int background_images = 0, content_images = 0;
-    const auto start = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(400)) {
-        Composite c;
-        if (composite_of(window, c)) {
-            if (c.background > 0.5) ++background_images;
-            if (c.content > 0.5) ++content_images;
+        host->attach_to_parent((__bridge void*)window.contentView);
+        REQUIRE(host->present_first_frame());
+        ++opens;
+        const auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(250)) {
+            Composite c;
+            if (composite_of(window, c)) {
+                if (c.background > 0.5) ++background_images;
+                if (c.content > 0.5) ++content_images;
+            }
+            spin_main(0.002);
         }
-        spin_main(0.002);
+        host->detach();
+        host.reset();
+        [window orderOut:nil];
+        [window close];
     }
-    host->detach();
-    host.reset();
-    [window orderOut:nil];
-    [window close];
-    INFO("images showing only the backing colour: " << background_images);
-    CHECK(content_images > 0);
+    INFO(opens << " opens; images showing only the backing colour: " << background_images);
+    CHECK(content_images >= opens);
     CHECK(background_images == 0);
 }
 #endif
