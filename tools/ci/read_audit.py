@@ -234,8 +234,22 @@ class Finding:
 
 
 def tracked_files(root: Path) -> set[str]:
-    out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True).stdout
-    return {p for p in out.decode("utf-8", "surrogateescape").split("\0") if p}
+    """Tracked files, without gitlinks: a submodule is a directory."""
+    return {p for mode, p in _index(root) if mode != "160000"}
+
+
+def tracked_gitlinks(root: Path) -> set[str]:
+    return {p for mode, p in _index(root) if mode == "160000"}
+
+
+def _index(root: Path) -> list[tuple[str, str]]:
+    out = subprocess.run(["git", "-C", str(root), "ls-files", "-s", "-z"], capture_output=True, check=True).stdout
+    rows = []
+    for entry in out.decode("utf-8", "surrogateescape").split("\0"):
+        if entry:
+            meta, _, path = entry.partition("\t")
+            rows.append((meta.split(" ", 1)[0], path))
+    return rows
 
 
 def tracked_dirs(files: set[str]) -> set[str]:
@@ -298,13 +312,26 @@ def checkout_accesses(trace: Trace, root: Path, excluded: list[Path], files: set
     return {(rel, kind): program for rel, (kind, program) in best.items()}
 
 
+def _ancestor_of_declared(rel: str, inputs: list[str]) -> bool:
+    """Whether a directory lies above a declared input (or above a glob's fixed
+    prefix). Listing it is how an interpreter finds the declared file, such as
+    Python's import scan of its script's own directory, or a glob expanding
+    its fixed prefix."""
+    for i in inputs:
+        cut = min((i.index(c) for c in "*?[" if c in i), default=len(i))
+        fixed = i[:cut].rstrip("/")
+        if fixed.startswith(rel + "/") or (cut < len(i) and fixed == rel):
+            return True
+    return False
+
+
 def findings_for(accesses: dict[tuple[str, str], str], inputs: list[str],
                  data: str | None = None) -> tuple[list[Finding], int]:
     if data == WHOLE_CHECKOUT:
         return [], len(accesses)
     found, covered = [], 0
     for (rel, kind), program in sorted(accesses.items()):
-        if covered_by(rel, inputs):
+        if covered_by(rel, inputs) or (kind == "listing" and _ancestor_of_declared(rel, inputs)):
             covered += 1
         else:
             found.append(Finding(rel, kind, program))
@@ -497,7 +524,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     inventory = json.loads(subprocess.run(["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
                                           capture_output=True, text=True, check=True).stdout)
     files = tracked_files(root)
-    dirs = tracked_dirs(files)
+    dirs = tracked_dirs(files) | tracked_gitlinks(root)
     work = Path(tempfile.mkdtemp(prefix="read-audit-"))
     control = run_control(root, work, files, dirs)
     print(f"read-audit: control {'flagged its undeclared read' if control['ok'] else 'FAILED'}: "

@@ -930,7 +930,10 @@ measures them. On a GitHub-hosted Linux runner it builds the tree, runs every
 compiled test executable's ctest registrations under `strace -f`, and diffs
 the tracked checkout files they open, list or probe against the executable's
 declared inputs. It uses the selector's own prefix-or-glob match, and CMake
-files count as covered because a CMake change already reruns everything. Each
+files count as covered because a CMake change already reruns everything. Listing a directory
+above a declared input (Python's import scan of its own script directory)
+is covered, but opening a file there never is. A submodule gitlink is a
+directory, not a file. Each
 undeclared access is reported with its executable, its test and the program
 that made it. Before the tests, a control program goes through the same
 ctest and strace path. It reads one undeclared and one declared tracked

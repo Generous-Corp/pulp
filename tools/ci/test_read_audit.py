@@ -126,6 +126,17 @@ class DiffTests(unittest.TestCase):
         found, _ = ra.findings_for(self.accesses(), [], "none")
         self.assertEqual(len(found), 5)
 
+    def test_listing_an_ancestor_of_a_declared_input_is_covered_but_reading_under_it_is_not(self) -> None:
+        # `python3 lib/pkg/x.py` lists lib/pkg to import; that is not a
+        # dependency on the directory's other files. Opening one of them is.
+        acc = {("lib", "listing"): "python3", ("lib/pkg", "listing"): "python3",
+               ("lib/pkg/other.py", "read"): "python3", ("notes", "listing"): "python3",
+               ("data/sets", "listing"): "x"}
+        found, covered = ra.findings_for(acc, ["lib/pkg/x.py", "data/sets/*/b.json"])
+        self.assertEqual(sorted((f.path, f.kind) for f in found),
+                         [("lib/pkg/other.py", "read"), ("notes", "listing")])
+        self.assertEqual(covered, 3)
+
     def test_a_glob_declaration_covers_what_the_selector_would(self) -> None:
         found, _ = ra.findings_for({("test/fixtures/other/b.json", "read"): "x"}, ["test/fixtures/*/b.json"])
         self.assertEqual(found, [])
@@ -156,6 +167,19 @@ class UnreadablePathTests(unittest.TestCase):
         with mock.patch.object(ra.os.path, "realpath", refusing):
             got = ra.checkout_accesses(t, Path(REPO), [Path(BUILD)], FILES, ra.tracked_dirs(FILES))
         self.assertEqual(list(got), [("docs/x.md", "read")])
+
+
+class GitlinkTests(unittest.TestCase):
+    def test_a_submodule_is_a_directory_not_a_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            run = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+            run("init", "-q")
+            (repo / "a.txt").write_text("a")
+            run("add", "a.txt")
+            run("update-index", "--add", "--cacheinfo", "160000,1234567890123456789012345678901234567890,sub")
+            self.assertEqual(ra.tracked_files(repo), {"a.txt"})
+            self.assertEqual(ra.tracked_gitlinks(repo), {"sub"})
 
 
 class GroupTests(unittest.TestCase):
