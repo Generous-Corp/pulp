@@ -107,6 +107,7 @@
   "pulp-test-cli-create-shellout": {
    "data": "declared",
    "inputs": [
+    "!packages.lock.json",
     "fixtures/packages/gain-dsp-kit",
     "fixtures/packages/simple-plugin-template",
     "tools/packages/registry.json",
@@ -1045,6 +1046,7 @@
   "pulp-test-mcp-server": {
    "data": "declared",
    "inputs": [
+    "!pulp.toml",
     "CMakeLists.txt",
     "core/timeline/schema/timeline_mcp_tools.json",
     "test/fixtures/gpu-ux",
