@@ -156,6 +156,14 @@ function(pulp_wire_android_sources)
                 ${_android_render_dir}/gpu_surface_android.cpp
             )
         endif()
+        # SurfaceRuntime owns ANativeWindow, Dawn/Skia, Choreographer, and
+        # lifecycle synchronization. Keep it in a private Android TU so the
+        # demo/UI translation unit only supplies the frame callback boundary.
+        if(EXISTS "${_android_render_dir}/surface_runtime_android.cpp")
+            target_sources(pulp-render PRIVATE
+                ${_android_render_dir}/surface_runtime_android.cpp
+            )
+        endif()
         # JNI `extern "C"` bridge — split out of gpu_surface_android.cpp.
         # Forwards onto the android_* entry points.
         if(EXISTS "${_android_render_dir}/gpu_surface_android_jni.cpp")
