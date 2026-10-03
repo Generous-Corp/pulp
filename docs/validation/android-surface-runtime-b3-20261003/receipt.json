@@ -2,7 +2,7 @@
   "receipt_version": 1,
   "status": "BLOCKED",
   "scope": "B3 Android SurfaceRuntime",
-  "tested_commit": "a2ae8dfb31fdb97c41b6e3fb9b45f0953c198e8a",
+  "tested_commit": "37a76cc84e62af11c6ae1d7ffca7d150c0d3891e",
   "worktree_branch": "codex/b3-android-surface-runtime-20261003",
   "scope_audit": {
     "android_files": [
