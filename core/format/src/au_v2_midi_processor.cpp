@@ -272,6 +272,8 @@ OSStatus PulpAUMidiProcessor::Initialize()
 {
     auto result = MusicDeviceBase::Initialize();
     if (result != noErr) return result;
+    // A host offline-render write older than this session no longer applies.
+    offline_render_.begin_session();
 
     if (processor_) {
         PrepareContext ctx;
