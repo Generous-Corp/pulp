@@ -1163,6 +1163,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-streaming-model-contract": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_streaming_model_contract.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-template-ui-scripts": {
    "data": "declared",
    "inputs": [
@@ -1626,6 +1638,7 @@
   "pulp-test-music-pattern-development",
   "pulp-test-music-theory",
   "pulp-test-music-voicing",
+  "pulp-test-nam-tcn-adapter",
   "pulp-test-native-core-ffi",
   "pulp-test-native-core-processor",
   "pulp-test-native-metal-audio-comparator",
@@ -1757,6 +1770,8 @@
   "pulp-test-standalone-rt",
   "pulp-test-state",
   "pulp-test-step-grid-view",
+  "pulp-test-streaming-model-benchmark",
+  "pulp-test-streaming-model-contract",
   "pulp-test-super-convolver-clap-params",
   "pulp-test-super-convolver-dsp",
   "pulp-test-super-convolver-web-cpu",
