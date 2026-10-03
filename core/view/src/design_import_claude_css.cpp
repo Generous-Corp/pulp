@@ -1,8 +1,8 @@
 // design_import_claude_css.cpp — pure Claude Design HTML/CSS scanning
 
-#include <pulp/view/design_sources.hpp>
 #include <choc/text/choc_JSON.h>
 #include <choc/text/choc_StringUtilities.h>
+#include <pulp/view/design_sources.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -13,7 +13,6 @@
 #include <vector>
 
 namespace pulp::view {
-
 
 // ── Claude Design classname extraction ───────────────────────────────────
 //
@@ -56,7 +55,8 @@ std::string strip_css_comments(const std::string& css) {
     while (i < css.size()) {
         if (i + 1 < css.size() && css[i] == '/' && css[i + 1] == '*') {
             auto end = css.find("*/", i + 2);
-            if (end == std::string::npos) break;  // unterminated — drop rest
+            if (end == std::string::npos)
+                break; // unterminated — drop rest
             i = end + 2;
         } else {
             out += css[i++];
@@ -76,10 +76,12 @@ std::map<std::string, std::string> parse_css_declarations(const std::string& bod
         std::string decl = body.substr(i, (semi == std::string::npos ? body.size() : semi) - i);
         i = (semi == std::string::npos) ? body.size() : semi + 1;
         auto colon = decl.find(':');
-        if (colon == std::string::npos) continue;
+        if (colon == std::string::npos)
+            continue;
         auto prop = std::string(choc::text::trim(std::string_view(decl).substr(0, colon)));
         auto value = std::string(choc::text::trim(std::string_view(decl).substr(colon + 1)));
-        if (prop.empty() || value.empty()) continue;
+        if (prop.empty() || value.empty())
+            continue;
         out[css_prop_to_camel_case(prop)] = value;
     }
     return out;
@@ -93,10 +95,11 @@ size_t skip_css_string(const std::string& css, size_t quote_at) {
     const char quote = css[quote_at];
     for (size_t i = quote_at + 1; i < css.size(); ++i) {
         if (css[i] == '\\') {
-            ++i;  // consume the escaped char
+            ++i; // consume the escaped char
             continue;
         }
-        if (css[i] == quote) return i + 1;
+        if (css[i] == quote)
+            return i + 1;
     }
     return css.size();
 }
@@ -116,7 +119,8 @@ size_t find_matching_brace(const std::string& css, size_t open) {
         if (c == '{') {
             ++depth;
         } else if (c == '}') {
-            if (--depth == 0) return i;
+            if (--depth == 0)
+                return i;
         }
     }
     return std::string::npos;
@@ -142,14 +146,15 @@ size_t find_matching_brace(const std::string& css, size_t open) {
 //      a regex cannot match.
 //   2. The selector list can include commas, so we need to split on
 //      `,` and apply the same body to every classname in the list.
-void collect_classnames_from_css(const std::string& css_in,
-                                 ClaudeClassNameRules& into) {
+void collect_classnames_from_css(const std::string& css_in, ClaudeClassNameRules& into) {
     auto css = strip_css_comments(css_in);
     size_t i = 0;
     while (i < css.size()) {
         // Skip whitespace.
-        while (i < css.size() && std::isspace(static_cast<unsigned char>(css[i]))) ++i;
-        if (i >= css.size()) break;
+        while (i < css.size() && std::isspace(static_cast<unsigned char>(css[i])))
+            ++i;
+        if (i >= css.size())
+            break;
 
         // Scan the prelude for whichever comes first: the `{` that
         // opens a body, or the `;` that terminates a body-less
@@ -165,8 +170,14 @@ void collect_classnames_from_css(const std::string& css_in,
                 scan = skip_css_string(css, scan);
                 continue;
             }
-            if (c == '{') { open = scan; break; }
-            if (c == ';') { statement_at_rule = true; break; }
+            if (c == '{') {
+                open = scan;
+                break;
+            }
+            if (c == ';') {
+                statement_at_rule = true;
+                break;
+            }
             ++scan;
         }
 
@@ -177,12 +188,14 @@ void collect_classnames_from_css(const std::string& css_in,
             i = scan + 1;
             continue;
         }
-        if (open == std::string::npos) break;
+        if (open == std::string::npos)
+            break;
         std::string selector_list = css.substr(i, open - i);
 
         // Find the matching `}`, counting nested braces.
         auto close = find_matching_brace(css, open);
-        if (close == std::string::npos) break;
+        if (close == std::string::npos)
+            break;
         std::string body = css.substr(open + 1, close - (open + 1));
         i = close + 1;
 
@@ -191,8 +204,10 @@ void collect_classnames_from_css(const std::string& css_in,
         // whole balanced body is already consumed above, so nested
         // at-rules are skipped along with it.
         auto first_non_ws = selector_list.find_first_not_of(" \t\r\n");
-        if (first_non_ws == std::string::npos) continue;
-        if (selector_list[first_non_ws] == '@') continue;
+        if (first_non_ws == std::string::npos)
+            continue;
+        if (selector_list[first_non_ws] == '@')
+            continue;
 
         // Split selector_list on top-level commas.
         std::vector<std::string> selectors;
@@ -215,25 +230,31 @@ void collect_classnames_from_css(const std::string& css_in,
             // A trailing chained selector (`.foo .bar`, `.foo > .bar`,
             // `.foo:hover`, `.foo[data-x]`) means this isn't a plain
             // classname rule — skip it.
-            if (sel.empty() || sel[0] != '.') continue;
+            if (sel.empty() || sel[0] != '.')
+                continue;
             std::string name;
             size_t k = 1;
-            if (k >= sel.size() || !(std::isalpha(static_cast<unsigned char>(sel[k])) || sel[k] == '_'))
+            if (k >= sel.size() ||
+                !(std::isalpha(static_cast<unsigned char>(sel[k])) || sel[k] == '_'))
                 continue;
-            while (k < sel.size() &&
-                   (std::isalnum(static_cast<unsigned char>(sel[k])) ||
-                    sel[k] == '_' || sel[k] == '-')) {
+            while (k < sel.size() && (std::isalnum(static_cast<unsigned char>(sel[k])) ||
+                                      sel[k] == '_' || sel[k] == '-')) {
                 name += sel[k++];
             }
             // Anything left over → not a plain classname selector.
-            if (k != sel.size()) continue;
-            if (name.empty()) continue;
+            if (k != sel.size())
+                continue;
+            if (name.empty())
+                continue;
             // Theme-scope selectors are handled upstream as token
             // overrides, not classname rules.
-            if (name.rfind("scheme-", 0) == 0) continue;
+            if (name.rfind("scheme-", 0) == 0)
+                continue;
 
-            if (!decls) decls = parse_css_declarations(body);
-            if (decls->empty()) continue;
+            if (!decls)
+                decls = parse_css_declarations(body);
+            if (decls->empty())
+                continue;
 
             // Cascade: later blocks override earlier ones for the same
             // classname. Per-prop merge keeps unrelated declarations
@@ -252,9 +273,7 @@ void collect_classnames_from_css(const std::string& css_in,
 // rules, no classnames). Returns the inner CSS bodies.
 std::vector<std::string> extract_html_style_blocks(const std::string& html) {
     std::vector<std::string> blocks;
-    static const std::regex style_re(
-        R"RX(<style\b[^>]*>([\s\S]*?)</style>)RX",
-        std::regex::icase);
+    static const std::regex style_re(R"RX(<style\b[^>]*>([\s\S]*?)</style>)RX", std::regex::icase);
     auto begin = std::sregex_iterator(html.begin(), html.end(), style_re);
     auto end = std::sregex_iterator();
     for (auto it = begin; it != end; ++it) {
@@ -265,8 +284,9 @@ std::vector<std::string> extract_html_style_blocks(const std::string& html) {
         // dropped.
         std::string head = body.substr(0, std::min<size_t>(body.size(), 200));
         std::transform(head.begin(), head.end(), head.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (head.find("font-face") != std::string::npos) continue;
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (head.find("font-face") != std::string::npos)
+            continue;
         blocks.push_back(std::move(body));
     }
     return blocks;
@@ -280,18 +300,22 @@ std::optional<std::string> extract_bundler_template_html(const std::string& html
     if (tag_start == std::string::npos) {
         tag_start = html.find(opener_sq);
         header_len = opener_sq.size();
-        if (tag_start == std::string::npos) return std::nullopt;
+        if (tag_start == std::string::npos)
+            return std::nullopt;
     }
 
     const size_t open_end = html.find('>', tag_start + header_len);
-    if (open_end == std::string::npos) return std::nullopt;
+    if (open_end == std::string::npos)
+        return std::nullopt;
 
     const size_t close = html.find("</script>", open_end + 1);
-    if (close == std::string::npos) return std::nullopt;
+    if (close == std::string::npos)
+        return std::nullopt;
 
     try {
         auto value = choc::json::parseValue(html.substr(open_end + 1, close - (open_end + 1)));
-        if (!value.isString()) return std::nullopt;
+        if (!value.isString())
+            return std::nullopt;
         return std::string(value.getString());
     } catch (...) {
         return std::nullopt;
@@ -324,32 +348,28 @@ ClaudeClassNameRules extract_claude_classnames(const std::string& html) {
 }
 
 bool looks_like_bundler_entry(const std::string& html) {
-    if (html.empty()) return false;
+    if (html.empty())
+        return false;
 
-    auto contains = [&](const char* needle) {
-        return html.find(needle) != std::string::npos;
-    };
+    auto contains = [&](const char* needle) { return html.find(needle) != std::string::npos; };
 
     // Standard mount points (React, Vue, Svelte, @pulp/react).
-    const bool has_mount_root =
-        contains("id=\"root\"")        || contains("id='root'") ||
-        contains("id=\"app\"")         || contains("id='app'")  ||
-        contains("id=\"__pulp_root\"") || contains("id='__pulp_root'");
+    const bool has_mount_root = contains("id=\"root\"") || contains("id='root'") ||
+                                contains("id=\"app\"") || contains("id='app'") ||
+                                contains("id=\"__pulp_root\"") || contains("id='__pulp_root'");
 
     // Script tags that pull in a bundled JS entry. We don't try to
     // identify whether the script *is* a bundle — just that the page
     // is structured to load one.
-    const bool has_script_src =
-        contains("<script src=")                  ||
-        contains("<script type=\"module\" src=")  ||
-        contains("import(\"./")                   || contains("import('./");
+    const bool has_script_src = contains("<script src=") ||
+                                contains("<script type=\"module\" src=") ||
+                                contains("import(\"./") || contains("import('./");
 
     // Bundler-emitted markers (`__bundler_*`, "Unpacking..." status, the
     // @pulp/react runtime, React dev-tools hooks). These rarely show up
     // in hand-authored Claude Design HTML, so a single hit is enough.
-    const bool has_bundler_hint =
-        contains("__bundler")        || contains("Unpacking")     ||
-        contains("data-reactroot")   || contains("@pulp/react");
+    const bool has_bundler_hint = contains("__bundler") || contains("Unpacking") ||
+                                  contains("data-reactroot") || contains("@pulp/react");
 
     // Either (mount + script) — vanilla shell — or any unambiguous
     // bundler-specific marker.
