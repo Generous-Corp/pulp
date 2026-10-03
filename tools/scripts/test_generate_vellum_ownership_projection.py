@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
-import importlib.util
+import contextlib
 import hashlib
+import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -368,8 +370,12 @@ class OwnershipProjectionTests(unittest.TestCase):
                     )
                 )
             )
-            self.assertEqual(
-                projection_tool.main(
+            # Capture the refusal: printed to the job log, this expected
+            # "projection is stale" line reads as the step's real failure and
+            # has sent a reader to regenerate a projection that was current.
+            captured = io.StringIO()
+            with contextlib.redirect_stderr(captured):
+                verdict = projection_tool.main(
                     [
                         "--repo",
                         str(repo),
@@ -381,9 +387,9 @@ class OwnershipProjectionTests(unittest.TestCase):
                         str(path_a),
                         "--verify",
                     ]
-                ),
-                1,
-            )
+                )
+            self.assertEqual(verdict, 1)
+            self.assertIn("ownership projection is stale", captured.getvalue())
 
     def test_event_loader_matches_freeze_gate_basics(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

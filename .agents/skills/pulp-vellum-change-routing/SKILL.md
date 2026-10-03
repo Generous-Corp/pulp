@@ -379,17 +379,17 @@ has to be read before it runs.
 authority transition is affected") and fails the second, so reading the job name
 sends you to the wrong script. Open the log and find which one raised.
 
-A local **advisory** hint now surfaces this before the push rather than after
-it. `tools/scripts/vellum_watch_preflight.py` runs from both `gates.sh` and
-`.githooks/pre-push`; when the pushed range touches a watched glob it names the
-affected families, prints the reproduce command, and repeats the commit-range
-trap below. It **never blocks**, and it must not be promoted to blocking: the
-authoritative check runs from a trusted root in two required contexts
-specifically so a branch's own copy of the checker holds no veto, and it
-compares against the merge-base for the same reason the reproduce command
-below does. It is silent for a range that touches nothing watched, so silence
-from it is not proof — run the checker by hand if you want a verdict on the
-record.
+A local gate now catches this before the push rather than after it.
+`tools/scripts/vellum_watch_preflight.py --enforce` runs from both `gates.sh`
+and `.githooks/pre-push`; when the pushed range touches a watched glob without
+a committed event that covers it exactly, both fail and print the exact event
+JSON to add (or `--write-event --rationale "..."` writes it). Only a positive
+"event owed" verdict blocks; a missing checker or unresolvable range never
+does. The authoritative check still runs from a trusted root in two required
+contexts — a local refusal cannot accept anything on CI's behalf — and the gate
+compares against the merge-base for the same reason the reproduce command below
+does. It is silent for a range that touches nothing watched, so silence from it
+is not proof — run the checker by hand if you want a verdict on the record.
 
 Four non-obvious rules of the expansion-watch checker, none derivable from a
 skim of the source:

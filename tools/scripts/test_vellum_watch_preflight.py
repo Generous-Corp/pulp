@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Tests for the advisory Vellum watch-event pre-push hint.
+"""Tests for the local Vellum watch-event gate.
 
-The hint's whole value is that it fires BEFORE a push, and its whole risk is
-that a local copy of a trusted-root checker manufactures a false red on a
-required-gate surface. Both properties are covered here, in throwaway git
+The gate's whole value is that it fires BEFORE a push and says exactly what
+event to add, and its whole risk is that a local copy of a trusted-root checker
+manufactures a false red on a required-gate surface. Both properties are covered here, in throwaway git
 repositories seeded with this repo's real acceptance artefact and checker — no
 network, no build, and no dependency on this checkout's branch state.
 """
@@ -72,11 +72,12 @@ class VellumWatchPreflightTest(unittest.TestCase):
         _git(self.repo, "commit", "-q", "-m", message)
         return _git(self.repo, "rev-parse", "HEAD")
 
-    def _run(self, base: str = "main", head: str = "HEAD") -> tuple[int, str]:
+    def _run(self, base: str = "main", head: str = "HEAD",
+             *extra: str) -> tuple[int, str]:
         """Invoke the preflight as the hooks do: as a subprocess, from the repo."""
         completed = subprocess.run(
             ["python3", str(PREFLIGHT), "--repo", str(self.repo),
-             "--base", base, "--head", head],
+             "--base", base, "--head", head, *extra],
             cwd=self.repo, check=False, capture_output=True, text=True,
         )
         return completed.returncode, completed.stdout + completed.stderr
@@ -138,7 +139,7 @@ class VellumWatchPreflightTest(unittest.TestCase):
         self.assertEqual(code, 10)
         for family in WATCHED_FAMILIES:
             self.assertIn(family, output)
-        self.assertIn("ADVISORY", output)
+        self.assertIn("ADVISORY", output)  # without --enforce
         # The trap that makes a correct event file look broken.
         self.assertIn("COMMIT RANGE", output)
         # The hint must route to the authoring rules, not just complain.
@@ -212,7 +213,125 @@ class VellumWatchPreflightTest(unittest.TestCase):
             msg="the tip-based comparison came back clean, so this test would "
                 "pass even if the preflight used the tip")
 
-    # ── advisory means advisory ────────────────────────────────────────────
+    # ── the exact event to add ─────────────────────────────────────────────
+
+    def _suggested_event(self, output: str) -> dict:
+        import json
+        start = output.index("{")
+        end = output.index("\n       }") + len("\n       }")
+        return json.loads(output[start:end])
+
+    def test_an_uncovered_change_prints_the_exact_event_json(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._write("tools/import-design/test_fixture_probe.py", "# a test\n")
+        self._commit("feat: touch a watched tree")
+        code, output = self._run("main", "HEAD", "--enforce")
+        self.assertEqual(code, 10, msg=output)
+        self.assertIn("BLOCKING", output)
+        event = self._suggested_event(output)
+        checker = self._import_checker()
+        self.assertEqual(event["capability_families"], WATCHED_FAMILIES)
+        self.assertEqual(event["acceptance_id"], "full-design-import-render-v1-pulp-watch")
+        self.assertEqual(event["acceptance_sha256"], checker.EXPECTED_ACCEPTANCE_SHA256)
+        self.assertEqual(event["disposition"], "watch-only-no-authority")
+        self.assertEqual(event["authority_effect"], "none")
+        self.assertIn("python3 tools/import-design/test_fixture_probe.py", event["tests"])
+        self.assertTrue(event["event_id"].endswith("-topic-watch"), event["event_id"])
+        # Every key the checker demands, and nothing else: with a real rationale
+        # the suggestion must validate as-is.
+        event["rationale"] = "A fixture rationale long enough to satisfy the checker."
+        self.assertEqual(
+            checker.validate_event(event, f"{event['event_id']}.json"),
+            set(WATCHED_FAMILIES))
+
+    def test_write_event_creates_an_event_that_clears_the_gate(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._commit("feat: touch a watched tree")
+        code, output = self._run(
+            "main", "HEAD", "--write-event", "--event-id", "20261002-fixture-watch",
+            "--rationale", "Fixture change under a watched tree; watch-only, no authority moves.")
+        self.assertEqual(code, 0, msg=output)
+        written = self.repo / EVENT_DIR_REL / "20261002-fixture-watch.json"
+        self.assertTrue(written.is_file(), output)
+        self._commit("ci: record the watch event")
+        code, output = self._run("main", "HEAD", "--enforce")
+        self.assertEqual(code, 0, msg=output)
+        # And the authoritative checker agrees on the same range.
+        checker = self._import_checker()
+        report = checker.verify(
+            self.repo, _git(self.repo, "merge-base", "main", "HEAD"),
+            _git(self.repo, "rev-parse", "HEAD"))
+        self.assertEqual(report["status"], "pass", msg=report)
+
+    def test_write_event_refuses_a_placeholder_rationale(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._commit("feat: touch a watched tree")
+        for rationale in ("too short", "<REPLACE: something long enough to pass>"):
+            code, output = self._run("main", "HEAD", "--write-event",
+                                     "--rationale", rationale)
+            self.assertEqual(code, 2, msg=output)
+        self.assertEqual(list((self.repo / EVENT_DIR_REL).iterdir()), [])
+
+    def test_write_event_with_nothing_owed_writes_nothing(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(UNWATCHED_PATH, "an ordinary docs edit\n")
+        self._commit("docs: an edit outside every watched tree")
+        code, output = self._run("main", "HEAD", "--write-event", "--rationale",
+                                 "Nothing is owed here, so nothing must be written.")
+        self.assertEqual(code, 0, msg=output)
+        self.assertEqual(list((self.repo / EVENT_DIR_REL).iterdir()), [])
+
+    def test_an_over_claiming_event_is_named(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._write(f"{EVENT_DIR_REL}/20260920-fixture.json",
+                    self._event("20260920-fixture",
+                                WATCHED_FAMILIES + ["design-ir-contract"]))
+        self._commit("feat: touch a watched tree, over-claiming")
+        code, output = self._run("main", "HEAD", "--enforce")
+        self.assertEqual(code, 10, msg=output)
+        self.assertIn("design-ir-contract", output)
+        self.assertIn("EXACT", output)
+
+    # ── the freeze job's inventories ───────────────────────────────────────
+
+    def _verifier(self, rel: str, *, stale: bool) -> None:
+        body = ("import sys\nprint('inventory is stale; run --write', file=sys.stderr)\n"
+                "sys.exit(1)\n") if stale else "print('ok')\n"
+        self._write(rel, body)
+
+    def test_a_stale_inventory_fails_with_its_regenerate_command(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._verifier("tools/scripts/pulp_tooling_disposition.py", stale=True)
+        self._verifier("tools/scripts/generate_vellum_ownership_projection.py", stale=False)
+        self._commit("chore: a tooling change")
+        code, output = self._run("main", "HEAD", "--enforce", "--inventories")
+        self.assertEqual(code, 11, msg=output)
+        self.assertIn("python3 tools/scripts/pulp_tooling_disposition.py --write", output)
+        self.assertIn("inventory is stale", output)
+        self.assertNotIn("ownership projection is stale", output)
+
+    def test_current_inventories_pass_and_absent_ones_are_skipped(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._verifier("tools/scripts/pulp_tooling_disposition.py", stale=False)
+        self._commit("chore: a tooling change")
+        code, output = self._run("main", "HEAD", "--enforce", "--inventories")
+        self.assertEqual(code, 0, msg=output)
+
+    def test_an_owed_event_and_a_stale_inventory_are_both_reported(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._verifier("tools/scripts/pulp_tooling_disposition.py", stale=True)
+        self._commit("feat: touch a watched tree and a tooling inventory")
+        code, output = self._run("main", "HEAD", "--enforce", "--inventories")
+        self.assertEqual(code, 10, msg=output)
+        self.assertIn("--write-event", output)
+        self.assertIn("pulp_tooling_disposition.py --write", output)
+
+    # ── only a positive verdict blocks ─────────────────────────────────────
 
     def test_a_missing_checker_yields_no_verdict_and_no_traceback(self) -> None:
         (self.repo / "tools" / "scripts" / CHECKER.name).unlink()
@@ -231,24 +350,22 @@ class VellumWatchPreflightTest(unittest.TestCase):
         self.assertEqual(code, 20)
         self.assertNotIn("Traceback", output)
 
-    def test_the_callers_never_let_it_block_a_push(self) -> None:
-        """The hint is wired into two shared enforcement surfaces.
+    def test_the_callers_block_only_on_an_owed_event(self) -> None:
+        """Both shared enforcement surfaces fail on exit 10 and on nothing else.
 
-        Its authoritative counterpart runs from a trusted root in two REQUIRED
-        GitHub checks. A local copy holding a veto would be a downgrade, so the
-        call sites must not be able to set a failure — asserted at the call
-        site, because that is where a later edit would break it.
+        Exit 20 ("no verdict") must never block: a local copy of a trusted-root
+        checker that cannot reach a verdict has no business refusing a push.
+        Asserted at the call site, because that is where a later edit would
+        break it.
         """
         import re
         for rel in ("tools/scripts/gates.sh", ".githooks/pre-push"):
             source = (ROOT / rel).read_text()
             self.assertIn("vellum_watch_preflight.py", source,
-                          msg=f"{rel} does not run the advisory hint")
+                          msg=f"{rel} does not run the Vellum gate")
             # Both call sites reach the script through a variable, so scanning
-            # for the literal filename finds only the assignment and would
-            # declare any invocation clean. Resolve one hop of indirection —
-            # the same thing build_parallelism_guard.py has to do — and require
-            # that at least one real invocation line was examined.
+            # for the literal filename finds only the assignment. Resolve one
+            # hop of indirection and require a real invocation line.
             names = {"vellum_watch_preflight.py"}
             for match in re.finditer(
                     r'^\s*([A-Za-z_][A-Za-z0-9_]*)=.*vellum_watch_preflight\.py',
@@ -256,18 +373,27 @@ class VellumWatchPreflightTest(unittest.TestCase):
                 names.add(match.group(1))
             invocations = [
                 line for line in source.splitlines()
-                if any(n in line for n in names) and not re.match(
-                    r'^\s*[A-Za-z_][A-Za-z0-9_]*=', line)
-                and not line.lstrip().startswith("#")
+                if any(n in line for n in names)
+                and not re.match(r'^\s*[A-Za-z_][A-Za-z0-9_]*=', line)
+                and not line.lstrip().startswith(("#", "echo"))
+                and not line.lstrip().startswith("if [ -f")
             ]
-            self.assertTrue(
-                invocations,
-                msg=f"{rel}: found no invocation line for the hint — this check "
-                    "is measuring nothing")
-            for line in invocations:
-                self.assertNotIn(
-                    "fail=1", line,
-                    msg=f"{rel} lets the advisory Vellum hint block a push: {line}")
+            self.assertTrue(all("--enforce" in line for line in invocations),
+                            msg=f"{rel}: an invocation runs without --enforce")
+            self.assertEqual(
+                len(invocations), 1,
+                msg=f"{rel}: expected exactly one --enforce invocation")
+            self.assertNotIn("|| true", invocations[0],
+                             msg=f"{rel} discards the gate's verdict")
+            block = source[source.index(invocations[0]):][:400]
+            self.assertIn("--inventories", invocations[0],
+                          msg=f"{rel} does not verify the freeze inventories")
+            self.assertRegex(
+                block,
+                r'vellum_rc"? -eq 10 \] \|\| \[ "\$vellum_rc"? -eq 11 \]; then\s+fail=1',
+                msg=f"{rel} does not fail on an owed event or a stale inventory")
+            self.assertNotRegex(block, r"-eq 20|-ne 0|-gt 0",
+                                msg=f"{rel} blocks on a no-verdict exit")
 
 
 if __name__ == "__main__":
