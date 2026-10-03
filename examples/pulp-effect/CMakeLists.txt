@@ -88,7 +88,7 @@ if(APPLE AND PULP_HAS_AUSDK)
 endif()
 
 if(PULP_HAS_VST3)
-    find_program(PLUGINVAL pluginval)
+    _pulp_find_pluginval(PLUGINVAL)
     if(PLUGINVAL)
         add_test(NAME pluginval-PulpEffect-VST3
             COMMAND ${PLUGINVAL} --validate ${CMAKE_BINARY_DIR}/VST3/PulpEffect.vst3 --strictness-level 5 --timeout-ms 10000)

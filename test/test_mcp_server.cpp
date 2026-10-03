@@ -354,6 +354,21 @@ std::filesystem::path make_fake_command(const std::filesystem::path& dir, const 
     return command;
 }
 
+void make_fake_governed_build(const std::filesystem::path& project) {
+    const auto governor = project / "tools" / "ci" / "governed-build.sh";
+    std::filesystem::create_directories(governor.parent_path());
+    std::ofstream script(governor);
+    script << "#!/bin/sh\n"
+           << "[ \"$1\" = cmake ] && shift\n"
+           << "exec cmake \"$@\"\n";
+    script.close();
+    std::filesystem::permissions(governor,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+}
+
 } // namespace
 
 TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
@@ -1821,6 +1836,7 @@ TEST_CASE("MCP build and test handlers quote project paths and filters", "[mcp][
     TempDir fake_bin;
     make_fake_command(fake_bin.path, "cmake", "fake-cmake");
     make_fake_command(fake_bin.path, "ctest", "fake-ctest");
+    make_fake_governed_build(project);
     const char* old_path = std::getenv("PATH");
     ScopedEnvVar path_env("PATH", fake_bin.path.string() + ":" + (old_path ? old_path : ""));
     ScopedCurrentPath cwd(project);
@@ -2127,6 +2143,7 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
     std::ofstream(project / "build" / "CMakeCache.txt") << "CMAKE_BUILD_TYPE:STRING=Release\n";
     make_package_workflow_fake_pulp_cli(project, log);
     make_fake_command(bin, "cmake", "fake-cmake");
+    make_fake_governed_build(project);
     {
         const auto screenshot = project / "build" / "tools" / "screenshot" / "pulp-screenshot";
         std::ofstream script(screenshot);
@@ -2225,6 +2242,16 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
 #endif
 }
 
+// A minimal Pulp project root for pulp_status. Run from the checkout, the
+// tool lists core/ and test/ and asks git for the branch, so the test would
+// read the whole tree; these cases only need it to find a project.
+static std::filesystem::path make_status_project(const std::filesystem::path& dir) {
+    std::filesystem::create_directories(dir / "core");
+    std::filesystem::create_directories(dir / "test");
+    std::ofstream(dir / "CMakeLists.txt") << "project(StatusFixture VERSION 1.0.0)\n";
+    return dir;
+}
+
 TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
     TempDir home;
     {
@@ -2235,7 +2262,8 @@ TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
     ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
     ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
     ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
-    ScopedCurrentPath cwd(repo_root_path());
+    TempDir project;
+    ScopedCurrentPath cwd(make_status_project(project.path));
 
     auto response = handle_request(tool_call("21", "pulp_status"));
     require_contains(response,
@@ -2320,7 +2348,8 @@ TEST_CASE("temp-repo git stays isolated despite an inherited GIT_DIR",
 
 TEST_CASE("MCP status resolves import-design defaults from config and env",
           "[mcp][tools][import-design]") {
-    ScopedCurrentPath cwd(repo_root_path());
+    TempDir project;
+    ScopedCurrentPath cwd(make_status_project(project.path));
 
     SECTION("built-ins stay live and js when no config or env is present") {
         TempDir home;
