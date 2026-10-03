@@ -4087,3 +4087,9 @@ replay-golden, fixture-runner and document-fuzz suites read only
 opens anything else in the tree, must be declared, or the suite reads as
 `data: undeclared` and is never skipped. NO_DEFINE keeps the suite's own
 `PULP_TIMELINE_FIXTURE_DIR` definition.
+A program ctest runs directly is declared the same way, under its own target:
+`timeline-fixture-corpus` runs `pulp-fixture-runner --corpus
+<checkout>/test/fixtures/timeline`, so the runner carries
+`pulp_test_data(pulp-fixture-runner NO_DEFINE PATHS test/fixtures/timeline)`.
+Its source names no checkout path (the path arrives as an argument), so no
+scan flags it; the nightly read audit is what caught the 41 corpus reads.

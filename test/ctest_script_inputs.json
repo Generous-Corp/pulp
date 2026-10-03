@@ -170,6 +170,18 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
+  "pulp-fixture-runner": {
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "core/interchange/tools/fixture_runner_main.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-au-v2-param-display": {
    "data": "none",
    "inputs": [],
