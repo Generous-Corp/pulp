@@ -151,7 +151,18 @@ class KeyTests(unittest.TestCase):
         self.assertFalse(self.equal(keys, EXE))
         self.assertTrue(self.equal(keys, OTHER))
         self.fx.head_targets["pulp-test-a"]["digest"] = self.fx.base_targets["pulp-test-a"]["digest"]
-        self.assertFalse(self.equal(self.fx.keys(head, image="other-image"), EXE))
+        self.assertEqual(ek.key_of("d", "img", ["p"], {"p": "1"}) == ek.key_of("d", "other", ["p"], {"p": "1"}), False)
+
+    def test_a_record_from_another_image_keys_nothing(self):
+        keys = self.fx.keys(self.head(**{"docs/readme.md": "new\n"}), image="lane-image")
+        self.assertEqual({e["always_run"] for e in keys.values()}, {"base_other_image"})
+        self.assertEqual({e["base_key"] for e in keys.values()}, {None})
+
+    def test_a_base_that_is_not_an_ancestor_of_head_keys_nothing(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        later = self.head(**{"docs/readme.md": "newer\n"})
+        self.fx.base = later                               # the record's tree is ahead of head
+        self.assertEqual({e["always_run"] for e in self.fx.keys(head).values()}, {"base_unrecorded"})
 
     def test_a_stale_or_missing_object_is_unrecorded(self):
         head = self.head(**{"docs/readme.md": "new\n"})

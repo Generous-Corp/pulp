@@ -16,7 +16,9 @@ equal content over that set proves nothing.
 
 What a key cannot see is made an always_run reason, never a guess:
 
-    base_unrecorded    no usable reuse record for the base commit
+    base_unrecorded    no usable reuse record for the base commit, or its
+                       commit is not an ancestor of head
+    base_other_image   the record was produced on another runner image
     dependency_pin     a dependency pin moved (every build input may move)
     codemodel_unknown  no content-keyed codemodel digest for the target on
                        one side
@@ -29,6 +31,14 @@ What a key cannot see is made an always_run reason, never a guess:
                        or deleted, so an #include may resolve elsewhere
     data_*             the data scan cannot vouch for what it reads
     spawns_*           the spawn scan cannot vouch for what it runs
+
+Which record is the base is the planner's choice, made where credentials
+exist: a run on the SAME runner image as the one that will use the keys,
+whose tree is an ancestor of head. For the local validation lane that is
+the lane's own most recent record on its image (its warm build directory
+holds that build); for the merge-group gate it is the gate's record at the
+base commit. A record from another image keys nothing: a verdict carried
+across hosts is exactly what nobody has measured.
 
 The computation reads only local data: the source checkout's git objects,
 the base reuse-record files the host planner fetched, the head codemodel
@@ -329,6 +339,8 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             ctest: dict | None, build_dir: Path | None, image_id: str | None) -> dict:
     """The key manifest's `executables` and a count per always_run reason.
     Pure over its inputs and the two git trees."""
+    ancestor = subprocess.run(["git", "-C", str(source_root), "merge-base", "--is-ancestor", base_sha, head_sha],
+                              capture_output=True).returncode == 0
     base_tree, head_tree = tree_blobs(source_root, base_sha), tree_blobs(source_root, head_sha)
     changed_paths = {p for p in set(base_tree) | set(head_tree) if base_tree.get(p) != head_tree.get(p)}
     shadowing = {os.path.basename(p) for p in set(base_tree) ^ set(head_tree) if p.endswith(HEADER_SUFFIXES)}
@@ -357,7 +369,8 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
         dstate, dinputs = data_status(artifact, data_scan)
         sstate = spawn_status(artifact, spawn_scan)
         reason = (
-            "base_unrecorded" if record is None or sets is None else
+            "base_unrecorded" if record is None or sets is None or not ancestor else
+            "base_other_image" if record.get("image") != image_id else
             "dependency_pin" if pins else
             "codemodel_unknown" if not keyed or not base_target.get("digest") or not target.get("digest") else
             "commit_bound" if target.get("commit_bound") or base_target.get("commit_bound") else
@@ -373,7 +386,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
                       or {"undeclared": "spawns_undeclared", "unknown": "spawns_unknown"}.get(sstate))
         entry = {"kind": kind, "registrations": [t["name"] for t in tests], "always_run": reason,
                  "spawns": sorted(spawns.closure(artifact)), "head_key": None, "base_key": None}
-        if paths is not None and reason not in ("base_unrecorded", "codemodel_unknown"):
+        if paths is not None and reason not in ("base_unrecorded", "base_other_image", "codemodel_unknown"):
             keyed_paths = paths | (data_paths(dinputs, base_tree, head_tree) if dstate == "declared" else set())
             entry["base_key"] = key_of(base_target["digest"], (record or {}).get("image"), keyed_paths, base_tree)
             entry["head_key"] = key_of(target["digest"], image_id, keyed_paths, head_tree)
