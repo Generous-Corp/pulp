@@ -30,14 +30,6 @@ bool write_text(const fs::path& path, const std::string& body) {
     out << body;
     return out.good();
 }
-#ifdef _WIN32
-std::string shell_quote_local(const fs::path& path) {
-    std::string out = "'";
-    for (char c : path.string())
-        out += c == '\'' ? "'\\''" : std::string(1, c);
-    return out + "'";
-}
-#endif
 std::string json_string_local(const std::string& value) {
     return pulp::cli::json_string(value);
 }
