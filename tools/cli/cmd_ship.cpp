@@ -13,6 +13,7 @@
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -119,6 +120,11 @@ static int print_ship_help() {
     std::cout << "             --dry-run  (print the plan without doing anything)\n";
     std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
     std::cout << "             --url <artifact-or-url> [--download-url https://...] --version 1.0.0\n";
+    std::cout << "             [--build-number N] [--min-os 12.0] [--channel beta]\n";
+    std::cout << "             [--sign-key-file <ed25519-key-file>]  (never pass a key on argv)\n";
+    std::cout << "             [--notes <text> | --notes-html-file <file.html>]\n";
+    std::cout << "             [--release-notes-url <url>] [--full-release-notes-url <url>]\n";
+    std::cout << "             [--installation-type auto|package|none] [--pub-date <RFC 2822>]\n";
     std::cout << "  check      Check signing status of built desktop plugins or Android APK/AAB artifacts\n";
     std::cout << "             --json  (include inspector capability declarations)\n";
     std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
@@ -1856,6 +1862,8 @@ static int ship_appcast(const std::vector<std::string>& args,
                        const fs::path& root, const fs::path& build_dir) {
     const std::string sub = "appcast";
         std::string version, notes, url, download_url, output_path, title, sign_key, min_os;
+        std::string sign_key_file, build_number, notes_html_file, release_notes_url;
+        std::string full_release_notes_url, channel, installation_type = "auto", pub_date;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--version") {
                 if (!take_ship_value(args, i, sub, args[i], version)) return 2;
@@ -1873,8 +1881,73 @@ static int ship_appcast(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], sign_key)) return 2;
             } else if (args[i] == "--min-os") {
                 if (!take_ship_value(args, i, sub, args[i], min_os)) return 2;
+            } else if (args[i] == "--sign-key-file") {
+                if (!take_ship_value(args, i, sub, args[i], sign_key_file)) return 2;
+            } else if (args[i] == "--build-number") {
+                if (!take_ship_value(args, i, sub, args[i], build_number)) return 2;
+            } else if (args[i] == "--notes-html-file") {
+                if (!take_ship_value(args, i, sub, args[i], notes_html_file)) return 2;
+            } else if (args[i] == "--release-notes-url") {
+                if (!take_ship_value(args, i, sub, args[i], release_notes_url)) return 2;
+            } else if (args[i] == "--full-release-notes-url") {
+                if (!take_ship_value(args, i, sub, args[i], full_release_notes_url)) return 2;
+            } else if (args[i] == "--channel") {
+                if (!take_ship_value(args, i, sub, args[i], channel)) return 2;
+            } else if (args[i] == "--installation-type") {
+                if (!take_ship_value(args, i, sub, args[i], installation_type)) return 2;
+            } else if (args[i] == "--pub-date") {
+                if (!take_ship_value(args, i, sub, args[i], pub_date)) return 2;
             } else {
                 return unknown_ship_arg(sub, args[i]);
+            }
+        }
+
+        if (!sign_key.empty() && !sign_key_file.empty()) {
+            std::cerr << "Error: pass --sign-key or --sign-key-file, not both.\n";
+            return 2;
+        }
+        if (!notes.empty() && !notes_html_file.empty()) {
+            std::cerr << "Error: pass --notes or --notes-html-file, not both.\n";
+            return 2;
+        }
+        if (installation_type != "auto" && installation_type != "package" &&
+            installation_type != "none") {
+            std::cerr << "Error: --installation-type must be auto, package or none.\n";
+            return 2;
+        }
+        if (!sign_key_file.empty()) {
+            // The key file is Sparkle's `generate_keys -x` format: one line of
+            // base64. Read it here so the secret never appears in argv / ps.
+            std::ifstream key_in(sign_key_file);
+            if (!key_in) {
+                std::cerr << "Error: cannot read --sign-key-file " << sign_key_file << "\n";
+                return 1;
+            }
+            std::string key((std::istreambuf_iterator<char>(key_in)),
+                            std::istreambuf_iterator<char>());
+            key.erase(std::remove_if(key.begin(), key.end(),
+                                     [](unsigned char c) { return std::isspace(c); }),
+                      key.end());
+            if (key.empty()) {
+                std::cerr << "Error: --sign-key-file " << sign_key_file << " is empty\n";
+                return 1;
+            }
+            sign_key = std::move(key);
+        }
+        std::string notes_html;
+        if (!notes_html_file.empty()) {
+            std::ifstream notes_in(notes_html_file);
+            if (!notes_in) {
+                std::cerr << "Error: cannot read --notes-html-file " << notes_html_file << "\n";
+                return 1;
+            }
+            notes_html.assign(std::istreambuf_iterator<char>(notes_in),
+                              std::istreambuf_iterator<char>());
+            if (notes_html.find("]]>") != std::string::npos) {
+                // The notes are written into a CDATA section, which "]]>" ends.
+                std::cerr << "Error: --notes-html-file contains \"]]>\", which would "
+                             "terminate the appcast's CDATA section.\n";
+                return 1;
             }
         }
 
@@ -1904,9 +1977,23 @@ static int ship_appcast(const std::vector<std::string>& args,
         pulp::ship::AppcastItem item;
         item.version = version;
         item.title = "Version " + version;
-        item.description = notes.empty() ? "" : "<p>" + notes + "</p>";
+        item.build_number = build_number;
+        item.description = !notes_html.empty() ? notes_html
+                         : notes.empty()       ? ""
+                                               : "<p>" + notes + "</p>";
         item.download_url = download_url.empty() ? url : download_url;
         if (!min_os.empty()) item.minimum_os = min_os;
+        item.channel = channel;
+        item.release_notes_link = release_notes_url;
+        item.full_release_notes_link = full_release_notes_url;
+        // Sparkle 2 needs sparkle:installationType="package" to run a .pkg
+        // through /usr/sbin/installer; without it a package download is
+        // treated as an archive and the update fails after the download.
+        if (installation_type == "package")
+            item.installation_type = "package";
+        else if (installation_type == "auto")
+            item.installation_type = pulp::ship::sparkle_installation_type_for(
+                item.download_url);
 
         auto url_as_path = fs::path(url);
         if (fs::exists(url_as_path)) {
@@ -1936,10 +2023,41 @@ static int ship_appcast(const std::vector<std::string>& args,
             return 1;
         }
 
-        { auto now = std::time(nullptr); char buf[64];
-          std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S %z", std::localtime(&now));
-          item.pub_date = buf; }
+        if (!pub_date.empty()) {
+            item.pub_date = pub_date;
+        } else {
+            auto now = std::time(nullptr); char buf[64];
+            std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S %z", std::localtime(&now));
+            item.pub_date = buf;
+        }
 
+        // Re-running for the same version replaces that entry rather than
+        // listing it twice, and a feed never gains an entry older than one it
+        // already offers: Sparkle compares sparkle:version (the build number),
+        // so a lower one would be silently ignored by every client that
+        // already has the newer build.
+        const auto effective_build = [](const pulp::ship::AppcastItem& it) {
+            return it.build_number.empty() ? it.version : it.build_number;
+        };
+        feed.items.erase(
+            std::remove_if(feed.items.begin(), feed.items.end(),
+                           [&](const pulp::ship::AppcastItem& existing) {
+                               return existing.channel == item.channel &&
+                                      existing.version == item.version;
+                           }),
+            feed.items.end());
+        for (const auto& existing : feed.items) {
+            if (existing.channel != item.channel) continue;
+            if (pulp::ship::compare_versions(effective_build(item),
+                                             effective_build(existing)) <= 0) {
+                std::cerr << "Error: build " << effective_build(item)
+                          << " is not newer than build " << effective_build(existing)
+                          << " (version " << existing.version
+                          << ") already in " << output_path << ".\n";
+                std::cerr << "  Sparkle orders updates by sparkle:version; raise --build-number.\n";
+                return 1;
+            }
+        }
         feed.items.insert(feed.items.begin(), std::move(item));
         const auto parent = fs::path(output_path).parent_path();
         if (!parent.empty()) fs::create_directories(parent);

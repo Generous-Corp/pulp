@@ -8,6 +8,7 @@
 #   pulp_enable_midi_tuning_provider() — Attach optional tuning providers
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpAppIcon.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpSparkle.cmake")
 
 function(_pulp_pick_target out_var)
     foreach(_candidate IN LISTS ARGN)

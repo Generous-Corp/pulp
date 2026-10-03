@@ -796,6 +796,10 @@ pulp_add_test_suite(pulp-test-standalone-transport-midi GROUP pulp-test-group-co
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-musical-typing GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone)
+# Sparkle updater policy and menu wiring; pure values plus a process probe that
+# opens no window and reaches no network.
+pulp_add_test_suite(pulp-test-standalone-updater GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone)
 # Synthetic key-sequence driver: spec parsing, the press/capture frame
 # schedule, and the platform driver's refusal contract.
 pulp_add_test_suite(pulp-test-standalone-key-sequence GROUP pulp-test-group-core-standalone

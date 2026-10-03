@@ -251,6 +251,7 @@ class CombinedInstallerTest(unittest.TestCase):
         d15_fixture: str | None = None,
         expect_success: bool = True,
         analyze_omits_relocatable: bool = False,
+        embed_framework_in: str | None = None,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -273,7 +274,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 fake_bin,
                 "file",
                 'case "${!#}" in\n'
-                '  */Contents/MacOS/*) echo "Mach-O 64-bit executable";;\n'
+                '  */Contents/MacOS/*|*/Autoupdate) echo "Mach-O 64-bit executable";;\n'
                 '  *) /usr/bin/file "$@";;\n'
                 'esac\n',
             )
@@ -416,6 +417,17 @@ class CombinedInstallerTest(unittest.TestCase):
             for title, app_name in apps or []:
                 bundle = tmp / f"{app_name}.app"
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
+                if embed_framework_in == app_name:
+                    # Sparkle 2's on-disk shape: a versioned framework whose
+                    # Versions/B carries helper code that must be signed first.
+                    fw = bundle / "Contents" / "Frameworks" / "Sparkle.framework"
+                    vb = fw / "Versions" / "B"
+                    (vb / "XPCServices" / "Downloader.xpc" / "Contents").mkdir(parents=True)
+                    (vb / "Updater.app" / "Contents" / "MacOS").mkdir(parents=True)
+                    for exe in (vb / "Sparkle", vb / "Autoupdate"):
+                        exe.write_text("fixture\n")
+                        exe.chmod(0o755)
+                    (fw / "Versions" / "Current").symlink_to("B")
                 args.extend(("--app", title, str(bundle)))
                 if title in (scripted_apps or set()):
                     scripts = tmp / f"{title}-scripts"
@@ -617,6 +629,32 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertIsNotNone(choice)
         self.assertIn('enabled="false"', choice.group(0))
         self.assertIn('selected="true"', choice.group(0))
+
+    def test_embedded_frameworks_are_signed_inside_out_before_the_app(self) -> None:
+        self._run_installer([], [("Standalone app", "Fixture")],
+                            embed_framework_in="Fixture")
+        lines = self._last_codesign_argv.splitlines()
+
+        def index_of(suffix: str) -> int:
+            hits = [i for i, line in enumerate(lines)
+                    if line.startswith("--force") and line.endswith(suffix)]
+            self.assertTrue(hits, f"never signed: {suffix}\n" + "\n".join(lines))
+            return hits[0]
+
+        xpc = index_of("XPCServices/Downloader.xpc")
+        updater = index_of("Updater.app")
+        helper = index_of("Versions/Current/Autoupdate")
+        framework = index_of("Frameworks/Sparkle.framework")
+        app = index_of("Fixture.app")
+        self.assertLess(max(xpc, updater, helper), framework)
+        self.assertLess(framework, app)
+        for i in (xpc, updater, helper, framework):
+            self.assertIn("--options runtime --timestamp", lines[i])
+            self.assertIn("-s application-fixture", lines[i])
+        # An XPC service keeps its own entitlements through the re-sign.
+        self.assertIn("--preserve-metadata=entitlements", lines[xpc])
+        # The framework's own binary is sealed with the framework, never alone.
+        self.assertFalse(any(line.endswith("Versions/Current/Sparkle") for line in lines))
 
     def test_apps_are_pinned_to_applications_instead_of_relocated(self) -> None:
         xml, relocation = self._run_installer(
