@@ -175,6 +175,34 @@ class GateSupervisorTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual(log.read_text(encoding="utf-8"), "gate diagnostic\n")
 
+    def test_missing_gate_executable_reports_command_and_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="prepush-supervisor-missing-") as raw:
+            temp = Path(raw)
+            log = temp / "gate.log"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SUPERVISOR),
+                    "--log",
+                    str(log),
+                    "--",
+                    str(temp / "does-not-exist"),
+                    "--sentinel",
+                ],
+                # Keep the supervisor's ownership probe (`ps`) available while
+                # proving the gate command itself is missing.
+                env={"PATH": "/bin:/usr/bin"},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 127)
+            diagnostic = log.read_text(encoding="utf-8")
+            self.assertIn("gate executable unavailable", diagnostic)
+            self.assertIn("does-not-exist --sentinel", diagnostic)
+            self.assertIn("PATH: /bin:/usr/bin", diagnostic)
+
     def test_signal_terminated_gate_preserves_shell_status(self) -> None:
         with tempfile.TemporaryDirectory(prefix="prepush-supervisor-signaled-") as raw:
             temp = Path(raw)

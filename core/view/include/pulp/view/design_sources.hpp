@@ -9,6 +9,7 @@
 #include <pulp/view/design_ir.hpp>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <optional>
@@ -224,6 +225,31 @@ std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html);
 /// same native runtime path as a regular Claude bundle.
 std::optional<ClaudeBundle> parse_materialized_browser_document(
     const std::string& json);
+
+/// `parse_materialized_browser_document` with process-wide reuse.
+///
+/// Decoding a captured document — JSON parse, base64 decode, and a SHA-256
+/// check of every asset — costs on the order of 100 ms for a plug-in UI, and
+/// an editor runs it on every open. The first call for a document does the
+/// full decode and verification; every later call in the same process with
+/// byte-identical input returns the same immutable bundle. Keyed by the full
+/// input bytes (size, then an exact compare), so a hit is never a different
+/// document, and only accepted documents are kept: a rejected input is
+/// decoded again on every call and still returns nullptr. In-memory only and
+/// bounded; `PULP_RUNTIME_IMPORT_CACHE=0` disables reuse.
+std::shared_ptr<const ClaudeBundle> parse_materialized_browser_document_shared(
+    const std::string& json);
+
+struct MaterializedDocumentCacheStats {
+    std::uint64_t verifies = 0;  ///< full decode + verification passes run
+    std::uint64_t hits = 0;      ///< calls served from an earlier verification
+    std::uint64_t rejected = 0;  ///< inputs that failed verification
+    std::size_t entries = 0;
+    std::size_t bytes = 0;       ///< input + decoded asset bytes held
+};
+MaterializedDocumentCacheStats materialized_document_cache_stats();
+/// Drop every kept document (tests; a host that wants the memory back).
+void clear_materialized_document_cache();
 
 /// Normalize a constrained v0.dev React TSX export into the runtime-import
 /// bundle payload shape. Accepts either a bare single-file TSX component or

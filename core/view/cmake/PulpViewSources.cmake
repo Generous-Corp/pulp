@@ -266,6 +266,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/widget_bridge/runtime_import_api.cpp
         src/claude_bundle.cpp
         src/claude_bundle_sources.cpp
+        src/materialized_document_cache.cpp
     )
     target_compile_definitions(pulp-view-core PUBLIC PULP_HAS_DESIGN_IMPORT=1)
     target_compile_definitions(pulp-view-script PUBLIC PULP_HAS_DESIGN_IMPORT=1)

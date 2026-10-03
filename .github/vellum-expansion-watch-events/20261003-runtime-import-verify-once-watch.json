@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-runtime-import-verify-once-watch",
+  "created_at": "2026-10-03T05:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record an editor-open performance change that crosses these families' selectors. A materialized browser document handed to __pulpRuntimeImport__ is decoded and SHA-256 verified once per process; a later import with byte-identical input reuses the same immutable bundle, and rejected inputs are never kept. The accepted and rejected documents, and the bundle each accepted one yields, are unchanged. The QuickJS whole-script bytecode cache now also takes scripts from 2 KB, so a document's smaller inline scripts read bytecode on reopen. No importer lowering, DesignIR shape, capture path, renderer selection, asset format, fixture or threshold changes. Registered as watch-only so the families' coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-group-view-widgets WidgetBridge __pulpRuntimeImport__ verifies a document once per process",
+    "pulp-test-group-view-widgets WidgetBridge __pulpRuntimeImport__ never keeps a rejected document"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -81,7 +81,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "proves": "A Pulp standalone launches, accepts a click, and visibly changes state.",
         "prepare_command": (
             'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR="$(pwd)/external/skia-build" && '
-            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)"
+            "tools/ci/governed-build.sh cmake --build build-desktop-automation --target pulp-ui-preview"
         ),
         "command": (
             "python3 tools/local-ci/local_ci.py desktop video mac "
@@ -89,7 +89,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--source-mode exact-sha "
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
             "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR=\"$(pwd)/external/skia-build\" && "
-            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
+            "tools/ci/governed-build.sh cmake --build build-desktop-automation --target pulp-ui-preview' "
             "--pulp-app-automation --capture-ui-snapshot --click-view-id bypass-toggle "
             "--duration 6 --video-fps 8 --video-recorder frame-sequence "
             "--label standalone-bypass-toggle --compose-video-proof"
@@ -110,7 +110,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "proves": "The no-GPU audio inspector demo launches and produces a short Remotion-composed proof without requiring Skia.",
         "prepare_command": (
             "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
-            "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)"
+            "tools/ci/governed-build.sh cmake --build build-video-nogpu --target pulp-audio-inspector-demo"
         ),
         "command": (
             "python3 tools/local-ci/local_ci.py desktop video mac "
@@ -118,7 +118,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--source-mode exact-sha "
             "--command './build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo' "
             "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
-            "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' "
+            "tools/ci/governed-build.sh cmake --build build-video-nogpu --target pulp-audio-inspector-demo' "
             "--duration 4 --video-fps 8 --video-title 'Audio inspector demo proof' "
             "--video-note 'The proof launches the no-GPU audio inspector demo and records a short validation clip with Remotion context.' "
             "--label audio-inspector-demo-proof --compose-video-proof"
@@ -142,7 +142,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "proves": "A real host loads a Pulp plugin and records host/editor context.",
         "prepare_command": (
             "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
-            "cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu) && "
+            "tools/ci/governed-build.sh cmake --build build-video-nogpu --target PulpSynth_CLAP && "
             'mkdir -p "$HOME/Library/Audio/Plug-Ins/CLAP" && '
             'ln -sfn "$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap" '
             '"$HOME/Library/Audio/Plug-Ins/CLAP/PulpSynth.clap"'
@@ -152,7 +152,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--recipe reaper-plugin-editor --plugin PulpSynth --plugin-format clap "
             "--source-mode exact-sha "
             "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
-            "cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu) && "
+            "tools/ci/governed-build.sh cmake --build build-video-nogpu --target PulpSynth_CLAP && "
             "mkdir -p \"$HOME/Library/Audio/Plug-Ins/CLAP\" && "
             "ln -sfn \"$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap\" "
             "\"$HOME/Library/Audio/Plug-Ins/CLAP/PulpSynth.clap\"' "
@@ -177,7 +177,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "proves": "A developer build exposes inspector/audio-inspector state during a visible workflow.",
         "prepare_command": (
             "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
-            "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)"
+            "tools/ci/governed-build.sh cmake --build build-video-nogpu --target pulp-audio-inspector-demo"
         ),
         "command": (
             "python3 tools/local-ci/local_ci.py desktop video mac "
@@ -185,7 +185,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--source-mode exact-sha "
             "--command './build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo' "
             "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
-            "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' "
+            "tools/ci/governed-build.sh cmake --build build-video-nogpu --target pulp-audio-inspector-demo' "
             "--label inspector-open-and-select --compose-video-proof"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
@@ -204,7 +204,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "proves": "The proof highlights one component so the reviewer does not hunt through the full window.",
         "prepare_command": (
             'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR="$(pwd)/external/skia-build" && '
-            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)"
+            "tools/ci/governed-build.sh cmake --build build-desktop-automation --target pulp-ui-preview"
         ),
         "command": (
             "python3 tools/local-ci/local_ci.py desktop video mac "
@@ -212,7 +212,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--source-mode exact-sha "
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
             "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR=\"$(pwd)/external/skia-build\" && "
-            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
+            "tools/ci/governed-build.sh cmake --build build-desktop-automation --target pulp-ui-preview' "
             "--pulp-app-automation --capture-ui-snapshot --component-id bypass-toggle "
             "--click-view-id bypass-toggle --label component-bypass-toggle "
             "--duration 6 --video-fps 8 --video-recorder frame-sequence --compose-video-proof"
@@ -256,7 +256,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "-DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_ARCHITECTURES=arm64 "
             "-DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 -DCMAKE_BUILD_TYPE=Release "
             "-DPULP_ENABLE_GPU=OFF -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=ON && "
-            "cmake --build build-ios-sim-video-proof --target PulpSineSynth_HostApp_Embed "
+            "tools/ci/governed-build.sh cmake --build build-ios-sim-video-proof --target PulpSineSynth_HostApp_Embed "
             "--config Release -- -sdk iphonesimulator"
         ),
         "command": (

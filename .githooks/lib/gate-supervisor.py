@@ -14,6 +14,7 @@ import argparse
 import os
 from pathlib import Path
 import signal
+import shlex
 import subprocess
 import sys
 import time
@@ -138,7 +139,14 @@ def main(argv: list[str]) -> int:
                     start_new_session=True,
                 )
             except FileNotFoundError as exc:
-                gate_log.write(f"{exc}\n".encode())
+                command = shlex.join(args.command)
+                gate_log.write(
+                    (
+                        f"[pre-push] gate executable unavailable: {exc}\n"
+                        f"[pre-push] command: {command}\n"
+                        f"[pre-push] PATH: {os.environ.get('PATH', '')}\n"
+                    ).encode()
+                )
                 return 127
             except PermissionError as exc:
                 gate_log.write(f"{exc}\n".encode())
