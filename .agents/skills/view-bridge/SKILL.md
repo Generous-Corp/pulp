@@ -170,6 +170,31 @@ read-back frame, with an undeclared host as the control); downstream example:
 Spectr's `Spectr-au-editor-first-frame-*` ctests driving the real AU v2 Cocoa
 view off screen. Time the gap with the `trace-analysis` first-frame recipe.
 
+Out of process (Logic hosts AU v2 in AUHostingService): instantiate with
+`kAudioComponentInstantiation_LoadOutOfProcess`, take the editor from
+`-[AUAudioUnit requestViewControllerWithCompletionHandler:]`, and read back the
+**host's own window** (a process may read its own windows without
+screen-recording permission; the window server composites the remote editor
+into it). Give the host window a loud backdrop (magenta) so "nothing composited
+yet" cannot pass as a dark background. What only this path shows:
+
+- The host container has no background of its own; until the remote layer
+  arrives the host's window shows through. The plug-in's backing-layer colour
+  is what the remote layer shows first.
+- A host resize sent right after open is handled by the plug-in process's main
+  thread, which is busy mounting the document, so the document can present at
+  the old size and be shown cropped (plus host backdrop) until the resize is
+  processed. Blocking main-thread document work costs resize latency OOP, not
+  only time-to-content.
+- Edge-anchored chrome can sit a pixel or two off and a black 1-px host edge
+  can show for a frame while the remote content and the host converge on one
+  size; classify that separately from an off-brand colour.
+- `launchctl setenv` does not reach AUHostingService, so `PULP_TRACE_PATH`
+  cannot start a trace in the plug-in process there; measure OOP from the host
+  window and use the in-process probe for spans.
+- Requesting a second view controller from the same remote instance did not
+  paint in a probe; instantiate a fresh unit per measured open.
+
 ## Lifecycle protocol — adapter author side
 
 ```
