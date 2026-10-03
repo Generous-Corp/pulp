@@ -6916,6 +6916,8 @@
     ".githooks/pre-push",
     ".github/vellum-expansion-watch-events",
     "tools/scripts/gates.sh",
+    "tools/scripts/generate_vellum_ownership_projection.py",
+    "tools/scripts/pulp_tooling_disposition.py",
     "tools/scripts/test_vellum_watch_preflight.py"
    ],
    "kind": "python"
