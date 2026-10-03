@@ -722,6 +722,33 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             with self.assertRaisesRegex(inventory.InventoryError, "absent from CTest inventory"):
                 check_ctest_inventory({"tests": [ready]}, REPO_ROOT, build, policy)
 
+    def test_a_pending_catch2_discovery_defers_only_the_literal_name_check(self) -> None:
+        # While a Catch2 executable is unbuilt its cases are one placeholder, so a
+        # literal name that may be one of them cannot be checked yet; the same
+        # selftest checks it after the full build. Proof is still required.
+        policy = {"build_flags": [], "build_type": "debug", "baseline_tests": ["smoke"],
+                  "families": [{"name": "f", "tests": ["a-discovered-case"]}]}
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            name = "unit_tests_NOT_BUILT-abc1234"
+            cases = build / "unit_tests-abc1234_tests.cmake"
+            (build / "unit_tests-abc1234_include.cmake").write_text(
+                f'if(EXISTS "{cases}")\n  include("{cases}")\nelse()\n'
+                f"  add_test({name} {name})\nendif()\n", encoding="utf-8")
+            ready = fixture("smoke", str(build / "bin" / "tests"),
+                            properties=[{"name": "WORKING_DIRECTORY", "value": str(build)}])
+            placeholder = {"name": name,
+                           "properties": [{"name": "WORKING_DIRECTORY", "value": str(build)}]}
+            self.assertEqual(
+                check_ctest_inventory({"tests": [ready, placeholder]}, REPO_ROOT, build, policy), 1)
+            # Once discovery has run, the name must be a real registration.
+            with self.assertRaisesRegex(inventory.InventoryError, "a-discovered-case"):
+                check_ctest_inventory({"tests": [ready]}, REPO_ROOT, build, policy)
+            # A placeholder without its generated include proves nothing.
+            (build / "unit_tests-abc1234_include.cmake").unlink()
+            with self.assertRaisesRegex(inventory.InventoryError, "unambiguous command"):
+                check_ctest_inventory({"tests": [ready, placeholder]}, REPO_ROOT, build, policy)
+
     def test_property_order_is_not_registration_identity(self) -> None:
         properties = [
             {"name": "LABELS", "value": ["one", "two"]},

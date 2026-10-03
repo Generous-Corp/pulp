@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "lane": "mac",
+  "description": "Tests the opt-in mac lane's full suite fails regardless of the change. A changed-surface matched_fail counts only when every full-suite failure outside the selection is listed here and its entry has not expired. Remove a row when its owner fixes the test; renew an expiry only after re-confirming the row is still a known lane red.",
+  "tests": [
+    {
+      "name": "visual-python-deps-present",
+      "reason": "the mac lane interpreter is not given the visual-analysis lock",
+      "owner_issue": "https://github.com/Generous-Corp/pulp/issues/9382",
+      "expires": "2026-10-17"
+    },
+    {
+      "name": "script-test-inputs-drift",
+      "reason": "compiled entries differ in the lane's examples-on configure from the gate profile's file",
+      "owner_issue": "https://github.com/Generous-Corp/pulp/issues/9382",
+      "expires": "2026-10-17"
+    },
+    {
+      "name": "source-selftest-lane-contract",
+      "reason": "the policy selftest's --build-dir argument exists only with the inventory target on",
+      "owner_issue": "https://github.com/Generous-Corp/pulp/issues/9382",
+      "expires": "2026-10-17"
+    },
+    {
+      "name": "ctest-unique-names",
+      "reason": "examples on registers a sampler source in two suites",
+      "owner_issue": "https://github.com/Generous-Corp/pulp/issues/9382",
+      "expires": "2026-10-17"
+    },
+    {
+      "name": "component-visual-regression",
+      "reason": "Badge-light renders 7.88% from its golden on this host",
+      "owner_issue": "https://github.com/Generous-Corp/pulp/issues/9382",
+      "expires": "2026-10-17"
+    },
+    {
+      "name": "NullAudioDevice delivers blocks at the real-time rate",
+      "reason": "real-time-rate assertion under the lane's load",
+      "owner_issue": "https://github.com/Generous-Corp/pulp/issues/9382",
+      "expires": "2026-10-17"
+    },
+    {
+      "name": "Standalone with PULP_AUDIO_DEVICE=null runs audio without a device",
+      "reason": "same null-device path as the real-time-rate test",
+      "owner_issue": "https://github.com/Generous-Corp/pulp/issues/9382",
+      "expires": "2026-10-17"
+    },
+    {
+      "name": "sample-region control reaches editable and frozen products through CLI",
+      "reason": "CLI current-read exits 1; cause not yet established",
+      "owner_issue": "https://github.com/Generous-Corp/pulp/issues/9382",
+      "expires": "2026-10-17"
+    }
+  ]
+}

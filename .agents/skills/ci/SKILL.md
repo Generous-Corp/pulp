@@ -7457,6 +7457,21 @@ command after the build, or any difference from the base. The receipt records
 unbuilt base could not list, compared on name, arguments and properties) and
 `base_inventory_configure_seconds`.
 
+On a lane whose full suite carries known reds, two failing legs compare per test
+from each leg's `ctest --output-junit` report: `matched_fail` when the selected
+leg failed nothing the full suite passed and saw every full-suite failure inside
+its selection (`selected_only_failure` and `missed_full_failure` name the two
+ways it can fail). It graduates only when every full-suite failure outside the
+selection is on `tools/ci/changed_surface_lane_reds.json`, read from the
+protected base and itself a policy path, so a PR cannot allowlist its own
+regression. Each row carries an owner issue and an `expires` date; an expired
+row is dropped, so a fixed red cannot keep hiding a new failure under its name.
+Remove a row when its owner fixes the test, and renew an expiry only after
+re-confirming the red. `allowlisted_failure_count` reports how much of a
+graduation rested on the allowlist; the goal is 0. Shipyard
+recomputes the rule from the receipt's named sets and reports `matched_fail`,
+never `matched_pass`.
+
 The scratch base is provisioned like the head before it configures: `setup.sh
 --deps-only` links `external/` from the shared source cache with git limited to
 local objects. A worktree never inherits the untracked SDK links, and a base
