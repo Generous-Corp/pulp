@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-mac-lane-visual-python-deps-watch",
+  "created_at": "2026-10-03T16:02:08Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "The opt-in Shipyard mac lane's macOS configure stage now ends with tools/ci/install_visual_python_deps.sh build, the same script build.yml and the sanitizer jobs already call, so the non-skippable visual-python-deps-present ctest can pass on that lane. The installed set (tools/motion/visual/requirements.lock), its hash pinning and the interpreter resolution are unchanged; the step test pins the new caller. No visual harness fixture, golden, threshold, capture path, renderer, importer or Vellum-owned source changes, and no design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/test_visual_python_deps_step.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

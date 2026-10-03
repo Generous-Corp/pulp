@@ -182,11 +182,15 @@ build     = "cmake --build build --config Release --parallel 4"
 # wait_until patterns and longer timeouts — no longer excluded.
 test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude \"slow|validation\""
 
-# The exact inventory is specific to the required macOS target. Optional Linux
+# The exact inventory is specific to the required macOS target. After
+# configure, the lane installs the hash-pinned visual-analysis set into the
+# interpreter that configure recorded, as every workflow job that runs ctest
+# does (tools/ci/install_visual_python_deps.sh); without it the non-skippable
+# visual-python-deps-present check fails on this lane. Optional Linux
 # targets inherit the default recipe but register a different platform-gated
 # CTest inventory, so they must not validate against the macOS cardinality.
 [validation.default.overrides.macos]
-configure = "tools/ci/build-dir-sentinel.sh guard build 'mkdir -p build/.cmake/api/v1/query && : > build/.cmake/api/v1/query/codemodel-v2 && ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
+configure = "tools/ci/build-dir-sentinel.sh guard build 'mkdir -p build/.cmake/api/v1/query && : > build/.cmake/api/v1/query/codemodel-v2 && ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"' && bash tools/ci/install_visual_python_deps.sh build"
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via
