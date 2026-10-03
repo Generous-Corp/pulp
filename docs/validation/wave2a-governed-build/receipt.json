@@ -116,5 +116,48 @@
     "helper": "governed_build_command",
     "behavior": "uses tools/ci/governed-build.sh cmake --build with explicit target and passthrough args",
     "raw_unguarded_build_emitters_after": 0
+  },
+  "implementation_commit": "8f3bfc0d6e9b091ec2578d49651bce50da0d2d2c",
+  "validation": {
+    "focused_tests": [
+      {
+        "command": "python3 -m unittest test_desktop_video_matrix_commands_cli.py",
+        "cwd": "tools/local-ci",
+        "result": "passed",
+        "tests": 6
+      },
+      {
+        "command": "python3 -m unittest tools/ci/test_build_governance_paths.py",
+        "result": "passed",
+        "tests": 5
+      },
+      {
+        "command": "python3 -m py_compile tools/local-ci/desktop_video_matrix_commands_cli.py",
+        "result": "passed"
+      },
+      {
+        "command": "python3 tools/scripts/build_parallelism_guard.py validate-build.sh tools/local-ci/desktop_video_matrix_commands_cli.py tools/mcp/mcp_tools.cpp tools/cli/cmd_design.cpp tools/ci/governed-build.sh",
+        "result": "passed"
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      }
+    ],
+    "exact_output_parity": {
+      "result": "passed",
+      "scenarios": 10,
+      "command_receipts": 11
+    },
+    "gates": {
+      "command": "tools/scripts/gates.sh origin/main",
+      "result": "passed-with-one-not-checked",
+      "source_selftests": "19 passed",
+      "workflow_contracts": "6 passed",
+      "pr_fast": "99 passed",
+      "other_contracts": "13 passed, 1 pre-existing on origin/main",
+      "not_checked": "tools/scripts/test_generated_version_bump_check.py",
+      "diff_coverage": "not-run-locally"
+    }
   }
 }
