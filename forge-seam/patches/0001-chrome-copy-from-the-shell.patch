@@ -19,12 +19,14 @@ index 63b40c2..7e107e3 100644
  list(TRANSFORM FORGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
  
  # M2's Designer document consumes Pulp's optional design-import surface. Keep
-@@ -645,6 +655,38 @@ if(FORGE_BUILD_TESTS)
+@@ -645,6 +655,40 @@ if(FORGE_BUILD_TESTS)
              forge_core Catch2::Catch2WithMain)
          catch_discover_tests(forge-test-chrome)
  
 +        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_chrome_no_leak.cpp")
-+            add_executable(forge-test-chrome-no-leak test/test_chrome_no_leak.cpp)
++            add_executable(forge-test-chrome-no-leak
++                test/test_chrome_no_leak.cpp
++                test/test_chrome_no_leak_baselines.cpp)
 +            target_include_directories(forge-test-chrome-no-leak PRIVATE
 +                ${CMAKE_CURRENT_SOURCE_DIR}/test)
 +            # The SDK this binary renders with, so a baseline mismatch can say
@@ -58,7 +60,7 @@ index 63b40c2..7e107e3 100644
          add_executable(forge-test-audio-asset-coordinator
              test/test_audio_asset_coordinator.cpp)
          target_include_directories(forge-test-audio-asset-coordinator PRIVATE
-@@ -1573,6 +1615,10 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+@@ -1573,6 +1617,10 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
      # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).
      add_subdirectory(midi)
  

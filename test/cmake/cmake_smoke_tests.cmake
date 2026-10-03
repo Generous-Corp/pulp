@@ -1141,6 +1141,9 @@ set_tests_properties(cmake-test-manifest-parse-selftest PROPERTIES
 # Validation contract tests — schema and reality snapshot
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
+pulp_test_data(pulp-test-validation-contract NO_DEFINE PATHS
+    docs/contracts/phase1-reality-snapshot.yaml
+    docs/contracts/validation-report-v1.schema.json)
 catch_discover_tests(pulp-test-validation-contract)
 
 # pulp-build-info.json / runtime-pins.json machinery that needs no built

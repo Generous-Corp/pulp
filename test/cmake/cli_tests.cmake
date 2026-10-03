@@ -58,6 +58,17 @@ target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-create-shellout)
+# `pulp create` reads the package kits and the built-in gain template (and
+# checks for a standalone variant of it), and the dependency-kit case copies
+# the package registry.
+pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
+    fixtures/packages/simple-plugin-template
+    fixtures/packages/gain-dsp-kit
+    tools/templates/gain
+    tools/templates/standalone
+    tools/packages/registry.json
+    # The package dependency root is found by a packages.lock.json probe.
+    ABSENT packages.lock.json)
 
 # CLI import substrate tests — detection engine, JSON-over-stdio SPI runner,
 # install-hint path, and the vendor-agnostic source guard. Links the import
@@ -73,6 +84,8 @@ target_link_libraries(pulp-test-cli-import PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 pulp_test_data(pulp-test-cli-import PATHS tools/import/known-frameworks.json)
+# The spawned pulp-cpp reads the shipped tool registry to find an importer.
+pulp_test_data(pulp-test-cli-import NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-import
     PROPERTIES LABELS "parser-import")
 
@@ -91,6 +104,8 @@ target_link_libraries(pulp-test-cli-import-emit PRIVATE
     Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-import-emit PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# The spawned pulp-cpp reads the shipped tool registry to find an importer.
+pulp_test_data(pulp-test-cli-import-emit NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-import-emit
     PROPERTIES LABELS "parser-import")
 
@@ -165,6 +180,9 @@ target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catc
 target_compile_definitions(pulp-test-cli-shellout PRIVATE
     PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
+# `pulp doctor` and `pulp status` walk the checkout, and `pulp docs` reads an
+# open-ended set of documents, all through the spawned pulp-cpp.
+pulp_test_data(pulp-test-cli-shellout WHOLE_CHECKOUT)
 
 add_executable(pulp-test-cli-overflow-shellout test_cli_overflow_shellout.cpp)
 target_link_libraries(pulp-test-cli-overflow-shellout PRIVATE
@@ -192,9 +210,7 @@ target_compile_definitions(pulp-test-cli-shellout PRIVATE
 if(TARGET pulp-test-cli-run-fixture)
     add_dependencies(pulp-test-cli-shellout pulp-test-cli-run-fixture)
 endif()
-if(TARGET pulp-import-design)
-    add_dependencies(pulp-test-cli-shellout pulp-import-design)
-endif()
+pulp_test_spawns(pulp-test-cli-shellout pulp-import-design)
 if(APPLE)
     catch_discover_tests(pulp-test-cli-shellout TEST_SPEC "~[hdiutil]")
     catch_discover_tests(pulp-test-cli-shellout
@@ -230,6 +246,8 @@ catch_discover_tests(pulp-test-cli-shellout-scan-projects)
 add_executable(pulp-test-cli-shellout-pr test_cli_shellout_pr.cpp)
 target_link_libraries(pulp-test-cli-shellout-pr PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-pr)
+# `pulp status` walks the checkout through the spawned pulp-cpp.
+pulp_test_data(pulp-test-cli-shellout-pr WHOLE_CHECKOUT)
 catch_discover_tests(pulp-test-cli-shellout-pr)
 
 # CLI lifecycle-command shell-out tests: pulp doctor / pulp dev /
@@ -246,6 +264,8 @@ else()
         PULP_TEST_CONTROL_HEALTH_ENABLED=0)
 endif()
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-lifecycle)
+# `pulp doctor --versions` reads the plugin manifest through the spawned pulp-cpp.
+pulp_test_data(pulp-test-cli-shellout-lifecycle NO_DEFINE PATHS .claude-plugin/plugin.json)
 catch_discover_tests(pulp-test-cli-shellout-lifecycle)
 
 # `pulp tweaks diff` shell-out tests. Drives the built binary against
@@ -608,3 +628,20 @@ if(Python3_Interpreter_FOUND)
         LABELS "cli;templates"
         TIMEOUT 60)
 endif()
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-cli-validator-discovery NONE)  # `<validator> --version` and `command -v` on system paths
+pulp_test_spawns(pulp-test-cli-mac-runtime-validators NONE) # plutil and auval, behind an injected runner
+pulp_test_spawns(pulp-test-cli-package-commands NONE)     # links the registry's runner but never runs a tool
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-cli-skew-banner NONE)          # bash on a temp driver, with a temp `pulp` shim
+# It sources the version-check helper from the checkout, found by walking up
+# from its working directory.
+if(TARGET pulp-test-cli-skew-banner)
+    pulp_test_data(pulp-test-cli-skew-banner NO_DEFINE PATHS tools/scripts/cli_version_check.sh)
+endif()
+# The lifecycle case stages a fake broker script at the real broker's name.
+pulp_test_spawns(pulp-test-cli-shellout-lifecycle NOT_RUN pulp-control-broker)

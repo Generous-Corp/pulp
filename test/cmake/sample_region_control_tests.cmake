@@ -87,5 +87,7 @@ function(_pulp_register_sample_region_control_e2e)
     catch_discover_tests(pulp-test-control-sample-region-e2e
         PROPERTIES TIMEOUT "${_pulp_sample_region_e2e_timeout}"
         LABELS "inspect;control;sample-region;e2e")
+    # Its broker is a copy of itself (staged above), not the built broker.
+    pulp_test_spawns(pulp-test-control-sample-region-e2e NOT_RUN pulp-control-broker)
 endfunction()
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _pulp_register_sample_region_control_e2e)

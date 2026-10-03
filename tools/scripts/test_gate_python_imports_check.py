@@ -162,6 +162,19 @@ class InventoryTests(unittest.TestCase):
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_the_lock_counts_as_installed_only_while_the_workflow_runs_the_installer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            for rel in (check.GATE_WORKFLOW, check.GATE_INSTALLER, check.GATE_LOCK):
+                (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+                (repo / rel).write_bytes((check.REPO_ROOT / rel).read_bytes())
+            self.assertIn("numpy", check.gate_modules(repo))
+            workflow = repo / check.GATE_WORKFLOW
+            workflow.write_text(workflow.read_text(encoding="utf-8").replace(
+                f"bash {check.GATE_INSTALLER}", "true"), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "no longer installs"):
+                check.gate_modules(repo)
+
     def test_gate_packages_are_derived_from_the_lock_the_gate_installs(self) -> None:
         modules = check.gate_modules()
         # Control: the lock really is read (PIL comes from the pillow mapping).

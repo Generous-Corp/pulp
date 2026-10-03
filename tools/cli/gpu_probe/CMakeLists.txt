@@ -140,6 +140,7 @@ if(PULP_BUILD_TESTS)
             pulp-tool-gpu-dpr-measurement Catch2::Catch2WithMain)
         add_test(NAME gpu-dpr-native-measurement
             COMMAND pulp-test-gpu-dpr-native-measurement)
+        pulp_test_spawns(pulp-test-gpu-dpr-native-measurement NONE) # fork; a temp shell script
     endif()
 
     if(PULP_ENABLE_GPU)

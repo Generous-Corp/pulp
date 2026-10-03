@@ -78,7 +78,7 @@ these definitions.
 | `humanize` | `timing_ms`, `vel_jitter`, `seed` | Deterministic timing `0..30 ms` and velocity `0..40` jitter. Seed is structural, not macro-exposable. |
 | `chord` | `type`, `voicing`, `spread` | Types: `maj`, `min`, `dim`, `aug`, `sus2`, `sus4`, `maj7`, `min7`, `dom7`, `power`, `octave`; voicing: `close`, `open`, `drop2`; spread `0..1`. |
 | `harmonize` | `interval`, `root`, `scale`, `mix` | Adds one diatonic voice. Interval indices `1..7` mean second through octave; mix `0..1`. |
-| `note_delay` | `sync`, `division`, `time_ms`, `feedback`, `vel_decay`, `repeats` | `sync`: `time` or `sync`; time `1..1000 ms`; feedback `0..0.9`; decay `0..1`; repeats `1..16`. |
+| `note_delay` | `sync`, `division`, `time_ms`, `feedback`, `vel_decay`, `repeats`, `gate` | `sync`: `time` or `sync`; time `1..1000 ms`; feedback `0..0.9`; decay `0..1`; repeats `1..16`; `gate` `0..1` (zero keeps the authored source-held gate; a non-zero value is an authorable gate, and each echo is held for that percentage of its delay stride). |
 | `arp` | `rate`, `mode`, `octaves`, `hold`, `gate` | Modes: `up`, `down`, `up-down`, `random`, `as-played`; octaves `1..4`; hold off/on; gate `0.1..1`. |
 | `note_repeat` | `sync`, `division`, `count`, `time_ms`, `vel_curve`, `gate` | Retriggers into `1..16` hits; free time `5..500 ms`; velocity curve `-1..1`; gate `0.1..1`. Count 1 is bypass. |
 | `chance` | `mode`, `pulses`, `steps`, `seed`, `probability` | Probability or Euclidean gating; pulses `1..16`, steps `1..32`, probability `0..1`. Seed is not macro-exposable. |
@@ -113,6 +113,17 @@ prepared kernel. Cluster balancing, seeded timing jitter, and one-window
 latency remain unchanged.
 
 ## Pattern data
+
+### Latch lifecycle controls
+
+`pulp::midi::Latch` Hold mode keeps one sounding voice for a key. Repeated
+attacks while that key is physically held still increase retention depth;
+re-pressing after its physical release does not retrigger the already latched
+voice. If an output buffer is full, a note-off is queued in the bounded
+per-key debt table and drained at the start of the next process block. This
+keeps lifecycle balancing deterministic without allocating or dropping a
+release. `Off` remains an exact passthrough and `Toggle` retains its existing
+per-key flip behavior.
 
 `pattern_gate`, `step_seq`, `note_gen`, `morph_seq`, and `drum_gen` consume
 bounded pattern data: at most eight lanes, each with at most 32 steps.

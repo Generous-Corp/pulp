@@ -13,9 +13,24 @@ What must hold:
   build tree even when it lives inside the checkout;
 - a path that matches nothing fails the configure; a glob that matches passes;
 - a stale `<exe>.inputs.json` from an earlier configure is removed;
+- ABSENT records `!<path>` for a path the test probes and expects missing,
+  refusing one that exists or is a glob;
 - NO_DEFINE records paths without touching the target's definitions, NONE
   records a reviewed source with no paths, and SOURCES narrows a declaration
-  to some of an executable's sources (and refuses one that is not its own).
+  to some of an executable's sources (and refuses one that is not its own);
+- `pulp_test_spawns()` gives a test an edge to a tool defined after the test
+  directory, where an inline `if(TARGET tool)` is false and silently drops
+  it; `runtime_targets` lists the edge, and `spawns_none` a reviewed NONE;
+- a `$<TARGET_FILE:x>` definition without an edge to x fails the configure,
+  and so does a NONE on an executable that has one, or a pulp_test_spawns()
+  edge that does not reach the written index;
+- WHOLE_CHECKOUT records an executable whose verdict can depend on any file
+  in the checkout, and refuses paths beside it;
+- every executable in the tree is indexed, flagged `under_test` when it is
+  defined under test/, so a test program defined beside its tool is seen;
+- NOT_RUN records a reviewed name the test does not run and refuses an edge
+  to the same target; runtime-targets.json indexes every built program by
+  its artifact name with its own runtime targets.
 
 Run:
     python3 tools/scripts/test_pulp_test_data_cmake.py
@@ -60,9 +75,9 @@ def write(root: Path, rel: str, text: str) -> None:
 
 @unittest.skipUnless(shutil.which("cmake") and shutil.which("make"), "cmake or make not on PATH")
 class PulpTestDataCMakeTests(unittest.TestCase):
-    def project(self, tmp: Path, extra: str = "") -> Path:
+    def project(self, tmp: Path, extra: str = "", root_extra: str = "") -> Path:
         src = tmp / "src"
-        write(src, "CMakeLists.txt", ROOT_LISTS)
+        write(src, "CMakeLists.txt", ROOT_LISTS + root_extra)
         write(src, "test/CMakeLists.txt", TEST_LISTS.format(module=MODULE.as_posix(), extra=extra))
         for name in ("solo", "g1", "g2", "q"):
             write(src, f"test/{name}.c", "int main(void) { return 0; }\n")
@@ -87,7 +102,8 @@ class PulpTestDataCMakeTests(unittest.TestCase):
             out = build / "test" / "test-data"
             solo = json.loads((out / "solo.inputs.json").read_text(encoding="utf-8"))
             self.assertEqual(solo, {"schema": "pulp-test-data-inputs/v1", "executable": "solo", "kind": "compiled",
-                                    "sources": ["test/solo.c"], "inputs": ["fixtures/solo.json"]})
+                                    "sources": ["test/solo.c"], "inputs": ["fixtures/solo.json"],
+                                    "whole_checkout": False})
             group = json.loads((out / "group.inputs.json").read_text(encoding="utf-8"))
             self.assertEqual((group["sources"], group["inputs"]), (["test/g1.c"], ["fixtures/*.json"]))
             self.assertFalse((out / "quiet.inputs.json").exists())
@@ -105,6 +121,29 @@ class PulpTestDataCMakeTests(unittest.TestCase):
             self.assertEqual(len(g1), 2, group_flags)
             self.assertIn("PULP_SOURCE_DIR=", g1[1].splitlines()[0])
             self.assertNotIn("g2.c.o_DEFINES", group_flags)  # the neighbour gets no definition
+
+    def test_whole_checkout_is_recorded_and_takes_no_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            src = self.project(Path(t), extra="pulp_test_data(quiet WHOLE_CHECKOUT)")
+            build = Path(t) / "build"
+            proc = self.configure(src, build)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            quiet = json.loads((build / "test" / "test-data" / "quiet.inputs.json").read_text(encoding="utf-8"))
+            self.assertEqual((quiet["whole_checkout"], quiet["inputs"]), (True, []))
+            src2 = self.project(Path(t) / "b", extra="pulp_test_data(quiet WHOLE_CHECKOUT PATHS fixtures)")
+            self.assertIn("WHOLE_CHECKOUT already covers every path", self.configure(src2, Path(t) / "build2").stderr)
+
+    def test_an_executable_outside_test_is_indexed_and_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            src = self.project(Path(t), root_extra="add_executable(tool tool.c)\n")
+            write(src, "tool.c", "int main(void) { return 0; }\n")
+            build = Path(t) / "build"
+            proc = self.configure(src, build)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            index = json.loads((build / "test" / "test-data" / "executables.json").read_text(encoding="utf-8"))
+            ex = index["executables"]
+            self.assertEqual((ex["tool"]["under_test"], ex["tool"]["sources"]), (False, ["tool.c"]))
+            self.assertTrue(ex["solo"]["under_test"])
 
     def test_a_path_that_matches_nothing_fails_configure(self) -> None:
         with tempfile.TemporaryDirectory() as t:
@@ -137,6 +176,21 @@ class PulpTestDataCMakeTests(unittest.TestCase):
                 flags = (build / "test" / "CMakeFiles" / f"{target}.dir" / "flags.make").read_text(encoding="utf-8")
                 self.assertNotIn("PULP_SOURCE_DIR", flags, target)
 
+    def test_absent_paths_are_recorded_and_must_not_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            src = self.project(Path(t), extra="pulp_test_data(quiet ABSENT pulp.toml fixtures/missing.lock)")
+            build = Path(t) / "build"
+            proc = self.configure(src, build)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            quiet = json.loads((build / "test" / "test-data" / "quiet.inputs.json").read_text(encoding="utf-8"))
+            self.assertEqual(quiet["inputs"], ["!fixtures/missing.lock", "!pulp.toml"])
+            # A path that exists is a read, not an absence.
+            src2 = self.project(Path(t) / "b", extra="pulp_test_data(quiet ABSENT fixtures/solo.json)")
+            self.assertIn("ABSENT 'fixtures/solo.json' exists in the checkout",
+                          self.configure(src2, Path(t) / "build2").stderr)
+            src3 = self.project(Path(t) / "c", extra="pulp_test_data(quiet ABSENT fixtures/*.toml)")
+            self.assertIn("must be a plain path", self.configure(src3, Path(t) / "build3").stderr)
+
     def test_sources_must_belong_to_the_executable(self) -> None:
         with tempfile.TemporaryDirectory() as t:
             src = self.project(Path(t), extra="pulp_test_data(quiet SOURCES solo.c PATHS fixtures)")
@@ -156,6 +210,112 @@ class PulpTestDataCMakeTests(unittest.TestCase):
             write(src, "test/CMakeLists.txt", TEST_LISTS.format(module=MODULE.as_posix(), extra=""))
             self.assertEqual(self.configure(src, build).returncode, 0)
             self.assertFalse(manifest.exists())
+
+
+SPAWN_ROOT_LISTS = """cmake_minimum_required(VERSION 3.24)
+project(pulp_test_spawns_fixture C)
+add_subdirectory(test)
+add_subdirectory(tools)
+"""
+
+
+@unittest.skipUnless(shutil.which("cmake") and shutil.which("make"), "cmake or make not on PATH")
+class PulpTestSpawnsCMakeTests(unittest.TestCase):
+    """Tools are defined after the test directory, as in the real tree."""
+
+    def configure(self, extra: str) -> tuple[subprocess.CompletedProcess[str], dict]:
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        tmp = Path(holder.name)
+        src = tmp / "src"
+        write(src, "CMakeLists.txt", SPAWN_ROOT_LISTS)
+        write(src, "test/CMakeLists.txt",
+              f'include("{MODULE.as_posix()}")\npulp_test_data_arm()\n'
+              "add_executable(spawner s.c)\nadd_executable(plain p.c)\n" + extra)
+        write(src, "tools/CMakeLists.txt", "add_executable(tool t.c)\n")
+        for rel in ("test/s.c", "test/p.c", "tools/t.c"):
+            write(src, rel, "int main(void) { return 0; }\n")
+        build = tmp / "build"
+        proc = subprocess.run(["cmake", "-G", "Unix Makefiles", "-S", str(src), "-B", str(build)],
+                              capture_output=True, text=True, timeout=180)
+        proc.stderr = " ".join(proc.stderr.split())
+        index_path = build / "test" / "test-data" / "executables.json"
+        index = json.loads(index_path.read_text(encoding="utf-8"))["executables"] if index_path.exists() else {}
+        self.build = build
+        return proc, index
+
+    def artifacts(self) -> dict:
+        path = self.build / "test" / "test-data" / "runtime-targets.json"
+        return json.loads(path.read_text(encoding="utf-8"))["artifacts"]
+
+    def test_a_deferred_edge_reaches_a_tool_defined_later(self) -> None:
+        proc, index = self.configure(
+            "pulp_test_spawns(spawner tool)\n"
+            # The shape that silently dropped edges: the tool does not exist yet.
+            "if(TARGET tool)\n  add_dependencies(plain tool)\nendif()\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(index["spawner"]["runtime_targets"], ["tool"])
+        self.assertEqual(index["plain"]["runtime_targets"], [])
+        self.assertEqual((index["spawner"]["spawns_none"], index["plain"]["spawns_none"]), (False, False))
+
+    def test_a_missing_test_is_skipped_and_a_missing_tool_is_recorded(self) -> None:
+        # A platform-specific suite may be absent; its declaration must not
+        # break the configure of every other platform.
+        proc, index = self.configure("pulp_test_spawns(not-built-here tool)\npulp_test_spawns(spawner absent-tool)\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("not-built-here", index)
+        # The test is built but its tool is not: no edge, and the tool is named
+        # so the scan keeps the test undeclared on this configuration.
+        self.assertEqual((index["spawner"]["runtime_targets"], index["spawner"]["absent_spawns"]),
+                         ([], ["absent-tool"]))
+        self.assertIn("pulp_test_spawns: spawner runs absent-tool, which this configuration does not build",
+                      proc.stdout)
+        self.assertEqual(index["plain"]["absent_spawns"], [])
+
+    def test_a_target_file_definition_needs_an_edge(self) -> None:
+        defs = 'target_compile_definitions(spawner PRIVATE TOOL="$<TARGET_FILE:tool>")\n'
+        proc, _ = self.configure(defs)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("spawner -> tool", proc.stderr)
+        # The inline guard evaluated before the tool exists adds nothing, so it
+        # fails the same way.
+        proc, _ = self.configure(defs + "if(TARGET tool)\n  add_dependencies(spawner tool)\nendif()\n")
+        self.assertIn("spawner -> tool", proc.stderr)
+        proc, index = self.configure(defs + "pulp_test_spawns(spawner tool)\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(index["spawner"]["runtime_targets"], ["tool"])
+
+    def test_none_records_a_review_and_refuses_an_edge(self) -> None:
+        proc, index = self.configure("pulp_test_spawns(plain NONE)\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual((index["plain"]["spawns_none"], index["plain"]["runtime_targets"]), (True, []))
+        proc, _ = self.configure("pulp_test_spawns(spawner NONE)\npulp_test_spawns(spawner tool)\n")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("spawner is declared pulp_test_spawns(NONE) but depends on tool", proc.stderr)
+
+    def test_not_run_is_recorded_and_refuses_an_edge(self) -> None:
+        proc, index = self.configure("pulp_test_spawns(plain NOT_RUN tool)\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual((index["plain"]["named_not_run"], index["plain"]["runtime_targets"]), (["tool"], []))
+        proc, _ = self.configure("pulp_test_spawns(spawner tool)\npulp_test_spawns(spawner NOT_RUN tool)\n")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("spawner declares tool NOT_RUN but depends on it", proc.stderr)
+
+    def test_every_built_program_is_indexed_by_its_artifact_name(self) -> None:
+        proc, _ = self.configure("set_target_properties(spawner PROPERTIES OUTPUT_NAME spawner-bin)\n"
+                                 "pulp_test_spawns(spawner tool)\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        artifacts = self.artifacts()
+        self.assertEqual(artifacts["spawner"], {"artifact": "spawner-bin", "runtime_targets": ["tool"]})
+        self.assertEqual(artifacts["tool"], {"artifact": "tool", "runtime_targets": []})
+
+    def test_a_declared_edge_must_reach_the_index(self) -> None:
+        # A utility target is not something a test runs, so its edge cannot be
+        # recorded as a runtime target; the configure says so instead of
+        # dropping it.
+        proc, _ = self.configure("add_custom_target(stage)\npulp_test_spawns(spawner stage)\n")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("spawner declares stage, which is not a recorded runtime target", proc.stderr)
 
 
 if __name__ == "__main__":

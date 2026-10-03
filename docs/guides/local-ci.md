@@ -736,8 +736,8 @@ investigating or just within the usual range?" Humans can use the same commands
 for high-level platform comparisons, but no observability service is required.
 
 The `shipyard metrics` commands require a Shipyard build that includes the
-metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.4`, which
-provides it, so no separate binary is needed.
+metrics subcommand, which every Shipyard since `v0.81.4` provides; the pin in
+`tools/shipyard.toml` is newer, so no separate binary is needed.
 
 ```bash
 # Enable VM runtime records on tartci hosts or LaunchAgents.
@@ -913,13 +913,47 @@ checkout (names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition pointing
 into the checkout) but no declaration is `data: undeclared`: the shadow
 selects it on every change, and `script-test-inputs-drift` fails a pull
 request that adds a new undeclared source, so the backlog only shrinks.
+A test that runs or loads another built target declares it with
+`pulp_test_spawns(<test> <target>...)`, which adds the `add_dependencies`
+edge after every tool directory has been read. An inline
+`if(TARGET <tool>)` in `test/cmake` is evaluated too early and creates no
+edge. An executable whose sources call a process API with no such edge and no
+reviewed `pulp_test_spawns(<test> NONE)` is `spawns: undeclared`, and the
+shadow selects it on every change. So is one whose code names a built
+program (a string such as `"pulp-cpp"`) that no edge reaches and no reviewed
+`pulp_test_spawns(<test> NOT_RUN <target>)` covers, and one whose declared
+tool this configuration does not build.
+
+The declarations come from a static scan, so a nightly **read audit**
+(`.github/workflows/read-audit-nightly.yml`, `tools/ci/read_audit.py`)
+measures them. On a GitHub-hosted Linux runner it builds the tree, runs every
+compiled test executable's ctest registrations under `strace -f`, and diffs
+the tracked checkout files they open, list or probe against the executable's
+declared inputs. It uses the selector's own prefix-or-glob match, and CMake
+files count as covered because a CMake change already reruns everything. Each
+undeclared access is reported with its executable, its test and the program
+that made it. Before the tests, a control program goes through the same
+ctest and strace path. It reads one undeclared and one declared tracked
+file, and the run fails with no verdict unless only the undeclared one is
+flagged. The report names what it cannot see: macOS-only executables, targets
+that did not build, script-driven tests, and relative paths whose directory
+was unknown. Each run ends with one
+`read-audit stage0:` line and a `stage0` block in the report. The verdict is
+`clean` only when the control was flagged, every declared executable this
+platform registers was audited, and no audited executable has a finding.
+`incomplete` means the run cannot vouch for itself.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
 `tools/ci/affected_tests_shadow.py`): the ctest entries the build graph and
 recorded header dependencies say the group's change could reach, with
 script-driven tests counted as affected whenever any script surface changed
-and every test selected when a CMake file changed. It selects nothing; the
+and every test selected when a CMake file changed. A compiled test is also
+affected when a program it runs or loads at run time is: a tool it spawns
+through `$<TARGET_FILE:x>` or a path it computes, reached through the
+`add_dependencies(<test> x)` edge that the CMake codemodel records and Ninja
+keeps only as order-only (`tools/ci/spawn_closure.py`; without a readable
+codemodel every test is selected). It selects nothing; the
 number to watch is `failed_outside_selection`, which must stay at zero over a
 long window before selection could gate anything.
 
@@ -984,12 +1018,18 @@ the head issued no receipt (annotation field `source: reuse-record`). The
 macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
 (`tools/cmake/PulpLinkMaps.cmake`): every link runs through
 `tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
-linker's status, and for an executable keeps only the map's object list and
-the link arguments under `<build>/link-members/` (the map, megabytes of
-symbol table, is deleted). The linked bytes are identical with and without
-it. `link-members-<sha>.json` in the record then lists, per executable, the
-archive members its link pulled, with `whole` set on archives the link line
-force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
+linker's status, and for an executable, a loadable module (a `-bundle`
+link: plug-in bundles, LV2 binaries, reload probes) or a shared library keeps
+only the map's object list and the link arguments under `<build>/link-members/`
+(the map, megabytes of symbol table, is deleted). The linked bytes are
+identical with and without it. `link-members-<sha>.json` in the record then
+lists, per link (each entry's `kind`: `executable`, `module` or `shared`;
+schema `pulp-link-members/v3`), the archive members it pulled, with `whole`
+set on archives the link line force-loads (`-force_load`, `-all_load`,
+`-ObjC`); partial links (`-r`) are only counted, as `unrecorded`. Every reader
+calls `link_members.unusable()` first and treats an unknown schema, a `shared`
+link (its content reaches the binaries that load it without changing their
+maps) or an unrecorded link as no record at all, and the record job warns. `codemodel-<sha>.json`
 (`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
 source list, compile groups, link line and the ctest registrations that run
 its artifact, read from the file-API codemodel reply the configure step
@@ -1984,8 +2024,10 @@ Python tool scripts and skill docs select through generated families.
 `tools/scripts/changed_surface_script_families.py` reads
 `test/ctest_script_inputs.json` (each script-driven ctest's entry and the
 inputs it imports or names) and writes one family per group of top-level
-`tools/scripts/*.py` files sharing the same readers into the marked block of
-`.shipyard/config.toml`, plus `agent-skill-docs` for
+`tools/scripts/*.py` files sharing the same readers into
+`.shipyard/changed-surface-families.toml`, which the selection names as its
+`families_file` (Shipyard reads it from the protected base and treats it as a
+policy path), plus `agent-skill-docs` for
 `.agents/skills/*/SKILL.md` and a `script-surface-whole-tree` family that adds
 the drift, lint, registry, sync, guard, census, inventory and probe tests to
 any of those changes. A `script-surface-environment-bound` family likewise
@@ -2004,7 +2046,7 @@ registration, so `tools/scripts/test_*.py` is no longer a test-topology path;
 describe this policy are not policy inputs either. The generator, the
 script-inputs list and the inventory contract are.
 
-`changed-surface-script-families-drift` (macOS) regenerates the block and
+`changed-surface-script-families-drift` (macOS) regenerates the file and
 compares it. Like `script-test-inputs-drift` it is diff-scoped: drift blocks a
 change touching a script, a skill doc, the script-inputs list, the generator or
 the config, reports otherwise, and never fails a merge group. Regenerate with
@@ -6888,7 +6930,11 @@ validates it.
 
 `build.yml`'s `Install visual-analysis Python dependencies` step installs the
 declared set (`tools/motion/visual/requirements.txt`) so the non-skippable
-`visual-python-deps-present` ctest stays answerable. It used to pass
+`visual-python-deps-present` ctest stays answerable. The step body lives in
+`tools/ci/install_visual_python_deps.sh <build-dir>`, which every job that runs
+a broad ctest calls after configuring, the sanitizer jobs included; those once
+ran ctest without it, so the check failed in every ASan, TSan, UBSan and RTSan
+run. It used to pass
 `--upgrade`, which asks PyPI for a newer wheel *even when the requirement is
 already met* — turning "pypi.org is reachable from this VM" into a precondition
 of the **required** `macos` check.

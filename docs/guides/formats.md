@@ -778,14 +778,23 @@ rendered samples and the per-block `ProcessContext` metadata against direct
 stepped processing for the same schedule.
 
 Format adapter runtime-mode tests should assert the adapter-owned source of
-truth rather than inferring mode from transport. VST3 maps
-`ProcessSetup::processMode == kOffline` to `ProcessMode::Offline` with a
-faster-than-realtime render hint. CLAP has no equivalent process-mode field, so
-its adapter reports realtime mode and realtime render speed unless a future CLAP
-extension exposes stronger host intent. AU v2 effect and instrument render
-callbacks also report realtime mode and realtime render speed because the v2 SDK
-does not surface offline-bounce intent to `ProcessBufferLists()` / `Render()`;
-AU v3 mirrors that explicit realtime render-path contract. Bypass, tail-drain,
+truth rather than inferring mode from transport. Every adapter maps its host's
+offline-render signal to `ProcessMode::Offline` with a `FasterThanRealtime`
+render hint, and to realtime otherwise:
+
+| Format | Host signal |
+|--------|-------------|
+| VST3 | `ProcessSetup::processMode == kOffline` |
+| AU v3 | `AUAudioUnit.renderingOffline` |
+| AU v2 (effect, instrument, MIDI processor) | `kAudioUnitProperty_OfflineRender` (global, read/write `UInt32`; `AUBase` does not implement it, so the adapter does) |
+| CLAP | `clap.render` extension, `set(CLAP_RENDER_OFFLINE)` |
+| AAX | an AudioSuite instance (`AAX_IController::GetIsAudioSuite`), carried to the algorithm in the last parameter-packet slot. A Pro Tools insert bounce is not distinguishable from playback through AAX. |
+
+A processor that runs work on a worker thread and adopts the result at a later
+block should, on an offline block, wait for that work instead: an offline render
+outruns the wall clock, so a result that arrives "in time" during playback lands
+late and coarser in a bounce. Waiting is legal only when `is_offline()` is true.
+Bypass, tail-drain,
 reset, and transport-jump flags stay explicit `ProcessContext` metadata and
 should be covered where the host API can actually deliver them. VST3 process
 context sample-position discontinuities, AU v2 host-callback sample-position

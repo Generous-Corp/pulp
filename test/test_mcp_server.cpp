@@ -354,6 +354,21 @@ std::filesystem::path make_fake_command(const std::filesystem::path& dir, const 
     return command;
 }
 
+void make_fake_governed_build(const std::filesystem::path& project) {
+    const auto governor = project / "tools" / "ci" / "governed-build.sh";
+    std::filesystem::create_directories(governor.parent_path());
+    std::ofstream script(governor);
+    script << "#!/bin/sh\n"
+           << "[ \"$1\" = cmake ] && shift\n"
+           << "exec cmake \"$@\"\n";
+    script.close();
+    std::filesystem::permissions(governor,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+}
+
 } // namespace
 
 TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
@@ -1638,7 +1653,8 @@ TEST_CASE("pulp_audio_compare validates its arguments before shelling out", "[mc
     // Each invocation drives one guard branch in handle_audio_compare so the
     // typed validation fails fast (with an actionable message) instead of
     // spawning the delegated command on bad input.
-    ScopedCurrentPath cwd(repo_root());
+    CliProjectRoot project(built_cli());
+    ScopedCurrentPath cwd(project.path());
     int id = 70;
     auto call = [&](const char* args) {
         return handle_request(tool_call(std::to_string(id++), "pulp_audio_compare", args));
@@ -1659,7 +1675,7 @@ TEST_CASE("pulp_audio_compare validates its arguments before shelling out", "[mc
     require_contains(
         call(
             R"JSON({"reference":"/nope/a.wav","candidate":"/nope/b.wav","profile":"noise-roughness"})JSON"),
-        R"JSON("jsonrpc":"2.0")JSON");
+        kCompareRanMarker);
     // Threshold is passed through to the Python registry (the per-axis source of truth: a
     // fraction for tonal-balance, dB for added-hf); the MCP guards only the universal invariant
     // that it is a finite positive magnitude. A negative threshold is rejected here...
@@ -1670,7 +1686,7 @@ TEST_CASE("pulp_audio_compare validates its arguments before shelling out", "[mc
     require_contains(
         call(
             R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"added-hf","threshold":3.0})JSON"),
-        R"JSON("jsonrpc":"2.0")JSON");
+        kCompareRanMarker);
 }
 
 TEST_CASE("pulp_audio_compare forwards valid options through the delegated shell-out",
@@ -1678,32 +1694,50 @@ TEST_CASE("pulp_audio_compare forwards valid options through the delegated shell
     // Valid profile + reference_role + a tiny threshold flow past every guard and
     // into the shell-out tail (the threshold is serialized via std::to_chars, so a
     // small value is preserved rather than floored to fixed decimals). The opt-in
-    // tool is absent here, so the handler returns its install/upgrade hint — but the
-    // response is a well-formed JSON-RPC result, which is all we assert.
-    ScopedCurrentPath cwd(repo_root());
+    // tool is absent under the staged empty home, so this build's CLI answers with
+    // its install hint, which only a real run of the CLI prints.
+    CliProjectRoot project(built_cli());
+    ScopedCurrentPath cwd(project.path());
     auto response = handle_request(tool_call(
         "68", "pulp_audio_compare",
         R"JSON({"reference":"/nonexistent/ref.wav","candidate":"/nonexistent/cand.wav",)JSON"
         R"JSON("profile":"added-hf","reference_role":"golden","threshold":0.0001})JSON"));
     require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
-    require_contains(response, R"JSON("content")JSON");
+    require_contains(response, kCompareRanMarker);
 }
 
 TEST_CASE("pulp_audio_compare dispatch reaches the delegated shell-out", "[mcp][tools][audio]") {
     // Exercise handle_audio_compare's tail past argument validation: from a project
     // root it makes the private temp report dir, builds the `pulp audio compare …
     // --json <temp>` command, shells out, and folds the result. The opt-in Audio
-    // Quality Lab tool is not installed here, so the delegated command writes no
-    // report and the handler returns its actionable install/upgrade hint — but the
-    // response is a well-formed JSON-RPC result wrapping that text, which is all we
-    // assert (and it covers the temp-dir → exec → empty-report → hint branch that
-    // the required-argument case returns before ever reaching).
-    ScopedCurrentPath cwd(repo_root());
+    // Quality Lab tool is absent under the staged empty home, so this build's CLI
+    // writes no report and prints its install hint, which the handler surfaces
+    // (the temp-dir → exec → empty-report → hint branch).
+    CliProjectRoot project(built_cli());
+    ScopedCurrentPath cwd(project.path());
     auto response = handle_request(tool_call(
         "62", "pulp_audio_compare",
         R"JSON({"reference":"/nonexistent/ref.wav","candidate":"/nonexistent/cand.wav"})JSON"));
     require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
-    require_contains(response, R"JSON("content")JSON");
+    require_contains(response, "pulp audio compare produced no report");
+    require_contains(response, kCompareRanMarker);
+}
+
+TEST_CASE("pulp audio shell-outs say so when no CLI is there to run", "[mcp][tools][audio]") {
+    // The negative control for the cases above: the same calls from a project
+    // root with no CLI staged. Neither CLI-only line can appear, so a response
+    // that carries one proves the staged binary ran.
+    CliProjectRoot project({});
+    ScopedCurrentPath cwd(project.path());
+    const auto compare = handle_request(tool_call(
+        "63", "pulp_audio_compare",
+        R"JSON({"reference":"/nonexistent/ref.wav","candidate":"/nonexistent/cand.wav"})JSON"));
+    require_contains(compare, "pulp audio compare produced no report");
+    REQUIRE(compare.find(kCompareRanMarker) == std::string::npos);
+    const auto render = handle_request(tool_call(
+        "64", "pulp_audio_render", R"({"plugin":"X.clap","duration_ms":100})"));
+    require_contains(render, "pulp audio render did not write a metrics manifest");
+    REQUIRE(render.find("pulp audio render: failed to load") == std::string::npos);
 }
 
 TEST_CASE("MCP project-root dependent tools reject non-project directories", "[mcp][tools]") {
@@ -1802,6 +1836,7 @@ TEST_CASE("MCP build and test handlers quote project paths and filters", "[mcp][
     TempDir fake_bin;
     make_fake_command(fake_bin.path, "cmake", "fake-cmake");
     make_fake_command(fake_bin.path, "ctest", "fake-ctest");
+    make_fake_governed_build(project);
     const char* old_path = std::getenv("PATH");
     ScopedEnvVar path_env("PATH", fake_bin.path.string() + ":" + (old_path ? old_path : ""));
     ScopedCurrentPath cwd(project);
@@ -2108,6 +2143,7 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
     std::ofstream(project / "build" / "CMakeCache.txt") << "CMAKE_BUILD_TYPE:STRING=Release\n";
     make_package_workflow_fake_pulp_cli(project, log);
     make_fake_command(bin, "cmake", "fake-cmake");
+    make_fake_governed_build(project);
     {
         const auto screenshot = project / "build" / "tools" / "screenshot" / "pulp-screenshot";
         std::ofstream script(screenshot);
@@ -2206,6 +2242,16 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
 #endif
 }
 
+// A minimal Pulp project root for pulp_status. Run from the checkout, the
+// tool lists core/ and test/ and asks git for the branch, so the test would
+// read the whole tree; these cases only need it to find a project.
+static std::filesystem::path make_status_project(const std::filesystem::path& dir) {
+    std::filesystem::create_directories(dir / "core");
+    std::filesystem::create_directories(dir / "test");
+    std::ofstream(dir / "CMakeLists.txt") << "project(StatusFixture VERSION 1.0.0)\n";
+    return dir;
+}
+
 TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
     TempDir home;
     {
@@ -2216,7 +2262,8 @@ TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
     ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
     ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
     ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
-    ScopedCurrentPath cwd(repo_root_path());
+    TempDir project;
+    ScopedCurrentPath cwd(make_status_project(project.path));
 
     auto response = handle_request(tool_call("21", "pulp_status"));
     require_contains(response,
@@ -2301,7 +2348,8 @@ TEST_CASE("temp-repo git stays isolated despite an inherited GIT_DIR",
 
 TEST_CASE("MCP status resolves import-design defaults from config and env",
           "[mcp][tools][import-design]") {
-    ScopedCurrentPath cwd(repo_root_path());
+    TempDir project;
+    ScopedCurrentPath cwd(make_status_project(project.path));
 
     SECTION("built-ins stay live and js when no config or env is present") {
         TempDir home;
@@ -3335,7 +3383,8 @@ TEST_CASE("pulp_audio_render validates its latency arguments before shelling out
     // The proof itself is exercised end-to-end by the CLI shellout tests; what
     // is asserted here is that the MCP surface refuses garbage rather than
     // forwarding it.
-    ScopedCurrentPath cwd(repo_root());
+    CliProjectRoot project(built_cli());
+    ScopedCurrentPath cwd(project.path());
     int id = 90;
     auto call = [&](const char* args) {
         return handle_request(tool_call(std::to_string(id++), "pulp_audio_render", args));
@@ -3352,12 +3401,12 @@ TEST_CASE("pulp_audio_render validates its latency arguments before shelling out
         call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_expect":-2})"),
         "latency_expect must be an integer >= 0");
 
-    // A well-formed latency request reaches the shellout (which fails here --
-    // the plugin does not exist -- but as a well-formed JSON-RPC result, not a
-    // validation error). This is the branch that assembles the CLI flags.
+    // A well-formed latency request reaches the shellout, which assembles the CLI
+    // flags. This build's CLI runs and refuses the plugin, because none exists:
+    // only a real run of it prints that refusal.
     auto ok = call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,
                        "input_signal":"noise","latency_policy":"delayed-null",
                        "latency_tolerance":0,"latency_expect":512})");
     require_contains(ok, R"JSON("jsonrpc":"2.0")JSON");
-    require_contains(ok, R"JSON("content")JSON");
+    require_contains(ok, "pulp audio render: failed to load 'X.clap'");
 }

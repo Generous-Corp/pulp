@@ -78,6 +78,18 @@ target_compile_definitions(pulp-test-design-import-native-materializer PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
+# The generated-source compiles read headers only from these include roots (the
+# test refuses a compile whose dependency file reaches anywhere else in the
+# checkout); the fader case reads one image, and the include-root control
+# copies one music header.
+pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
+    SOURCES test_design_import_native_materializer.cpp
+    PATHS
+        core/view/include core/canvas/include core/runtime/include core/platform/include
+        core/events/include core/state/include core/audio/include core/midi/include
+        core/signal/include core/host/include
+        core/music/include/pulp/music/pitch.hpp
+        test/fixtures/import-fidelity/assets/fader_ref.png)
 
 # A lowered on/off, proved on BOTH consumers of a control: the native
 # materializer's binder callbacks and the emitted script the widget bridge
@@ -338,3 +350,7 @@ target_link_libraries(pulp-test-design-import-screenshot-parity
     PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-screenshot-parity
     PROPERTIES LABELS "parser-import")
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-design-import-native-materializer NONE) # the host C++ compiler and xcrun

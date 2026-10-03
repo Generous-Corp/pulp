@@ -1997,12 +1997,108 @@ TEST_CASE("a wheel over an open overlay lands inside it, not on the view beneath
     CHECK(counts.plot == 1);
     CHECK(counts.row == 1);
 
-    // A non-modal popover leaves the rest of the screen live: outside it, the
-    // plot still scrolls, exactly as before.
-    pulp::view::deliver_mouse_wheel(root, {600.0f, 400.0f}, 0.0f, 3.0f, {});
-    CHECK(counts.plot == 2);
     // Passive input never dismisses.
     CHECK(root.interaction().active_overlay == scene.menu);
+    scene.menu->release_overlay();
+}
+
+TEST_CASE("a wheel outside an open non-modal popover reaches nothing behind it",
+          "[view][overlay][wheel]") {
+    OverlayGuard g;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+    WheelCounts counts;
+    count_wheels(scene, counts);
+    const Point elsewhere{600.0f, 400.0f};
+
+    // Control: nothing open, the plot scrolls.
+    pulp::view::deliver_mouse_wheel(root, elsewhere, 0.0f, 3.0f, {});
+    REQUIRE(counts.plot == 1);
+
+    // A menu is open (no dialog role): scrolling elsewhere does nothing, as
+    // with a macOS menu, and still dismisses nothing.
+    scene.menu->claim_overlay();
+    const auto route = pulp::view::route_passive_pointer(root, elsewhere);
+    CHECK(route.blocked);
+    CHECK(route.target == nullptr);
+    pulp::view::deliver_mouse_wheel(root, elsewhere, 0.0f, 3.0f, {});
+    CHECK(counts.plot == 1);
+    CHECK(root.interaction().active_overlay == scene.menu);
+
+    // A popover that takes no pointer input owns nothing on screen.
+    scene.menu->set_pointer_events(View::PointerEvents::none);
+    CHECK_FALSE(pulp::view::route_passive_pointer(root, elsewhere).blocked);
+    scene.menu->set_pointer_events(View::PointerEvents::auto_);
+
+    // The policy knob restores the earlier fall-through.
+    pulp::view::OverlayDismissalPolicy permissive;
+    permissive.passive_input_outside_overlay_blocked = false;
+    pulp::view::set_overlay_dismissal_policy(permissive);
+    pulp::view::deliver_mouse_wheel(root, elsewhere, 0.0f, 3.0f, {});
+    CHECK(counts.plot == 2);
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+
+    // Closed, the plot responds again.
+    scene.menu->release_overlay();
+    pulp::view::deliver_mouse_wheel(root, elsewhere, 0.0f, 3.0f, {});
+    CHECK(counts.plot == 3);
+}
+
+TEST_CASE("a wheel inside an open overlay never chains past the overlay root",
+          "[view][overlay][wheel][containment]") {
+    OverlayGuard g;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+    // The rail and the trigger are the menu's tree ancestors but lie OUTSIDE
+    // the overlay: a zoom or pan handler there must not hear a tick that
+    // landed on the menu. The bottom row is inside the tree hit test's reach,
+    // so the same point resolves to the same row with or without the claim.
+    View* rail = scene.menu->parent()->parent();
+    int rail_dom = 0, rail_native = 0, menu_dom = 0, row_native = 0;
+    rail->on_dom_wheel_event = [&](const pulp::view::MouseEvent&, bool) { ++rail_dom; };
+    rail->on_pointer_event = [&](const pulp::view::MouseEvent& e) {
+        if (e.is_wheel) ++rail_native;
+    };
+    scene.menu->on_dom_wheel_event = [&](const pulp::view::MouseEvent&, bool) { ++menu_dom; };
+    // A row handler that does NOT consume (a list already at its end).
+    scene.bottom_row->on_pointer_event = [&](const pulp::view::MouseEvent& e) {
+        if (e.is_wheel) ++row_native;
+    };
+
+    // Control: with nothing claimed the tick bubbles all the way up.
+    pulp::view::deliver_mouse_wheel(root, UpwardMenuScene::kBottomRow, 3.0f, 0.0f, {});
+    REQUIRE(rail_dom == 1);
+    REQUIRE(rail_native == 1);
+    REQUIRE(menu_dom == 1);
+    REQUIRE(row_native == 1);
+
+    scene.menu->claim_overlay();
+    const auto route = pulp::view::route_passive_pointer(root, UpwardMenuScene::kBottomRow);
+    CHECK(route.overlay == scene.menu);
+    pulp::view::deliver_mouse_wheel(root, UpwardMenuScene::kBottomRow, 3.0f, 0.0f, {});
+    // The overlay itself and its rows still hear it...
+    CHECK(menu_dom == 2);
+    CHECK(row_native == 2);
+    // ...nothing outside it does.
+    CHECK(rail_dom == 1);
+    CHECK(rail_native == 1);
+
+    // A submenu stacked on the menu is its own boundary: the menu beneath
+    // does not hear a tick that landed on the submenu.
+    View* submenu = add_child_at(*scene.menu, std::make_unique<TestView>(),
+                                 {0.0f, 300.0f, 200.0f, 100.0f});
+    int submenu_dom = 0;
+    submenu->on_dom_wheel_event = [&](const pulp::view::MouseEvent&, bool) { ++submenu_dom; };
+    submenu->claim_overlay(scene.menu);
+    REQUIRE(root.overlay_depth() == 2);
+    // Root y of the submenu: menu top 110 + 300.
+    pulp::view::deliver_mouse_wheel(root, {150.0f, 450.0f}, 0.0f, 3.0f, {});
+    CHECK(submenu_dom == 1);
+    CHECK(menu_dom == 2);
+    CHECK(rail_dom == 1);
+    submenu->dismiss_claimed_overlay();
     scene.menu->release_overlay();
 }
 

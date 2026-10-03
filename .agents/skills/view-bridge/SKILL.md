@@ -119,6 +119,82 @@ went from 1.4–2.1 s to 12–20 ms, and the full document drew at ~0.5 s warm /
 ~0.9 s cold once the costs below were also removed (see `import-design`,
 "Editor-open cost of a materialized document").
 
+### The first frame must already look like the plug-in
+
+View-first opening means the DAW **shows** the editor for a while before the
+document draws: first the host view's backing layer (until the first Metal
+frame), then every frame painted over an empty tree (until the document
+mounts, ~0.5–1 s for a materialized document, several seconds on a loaded
+host). Whatever colour fills those is the first impression of the plug-in. It
+used to be the framework default navy (`kEditorHostClearRgb`, 0x1E1E2E, which
+is also `Theme::dark()`'s `bg.primary`) for every plug-in — a dark editor
+flashed blue-grey on every open.
+
+- Declare the editor's own background:
+  `std::optional<std::uint32_t> editor_background() const override` returning
+  0xRRGGBB — for a scripted UI, its page/root background (`:root { --bg }`).
+  It is called on the main thread at each open, so an editor with
+  user-selectable colour schemes returns the active scheme's colour.
+  Undeclared, `ViewBridge` uses the root theme's `bg.primary` (right for a
+  native/AutoUi editor), then the default.
+- Derive the value from the design source at build time rather than
+  restating it in C++, or a redesign leaves the open frame stale (Spectr's
+  CMake reads `--bg` out of its materialized document).
+- Adapters must build host options through `editor_host_options(bridge, gpu,
+  size)` (`gpu_host_select.hpp`); a hand-built `PluginViewHost::Options` drops
+  the colour and that format opens on the default again.
+- Hosts paint it in **three** places, and a check that sees one is not
+  enough: the backing layer (seeded before the view can join a window), the
+  frame fill under the tree, and the letterbox bars around a pinned viewport
+  (visible after the UI is up when the host's aspect differs).
+- Do not paint a poster/snapshot of the UI instead: a default-state poster
+  shows the wrong knob positions, band counts and spectrum for the user's
+  session and then jumps to the real ones — a different flash, not none. The
+  honest pre-document frame is the plug-in's own background plus any chrome
+  the editor already draws in its final place (e.g. a native resize grip).
+- An SDK older than this API: shim from the plug-in — paint the root's
+  background (`View::set_background_color`) and recolour the host view's
+  backing layer in `on_view_opened()` (AU v2 attaches before it returns the
+  view) — keyed on `PULP_FORMAT_HAS_EDITOR_BACKGROUND` for removal.
+
+Gate it on **presented pixels**, not on the option being set: read back every
+presented drawable (a GPU blit into a shared buffer — no screenshot or
+screen-recording permission) from view creation until the UI is stable, cold
+and warm, at the preferred and minimum host sizes, and fail any frame that is
+neither the background (plus already-final chrome) nor the settled UI, and a
+backing layer that is not the background. Keep the framework navy as a named
+class so the defect reads as itself. Negative control: the same gate on a
+build without the declaration must fail on every open. In-tree:
+`test_plugin_view_host_first_frame_macos.mm` (both macOS hosts, layer +
+read-back frame, with an undeclared host as the control); downstream example:
+Spectr's `Spectr-au-editor-first-frame-*` ctests driving the real AU v2 Cocoa
+view off screen. Time the gap with the `trace-analysis` first-frame recipe.
+
+Out of process (Logic hosts AU v2 in AUHostingService): instantiate with
+`kAudioComponentInstantiation_LoadOutOfProcess`, take the editor from
+`-[AUAudioUnit requestViewControllerWithCompletionHandler:]`, and read back the
+**host's own window** (a process may read its own windows without
+screen-recording permission; the window server composites the remote editor
+into it). Give the host window a loud backdrop (magenta) so "nothing composited
+yet" cannot pass as a dark background. What only this path shows:
+
+- The host container has no background of its own; until the remote layer
+  arrives the host's window shows through. The plug-in's backing-layer colour
+  is what the remote layer shows first.
+- A host resize sent right after open is handled by the plug-in process's main
+  thread, which is busy mounting the document, so the document can present at
+  the old size and be shown cropped (plus host backdrop) until the resize is
+  processed. Blocking main-thread document work costs resize latency OOP, not
+  only time-to-content.
+- Edge-anchored chrome can sit a pixel or two off and a black 1-px host edge
+  can show for a frame while the remote content and the host converge on one
+  size; classify that separately from an off-brand colour.
+- `launchctl setenv` does not reach AUHostingService, so `PULP_TRACE_PATH`
+  cannot start a trace in the plug-in process there; measure OOP from the host
+  window and use the in-process probe for spans.
+- Requesting a second view controller from the same remote instance did not
+  paint in a probe; instantiate a fresh unit per measured open.
+
 ## Lifecycle protocol — adapter author side
 
 ```
@@ -315,9 +391,25 @@ overlay that escapes its ancestors' bounds — a full-editor scrim mounted insid
 a toolbar button — paints over the content, but the tree hit test cannot descend
 into it there and lands on whatever it covers, so a scroll over a dialog's
 backdrop used to zoom the plot behind it. Inside a shown overlay the input goes
-to the overlay's own subtree; outside every overlay while a MODAL one is open
-(`ModalOverlay`, or an overlay with `AccessRole::dialog`) it is dropped;
-otherwise the tree answers as before. Hidden overlays count for nothing — and
+to the overlay's own subtree; outside every overlay while ANY shown overlay is
+open — a modal dialog, or a non-modal menu, dropdown or submenu — it is dropped,
+as on macOS, where scrolling elsewhere while a menu is open does nothing
+(`OverlayDismissalPolicy::passive_input_outside_overlay_blocked`, default on;
+off restores the old rule that only a MODAL overlay blocked, and an overlay
+with `pointer-events: none` never blocks). With nothing open the tree answers.
+
+A wheel that lands INSIDE an overlay is also contained there
+(`PassivePointerRoute::overlay`): the native bubble stops at the overlay root,
+and the web-compat DOM bubble stops at that element (the bridge adds
+`__pulpWheelBoundary: "<overlay element id>"` to the wheel payload, and
+`_dispatchEvent` skips every element above it except `__root__`, a React-DOM
+delegate). So a menu whose list is already at its end, or a tick over its fixed
+header, never chains to a zoom handler on the plot the menu is mounted inside —
+the defect was a user scrolling a Modulation submenu and zooming the view
+behind it. A submenu stacked with `overlayParent` is its own boundary. The
+React-DOM delegated lane still dispatches by fiber tree from `__root__`, so it
+is not contained; `@pulp/react` and web-compat element listeners are.
+Hidden overlays count for nothing — and
 `root_overlay_owns_keyboard` likewise ignores a claimed popover that is not on
 screen, so a dialog that stays mounted while closed cannot hold the DAW's
 keyboard.
@@ -2574,6 +2666,53 @@ Bloom, glow and per-band gradients cost per lit element, so an effect that is
 free on a silent editor can dominate a frame with loud, dense audio. Cap the
 number of glowing elements or reuse one cached gradient, and judge the cost
 with real audio running, never on an idle editor.
+
+### 7. Hydrate before the first render; never setState for initial data after mount
+
+The editor open is a commit budget too. Every piece of initial state that
+arrives AFTER the first render -- a mount effect that requests state, a
+`.then(setX)` on a native reply, a hydrate delivered in an animation frame, a
+passive effect that hands that hydrate on, a native `load_script` that flips a
+flag -- is another commit, and in a materialized import each one re-applies
+the captured document. Host-callback batching (`__pulpBatchUpdates__` around
+rAF/timer callbacks and one native message's listeners) merges updates inside
+ONE callback; it cannot merge a promise job with a later frame or a passive
+effect, and Pulp deliberately does not batch the microtask queue: @pulp/react
+renders a LegacyRoot, code may read the tree right after a `setState` in a
+`.then`, and wrapping the engine's job drain would re-enter it from script.
+So the fix belongs in the app:
+
+- **Read initial state synchronously and render with it.** A native dispatch
+  that returns its answer (an `EditorBridge` handler called through the
+  realm's dispatcher) can be read in a `useState` initializer. Read each
+  read-only verb ONCE per realm and hand every component the same answer, so
+  the whole first render agrees on one state.
+- **Reconcile instead of re-hydrating.** After listeners subscribe, re-read
+  once and hydrate only if the processor moved between the first render and
+  the subscription; nothing published in that window is lost and the common
+  case commits nothing.
+- **Arm "do not echo" guards from the seed.** A publication effect that sends
+  the editor's state back to the processor must treat the seeded state as
+  already published, or the mount writes the processor's own state back.
+- **Late mounts go in a layout effect, not a passive one.** Something that
+  must be created after the first render (to keep generated native ids
+  stable, say) can `setState` in `useLayoutEffect`: a LegacyRoot flushes that
+  inside the mount, before the first present, instead of as a commit of its
+  own. The same holds for state whose first render would change the tree's
+  node order -- hand it over in the layout pass and the first render's ids
+  stay what they were.
+- **Same-value setters are not free when the value is a new object.**
+  `setSelection(new Set())` on mount commits; `setSelection(s => s.size ? new
+  Set() : s)` does not.
+
+Gate it by count: keep a commit counter in the runtime's `resetAfterCommit`
+(commits, re-applies, the count at the end of the mount) and assert, after the
+editor settles, that commits after the mount stay at 0-1 and only the mount's
+first commit re-applies the whole document. Wall time is for tracking. Worked
+example (Spectr, AU v2, M5 Max): six post-mount commits (two from one
+promise-driven modulation read, build info, the rAF hydrate, a passive effect,
+a tracing badge) became zero; ~250 ms of a warm open, and a non-default
+session (48 bands, a boosted band) mounts showing it.
 
 ## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
 

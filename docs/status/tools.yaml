@@ -538,6 +538,24 @@ tools:
   availability: always
   skill: ci
   docs: guides/local-ci.md
+- name: changed-surface-shadow-plans
+  path: tools/scripts/changed_surface_shadow_plans.py
+  category: build-speed
+  use_when: Ranking why changed-surface plans select the full suite instead of a bounded one, across every
+    PR head rather than only the opt-in mac-lane runs, or checking that a planner change moved a reason.
+  invocation: python3 tools/scripts/changed_surface_shadow_plans.py rank --since <ISO> [--until <ISO>] [--json]
+  inputs: The `changed-surface-shadow-plan` artifact (90-day retention) that
+    .github/workflows/changed-surface-shadow-plan.yml uploads for every pull-request head, and that
+    workflow's runs, from the GitHub API.
+  outputs: Plans ÷ PR heads, and a per-reason table (planner reason, bounded, unlabelled, planner_error,
+    missing_record) with a count and an example PR each; `--json`.
+  caveat: Counts only records whose origin is `shadow_plan_step`. They never execute, so this measures
+    selection, never executed bounded plans; a lane proxy must not divide by these. A head whose run
+    uploaded nothing is counted as `missing_record`, so a low plans ÷ heads means the instrument is
+    blind, not that plans were good.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
 - name: reuse-policy-replay
   path: tools/scripts/reuse_policy_replay.py
   category: build-speed

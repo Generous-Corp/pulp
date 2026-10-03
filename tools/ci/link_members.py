@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Which archive members did each executable's link actually pull?
+"""Which archive members did each executable's or module's link actually pull?
 
 An executable depends on a static archive only through the members the
 linker loaded, and ld64 / ld-prime write that set when asked (`-Wl,-map,F`):
@@ -17,10 +17,21 @@ executables pull largely the same members:
 
     {"members": {"<build>/core/state/libpulp-state.a": ["state_migration.cpp.o", "store.cpp.o", ...]},
      "executables": {"<build>/test/pulp-test-state": {
+         "kind": "executable",
          "objects": ["<build>/test/CMakeFiles/.../test_state.cpp.o", ...],
          "archives": {"<build>/core/state/libpulp-state.a": {"members": [0, 1], "whole": false}}}}}
 
-`expand()` turns that back into member names per executable.
+`expand()` turns that back into member names per executable. The map is named
+for its first use but also holds loadable modules (`-bundle` links, CMake
+MODULE_LIBRARY targets such as plug-in bundles, `"kind": "module"`) and shared
+libraries (`-dynamiclib` / `-shared`, `"kind": "shared"`). Partial links (`-r`)
+are not recorded; `unrecorded` counts them.
+
+A reader must call `unusable()` first and treat any reason it returns as "no
+record": an unknown schema or kind, or a link it could not see, means the map
+does not describe every link, and a reuse key built from it would miss a
+change. A shared library is a kind of its own because its content reaches the
+binaries that load it without changing their bytes or their maps.
 
 An archive is `whole` when the link line loads every member regardless of use
 (`-force_load <archive>`, `-all_load`, `-ObjC`): a key over it must cover all
@@ -38,7 +49,12 @@ import re
 import sys
 from pathlib import Path
 
-SCHEMA = "pulp-link-members/v1"
+SCHEMA = "pulp-link-members/v3"
+# Schemas a reader may interpret. v1 recorded executables only and carried no
+# kind; v2 added modules; v3 added shared libraries and the `unrecorded` count.
+READABLE_SCHEMAS = ("pulp-link-members/v1", "pulp-link-members/v2", SCHEMA)
+# Kinds whose dependency on archive members the map describes completely.
+MODELLED_KINDS = ("executable", "module")
 MEMBERS_DIR = "link-members"
 _ROW = re.compile(r"^\[\s*\d+\]\s+(.*)$")
 _MEMBER = re.compile(r"^(.*\.a)\((.*)\)$")
@@ -127,7 +143,9 @@ def whole_archive_flags(args: list[str], cwd: Path, build_root: Path) -> tuple[s
 
 
 def parse_link(objects_text: list[str], args: list[str], build_root: Path) -> tuple[str, dict]:
-    """(executable, {"objects", "archives"}) for one recorded link."""
+    """(output, {"kind", "objects", "archives"}) for one recorded link: an
+    executable, a loadable module (`-bundle`, a CMake MODULE_LIBRARY such as
+    a plug-in bundle) or a shared library (`-dynamiclib` / `-shared`)."""
     cwd, path, inputs = parse_map(objects_text)
     if not path or not inputs:
         raise ValueError("no output path or no object files")
@@ -135,6 +153,8 @@ def parse_link(objects_text: list[str], args: list[str], build_root: Path) -> tu
     forced, everything = whole_archive_flags(args, base, build_root)
     found = members_of(inputs, base, build_root)
     return _normalise(path, base, build_root), {
+        "kind": "module" if "-bundle" in args else
+                "shared" if "-dynamiclib" in args or "-shared" in args else "executable",
         "objects": found["objects"],
         "archives": {a: {"members": ms, "whole": everything or a in forced}
                      for a, ms in found["archives"].items()},
@@ -155,7 +175,28 @@ def collect(build_dir: Path) -> dict:
             executables[exe] = rec
         except (OSError, ValueError):
             unreadable += 1
-    return compact({"schema": SCHEMA, "executables": executables, "unreadable": unreadable})
+    unrecorded = len(list((build_dir / MEMBERS_DIR).glob("*.unrecorded")))
+    return compact({"schema": SCHEMA, "executables": executables, "unreadable": unreadable,
+                    "unrecorded": unrecorded})
+
+
+def unusable(doc: dict | None) -> str | None:
+    """Why a reader must not build a reuse key from this record, or None.
+
+    A schema this module does not know may hold kinds it cannot interpret; a
+    shared library or a partial link changes what loads without changing the
+    linking binary's map. Each makes the record incomplete, so the reader falls
+    back to "no record" rather than trusting part of it."""
+    if not isinstance(doc, dict):
+        return "no record"
+    if doc.get("schema") not in READABLE_SCHEMAS:
+        return f"unknown schema {doc.get('schema')!r}"
+    kinds = {rec.get("kind", "executable") for rec in (doc.get("executables") or {}).values()}
+    if kinds - set(MODELLED_KINDS):
+        return f"links of kind {', '.join(sorted(kinds - set(MODELLED_KINDS)))} are not modelled"
+    if doc.get("unrecorded"):
+        return f"{doc['unrecorded']} link(s) not recorded"
+    return None
 
 
 def compact(doc: dict) -> dict:
@@ -167,7 +208,7 @@ def compact(doc: dict) -> dict:
     members = {a: sorted(ms) for a, ms in sorted(table.items())}
     index = {a: {m: i for i, m in enumerate(ms)} for a, ms in members.items()}
     executables = {
-        exe: {"objects": rec["objects"],
+        exe: {"kind": rec.get("kind", "executable"), "objects": rec["objects"],
               "archives": {a: {"members": sorted(index[a][m] for m in info["members"]), "whole": info["whole"]}
                            for a, info in rec["archives"].items()}}
         for exe, rec in doc["executables"].items()}
@@ -175,9 +216,12 @@ def compact(doc: dict) -> dict:
 
 
 def expand(doc: dict) -> dict[str, dict]:
-    """executable -> {"objects", "archives": {archive: {"members": [names], "whole"}}}."""
+    """executable -> {"objects", "archives": {archive: {"members": [names], "whole"}}}.
+    Raises ValueError for a schema this module cannot read."""
+    if doc.get("schema") not in READABLE_SCHEMAS:
+        raise ValueError(f"unknown link-members schema {doc.get('schema')!r}")
     members = doc.get("members", {})
-    return {exe: {"objects": rec["objects"],
+    return {exe: {"kind": rec.get("kind", "executable"), "objects": rec["objects"],
                   "archives": {a: {"members": [members[a][i] for i in info["members"]], "whole": info["whole"]}
                                for a, info in rec["archives"].items()}}
             for exe, rec in doc["executables"].items()}
@@ -186,7 +230,10 @@ def expand(doc: dict) -> dict[str, dict]:
 def cmd_collect(a: argparse.Namespace) -> int:
     doc = collect(Path(a.build_dir).resolve())
     Path(a.out).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-    print(f"link-members: {len(doc['executables'])} executables, {doc['unreadable']} unreadable")
+    kinds = [rec["kind"] for rec in doc["executables"].values()]
+    print(f"link-members: {kinds.count('executable')} executables, {kinds.count('module')} modules, "
+          f"{kinds.count('shared')} shared libraries, {doc['unreadable']} unreadable, "
+          f"{doc['unrecorded']} unrecorded")
     return 0
 
 

@@ -535,6 +535,24 @@ def _reproduce_tree(
                 if cumulative_base is None:
                     raise NotGeneratedBump("cumulative head omitted its immutable base")
                 _assert_writer_unchanged(repo, base, cumulative_base)
+                if cumulative_base == base:
+                    # The group is the bump alone on its own base, so the
+                    # exact cumulative projection IS the projection just
+                    # proven. Regenerating it again in a second worktree would
+                    # not be: the trusted scripts are bound to the base
+                    # worktree, and a regenerator that anchors its root to its
+                    # own location (gpu_handoff_provenance.py does) writes the
+                    # first worktree and leaves the second stale.
+                    if _git_text(repo, "rev-parse", f"{cumulative_head}^{{tree}}") != (
+                        expected_tree
+                    ):
+                        raise NotGeneratedBump(
+                            "merge-group tree differs from the exact cumulative projection"
+                        )
+                    _path_projection(
+                        repo, base=base, observed=cumulative_head, edited=edited
+                    )
+                    return assignments
                 cumulative_worktree = Path(holder) / "cumulative"
                 cumulative_added = False
                 try:

@@ -140,3 +140,8 @@ if(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS AND NOT WIN32)
         SOURCES test_pulp_node_v1_rust.cpp
         LIBRARIES pulp::native-components pulp-node-rust)
 endif()
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-group-native-platform NONE)    # /bin/sh, sleep, ping, cmd, /bin/pwd
+pulp_test_spawns(pulp-test-native-core-processor NONE)    # fork without exec

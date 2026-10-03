@@ -304,6 +304,34 @@ the generated graph, not the CMake text —
 `grep "pulp-test-cli-<suite>.dir/all: tools/cli/CMakeFiles/pulp-cli.dir/all"
 build/CMakeFiles/Makefile2` must print a line.
 
+For a tool other than pulp-cli (pulp-import-design, a fixture), use
+`pulp_test_spawns(<suite> <tool>)` from `tools/cmake/PulpTestData.cmake` next
+to the suite; it defers the edge the same way, and configure fails when a
+`$<TARGET_FILE:x>` definition has no edge. The MCP audio tool tests
+(pulp-test-mcp-server, pulp-test-mcp-timeline-tools) are on the
+`_cli_shellout_suite` list too: the MCP server runs the CLI it finds under a
+project root's `build/tools/cli`, so those tests stage `PULP_CLI_BINARY`
+there through `CliProjectRoot` (test/mcp_server_test_support.hpp) rather than
+running whatever sits in the checkout's `build/`.
+
+### A shell-out test's data includes what the spawned CLI reads
+
+A test selector reuses a test's result when none of its inputs changed, and
+for a shell-out suite the inputs include every checkout file the spawned
+`pulp-cpp` opens: the tool registry (`tools/packages/tool-registry.json`),
+`.claude-plugin/plugin.json`, `tools/shipyard.toml`. Those sit under paths a
+selector treats as non-build input (`tools/`, `docs/`, `.claude*`), so an
+undeclared read there is a test the selector can wrongly skip. Declare them
+next to the suite with `pulp_test_data(<suite> NO_DEFINE PATHS ...)`. A command
+that walks the checkout (`pulp doctor`, `pulp status`, `pulp docs`) cannot be
+described by a path list: declare its suite `pulp_test_data(<suite>
+WHOLE_CHECKOUT)`, which is never skipped. `pulp-cli` itself carries
+WHOLE_CHECKOUT because ctest runs `pulp-cpp` directly (`cli-doctor`,
+`cli-status`, ...). A test target defined in `tools/cli/CMakeLists.txt` is
+scanned like one under `test/` once ctest runs it, so a new one that reads the
+checkout needs its declaration there, after the target. The nightly read
+audit (`tools/ci/read_audit.py`) is what finds a read nobody declared.
+
 ### The C++ lease path is interactive unless told otherwise
 
 `TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`; `pulp build
@@ -440,6 +468,22 @@ disappear. The `fsutil` contract (including the lexical-normalization caveat
 that a symlink inside the root still reads as "within") is pinned in the header
 comments and covered by the `[fs-safety]` cases in
 `test/test_cli_kit_commands.cpp` — update both sides when changing it.
+
+#### `#ifdef _WIN32` CLI code is compiled only by the release legs
+
+Every required gate is Clang on macOS, so nothing a PR runs compiles a
+`#ifdef _WIN32` block in `tools/cli/`. A Windows-only mistake there stays green
+through merge and surfaces only when `release-cli.yml`'s `CLI windows-x64` /
+`CLI windows-arm64` legs build the tag — and the `release` job is gated on every
+leg, so one MSVC error publishes nothing for that tag and every tag after it
+until a fix lands (a tag's own source is what gets built; a fix on `main` cannot
+rescue an already-cut tag). The concrete case: a refactor that extracted
+`kit_profile_verification.cpp` carried two `_WIN32`
+`shell_quote_local(const fs::path&)` definitions — one in the anonymous
+namespace, one in `pulp::cli::kit` — and MSVC rejected the call site as
+ambiguous (C2668). When moving or extracting helpers, grep the destination TU
+for an existing definition inside *both* branches of every platform `#ifdef`,
+and keep the cmd.exe-correct quoting (double quotes) on the Windows side.
 
 ### 2. Update the CLI commands manifest
 - [ ] Add entry to `docs/status/cli-commands.yaml` with:

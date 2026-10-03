@@ -1212,6 +1212,75 @@ TEST_CASE("Event contract: nested raw wheel ancestors fire without duplicating D
 }
 
 
+TEST_CASE("Event contract: a wheel inside an open overlay never reaches a listener outside it",
+          "[view][bridge][events][contract][overlay][wheel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    set_overlay_dismissal_policy(OverlayDismissalPolicy{});
+
+    // plot > menu (the overlay) > row. The plot listens both ways a page can:
+    // an element listener and a raw registered callback.
+    bridge.load_script(R"(
+        var plot_dom = 0, plot_raw = 0, menu_dom = 0, row_dom = 0;
+        var plot = document.createElement('div');
+        var menu = document.createElement('div');
+        var row = document.createElement('div');
+        document.body.appendChild(plot);
+        plot.appendChild(menu);
+        menu.appendChild(row);
+        plot.addEventListener('wheel', function() { plot_dom++; });
+        on(plot._id, 'wheel', function() { plot_raw++; });
+        registerWheel(plot._id);
+        menu.addEventListener('wheel', function() { menu_dom++; });
+        // A row handler that does not consume: a list already at its end.
+        row.addEventListener('wheel', function() { row_dom++; });
+        globalThis.__plot_id = plot._id;
+        globalThis.__menu_id = menu._id;
+        globalThis.__row_id = row._id;
+    )");
+    const auto id = [&](const char* name) {
+        return std::string(engine.evaluate(name).getWithDefault<std::string_view>(""));
+    };
+    auto* plot = bridge.widget(id("globalThis.__plot_id"));
+    auto* menu = bridge.widget(id("globalThis.__menu_id"));
+    auto* row = bridge.widget(id("globalThis.__row_id"));
+    REQUIRE(plot != nullptr);
+    REQUIRE(menu != nullptr);
+    REQUIRE(row != nullptr);
+    plot->set_bounds({0, 0, 400, 300});
+    menu->set_bounds({20, 20, 150, 200});
+    row->set_bounds({0, 0, 150, 30});
+    const auto count = [&](const char* name) {
+        return engine.evaluate(name).getWithDefault<int>(-1);
+    };
+
+    WheelHost host;
+    host.request_repaint = [] {};
+    // Control: no overlay open, the tick reaches every listener once.
+    deliver_mouse_wheel(root, {40, 30}, 0.0f, 3.0f, host);
+    REQUIRE(count("row_dom") == 1);
+    REQUIRE(count("menu_dom") == 1);
+    REQUIRE(count("plot_dom") == 1);
+    REQUIRE(count("plot_raw") == 1);
+
+    bridge.load_script("claimOverlay(globalThis.__menu_id, false, '');");
+    REQUIRE(root.interaction().active_overlay == menu);
+    deliver_mouse_wheel(root, {40, 30}, 0.0f, 3.0f, host);
+    CHECK(count("row_dom") == 2);
+    CHECK(count("menu_dom") == 2);
+    CHECK(count("plot_dom") == 1);
+    CHECK(count("plot_raw") == 1);
+
+    // Outside the menu, while it is open: swallowed.
+    deliver_mouse_wheel(root, {350, 250}, 0.0f, 3.0f, host);
+    CHECK(count("plot_dom") == 1);
+    CHECK(count("plot_raw") == 1);
+    menu->release_overlay();
+}
+
 TEST_CASE("setBackgroundGradient parses linear / radial / conic into the right kind",
           "[view][widget-bridge][gradient]") {
     // The CSS parser must route each gradient form to the matching View kind

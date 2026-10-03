@@ -84,6 +84,31 @@ TAG_IMMUTABLE_FAILURE_SIGNATURES = (
     "does not match pinned revision",
 )
 
+# A compiler diagnostic against a source file is the same kind of fact: the
+# sources are frozen at the tag, so every re-run compiles the same bytes and
+# rejects them the same way. v0.897.3, v0.898.0 and v0.899.0 each failed their
+# Windows legs on one MSVC C2668 in a CLI source and were re-dispatched on every
+# sweep — three full release matrices apiece, ~50 minutes each, for an outcome no
+# re-run could change.
+#
+# Matched narrowly, so an environmental failure keeps the retry path:
+#   * MSVC `file(line[,col]): error C2xxx-C9xxx:` — the language errors. C1xxx
+#     are the fatal ones (C1060 out of heap space, C1083 cannot open include
+#     file), which a resource limit or an incomplete fetch can cause.
+#   * Clang/GCC `file:line:col: error:` — a plain `error:` only. `fatal error:`
+#     (missing include) and `internal compiler error:` do not match.
+# Linker errors are deliberately absent: an undefined symbol can come from an
+# interrupted dependency build as easily as from the tree.
+_SOURCE = r"[^\\/\s:()]+\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|m|mm)"
+TAG_IMMUTABLE_COMPILE_ERRORS = (
+    re.compile(_SOURCE + r"\(\d+(?:,\d+)?\): error C[2-9]\d{3}: [^\r\n]*"),
+    re.compile(_SOURCE + r":\d+:\d+: error: [^\r\n]*"),
+)
+# MSBuild appends the project file to every diagnostic; it says nothing a reader
+# needs and pushes the useful part out of a one-line summary.
+_MSBUILD_PROJECT_SUFFIX = re.compile(r"\s*\[[^\]]*\.vcxproj\]\s*$")
+_SIGNATURE_LIMIT = 200
+
 
 def tag_immutable_failure(log_text: str) -> str | None:
     """Return the signature proving a failure is a property of the tag, if any.
@@ -92,10 +117,18 @@ def tag_immutable_failure(log_text: str) -> str | None:
     the capacity path asks "may this run keep a dedicated runner?". Both mean the
     same thing — can a re-run change the outcome — so they must not grow separate
     definitions of "doomed" that can later disagree.
+
+    A compile error is returned as `compile error: <first diagnostic>`, so the
+    incident names the file and the error without anyone opening the log.
     """
     for signature in TAG_IMMUTABLE_FAILURE_SIGNATURES:
         if signature in log_text:
             return signature
+    for pattern in TAG_IMMUTABLE_COMPILE_ERRORS:
+        match = pattern.search(log_text)
+        if match:
+            diagnostic = _MSBUILD_PROJECT_SUFFIX.sub("", match.group(0)).strip()
+            return f"compile error: {diagnostic[:_SIGNATURE_LIMIT]}"
     return None
 
 
@@ -160,6 +193,9 @@ class TagState:
     run_states: tuple[str, ...]  # states of every release-cli run for this tag
     validation_failures: tuple[str, ...]  # failed product-validation step names
     dispatch_attempts: int   # how many times we have already re-dispatched
+    # "<job> › <first failed step>" for each failed job of the newest completed
+    # run, so an incident names the leg without anyone opening the run.
+    failed_legs: tuple[str, ...] = ()
 
     @property
     def circuit_open(self) -> bool:
@@ -339,6 +375,82 @@ def decide(
     return Decision(REDISPATCH, f"{state.tag}: {detail}")
 
 
+def drought(
+    state: TagState,
+    now: datetime,
+    *,
+    drought_hours: float,
+    newest_published: tuple | None,
+) -> str | None:
+    """Return why an unpublished tag is a standing incident by age alone, or None.
+
+    The other report paths fire only once retries are exhausted or a validation
+    circuit opens. Between those, a tag whose release keeps failing is silently
+    re-dispatched — three tags sat unpublished for hours that way with no issue
+    open. So a tag still unpublished `drought_hours` after it was cut is
+    reported too, naming the legs that failed.
+
+    It does NOT fire on a first build that is merely slow: the pipeline takes
+    70-165+ minutes, and an age threshold alone is exactly what made the
+    retired watchdogs alarm on healthy releases. A live run with no failed leg
+    behind it is left alone; a live run that is a re-dispatch of a failed one
+    is not, so the incident does not flap while a retry is in flight.
+    """
+    if state.published or superseded(state.tag, newest_published):
+        return None
+    age = now - state.created_at
+    if age < timedelta(hours=drought_hours):
+        return None
+    live = any(s in LIVE_RUN_STATES for s in state.run_states)
+    if live and not state.failed_legs:
+        return None
+    hours = age.total_seconds() / 3600
+    return f"unpublished {hours:.1f}h after tagging; {describe_legs(state)}"
+
+
+def describe_legs(state: TagState) -> str:
+    if state.failed_legs:
+        return "failing leg(s): " + "; ".join(state.failed_legs)
+    return "no failed leg recorded (no release run completed)"
+
+
+def failed_legs(jobs: Iterable[dict]) -> tuple[str, ...]:
+    """Name each failed job and the first step it failed in."""
+    legs: list[str] = []
+    for job in jobs:
+        if job.get("conclusion") != "failure":
+            continue
+        step = next(
+            (
+                st.get("name", "")
+                for st in job.get("steps", [])
+                if st.get("conclusion") == "failure"
+            ),
+            "",
+        )
+        name = job.get("name", "unknown job")
+        legs.append(f"{name} › {step}" if step else name)
+    return tuple(legs)
+
+
+def newest_failed_legs(
+    runs: Iterable[dict], job_cache: dict[int, list[dict]]
+) -> tuple[str, ...]:
+    """Failed legs of the newest completed run's latest attempt."""
+    completed = sorted(
+        (r for r in runs if r.get("status") == "completed"),
+        key=lambda r: r.get("created_at", ""),
+        reverse=True,
+    )
+    for run in completed:
+        jobs = job_cache.get(run["id"], [])
+        if not jobs:
+            continue
+        latest = max(int(j.get("run_attempt", 1)) for j in jobs)
+        return failed_legs(j for j in jobs if int(j.get("run_attempt", 1)) == latest)
+    return ()
+
+
 # ── github i/o ───────────────────────────────────────────────────────────────
 
 
@@ -478,6 +590,7 @@ def collect(
                 dispatch_attempts=sum(
                     1 for r in tag_runs if r["event"] == "workflow_dispatch"
                 ),
+                failed_legs=newest_failed_legs(tag_runs, job_cache),
             )
         )
     return states
@@ -665,10 +778,10 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
         return
 
     body = (
-        "Tags the release reconciler could not get published on its own. It "
-        "re-dispatches automatically, so anything listed here has already "
-        "exhausted its retry budget or cannot be fixed by a rebuild — this is a "
-        "real failure, not a flake.\n\n"
+        "Tags the release reconciler could not get published on its own: each "
+        "one exhausted its retry budget, failed in a way a rebuild cannot fix, "
+        "or is still unpublished long after it was cut. Every entry names the "
+        "release legs that failed.\n\n"
         + "\n".join(f"- `{tag}` — {why}" for tag, why in report)
         + "\n\nOpen the failing `release-cli.yml` run and land the fix on `main`. "
         "A product-validation circuit stays open until a later run passes the "
@@ -709,6 +822,7 @@ def main() -> int:
     repo = os.environ["REPO"]
     dry_run = os.environ.get("DRY_RUN", "false") == "true"
     grace = int(os.environ.get("GRACE_MINUTES", "45"))
+    drought_hours = float(os.environ.get("DROUGHT_HOURS", "2"))
     max_age = int(os.environ.get("MAX_AGE_HOURS", "72"))
     max_attempts = int(os.environ.get("MAX_ATTEMPTS", "3"))
     now = datetime.now(timezone.utc)
@@ -763,14 +877,24 @@ def main() -> int:
             stuck_queue_hours=int(os.environ.get("STUCK_QUEUE_HOURS", "4")),
         )
         print(f"  [{decision.action:11}] {decision.reason}")
+        dry_spell = drought(
+            state, now, drought_hours=drought_hours, newest_published=newest_published
+        )
         if decision.action == REDISPATCH:
+            # Report before the budget check: a tag whose re-dispatch is
+            # deferred this sweep is no less overdue.
+            if dry_spell:
+                report.append((state.tag, f"{dry_spell}; re-dispatching"))
             if budget <= 0:
                 print("    (deferred — re-dispatch budget for this sweep is spent)")
                 continue
             budget -= 1
             redispatch(repo, state.tag, dry_run)
         elif decision.action in (CIRCUIT_OPEN, ESCALATE, INCOMPLETE, STUCK_QUEUE):
-            report.append((state.tag, decision.reason))
+            reason = decision.reason
+            if decision.action != INCOMPLETE and state.failed_legs:
+                reason = f"{reason}; {describe_legs(state)}"
+            report.append((state.tag, reason))
         elif incident_stays_open(
             state,
             newest_published=newest_published,
@@ -782,7 +906,11 @@ def main() -> int:
             # ESCALATE this time round. It stays in the incident until it actually
             # publishes; otherwise the incident would close the moment a retry
             # started and reopen the moment it failed, flapping on every sweep.
-            report.append((state.tag, "still unpublished; repair in progress"))
+            report.append(
+                (state.tag, f"still unpublished; repair in progress; {describe_legs(state)}")
+            )
+        elif dry_spell:
+            report.append((state.tag, dry_spell))
 
     sync_incident(repo, report, dry_run)
     # Reporting a problem is not itself a failure — exiting non-zero here would

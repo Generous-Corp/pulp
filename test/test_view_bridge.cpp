@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_ui.hpp>
+#include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
@@ -562,6 +563,102 @@ TEST_CASE("Editor open: a hosted editor returns its view before evaluating the d
     UNSCOPED_INFO("hosted editor open() returned in " << open_ms << " ms");
 
     std::filesystem::remove_all(p.script_path.parent_path());
+}
+
+namespace {
+
+// A view-first scripted editor that declares its own background, the way a
+// captured design with a dark page should.
+class DeclaredBackgroundEditorProcessor final : public StubProcessor {
+public:
+    std::filesystem::path script_path;
+    std::optional<std::uint32_t> background;
+    bool throw_on_background = false;
+
+    std::optional<std::uint32_t> editor_background() const override {
+        if (throw_on_background) throw std::runtime_error("no background");
+        return background;
+    }
+    view::ScriptedUiSession* active_scripted_ui() override { return session.get(); }
+    const view::ScriptedUiSession* active_scripted_ui() const override {
+        return session.get();
+    }
+    std::unique_ptr<view::View> create_view() override {
+        auto root = std::make_unique<view::View>();
+        root->set_bounds({0, 0, 480, 320});
+        session = std::make_unique<view::ScriptedUiSession>(
+            *root, state(),
+            view::ScriptedUiOptions{.script_path = script_path,
+                                    .enable_hot_reload = false,
+                                    .enable_theme_reload = false});
+        if (!session->load_deferrable()) return nullptr;
+        return root;
+    }
+
+    std::unique_ptr<view::ScriptedUiSession> session;
+};
+
+}  // namespace
+
+TEST_CASE("Editor open: the host is handed the plug-in's own background before the document",
+          "[view_bridge][scripted-ui][editor-open][first-frame]") {
+    state::StateStore store;
+    DeclaredBackgroundEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.script_path = write_editor_script("pulp-editor-first-frame",
+                                        "createLabel('status', 'mounted', '');\n");
+    p.background = 0x05070A;
+
+    format::ViewBridge bridge(p, store, format::ViewBridge::Options::hosted_editor());
+    REQUIRE(bridge.open());
+    // Resolved inside open(), while the document is still pending — which is
+    // exactly when the host paints nothing but this colour.
+    REQUIRE(p.session->document_load_pending());
+    CHECK(bridge.view()->child_count() == 0);
+    CHECK(bridge.editor_background_rgb() == 0x05070A);
+
+    // Every adapter builds its host options through one helper; the colour
+    // must survive it, or that format opens on the framework default.
+    format::GpuHostDecision gpu;
+    gpu.use_gpu = true;
+    const auto opts = format::editor_host_options(bridge, gpu, {480, 320});
+    CHECK(opts.background_rgb == 0x05070A);
+    CHECK(opts.use_gpu);
+    CHECK(opts.size.width == 480);
+    CHECK(opts.size.height == 320);
+
+    // Only the low 24 bits are a colour.
+    p.background = 0xFF112233;
+    format::ViewBridge masked(p, store, format::ViewBridge::Options::hosted_editor());
+    REQUIRE(masked.open());
+    CHECK(masked.editor_background_rgb() == 0x112233);
+
+    std::filesystem::remove_all(p.script_path.parent_path());
+}
+
+TEST_CASE("Editor background falls back to the root theme, then the host default",
+          "[view_bridge][first-frame]") {
+    StubProcessor undeclared;
+    // No declaration and no root: the documented host default.
+    CHECK(format::resolve_editor_background(undeclared, nullptr) ==
+          view::kEditorHostClearRgb);
+
+    // A native editor paints its theme's bg.primary; that is its background.
+    view::View root;
+    auto theme = view::Theme::dark();
+    theme.colors["bg.primary"] = canvas::Color::hex(0x203040);
+    root.set_theme(theme);
+    CHECK(format::resolve_editor_background(undeclared, &root) == 0x203040);
+
+    // A declaration wins over the theme.
+    DeclaredBackgroundEditorProcessor declared;
+    declared.background = 0x05070A;
+    CHECK(format::resolve_editor_background(declared, &root) == 0x05070A);
+
+    // A throwing override never fails the open; it falls through.
+    declared.throw_on_background = true;
+    CHECK(format::resolve_editor_background(declared, &root) == 0x203040);
 }
 
 TEST_CASE("Editor open: standalone and harness bridges keep the synchronous load",

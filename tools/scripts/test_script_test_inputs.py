@@ -15,7 +15,14 @@ cmake-driven test. What must hold:
 - an unreadable inventory exits 2;
 - compiled executables fold into the same list from configure evidence: a
   declared fixture is listed, an undeclared reader is `data: undeclared`,
-  and `--check` fails on a NEW undeclared source against the base list.
+  and `--check` fails on a NEW undeclared source against the base list;
+- a source that finds the checkout by walking two levels up from its working
+  directory or from its own `__FILE__` reads it, and one level up (the build
+  tree) does not;
+- the scan covers an executable defined outside test/ when ctest runs it
+  (as a command or through a Catch2 discovery include), keyed by the program
+  name ctest runs, and not one a test only passes as an argument;
+- WHOLE_CHECKOUT reads as `data: whole_checkout`, never undeclared.
 
 Run:
     python3 tools/scripts/test_script_test_inputs.py
@@ -24,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -385,6 +393,156 @@ def compiled_evidence(repo: Repo, *, declare_b: bool = False) -> None:
             "sources": srcs, "inputs": paths}), encoding="utf-8")
 
 
+def spawn_evidence(repo: Repo) -> None:
+    """Executables that start a process, as configure records them:
+    edge (a runtime target), reviewed (pulp_test_spawns NONE), hidden (the
+    call sits in a test/support header it includes, with no edge), member
+    (a `.system(` member call, which is not a process API), and data-and-spawn
+    (reads a declared fixture and spawns with no edge)."""
+    write(repo.root, "test/test_edge.cpp", "auto r = pulp::platform::ChildProcess::run(tool, {});\n")
+    write(repo.root, "test/test_reviewed.cpp", "FILE* f = popen(\"git status\", \"r\");\n")
+    write(repo.root, "test/test_hidden.cpp", '#include "support/runner.hpp"\nint x = run_it();\n')
+    write(repo.root, "test/support/runner.hpp", "inline int run_it() { return fork(); }\n")
+    write(repo.root, "test/test_loader.cpp", "auto slot = PluginSlot::load(info);\n")
+    write(repo.root, "test/test_exec.cpp", "auto r = pulp::platform::exec(tool, {\"--version\"}, 1000);\n")
+    write(repo.root, "test/test_member_exec.cpp", "auto m = pattern.exec(text);\nauto n = db->exec(sql);\n")
+    write(repo.root, "test/test_scanner.cpp", "auto found = scanner.scan_directory(dir, PluginFormat::CLAP);\n")
+    write(repo.root, "test/test_fake_slot.cpp", "struct FakeSlot : PluginSlot { bool is_loaded() const; };\n")
+    write(repo.root, "test/test_member.cpp",
+          "physics.system(1);\nint my_system(int);\nauto m = ThemeMode::system();\n"
+          "// the effect system (bloom) runs popen(cmd) in prose\n/* fork() */\n")
+    write(repo.root, "test/test_both.cpp",
+          'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a";\nint rc = std::system(cmd);\n')
+    ev = repo.build / "test" / "test-data"
+    ev.mkdir(parents=True, exist_ok=True)
+    row = lambda src, runtime=(), none=False, defines=(): {
+        "sources": [src], "tree_defines": list(defines), "runtime_targets": list(runtime), "spawns_none": none}
+    (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+        "pulp-test-edge": row("test/test_edge.cpp", runtime=["pulp-cli"]),
+        "pulp-test-reviewed": row("test/test_reviewed.cpp", none=True),
+        "pulp-test-hidden": row("test/test_hidden.cpp"),
+        "pulp-test-member": row("test/test_member.cpp"),
+        "pulp-test-both": row("test/test_both.cpp", defines=["PULP_SOURCE_DIR"]),
+        "pulp-test-loader": row("test/test_loader.cpp"),
+        "pulp-test-exec": row("test/test_exec.cpp"),
+        "pulp-test-member-exec": row("test/test_member_exec.cpp"),
+        "pulp-test-scanner": row("test/test_scanner.cpp"),
+        "pulp-test-fake-slot": row("test/test_fake_slot.cpp"),
+        }}), encoding="utf-8")
+    (ev / "runtime-targets.json").write_text(json.dumps({"schema": "pulp-runtime-targets/v1", "artifacts": {}}),
+                                             encoding="utf-8")
+    (ev / "pulp-test-both.inputs.json").write_text(json.dumps({
+        "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-both", "kind": "compiled",
+        "sources": ["test/test_both.cpp"], "inputs": ["test/fixtures/a"]}), encoding="utf-8")
+
+
+def named_program_evidence(repo: Repo) -> None:
+    """Spawners whose code names programs this tree builds. `pulp-cli` builds
+    pulp-cpp; the broker runs the host; one plugin builds as AU and CLAP under
+    one artifact name."""
+    write(repo.root, "test/test_direct.cpp", 'ChildProcess::run(dir / "pulp-cpp.exe", {});\n')
+    write(repo.root, "test/test_missing.cpp", 'ChildProcess::run(dir / "helper-tool", {});\n')
+    write(repo.root, "test/test_through.cpp", 'ChildProcess::run(broker, {"--host", dir + "/control-host"});\n')
+    write(repo.root, "test/test_fake.cpp", 'auto fake = dir / "pulp-screenshot";\nauto r = popen(cmd, "r");\n')
+    write(repo.root, "test/test_plugin.cpp", 'info.path = "PulpGain.clap";\nauto slot = PluginSlot::load(info);\n')
+    ev = repo.build / "test" / "test-data"
+    ev.mkdir(parents=True, exist_ok=True)
+    row = lambda src, runtime=(), none=False, not_run=(): {
+        "sources": [src], "tree_defines": [], "runtime_targets": list(runtime), "spawns_none": none,
+        "named_not_run": list(not_run)}
+    (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+        "direct": row("test/test_direct.cpp", runtime=["pulp-cli"]),
+        "missing": row("test/test_missing.cpp", runtime=["pulp-cli"]),
+        "through": row("test/test_through.cpp", runtime=["broker"]),
+        "fake": row("test/test_fake.cpp", none=True, not_run=["pulp-screenshot"]),
+        "plugin": row("test/test_plugin.cpp", runtime=["PulpGain_CLAP"]),
+        # Declares a tool this configuration does not build, and has no other edge.
+        "absent": dict(row("test/test_direct.cpp"), absent_spawns=["pulp-cli"])}}), encoding="utf-8")
+    art = lambda name, runtime=(): {"artifact": name, "runtime_targets": list(runtime)}
+    (ev / "runtime-targets.json").write_text(json.dumps({"schema": "pulp-runtime-targets/v1", "artifacts": {
+        "pulp-cli": art("pulp-cpp"), "helper-tool": art("helper-tool"), "broker": art("broker", ["control-host"]),
+        "control-host": art("control-host"), "pulp-screenshot": art("pulp-screenshot"),
+        "PulpGain_AU": art("PulpGain"), "PulpGain_CLAP": art("PulpGain")}}), encoding="utf-8")
+
+
+class NamedProgramTests(unittest.TestCase):
+    def test_every_named_program_needs_an_edge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); named_program_evidence(repo)
+            ex = sti.compiled_entries(repo.root, repo.build)
+            # "pulp-cpp.exe" is pulp-cli's artifact, and the test has that edge.
+            self.assertEqual(ex["direct"]["spawns"], "declared")
+            self.assertNotIn("unmatched_programs", ex["direct"])
+            # An edge to something else does not cover a second program.
+            self.assertEqual((ex["missing"]["spawns"], ex["missing"]["unmatched_programs"]),
+                             ("undeclared", ["helper-tool"]))
+            # The host is reached through the broker the test runs.
+            self.assertEqual(ex["through"]["spawns"], "declared")
+            # A reviewed "named, not run" answers the name; NONE stays NONE.
+            self.assertEqual(ex["fake"]["spawns"], "none")
+            # One plugin built in several formats is one name in the code.
+            self.assertEqual(ex["plugin"]["spawns"], "declared")
+            # A declared tool this configuration does not build is not an edge.
+            self.assertEqual((ex["absent"]["spawns"], ex["absent"]["unmatched_programs"]), ("undeclared", ["pulp-cli"]))
+
+    def test_without_the_runtime_index_every_spawner_is_undeclared(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); named_program_evidence(repo)
+            (repo.build / "test" / "test-data" / "runtime-targets.json").unlink()
+            ex = sti.compiled_entries(repo.root, repo.build)
+            self.assertEqual({k: v["spawns"] for k, v in ex.items()},
+                             dict.fromkeys(("direct", "missing", "through", "fake", "plugin", "absent"), "undeclared"))
+
+
+class SpawnScanTests(unittest.TestCase):
+    def test_each_spawn_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); spawn_evidence(repo)
+            ex = sti.compiled_entries(repo.root, repo.build)
+            self.assertEqual((ex["pulp-test-edge"]["spawns"], ex["pulp-test-edge"]["runtime_targets"]),
+                             ("declared", ["pulp-cli"]))
+            self.assertEqual(ex["pulp-test-reviewed"]["spawns"], "none")
+            self.assertEqual(ex["pulp-test-hidden"]["spawns"], "undeclared")
+            # The call is found in the header the source includes, not the source.
+            self.assertEqual(ex["pulp-test-hidden"]["spawning_sources"], ["test/support/runner.hpp"])
+            # Spawning alone makes an entry; its data side says it reads nothing.
+            self.assertEqual((ex["pulp-test-edge"]["data"], ex["pulp-test-edge"]["inputs"]), ("none", []))
+            self.assertNotIn("pulp-test-member", ex)
+            # Loading a plugin is a runtime edge; implementing the interface is not.
+            self.assertEqual(ex["pulp-test-loader"]["spawns"], "undeclared")
+            # The process API's free exec() runs a program; a member exec() does not.
+            self.assertEqual(ex["pulp-test-exec"]["spawns"], "undeclared")
+            self.assertNotIn("pulp-test-member-exec", ex)
+            # So is a scanner call that opens bundles from disk.
+            self.assertEqual(ex["pulp-test-scanner"]["spawns"], "undeclared")
+            self.assertNotIn("pulp-test-fake-slot", ex)
+            self.assertEqual((ex["pulp-test-both"]["data"], ex["pulp-test-both"]["spawns"]), ("declared", "undeclared"))
+            summary = sti.data_summary(repo.root, repo.build)
+            self.assertEqual((summary["data_reading"], summary["declared"], summary["undeclared"]), (1, 1, 0))
+
+    def test_every_process_starting_class_of_the_repo_api_is_a_signal(self) -> None:
+        decl = re.compile(r"^\s*(?:static\s+|virtual\s+)*[\w:<>&*]+\s+(?:run|start\w*|launch)\s*\(", re.M)
+        starters = set()
+        for rel in ("core/platform/include/pulp/platform/child_process.hpp",
+                    "core/events/include/pulp/events/child_process_manager.hpp"):
+            parts = re.split(r"\n(?:class|struct)\s+(\w+)[^;{]*\{", (HERE.parents[1] / rel).read_text(encoding="utf-8"))
+            starters |= {name for name, body in zip(parts[1::2], parts[2::2]) if decl.search(body)}
+        self.assertGreaterEqual(len(starters), 3, starters)  # the parse found the API at all
+        self.assertLessEqual(starters, set(sti.SPAWN_CLASSES))
+        # Free functions that run a program and hand back its result.
+        header = (HERE.parents[1] / "core/platform/include/pulp/platform/child_process.hpp").read_text(encoding="utf-8")
+        runners = set(re.findall(r"^ProcessResult\s+(\w+)\s*\(", header, re.M))
+        self.assertGreaterEqual(len(runners), 1, runners)
+        self.assertLessEqual(runners, set(sti.SPAWN_FUNCTIONS))
+
+    def test_every_listed_loader_still_exists_in_core_host(self) -> None:
+        host = "\n".join((HERE.parents[1] / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
+                         for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp"))
+        for api in sti.LOAD_APIS:
+            name = re.sub(r"\\s\*\\\($", "", api).split("::")[-1]
+            self.assertRegex(host, r"\b%s\s*\(" % re.escape(name), api)
+
+
 class CompiledDataTests(unittest.TestCase):
     def run_tool(self, repo: Repo, *args: str, event: str = "pull_request") -> subprocess.CompletedProcess[str]:
         inv = repo.build / "inv.json"
@@ -403,8 +561,30 @@ class CompiledDataTests(unittest.TestCase):
             lst = json.loads((repo.root / sti.DEFAULT_LIST).read_text(encoding="utf-8"))
             self.assertEqual(lst["executables"]["pulp-test-a"], {
                 "kind": "compiled", "data": "declared", "inputs": ["test/fixtures/a"],
-                "sources": ["test/test_a.cpp"], "undeclared_sources": []})
+                "sources": ["test/test_a.cpp"], "detected_sources": ["test/test_a.cpp"],
+                "undeclared_sources": []})
             self.assertIn("alpha", lst["tests"])  # script entries unchanged, same file
+            self.assertEqual(lst["executables_scanned_for"], ["data", "spawns"])
+            # Every executable configure saw is listed, clean ones included
+            # (pulp-test-d reads nothing and has no entry), so a missing entry
+            # can be told apart from a never-scanned executable.
+            self.assertEqual(lst["executables_scanned"], ["pulp-test-a", "pulp-test-b", "pulp-test-c", "pulp-test-d"])
+            self.assertNotIn("pulp-test-d", lst["executables"])
+
+    def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            # pulp-test-d's source has no signal; declaring it must not make
+            # the scan look as if it detected a reader there.
+            (repo.build / "test" / "test-data" / "pulp-test-d.inputs.json").write_text(json.dumps({
+                "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-d", "kind": "compiled",
+                "sources": ["test/test_d.cpp"], "inputs": ["test/fixtures/a"]}), encoding="utf-8")
+            ex = sti.compiled_entries(repo.root, repo.build)
+            self.assertEqual(ex["pulp-test-d"]["data"], "declared")
+            self.assertEqual(ex["pulp-test-d"]["sources"], ["test/test_d.cpp"])
+            self.assertEqual(ex["pulp-test-d"]["detected_sources"], [])
+            self.assertEqual(ex["pulp-test-a"]["detected_sources"], ["test/test_a.cpp"])
+            self.assertEqual(ex["pulp-test-b"]["detected_sources"], ["test/test_b.cpp"])
 
     def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -500,6 +680,69 @@ class CompiledDataTests(unittest.TestCase):
             proc = self.run_tool(repo, "--check", "--full")
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+
+
+class ScanScopeTests(unittest.TestCase):
+    def test_walking_up_to_the_checkout_is_a_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, "test/two.cpp", 'auto r = fs::current_path() / ".." / "..";\n')
+            write(root, "test/joined.cpp", 'auto r = std::filesystem::current_path() / "../..";\n')
+            write(root, "test/file.cpp", "auto r = fs::path(__FILE__).parent_path().parent_path();\n")
+            write(root, "test/build.cpp", 'auto b = fs::current_path() / ".." / "tools";\n')
+            write(root, "test/log.cpp", 'log(__FILE__, __LINE__);\n')
+            self.assertEqual(sti.source_signals(root, "test/two.cpp", []), [sti.WALK_UP_SIGNAL])
+            self.assertEqual(sti.source_signals(root, "test/joined.cpp", []), [sti.WALK_UP_SIGNAL])
+            self.assertEqual(sti.source_signals(root, "test/file.cpp", []), [sti.SOURCE_FILE_SIGNAL])
+            self.assertEqual(sti.source_signals(root, "test/build.cpp", []), [])  # the build tree
+            self.assertEqual(sti.source_signals(root, "test/log.cpp", []), [])
+
+    def scope_build(self, tmp: Path) -> tuple[Path, Path]:
+        root, build = tmp / "repo", tmp / "build"
+        write(root, "test/t.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        write(root, "tools/cli/run.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        write(root, "tools/cli/disc.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        write(root, "tools/cli/arg.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        write(root, "tools/cli/idle.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        ev = build / "test" / "test-data"
+        ev.mkdir(parents=True)
+        rec = lambda src, under: {"sources": [src], "tree_defines": ["PULP_SOURCE_DIR"], "under_test": under}
+        (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+            "in-test": rec("test/t.cpp", True), "cli-target": rec("tools/cli/run.cpp", False),
+            "discovered": rec("tools/cli/disc.cpp", False), "arg-only": rec("tools/cli/arg.cpp", False),
+            "idle": rec("tools/cli/idle.cpp", False)}}), encoding="utf-8")
+        (ev / "runtime-targets.json").write_text(json.dumps({"schema": "pulp-runtime-targets/v1", "artifacts": {
+            "cli-target": {"artifact": "cli-run", "runtime_targets": []}}}), encoding="utf-8")
+        b = str(build)
+        write(build, "CTestTestfile.cmake",
+              f'add_test([=[direct]=] "{b}/tools/cli/cli-run" "doctor")\n'
+              f'add_test([=[script]=] "/usr/bin/python3" "{root}/check.py" "--binary" "{b}/tools/cli/arg-only")\n'
+              f'include("{b}/tools/cli/discovered-1a2b3c4_include.cmake")\n')
+        return root, build
+
+    def test_an_executable_ctest_runs_outside_test_is_scanned_by_its_program_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, build = self.scope_build(Path(tmp))
+            ex = sti.compiled_entries(root, build)
+            # Run by ctest under its artifact name; found through a discovery
+            # include; an argument to a script is not run by ctest; unused.
+            self.assertEqual(sorted(ex), ["cli-run", "discovered", "in-test"])
+            self.assertEqual(ex["cli-run"]["data"], "undeclared")
+            self.assertEqual(sorted(sti.test_executables(build)), ["cli-run", "discovered", "in-test"])
+            # Without a CTestTestfile nothing can be ruled out, so all are scanned.
+            (build / "CTestTestfile.cmake").unlink()
+            self.assertEqual(sorted(sti.compiled_entries(root, build)),
+                             ["arg-only", "cli-target", "discovered", "idle", "in-test"])
+
+    def test_a_declaration_on_a_renamed_program_is_read_by_its_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, build = self.scope_build(Path(tmp))
+            (build / "test" / "test-data" / "cli-target.inputs.json").write_text(json.dumps({
+                "schema": "pulp-test-data-inputs/v1", "executable": "cli-target", "kind": "compiled",
+                "sources": ["tools/cli/run.cpp"], "inputs": [], "whole_checkout": True}), encoding="utf-8")
+            entry = sti.compiled_entries(root, build)["cli-run"]
+            self.assertEqual((entry["data"], entry["undeclared_sources"]), ("whole_checkout", []))
+            self.assertEqual(entry["detected_sources"], ["tools/cli/run.cpp"])
 
 
 if __name__ == "__main__":

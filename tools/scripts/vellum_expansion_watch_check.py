@@ -648,14 +648,34 @@ def verify(root: pathlib.Path, base: str | None = None, head: str | None = None)
         }
 
 
-def main() -> int:
+def resolve_commit(root: pathlib.Path, ref: str | None) -> str | None:
+    """A ref or short SHA on the command line, as the full SHA `verify` requires.
+
+    `verify` itself stays strict: it is the trusted-root contract, and CI
+    always passes full SHAs. Only the CLI resolves, so a local
+    `--head HEAD` or `--head 1a2b3c4` reproduces the verdict instead of
+    failing with "expected full commit SHA". Anything git cannot resolve to a
+    commit is passed through unchanged, and `verify` rejects it as before.
+    """
+    if ref is None or SHA40.fullmatch(ref):
+        return ref
+    result = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        check=False, capture_output=True, text=True,
+    )
+    resolved = result.stdout.strip()
+    return resolved if result.returncode == 0 and SHA40.fullmatch(resolved) else ref
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=pathlib.Path, default=pathlib.Path.cwd())
-    parser.add_argument("--base")
-    parser.add_argument("--head")
+    parser.add_argument("--base", help="commit to compare from (ref or SHA; resolved to a full SHA)")
+    parser.add_argument("--head", help="commit to compare to (ref or SHA; resolved to a full SHA)")
     parser.add_argument("--output", type=pathlib.Path)
-    args = parser.parse_args()
-    report = verify(args.repo.resolve(), args.base, args.head)
+    args = parser.parse_args(argv)
+    root = args.repo.resolve()
+    report = verify(root, resolve_commit(root, args.base), resolve_commit(root, args.head))
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

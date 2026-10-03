@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.895.0
+    VERSION 0.901.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -753,6 +753,9 @@ if(PULP_BUILD_TESTS AND APPLE AND NOT IOS AND NOT PULP_IOS
         VERBATIM)
     catch_discover_tests(pulp-test-control-phase15-aggregate-e2e
         PROPERTIES LABELS "inspect;control;e2e;phase15;aggregate;cli;mcp")
+    # Its broker is a copy of itself, and the fixture names are manifest data.
+    pulp_test_spawns(pulp-test-control-phase15-aggregate-e2e NOT_RUN
+        pulp-control-broker pulp-control-trusted-host-fixture pulp-control-installed-host-e2e-fixture)
 endif()
 
 # ── Screenshot Tool ────────────────────────────────────────────────────────
@@ -836,6 +839,12 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
             add_dependencies(${_pulp_clap_host_test} PulpGain_CLAP)
         endif()
     endforeach()
+    # pulp-test-host also loads examples/pulpsynth's CLAP from the build tree.
+    if(TARGET pulp-test-host AND TARGET PulpSynth_CLAP)
+        target_compile_definitions(pulp-test-host PRIVATE
+            PULP_TEST_PULPSYNTH_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpSynth.clap")
+        add_dependencies(pulp-test-host PulpSynth_CLAP)
+    endif()
 
     if(TARGET pulp-cli AND TARGET PulpTone_CLAP)
         add_dependencies(pulp-cli PulpGain_CLAP PulpTone_CLAP)

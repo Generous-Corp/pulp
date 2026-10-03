@@ -18,11 +18,17 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <memory>
 #include <span>
 #include <string>
 #include <vector>
+
+/// Present while Processor::editor_background() exists (the colour a
+/// host-embedded editor shows before its document mounts). Downstream code
+/// that shims the behaviour for older SDKs can key its removal on this.
+#define PULP_FORMAT_HAS_EDITOR_BACKGROUND 1
 
 namespace pulp::view {
 class ScriptedUiSession;
@@ -1054,6 +1060,26 @@ public:
     /// Appended to preserve every existing virtual slot.
     virtual bool process_block(ProcessBlock&) {
         return false;
+    }
+
+    /// The editor's own background colour, as 0xRRGGBB.
+    ///
+    /// A host-embedded editor returns its view before its document has drawn
+    /// (view-first opening), so the host's first frames — and the native
+    /// layer behind them — show nothing but this colour, as do the letterbox
+    /// bars around a pinned design viewport. Return the colour the editor
+    /// paints behind everything else (for a scripted UI, its page/root
+    /// background) so the editor opens looking like itself instead of a
+    /// framework default.
+    ///
+    /// Called on the main thread each time an editor opens, so it may depend on
+    /// state (an editor with user-selectable colour schemes returns the active
+    /// scheme's background). `std::nullopt` uses the editor root's theme
+    /// `bg.primary`, which is what a native or AutoUi editor paints. See
+    /// `ViewBridge::editor_background_rgb()`.
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual std::optional<std::uint32_t> editor_background() const {
+        return std::nullopt;
     }
 
 private:

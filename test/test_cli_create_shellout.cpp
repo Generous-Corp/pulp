@@ -148,7 +148,8 @@ std::string pulp_binary_diagnostics(const fs::path& selected) {
 }
 
 pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
-                                         const fs::path& working_dir) {
+                                         const fs::path& working_dir,
+                                         bool skip_bootstrap = true) {
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(working_dir);
     // Generous budget, not a latency assertion. `pulp create` runs in ~1-2 s,
@@ -163,6 +164,11 @@ pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
     options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
 
     ScopedEnvVar disable_update("PULP_UPDATE_CHECK_DISABLED", "1");
+    // A checkout without external/vst3sdk would otherwise run
+    // `./setup.sh --deps-only` from inside `pulp create`, which reads and writes
+    // the tree well beyond the fixtures these cases declare. None of them
+    // depends on the SDK formats being available.
+    ScopedEnvVar no_bootstrap("PULP_SKIP_DEPENDENCY_BOOTSTRAP", skip_bootstrap ? "1" : "0");
     auto binary = pulp_binary();
     auto result =
         pulp::platform::ChildProcess::run(native_path_string(binary), args, options);
@@ -497,6 +503,48 @@ TEST_CASE("pulp create resolves built-in template names before same-named local 
     REQUIRE(r.exit_code == 0);
     REQUIRE(fs::exists(out_dir / "CMakeLists.txt"));
     REQUIRE(r.stderr_output.find("template kit manifest is invalid") == std::string::npos);
+}
+
+TEST_CASE("pulp create never runs the checkout's setup.sh under this suite",
+          "[cli][create][shellout][bootstrap]") {
+#ifdef _WIN32
+    SKIP("the dependency bootstrap runs the POSIX setup.sh path only off Windows");
+#else
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+
+    // A minimal checkout: the markers `pulp create` finds a source root by, no
+    // external/vst3sdk (so the plugin formats look unprepared), and a setup.sh
+    // that records being run and fails.
+    TempDir tmp("pulp-create-bootstrap-probe");
+    const auto root = tmp.path / "checkout";
+    fs::create_directories(root / "core");
+    std::ofstream(root / "CMakeLists.txt") << "project(BootstrapProbe)\n";
+    const auto marker = tmp.path / "setup-ran";
+    {
+        std::ofstream setup(root / "setup.sh");
+        setup << "#!/bin/sh\nprintf ran > '" << marker.string() << "'\nexit 1\n";
+    }
+    fs::permissions(root / "setup.sh", fs::perms::owner_all, fs::perm_options::replace);
+    const std::vector<std::string> args = {"create", "Bootstrap Probe",
+                                           "--output", native_path_string(tmp.path / "out"),
+                                           "--no-build", "--ci"};
+
+    auto skipped = run_create(args, root);
+    INFO(skipped.stdout_output << skipped.stderr_output);
+    REQUIRE_FALSE(skipped.timed_out);
+    REQUIRE_FALSE(fs::exists(marker));
+    REQUIRE((skipped.stdout_output + skipped.stderr_output)
+                .find("Skipping checkout dependency bootstrap") != std::string::npos);
+
+    // The control: the same call without the skip does run the checkout's own
+    // setup.sh, so the absence above is the variable's doing.
+    auto bootstrapped = run_create(args, root, /*skip_bootstrap=*/false);
+    INFO(bootstrapped.stdout_output << bootstrapped.stderr_output);
+    REQUIRE_FALSE(bootstrapped.timed_out);
+    REQUIRE(fs::exists(marker));
+#endif
 }
 
 TEST_CASE("pulp create rejects non-template kits passed as template paths",

@@ -126,32 +126,22 @@ class ReferenceGraphTests(unittest.TestCase):
         self.assertTrue(repo.decide("tools/scripts/lane_thing.py")[
             "tools/scripts/lane_thing.py"].admitted)
 
-    def test_generated_selector_family_listing_is_not_a_blocker(self) -> None:
+    def test_generated_selector_families_file_is_not_a_blocker(self) -> None:
         repo = self._repo({
             "tools/scripts/lane_thing.py": "X = 1\n",
-            wide.SHIPYARD_CONFIG: (
-                "[targets.mac]\n"
-                f"{wide.SELECTOR_BLOCK_BEGIN}: generator --write\n"
-                'paths = ["tools/scripts/lane_thing.py"]\n'
-                f"{wide.SELECTOR_BLOCK_END}\n"
-            ),
+            wide.SELECTOR_FAMILIES_FILE: '[[families]]\npaths = ["tools/scripts/lane_thing.py"]\n',
         })
         self.assertTrue(repo.decide("tools/scripts/lane_thing.py")[
             "tools/scripts/lane_thing.py"].admitted)
 
-    def test_shipyard_config_running_a_script_keeps_native(self) -> None:
+    def test_shipyard_config_naming_a_script_keeps_native(self) -> None:
         repo = self._repo({
             "tools/scripts/lane_thing.py": "X = 1\n",
-            wide.SHIPYARD_CONFIG: (
-                'test = "python3 tools/scripts/lane_thing.py"\n'
-                f"{wide.SELECTOR_BLOCK_BEGIN}: generator --write\n"
-                'paths = ["tools/scripts/lane_thing.py"]\n'
-                f"{wide.SELECTOR_BLOCK_END}\n"
-            ),
+            ".shipyard/config.toml": 'test = "python3 tools/scripts/lane_thing.py"\n',
         })
         d = repo.decide("tools/scripts/lane_thing.py")["tools/scripts/lane_thing.py"]
         self.assertFalse(d.admitted)
-        self.assertIn(wide.SHIPYARD_CONFIG, d.reason)
+        self.assertIn(".shipyard/config.toml", d.reason)
 
     def test_gate_side_cmake_registration_keeps_native(self) -> None:
         repo = self._repo({
@@ -413,6 +403,9 @@ REVIEWED_SCANNERS = {
     "tools/scripts/raw_this_async_check.py": "walks core/ only",
     "tools/scripts/sample_region_compat_baseline.py": "walks CMake and build trees",
     "tools/scripts/skills_doc_check.py": "walks .agents/skills",
+    "tools/deps/audit.py":
+        "walks only a dependency's fetched source tree (external/ or the FetchContent "
+        "cache) for its offline-fetch contract; it names tools/ only for its own manifest",
     "tools/scripts/style_dedup_table.py": "walks C++ source directories",
     "tools/scripts/thread_assert_check.py": "walks test/*.cpp",
     "tools/scripts/test_agent_capability_installed_sdk.py": "walks its build prefix",

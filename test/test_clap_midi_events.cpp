@@ -2436,6 +2436,46 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
     REQUIRE_FALSE(g_capturing->captured_context.has_transport(TransportField::FrameRate));
 }
 
+// A host rendering faster than realtime announces it through `clap.render`.
+// The adapter must offer the extension, accept both modes, refuse anything
+// else, and report the mode on every following block.
+TEST_CASE("CLAP render extension surfaces offline rendering in ProcessContext",
+          "[clap][render][offline]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    const auto* render = static_cast<const clap_plugin_render_t*>(
+        clap_adapter::clap_get_extension(&h.plugin.plugin, CLAP_EXT_RENDER));
+    REQUIRE(render != nullptr);
+    REQUIRE(render->has_hard_realtime_requirement != nullptr);
+    REQUIRE(render->set != nullptr);
+    REQUIRE_FALSE(render->has_hard_realtime_requirement(&h.plugin.plugin));
+
+    InputEventList events;
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_context.is_realtime());
+
+    REQUIRE(render->set(&h.plugin.plugin, CLAP_RENDER_OFFLINE));
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_context.is_offline());
+    REQUIRE(g_capturing->captured_context.render_speed_hint ==
+            RenderSpeedHint::FasterThanRealtime);
+    REQUIRE(g_capturing->captured_context.allows_offline_quality_work());
+
+    // An unknown mode is refused and leaves the current mode in place.
+    REQUIRE_FALSE(render->set(&h.plugin.plugin,
+                              static_cast<clap_plugin_render_mode>(7)));
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_context.is_offline());
+
+    REQUIRE(render->set(&h.plugin.plugin, CLAP_RENDER_REALTIME));
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_context.is_realtime());
+    REQUIRE(g_capturing->captured_context.render_speed_hint ==
+            RenderSpeedHint::Realtime);
+}
+
 TEST_CASE("CLAP transport without seconds timeline leaves sample position unset",
           "[clap][transport]") {
     g_pending_opts_mpe = false;

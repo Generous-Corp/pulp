@@ -51,12 +51,11 @@ void paint_plugin_scene(canvas::Canvas& canvas, View& root,
         canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
     }
 
-    // Host clear color, not a themed surface: kEditorHostClear* is the
-    // pre-first-frame background every Pulp host seeds (shared with the macOS
-    // NSColor/CGColor spellings in window_host_mac_internal.hpp) and it must
-    // not shift with the active theme.
-    canvas.set_fill_color(pulp::canvas::Color::rgba8(  // token-lint:allow
-        kEditorHostClearR, kEditorHostClearG, kEditorHostClearB));
+    // The editor's declared background (PluginViewHost::Options::background_rgb),
+    // not a themed surface: it is what every frame shows before the document
+    // mounts and what the letterbox bars show after, so it must be the
+    // plug-in's own colour and must not shift with the active theme.
+    canvas.set_fill_color(pulp::canvas::Color::hex(geometry.background_rgb));
     canvas.fill_rect(0, 0, geometry.width, geometry.height);
 
     float sx, sy, tx, ty;

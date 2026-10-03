@@ -554,6 +554,8 @@ catch_discover_tests(pulp-test-cli-audio-validate)
 add_executable(pulp-test-cli-audio-compare test_cli_audio_compare.cpp)
 target_link_libraries(pulp-test-cli-audio-compare PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-compare)
+# The spawned pulp-cpp reads the shipped tool registry to resolve the tool.
+pulp_test_data(pulp-test-cli-audio-compare NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-audio-compare)
 
 add_executable(pulp-test-cli-audio-latency test_cli_audio_latency.cpp)
@@ -669,6 +671,7 @@ catch_discover_tests(pulp-test-host TEST_SPEC "~[flaky]")
 # Focused. No CLAP fixture needed — these exercise pure graph
 # routing/topology, not plugin loading.
 add_executable(pulp-test-host-signal-graph test_host_signal_graph.cpp
+    test_host_signal_graph_prepared_edit.cpp
     test_custom_node_diagnostics.cpp)
 target_sources(pulp-test-host-signal-graph PRIVATE
     $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -914,6 +917,8 @@ catch_discover_tests(pulp-test-web-demos)
 # AI Designer: design tool layout/parity tests
 pulp_add_test_suite(pulp-test-design-tool-layout GROUP pulp-test-group-app-view
     LIBRARIES pulp::view pulp::state)
+# It finds the design tool's modules from its own source file's location.
+pulp_test_data(pulp-test-design-tool-layout NO_DEFINE PATHS examples/design-tool/*.js)
 
 add_executable(pulp-test-design-debug-contracts test_design_debug_contracts.cpp)
 target_link_libraries(pulp-test-design-debug-contracts PRIVATE
@@ -990,3 +995,20 @@ pulp_add_test_suite(pulp-test-widget-metrics GROUP pulp-test-group-app-view
 pulp_add_test_suite(pulp-test-forge-descriptor-audit GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)
 pulp_test_data(pulp-test-forge-descriptor-audit PATHS docs/status/forge-catalog.json)
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-coreaudio-native-lifetime NONE) # fork without exec
+
+# pulp-test-host loads PulpGain.clap and PulpSynth.clap when examples are
+# built (the edges and paths are added in the top-level CMakeLists.txt, after
+# examples/); without examples those cases skip and it loads only system or
+# temp plugins.
+# pulp-test-host-regression loads PulpGain.clap the same way and otherwise only
+# fake bundles in a scratch directory; pulp-test-group-app-host loads the
+# in-process built-in instrument.
+if(NOT PULP_BUILD_EXAMPLES)
+    pulp_test_spawns(pulp-test-host NONE)
+    pulp_test_spawns(pulp-test-host-regression NONE)
+endif()
+pulp_test_spawns(pulp-test-group-app-host NONE)

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-changed-surface-shadow-plans-watch",
+  "created_at": "2026-10-03T02:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record a tool-registry addition that crosses the design-output-and-packaging family only through its docs/status/tools.yaml selector. The new changed-surface-shadow-plans entry registers a build-speed ranking script that reads the advisory changed-surface-shadow-plan workflow's artifacts and reports plans per PR head and a per-reason table; CLAUDE.md carries the regenerated registry digest. No importer, DesignIR schema, renderer, codegen output, packaging artifact, release workflow or Vellum-owned source changes, and no authority moves.",
+  "tests": [
+    "vellum-expansion-watch",
+    "tools-registry-check",
+    "changed-surface-shadow-plans-selftest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

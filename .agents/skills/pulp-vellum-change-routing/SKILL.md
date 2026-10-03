@@ -379,24 +379,36 @@ has to be read before it runs.
 authority transition is affected") and fails the second, so reading the job name
 sends you to the wrong script. Open the log and find which one raised.
 
-A local **advisory** hint now surfaces this before the push rather than after
-it. `tools/scripts/vellum_watch_preflight.py` runs from both `gates.sh` and
-`.githooks/pre-push`; when the pushed range touches a watched glob it names the
-affected families, prints the reproduce command, and repeats the commit-range
-trap below. It **never blocks**, and it must not be promoted to blocking: the
-authoritative check runs from a trusted root in two required contexts
-specifically so a branch's own copy of the checker holds no veto, and it
-compares against the merge-base for the same reason the reproduce command
-below does. It is silent for a range that touches nothing watched, so silence
-from it is not proof — run the checker by hand if you want a verdict on the
-record.
+A local gate now catches this before the push rather than after it.
+`tools/scripts/vellum_watch_preflight.py --enforce` runs from both `gates.sh`
+and `.githooks/pre-push`; when the pushed range touches a watched glob without
+a committed event that covers it exactly, both fail and print the exact event
+JSON to add (or `--write-event --rationale "..."` writes it). Only a positive
+"event owed" verdict blocks; a missing checker or unresolvable range never
+does. The authoritative check still runs from a trusted root in two required
+contexts — a local refusal cannot accept anything on CI's behalf — and the gate
+compares against the merge-base for the same reason the reproduce command below
+does. It is silent for a range that touches nothing watched, so silence from it
+is not proof — run the checker by hand if you want a verdict on the record.
+
+The same preflight also runs the FIRST checker, `vellum_freeze_check.py`, over
+the merge-base range, because it fails too: a touched path in a transferred
+slice (e.g. `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) owes
+a `.github/vellum-change-events/` event, and that path is often ALSO under a
+watched glob, so one edit can owe both events. On that failure it exits 12 and
+prints the change-event JSON (`pulp-only`, the slices, suggested tests, a
+`<REPLACE: ...>` rationale); `--write-change-event --rationale "..."` writes it.
+The checker accepts any non-empty rationale, so the preflight separately
+refuses a committed change event that still carries the placeholder.
 
 Four non-obvious rules of the expansion-watch checker, none derivable from a
 skim of the source:
 
-- **Both `--base` and `--head` must be full 40-char SHAs.** A ref name fails with
-  `base: expected full commit SHA`, which reads like a different bug than the one
-  CI hit. Always `--base $(git rev-parse ...) --head $(git rev-parse HEAD)`.
+- **`verify()` requires full 40-char SHAs; the CLI resolves refs for you.**
+  `--head HEAD` or a short SHA is resolved with `git rev-parse` before
+  `verify()` runs; only an unresolvable ref still fails with
+  `expected full commit SHA`. Callers that import the module and call
+  `verify()` directly (as the preflight does) must pass full SHAs.
 - **Coverage is exact set equality**, not a superset test: the checker raises on
   `covered != affected`, so claiming an extra capability family fails exactly as
   hard as omitting one. Claiming the same family from two event files in one diff

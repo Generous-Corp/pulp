@@ -405,23 +405,17 @@ TEST_CASE("PluginSlot loads only the canonical pathless basic instrument",
 // get_parameter immediately (cached readback), not silently dropped.
 // Unknown param IDs must be rejected instead of polluting the cache.
 //
-// If a built pulpsynth.clap isn't findable the test skips gracefully.
+// The bundle comes from the build (PULP_TEST_PULPSYNTH_CLAP_PATH, set with the
+// build edge in the top-level CMakeLists.txt when the example is built); a
+// configuration without it skips.
 TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
           "[host][slot][clap][issue-296]") {
     namespace fs = std::filesystem;
-    std::vector<fs::path> candidates = {
-        fs::current_path() / "examples" / "pulpsynth" / "pulpsynth.clap",
-        fs::current_path().parent_path() / "examples" / "pulpsynth" / "pulpsynth.clap",
-    };
-    fs::path found;
-    for (const auto& p : candidates) {
-        std::error_code ec;
-        if (fs::exists(p, ec)) { found = p; break; }
-    }
-    if (found.empty()) {
-        SKIP("pulpsynth.clap not built — skipping CLAP set_parameter integration");
-        return;
-    }
+#ifndef PULP_TEST_PULPSYNTH_CLAP_PATH
+    SKIP("PulpSynth.clap is not built in this configuration");
+#else
+    const fs::path found = PULP_TEST_PULPSYNTH_CLAP_PATH;
+    REQUIRE(fs::exists(found));
 
     PluginInfo info;
     info.name = "pulpsynth";
@@ -457,6 +451,7 @@ TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
         // bogus_id rejected — readback must not reflect 99.0f.
         REQUIRE_THAT(after, WithinAbs(before, 1e-6f));
     }
+#endif
 }
 
 #ifdef PULP_TEST_CLAP_PATH

@@ -15,6 +15,7 @@
 # tier-0 bound. Usage:
 #
 #   tools/ci/governed-build.sh cmake --build build [--target ...]
+#   tools/ci/governed-build.sh --dry-run cmake --build build [--target ...]
 #   tools/ci/governed-build.sh --probe-jobs   # print the share a build would get
 #
 # Build class (PULP_BUILD_CLASS, default `interactive`):
@@ -44,6 +45,18 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
+# A dry run reports the bounded share and exact command without acquiring a
+# lease, taking a build-dir lock, writing a marker, or recording metrics.
+DRY_RUN=0
+if [ "${1:-}" = "--dry-run" ]; then
+  DRY_RUN=1
+  shift
+  if [ "$#" -eq 0 ]; then
+    echo "governed-build: --dry-run requires a build command" >&2
+    exit 2
+  fi
+fi
+
 log() { echo "[governed-build] $*" >&2; }
 
 GOVERNED_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -64,7 +77,8 @@ case "$(uname -s 2>/dev/null)" in
 esac
 if [ "${_PULP_GOVERNED_BUILD_LOCKED:-}" = "1" ]; then
   unset _PULP_GOVERNED_BUILD_LOCKED
-elif [ "${1:-}" != "--probe-jobs" ] && [ "$GOVERNED_POSIX_HOST" = "1" ]; then
+elif [ "${1:-}" != "--probe-jobs" ] && [ "$DRY_RUN" != "1" ] \
+    && [ "$GOVERNED_POSIX_HOST" = "1" ]; then
   guard_py="$GOVERNED_REPO_ROOT/tools/ci/checkout_location_guard.py"
   lock_py="$GOVERNED_REPO_ROOT/tools/ci/build_dir_lock.py"
   if ! command -v python3 >/dev/null 2>&1; then
@@ -337,6 +351,14 @@ probe_jobs() {
 TARTCI_BIN=""
 if [ "${1:-}" = "--probe-jobs" ]; then
   probe_jobs
+  exit 0
+fi
+
+if [ "$DRY_RUN" = "1" ]; then
+  dry_run_plan="$(probe_jobs)"
+  printf 'governed-build dry-run receipt: %s command=' "$dry_run_plan"
+  printf ' %q' "$@"
+  printf '\n'
   exit 0
 fi
 

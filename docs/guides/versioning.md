@@ -574,9 +574,10 @@ python3 tools/deps/validate_hosts.py
 
 Prefer `shipyard pin bump` over hand-editing `tools/shipyard.toml`. It owns
 the stale-worktree, downgrade, redundant-main-pin, version, and release-asset
-guards. This matters for Rust Shipyard releases because v0.50.0+ changed the
-macOS distribution shape to Apple-Silicon-only signed `.dmg` assets; the pin
-and asset metadata should move together.
+guards. The pin file holds only `version` and `repo`: `tools/install-shipyard.sh`
+runs the upstream installer at that tag, which picks the platform asset (since
+v0.50.0 an Apple-Silicon-only signed `.dmg` on macOS) and verifies its checksum
+itself, so a bump changes `version` and nothing else.
 
 Pulp tracks the latest verified public Shipyard release by default while still
 recording an immutable exact tag. Automation should propose the newest release;
@@ -584,15 +585,22 @@ hold an older pin only for a documented incompatibility with an owner and exit
 condition. Never replace the tag with a moving branch or `latest` URL: exact
 pins keep checkouts reproducible and let the fleet prove binary parity.
 
-The current v0.143.0 pin adds Pulp's bounded zero-job recovery primitive while
-retaining the hardened unattended fleet updates and schema-v3 selected
-build-and-test transactions carried by v0.110.0. Recovery is default-off and
-receipt-fenced: it targets only an exact queued `Build and Test` attempt with an
-exhaustive zero-job census, refuses duplicate or conflicting receipts, and
-does not cancel the source run or merge a PR. A separately serialized
-protected-main worker, dry run, and one live canary remain required before
-activation. Keep the workflow `SHIPYARD_VERSION` and `tools/shipyard.toml` in
-lockstep; the pin gate rejects drift.
+The current v0.262.0 pin brings the pin up to the commands Pulp's workflows
+and scripts already invoke (`shipyard landing`, `shipyard landability`, `shipyard
+pr --target`, none of which v0.143.0 had), and the changed-surface planner the
+bounded mac lane depends on: merge-base planning for a head behind its recorded
+base, and `changed-surface-plan --record` for shadow-only plan records. It
+retains v0.143.0's default-off, receipt-fenced zero-job recovery primitive
+(an exact queued `Build and Test` attempt, an exhaustive zero-job census, no
+cancel and no merge; a serialized protected-main worker, dry run and live canary
+remain required before activation) and the schema-v3 selected build-and-test
+transactions carried by v0.110.0. Version-at-land's `shipyard changelog
+regenerate` renders CHANGELOG.md byte-identically under v0.143.0 and v0.262.0
+for the same tag graph. A bump is checked three ways: the changelog render
+against a fixed tag graph under both pins, a clean-HOME `install-shipyard.sh`
+whose `--status` matches the pin, and every subcommand and flag that
+`.github/workflows` and `tools/` execute resolving in the new binary's
+`--help`.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 

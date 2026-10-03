@@ -608,6 +608,40 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-contract GROUP pulp-test-group
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+pulp_add_test_suite(pulp-test-streaming-model-contract
+    SOURCES test_streaming_model_contract.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+
+pulp_add_test_suite(pulp-test-neural-model-manifest GROUP pulp-test-group-core-gpu-audio-private
+    SOURCES test_neural_model_manifest.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Keep this adapter on its own test binary so the callback contract is enforced
+# by the same allocation/lock trap as the model-neutral streaming contract.
+pulp_add_test_suite(pulp-test-nam-tcn-adapter
+    SOURCES test_nam_tcn_adapter.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+
+# CPU-only receipt for the model-neutral callback lane. The executable owns
+# all model/audio storage before entering the allocation probe and reports a
+# reproducible channel/kernel matrix without requiring Dawn or a GPU device.
+pulp_add_test_suite(pulp-test-streaming-model-benchmark
+    SOURCES test_streaming_model_benchmark.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+
 # Public, backend-neutral WaveNet adapter boundary. This is deliberately a
 # shape/fallback contract; provider handles remain private until an execution
 # owner can be safely attached to GpuAudioNode.
@@ -1010,3 +1044,11 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} -m unittest discover
             -s ${PROJECT_SOURCE_DIR}/test -p test_verify_gpu_same_device_storage.py)
 endif()
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-group-core-audio NONE)         # fork without exec
+pulp_test_spawns(pulp-test-group-core-events NONE)        # constructs ChildProcessManager; starts nothing
+pulp_test_spawns(pulp-test-group-core-platform NONE)      # dlopen of the system libdbus
+pulp_test_spawns(pulp-test-group-core-runtime-http NONE)  # /bin/echo, /bin/sh, /bin/pwd, powershell
+pulp_test_spawns(pulp-test-streaming-model-contract NONE) # fork without exec

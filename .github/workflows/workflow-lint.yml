@@ -35,6 +35,13 @@ on:
       - 'tools/scripts/workflow_runner_selector_audit.py'
       - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
+      - 'tools/scripts/windows_cli_compile_scope.py'
+      - 'tools/scripts/test_windows_cli_compile_scope.py'
+      - 'tools/scripts/windows_cli_release_precheck.py'
+      - 'tools/scripts/test_windows_cli_release_precheck.py'
+      - 'tools/scripts/test_windows_cli_compile_workflow.py'
+      - 'tools/scripts/release_reconcile.py'
+      - 'tools/scripts/test_release_reconcile.py'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
       - 'tools/scripts/release_build_matrix.py'
@@ -54,6 +61,8 @@ on:
       - 'tools/scripts/test_queue_age_watchdog.py'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
+      - 'tools/scripts/stale_run_reaper.py'
+      - 'tools/scripts/test_stale_run_reaper.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/test_coverage_surface_contract.py'
@@ -138,6 +147,13 @@ on:
       - 'tools/scripts/workflow_runner_selector_audit.py'
       - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
+      - 'tools/scripts/windows_cli_compile_scope.py'
+      - 'tools/scripts/test_windows_cli_compile_scope.py'
+      - 'tools/scripts/windows_cli_release_precheck.py'
+      - 'tools/scripts/test_windows_cli_release_precheck.py'
+      - 'tools/scripts/test_windows_cli_compile_workflow.py'
+      - 'tools/scripts/release_reconcile.py'
+      - 'tools/scripts/test_release_reconcile.py'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
       - 'tools/scripts/release_build_matrix.py'
@@ -157,6 +173,8 @@ on:
       - 'tools/scripts/test_queue_age_watchdog.py'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
+      - 'tools/scripts/stale_run_reaper.py'
+      - 'tools/scripts/test_stale_run_reaper.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/test_coverage_surface_contract.py'
@@ -330,6 +348,7 @@ jobs:
           python3 tools/scripts/test_api_contracts_workflow.py
           python3 tools/scripts/test_queue_age_watchdog.py
           python3 tools/scripts/test_merge_stall_watchdog.py
+          python3 tools/scripts/test_stale_run_reaper.py
           python3 tools/scripts/test_gpu_provenance_ci_wiring.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
@@ -358,6 +377,13 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
+          # MSVC CLI compile lane: its change scope, the pre-tag check that
+          # reads it, and its configure parity with release-cli.yml's
+          # Windows legs. The reconciler's circuit/drought rules ride along.
+          python3 tools/scripts/test_windows_cli_compile_scope.py
+          python3 tools/scripts/test_windows_cli_release_precheck.py
+          python3 tools/scripts/test_windows_cli_compile_workflow.py
+          python3 tools/scripts/test_release_reconcile.py
           # auto-release.yml's bypass-trailer guard, run as the step body
           # extracted from the workflow: a quoted trailer must not
           # withhold a release tag, a declared one must.

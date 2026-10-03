@@ -13,6 +13,8 @@ or as a bare script:
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -484,6 +486,53 @@ class LicenseVerificationTests(unittest.TestCase):
                          "x-abc" + "0" * 37)
         (cache_dir / "x-abc1").mkdir()  # two candidates: ambiguous, so unverified
         self.assertIsNone(audit.offline_fetch_tree(self.OFFLINE_DEP, {"cache_name": "x"}))
+
+    def _no_trees(self) -> None:
+        original = audit.local_source_tree
+        audit.local_source_tree = lambda dep: None
+        self.addCleanup(lambda: setattr(audit, "local_source_tree", original))
+        cache = audit.FETCHCONTENT_CACHE
+        audit.FETCHCONTENT_CACHE = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.addCleanup(lambda: setattr(audit, "FETCHCONTENT_CACHE", cache))
+        build = audit.BUILD_DIR
+        self.addCleanup(lambda: setattr(audit, "BUILD_DIR", build))
+
+    def test_require_offline_trees_fails_when_the_tree_is_absent(self) -> None:
+        self._no_trees()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(audit.offline_fetch_main([self.OFFLINE_DEP], require_trees=True), 1)
+        self.assertIn("NOT VERIFIED", out.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(audit.offline_fetch_main([self.OFFLINE_DEP], require_trees=False), 0)
+            self.assertEqual(audit.offline_fetch_main([{"name": "y"}], require_trees=True), 1)
+
+    def test_a_configured_build_names_the_tree_it_used(self) -> None:
+        self._no_trees()
+        build = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        tree = build / "src-x"
+        (tree / "rt").mkdir(parents=True)
+        (tree / "rt" / "Fetch.cmake").write_text(self.FETCH + 'file(DOWNLOAD "u" "f")\n')
+        (build / "CMakeCache.txt").write_text(f"x_SOURCE_DIR:STATIC={tree}\n")
+        audit.BUILD_DIR = build
+        status, problems = audit.verify_offline_fetch(self.OFFLINE_DEP)
+        self.assertEqual(status, "verified")
+        self.assertIn("rt/Fetch.cmake:3", problems[0])
+
+    def test_full_audit_fails_on_absent_trees_only_when_required(self) -> None:
+        self._no_trees()
+        original = audit.load_manifest
+        audit.load_manifest = lambda: [{**self.OFFLINE_DEP, "license": "MIT", "source_kind": "fetchcontent",
+                                        "documented_in_dependencies_md": False,
+                                        "documented_in_notice_md": False}]
+        self.addCleanup(lambda: setattr(audit, "load_manifest", original))
+        uncovered = audit.find_uncovered_declarations
+        audit.find_uncovered_declarations = lambda *a, **k: []
+        self.addCleanup(lambda: setattr(audit, "find_uncovered_declarations", uncovered))
+        for flags, expected in ((["--verify-licenses"], 0),
+                                (["--verify-licenses", "--require-offline-trees"], 1)):
+            with self.subTest(flags=flags), unittest.mock.patch.object(
+                    sys, "argv", ["audit.py", *flags]), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(audit.main(), expected)
 
     def test_webgpu_is_held_to_the_offline_fetch_contract(self) -> None:
         dep = next(d for d in audit.load_manifest() if d["name"] == "WebGPU-distribution")

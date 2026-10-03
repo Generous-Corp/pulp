@@ -1169,8 +1169,9 @@ The processor's offline path should drive that work **synchronously** (blocking
 readback is fine offline — no RT deadline). Trust model is the same as bypass: the
 host is expected to clear `renderingOffline` when returning to live playback; a host
 that leaves it set would keep the processor on the (blocking) offline path during
-realtime. VST3 already surfaces this via `ProcessSetup.processMode == kOffline`;
-AU v2 and CLAP do not surface offline intent (documented limitation).
+realtime. VST3 surfaces this via `ProcessSetup.processMode == kOffline`, AU v2 via
+`kAudioUnitProperty_OfflineRender`, CLAP via `clap.render`, and AAX for AudioSuite
+instances (see the `auv2` / `clap` / `aax` skills).
 
 ### Latency / tail change notifications
 
@@ -1294,6 +1295,17 @@ that crash; the fix is to remove the explicit close, NOT to add it.
 The AUv3 editor now also auto-selects the GPU host via the shared
 `decide_gpu_host()` helper (Options overload) — see the `view-bridge`
 skill's "GPU view host auto-selection" section.
+
+Build the host's `PluginViewHost::Options` with
+`editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
+by field: it carries the plug-in's declared background
+(`ViewBridge::editor_background_rgb()`), which the host paints on its backing
+layer and under the empty tree until the view-first document mounts. A
+hand-built Options silently drops it and this format opens on the framework
+navy while the others open on the plug-in's colour (`view-bridge`, "The first
+frame must already look like the plug-in"). Both view controllers keep the bridge-less preview/fallback
+path on default Options; only the bridged path goes through the helper, and it
+passes the controller's real host size back in as `size`.
 
 ### Headless automation must not create fallback AUv3 UI
 

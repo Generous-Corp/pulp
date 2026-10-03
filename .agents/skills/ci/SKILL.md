@@ -19,6 +19,73 @@ historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 removing it produces a deterministic shallow-history failure unrelated to the
 source change.
 
+## Landing a Pulp PR fast — the checklist
+
+Every step below exists because skipping it cost a CI round trip (20-40 min)
+on a real PR. Do them in order.
+
+1. **Run `tools/scripts/gates.sh origin/main` before every push.** It runs the
+   offline gates CI runs, including both halves of the required `Vellum freeze`
+   check, over the merge-base range:
+   - **watch events** — a range touching a watched capability-family path
+     without a committed `.github/vellum-expansion-watch-events/` event FAILS
+     (exit 10) and prints the exact JSON; or run
+     `python3 tools/scripts/vellum_watch_preflight.py --write-event --rationale "..."`.
+   - **change events** (`vellum_freeze_check.py`) — a range touching a path in
+     a transferred slice of `.github/vellum-ownership.json` (e.g.
+     `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
+     committed `.github/vellum-change-events/` event FAILS (exit 12) and prints
+     the JSON (disposition `pulp-only`, suggested tests); or run
+     `python3 tools/scripts/vellum_watch_preflight.py --write-change-event --rationale "..."`.
+     One edit can owe BOTH events. A committed event whose rationale is still
+     the `<REPLACE: ...>` placeholder also fails here, because CI accepts it.
+
+   Commit the event(s) before re-running — both checkers read the commit
+   range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
+   on its own for just the Vellum verdict.
+2. **Know the required contexts, and only those.** They come from branch
+   protection, not from the check list on the PR page:
+
+   ```sh
+   shipyard landability --repo Generous-Corp/pulp      # prints "required contexts (branch_protection): ..."
+   shipyard landability --repo Generous-Corp/pulp --pr <N>   # was each gate actually requested for this PR?
+   ```
+
+   As of 2026-10-02: `macos`, `Enforce version & skill sync`, `Vellum freeze`,
+   `Vellum trusted freeze`, `Build + prove + (owner-gated) deploy`,
+   `drift-fast`. Everything else (Workflow lint, CodeQL, Linux, Windows,
+   coverage) is advisory — red there does not stop auto-merge.
+3. **Open with `shipyard pr` and leave auto-merge armed.** Before you start,
+   `shipyard ship-state list` shows whether someone is already landing it.
+4. **Read `mergeStateStatus` correctly:**
+
+   | State | Means | Do |
+   |---|---|---|
+   | `CLEAN` | mergeable, all checks green | nothing; the queue takes it |
+   | `UNSTABLE` | mergeable; a **non-required** check is failing or pending | nothing. Auto-merge still fires. Check whether that check is also red on `main` before "fixing" it on your branch |
+   | `BLOCKED` | a **required** context is missing, pending, or failing (or a review is owed) | find which required context; `shipyard landability --pr <N>` tells absent from unschedulable |
+   | `BEHIND` | base moved under `strict` | if auto-merge is armed the merge queue does the update itself — check the queue before touching it |
+   | `DIRTY` | real conflict | merge `origin/main` and resolve; never `--force` |
+
+5. **Do not merge `main` into a BEHIND branch the queue owns.** With
+   auto-merge armed, BEHIND usually means QUEUED, and a queued branch rejects
+   pushes (`GH006 ... Branches that are queued for merging cannot be
+   updated`). Read the queue first:
+
+   ```sh
+   ghapp api graphql -f query='{repository(owner:"Generous-Corp",name:"pulp"){mergeQueue(branch:"main"){entries(first:20){nodes{position state pullRequest{number}}}}}}'
+   ```
+
+   Every manual merge of `main` also restarts the PR-head `macos` run for
+   nothing: the merge group validates the combined tree anyway.
+6. **A red check that your diff cannot have caused is probably `main`.**
+   Reproduce it on `origin/main` (see "Is `main` itself broken?") before
+   debugging your branch.
+7. **Wait with one blocking command, then prove the merge by git ancestry:**
+   `shipyard wait pr <N> --state merged`, then
+   `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
+   A `wait` exit code is not merge proof.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
@@ -442,7 +509,7 @@ path; otherwise two cancellation actuators can race and make restart evidence
 ambiguous. This exclusion does not authorize recovery by itself—the dedicated
 Shipyard invocation remains separately enabled only after its pinned release,
 receipt namespace protection, and canary are in place. Pulp pins the bounded
-primitive at Shipyard v0.143.0; that pin supplies the command but does not turn
+primitive since Shipyard v0.143.0; the pin supplies the command but does not turn
 on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
@@ -455,8 +522,8 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.83.0`,
-which provides it, so the pinned binary is sufficient. That pin also makes
+`shipyard metrics` subcommand, which every pin since `v0.83.0` provides, so the
+pinned binary in `tools/shipyard.toml` is sufficient. Those pins also make
 formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
 lifecycle for an explicit pilot rather than routing stack members through the
@@ -581,6 +648,10 @@ Two things to know when it goes red:
 What it does **not** cover is GCC *behavior* — nothing is executed, so a
 construct both compilers accept but implement differently is still only caught
 by the Clang test lanes.
+
+MSVC sees PR code in one place: `windows-cli-compile.yml`, scoped to the CLI and
+MCP targets (see "Windows is nightly-only" below). Everything else Windows-only is
+compiled by the nightly `cross-platform-check.yml` and by the release legs.
 
 Release-path configurations use `PULP_ENABLE_INSPECTOR=ON` starting at the
 `inspector_sdk_floor` in `release_product_matrix.json`; earlier marker-era
@@ -743,6 +814,21 @@ every test it fails also fails there, it prints `PRE-EXISTING ON BASE` as a
 warning and does not fail the check. Compiled tests are never exempted: their
 binary is the pull request's own build, so a base run would compare it with
 itself.
+
+### `pulp_test_data` is a static claim; the nightly read audit measures it
+
+A compiled test's `data: declared` / `data: none` in
+`test/ctest_script_inputs.json` comes from scanning its sources, and the
+selector trusts it to skip the test when nothing declared changed. A path
+assembled at run time, a fixture opened by a helper library, or a file a
+spawned tool reads never shows up in that scan. `read-audit-nightly.yml`
+(`tools/ci/read_audit.py`) runs every compiled test under `strace -f` on Linux
+and reports each tracked checkout file a test opened, listed or probed without
+declaring it. To fix a finding, add the path to the test's `pulp_test_data()`.
+Never treat a clean audit as proof for macOS-only tests: Linux does not
+register them, and the report lists them as not covered. A run whose control
+was not flagged has no verdict, because strace saw nothing, and it fails for
+that reason.
 
 ### Only a ready-to-land PR head issues a receipt
 
@@ -1208,43 +1294,72 @@ line and let the push through, putting the blind spot back one layer out from
 the script that just closed it. Map every non-zero code a gate can return, and
 when you add an outcome to a gate, add its arm to the hook in the same change.
 
-### The Vellum watch-event hint is ADVISORY, and that is load-bearing
+### The Vellum watch-event gate fails locally, and prints the event to add
 
 `gates.sh` and `.githooks/pre-push` both run
-`tools/scripts/vellum_watch_preflight.py`, which prints — and never blocks — a
-warning when the pushed range owes a `.github/vellum-expansion-watch-events/*.json`
-file that it does not carry. Three pull requests discovered that requirement the
-expensive way in one evening, each by failing the required `Vellum freeze`
-check after a push.
+`tools/scripts/vellum_watch_preflight.py --enforce`. When the pushed range owes
+a `.github/vellum-expansion-watch-events/*.json` file it does not carry, both
+FAIL (the hook's failure is demotable with `PULP_DISABLE_PREPUSH_GATES=1`, like
+every primary gate) and the script prints the exact event JSON that satisfies
+the checker: the missing families, the acceptance id and sha256, suggested
+covering tests derived from the test files the range touches, and the
+watch-only/no-authority disposition. Write it in one step instead with:
+
+```bash
+python3 tools/scripts/vellum_watch_preflight.py --write-event \
+  --rationale "what changed, and that no authority moves"
+git add .github/vellum-expansion-watch-events/ && git commit -m "ci: record a Vellum watch event"
+```
+
+`--write-event` refuses a missing, short, or `<placeholder>` rationale, and
+writes nothing when no event is owed. It used to be an advisory hint; advisory
+output did not stop #9143, #9275 and #9283 each going red on both required
+Vellum checks on 2026-10-02, a CI round trip apiece.
 
 The trigger is **changed paths, not intent**: the checker globs the changed-file
 list against pinned capability-family selectors and reads nothing of the diff,
 so a one-line `#include` under `test/test_browser_capture*`, or an ordinary edit
-under `tools/import-design/**`, owes a hand-authored event.
+under `tools/import-design/**`, owes a hand-authored event. Coverage is compared
+for **equality**: an event that claims a family the range does not touch fails
+too, and the gate names the over-claimed family.
 
-**Do not promote this to a blocking gate, and do not move the authoritative
-check local.** `.github/workflows/vellum-trusted-gate.yml` runs the checker from
-a *trusted root* rather than from the pull request's copy, and
-`.github/CODEOWNERS` locks the events directory, the checker and the checker's
-test. A local gate would execute the branch's own copy of a script that exists
-precisely so the branch's copy is not trusted. Two required contexts
-(`Vellum freeze`, `Vellum trusted freeze`) stay the authority; this only moves
-discovery earlier.
-
-Two things the hint must keep doing, both asserted by
+**The authoritative check stays in CI, from a trusted root.**
+`.github/workflows/vellum-trusted-gate.yml` runs the checker from a trusted root
+rather than the pull request's copy, and `.github/CODEOWNERS` locks the events
+directory, the checker and its test. A local refusal does not weaken that: it
+can only stop a push the required checks would also refuse, and it never
+accepts anything on CI's behalf. The real risk of a local copy is a FALSE red,
+so three properties are load-bearing, all asserted by
 `tools/scripts/test_vellum_watch_preflight.py`:
 
 - **It compares against the MERGE-BASE, never `origin/main`'s tip.** Using the
   tip manufactures `watch events are append-only` on any branch that is merely
-  stale — a false red on a required gate's surface, which is worse than the
-  friction being fixed.
-- **Neither call site may set `fail`.** The test resolves the `$VELLUM_HINT`
-  variable rather than grepping for the filename, because the literal path
-  appears only in the assignment: a scan for the filename finds no invocation
-  line at all and passes whatever the call sites do.
+  stale.
+- **Only exit 10 (event owed) blocks.** Exit 20 (no checker, no acceptance, no
+  resolvable range, any internal error) never does. The test resolves the
+  `$VELLUM_HINT` variable rather than grepping for the filename, because the
+  literal path appears only in the assignment.
+- **Events are read from the HEAD COMMIT, not the working tree.** An event you
+  wrote but did not commit covers nothing, exactly as in CI.
 
-Its exit codes (0 nothing owed · 10 event owed · 20 no verdict) are
-informational; both callers discard them with `|| true`.
+**It also verifies the freeze job's inventories** (`--inventories`): the
+`Vellum freeze` job's "Verify extraction and tooling inventories" step runs
+`generate_vellum_cut_manifest.py --verify`,
+`generate_vellum_ownership_projection.py --verify` and
+`pulp_tooling_disposition.py`, and a stale one fails the required check. A new
+CLI flag or command is enough to stale `docs/status/pulp-tooling-disposition.json`
+(#9283's Sparkle appcast options did). The gate runs the same three and prints
+the regenerate command (`python3 tools/scripts/pulp_tooling_disposition.py
+--write`, and so on) for whichever is stale.
+
+**Reading that step's log:** the line `vellum-ownership-projection: error:
+ownership projection is stale` used to be printed by a *passing* negative
+control in `test_generate_vellum_ownership_projection.py`, so it appeared in
+every log and pointed at the wrong file. The test now captures it. The real
+failure is the last tool line before `Process completed with exit code 1`.
+
+Exit codes: 0 nothing owed · 10 event owed · 11 inventory stale · 20 no
+verdict · 2 `--write-event` refused. Both callers block on 10 and 11 only.
 
 ### `gates.sh` and the pre-push hook are two lists, not one
 
@@ -1783,6 +1898,22 @@ to the event commit; only other fetch errors print `bounded fetch failed`.
 Before attributing a hydrate-step red to a vanished queue branch, check that the
 run's workflow commit carries the event-commit fallback at all.
 
+Every job that runs a broad ctest installs the set through
+`tools/ci/install_visual_python_deps.sh <build-dir>`; a workflow that runs ctest
+without it makes `visual-python-deps-present` red in every run (the sanitizer
+jobs did, main-wide). `test_visual_python_deps_step.py` pins both the script's
+behaviour and which jobs call it.
+`relay_contract_check.py` scans a shell script a gate step runs (`bash
+tools/...sh`) as part of the step, so moving the install into the script kept
+`pypi.org` derived; without that, the relay contract would have stopped
+requiring PyPI egress for the gate.
+
+`test-pch-wiring` reads compile flags back from the generator. Ninja lists one
+compile line per object; the Makefile generator, which the hosted sanitizer jobs
+use by default, writes a target's PCH flags per object as a `# PCH options:`
+comment in `flags.make`, not in `CXX_FLAGS`. Reading only `CXX_FLAGS` reported
+every consumer of a correctly wired Makefiles tree as "flags name no PCH".
+
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
 both produce a green step. `visual-python-deps-present` exists for that: it
@@ -1992,6 +2123,45 @@ undeclared. Declaring a subset is worse than not declaring, because it
 makes an unsound key look sound. Count with
 `script_test_inputs.py --build-dir <dir> --data-summary`.
 
+A compiled test that runs or loads another target this tree builds (a CLI,
+tool, fixture executable or MODULE) declares it with
+`pulp_test_spawns(<test> <target>...)` (same module). Never write
+`if(TARGET <tool>) add_dependencies(...)` in `test/cmake`: the test directory
+is read before `tools/cli`, `tools/import-design` and `examples/`, so the
+guard is false and the edge silently never exists (cli-import-design ran
+against whatever pulp-cpp was lying around for that reason).
+`pulp_test_spawns` adds the edge once the whole tree is read. The configure
+fails when a definition names `$<TARGET_FILE:x>` without an edge to x.
+`script_test_inputs.py` scans each test's sources and the `test/` headers they
+include, comments stripped, for process API calls and for runtime loads
+(`PluginSlot::load`, the CLAP bundle scanner, `dlopen` and its shim,
+`LoadLibrary`, `CFBundle`). One with no edge and no reviewed
+`pulp_test_spawns(<test> NONE)` (it starts only system tools, a fork of
+itself, or an in-process plugin) is `spawns: undeclared`, and the shadow
+never skips it. Pass a built artifact's path in from
+CMake (`$<TARGET_FILE:x>`, or the bundle path beside its edge); never find it
+by a path relative to the working directory. pulp-test-host's PulpSynth case
+did that and silently skipped for its whole life. The scan cannot see a
+spawn inside linked library code (the MCP audio tools shell out from
+tools/mcp), and "declared" means one edge, not all of them, so read what a
+test runs before marking it. The MCP audio tests now stage this build's CLI
+under a temp project root (`CliProjectRoot`) and assert text only a real run
+prints.
+
+One edge is not enough. Configure writes
+`<build>/test/test-data/runtime-targets.json` (every program or module the
+tree builds, by artifact file name, with its own runtime targets). The scan
+checks every string-literal path component in a spawning test's code that
+names one of those artifacts (`"pulp-cpp"`): it must be reached by an edge,
+directly or through a program the test runs, or be reviewed with
+`pulp_test_spawns(<test> NOT_RUN <target>...)` (named but never run, e.g. a
+fake staged at the real tool's name). Otherwise the test is `spawns:
+undeclared` with `unmatched_programs`. A built test whose declared tool this
+configuration does not build is recorded as `absent_spawns`, named in the
+configure output, and stays undeclared there; Linux and Windows build fewer
+tools than macOS, so the same test can be declared on one and undeclared on
+another.
+
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the
@@ -2039,6 +2209,15 @@ its fail-closed rules (CMake change selects all; script-driven tests are
 affected whenever a script surface changed; a changed file no edge reads
 selects all) are the contract any real selector inherits. The ctest step takes
 no input from it; do not wire it into `-R`/`-L` without a contract decision.
+
+A test that spawns another built program (pulp-cli, pulp-import-design, a
+fixture runner) or loads a module at run time is reached only through the
+`add_dependencies(<test> <tool>)` edge, which Ninja records as order-only and
+the graph drops. `tools/ci/spawn_closure.py` reads that edge from the CMake
+codemodel's `dependencies`, and any consumer of "which tests does this change
+reach" (the shadow today) must go through it rather than walk the codemodel
+itself. Give every spawned tool or loaded module an `add_dependencies` on its
+test, or the closure cannot see it.
 
 ## The gate's "Hits: N / N (99.7%)" line is the host's history, not the job's
 
@@ -2142,7 +2321,7 @@ and each one fails a different check on the PR head if it is hand-edited:
 `test/ctest_script_inputs.json` (`script-test-inputs-drift`),
 `tools/ci/source_selftests.json` (`source-selftest-lane-contract`, which also
 compares each entry's TIMEOUT, RESOURCE_LOCK and argv to the registration), and
-the changed-surface script families block in `.shipyard/config.toml`
+the changed-surface script families file `.shipyard/changed-surface-families.toml`
 (`changed-surface-script-families-drift`, which must map every new script and
 list every new reader of `.agents/skills/*/SKILL.md`). Regenerate all three from
 a configured build: `script_test_inputs.py --build-dir B --write`,
@@ -3765,6 +3944,37 @@ explicit: up to ~24 h of latency on a Windows regression, bought with merge-queu
 capacity. Revisit only if Windows parity becomes an active workstream rather than a
 background one.
 
+**The one PR-time exception: `Windows CLI compile (MSVC)`.** The 24 h latency is
+not harmless for the CLI, because `release-cli.yml` compiles it with MSVC on every
+tag: an MSVC-only error under `#ifdef _WIN32` (a helper defined twice in
+`tools/cli/kit_profile_verification.cpp`, C2668) failed the Windows legs of
+v0.897.3, v0.898.0 and v0.899.0 on 2026-10-03, and the nightly that should have
+caught it had been cancelled on both preceding nights.
+`windows-cli-compile.yml` compiles only `pulp-cli` and `pulp-mcp`, and only when
+`tools/scripts/windows_cli_compile_scope.py` says the change can reach them
+(`tools/cli/`, `tools/mcp/`, `tools/cmake/`, or C/C++ carrying a Windows/MSVC
+marker) — ~3 merges a day, one hosted Windows job each, against the four jobs per
+PR this section removed. It is advisory. Its main-push runs post a
+`Windows CLI compile verdict` check, which feeds a **blocking** pre-tag check in
+`auto-release.yml` (`windows_cli_release_precheck.py`): while the newest verdict
+for an ancestor of the tagged commit is a failure, the SDK tag is withheld and the
+step summary says why. The check reads check runs with `checks: read` — do not
+"simplify" it to the workflow-runs API, which needs an `actions` scope that
+auto-release deliberately does not hold. Read it as:
+
+- **`SDK tag withheld` on an auto-release run** — main does not compile with MSVC.
+  Fix the code; the first push after a clean `Windows CLI compile (MSVC)` run tags
+  the current version. Do not tag by hand, and do not set
+  `PULP_RELEASE_WINDOWS_PRECHECK=off` unless the lane itself is broken (that
+  variable disables the check).
+- **A red `Windows CLI compile (MSVC)` on your PR** — it cannot flake on code: it
+  runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
+  failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
+  job is skipped, so the pre-tag check ignores it too.
+- **Promoting it to required** needs a `merge_group` trigger plus the ruleset
+  entry. The scope job always reports and an irrelevant change skips the compile
+  job (a skipped job satisfies a required check), so nothing else changes.
+
 Related, and rejected on measurement: moving the Ubuntu preamble jobs off the Macs.
 `pulp-preamble-m5` and `pulp-studio-02` do also carry the `pulp-build` gate label,
 so the starvation mechanism is real — but it is ~0.6 min of Mac time per run, and
@@ -4573,6 +4783,15 @@ bisectable.
   incidents. A pile of open `release: stuck` trackers therefore means the
   release pipeline is genuinely stuck NOW — check release-reconcile's single
   incident issue first, don't triage the trackers one by one.
+- **The reconciler's incident names the failing leg** (`CLI windows-x64 › Build`)
+  for every tag it lists, and it lists a tag on either of two grounds: retries
+  are exhausted or cannot help, or the tag is still unpublished 2 h
+  (`DROUGHT_HOURS`) after it was cut with a failed leg behind it. A compiler
+  error in a leg's log (MSVC `error C2xxx`, Clang/GCC `file:line:col: error:`) is
+  treated as tag-immutable: the circuit opens on the first failure and the tag
+  is not re-dispatched, because the frozen sources fail identically every time.
+  Fix it on main and let the next tag publish; re-dispatching that tag by hand
+  only burns another release matrix.
 - **NEVER delete a GitHub release or draft — deletion of a once-published
   release permanently burns its tag name.** GitHub reserves an immutable
   release's `tag_name` forever; every later publish attempt 422s with
@@ -6754,7 +6973,7 @@ rejects the dispatch if the live PR head moved or the exact source is no longer
 the queued `pull_request` attempt for `.github/workflows/build.yml` with an
 exhaustive zero-job census. Operator dispatches leave recovery false, omit the
 source identity, and retain live-head resolution.
-Shipyard v0.143.0 provides the matching default-off
+Shipyard v0.143.0 and later provide the matching default-off
 `shipyard runner zero-job-recover` controller primitive. It creates and then
 re-reads an exact receipt, refuses duplicate/conflicting receipt contexts,
 requires the exhaustive current-attempt census to remain unchanged, and never
@@ -7098,7 +7317,7 @@ still select full validation. Top-level `tools/scripts/*.py` and
 `test/ctest_script_inputs.json` by `changed_surface_script_families.py`, which
 also adds the whole-tree drift/lint/sync tests; a script native code, shell or
 CMake names stays full. After regenerating the script-inputs list, regenerate
-the block with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`
+the families file with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`
 blocks the next change to a script or skill doc. A test whose outcome follows
 host load, the toolchain or host state rather than its inputs belongs in the
 `environment-bound` ctest label: the generator then runs it with every bounded
@@ -7223,6 +7442,27 @@ entry on one side only counts), or the run refuses with `inventory:
 base_provisioning_mismatch: <entry> base=... head=...`, so the next provisioning
 gap names itself rather than reading as drift. The receipt records the compared
 `base_inventory_environment` and `base_inventory_linked_externals`.
+
+To rank why plans go full across every PR rather than only opt-in mac-lane
+runs, read the shadow plans: `changed-surface-shadow-plan.yml` records one
+`shipyard changed-surface-plan --record` per PR head (advisory, never
+required, builds nothing) and `changed_surface_shadow_plans.py rank --since
+<ISO>` reports plans ÷ PR heads and a per-reason table. These plans never
+execute, so never divide an executed-bounded proxy by them; a head with no
+record counts as `missing_record`, so a low plans ÷ heads means the
+instrument is blind.
+
+Registrations are compared in configure shape: a discovered Catch2 case (ctest
+lists it with no backtrace) folds to its executable's row like the
+`*_NOT_BUILT-*` placeholder, and a build-tree program lists no command, as an
+unbuilt one does. A configure-only base cannot represent a built tree, so after
+the full build the tree is compared with its own pre-build snapshot (catching a
+CMake re-run mid-build), never with the base. A registration the authoritative
+filter excludes (`validation`, `slow`, ...) is never proven or required to have
+a command: on m3 the examples' `find_program(PLUGINVAL pluginval)` resolves to a
+doubled path that does not exist, so those tests list no command at all.
+`SelectedLegPipelineTest` drives every gate through the cold, selected-built and
+fully built states; add a state there before a proof run finds it.
 
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
@@ -7604,9 +7844,22 @@ What it does:
   `queued_max_minutes` inputs to override the thresholds for manual runs.
 - Runs on `ubuntu-latest` — it only calls the GitHub API, no build.
   `permissions: actions: write` (required to cancel runs) + `contents: read`.
-- Pages through `actions/runs?status=in_progress` and `?status=queued`
-  via `gh api --paginate` and cancels anything past the threshold via
-  the `runs/<id>/cancel` API.
+- Logic lives in `tools/scripts/stale_run_reaper.py` (tested by
+  `test_stale_run_reaper.py`, run in workflow-lint). It pages through
+  `actions/runs?status=in_progress` and `?status=queued` and cancels
+  anything past the threshold via `runs/<id>/cancel`.
+- **A refused cancel escalates to `runs/<id>/force-cancel`**, unless the
+  run's head is still the head of an open PR (force-cancel also skips
+  `always()` cleanup). A plain cancel answers 409 for a run whose jobs
+  were never assigned; the old shell loop read every refusal as "likely
+  already completed", so 13 runs sat `queued` for up to 45 days while it
+  logged that line every 30 minutes (measured 2026-10-02).
+- **GitHub-side phantoms:** a run that refuses cancel AND force-cancel
+  with `Cannot cancel a workflow run that has not been queued yet` has
+  zero jobs, and `DELETE` is refused too (403, App and personal token
+  alike). It holds no runner and no concurrency group. The summary lists
+  these in their own table and never counts them as cancelled; only
+  GitHub Support can remove one. Do not burn calls retrying them by hand.
 - **Age basis:** `in_progress` runs are aged from `run_started_at`
   (execution start), **not** `created_at`. `created_at` also counts
   queue time, so during a deep backlog a healthy run that queued for

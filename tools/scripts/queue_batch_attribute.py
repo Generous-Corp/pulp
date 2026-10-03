@@ -697,6 +697,13 @@ WORKFLOW_SURFACE_DIRS = (".github/workflows/", ".github/actions/")
 # `$PULP_BUILD_DIR/CMakeCache.txt` and exits non-zero when the entry is missing,
 # which a build-system change can cause.
 BUILD_SURFACE_FILES = ("CMakeLists.txt",)
+# The visual-analysis install runs a repository script over a pinned lock, so a
+# change to either can fail it.
+INSTALL_INPUT_FILES = (
+    "tools/ci/install_visual_python_deps.sh",
+    "tools/motion/visual/requirements.lock",
+    "tools/motion/visual/requirements.txt",
+)
 BUILD_SURFACE_SUFFIXES = (".cmake",)
 BUILD_SENSITIVE_STEP_PATTERNS = (
     re.compile(r"^install\b.*\bdependenc(?:y|ies)\b", re.I),
@@ -718,6 +725,8 @@ def head_reaches_step(step: str, changes: list[ChangedFile]) -> str | None:
             return change.path
         if not build_sensitive:
             continue
+        if path in INSTALL_INPUT_FILES:
+            return change.path
         if path.rsplit("/", 1)[-1] in BUILD_SURFACE_FILES:
             return change.path
         if path.endswith(BUILD_SURFACE_SUFFIXES):

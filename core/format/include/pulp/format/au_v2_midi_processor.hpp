@@ -232,6 +232,10 @@ private:
     // Default-constructed so the first Render() after Initialize() reports no
     // changes.
     detail::PlayheadSnapshot playhead_prev_{};
+
+    // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
+    // the host before a faster-than-realtime bounce and read each render block.
+    OfflineRenderProperty offline_render_;
 };
 
 } // namespace pulp::format::au

@@ -12,7 +12,7 @@
 #   git config core.hooksPath .githooks
 #
 # Bypass knobs (use sparingly — CI runs the same gates):
-#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/compat-aggregate/node-ABI/docs-noise/source-contract/hotspot-size/deps)
+#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/compat-aggregate/node-ABI/docs-noise/source-contract/hotspot-size/deps/vellum-watch)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
 #   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies)
 #
@@ -49,6 +49,33 @@ if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
     exit 1
 fi
 
+# Resolve the configured interpreter before any advisory helper runs. GUI
+# environments may omit Homebrew from PATH, while PYTHON may be a command name
+# (for example PYTHON=python3.12) rather than an absolute path.
+if [ -n "${PYTHON:-}" ]; then
+    if [[ "${PYTHON}" == */* ]]; then
+        PULP_PYTHON="${PYTHON}"
+    else
+        PULP_PYTHON="$(command -v "${PYTHON}" 2>/dev/null || true)"
+    fi
+else
+    for _python_candidate in \
+        "$(command -v python3 2>/dev/null || true)" \
+        /opt/homebrew/bin/python3 \
+        /usr/local/bin/python3 \
+        /usr/bin/python3; do
+        if [ -n "${_python_candidate}" ] && [ -x "${_python_candidate}" ]; then
+            PULP_PYTHON="${_python_candidate}"
+            break
+        fi
+    done
+fi
+if [ -z "${PULP_PYTHON:-}" ] || [ ! -x "${PULP_PYTHON}" ]; then
+    echo "[pre-push] required Python interpreter is unavailable; checked PYTHON, PATH, and standard macOS locations." >&2
+    echo "[pre-push] set PYTHON=/absolute/path/to/python3 and retry." >&2
+    exit 2
+fi
+
 # ── Main-refresh push telemetry + policy ───────────────────────────────────
 # A local `git merge origin/main && git push` moves the PR head, which cancels
 # the in-flight required `macos` gate, and it never reaches Shipyard's
@@ -63,7 +90,7 @@ fi
 REFRESH_PUSH_CHECK="$ROOT/tools/scripts/refresh_push_check.py"
 if [ -f "$REFRESH_PUSH_CHECK" ]; then
     printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
-        "${PYTHON:-python3}" "$REFRESH_PUSH_CHECK" --root "$ROOT" --remote-url "${2:-}"
+        "$PULP_PYTHON" "$REFRESH_PUSH_CHECK" --root "$ROOT" --remote-url "${2:-}"
     _refresh_rc=$?
     if [ "$_refresh_rc" = "1" ]; then
         if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] || [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; then
@@ -89,7 +116,7 @@ fi
 QUEUE_REBASE_HINT="$ROOT/tools/scripts/prepush_queue_rebase_hint.py"
 if [ -f "$QUEUE_REBASE_HINT" ]; then
     printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
-        "${PYTHON:-python3}" "$QUEUE_REBASE_HINT" --root "$ROOT" --remote-url "${2:-}" || true
+        "$PULP_PYTHON" "$QUEUE_REBASE_HINT" --root "$ROOT" --remote-url "${2:-}" || true
 fi
 
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
@@ -126,7 +153,7 @@ source "$ROOT/.githooks/lib/gate-output.sh"
 # only reaches an agent that chooses to read it; a push reaches everyone.
 PR_BATCH_ADVISOR="$ROOT/tools/scripts/pr_batch_advisor.py"
 if [ -f "$PR_BATCH_ADVISOR" ] && [ "${PULP_SKIP_PR_BATCH_ADVICE:-0}" != "1" ]; then
-    run_gate_captured python3 "$PR_BATCH_ADVISOR" || true
+    run_gate_captured "$PULP_PYTHON" "$PR_BATCH_ADVISOR" || true
 fi
 
 # ── Shipyard-drift detection (pulp #1406) ──────────────────────────────────
@@ -176,7 +203,7 @@ if [ "${SHIPYARD_PR_RUNNING:-0}" != "1" ] && [ "${PULP_VIA_SHIPYARD:-0}" != "1" 
     echo "" >&2
 fi
 
-PYTHON="${PYTHON:-python3}"
+PYTHON="${PULP_PYTHON}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 SPML="$ROOT/tools/scripts/skill_path_map_lint.py"
@@ -389,19 +416,26 @@ if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; 
     esac
 fi
 
-# Vellum watch-event hint — ADVISORY: warns, never blocks, and is deliberately
-# not demotable because it has nothing to demote. The required `Vellum freeze`
-# check wants a hand-authored event under .github/vellum-expansion-watch-events/
-# whenever the pushed range touches a pinned capability-family path glob; the
-# trigger is the path list, not the diff's meaning, so an ordinary edit under a
-# watched tree qualifies with no warning anywhere else.
-#
-# The authoritative run stays in CI, executed from a trusted root rather than
-# from this branch's copy of the checker — that is the whole point of the gate,
-# and giving the branch's copy a local veto would undo it. This prints what CI
-# will say and the command that reproduces it, then gets out of the way.
+# Vellum watch-event gate (demotable with PULP_DISABLE_PREPUSH_GATES=1). The
+# required `Vellum freeze` check wants a hand-authored event under
+# .github/vellum-expansion-watch-events/ whenever the pushed range touches a
+# pinned capability-family path glob; the trigger is the path list, not the
+# diff's meaning, so an ordinary edit under a watched tree qualifies with no
+# warning anywhere else. Advisory output did not prevent three red PRs in one
+# day, so an owed event (exit 10) now fails the push and the script prints the
+# exact event JSON to commit. "No verdict" (exit 20) never blocks. The trusted
+# CI run stays the authority; this can only refuse what CI would also refuse.
+# `--inventories` also verifies the freeze job's cut manifest, ownership
+# projection and tooling disposition, printing the regenerate command (exit 11).
+# It also runs the job's change-event checker (`vellum_freeze_check.py`): a
+# touched transferred-slice path owes a `.github/vellum-change-events/` event,
+# whose JSON it prints or writes with `--write-change-event` (exit 12).
 if [ -f "$VELLUM_HINT" ]; then
-    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" || true
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
+    vellum_rc=$?
+    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
+        fail=1
+    fi
 fi
 
 # Docs-noise lint (advisory-demotable in v1). Forward-looking: scans added

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-import-design-suite-data-watch",
+  "created_at": "2026-10-03T07:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Record test-registration lines that cross design-source-ingest through test/cmake/design_import_tool_cli_tests.cmake: pulp_test_data(... NO_DEFINE ...) declarations for pulp-test-cli-import-design (three import fixture sets) and pulp-test-import-design-tool (tools/import-design and the .fig fixture). The two suites now run against an isolated empty PULP_HOME (test/support/isolated_pulp_home.hpp), so a host's import-design defaults cannot change what the CLI and the import tool emit under test. Import tool code, capture, rendering, DesignIR, fixtures and thresholds are unchanged. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-data-cmake-selftest",
+    "script-test-inputs-selftest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

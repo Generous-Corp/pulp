@@ -99,18 +99,66 @@ midi::MidiEvent decode_midi_event(uint8_t inStatus,
                                   uint8_t inData2) noexcept;
 
 /// Build the AU v2 render-path ProcessContext fields that are independent of
-/// host callbacks. AU v2 render callbacks are always realtime; offline bounce
-/// intent is not surfaced by the v2 SDK, so hosts that need explicit offline
-/// hints should use AU v3 or another adapter that provides that signal.
+/// host callbacks. `offline` is the host's `kAudioUnitProperty_OfflineRender`
+/// value (see `OfflineRenderProperty`): a host doing a faster-than-realtime
+/// bounce sets it before rendering, and the block is then reported as
+/// `ProcessMode::Offline` + `RenderSpeedHint::FasterThanRealtime`, the same
+/// mapping the AU v3, VST3, and CLAP adapters use.
 inline ProcessContext make_render_process_context(double sample_rate,
-                                                  int num_samples) noexcept {
+                                                  int num_samples,
+                                                  bool offline = false) noexcept {
     ProcessContext ctx;
     ctx.sample_rate = sample_rate;
     ctx.num_samples = num_samples;
-    ctx.process_mode = ProcessMode::Realtime;
-    ctx.render_speed_hint = RenderSpeedHint::Realtime;
+    ctx.process_mode = offline ? ProcessMode::Offline : ProcessMode::Realtime;
+    ctx.render_speed_hint = offline ? RenderSpeedHint::FasterThanRealtime
+                                    : RenderSpeedHint::Realtime;
     return ctx;
 }
+
+/// Host offline-render intent for an AU v2 instance.
+///
+/// `kAudioUnitProperty_OfflineRender` is a global-scope, read/write `UInt32`
+/// that a host (Logic's offline bounce, REAPER's render) sets non-zero before a
+/// faster-than-realtime render and back to zero afterwards. `AUBase` does not
+/// implement it, so without this an AU v2 plug-in rejects the write and every
+/// block reports realtime. The value is written on the host's property thread
+/// and read on the render thread, so it is held in an atomic.
+class OfflineRenderProperty {
+public:
+    OSStatus property_info(AudioUnitScope scope, UInt32& out_size,
+                           bool& out_writable) const noexcept {
+        if (scope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        out_size = sizeof(UInt32);
+        out_writable = true;
+        return noErr;
+    }
+
+    OSStatus get(AudioUnitScope scope, void* out_data) const noexcept {
+        if (scope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!out_data) return kAudioUnitErr_InvalidPropertyValue;
+        *static_cast<UInt32*>(out_data) = offline() ? 1u : 0u;
+        return noErr;
+    }
+
+    OSStatus set(AudioUnitScope scope, const void* in_data,
+                 UInt32 in_size) noexcept {
+        if (scope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!in_data || in_size < sizeof(UInt32))
+            return kAudioUnitErr_InvalidPropertyValue;
+        offline_.store(*static_cast<const UInt32*>(in_data) != 0,
+                       std::memory_order_release);
+        return noErr;
+    }
+
+    /// Render-thread read of the latest host value.
+    bool offline() const noexcept {
+        return offline_.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic<bool> offline_{false};
+};
 
 /// Populate AU v2 render-context transport metadata from host callbacks and
 /// derive per-block playhead change flags. The AU v2 SDK only exposes these

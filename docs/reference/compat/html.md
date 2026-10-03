@@ -309,5 +309,9 @@ A third hint does not claim at all — it QUALIFIES a claim:
 `__dispatch__` is the sole native-to-DOM element fan-out. In particular, wheel
 registration no longer emits a second event: legacy positional deltas are
 normalized to `deltaX` / `deltaY` at the shared dispatch boundary, then the
-normal element bubbling path runs once. Callback exceptions remain contained
+normal element bubbling path runs once. A wheel that lands inside an open
+overlay (a menu, dropdown or dialog) does not bubble past that overlay's
+element — as with `overscroll-behavior: contain`, a listener on an ancestor
+outside the overlay never sees it — and a wheel outside every open overlay is
+not delivered at all while one is open. Callback exceptions remain contained
 inside that JS boundary so they cannot stop the frame loop.

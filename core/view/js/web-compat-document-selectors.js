@@ -49,7 +49,34 @@
 // listed as unsupported.  Sibling combinators (`+`, `~`) are not
 // implemented; selectors that include them silently fall through to
 // no-match (legacy behavior).
+//
+// Parses are memoized by source text. A parse is a pure function of the
+// string and no caller mutates the record it returns (StyleSheet copies a
+// rule's record before stripping its pseudo-class), so every matches(),
+// closest() and querySelector() of one selector shares one record. Without
+// this a scan that tests one selector against every element -- a registry
+// search, a stylesheet pass, captured-state resolution on each React
+// commit -- re-tokenised the selector once per element. The cache is
+// bounded and cleared when full, so a stream of distinct generated
+// selectors cannot grow it without limit.
+var _selectorParseCache = new Map();
+var _SELECTOR_PARSE_CACHE_LIMIT = 512;
 function _parseSelector(str) {
+    if (!str) return _parseSelectorUncached(str);
+    var key = String(str);
+    var cached = _selectorParseCache.get(key);
+    if (cached !== undefined) return cached;
+    var parsed = _parseSelectorUncached(key);
+    if (_selectorParseCache.size >= _SELECTOR_PARSE_CACHE_LIMIT)
+        _selectorParseCache.clear();
+    _selectorParseCache.set(key, parsed);
+    return parsed;
+}
+// Lets a vendored runtime that carries its own copy of this cache see that
+// the SDK's selector engine already memoizes.
+_parseSelector.__pulpMemoized = true;
+
+function _parseSelectorUncached(str) {
     var result = { tag: null, id: null, classes: [], attrs: [], pseudo: null,
                    parent: null, direct: false };
 

@@ -36,11 +36,15 @@ import textwrap
 import unittest
 from pathlib import Path
 
-import yaml
-
 REPO = Path(__file__).resolve().parents[2]
-WORKFLOW = REPO / ".github/workflows/build.yml"
+SCRIPT = REPO / "tools/ci/install_visual_python_deps.sh"
 STEP_NAME = "Install visual-analysis Python dependencies"
+# Every workflow that runs a broad ctest, and the build directory each such job
+# tests: each must install the set into that tree's interpreter.
+CTEST_JOBS = {
+    ".github/workflows/build.yml": ["$PULP_BUILD_DIR"],
+    ".github/workflows/sanitizers.yml": ["build-asan", "build-tsan", "build-ubsan", "build-rtsan"],
+}
 REQUIREMENTS = REPO / "tools/motion/visual/requirements.txt"
 LOCK = REPO / "tools/motion/visual/requirements.lock"
 
@@ -65,13 +69,33 @@ def _version(text: str) -> tuple[int, ...]:
 
 
 def _step_script() -> str:
-    """Return the run: body of the install step, as build.yml declares it."""
-    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    for job in workflow["jobs"].values():
-        for step in job.get("steps") or []:
-            if step.get("name") == STEP_NAME:
-                return step["run"]
-    raise AssertionError(f"build.yml declares no step named {STEP_NAME!r}")
+    """The install script every ctest-running job calls, run as those jobs run
+    it: with the build directory in PULP_BUILD_DIR."""
+    return SCRIPT.read_text(encoding="utf-8")
+
+
+class EveryCtestJobInstallsTest(unittest.TestCase):
+    """The sanitizer jobs ran ctest without the set, so visual-python-deps-present
+    failed in every one of them; each job that runs ctest must call the script."""
+
+    def test_each_ctest_job_installs_into_the_tree_it_tests(self) -> None:
+        for workflow, build_dirs in CTEST_JOBS.items():
+            text = (REPO / workflow).read_text(encoding="utf-8")
+            calls = re.findall(
+                r"(?m)^\s+run: bash tools/ci/install_visual_python_deps\.sh (\S+)\s*$", text)
+            self.assertEqual(sorted(c.strip('"') for c in calls), sorted(build_dirs), workflow)
+            for build_dir in build_dirs:
+                if build_dir.startswith("$"):
+                    continue
+                self.assertIn(f"ctest --test-dir {build_dir}", text, workflow)
+                install = text.index(f"install_visual_python_deps.sh {build_dir}")
+                first_test = text.index(f"ctest --test-dir {build_dir}")
+                self.assertLess(install, first_test, f"{workflow}: {build_dir} tests before installing")
+
+    def test_no_workflow_keeps_its_own_copy_of_the_install(self) -> None:
+        for workflow in (REPO / ".github/workflows").glob("*.yml"):
+            text = workflow.read_text(encoding="utf-8")
+            self.assertNotIn("requirements.lock", text, f"{workflow.name} inlines the install")
 
 
 class VisualPythonDepsStepTest(unittest.TestCase):

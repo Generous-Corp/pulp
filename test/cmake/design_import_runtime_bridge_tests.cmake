@@ -167,7 +167,7 @@ add_executable(pulp-test-design-import-designmd
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_detect.cpp)
 pulp_test_data(pulp-test-design-import-designmd NO_DEFINE
     SOURCES test_design_import_designmd.cpp test_design_import_designmd_040.cpp
-    PATHS test/fixtures/imports/designmd/alpha)
+    PATHS test/fixtures/imports/designmd/alpha compat.json)
 target_include_directories(pulp-test-design-import-designmd PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/import-design
@@ -221,3 +221,11 @@ pulp_add_test_suite(pulp-test-web-compat-menu-keynav GROUP pulp-test-group-desig
 pulp_add_test_suite(pulp-test-web-compat-react-shims GROUP pulp-test-group-design-import-bridge
     LIBRARIES pulp::view
     TIMEOUT 180)
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-offscreen-capture-rt-contract NONE) # fork without exec
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-design-swift-codegen NONE)     # swiftc

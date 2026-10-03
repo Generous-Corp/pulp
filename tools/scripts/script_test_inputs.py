@@ -338,6 +338,44 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None) -> dict | 
 TEST_DATA_DIR = Path("test") / "test-data"
 # Text in a compiled test source that means it opens files from the checkout.
 DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
+# Finding the checkout by walking up from the working directory, with no
+# definition at all: ctest runs a test in <build>/<dir>, so two levels up is
+# the checkout root. One level up is the build tree, where tests find binaries.
+WALK_UP_SIGNAL = "current_path()/../.."
+# Or from the test's own source file, which lives in the checkout.
+SOURCE_FILE_SIGNAL = "path(__FILE__)"
+SOURCE_FILE = re.compile(r"path\(\s*__FILE__\s*\)")
+WALK_UP = re.compile(r'current_path\(\)\s*/\s*(?:"\.\./\.\.|"\.\."\s*/\s*"\.\.")')
+
+# Calls that start or load another program or module. The class names are the repo's
+# own process API (core/platform/child_process.hpp,
+# core/events/child_process_manager.hpp; this script's selftest checks every
+# class there that starts a process is listed), plus the C and platform
+# entry points. A compiled test whose sources (or the test/ headers they
+# include) call one runs something at run time; whether that something is a
+# program this repo builds is what its spawn edges, or a reviewed
+# pulp_test_spawns(NONE), say.
+SPAWN_CLASSES = ("ChildProcess", "ChildProcessManager", "ConnectedChildProcess")
+# And its free functions that run a program.
+SPAWN_FUNCTIONS = ("exec",)
+# The repo's plugin and module loaders (core/host): PluginSlot::load, the
+# scanner calls that open bundles from disk, and the dlopen shim. PluginSlot alone is an interface that
+# tests implement in memory, so only its loader counts.
+LOAD_APIS = (r"PluginSlot::load\s*\(", r"scan_clap_bundle\s*\(", r"scan_vst3_bundle\s*\(",
+             r"scan_lv2_bundle\s*\(", r"scan_directory\s*\(", r"scan_audio_units\s*\(", r"dl_open\s*\(")
+SPAWN_SIGNAL = re.compile(
+    r"\b(?:%s)\b" % "|".join(SPAWN_CLASSES)
+    + r"|(?<![\w.>])(?:%s)\s*\(" % "|".join(SPAWN_FUNCTIONS)
+    + r"|\bposix_spawnp?\s*\(|\bpopen\s*\(|(?:\bstd::|(?<![\w.>:]))system\s*\(|\bexec[lv]p?e?\s*\("
+    + r"|\bfork\s*\(|\bNSTask\b|\bCreateProcess[AW]?\s*\("
+    # Loading a module or plugin bundle at run time is the same edge as running
+    # a program: the repo's own loaders, then the platform ones.
+    + r"|\b(?:%s)" % "|".join(LOAD_APIS)
+    + r"|\bdlopen\s*\(|\bLoadLibrary(?:Ex)?[AW]?\s*\(|\bCFBundle(?:Create|LoadExecutable)\w*\s*\(")
+EXECUTABLE_SCANS = ("data", "spawns")
+INCLUDE = re.compile(r'^\s*#\s*(?:include|import)\s*"([^"]+)"', re.M)
+# C and C++ comments, so prose such as "the effect system (bloom)" is not a call.
+COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 
 
 def _read_json(path: Path) -> dict | None:
@@ -355,49 +393,252 @@ def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     except OSError:
         return []
     hits = [sig for sig in DATA_SIGNALS if sig in text]
+    if WALK_UP.search(text):
+        hits.append(WALK_UP_SIGNAL)
+    if SOURCE_FILE.search(text):
+        hits.append(SOURCE_FILE_SIGNAL)
     for name in defines:
         if name not in hits and re.search(r"\b%s\b" % re.escape(name), text):
             hits.append(name)
     return hits
 
 
-def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
-    """`kind: compiled` entries from the configure-time evidence, or None when
-    the build directory carries none (a tree configured before the helper)."""
+def _test_include_closure(root: Path, rel: str) -> list[str]:
+    """`rel` and every header under test/ it reaches through quoted includes."""
+    seen: list[str] = []
+    stack = [rel]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        try:
+            text = (root / cur).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        seen.append(cur)
+        for name in INCLUDE.findall(text):
+            for base in (os.path.dirname(cur), "test", "test/support"):
+                cand = os.path.normpath(os.path.join(base, name))
+                if cand.startswith("test/") and (root / cand).is_file():
+                    stack.append(cand)
+                    break
+    return seen
+
+
+def spawning_sources(root: Path, sources: list[str]) -> list[str]:
+    """The files (sources and the test/ headers they include) that call a
+    process API."""
+    hits = set()
+    for src in sources:
+        for f in _test_include_closure(root, src):
+            try:
+                if SPAWN_SIGNAL.search(COMMENT.sub("", (root / f).read_text(encoding="utf-8", errors="replace"))):
+                    hits.add(f)
+            except OSError:
+                continue
+    return sorted(hits)
+
+
+# A string literal, and the file suffixes a built program or module carries.
+STRING_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+ARTIFACT_SUFFIX = re.compile(r"\.(?:exe|clap|vst3|component|so|dylib|bundle|app|dll)$", re.I)
+
+
+CATCH_INCLUDE = re.compile(r"^(.+)-[0-9a-f]+_include\.cmake$")
+# add_test(<name> "<program>" ...): the program is the first quoted argument
+# after the name, which CMake writes as a bracket or quoted argument.
+CTEST_COMMAND = re.compile(r'add_test\(\s*(?:\[(=*)\[.*?\]\1\]|"(?:[^"\\]|\\.)*"|[^\s()]+)\s+"((?:[^"\\]|\\.)*)"', re.S)
+CTEST_INCLUDE = re.compile(r'include\(\s*"([^"]+)"\s*\)')
+
+
+def ctest_programs(build_dir: Path) -> set[str] | None:
+    """The built programs ctest runs, by file name: the program of every
+    add_test whose program lies under the build directory, plus the target a
+    Catch2 discovery include is named after (its tests only exist once the
+    target is built). A built program a test only passes as an argument (to
+    a script, say) is not one: the test that runs it is scanned instead.
+    None when the build directory has no CTestTestfile."""
+    files = sorted(build_dir.rglob("CTestTestfile.cmake"))
+    if not files:
+        return None
+    build = os.path.realpath(build_dir)
+    names: set[str] = set()
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in CTEST_COMMAND.finditer(text):
+            prog = m.group(2)
+            if os.path.isabs(prog) and os.path.realpath(prog).startswith(build + os.sep):
+                names.add(re.sub(r"\.exe$", "", os.path.basename(prog), flags=re.I))
+        for inc in CTEST_INCLUDE.findall(text):
+            m = CATCH_INCLUDE.match(os.path.basename(inc))
+            if m:
+                names.add(m.group(1))
+    return names
+
+
+def test_executables(build_dir: Path | None) -> dict[str, dict] | None:
+    """executables.json's records for the executables this list scans: every
+    one under test/, and any other one ctest runs. Each is keyed by the
+    program name a ctest command carries, which is what a selector looks it
+    up by (pulp-cli is run as pulp-cpp), and keeps its target name under
+    `target`. None without the index."""
     if build_dir is None:
         return None
     index = _read_json(build_dir / TEST_DATA_DIR / "executables.json")
     if index is None:
         return None
+    artifacts = load_runtime_artifacts(build_dir) or {}
+    run = ctest_programs(build_dir)
     out = {}
-    for exe, rec in sorted((index.get("executables") or {}).items()):
-        decl = _read_json(build_dir / TEST_DATA_DIR / f"{exe}.inputs.json") or {}
+    for target, rec in (index.get("executables") or {}).items():
+        program = str((artifacts.get(target) or {}).get("artifact") or target)
+        if run is not None and program in run:
+            name = program
+        elif rec.get("under_test", True) or run is None or target in run:
+            name = target
+        else:
+            continue
+        out[name] = dict(rec, target=target)
+    return out
+
+
+def load_runtime_artifacts(build_dir: Path | None) -> dict[str, dict] | None:
+    """Every program or module the tree builds: target -> {artifact, runtime_targets}."""
+    if build_dir is None:
+        return None
+    doc = _read_json(build_dir / TEST_DATA_DIR / "runtime-targets.json")
+    return None if doc is None else dict(doc.get("artifacts") or {})
+
+
+def named_programs(root: Path, sources: list[str], artifacts: dict[str, dict]) -> dict[str, list[str]]:
+    """Targets whose artifact file name appears as a path component of a string
+    literal in `sources` or the test/ headers they include, with where."""
+    by_name: dict[str, set[str]] = {}
+    for target, rec in artifacts.items():
+        by_name.setdefault(str(rec.get("artifact") or target).lower(), set()).add(target)
+    found: dict[str, list[str]] = {}
+    for src in sources:
+        for f in _test_include_closure(root, src):
+            try:
+                text = COMMENT.sub("", (root / f).read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            for literal in STRING_LITERAL.finditer(text):
+                for part in re.split(r"[/\\]", literal.group(1)):
+                    for target in by_name.get(ARTIFACT_SUFFIX.sub("", part).lower(), ()):
+                        line = text.count("\n", 0, literal.start()) + 1
+                        found.setdefault(target, []).append(f"{f}:{line}")
+    return found
+
+
+def runtime_closure(direct: list[str], artifacts: dict[str, dict]) -> set[str]:
+    """`direct` and every program or module those depend on in turn."""
+    seen, stack = set(), list(direct)
+    while stack:
+        target = stack.pop()
+        if target in seen:
+            continue
+        seen.add(target)
+        stack.extend((artifacts.get(target) or {}).get("runtime_targets") or [])
+    return seen
+
+
+def spawn_state(root: Path, rec: dict, exe: str = "",
+                artifacts: dict[str, dict] | None = None) -> tuple[str | None, list[str], list[str]]:
+    """(`declared` | `none` | `undeclared` | None, the spawning files, the
+    programs it names without an edge) for one executables.json record. None:
+    nothing in it starts a process; `artifacts` None (no runtime-targets
+    index) leaves every spawner undeclared.
+
+    An edge or a reviewed NONE is not enough on its own: every program this
+    tree builds that the code names (a path component of a string literal,
+    such as "pulp-cpp") must be reached by an edge, directly or through
+    another program it runs, or be reviewed as named but not run. One that is
+    not leaves the executable `undeclared`."""
+    spawning = spawning_sources(root, list(rec.get("sources") or []))
+    if rec.get("absent_spawns"):
+        # It declares a program this configuration does not build.
+        return "undeclared", spawning, sorted(rec["absent_spawns"])
+    if not spawning:
+        return None, [], []
+    if rec.get("runtime_targets"):
+        state = "declared"
+    elif rec.get("spawns_none"):
+        state = "none"
+    else:
+        return "undeclared", spawning, []
+    if artifacts is None:
+        # Without the index of what the tree builds, the names cannot be checked.
+        return "undeclared", spawning, []
+    named = named_programs(root, list(rec.get("sources") or []), artifacts)
+    covered = runtime_closure(list(rec.get("runtime_targets") or []), artifacts)
+    covered |= set(rec.get("named_not_run") or []) | {exe}
+    # Targets that share an artifact name (one plugin's AU, VST3 and CLAP
+    # builds) are one name in the code; an edge to any of them answers it.
+    by_artifact: dict[str, set[str]] = {}
+    for target in named:
+        by_artifact.setdefault(str(artifacts[target].get("artifact") or target).lower(), set()).add(target)
+    unmatched = sorted(t for group in by_artifact.values() if not group & covered for t in group)
+    return ("undeclared" if unmatched else state), spawning, unmatched
+
+
+def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
+    """`kind: compiled` entries from the configure-time evidence, or None when
+    the build directory carries none (a tree configured before the helper)."""
+    index = test_executables(build_dir)
+    if index is None:
+        return None
+    out = {}
+    artifacts = load_runtime_artifacts(build_dir)
+    for exe, rec in sorted(index.items()):
+        target = rec.get("target", exe)
+        decl = _read_json(build_dir / TEST_DATA_DIR / f"{target}.inputs.json") or {}
         declared_sources = set(decl.get("sources") or [])
         defines = list(rec.get("tree_defines") or [])
         reading = {src for src in rec.get("sources") or [] if source_signals(root, src, defines)}
         data_sources = reading | declared_sources
-        if not data_sources:
+        spawns, spawning, unmatched = spawn_state(root, rec, target, artifacts)
+        if not data_sources and spawns is None and not decl.get("whole_checkout"):
             continue
-        undeclared = sorted(reading - declared_sources)
-        out[exe] = {"kind": "compiled", "data": "undeclared" if undeclared else "declared",
-                    "inputs": sorted(set(decl.get("inputs") or [])),
-                    "sources": sorted(data_sources), "undeclared_sources": undeclared}
+        whole = bool(decl.get("whole_checkout"))
+        # WHOLE_CHECKOUT covers every read, so nothing it reads is undeclared.
+        undeclared = [] if whole else sorted(reading - declared_sources)
+        entry = {"kind": "compiled",
+                 "data": ("whole_checkout" if whole else
+                          ("undeclared" if undeclared else "declared") if data_sources else "none"),
+                 "inputs": sorted(set(decl.get("inputs") or [])),
+                 "sources": sorted(data_sources), "undeclared_sources": undeclared}
+        if data_sources or whole:
+            # Only the sources a signal matched, so a reader can tell a scan
+            # that saw the declared readers from one that only echoes
+            # pulp_test_data's SOURCES.
+            entry["detected_sources"] = sorted(reading)
+        if spawns is not None:
+            entry["spawns"] = spawns
+            entry["spawning_sources"] = spawning
+            entry["runtime_targets"] = sorted(rec.get("runtime_targets") or [])
+            if unmatched:
+                entry["unmatched_programs"] = unmatched
+        out[exe] = entry
     return out
 
 
 def data_summary(root: Path, build_dir: Path | None) -> dict | None:
     """The data-manifest proxy: executables with a declaration over those that
     read PULP_SOURCE_DIR, plus the wider undeclared count."""
-    index = _read_json(build_dir / TEST_DATA_DIR / "executables.json") if build_dir else None
+    index = test_executables(build_dir)
     entries = compiled_entries(root, build_dir)
     if index is None or entries is None:
         return None
-    psd = sorted(exe for exe, rec in (index.get("executables") or {}).items()
+    psd = sorted(exe for exe, rec in index.items()
                  if any("PULP_SOURCE_DIR" in source_signals(root, s, []) for s in rec.get("sources") or []))
     with_manifest = sorted(exe for exe in psd if entries.get(exe, {}).get("inputs"))
-    return {"executables": len(index.get("executables") or {}),
+    return {"executables": len(index),
             "reading_pulp_source_dir": len(psd), "reading_pulp_source_dir_with_manifest": len(with_manifest),
-            "data_reading": len(entries),
+            "data_reading": sum(1 for e in entries.values() if e["data"] != "none"),
             "declared": sum(1 for e in entries.values() if e["data"] == "declared"),
             "undeclared": sum(1 for e in entries.values() if e["data"] == "undeclared"),
             "undeclared_sources": sorted({s for e in entries.values() for s in e["undeclared_sources"]})}
@@ -440,6 +681,13 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
     compiled = compiled_entries(root, build_dir)
     if compiled is not None:
         doc["executables"] = compiled
+        # What every test executable was scanned for. An executable with no
+        # entry was scanned and showed neither, which a list written before a
+        # scan existed cannot say: a reader treats a missing scan as unknown.
+        doc["executables_scanned_for"] = list(EXECUTABLE_SCANS)
+        # And which executables were scanned: a missing entry means "clean" only
+        # for a name in this list; one that is not here was never scanned.
+        doc["executables_scanned"] = sorted(test_executables(build_dir) or {})
     return doc
 
 

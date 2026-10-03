@@ -186,38 +186,8 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertEqual(skills["tests"], ["skills-doc-sync"])
         self.assertIn(".agents/skills/*/SKILL.md", generated["script-surface-whole-tree"]["paths"])
 
-    def test_markers_match_what_the_gate_widening_treats_as_selection_only(self) -> None:
-        self.assertTrue(families.BEGIN.startswith(wide_non_native.SELECTOR_BLOCK_BEGIN))
-        self.assertEqual(families.END, wide_non_native.SELECTOR_BLOCK_END)
-        self.assertEqual(str(families.CONFIG), wide_non_native.SHIPYARD_CONFIG)
-
-    def test_environment_bound_tests_ride_along_with_every_mapped_change(self) -> None:
-        self.add_whole_tree()
-        self.write("tools/scripts/test_a.py", "")
-        self.script_test("a-selftest", "tools/scripts/test_a.py")
-        self.write("tools/scripts/browser_unit.mjs", "")
-        self.script_test("browser-unit", "tools/scripts/browser_unit.mjs", labels=["browser-capture"])
-        self.write("tools/scripts/locked.py", "")
-        self.script_test("locked-selftest", "tools/scripts/locked.py", lock=["browser"])
-        self.write("tools/scripts/plain.py", "")
-        self.script_test("plain-selftest", "tools/scripts/plain.py", labels=["node"])
-        self.write("tools/scripts/timing.py", "")
-        self.script_test("timing-selftest", "tools/scripts/timing.py", labels=["environment-bound"])
-        generated = self.generate()
-        env = generated["script-surface-environment-bound"]
-        self.assertEqual(env["tests"], ["browser-unit", "locked-selftest", "timing-selftest"])
-        self.assertEqual(env["paths"], generated["script-surface-whole-tree"]["paths"])
-        self.assertIn("tools/scripts/test_a.py", env["paths"])
-
-    def test_environment_bound_test_that_cannot_run_bounded_refuses(self) -> None:
-        self.add_whole_tree()
-        self.write("tools/scripts/test_a.py", "")
-        self.script_test("a-selftest", "tools/scripts/test_a.py")
-        self.write("tools/scripts/gpu_device.py", "")
-        self.script_test("gpu-device-selftest", "tools/scripts/gpu_device.py", labels=["gpu"],
-                         fixtures=["device"])
-        with self.assertRaises(families.GenerationError):
-            self.generate()
+    def test_the_families_file_is_what_the_gate_widening_treats_as_selection_only(self) -> None:
+        self.assertEqual(str(families.FAMILIES_FILE), wide_non_native.SELECTOR_FAMILIES_FILE)
 
     def test_no_whole_tree_test_refuses_to_bound_anything(self) -> None:
         self.write("tools/scripts/test_alone.py", "")
@@ -225,23 +195,16 @@ class GeneratedFamiliesTest(FamilyFixture):
         with self.assertRaises(families.GenerationError):
             self.generate()
 
-    def test_rendered_block_is_valid_policy_toml_and_splices_idempotently(self) -> None:
+    def test_rendered_file_holds_only_families_and_is_valid_toml(self) -> None:
         self.add_whole_tree()
         self.write("tools/scripts/test_a.py", "")
         self.script_test("a-selftest", "tools/scripts/test_a.py")
-        block = families.render(list(self.generate().values()))
-        config = ("[targets.mac.changed_surface_selection]\nschema_version = 3\n"
-                  f"{families.BEGIN}\nstale\n{families.END}\n"
-                  "[targets.mac.changed_surface_selection.execution]\nmode = \"shadow\"\n")
-        spliced = families.splice(config, block)
-        self.assertEqual(families.splice(spliced, block), spliced)
-        self.assertNotIn("stale", spliced)
-        parsed = tomllib.loads(spliced)["targets"]["mac"]["changed_surface_selection"]
-        self.assertEqual({f["name"] for f in parsed["families"]},
-                         {"script-surface-whole-tree"} | {n for n in self.generate() if n != "script-surface-whole-tree"})
-        self.assertEqual(parsed["execution"]["mode"], "shadow")
-        with self.assertRaises(families.GenerationError):
-            families.splice("no markers\n", block)
+        generated = self.generate()
+        parsed = tomllib.loads(families.render(list(generated.values())))
+        self.assertEqual(set(parsed), {"families"})
+        self.assertEqual({f["name"] for f in parsed["families"]}, set(generated))
+        self.assertEqual(families.render(list(generated.values())),
+                         families.render(list(self.generate().values())))
 
 
 class DriftCheckTest(FamilyFixture):
@@ -252,10 +215,10 @@ class DriftCheckTest(FamilyFixture):
         self.write("tools/scripts/test_a.py", "")
         self.script_test("a-selftest", "tools/scripts/test_a.py")
         self.generate()
-        config = self.root / ".shipyard" / "config.toml"
-        config.parent.mkdir(parents=True, exist_ok=True)
-        # A committed block that no longer matches what the generator emits.
-        config.write_text(f"{families.BEGIN}\nstale\n{families.END}\n", encoding="utf-8")
+        committed = self.root / families.FAMILIES_FILE
+        committed.parent.mkdir(parents=True, exist_ok=True)
+        # A committed file that no longer matches what the generator emits.
+        committed.write_text("# stale\n", encoding="utf-8")
         saved_reply = inventory.codemodel_reply_available
         inventory.codemodel_reply_available = lambda _build: True
         saved = (inventory.load_ctest_json, inventory.load_codemodel_targets,
@@ -277,6 +240,7 @@ class DriftCheckTest(FamilyFixture):
     def test_drift_blocks_a_change_to_a_mapped_surface(self) -> None:
         for path in ["tools/scripts/test_a.py", ".agents/skills/ci/SKILL.md",
                      "test/ctest_script_inputs.json", ".shipyard/config.toml",
+                     ".shipyard/changed-surface-families.toml",
                      "tools/scripts/changed_surface_script_families.py"]:
             with self.subTest(path=path):
                 self.assertEqual(self.check([path]), 1)
@@ -299,7 +263,7 @@ class DriftCheckTest(FamilyFixture):
         self.assertIn("tools/scripts/test_a.py: readers +['a-selftest'] -['old-selftest']",
                       families.describe_drift(stale, current))
         self.assertIn("tools/scripts/test_a.py: newly mapped",
-                      families.describe_drift(f"{families.BEGIN}\n{families.END}\n", current))
+                      families.describe_drift("", current))
 
     def test_drift_without_a_base_is_a_full_blocking_check(self) -> None:
         self.assertEqual(self.check(None), 1)

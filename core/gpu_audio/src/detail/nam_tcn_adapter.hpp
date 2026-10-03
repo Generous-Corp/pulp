@@ -1,0 +1,81 @@
+#pragma once
+
+#include "streaming_model.hpp"
+
+namespace pulp::gpu_audio::detail {
+
+/// Adapter for a causal CPU kernel whose parsed weights and state are owned by
+/// the caller. Pulp owns lifecycle and BufferView/StreamingModel admission;
+/// kernel headers and model formats remain outside the Pulp ABI.
+struct NamTcnCpuKernel {
+    void* state = nullptr;
+    bool (*prepare)(void*, const StreamingPrepareContext&) noexcept = nullptr;
+    void (*process)(void*, const float*, float*, std::uint32_t) noexcept = nullptr;
+    void (*reset)(void*) noexcept = nullptr;
+    bool (*quiesce)(void*) noexcept = nullptr;
+    bool (*release)(void*) noexcept = nullptr;
+};
+
+class NamTcnStreamingAdapter final : public StreamingModel {
+  public:
+    NamTcnStreamingAdapter(StreamingModelSpec spec, NamTcnCpuKernel kernel) noexcept
+        : spec_(spec), kernel_(kernel) {}
+
+    const StreamingModelSpec& spec() const noexcept override {
+        return spec_;
+    }
+
+    bool prepare(const StreamingPrepareContext& context) noexcept override {
+        prepared_ = false;
+        max_frames_ = 0;
+        if (spec_.input_channels != 1 || spec_.output_channels != 1 ||
+            !valid_streaming_prepare_context(context) || context.spec != &spec_ ||
+            kernel_.state == nullptr || kernel_.prepare == nullptr || kernel_.process == nullptr ||
+            kernel_.reset == nullptr || kernel_.quiesce == nullptr || kernel_.release == nullptr) {
+            return false;
+        }
+
+        if (!kernel_.prepare(kernel_.state, context))
+            return false;
+
+        max_frames_ = context.max_frames;
+        prepared_ = true;
+        return prepared_;
+    }
+
+    void process_cpu(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+                     std::uint32_t frames, StreamingBlockStamp) noexcept override {
+        if (!prepared_ || input.num_channels() != 1 || output.num_channels() != 1 ||
+            frames > max_frames_ || input.num_samples() < frames || output.num_samples() < frames) {
+            output.clear();
+            return;
+        }
+        kernel_.process(kernel_.state, input.channel_ptr(0), output.channel_ptr(0), frames);
+    }
+
+    bool quiesce() noexcept override {
+        return kernel_.quiesce != nullptr && kernel_.quiesce(kernel_.state);
+    }
+
+    void reset(std::uint64_t, StreamingResetReason) noexcept override {
+        if (kernel_.reset != nullptr)
+            kernel_.reset(kernel_.state);
+    }
+
+    bool release() noexcept override {
+        if (kernel_.release == nullptr)
+            return false;
+        const bool released = kernel_.release(kernel_.state);
+        if (released)
+            prepared_ = false;
+        return released;
+    }
+
+  private:
+    StreamingModelSpec spec_;
+    NamTcnCpuKernel kernel_;
+    std::uint32_t max_frames_ = 0;
+    bool prepared_ = false;
+};
+
+} // namespace pulp::gpu_audio::detail

@@ -34,9 +34,19 @@ input the graph cannot see:
   list is also affected when one of its declared data inputs changed
   (`pulp_test_data()`, globs allowed); an executable marked
   `data: undeclared` reads the checkout without a declaration and is always
-  affected;
+  affected, and so is one marked `spawns: undeclared` (it starts a process
+  with no spawn edge and no reviewed `pulp_test_spawns(NONE)`, so what it runs
+  is unknown); one marked `data: whole_checkout` (it walks the tree) is
+  always affected too;
+- a compiled test is affected when a directory its command line names
+  contains a changed file (`--corpus <checkout>/test/fixtures/timeline`);
 - a changed file that no edge reads and that is not under a known non-input
-  prefix (`docs/`, `.agents/`, `planning`, `*.md`) re-selects every test.
+  prefix (`docs/`, `.agents/`, `planning`, `*.md`) re-selects every test;
+- a compiled test is also affected when a program it runs or loads at run
+  time is (tools/ci/spawn_closure.py: the executables and modules its
+  codemodel `dependencies` reach, which is where `add_dependencies` on a
+  spawned tool lands); without a readable codemodel those edges are unknown
+  and every test is selected.
 
 Output: one `::notice title=affected-tests-shadow::` JSON line
 (`pulp-affected-tests-shadow/v1`) with selected/total counts, the
@@ -56,6 +66,10 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import codemodel_digest  # noqa: E402
+from spawn_closure import SpawnIndex  # noqa: E402
 
 SCHEMA = "pulp-affected-tests-shadow/v1"
 # Declared inputs for script-driven tests (tools/scripts/script_test_inputs.py,
@@ -218,6 +232,9 @@ def load_script_inputs(source_root: Path) -> dict[str, list[str]]:
 
 
 def declared_hit(inputs: list[str], changed: list[str]) -> bool:
+    # `!path` is a path the test probes for and expects missing
+    # (pulp_test_data ABSENT); any change to it can only be its creation.
+    inputs = [i[1:] if i.startswith("!") else i for i in inputs]
     for f in changed:
         for i in inputs:
             if f == i or f.startswith(i.rstrip("/") + "/"):
@@ -232,7 +249,9 @@ def declared_hit(inputs: list[str], changed: list[str]) -> bool:
 
 def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, changed: list[str],
             failed: list[str], script_inputs: dict[str, list[str]] | None = None,
-            compiled_data: dict[str, dict] | None = None) -> dict:
+            compiled_data: dict[str, dict] | None = None, spawns: SpawnIndex | None = None) -> dict:
+    """`spawns` holds the codemodel's runtime spawn edges; None means they
+    could not be read, so no compiled test can be shown unaffected."""
     g = Graph(build_dir, edges, deps)
     script_inputs = script_inputs or {}
     compiled_data = compiled_data or {}
@@ -249,20 +268,34 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
               and not f.endswith(".md") and not f.startswith(SCRIPT_SURFACE_PREFIXES)
               and not (f.startswith("test/") and not f.endswith((".cpp", ".cc", ".mm", ".hpp", ".h")))
               and not (f.endswith(("CMakeLists.txt", ".cmake")))]
-    select_all = flags["cmake_changed"] or bool(unread) or not changed
+    select_all = flags["cmake_changed"] or bool(unread) or not changed or spawns is None
     reason = ("cmake changed" if flags["cmake_changed"] else
               f"{len(unread)} changed file(s) no edge reads" if unread else
-              "empty diff" if not changed else "graph")
+              "empty diff" if not changed else
+              "no codemodel: spawn edges unknown" if spawns is None else "graph")
+    build_real = os.path.realpath(build_dir)
+    spawned_selected = 0
     selected = []
     declared = undeclared = sel_declared = sel_undeclared = 0
-    data_undeclared = sel_data_declared = 0
+    data_undeclared = sel_data_declared = spawns_undeclared = data_whole = 0
     for t in tests:
         name = t.get("name", "")
         binary = is_binary_test(t, build_dir)
         data = compiled_data.get(executable_name(t)) if binary else None
-        if data and data.get("data") != "declared":
-            # Reads the checkout without a declaration: never skippable.
+        if data and data.get("data") == "whole_checkout":
+            # Its verdict can depend on any file in the checkout.
+            data_whole += 1
+            selected.append(name)
+            continue
+        if data and data.get("data") not in ("declared", "none"):
+            # Reads the checkout without a declaration (or names a state this
+            # reader does not know): never skippable.
             data_undeclared += 1
+            selected.append(name)
+            continue
+        if data and data.get("spawns") not in (None, "declared", "none"):
+            # Starts a process with no edge to what it runs: never skippable.
+            spawns_undeclared += 1
             selected.append(name)
             continue
         if not binary:
@@ -274,8 +307,13 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
             selected.append(name)
             continue
         ins = test_inputs(t, build_dir, source_root)
-        if ins & aff:
+        # A directory named on the command line is read through: any change
+        # beneath it is a change to that input.
+        if ins & aff or any(c.startswith(i + os.sep) for i in ins for c in changed_abs):
             selected.append(name)
+        elif binary and _spawned(t, build_real, spawns) & aff:
+            selected.append(name)
+            spawned_selected += 1
         elif data and (list_changed or declared_hit(list(data.get("inputs") or []), changed)):
             selected.append(name)
             sel_data_declared += 1
@@ -295,8 +333,17 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
             "failed_outside_selection": len(outside), "failed_outside_names": outside[:50],
             "script_declared": declared, "script_undeclared": undeclared,
             "script_selected_declared": sel_declared, "script_selected_undeclared": sel_undeclared,
-            "compiled_data_undeclared": data_undeclared, "compiled_selected_by_data": sel_data_declared,
+            "compiled_data_undeclared": data_undeclared, "compiled_whole_checkout": data_whole,
+            "compiled_selected_by_data": sel_data_declared,
+            "compiled_selected_by_spawn": spawned_selected, "compiled_spawns_undeclared": spawns_undeclared,
             **flags}
+
+
+def _spawned(test: dict, build_real: str, spawns: SpawnIndex) -> set[str]:
+    """Absolute paths of the programs a binary test runs or loads at run time."""
+    exe = os.path.realpath(test["command"][0])
+    rel = os.path.relpath(exe, build_real)
+    return {os.path.realpath(os.path.join(build_real, a)) for a in spawns.closure(rel)}
 
 
 def main(argv: list[str]) -> int:
@@ -324,8 +371,13 @@ def main(argv: list[str]) -> int:
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, ET.ParseError) as exc:
         print(f"affected-tests shadow: no verdict, input unreadable: {exc}", file=sys.stderr)
         return 2
+    try:
+        spawns = SpawnIndex(codemodel_digest.digest_targets(build_dir, source_root)["targets"])
+    except (OSError, ValueError, KeyError, codemodel_digest.CodemodelError) as exc:
+        print(f"affected-tests shadow: no codemodel, spawn edges unknown: {exc}", file=sys.stderr)
+        spawns = None
     result = compute(build_dir, source_root, edges, parse_ninja_deps(deps_text), inventory, changed, failed,
-                     load_script_inputs(source_root), load_compiled_data(source_root))
+                     load_script_inputs(source_root), load_compiled_data(source_root), spawns)
     result["event"] = a.event
     print(f"affected-tests shadow: would select {result['selected']} of {result['total']} tests "
           f"({result['reason']}); failed outside selection: {result['failed_outside_selection']}")

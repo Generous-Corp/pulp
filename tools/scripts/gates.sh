@@ -21,6 +21,9 @@
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
+#   - vellum-watch (a range touching a watched capability-family path owes a
+#     committed watch event, and one touching a transferred-slice path owes a
+#     committed change event; prints the exact event JSON to add)
 #   - gpu-handoff-pin (a pinned gpu-vellum-handoff path changed without the
 #     ledger being refreshed in the same range)
 #   - gpu-ledger-sentinel (the pulp-gpu-ledger merge driver resolved a ledger
@@ -199,21 +202,32 @@ if [ -f "$SHIPYARD_LOCAL" ]; then
     fi
 fi
 
-# ── 0c. vellum watch-event hint (ADVISORY) ─────────────────────────────────
-# The required `Vellum freeze` check demands a hand-authored watch event when a
-# change touches one of the pinned capability-family path globs — and the
-# trigger is PATHS, not intent, so a one-line edit under e.g.
-# `tools/import-design/**` qualifies with nothing in the diff to warn you.
-# Discovering that from CI costs a full round trip, which three pull requests
-# paid in one evening.
-#
-# ADVISORY BY CONSTRUCTION, and it must stay that way: the authoritative check
-# runs from a TRUSTED ROOT in two required GitHub contexts precisely so a
-# branch's own copy of the checker is not trusted, and CODEOWNERS locks the
-# events directory, the checker and its test. This only moves DISCOVERY
-# earlier; it never changes a required context and never sets `fail`.
+# ── 0c. vellum watch-event gate ────────────────────────────────────────────
+# The required `Vellum freeze` / `Vellum trusted freeze` checks demand a
+# hand-authored watch event when a change touches one of the pinned
+# capability-family path globs — and the trigger is PATHS, not intent, so a
+# one-line edit under e.g. `tools/import-design/**` qualifies with nothing in
+# the diff to warn you. As an advisory hint this still cost three pull requests
+# a CI round trip each on 2026-10-02, so an owed event now FAILS here and the
+# script prints the exact event JSON to commit (or writes it with
+# `--write-event --rationale "..."`). Only a positive "event owed" verdict
+# (exit 10) fails; "no verdict" (20) never does. The trusted-root CI run stays
+# the authority — a local refusal can only stop what CI would also refuse.
+# `--inventories` also runs the freeze job's inventory verifiers (cut manifest,
+# ownership projection, tooling disposition) and prints the regenerate command
+# for a stale one (exit 11). It also runs the job's change-event checker,
+# `vellum_freeze_check.py`: a touched path in a transferred slice of
+# `.github/vellum-ownership.json` owes a `.github/vellum-change-events/` event,
+# and the script prints that JSON (or writes it with `--write-change-event
+# --rationale "..."`) — exit 12.
 if [ -f "$VELLUM_HINT" ]; then
-    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" || true
+    echo "" >&2
+    echo "▸ vellum watch-event coverage (merge-base $BASE..HEAD)" >&2
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
+    vellum_rc=$?
+    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
+        fail=1
+    fi
 fi
 
 # ── 1. skill-sync ──────────────────────────────────────────────────────────

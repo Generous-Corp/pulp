@@ -16,3 +16,7 @@ target_link_libraries(pulp-test-cli-package-registry PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-package-registry)
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-cli-package-registry NONE)     # the registry's curl/powershell download
