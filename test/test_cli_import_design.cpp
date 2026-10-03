@@ -19,6 +19,7 @@
 // them to the slice that introduced them.
 
 #include "test_cli_shellout_util.hpp"
+#include "support/isolated_pulp_home.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
@@ -38,6 +39,10 @@ using namespace pulp::platform;
 namespace fs = std::filesystem;
 
 namespace {
+
+// Every case below runs the CLI or the import tool against an empty home, so
+// a host's ~/.pulp config cannot change what they emit.
+const pulp_test_cli::IsolatedPulpHome isolated_home;
 
 fs::path repo_root() {
     // Resolve from <repo>/test → <repo>. The fixture path can also be
@@ -1708,4 +1713,15 @@ TEST_CASE("import-design --emit-w3c-tokens without a path exits 2",
     REQUIRE(r.exit_code == 2);
     REQUIRE(r.stderr_output.find("--emit-w3c-tokens requires a path")
             != std::string::npos);
+}
+
+TEST_CASE("the suite runs against an isolated, empty PULP_HOME", "[cli][import-design][isolation]") {
+    const char* home = std::getenv("PULP_HOME");
+    REQUIRE(home != nullptr);
+    REQUIRE(std::filesystem::path(home) == isolated_home.path());
+    REQUIRE(std::filesystem::is_directory(home));
+    REQUIRE_FALSE(std::filesystem::exists(std::filesystem::path(home) / "config.toml"));
+    const char* check = std::getenv("PULP_UPDATE_CHECK_DISABLED");
+    REQUIRE(check != nullptr);
+    REQUIRE(std::string(check) == "1");
 }
