@@ -1,6 +1,6 @@
 {
   "schema": "pulp.a1-governed-build-receipt/v1",
-  "commit": "bcf183e9f13c1d93659a6badbc116005930d328b",
+  "commit": "48de18ab25",
   "branch": "codex/a1-governed-build-20261003",
   "base": "064b045cbba6aeab798f45b5e4f56abf176aef94",
   "governed_build": {
@@ -30,8 +30,9 @@
         "MCP package workflow preserves inspect plan approve apply gates"
       ],
       "cause": "fixture project omitted tools/ci/governed-build.sh; handler returned exit 127",
-      "classification": "branch-owned",
-      "source_run": "37102334174"
+      "classification": "fixed-by-fixture-wrapper",
+      "source_run": "37102334174",
+      "resolution": "removed production raw cmake fallback; both fixture projects now create tools/ci/governed-build.sh delegating to fake cmake"
     },
     "rerun": {
       "command": "ctest --test-dir build -R 'MCP (build and test handlers quote project paths and filters|package workflow preserves inspect plan approve apply gates)' --output-on-failure",
@@ -40,7 +41,16 @@
     },
     "format": "passed",
     "vellum_freeze": "passed",
-    "trusted_base_executor": "passed"
+    "trusted_base_executor": "passed",
+    "focused_governance": {
+      "format_changed": "passed",
+      "build_parallelism_guard": "passed",
+      "governance_unit_tests": {
+        "command": "python3 -m unittest tools/ci/test_build_governance_paths.py tools/local-ci/test_desktop_video_matrix_commands_cli.py",
+        "result": "passed",
+        "tests_passed": 10
+      }
+    }
   },
   "roadmap_changed": false
 }
