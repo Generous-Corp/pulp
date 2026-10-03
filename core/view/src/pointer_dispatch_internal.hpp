@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace pulp::view::detail {
 
@@ -34,6 +35,31 @@ private:
 
 inline std::uint32_t dom_pointer_token() noexcept {
     return current_dom_pointer_token;
+}
+
+// The element id of the open overlay a wheel resolved into, while that wheel's
+// DOM dispatch runs, or null outside one. The wheel registrar adds it to the
+// payload so the web-compat bubble stops at the overlay element, matching the
+// native containment in deliver_mouse_wheel. A thread-local rather than a
+// MouseEvent field for the same reason as the token above.
+inline thread_local const std::string* current_wheel_boundary_id = nullptr;
+
+class ScopedWheelBoundary {
+public:
+    explicit ScopedWheelBoundary(const std::string* id) noexcept
+        : previous_(current_wheel_boundary_id) {
+        current_wheel_boundary_id = (id && !id->empty()) ? id : nullptr;
+    }
+    ~ScopedWheelBoundary() { current_wheel_boundary_id = previous_; }
+    ScopedWheelBoundary(const ScopedWheelBoundary&) = delete;
+    ScopedWheelBoundary& operator=(const ScopedWheelBoundary&) = delete;
+
+private:
+    const std::string* previous_;
+};
+
+inline const std::string* wheel_boundary_id() noexcept {
+    return current_wheel_boundary_id;
 }
 
 } // namespace pulp::view::detail

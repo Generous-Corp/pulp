@@ -253,6 +253,13 @@ function __dispatch__(id, eventName) {
                             this._stoppedImmediate = true;
                         }
                     };
+                // A wheel that resolved inside an open overlay carries that
+                // overlay's element id; the bubble stops there
+                // (_dispatchEvent), so a listener outside the overlay never
+                // sees a tick nothing inside consumed.
+                if (eventName === 'wheel' && data && typeof data === 'object'
+                    && typeof data.__pulpWheelBoundary === 'string')
+                    ev._pulpBoundaryId = data.__pulpWheelBoundary;
                 // A direct @pulp/react handler runs before this web-compat
                 // target fan-out. stopPropagation still permits other target
                 // listeners; stopImmediatePropagation suppresses them too.

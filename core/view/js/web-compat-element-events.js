@@ -570,6 +570,30 @@ function _dispatchEvent(target, event) {
     var el = target._parentElement;
     while (el) { path.unshift(el); el = el._parentElement; }
 
+    // Overlay containment. A native wheel that resolved inside an open overlay
+    // names that overlay's element (`_pulpBoundaryId`, from the bridge's wheel
+    // payload); neither phase may visit an element above it, the DOM half of
+    // the native containment in deliver_mouse_wheel. `__root__` is kept: it is
+    // where a React-DOM delegate listens, and dropping it would deliver the
+    // tick to no React handler at all, inside the overlay included.
+    if (event._pulpBoundaryId !== undefined && target._id !== event._pulpBoundaryId) {
+        var boundaryAt = -1;
+        for (var b = path.length - 1; b >= 0; b--) {
+            if (path[b]._id === event._pulpBoundaryId) { boundaryAt = b; break; }
+        }
+        if (boundaryAt > 0) {
+            var contained = [];
+            for (var c = 0; c < boundaryAt; c++)
+                if (path[c]._id === "__root__") contained.push(path[c]);
+            path = contained.concat(path.slice(boundaryAt));
+        }
+    } else if (event._pulpBoundaryId !== undefined) {
+        var rootOnly = [];
+        for (var r = 0; r < path.length; r++)
+            if (path[r]._id === "__root__") rootOnly.push(path[r]);
+        path = rootOnly;
+    }
+
     // Debug-only dispatch logging for pointer/click/mouse events. Shows whether
     // the bubble chain reaches __root__ where the React-DOM delegate is
     // registered. Gated by globalThis.__pulpDebugDispatch__ to keep normal runs

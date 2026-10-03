@@ -315,9 +315,25 @@ overlay that escapes its ancestors' bounds — a full-editor scrim mounted insid
 a toolbar button — paints over the content, but the tree hit test cannot descend
 into it there and lands on whatever it covers, so a scroll over a dialog's
 backdrop used to zoom the plot behind it. Inside a shown overlay the input goes
-to the overlay's own subtree; outside every overlay while a MODAL one is open
-(`ModalOverlay`, or an overlay with `AccessRole::dialog`) it is dropped;
-otherwise the tree answers as before. Hidden overlays count for nothing — and
+to the overlay's own subtree; outside every overlay while ANY shown overlay is
+open — a modal dialog, or a non-modal menu, dropdown or submenu — it is dropped,
+as on macOS, where scrolling elsewhere while a menu is open does nothing
+(`OverlayDismissalPolicy::passive_input_outside_overlay_blocked`, default on;
+off restores the old rule that only a MODAL overlay blocked, and an overlay
+with `pointer-events: none` never blocks). With nothing open the tree answers.
+
+A wheel that lands INSIDE an overlay is also contained there
+(`PassivePointerRoute::overlay`): the native bubble stops at the overlay root,
+and the web-compat DOM bubble stops at that element (the bridge adds
+`__pulpWheelBoundary: "<overlay element id>"` to the wheel payload, and
+`_dispatchEvent` skips every element above it except `__root__`, a React-DOM
+delegate). So a menu whose list is already at its end, or a tick over its fixed
+header, never chains to a zoom handler on the plot the menu is mounted inside —
+the defect was a user scrolling a Modulation submenu and zooming the view
+behind it. A submenu stacked with `overlayParent` is its own boundary. The
+React-DOM delegated lane still dispatches by fiber tree from `__root__`, so it
+is not contained; `@pulp/react` and web-compat element listeners are.
+Hidden overlays count for nothing — and
 `root_overlay_owns_keyboard` likewise ignores a claimed popover that is not on
 screen, so a dialog that stays mounted while closed cannot hold the DAW's
 keyboard.
