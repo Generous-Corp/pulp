@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/signal/parametric_eq.hpp>
 
@@ -6,6 +7,7 @@
 #include <cmath>
 
 using namespace pulp::signal;
+using Catch::Approx;
 
 TEST_CASE("ParametricEq validates and applies a bounded band cascade", "[signal][parametric-eq]") {
     ParametricEq eq;
