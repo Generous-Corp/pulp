@@ -65,9 +65,8 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
 
     const auto& hints = bridge_.size_hints();
     const auto gpu = decide_gpu_host(bridge_);
-    view::PluginViewHost::Options opts;
-    opts.size = {hints.preferred_width, hints.preferred_height};
-    opts.use_gpu = gpu.use_gpu;
+    const auto opts = editor_host_options(
+        bridge_, gpu, {hints.preferred_width, hints.preferred_height});
 
     editor_host_ = view::PluginViewHost::create(*bridge_.view(), opts);
     if (!editor_host_) {
