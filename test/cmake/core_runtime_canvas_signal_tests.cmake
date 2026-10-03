@@ -1006,3 +1006,10 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} -m unittest discover
             -s ${PROJECT_SOURCE_DIR}/test -p test_verify_gpu_same_device_storage.py)
 endif()
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-group-core-audio NONE)         # fork without exec
+pulp_test_spawns(pulp-test-group-core-events NONE)        # constructs ChildProcessManager; starts nothing
+pulp_test_spawns(pulp-test-group-core-platform NONE)      # dlopen of the system libdbus
+pulp_test_spawns(pulp-test-group-core-runtime-http NONE)  # /bin/echo, /bin/sh, /bin/pwd, powershell

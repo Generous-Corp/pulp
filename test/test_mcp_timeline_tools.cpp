@@ -798,8 +798,10 @@ TEST_CASE("timeline agent renders two journal variants and receives a typed comp
     REQUIRE_THAT(reference_audio->channels[0][0], WithinAbs(0.8f, 1e-7f));
     REQUIRE_THAT(candidate_audio->channels[0][0], WithinAbs(0.4f, 1e-7f));
 
-    // pulp_audio_compare resolves its delegated CLI relative to a project root.
-    ScopedCurrentPath cwd(std::filesystem::path(PULP_SOURCE_DIR));
+    // pulp_audio_compare runs the CLI it finds under a project root's build/;
+    // stage this build's CLI there so the comparison runs what was just built.
+    mcp_test::CliProjectRoot cli_root(mcp_test::built_cli());
+    ScopedCurrentPath cwd(cli_root.path());
     const auto verdict = handle_audio_compare(
         "{\"candidate\":" +
         pulp::timeline::quote_json_string(
@@ -816,6 +818,8 @@ TEST_CASE("timeline agent renders two journal variants and receives a typed comp
     REQUIRE(verdict.find("reference and candidate are required") == std::string::npos);
     REQUIRE(verdict.find("must be WAV paths, not options") == std::string::npos);
     REQUIRE(verdict.find("not in a Pulp project") == std::string::npos);
+    // And the CLI really ran: only it prints this, under the staged empty home.
+    require_contains(verdict, mcp_test::kCompareRanMarker);
 }
 
 TEST_CASE("timeline MCP export and import publish new directories atomically",

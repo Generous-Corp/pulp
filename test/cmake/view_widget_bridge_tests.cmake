@@ -1073,3 +1073,6 @@ pulp_add_test_suite(pulp-test-widget-bridge-query GROUP pulp-test-group-view-wid
 # flex line; this suite pins that the widget layer does the same instead of
 # painting the text under its first element child.
 pulp_add_test_suite(pulp-test-widget-bridge-flex-text-children GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+
+# The crash fixture starts the trusted-host fixture its parent test stages.
+pulp_test_spawns(pulp-control-broker-crash-fixture pulp-control-trusted-host-e2e-fixture)

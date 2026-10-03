@@ -235,15 +235,10 @@ target_link_libraries(pulp-test-cli-import-design
     PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-import-design PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-import-design pulp-cli)
-endif()
 # The `import-design` command delegates to the standalone pulp-import-design
 # helper; without it the revived shell-out cases fail (exit 1) instead of
 # exercising the real path, so build it alongside this suite.
-if(TARGET pulp-import-design)
-    add_dependencies(pulp-test-cli-import-design pulp-import-design)
-endif()
+pulp_test_spawns(pulp-test-cli-import-design pulp-cli pulp-import-design)
 catch_discover_tests(pulp-test-cli-import-design
     PROPERTIES
         ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}"
@@ -402,12 +397,7 @@ target_include_directories(pulp-test-cli-import-figma-url PRIVATE
     ${CMAKE_SOURCE_DIR}/tools/import-design)
 target_link_libraries(pulp-test-cli-import-figma-url
     PRIVATE Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-import-figma-url pulp-cli)
-endif()
-if(TARGET pulp-import-design)
-    add_dependencies(pulp-test-cli-import-figma-url pulp-import-design)
-endif()
+pulp_test_spawns(pulp-test-cli-import-figma-url pulp-cli pulp-import-design)
 catch_discover_tests(pulp-test-cli-import-figma-url
     PROPERTIES LABELS "parser-import")
 

@@ -192,9 +192,7 @@ target_compile_definitions(pulp-test-cli-shellout PRIVATE
 if(TARGET pulp-test-cli-run-fixture)
     add_dependencies(pulp-test-cli-shellout pulp-test-cli-run-fixture)
 endif()
-if(TARGET pulp-import-design)
-    add_dependencies(pulp-test-cli-shellout pulp-import-design)
-endif()
+pulp_test_spawns(pulp-test-cli-shellout pulp-import-design)
 if(APPLE)
     catch_discover_tests(pulp-test-cli-shellout TEST_SPEC "~[hdiutil]")
     catch_discover_tests(pulp-test-cli-shellout
@@ -608,3 +606,9 @@ if(Python3_Interpreter_FOUND)
         LABELS "cli;templates"
         TIMEOUT 60)
 endif()
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-cli-validator-discovery NONE)  # `<validator> --version` and `command -v` on system paths
+pulp_test_spawns(pulp-test-cli-mac-runtime-validators NONE) # plutil and auval, behind an injected runner
+pulp_test_spawns(pulp-test-cli-package-commands NONE)     # links the registry's runner but never runs a tool
