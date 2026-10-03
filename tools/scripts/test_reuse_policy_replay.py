@@ -675,28 +675,33 @@ class CodemodelTests(unittest.TestCase):
 
     @staticmethod
     def data_scan(scanned, **entries):
-        """A data scan that detected its declared readers (a known reader `k`
-        always rides along so a scan with no other declared entry still
-        proves it saw something)."""
-        entries = {"k": {"data": "declared", "inputs": ["test/fixtures/k"], "detected_sources": ["test/k.cpp"]},
-                   **{n: {"detected_sources": ["test/x.cpp"], **e} for n, e in entries.items()}}
+        """A data scan that detected its declared readers (enough known
+        readers `k*` ride along that the scan proves it saw something)."""
+        known = {f"k{i}": {"data": "declared", "inputs": [f"test/fixtures/k{i}"], "detected_sources": ["test/k.cpp"]}
+                 for i in range(rrc.DATA_SCAN_MIN_DETECTED_READERS)}
+        entries = {**known, **{n: {"detected_sources": ["test/x.cpp"], **e} for n, e in entries.items()}}
         return rrc.spawn_scan_of({"executables_scanned_for": ["data", "spawns"], "executables_scanned": list(scanned),
                                   "executables": entries}, "data")
 
     def test_a_data_scan_that_cannot_show_it_saw_its_readers_is_not_trusted(self):
-        def doc(*detected):
+        def doc(seen, blind=0):
+            detected = [["s"]] * seen + [[]] * blind
             return {"executables_scanned_for": ["data"], "executables_scanned": ["a", "b"],
                     "executables": {f"r{i}": {"data": "declared", "inputs": ["x"], "detected_sources": d}
                                     for i, d in enumerate(detected)}}
-        self.assertIsNotNone(rrc.spawn_scan_of(doc(["s"]) , "data"))
-        self.assertIsNone(rrc.spawn_scan_of(doc(*[[]] * 3), "data"))            # blind: nothing detected
-        self.assertIsNone(rrc.spawn_scan_of(doc(*[["s"]] * 5, []), "data"))     # 5 of 6 is below the share
-        self.assertIsNotNone(rrc.spawn_scan_of(doc(*[["s"]] * 6, []), "data"))  # 6 of 7 meets it
-        legacy = doc(["s"])
+        floor = rrc.DATA_SCAN_MIN_DETECTED_READERS
+        self.assertEqual(floor, 20)
+        self.assertIsNotNone(rrc.spawn_scan_of(doc(floor), "data"))
+        self.assertIsNone(rrc.spawn_scan_of(doc(0, 30), "data"))                # blind: nothing detected
+        self.assertIsNone(rrc.spawn_scan_of(doc(floor - 1), "data"))            # every reader seen, too few of them
+        self.assertIsNone(rrc.spawn_scan_of(doc(1), "data"))                    # 1 of 1 is 100% and still not enough
+        self.assertIsNone(rrc.spawn_scan_of(doc(28, 6), "data"))                # 28 of 34 is below the share
+        self.assertIsNotNone(rrc.spawn_scan_of(doc(29, 5), "data"))             # 29 of 34 meets it
+        legacy = doc(floor)
         del legacy["executables"]["r0"]["detected_sources"]
         self.assertIsNone(rrc.spawn_scan_of(legacy, "data"))                    # the list cannot show it
-        self.assertIsNone(rrc.spawn_scan_of({**doc(), "executables": {}}, "data"))  # no known reader at all
-        self.assertIsNotNone(rrc.spawn_scan_of({**doc(), "executables": {}, "executables_scanned_for": ["spawns"]},
+        self.assertIsNone(rrc.spawn_scan_of({**doc(0), "executables": {}}, "data"))  # no known reader at all
+        self.assertIsNotNone(rrc.spawn_scan_of({**doc(0), "executables": {}, "executables_scanned_for": ["spawns"]},
                                                "spawns"))                       # the spawn scan is not gated
 
     def test_the_data_manifest_scopes_the_data_rule_per_executable(self):
