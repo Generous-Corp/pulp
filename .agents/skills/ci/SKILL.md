@@ -1256,8 +1256,24 @@ so three properties are load-bearing, all asserted by
 - **Events are read from the HEAD COMMIT, not the working tree.** An event you
   wrote but did not commit covers nothing, exactly as in CI.
 
-Exit codes: 0 nothing owed · 10 event owed · 20 no verdict · 2 `--write-event`
-refused.
+**It also verifies the freeze job's inventories** (`--inventories`): the
+`Vellum freeze` job's "Verify extraction and tooling inventories" step runs
+`generate_vellum_cut_manifest.py --verify`,
+`generate_vellum_ownership_projection.py --verify` and
+`pulp_tooling_disposition.py`, and a stale one fails the required check. A new
+CLI flag or command is enough to stale `docs/status/pulp-tooling-disposition.json`
+(#9283's Sparkle appcast options did). The gate runs the same three and prints
+the regenerate command (`python3 tools/scripts/pulp_tooling_disposition.py
+--write`, and so on) for whichever is stale.
+
+**Reading that step's log:** the line `vellum-ownership-projection: error:
+ownership projection is stale` used to be printed by a *passing* negative
+control in `test_generate_vellum_ownership_projection.py`, so it appeared in
+every log and pointed at the wrong file. The test now captures it. The real
+failure is the last tool line before `Process completed with exit code 1`.
+
+Exit codes: 0 nothing owed · 10 event owed · 11 inventory stale · 20 no
+verdict · 2 `--write-event` refused. Both callers block on 10 and 11 only.
 
 ### `gates.sh` and the pre-push hook are two lists, not one
 

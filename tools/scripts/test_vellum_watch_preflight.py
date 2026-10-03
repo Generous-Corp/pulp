@@ -296,6 +296,41 @@ class VellumWatchPreflightTest(unittest.TestCase):
         self.assertIn("design-ir-contract", output)
         self.assertIn("EXACT", output)
 
+    # ── the freeze job's inventories ───────────────────────────────────────
+
+    def _verifier(self, rel: str, *, stale: bool) -> None:
+        body = ("import sys\nprint('inventory is stale; run --write', file=sys.stderr)\n"
+                "sys.exit(1)\n") if stale else "print('ok')\n"
+        self._write(rel, body)
+
+    def test_a_stale_inventory_fails_with_its_regenerate_command(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._verifier("tools/scripts/pulp_tooling_disposition.py", stale=True)
+        self._verifier("tools/scripts/generate_vellum_ownership_projection.py", stale=False)
+        self._commit("chore: a tooling change")
+        code, output = self._run("main", "HEAD", "--enforce", "--inventories")
+        self.assertEqual(code, 11, msg=output)
+        self.assertIn("python3 tools/scripts/pulp_tooling_disposition.py --write", output)
+        self.assertIn("inventory is stale", output)
+        self.assertNotIn("ownership projection is stale", output)
+
+    def test_current_inventories_pass_and_absent_ones_are_skipped(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._verifier("tools/scripts/pulp_tooling_disposition.py", stale=False)
+        self._commit("chore: a tooling change")
+        code, output = self._run("main", "HEAD", "--enforce", "--inventories")
+        self.assertEqual(code, 0, msg=output)
+
+    def test_an_owed_event_and_a_stale_inventory_are_both_reported(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._verifier("tools/scripts/pulp_tooling_disposition.py", stale=True)
+        self._commit("feat: touch a watched tree and a tooling inventory")
+        code, output = self._run("main", "HEAD", "--enforce", "--inventories")
+        self.assertEqual(code, 10, msg=output)
+        self.assertIn("--write-event", output)
+        self.assertIn("pulp_tooling_disposition.py --write", output)
+
     # ── only a positive verdict blocks ─────────────────────────────────────
 
     def test_a_missing_checker_yields_no_verdict_and_no_traceback(self) -> None:
@@ -351,10 +386,14 @@ class VellumWatchPreflightTest(unittest.TestCase):
             self.assertNotIn("|| true", invocations[0],
                              msg=f"{rel} discards the gate's verdict")
             block = source[source.index(invocations[0]):][:400]
-            self.assertRegex(block, r'vellum_rc"? -eq 10 \]; then\s+fail=1',
-                             msg=f"{rel} does not fail on an owed event")
+            self.assertIn("--inventories", invocations[0],
+                          msg=f"{rel} does not verify the freeze inventories")
+            self.assertRegex(
+                block,
+                r'vellum_rc"? -eq 10 \] \|\| \[ "\$vellum_rc"? -eq 11 \]; then\s+fail=1',
+                msg=f"{rel} does not fail on an owed event or a stale inventory")
             self.assertNotRegex(block, r"-eq 20|-ne 0|-gt 0",
-                                msg=f"{rel} blocks on something other than exit 10")
+                                msg=f"{rel} blocks on a no-verdict exit")
 
 
 if __name__ == "__main__":

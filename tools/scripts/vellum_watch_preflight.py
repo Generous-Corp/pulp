@@ -38,6 +38,8 @@ Exit codes:
   0   nothing owed, or the range's affected families are already covered
   10  an event is owed and the range does not cover it
   20  no verdict available (no checker, no acceptance, no git range)
+  11  a Vellum freeze inventory (cut manifest, ownership projection, tooling
+      disposition) is stale; the regenerate command is printed
   2   --write-event refused (bad arguments, file exists, nothing owed)
 """
 
@@ -62,6 +64,22 @@ NOTHING_OWED = 0
 EVENT_OWED = 10
 NO_VERDICT = 20
 WRITE_REFUSED = 2
+INVENTORY_STALE = 11
+
+# The `Vellum freeze` job's "Verify extraction and tooling inventories" step:
+# (label, verify argv, regenerate command). Each verifier compares a committed
+# file against a fresh generation and exits non-zero when it is stale.
+INVENTORIES = (
+    ("Vellum initial cut manifest",
+     ["tools/scripts/generate_vellum_cut_manifest.py", "--verify"],
+     "python3 tools/scripts/generate_vellum_cut_manifest.py"),
+    ("Vellum ownership projection",
+     ["tools/scripts/generate_vellum_ownership_projection.py", "--verify"],
+     "python3 tools/scripts/generate_vellum_ownership_projection.py"),
+    ("Pulp tooling disposition (docs/status/pulp-tooling-disposition.json)",
+     ["tools/scripts/pulp_tooling_disposition.py"],
+     "python3 tools/scripts/pulp_tooling_disposition.py --write"),
+)
 
 ACCEPTANCE_ID = "full-design-import-render-v1-pulp-watch"
 RATIONALE_PLACEHOLDER = (
@@ -352,6 +370,38 @@ def run(root: pathlib.Path, base: str, head: str, stream, *,
     return EVENT_OWED
 
 
+def check_inventories(root: pathlib.Path, stream, *,
+                      python: str = sys.executable) -> int:
+    """Run the freeze job's inventory verifiers; print how to fix a stale one.
+
+    A verifier that is absent (an older checkout) is skipped, never failed.
+    """
+    stale: list[tuple[str, str, str]] = []
+    for label, argv, regenerate in INVENTORIES:
+        if not (root / argv[0]).is_file():
+            continue
+        try:
+            done = subprocess.run([python, *argv], cwd=root, capture_output=True,
+                                  text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if done.returncode != 0:
+            detail = (done.stderr or done.stdout).strip().splitlines()
+            stale.append((label, detail[-1] if detail else f"exit {done.returncode}",
+                          regenerate))
+    if not stale:
+        return NOTHING_OWED
+    lines = ["  ✗ vellum-inventory (the required `Vellum freeze` check runs the same "
+             "verifiers in \"Verify extraction and tooling inventories\"):"]
+    for label, detail, regenerate in stale:
+        lines += [f"     {label} is stale: {detail}",
+                  f"       regenerate: {regenerate}"]
+    lines += ["     Commit the regenerated file(s). The verifiers read the working",
+              "     tree, so an uncommitted edit can also trip this locally."]
+    _emit(lines, stream)
+    return INVENTORY_STALE
+
+
 def write_event(root: pathlib.Path, base: str, head: str, stream, *,
                 rationale: str | None, event_id: str | None) -> int:
     if not rationale or len(rationale.strip()) < 24 or rationale.lstrip().startswith("<"):
@@ -398,6 +448,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--write-event", action="store_true",
         help="write the owed event file into the working tree")
+    parser.add_argument(
+        "--inventories", action="store_true",
+        help="also verify the freeze job's cut manifest, ownership projection "
+             "and tooling disposition (exit 11 when one is stale)")
     parser.add_argument("--rationale", help="rationale text for --write-event")
     parser.add_argument("--event-id", help="event id for --write-event "
                         "(default: <today>-<branch>-watch)")
@@ -407,10 +461,20 @@ def main(argv: list[str] | None = None) -> int:
         return write_event(root, args.base, args.head, sys.stdout,
                            rationale=args.rationale, event_id=args.event_id)
     try:
-        return run(root, args.base, args.head, sys.stderr, enforce=args.enforce)
+        code = run(root, args.base, args.head, sys.stderr, enforce=args.enforce)
     except Exception:
         # An internal error is "no verdict", and no verdict never blocks.
-        return NO_VERDICT
+        code = NO_VERDICT
+    if args.inventories:
+        try:
+            stale = check_inventories(root, sys.stderr) == INVENTORY_STALE
+        except Exception:
+            stale = False
+        # An owed event outranks a stale inventory in the exit code; both are
+        # printed, and both callers block on either.
+        if stale and code != EVENT_OWED:
+            return INVENTORY_STALE
+    return code
 
 
 if __name__ == "__main__":

@@ -212,12 +212,15 @@ fi
 # `--write-event --rationale "..."`). Only a positive "event owed" verdict
 # (exit 10) fails; "no verdict" (20) never does. The trusted-root CI run stays
 # the authority — a local refusal can only stop what CI would also refuse.
+# `--inventories` also runs the freeze job's inventory verifiers (cut manifest,
+# ownership projection, tooling disposition) and prints the regenerate command
+# for a stale one (exit 11).
 if [ -f "$VELLUM_HINT" ]; then
     echo "" >&2
     echo "▸ vellum watch-event coverage (merge-base $BASE..HEAD)" >&2
-    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
-    if [ "$vellum_rc" -eq 10 ]; then
+    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ]; then
         fail=1
     fi
 fi
