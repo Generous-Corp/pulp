@@ -6144,6 +6144,21 @@
    ],
    "kind": "python"
   },
+  "read-audit-selftest": {
+   "entry": "tools/ci/test_read_audit.py",
+   "inputs": [
+    ".github/workflows/read-audit-nightly.yml",
+    "docs/status",
+    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/governed-build.sh",
+    "tools/ci/read_audit.py",
+    "tools/ci/spawn_closure.py",
+    "tools/ci/test_read_audit.py",
+    "tools/cmake"
+   ],
+   "kind": "python"
+  },
   "refactor-baseline-manifest": {
    "entry": "tools/scripts/verify_refactor_baselines.py",
    "inputs": [

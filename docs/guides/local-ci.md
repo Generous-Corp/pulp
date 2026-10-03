@@ -924,6 +924,21 @@ program (a string such as `"pulp-cpp"`) that no edge reaches and no reviewed
 `pulp_test_spawns(<test> NOT_RUN <target>)` covers, and one whose declared
 tool this configuration does not build.
 
+The declarations come from a static scan, so a nightly **read audit**
+(`.github/workflows/read-audit-nightly.yml`, `tools/ci/read_audit.py`)
+measures them. On a GitHub-hosted Linux runner it builds the tree, runs every
+compiled test executable's ctest registrations under `strace -f`, and diffs
+the tracked checkout files they open, list or probe against the executable's
+declared inputs. It uses the selector's own prefix-or-glob match, and CMake
+files count as covered because a CMake change already reruns everything. Each
+undeclared access is reported with its executable, its test and the program
+that made it. Before the tests, a control program goes through the same
+ctest and strace path. It reads one undeclared and one declared tracked
+file, and the run fails with no verdict unless only the undeclared one is
+flagged. The report names what it cannot see: macOS-only executables, targets
+that did not build, script-driven tests, and relative paths whose directory
+was unknown.
+
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
 `tools/ci/affected_tests_shadow.py`): the ctest entries the build graph and
