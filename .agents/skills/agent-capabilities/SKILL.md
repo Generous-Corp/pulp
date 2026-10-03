@@ -162,6 +162,13 @@ For an existing capability change:
   fingerprint would silently launder every unreviewed header edit. Paste the
   measured digest over the declared one in `agent_capability_registry.py`, bump
   `SURFACE_INVENTORY_VERSION` in `agent_capability_manifest.py`, then `--write`.
+- Exception: when the only stale fingerprint is a catalog binding's
+  `header_fingerprint` (e.g. `agent_capability_catalog_performance.py`, which
+  pins `processor.hpp` for `process_block`) and no capability's surface moved,
+  paste the measured digest there and `--write` WITHOUT bumping
+  `SURFACE_INVENTORY_VERSION`: the bump is refused with "surface
+  inventory_version changed without a surface change". A Processor virtual
+  that no capability exposes (an editor hook, say) is exactly this case.
 - Before choosing the next `SURFACE_INVENTORY_VERSION`, check whether an open
   branch already claimed it. Two branches that both bump 79 to 80 do not
   conflict — the edits are identical, so git merges them silently and the
