@@ -12,7 +12,7 @@
 #   git config core.hooksPath .githooks
 #
 # Bypass knobs (use sparingly — CI runs the same gates):
-#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/compat-aggregate/node-ABI/docs-noise/source-contract/hotspot-size/deps)
+#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/compat-aggregate/node-ABI/docs-noise/source-contract/hotspot-size/deps/vellum-watch)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
 #   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies)
 #
@@ -389,19 +389,21 @@ if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; 
     esac
 fi
 
-# Vellum watch-event hint — ADVISORY: warns, never blocks, and is deliberately
-# not demotable because it has nothing to demote. The required `Vellum freeze`
-# check wants a hand-authored event under .github/vellum-expansion-watch-events/
-# whenever the pushed range touches a pinned capability-family path glob; the
-# trigger is the path list, not the diff's meaning, so an ordinary edit under a
-# watched tree qualifies with no warning anywhere else.
-#
-# The authoritative run stays in CI, executed from a trusted root rather than
-# from this branch's copy of the checker — that is the whole point of the gate,
-# and giving the branch's copy a local veto would undo it. This prints what CI
-# will say and the command that reproduces it, then gets out of the way.
+# Vellum watch-event gate (demotable with PULP_DISABLE_PREPUSH_GATES=1). The
+# required `Vellum freeze` check wants a hand-authored event under
+# .github/vellum-expansion-watch-events/ whenever the pushed range touches a
+# pinned capability-family path glob; the trigger is the path list, not the
+# diff's meaning, so an ordinary edit under a watched tree qualifies with no
+# warning anywhere else. Advisory output did not prevent three red PRs in one
+# day, so an owed event (exit 10) now fails the push and the script prints the
+# exact event JSON to commit. "No verdict" (exit 20) never blocks. The trusted
+# CI run stays the authority; this can only refuse what CI would also refuse.
 if [ -f "$VELLUM_HINT" ]; then
-    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" || true
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce
+    vellum_rc=$?
+    if [ "$vellum_rc" -eq 10 ]; then
+        fail=1
+    fi
 fi
 
 # Docs-noise lint (advisory-demotable in v1). Forward-looking: scans added
