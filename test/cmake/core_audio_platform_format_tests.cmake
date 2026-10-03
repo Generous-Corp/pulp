@@ -135,7 +135,7 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
             pulp::timeline
             pulp::tool-timeline
             Catch2::Catch2WithMain)
-        # pulp_audio_compare resolves its delegated CLI from a project root.
+        # The sessions cases read timeline fixtures from the checkout.
         target_compile_definitions(pulp-test-mcp-timeline-tools PRIVATE
             PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
         target_include_directories(pulp-test-mcp-timeline-tools PRIVATE

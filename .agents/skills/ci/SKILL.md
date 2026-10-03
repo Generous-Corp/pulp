@@ -442,7 +442,7 @@ path; otherwise two cancellation actuators can race and make restart evidence
 ambiguous. This exclusion does not authorize recovery by itself—the dedicated
 Shipyard invocation remains separately enabled only after its pinned release,
 receipt namespace protection, and canary are in place. Pulp pins the bounded
-primitive at Shipyard v0.143.0; that pin supplies the command but does not turn
+primitive since Shipyard v0.143.0; the pin supplies the command but does not turn
 on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
@@ -455,8 +455,8 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.83.0`,
-which provides it, so the pinned binary is sufficient. That pin also makes
+`shipyard metrics` subcommand, which every pin since `v0.83.0` provides, so the
+pinned binary in `tools/shipyard.toml` is sufficient. Those pins also make
 formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
 lifecycle for an explicit pilot rather than routing stack members through the
@@ -2021,6 +2021,31 @@ undeclared. Declaring a subset is worse than not declaring, because it
 makes an unsound key look sound. Count with
 `script_test_inputs.py --build-dir <dir> --data-summary`.
 
+A compiled test that runs or loads another target this tree builds (a CLI,
+tool, fixture executable or MODULE) declares it with
+`pulp_test_spawns(<test> <target>...)` (same module). Never write
+`if(TARGET <tool>) add_dependencies(...)` in `test/cmake`: the test directory
+is read before `tools/cli`, `tools/import-design` and `examples/`, so the
+guard is false and the edge silently never exists (cli-import-design ran
+against whatever pulp-cpp was lying around for that reason).
+`pulp_test_spawns` adds the edge once the whole tree is read. The configure
+fails when a definition names `$<TARGET_FILE:x>` without an edge to x.
+`script_test_inputs.py` scans each test's sources and the `test/` headers they
+include, comments stripped, for process API calls and for runtime loads
+(`PluginSlot::load`, the CLAP bundle scanner, `dlopen` and its shim,
+`LoadLibrary`, `CFBundle`). One with no edge and no reviewed
+`pulp_test_spawns(<test> NONE)` (it starts only system tools, a fork of
+itself, or an in-process plugin) is `spawns: undeclared`, and the shadow
+never skips it. Pass a built artifact's path in from
+CMake (`$<TARGET_FILE:x>`, or the bundle path beside its edge); never find it
+by a path relative to the working directory. pulp-test-host's PulpSynth case
+did that and silently skipped for its whole life. The scan cannot see a
+spawn inside linked library code (the MCP audio tools shell out from
+tools/mcp), and "declared" means one edge, not all of them, so read what a
+test runs before marking it. The MCP audio tests now stage this build's CLI
+under a temp project root (`CliProjectRoot`) and assert text only a real run
+prints.
+
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the
@@ -2068,6 +2093,15 @@ its fail-closed rules (CMake change selects all; script-driven tests are
 affected whenever a script surface changed; a changed file no edge reads
 selects all) are the contract any real selector inherits. The ctest step takes
 no input from it; do not wire it into `-R`/`-L` without a contract decision.
+
+A test that spawns another built program (pulp-cli, pulp-import-design, a
+fixture runner) or loads a module at run time is reached only through the
+`add_dependencies(<test> <tool>)` edge, which Ninja records as order-only and
+the graph drops. `tools/ci/spawn_closure.py` reads that edge from the CMake
+codemodel's `dependencies`, and any consumer of "which tests does this change
+reach" (the shadow today) must go through it rather than walk the codemodel
+itself. Give every spawned tool or loaded module an `add_dependencies` on its
+test, or the closure cannot see it.
 
 ## The gate's "Hits: N / N (99.7%)" line is the host's history, not the job's
 
@@ -6783,7 +6817,7 @@ rejects the dispatch if the live PR head moved or the exact source is no longer
 the queued `pull_request` attempt for `.github/workflows/build.yml` with an
 exhaustive zero-job census. Operator dispatches leave recovery false, omit the
 source identity, and retain live-head resolution.
-Shipyard v0.143.0 provides the matching default-off
+Shipyard v0.143.0 and later provide the matching default-off
 `shipyard runner zero-job-recover` controller primitive. It creates and then
 re-reads an exact receipt, refuses duplicate/conflicting receipt contexts,
 requires the exhaustive current-attempt census to remain unchanged, and never

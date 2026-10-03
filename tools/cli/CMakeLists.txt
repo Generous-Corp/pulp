@@ -253,7 +253,10 @@ foreach(_cli_shellout_suite IN ITEMS
         pulp-test-cli-import
         pulp-test-cli-import-emit
         pulp-test-cli-import-terms
-        pulp-test-cli-ship-shellout)
+        pulp-test-cli-ship-shellout
+        # The MCP audio tools shell out to the CLI; these suites stage this one.
+        pulp-test-mcp-server
+        pulp-test-mcp-timeline-tools)
     if(TARGET ${_cli_shellout_suite})
         add_dependencies(${_cli_shellout_suite} pulp-cli)
         target_compile_definitions(${_cli_shellout_suite} PRIVATE

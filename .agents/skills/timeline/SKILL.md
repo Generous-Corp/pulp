@@ -4067,3 +4067,15 @@ registers every case twice under the same ctest name, and
 `protected_merge_receipt.py issue` refuses an inventory with a duplicated
 name, which silently disabled PR-head receipt reuse for weeks. The pr-fast
 `ctest-unique-names` guard now catches it on the PR head.
+
+## A timeline test that loads a plugin or forks declares it in its manifest
+
+A compiled timeline test whose sources call `PluginSlot::load`, `fork`, or
+another process or module API is scanned at configure time
+(`tools/scripts/script_test_inputs.py`). Unless it has an edge to the built
+target it loads, or a reviewed `pulp_test_spawns(<test> NONE)` in
+`test/cmake/timeline_tests.cmake`, it is `spawns: undeclared` and a selector
+never skips it. The graph-binding suite loads `PulpGain.clap` only through
+`PULP_TEST_CLAP_PATH`, which the top-level `CMakeLists.txt` sets together
+with the edge in examples builds, so it is `NONE` only when examples are off.
+Get a plugin's path from CMake, never from the working directory.

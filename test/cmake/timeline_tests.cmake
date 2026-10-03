@@ -758,3 +758,12 @@ endif()
 
 # Keep focused Timeline submodule registrations beneath this owner hub.
 include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")
+
+# Reviewed process API calls (tools/cmake/PulpTestData.cmake). The file journal
+# test forks without exec. The graph-binding suite loads PulpGain.clap only where
+# the top-level CMakeLists.txt gives it that edge (examples builds), and loads
+# nothing built otherwise.
+pulp_test_spawns(pulp-test-timeline-journal NONE)
+if(NOT PULP_BUILD_EXAMPLES)
+    pulp_test_spawns(pulp-test-timeline-graph-binding NONE)
+endif()
