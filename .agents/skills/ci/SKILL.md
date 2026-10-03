@@ -442,7 +442,7 @@ path; otherwise two cancellation actuators can race and make restart evidence
 ambiguous. This exclusion does not authorize recovery by itself—the dedicated
 Shipyard invocation remains separately enabled only after its pinned release,
 receipt namespace protection, and canary are in place. Pulp pins the bounded
-primitive at Shipyard v0.143.0; that pin supplies the command but does not turn
+primitive since Shipyard v0.143.0; the pin supplies the command but does not turn
 on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
@@ -455,8 +455,8 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.83.0`,
-which provides it, so the pinned binary is sufficient. That pin also makes
+`shipyard metrics` subcommand, which every pin since `v0.83.0` provides, so the
+pinned binary in `tools/shipyard.toml` is sufficient. Those pins also make
 formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
 lifecycle for an explicit pilot rather than routing stack members through the
@@ -6788,7 +6788,7 @@ rejects the dispatch if the live PR head moved or the exact source is no longer
 the queued `pull_request` attempt for `.github/workflows/build.yml` with an
 exhaustive zero-job census. Operator dispatches leave recovery false, omit the
 source identity, and retain live-head resolution.
-Shipyard v0.143.0 provides the matching default-off
+Shipyard v0.143.0 and later provide the matching default-off
 `shipyard runner zero-job-recover` controller primitive. It creates and then
 re-reads an exact receipt, refuses duplicate/conflicting receipt contexts,
 requires the exhaustive current-attempt census to remain unchanged, and never
