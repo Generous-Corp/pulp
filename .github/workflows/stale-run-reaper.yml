@@ -18,9 +18,8 @@ name: Stale run reaper
 # everything behind them stalls. Nothing else in the repo detects or
 # cancels them. This workflow does.
 #
-# Logic:
-#   - Pages through `actions/runs?status=in_progress` and
-#     `?status=queued` via `gh api --paginate`.
+# Logic (tools/scripts/stale_run_reaper.py, tested by test_stale_run_reaper.py):
+#   - Pages through `actions/runs?status=in_progress` and `?status=queued`.
 #   - `in_progress` runs are aged from `run_started_at` (execution
 #     start), NOT `created_at`. `created_at` also counts queue time, so
 #     a run that queued for hours then started recently would look
@@ -28,13 +27,17 @@ name: Stale run reaper
 #     `created_at` IS their age.
 #   - `in_progress` runs older than IN_PROGRESS_MAX_MINUTES and
 #     `queued` runs older than QUEUED_MAX_MINUTES are cancelled via the
-#     runs/<id>/cancel API.
+#     runs/<id>/cancel API. A 409 refusal escalates to runs/<id>/force-cancel
+#     unless the run's head is still the head of an open pull request.
+#   - A run refusing BOTH with "has not been queued yet" is a GitHub-side
+#     phantom (zero jobs; delete is refused too). It is listed separately and
+#     never counted as cancelled -- the old shell loop logged those as
+#     "likely already completed" every 30 minutes for weeks.
 #   - Thresholds are conservative: the slowest legit run (the cold
 #     nightly full build) executes ~2h, so the 4h in_progress cutoff
 #     is a 2x margin — nothing healthy is reaped.
 #   - Never cancels its own run (skips `${{ github.run_id }}`).
-#   - A failed cancel on one run (e.g. it just completed) never aborts
-#     the rest of the sweep.
+#   - A failed cancel on one run never aborts the rest of the sweep.
 #   - Writes a step summary: runs scanned plus a table of every run
 #     cancelled. If the reaper keeps reaping the same workflow, that
 #     workflow has a hang bug worth investigating — the summary history
@@ -82,189 +85,17 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: tools/scripts
+
       - name: Reap stale runs
         shell: bash
+        # Cancel first; on a refused cancel escalate to force-cancel unless the
+        # run's head is a live PR head; report GitHub-side phantoms (cancel and
+        # force-cancel both refused) separately instead of as cancelled.
         run: |
           set -euo pipefail
-
-          repo="${REPO}"
-          self_id="${SELF_RUN_ID}"
-          in_progress_max="${IN_PROGRESS_MAX_MINUTES}"
-          queued_max="${QUEUED_MAX_MINUTES}"
-          now_epoch=$(date -u +%s)
-
-          echo "Repo:                $repo"
-          echo "Self run id:         $self_id (never cancelled)"
-          echo "in_progress cutoff:  ${in_progress_max} min"
-          echo "queued cutoff:       ${queued_max} min"
-
-          scanned=0
-          cancelled=0
-          # JSON-Lines accumulator for the summary table.
-          : > cancelled.jsonl
-
-          # Scan one run status with one age threshold. Pages through
-          # every run via `gh api --paginate`, emitting one TSV row per
-          # run as one base64-encoded JSON object. Do not use TSV here:
-          # queued runs have an empty run_started_at and Bash whitespace IFS
-          # collapses consecutive tabs, which can shift path into the branch
-          # field and bypass the protected-workflow exclusion.
-          scan_status() {
-              local status="$1"
-              local max_minutes="$2"
-
-              echo ""
-              echo "=== Scanning status=${status} (cutoff ${max_minutes} min) ==="
-
-              local rows
-              rows=$(
-                  gh api --paginate \
-                      -H "Accept: application/vnd.github+json" \
-                      "/repos/${repo}/actions/runs?status=${status}&per_page=100" \
-                      --jq '.workflow_runs[] | @base64' \
-                      2>/dev/null || true
-              )
-
-              if [ -z "$rows" ]; then
-                  echo "  no ${status} runs"
-                  return 0
-              fi
-
-              while IFS= read -r encoded_run; do
-                  [ -z "$encoded_run" ] && continue
-                  local run_json
-                  if ! run_json=$(printf '%s' "$encoded_run" | base64 --decode 2>/dev/null); then
-                      echo "  skip malformed encoded run (refusing broad cancellation)"
-                      continue
-                  fi
-                  local run_id workflow_id run_status created started name path branch
-                  if ! run_id=$(jq -er '.id | select(type == "number" and . > 0) | tostring' <<<"$run_json") \
-                    || ! workflow_id=$(jq -er '.workflow_id | select(type == "number" and . > 0) | tostring' <<<"$run_json") \
-                    || ! run_status=$(jq -er '.status | select(type == "string" and length > 0)' <<<"$run_json") \
-                    || ! created=$(jq -er '.created_at | select(type == "string" and length > 0)' <<<"$run_json") \
-                    || ! name=$(jq -er '.name | select(type == "string" and length > 0)' <<<"$run_json") \
-                    || ! path=$(jq -er '.path | select(type == "string" and length > 0)' <<<"$run_json") \
-                    || ! branch=$(jq -er '.head_branch | select(type == "string")' <<<"$run_json"); then
-                      echo "  skip malformed run identity (refusing broad cancellation)"
-                      continue
-                  fi
-                  started=$(jq -r '.run_started_at // ""' <<<"$run_json")
-                  scanned=$((scanned + 1))
-
-                  if [ "$run_id" = "$self_id" ]; then
-                      echo "  skip ${run_id} (this reaper run)"
-                      continue
-                  fi
-
-                  # The canonical Build and Test workflow has a narrower,
-                  # receipt-fenced recovery protocol in Shipyard. This broad
-                  # age janitor must never become a competing actuator.
-                  if [ "$path" = ".github/workflows/build.yml" ] \
-                    || [ "$workflow_id" = "256999733" ] \
-                    || [ "$name" = "Build and Test" ]; then
-                      if [ "$path" != ".github/workflows/build.yml" ] \
-                        || [ "$workflow_id" != "256999733" ] \
-                        || [ "$name" != "Build and Test" ]; then
-                          echo "  refusing typed-recovery workflow identity drift for run ${run_id}" >&2
-                          exit 1
-                      fi
-                      echo "  skip ${run_id} (${name} id=${workflow_id} path=${path} is reserved for typed recovery)"
-                      continue
-                  fi
-
-                  # Age basis. An in_progress run is aged from
-                  # run_started_at (when execution actually began) — NOT
-                  # created_at, which also counts queue time, so a run
-                  # that queued for hours then started recently is not
-                  # hung. A queued run never started, so created_at IS
-                  # its age. Fall back to created_at if run_started_at
-                  # is absent.
-                  local age_src="$created"
-                  if [ "$status" = "in_progress" ] && [ -n "$started" ]; then
-                      age_src="$started"
-                  fi
-
-                  # timestamp -> epoch. GNU date first, Python fallback.
-                  local age_epoch
-                  age_epoch=$(date -u -d "${age_src}" +%s 2>/dev/null \
-                      || python3 -c "import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).timestamp()))" "${age_src}" \
-                      2>/dev/null || echo '')
-
-                  if [ -z "$age_epoch" ]; then
-                      echo "  skip ${run_id} (unparseable timestamp '${age_src}')"
-                      continue
-                  fi
-
-                  local age_min=$(( (now_epoch - age_epoch) / 60 ))
-
-                  if [ "$age_min" -le "$max_minutes" ]; then
-                      echo "  ok   ${run_id} '${name}' (${age_min} min, status ${run_status})"
-                      continue
-                  fi
-
-                  echo "  STUCK ${run_id} '${name}' branch '${branch}' (${age_min} min ${status}) — cancelling"
-
-                  # A failed cancel (run may have just completed) must
-                  # not abort the sweep. `|| true` keeps us going.
-                  if gh api --method POST \
-                          -H "Accept: application/vnd.github+json" \
-                          "/repos/${repo}/actions/runs/${run_id}/cancel" \
-                          >/dev/null 2>&1; then
-                      cancelled=$((cancelled + 1))
-                      python3 -c "import json,sys; print(json.dumps({'id': sys.argv[1], 'name': sys.argv[2], 'branch': sys.argv[3] or '(none)', 'status': sys.argv[4], 'age_min': int(sys.argv[5])}))" \
-                          "${run_id}" "${name}" "${branch}" "${status}" "${age_min}" >> cancelled.jsonl
-                      echo "    cancelled ${run_id}"
-                  else
-                      echo "    cancel failed for ${run_id} (likely already completed) — continuing"
-                  fi
-              done <<< "$rows"
-          }
-
-          scan_status "in_progress" "$in_progress_max"
-          scan_status "queued" "$queued_max"
-
-          echo ""
-          echo "Scanned ${scanned} run(s); cancelled ${cancelled}."
-          echo "SCANNED=${scanned}" >> "$GITHUB_ENV"
-          echo "CANCELLED=${cancelled}" >> "$GITHUB_ENV"
-
-      - name: Write step summary
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          scanned="${SCANNED:-0}"
-          cancelled="${CANCELLED:-0}"
-
-          # Build the whole summary into one buffer, then append it to
-          # $GITHUB_STEP_SUMMARY in a single redirect.
-          {
-              echo "## Stale run reaper"
-              echo ""
-              echo "- Thresholds: \`in_progress\` > **${IN_PROGRESS_MAX_MINUTES} min**, \`queued\` > **${QUEUED_MAX_MINUTES} min**"
-              echo "- Runs scanned: **${scanned}**"
-              echo "- Runs cancelled: **${cancelled}**"
-              echo ""
-
-              if [ -s cancelled.jsonl ]; then
-                  echo "### Cancelled runs"
-                  echo ""
-                  echo "| Run ID | Workflow | Branch | Stuck status | Age |"
-                  echo "|--------|----------|--------|--------------|-----|"
-                  python3 - <<'PY'
-          import json
-          with open('cancelled.jsonl') as fh:
-              for line in fh:
-                  line = line.strip()
-                  if not line:
-                      continue
-                  r = json.loads(line)
-                  print(f"| {r['id']} | {r['name']} | `{r['branch']}` | {r['status']} | {r['age_min']} min |")
-          PY
-                  echo ""
-                  echo "_If the same workflow is reaped repeatedly, it has a hang bug worth investigating._"
-              else
-                  echo "No stuck runs detected — CI queue is clean."
-              fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          python3 tools/scripts/stale_run_reaper.py --summary "$GITHUB_STEP_SUMMARY"
