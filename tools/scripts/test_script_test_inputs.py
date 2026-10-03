@@ -22,7 +22,10 @@ cmake-driven test. What must hold:
 - the scan covers an executable defined outside test/ when ctest runs it
   (as a command or through a Catch2 discovery include), keyed by the program
   name ctest runs, and not one a test only passes as an argument;
-- WHOLE_CHECKOUT reads as `data: whole_checkout`, never undeclared.
+- WHOLE_CHECKOUT reads as `data: whole_checkout`, never undeclared;
+- every scanned executable is keyed by its artifact, whether or not it lives
+  under test/, `executable_targets` maps a renamed one back to its target,
+  and two targets building one artifact refuse to be listed.
 
 Run:
     python3 tools/scripts/test_script_test_inputs.py
@@ -732,7 +735,28 @@ class ScanScopeTests(unittest.TestCase):
             # Without a CTestTestfile nothing can be ruled out, so all are scanned.
             (build / "CTestTestfile.cmake").unlink()
             self.assertEqual(sorted(sti.compiled_entries(root, build)),
-                             ["arg-only", "cli-target", "discovered", "idle", "in-test"])
+                             ["arg-only", "cli-run", "discovered", "idle", "in-test"])
+
+    def test_every_key_is_the_artifact_and_renamed_ones_map_to_their_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, build = self.scope_build(Path(tmp))
+            artifacts = build / "test" / "test-data" / "runtime-targets.json"
+            doc = json.loads(artifacts.read_text(encoding="utf-8"))
+            doc["artifacts"]["in-test"] = {"artifact": "in-test-bin", "runtime_targets": []}
+            artifacts.write_text(json.dumps(doc), encoding="utf-8")
+            lst = sti.build_list({"tests": []}, root, build)
+            self.assertEqual(lst["executables_scanned"], ["cli-run", "discovered", "in-test-bin"])
+            self.assertEqual(lst["executable_targets"], {"cli-run": "cli-target", "in-test-bin": "in-test"})
+            self.assertIn("in-test-bin", lst["executables"])
+            # A discovery include carries the target name, not the artifact.
+            doc["artifacts"]["discovered"] = {"artifact": "disc-bin", "runtime_targets": []}
+            artifacts.write_text(json.dumps(doc), encoding="utf-8")
+            self.assertIn("disc-bin", sti.test_executables(build))
+            # Two targets that build one program cannot be told apart by a selector.
+            doc["artifacts"]["discovered"] = {"artifact": "in-test-bin", "runtime_targets": []}
+            artifacts.write_text(json.dumps(doc), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "both build in-test-bin"):
+                sti.test_executables(build)
 
     def test_a_declaration_on_a_renamed_program_is_read_by_its_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

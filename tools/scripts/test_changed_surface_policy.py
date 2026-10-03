@@ -677,6 +677,51 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             with self.assertRaisesRegex(inventory.InventoryError, "unambiguous command"):
                 inventory.split_proven_unbuilt_placeholders([placeholder], build)
 
+    @staticmethod
+    def partly_built_tree(build: Path) -> None:
+        """A build tree whose `direct` program is a CMake artifact not built yet."""
+        reply = build / ".cmake" / "api" / "v1" / "reply"
+        reply.mkdir(parents=True)
+        (reply / "index-exact.json").write_text(
+            json.dumps({"reply": {"codemodel-v2": {"jsonFile": "codemodel.json"}}}),
+            encoding="utf-8")
+        (reply / "codemodel.json").write_text(
+            json.dumps({"configurations": [{"targets": [{"jsonFile": "target.json"}]}]}),
+            encoding="utf-8")
+        (reply / "target.json").write_text(
+            json.dumps({"name": "pulp-test-direct", "artifacts": [{"path": "direct"}]}),
+            encoding="utf-8")
+        (build / "CTestTestfile.cmake").write_text(
+            f'add_test([=[direct-test]=] "{build / "direct"}")\n', encoding="utf-8")
+
+    def test_a_partly_built_tree_passes_only_with_proof_each_gap_is_unbuilt(self) -> None:
+        # A bounded leg builds only its selected targets; the other
+        # registrations have no command yet, and the selftest ran in that leg.
+        policy = {"build_flags": [], "build_type": "debug", "baseline_tests": ["smoke"],
+                  "families": [{"name": "f", "tests": ["direct-test"]}]}
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            self.partly_built_tree(build)
+            ready = fixture("smoke", str(build / "bin" / "tests"),
+                            properties=[{"name": "WORKING_DIRECTORY", "value": str(build)}])
+            unbuilt = {"backtrace": 1, "name": "direct-test",
+                       "properties": [{"name": "WORKING_DIRECTORY", "value": str(build)}]}
+            self.assertEqual(
+                check_ctest_inventory({"tests": [ready, unbuilt]}, REPO_ROOT, build, policy), 1)
+            # Built but listed without a command: no longer merely unbuilt.
+            (build / "direct").write_text("", encoding="utf-8")
+            with self.assertRaisesRegex(inventory.InventoryError, "direct-test"):
+                check_ctest_inventory({"tests": [ready, unbuilt]}, REPO_ROOT, build, policy)
+            (build / "direct").unlink()
+            # Commandless with no CMake provenance at all.
+            orphan = {**unbuilt, "name": "orphan-test"}
+            with self.assertRaisesRegex(inventory.InventoryError, "orphan-test"):
+                check_ctest_inventory({"tests": [ready, unbuilt, orphan]}, REPO_ROOT, build, policy)
+            # A literal name nothing registers still refuses when no Catch2
+            # discovery is pending.
+            with self.assertRaisesRegex(inventory.InventoryError, "absent from CTest inventory"):
+                check_ctest_inventory({"tests": [ready]}, REPO_ROOT, build, policy)
+
     def test_property_order_is_not_registration_identity(self) -> None:
         properties = [
             {"name": "LABELS", "value": ["one", "two"]},
@@ -791,37 +836,55 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             inventory.expand_literal_selection(manifest, ["one", "one"])
 
 
-def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = None) -> None:
-    """A built tree's registrations must be complete and name every literal
-    test the policy declares. Whether they match the protected base is decided
-    per plan, against that base (run_changed_surface_tests.base_projection)."""
-    policy = load_policy()
-    source_root = inventory.source_root_for_build(build_dir)
-    payload = inventory.load_ctest_payload(build_dir)
-    projection = inventory.project_registrations(payload, source_root, build_dir)
-    unresolved = [name for name in projection["incomplete"]
-                  if not inventory.NOT_BUILT_PLACEHOLDER.match(name)]
-    if unresolved:
-        raise inventory.InventoryError(
-            f"registrations without a command after the build: {unresolved[:12]}"
-        )
+def check_ctest_inventory(
+    payload: dict, source_root: Path, build_dir: Path, policy: dict
+) -> int:
+    """The tree's registrations must be complete and name every literal test
+    the policy declares; returns how many are proven unbuilt.
+
+    A bounded leg builds only its selected targets, so other registrations
+    have no command yet. One passes only with the runner's own proof that it
+    is merely unbuilt (a Catch2 NOT_BUILT placeholder with its generated
+    include, or a direct test whose program is a CMake artifact not built
+    yet); a built registration without a command, or one with no proof,
+    refuses. Literal names that may be undiscovered Catch2 cases are checked
+    once no placeholder remains, which the same test does after the full
+    build."""
+    ready, unbuilt = inventory.split_proven_unbuilt_placeholders(payload["tests"], build_dir)
     manifest = inventory.build_manifest(
-        payload["tests"],
+        ready,
         source_root,
         Path(os.path.abspath(build_dir)),
         policy,
     )
     inventory.require_unambiguous(manifest)
-    missing = sorted(
-        literal_tests(policy)
-        - {group["composite"]["name"] for group in manifest["groups"]}
-    )
-    if missing:
+    present = {group["composite"]["name"] for group in manifest["groups"]}
+    present |= {test["name"] for test in unbuilt
+                if not inventory.NOT_BUILT_PLACEHOLDER.match(test["name"])}
+    undiscovered = any(inventory.NOT_BUILT_PLACEHOLDER.match(test["name"]) for test in unbuilt)
+    missing = sorted(literal_tests(policy) - present)
+    if missing and not undiscovered:
         raise inventory.InventoryError(
             f"policy names tests absent from CTest inventory: {missing}"
         )
-    inventory.expand_literal_selection(manifest, literal_tests(policy))
+    if not unbuilt:
+        inventory.expand_literal_selection(manifest, literal_tests(policy))
+    return len(unbuilt)
+
+
+def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = None) -> None:
+    """Check a configured tree's registrations (see check_ctest_inventory).
+    Whether they match the protected base is decided per plan, against that
+    base (run_changed_surface_tests.base_projection)."""
+    policy = load_policy()
+    source_root = inventory.source_root_for_build(build_dir)
+    payload = inventory.load_ctest_payload(build_dir)
+    unbuilt = check_ctest_inventory(payload, source_root, build_dir, policy)
+    if unbuilt:
+        print(f"changed-surface-policy: {unbuilt} registration(s) proven unbuilt in a "
+              "partly built tree; literal-name checks complete after the full build")
     if manifest_output is not None:
+        projection = inventory.project_registrations(payload, source_root, build_dir)
         manifest_output.write_bytes(inventory.canonical_json(projection) + b"\n")
 
 
