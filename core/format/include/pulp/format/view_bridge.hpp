@@ -63,6 +63,13 @@ public:
     struct Options {
         bool enable_hot_reload = false;  ///< Poll scripted UI + theme.json for changes
         ViewRole role = ViewRole::Editor;
+        /// Return the view before evaluating its scripted document (see
+        /// view::ScopedDeferredDocumentLoad). open() then builds a correctly
+        /// sized root in milliseconds and the document mounts on the editor's
+        /// second idle tick. On for every host-embedded editor, where the host
+        /// is blocked in its view-creation call; off for the standalone and
+        /// for harnesses that inspect the mounted tree right after open().
+        bool defer_document_load = false;
 
         /// Options for a primary editor embedded in a host: hot reload follows
         /// the developer's `PULP_DEV_HOT_RELOAD` opt-in, role is Editor.
@@ -78,7 +85,8 @@ public:
         /// reload on unconditionally because it is itself the dev tool.
         static Options hosted_editor() {
             return Options{.enable_hot_reload = dev_editor_hot_reload_enabled(),
-                           .role = ViewRole::Editor};
+                           .role = ViewRole::Editor,
+                           .defer_document_load = true};
         }
     };
 

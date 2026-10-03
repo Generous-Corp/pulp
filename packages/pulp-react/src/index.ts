@@ -21,6 +21,17 @@ import type { PulpContainer } from './types.js';
 // so DevTools registration only happens once per JS engine load.
 const reconciler = createReactReconciler(PulpHostConfig as unknown as Parameters<typeof createReactReconciler>[0]);
 
+// Host-driven callbacks — requestAnimationFrame and timers — run through this
+// hook (WidgetBridge's __pulpRunHostCallback__), so the several setState calls
+// one callback makes commit once when it returns. LegacyRoot otherwise commits
+// each setState synchronously, and in a materialized import every commit
+// re-applies captured import metadata: one editor's post-mount state hydrate
+// made 13 commits from a single animation frame. This is the batching React 18
+// applies to every update; code that must observe a commit mid-callback calls
+// flushSync explicitly, as it would in a browser.
+(globalThis as { __pulpBatchUpdates__?: unknown }).__pulpBatchUpdates__ =
+    <A, R>(fn: (arg: A) => R, arg: A): R => reconciler.batchedUpdates(fn, arg);
+
 // Optional DevTools hookup (no-op if devtools not present).
 try {
     reconciler.injectIntoDevTools({

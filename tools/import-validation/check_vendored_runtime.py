@@ -35,7 +35,12 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_FINGERPRINT = REPO / "packages" / "pulp-react" / "runtime-fingerprint.json"
-BANNER = re.compile(r"@pulp/react runtime revision (\d+)")
+# The banner is the bundle's FIRST line, exactly as runtime_fingerprint.mjs
+# emits it. Anchored, so a comment that merely mentions a revision (a hand
+# transplant's note, say) cannot claim every fix up to that revision.
+BANNER = re.compile(r"\A/\* @pulp/react runtime revision (\d+) \*/")
+# Bundle detection still accepts the phrase anywhere.
+BANNER_ANYWHERE = re.compile(r"@pulp/react runtime revision \d+")
 # Present in every @pulp/react bundle old enough to matter, banner or not.
 BUNDLE_MARKERS = ("__pulpReactDomRegistry__", "markMaterializedTreeDirty")
 MAX_BYTES = 64 * 1024 * 1024
@@ -53,11 +58,11 @@ def load_fingerprint(path: pathlib.Path) -> dict:
 
 
 def is_pulp_react_bundle(text: str) -> bool:
-    return bool(BANNER.search(text)) or any(m in text for m in BUNDLE_MARKERS)
+    return bool(BANNER_ANYWHERE.search(text)) or any(m in text for m in BUNDLE_MARKERS)
 
 
 def bundle_revision(text: str) -> int | None:
-    match = BANNER.search(text)
+    match = BANNER.match(text)
     return int(match.group(1)) if match else None
 
 

@@ -1,6 +1,6 @@
 ---
 name: view-bridge
-description: Plugin editors — load before writing or changing a JS/scripted plugin UI that animates, shows meters, analyzers or modulation, or handles pointer drawing, drag or zoom, and for editor lifecycle and multi-view attach. The realtime performance checklist covers React commits per pointer move or frame, pushing native data with dispatch_native_message instead of load_script, readout relayout, VisualizationBridge backlog policy and frame-time modulation display. Lifecycle covers when to override Processor::create_view(), the open → notify_attached → resize → close protocol, release_view() ownership rules, and secondary-view roles.
+description: Plugin editors — load before writing or changing a JS/scripted plugin UI, its create_view(), or anything an editor does at open (view-first document load, never blocking the host's view-creation call), or a UI that animates, shows meters, analyzers or modulation, or handles pointer drawing, drag or zoom, and for editor lifecycle and multi-view attach. The realtime performance checklist covers React commits per pointer move or frame, pushing native data with dispatch_native_message instead of load_script, readout relayout, VisualizationBridge backlog policy and frame-time modulation display. Lifecycle covers when to override Processor::create_view(), the open → notify_attached → resize → close protocol, release_view() ownership rules, and secondary-view roles.
 ---
 
 # ViewBridge skill
@@ -52,6 +52,72 @@ is the fast check before pushing. The same rule applies to non-view Processor
 virtuals: additive callbacks such as `process_f64(...)` belong after the
 existing f32 process surface, and descriptor fields added for new capabilities
 should be appended when positional aggregate initializer compatibility matters.
+
+## Editor open: return the sized view first, mount the document after
+
+**Rule: never do heavy work inside the host's view-creation call.** A plug-in
+host creates the editor view synchronously (`uiViewForAudioUnit:`,
+`IPlugView::attached`, `clap_plugin_gui::create`/`set_parent`, AUv3
+`requestViewController`) and shows nothing of the editor until that call
+returns. Logic opens a header-only plug-in window for the whole call. A
+scripted editor that compiles its runtime, imports a captured document and
+mounts React inside that call makes the user stare at an empty window for
+seconds. Return a correctly sized root first; mount the document after.
+
+What Pulp does for you (default, every hosted format):
+
+- `ViewBridge::Options::hosted_editor()` — the one Options every AU v2, AUv3,
+  VST3, CLAP and AAX adapter builds from — sets `defer_document_load`.
+  `ViewBridge::open()` then holds `view::ScopedDeferredDocumentLoad` around
+  `create_view()` and the default scripted editor.
+- `ScriptedUiSession::load_deferrable()` inside that guard verifies the script
+  is readable, returns true, and evaluates the document from the session's
+  **second** idle poll: the first tick presents the empty, sized editor, the
+  second mounts. Outside the guard (standalone, tests, harnesses) it is
+  `load()`. The default scripted editor (`PULP_UI_SCRIPT_PATH`) already uses
+  it and falls back to AutoUi *inside* the returned root if the deferred
+  document fails.
+- The first load of a session evaluates on the live realm only — no probe
+  realm (`probe_realm_evaluations() == 0`); reloads still probe.
+
+What a processor that builds its own `ScriptedUiSession` in `create_view()`
+must do:
+
+```cpp
+session->set_document_loaded_callback([this](bool ok, const std::string& err) {
+    // Everything that needs the mounted realm goes HERE: binding scripts,
+    // native observers, the first layout publish, a fail-closed path.
+});
+if (!session->load_deferrable(&error)) { /* unreadable script: fail now */ }
+// Do NOT read session->bridge() here — it is null until the document mounts.
+```
+
+- Plain `load()` still evaluates immediately inside the guard (callers may
+  read `bridge()` next), and logs a one-time warning naming
+  `load_deferrable()` when it blocks the host for 50 ms or more. That warning
+  is the tell that an editor opens slowly.
+- Never destroy the session from inside its own document-loaded callback (it
+  runs inside the session's load); mark it and retire it after the call
+  returns.
+- Keep the editor's size a compile-time / `view_size()` answer, never
+  something the document computes — the host sizes its window from the view
+  `create_view()` returns.
+- Downstream code that kept its own deferral for older SDKs keys its removal
+  on `PULP_VIEW_HAS_DEFERRED_DOCUMENT_LOAD`.
+
+Gate: the `[editor-open]` cases in `test/test_view_bridge.cpp` assert by state
+(not wall time) that a hosted `open()` evaluates nothing, the document mounts
+on the second idle tick, failures report from the tick, and a missing script
+still fails inside `open()`. Copy that shape for a plug-in's own editor:
+assert `document_load_pending()` / `bridge() == nullptr` after `create_view()`
+inside a `ScopedDeferredDocumentLoad`, then pump the session and assert the
+mounted tree. Measure wall time with the `trace-analysis` editor-open recipe;
+track it, do not gate on it.
+
+Worked example (Spectr, AU v2, M5 Max, traced build): the view-creation call
+went from 1.4–2.1 s to 12–20 ms, and the full document drew at ~0.5 s warm /
+~0.9 s cold once the costs below were also removed (see `import-design`,
+"Editor-open cost of a materialized document").
 
 ## Lifecycle protocol — adapter author side
 

@@ -48,6 +48,38 @@ struct ScriptedUiOptions {
     bool enable_runtime_import = false;
 };
 
+/// Present while the SDK has view-first document loading (ScopedDeferredDocumentLoad,
+/// ScriptedUiSession::set_document_loaded_callback). Downstream code that keeps
+/// its own deferral for older SDKs can key its removal on this.
+#define PULP_VIEW_HAS_DEFERRED_DOCUMENT_LOAD 1
+
+/// View-first editor opening.
+///
+/// A plug-in host creates the editor view synchronously and shows nothing of
+/// it -- in Logic, a header-only plug-in window -- until that call returns.
+/// While one of these is alive on the calling thread,
+/// ScriptedUiSession::load_deferrable() does not evaluate the document: it
+/// checks the script can be read, returns true, and evaluates it from the
+/// session's second poll(), so the host gets a correctly sized view at once and
+/// the first frame paints before the document mounts. ViewBridge::open() holds
+/// one for every host-embedded editor (ViewBridge::Options::hosted_editor()),
+/// around both create_view() and the default scripted editor. A plain load()
+/// inside one still evaluates immediately -- its caller may read bridge() next
+/// -- but warns once when that blocks the host. Standalone hosts and in-process
+/// harnesses never hold one, so their document is mounted when either returns.
+class ScopedDeferredDocumentLoad {
+public:
+    ScopedDeferredDocumentLoad();
+    ~ScopedDeferredDocumentLoad();
+    ScopedDeferredDocumentLoad(const ScopedDeferredDocumentLoad&) = delete;
+    ScopedDeferredDocumentLoad& operator=(const ScopedDeferredDocumentLoad&) = delete;
+    /// Whether a guard is alive on this thread.
+    static bool active() noexcept;
+
+private:
+    bool previous_ = false;
+};
+
 // Manages a JS-driven widget tree, optional theme.json overrides, and
 // standalone hot reload semantics with widget value preservation.
 class ScriptedUiSession {
@@ -61,7 +93,31 @@ public:
     ScriptedUiSession(const ScriptedUiSession&) = delete;
     ScriptedUiSession& operator=(const ScriptedUiSession&) = delete;
 
+    /// Evaluate the script and mount it into the root now; bridge() is live
+    /// when it returns true. Inside a ScopedDeferredDocumentLoad (a host's
+    /// view-creation call) a slow one logs a one-time warning naming
+    /// load_deferrable(), because the host shows no editor until it returns.
     bool load(std::string* error = nullptr);
+    /// View-first load. Outside a ScopedDeferredDocumentLoad this is load().
+    /// Inside one it only verifies the script can be read, returns true, and
+    /// evaluates the document from the session's second poll(); bridge()
+    /// stays null until then, so work that needs the mounted realm belongs in
+    /// set_document_loaded_callback(). The default scripted editor uses this;
+    /// a processor that builds its own session in create_view() should too.
+    bool load_deferrable(std::string* error = nullptr);
+    /// True between a deferred load() and the poll() that evaluates it.
+    bool document_load_pending() const noexcept { return document_load_pending_; }
+    /// Evaluate a deferred document now (a harness that needs the mounted tree
+    /// without pumping frames). Returns whether the document is loaded.
+    bool complete_pending_load(std::string* error = nullptr);
+    /// Called when a load() -- immediate or deferred -- finishes, with whether
+    /// the document mounted and the error when it did not. Set it before load().
+    /// The place for work that needs the mounted realm: binding scripts,
+    /// native observers, a fallback editor when the document failed.
+    void set_document_loaded_callback(
+        std::function<void(bool loaded, const std::string& error)> cb) {
+        document_loaded_callback_ = std::move(cb);
+    }
     /// Advance one frame: discharge the realm reset a completed
     /// `Runtime.evaluate` owes, retire and destroy realms replaced since the
     /// last frame, pump the bridge and one queued inspector request, then poll
@@ -170,6 +226,14 @@ public:
         double total_ms = 0.0;     ///< end-to-end
     };
     const ReloadMetrics& last_reload_metrics() const { return last_reload_metrics_; }
+    /// How many times this session evaluated a script on a throwaway probe
+    /// realm. A reload probes so a broken script cannot take down the live
+    /// editor; the first load has nothing to protect and never probes, so an
+    /// editor open evaluates its document exactly once. Exposed so tests and
+    /// editor-open budgets can assert that by count rather than by wall time.
+    std::uint64_t probe_realm_evaluations() const noexcept {
+        return probe_realm_evaluations_;
+    }
     /// Convenience: total wall-clock of the last reload, ms.
     double last_reload_ms() const { return last_reload_metrics_.total_ms; }
 
@@ -253,6 +317,12 @@ private:
     bool runtime_realm_quarantined_ = false;
     bool accessibility_retirement_pending_ = false;
     ReloadMetrics last_reload_metrics_{};   // JS-axis reload timings (item 1.2)
+    std::uint64_t probe_realm_evaluations_ = 0;
+    bool document_load_pending_ = false;
+    int deferred_load_polls_ = 0;
+    std::function<void(bool, const std::string&)> document_loaded_callback_;
+    bool load_now(std::string* error);
+    static constexpr double kBlockingLoadWarningMs = 50.0;
     bool last_theme_exists_ = false;
     std::optional<std::filesystem::file_time_type> last_theme_write_time_;
 

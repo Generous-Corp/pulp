@@ -36,6 +36,9 @@ public:
     // Evaluate JS code synchronously, returns the result as a choc::value::Value
     // Throws on parse/runtime errors
     choc::value::Value evaluate(const std::string& code);
+    // Evaluate a whole script (see JsEngine::evaluate_script): a large script
+    // seen before in this process reuses its compiled bytecode.
+    choc::value::Value evaluate_script(const std::string& code);
 
     bool supports_bounded_json_evaluation() const;
     std::string evaluate_bounded_json(const std::string& code,

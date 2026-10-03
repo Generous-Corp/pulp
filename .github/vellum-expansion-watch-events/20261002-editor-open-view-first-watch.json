@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261002-editor-open-view-first-watch",
+  "created_at": "2026-10-02T23:33:57Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record editor-open performance changes that cross these families' selectors. A scripted editor's first load evaluates once on the live realm instead of also on a probe realm; whole scripts (bundles, preludes, runtime-import payloads and inline template scripts) reuse QuickJS bytecode compiled earlier in the same process through JsEngine::evaluate_script, with evaluate()'s results and errors; animation-frame and timer callbacks run through the UI framework's batching hook (@pulp/react runtime fingerprint revision 3); host-embedded editors return their view before evaluating the document (ScopedDeferredDocumentLoad, ScriptedUiSession::load_deferrable); and trace spans name the runtime-import phases. No importer lowering, DesignIR shape, capture path, renderer selection, asset format, fixture or threshold changes, and no existing test's verdict changes. Registered as watch-only so the families' coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-scripted-ui [editor-open]",
+    "pulp-test-group-script-format [editor-open]",
+    "pulp-test-group-script-view [editor-open]",
+    "pulp-test-group-view-widgets [editor-open]",
+    "pulp-test-group-design-import-tool"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

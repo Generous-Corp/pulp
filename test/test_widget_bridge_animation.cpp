@@ -640,6 +640,58 @@ TEST_CASE("WidgetBridge host idle pump drains rAF + setTimeout in same call",
     REQUIRE(engine.evaluate("timer_count").getWithDefault<int>(-1) == 1);
 }
 
+TEST_CASE("WidgetBridge runs frame and timer callbacks inside the UI batching hook",
+          "[view][bridge][editor-open]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // A stand-in for React's batchedUpdates: it records how deep inside a
+    // batch each callback ran. A frame callback whose state updates should
+    // commit once must run at depth 1.
+    bridge.load_script(R"(
+        var batch_depth = 0;
+        var batches = 0;
+        globalThis.__pulpBatchUpdates__ = function (fn, arg) {
+            batch_depth += 1; batches += 1;
+            try { return fn(arg); } finally { batch_depth -= 1; }
+        };
+        var raf_depth = -1, raf_arg = -1, timer_depth = -1;
+        window.requestAnimationFrame(function (now) {
+            raf_depth = batch_depth; raf_arg = typeof now;
+        });
+        setTimeout(function () { timer_depth = batch_depth; }, 0);
+    )");
+    host_idle_pump(bridge);
+
+    CHECK(engine.evaluate("raf_depth").getWithDefault<int>(-2) == 1);
+    // The frame timestamp still reaches the callback through the hook.
+    CHECK(engine.evaluate("raf_arg").toString() == "number");
+    CHECK(engine.evaluate("timer_depth").getWithDefault<int>(-2) == 1);
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 2);
+}
+
+TEST_CASE("WidgetBridge frame and timer callbacks run unbatched without a hook",
+          "[view][bridge][editor-open]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var raf_ran = 0, timer_ran = 0;
+        window.requestAnimationFrame(function () { raf_ran += 1; });
+        setTimeout(function () { timer_ran += 1; }, 0);
+    )");
+    host_idle_pump(bridge);
+
+    CHECK(engine.evaluate("raf_ran").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("timer_ran").getWithDefault<int>(-1) == 1);
+}
+
 TEST_CASE("WidgetBridge poll_async_results alone does NOT fire setTimeout (regression guard)",
           "[view][bridge][issue-1412]") {
     // This test is the inverse of the fix: it asserts the historical

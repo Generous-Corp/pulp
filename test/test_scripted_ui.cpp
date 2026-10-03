@@ -732,6 +732,69 @@ TEST_CASE("ScriptedUiSession explicit reload() rebuilds without a watcher, prese
     fs::remove_all(temp_dir);
 }
 
+TEST_CASE("ScriptedUiSession evaluates a first load once, without a probe realm",
+          "[view][scripted-ui][editor-open]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-first-load");
+    const auto script_path = temp_dir / "main.js";
+    write_text(script_path, "createLabel('status', 'v1', '');\n");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(session.bridge()->widget("status") != nullptr);
+    // An editor open has no live UI to protect, so the document is evaluated
+    // on the live realm only.
+    CHECK(session.probe_realm_evaluations() == 0);
+
+    // Control: a reload of the SAME session must probe, or the counter above
+    // is an instrument that never moves.
+    write_text(script_path, "createLabel('status', 'v2', '');\n");
+    REQUIRE(session.reload(&error));
+    CHECK(session.probe_realm_evaluations() == 1);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession first load that throws leaves the root clean and retryable",
+          "[view][scripted-ui][editor-open]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-first-load-fail");
+    const auto script_path = temp_dir / "main.js";
+    // Mounts a widget and THEN throws: without a probe realm the partial
+    // mount lands on the live root, so the failure path must clear it.
+    write_text(script_path,
+               "createLabel('partial', 'half', '');\n"
+               "throw new Error('broken document');\n");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    const auto children_before = root.child_count();
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE_FALSE(session.load(&error));
+    CHECK_FALSE(error.empty());
+    CHECK(root.child_count() == children_before);
+    CHECK(session.bridge() == nullptr);
+
+    write_text(script_path, "createLabel('status', 'fixed', '');\n");
+    error.clear();
+    REQUIRE(session.load(&error));
+    REQUIRE(session.bridge()->widget("status") != nullptr);
+    CHECK(session.bridge()->widget("partial") == nullptr);
+    CHECK(session.probe_realm_evaluations() == 0);
+
+    fs::remove_all(temp_dir);
+}
+
 TEST_CASE("ScriptedUiSession records JS-axis reload metrics (item 1.2)",
           "[view][scripted-ui][metrics]") {
     const auto temp_dir = make_temp_dir("pulp-scripted-metrics");

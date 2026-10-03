@@ -1,5 +1,6 @@
 // widget_bridge/runtime_import_api.cpp - runtime-import registrations for WidgetBridge.
 
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/design_import.hpp>
 #include "api_registry.hpp"
@@ -105,6 +106,7 @@ void WidgetBridge::install_runtime_import_handlers() {
 
                 std::optional<ClaudeBundle> bundle;
                 if (source_lc == "materialized-browser") {
+                    PULP_TRACE_SCOPE_NAMED("js", "runtime_import_parse");
                     bundle = parse_materialized_browser_document(html);
                     if (!bundle) {
                         set_err("__pulpRuntimeImport__: invalid materialized browser document");

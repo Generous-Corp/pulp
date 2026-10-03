@@ -73,6 +73,12 @@ class VendoredRuntimeTest(unittest.TestCase):
         ids = [f["id"] for f in cvr.missing_fixes(text, MANIFEST)]
         self.assertEqual(ids, ["unsigned-fix"])
 
+    def test_a_revision_mentioned_mid_bundle_is_not_a_banner(self):
+        text = ("(() => { function markMaterializedTreeDirty() {}\n"
+                "  // a note citing @pulp/react runtime revision 2 \n})();\n")
+        ids = [f["id"] for f in cvr.missing_fixes(text, MANIFEST)]
+        self.assertEqual(ids, ["scoped-reapply", "unsigned-fix"])
+
     def test_stale_warns_by_default_and_fails_under_strict(self):
         path = self.bundle("runtime.js", OLD)
         rc, out = run([str(path), "--fingerprint", str(self.fp)])
