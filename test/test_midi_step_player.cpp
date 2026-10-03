@@ -819,7 +819,8 @@ TEST_CASE("StepPlayer admits pushed early groove offsets", "[midi][step-player][
         return player;
     };
     const std::array whole{std::int32_t{24'000}};
-    const std::array chopped{std::int32_t{137}, std::int32_t{999}, std::int32_t{4'096}, std::int32_t{1}};
+    const std::array chopped{std::int32_t{137}, std::int32_t{999}, std::int32_t{4'096},
+                             std::int32_t{1}};
     auto reference_player = build();
     auto partitioned_player = build();
     const auto reference = attacks_of(render(reference_player, map, 24'000, whole));
@@ -827,7 +828,8 @@ TEST_CASE("StepPlayer admits pushed early groove offsets", "[midi][step-player][
     REQUIRE(reference.size() == partitioned.size());
     REQUIRE(reference.size() == 4);
     for (std::size_t index = 0; index < reference.size(); ++index) {
-        const auto expected = static_cast<std::int64_t>(index) * kStepSamples - (index % 2 == 1 ? kPushSamples : 0);
+        const auto expected =
+            static_cast<std::int64_t>(index) * kStepSamples - (index % 2 == 1 ? kPushSamples : 0);
         CHECK(reference[index].sample == expected);
         CHECK(reference[index].identity() == partitioned[index].identity());
     }

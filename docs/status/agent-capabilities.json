@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 64,
+  "manifest_revision": 67,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -1049,7 +1049,7 @@
     {
       "key": "midi.linear-step-player",
       "domain": "midi",
-      "summary": "Bounded sample-accurate linear multi-lane step player with per-step gate, pitch offset, velocity, probability, ratchet, tie/slide, and per-lane direction modes.",
+      "summary": "Bounded sample-accurate linear multi-lane step player with per-step gate, pitch offset, velocity, probability, ratchet, tie/slide, signed early or late micro-timing offsets, and per-lane direction modes.",
       "rt_class": "audio",
       "lifecycle": {
         "construction": "control",
