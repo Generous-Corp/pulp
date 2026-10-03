@@ -153,15 +153,17 @@
    "undeclared_sources": []
   },
   "pulp-test-cli-import-design": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "test/fixtures/imports/claude/2024.10",
+    "test/fixtures/imports/designmd/alpha",
+    "test/fixtures/imports/figma-plugin"
+   ],
    "kind": "compiled",
    "sources": [
     "test/test_cli_import_design.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_cli_import_design.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-cli-import-detect": {
    "data": "declared",
@@ -915,8 +917,11 @@
    "undeclared_sources": []
   },
   "pulp-test-import-design-tool": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "test/fixtures/imports/fig/synthetic.fig",
+    "tools/import-design"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-import-design"
@@ -930,9 +935,7 @@
     "tools/import-design/node_runtime.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_import_design_tool.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-import-object-coverage": {
    "data": "declared",
