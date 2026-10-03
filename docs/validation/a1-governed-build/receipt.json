@@ -1,0 +1,26 @@
+{
+  "schema": "pulp.a1-governed-build-receipt/v1",
+  "commit": "eb42aed3afff3698255d57737c669fef5b790a34",
+  "branch": "codex/a1-governed-build-20261003",
+  "base": "064b045cbba6aeab798f45b5e4f56abf176aef94",
+  "governed_build": {
+    "command": "pulp build --all",
+    "result": "passed",
+    "targets": 2627
+  },
+  "focused_targets": [
+    "pulp-scan-worker",
+    "pulp-control-broker",
+    "pulp-au-instrument-probe",
+    "pulp-au-effect-ab",
+    "pulp-runtime-pins",
+    "pulp-import-design"
+  ],
+  "staging_test": {
+    "command": "ctest --test-dir build -R ^cmake-installed-sdk-runtime-staging$ --output-on-failure",
+    "result": "passed",
+    "tests_passed": 1,
+    "elapsed_seconds": 79.42
+  },
+  "roadmap_changed": false
+}
