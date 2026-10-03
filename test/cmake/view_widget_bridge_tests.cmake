@@ -820,6 +820,13 @@ if(TARGET pulp-render)
     list(APPEND _pulp_widget_bridge_test_libs pulp::render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
+# The late GPU/lifetime and stderr-diagnostic cases use the same private support
+# but compile as a second translation unit, keeping the original bridge suite
+# behavior and Catch2 names while limiting per-file rebuild cost.
+pulp_add_test_suite(pulp-test-widget-bridge-gpu-tail
+    GROUP pulp-test-group-view-widgets
+    SOURCES test_widget_bridge_gpu_tail.cpp
+    LIBRARIES ${_pulp_widget_bridge_test_libs})
 pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
 pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs})

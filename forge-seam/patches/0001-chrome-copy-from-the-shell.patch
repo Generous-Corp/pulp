@@ -24,7 +24,9 @@ index 63b40c2..7e107e3 100644
          catch_discover_tests(forge-test-chrome)
  
 +        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_chrome_no_leak.cpp")
-+            add_executable(forge-test-chrome-no-leak test/test_chrome_no_leak.cpp)
++            add_executable(forge-test-chrome-no-leak
+                test/test_chrome_no_leak.cpp
+                test/test_chrome_no_leak_baselines.cpp)
 +            target_include_directories(forge-test-chrome-no-leak PRIVATE
 +                ${CMAKE_CURRENT_SOURCE_DIR}/test)
 +            # The SDK this binary renders with, so a baseline mismatch can say
