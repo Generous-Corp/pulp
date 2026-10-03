@@ -6,6 +6,7 @@
   "claim_id": "b1c1b591-0bb6-41e0-80d7-df1a789e8128",
   "owned_paths": [
     "test/cmake/timeline_tests.cmake",
+    ".agents/skills/timeline/SKILL.md",
     "test/test_mcp_server.cpp",
     "test/test_mcp_timeline_tools.cpp",
     "docs/status/sequencer-exposure/rows/test-runtime-spawn-edges.json"
@@ -16,6 +17,12 @@
       "needles": [
         "pulp_test_spawns(pulp-test-timeline-journal NONE)",
         "pulp_test_spawns(pulp-test-timeline-graph-binding NONE)"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "## A timeline test that loads a plugin or forks declares it in its manifest"
       ]
     },
     {
