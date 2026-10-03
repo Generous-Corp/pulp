@@ -100,6 +100,9 @@ class LaneReuseRecordTests(unittest.TestCase):
         for flag in ("--link-members", "--object-deps", "--codemodel", "--inventory"):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index("--out-dir") + 1], str(self.out))
+        # The run's start bounds which reports belong to it.
+        not_before = int(argv[argv.index("--not-before-epoch") + 1])
+        self.assertLessEqual(not_before, int(junit.stat().st_mtime))
         attempts = self.out / "suites" / "full" / "LastTest.log"
         self.assertEqual(argv[argv.index("--suite") + 1], f"full={junit},attempts={attempts},repeat")
         self.assertEqual(attempts.read_text(), "attempts")
@@ -117,18 +120,19 @@ class LaneReuseRecordTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env):
             rc = lrr.record_legs(self.build, self.root,
                                  [("pr-affected", private / "selected-junit.xml", None),
-                                  ("full", private / "full-junit.xml", None)], "success")
+                                  ("full", private / "full-junit.xml", None)], "success", 1_800_000_000)
         self.assertEqual(rc, 0)
         copied = self.out / "suites" / "pr-affected" / "ctest.junit.xml"
         self.assertEqual(copied.read_text(), "<testsuite name='selected'/>")
         argv = self.calls()[0]["recorder"]
         suites = [argv[i + 1] for i, a in enumerate(argv) if a == "--suite"]
+        self.assertEqual(argv[argv.index("--not-before-epoch") + 1], "1800000000")
         self.assertEqual(suites, [f"pr-affected={copied},repeat"])
 
     def test_without_the_directory_a_bounded_plan_records_nothing(self) -> None:
         env = {k: v for k, v in os.environ.items() if k != lrr.RECORD_DIR_ENV}
         with mock.patch.dict(os.environ, env, clear=True):
-            self.assertEqual(lrr.record_legs(self.build, self.root, [], "success"), 0)
+            self.assertEqual(lrr.record_legs(self.build, self.root, [], "success", 0), 0)
         self.assertEqual(self.calls(), [])
 
 

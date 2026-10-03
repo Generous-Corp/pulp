@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Tuple
 
@@ -60,11 +61,13 @@ def keep_last_test_log(build_dir: Path, out: Path, name: str) -> Path | None:
 
 
 def recorder_argv(out: Path, build_dir: Path, source_root: Path, suites: Iterable[Suite],
-                  build_outcome: str) -> list[str]:
+                  build_outcome: str, not_before: int) -> list[str]:
+    # `not_before` is when the run's first ctest started: a report written
+    # before it belongs to an earlier run, as build.yml's job start says.
     argv = [sys.executable, str(RECORDER), "write",
             "--run-kind", "lane", "--run-id", out.name,
             "--out-dir", str(out), "--build-dir", str(build_dir), "--source-root", str(source_root),
-            "--build-outcome", build_outcome,
+            "--build-outcome", build_outcome, "--not-before-epoch", str(not_before),
             "--link-members", "--object-deps", "--codemodel", "--inventory"]
     for name, junit, attempts, repeat in suites:
         spec = f"{name}={junit}"
@@ -76,12 +79,13 @@ def recorder_argv(out: Path, build_dir: Path, source_root: Path, suites: Iterabl
     return argv
 
 
-def record(build_dir: Path, source_root: Path, suites: Sequence[Suite], build_outcome: str = "success") -> int:
+def record(build_dir: Path, source_root: Path, suites: Sequence[Suite], not_before: int,
+           build_outcome: str = "success") -> int:
     """Write the record when Shipyard asked for one; 0 when it did not."""
     out = record_dir()
     if out is None:
         return 0
-    rc = subprocess.run(recorder_argv(out, build_dir, source_root, suites, build_outcome)).returncode
+    rc = subprocess.run(recorder_argv(out, build_dir, source_root, suites, build_outcome, not_before)).returncode
     if rc != 0:
         print(f"lane-reuse-record: WARNING: reuse_record.py exited {rc}; this run leaves no record, "
               "so the next plan keyed against it runs in full", file=sys.stderr)
@@ -89,7 +93,7 @@ def record(build_dir: Path, source_root: Path, suites: Sequence[Suite], build_ou
 
 
 def record_legs(build_dir: Path, source_root: Path,
-                legs: Sequence[Tuple[str, Path, Optional[Path]]], build_outcome: str) -> int:
+                legs: Sequence[Tuple[str, Path, Optional[Path]]], build_outcome: str, not_before: int) -> int:
     """Record a bounded plan's legs (name, JUnit, LastTest.log copy). The
     runner keeps its JUnit reports in a private directory it deletes, so each
     is copied into the record first; a leg that wrote none is left out."""
@@ -102,7 +106,7 @@ def record_legs(build_dir: Path, source_root: Path,
             dest = suite_dir(out, name) / "ctest.junit.xml"
             shutil.copyfile(junit, dest)
             suites.append((name, dest, attempts, True))
-    return record(build_dir, source_root, suites, build_outcome)
+    return record(build_dir, source_root, suites, not_before, build_outcome)
 
 
 def run_test_stage(build_dir: Path, ctest: list[str]) -> int:
@@ -110,9 +114,10 @@ def run_test_stage(build_dir: Path, ctest: list[str]) -> int:
     if out is None:
         return subprocess.run(ctest).returncode
     junit = suite_dir(out, "full") / "ctest.junit.xml"
+    started = int(time.time())
     rc = subprocess.run(ctest + ["--output-junit", str(junit)]).returncode
     attempts = keep_last_test_log(build_dir, out, "full")
-    record(build_dir, Path.cwd(), [("full", junit, attempts, "--repeat" in ctest)])
+    record(build_dir, Path.cwd(), [("full", junit, attempts, "--repeat" in ctest)], started)
     return rc
 
 

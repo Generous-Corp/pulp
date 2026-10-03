@@ -1077,12 +1077,13 @@ def run_full_fallback(
     if full_build_result in (None, 0):
         reuse_out = lane_reuse_record.record_dir()
         junit = lane_reuse_record.suite_dir(reuse_out, "full") / "ctest.junit.xml" if reuse_out else None
+        started_epoch = int(time.time())
         full_started = time.monotonic()
         full_result = subprocess.run(execution_argv(build_dir, junit=junit), shell=False).returncode
         full_seconds = time.monotonic() - full_started
         if reuse_out is not None and junit is not None:
             attempts = lane_reuse_record.keep_last_test_log(build_dir, reuse_out, "full")
-            lane_reuse_record.record(build_dir, REPO_ROOT, [("full", junit, attempts, True)])
+            lane_reuse_record.record(build_dir, REPO_ROOT, [("full", junit, attempts, True)], started_epoch)
     write_fallback_result_receipt(
         args,
         error,
@@ -1215,6 +1216,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             verification_seconds += time.monotonic() - deferred_verification_started
         selected_seconds = 0.0
         reuse_out = lane_reuse_record.record_dir()
+        legs_started = int(time.time())
         selected_attempts: Path | None = None
         full_attempts: Path | None = None
         if selected_build_result in (None, 0):
@@ -1299,6 +1301,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             [("pr-affected", Path(directory) / "selected-junit.xml", selected_attempts),
              ("full", Path(directory) / "full-junit.xml", full_attempts)],
             "success" if selected_build_result in (None, 0) and full_build_result in (None, 0) else "failure",
+            legs_started,
         )
         result_dir = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
         if result_dir:

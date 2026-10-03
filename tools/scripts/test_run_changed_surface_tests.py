@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 from pathlib import Path
@@ -495,16 +496,20 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             commands: list[list[str]] = []
             record_dir = root / "record"
             record_dir.mkdir()
-            recorded: list[tuple[list[str], bool, str]] = []
+            recorded: list[tuple[list[str], bool, str, bool]] = []
 
             def run_command(argv: list[str], **_: object) -> subprocess.CompletedProcess:
                 commands.append(argv)
                 return subprocess.CompletedProcess(argv, 0)
 
-            def record_legs(_build, _source, legs, outcome) -> int:
+            started = int(time.time())
+
+            def record_legs(_build, _source, legs, outcome, not_before) -> int:
                 # The legs' reports live in the runner's private directory,
-                # which must still exist when they are recorded.
-                recorded.append(([name for name, _, _ in legs], legs[0][1].parent.is_dir(), outcome))
+                # which must still exist when they are recorded; the start is
+                # taken before the first leg.
+                recorded.append(([name for name, _, _ in legs], legs[0][1].parent.is_dir(), outcome,
+                                 started <= not_before <= int(time.time())))
                 return 0
 
             with (
@@ -565,7 +570,7 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 self.assertEqual(runner.run_locked(args, build), 0)
             # Before any build the comparison tolerates unbuilt programs; after
             # the full build it requires every registration to have one.
-            self.assertEqual(recorded, [(["pr-affected", "full"], True, "success")])
+            self.assertEqual(recorded, [(["pr-affected", "full"], True, "success", True)])
             prebuild, post_full = validate_calls.call_args_list
             self.assertIs(prebuild.kwargs["require_built"], False)
             self.assertNotIn("require_built", post_full.kwargs)
@@ -884,6 +889,7 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             self.assertEqual(commands[1][-2:], ["--output-junit", str(junit)])
             record.assert_called_once()
             self.assertEqual([suite[0] for suite in record.call_args.args[2]], ["full"])
+            self.assertIsInstance(record.call_args.args[3], int)  # the run's start, for --not-before-epoch
 
     def test_authoritative_mode_refusal_never_uses_shadow_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
