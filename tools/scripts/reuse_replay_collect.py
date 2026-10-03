@@ -958,6 +958,7 @@ ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
 
 
 sys.path.insert(0, str(HERE.parent / "ci"))
+from spawn_closure import SpawnIndex  # noqa: E402  tools/ci: the shared spawn-edge source
 
 
 def _is_cmake(path: str) -> bool:
@@ -973,9 +974,11 @@ def environment_bound(mapped: dict) -> bool:
     return bool(mapped.get("resource_locks")) or bool(ENVIRONMENT_LABELS & set(mapped.get("labels") or []))
 
 
-def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict]) -> tuple[set[str], set[str]]:
-    """(executables re-keyed by a codemodel change, executables the group's
-    codemodel describes), both relative to the build dir.
+def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict],
+                      types: tuple[str, ...] = ("EXECUTABLE",)) -> tuple[set[str], set[str]]:
+    """(artifacts re-keyed by a codemodel change, artifacts the group's
+    codemodel describes), both relative to the build dir, for targets of
+    `types` (executables by default).
 
     A target is re-keyed when its digest differs from the head job's or it
     is new, and so is every target that depends on one, transitively: the
@@ -994,30 +997,36 @@ def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict]) -> tuple[se
 
     def exes(names: Iterable[str]) -> set[str]:
         return {a.removeprefix("<build>/") for n in names for a in group[n].get("artifacts") or []
-                if group[n].get("type") == "EXECUTABLE"}
+                if group[n].get("type") in types}
     return exes(changed), exes(group)
 
 
-def executable_dependencies(targets: dict[str, dict]) -> dict[str, set[str]]:
-    """Executable -> the other executables its target depends on, transitively,
-    from the codemodel's dependency list (which carries add_dependencies edges:
-    a test that spawns a built tool usually names it only there)."""
-    by_name = {n: {a.removeprefix("<build>/") for a in t.get("artifacts") or []}
-               for n, t in targets.items() if t.get("type") == "EXECUTABLE"}
-    out: dict[str, set[str]] = {}
-    for name, artifacts in by_name.items():
-        seen: set[str] = set()
-        stack = list(targets[name].get("dependencies") or [])
-        while stack:
-            dep = stack.pop()
-            if dep in seen or dep not in targets:
-                continue
-            seen.add(dep)
-            stack.extend(targets[dep].get("dependencies") or [])
-        reached = {a for d in seen for a in by_name.get(d, ())}
-        for artifact in artifacts:
-            out[artifact] = reached
-    return out
+def spawn_scan_of(doc: dict | None) -> dict | None:
+    """The spawn scan a checked-in script-input list carries: per-executable
+    entries plus the set of executables the scan covered, or None when that
+    list did not scan for spawns (an older tree, or an unreadable list)."""
+    if not doc or "spawns" not in (doc.get("executables_scanned_for") or []) \
+            or not isinstance(doc.get("executables_scanned"), list):
+        return None
+    return {"entries": dict(doc.get("executables") or {}), "scanned": frozenset(doc["executables_scanned"])}
+
+
+def spawn_status(executable: str, scan: dict | None) -> str:
+    """`clean`, `undeclared` or `unknown` for one test executable (relative
+    to the build dir) under a spawn scan.
+
+    An entry whose `spawns` is absent, `declared` (its edges are in the
+    codemodel) or `none` (reviewed: it runs nothing this repo builds) is
+    clean; any other value is undeclared. A missing entry is clean only when
+    the scan covered that executable; otherwise nothing is known about it."""
+    if scan is None:
+        return "unknown"
+    name = os.path.basename(executable)
+    name = name[:-4] if name.endswith(".exe") else name
+    entry = scan["entries"].get(name)
+    if entry is None:
+        return "clean" if name in scan["scanned"] else "unknown"
+    return "clean" if entry.get("spawns") in (None, "declared", "none") else "undeclared"
 
 
 def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dict[str, dict],
@@ -1026,16 +1035,23 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                          codemodel: tuple[set[str], set[str]] | None = None,
                          commit_bound: frozenset[str] = frozenset(),
                          generated_keyed: bool = False,
-                         spawned: dict[str, set[str]] | None = None,
-                         spawnable: frozenset[str] = frozenset()) -> dict[str, dict]:
+                         spawns=None,
+                         spawnable: frozenset[str] = frozenset(),
+                         spawn_scan: dict | None = None,
+                         modules: frozenset[str] = frozenset(),
+                         rebuilt_modules: frozenset[str] = frozenset()) -> dict[str, dict]:
     """Per variant: the tests that must run and the share of executables rebuilt.
 
-    A test can run other built executables. `spawned` maps an executable to
-    the executables its target depends on (add_dependencies included); a
-    test whose executable depends on a rebuilt one runs. `spawnable` names
-    the executables no test runs as its own (tools, helpers, fixtures): a
-    test may spawn one without any declared edge, so when one is rebuilt
-    every compiled test runs in the strict variants.
+    A test can run or load other built programs. `spawns` (a
+    tools/ci/spawn_closure.py SpawnIndex) gives each executable's spawn
+    closure; a test whose closure holds a rebuilt executable or module runs.
+    `spawnable` names the executables no test runs as its own (tools,
+    helpers, fixtures) and `modules` the loadable modules. A test can reach
+    one without any edge, so in the strict variants, when one is rebuilt, a
+    test runs unless `spawn_scan` (see spawn_scan_of) vouches for its
+    executable, and one the scan found spawning with no reviewed edge always
+    runs. `rebuilt_modules` are the modules the drift rebuilds; the CMake
+    rules widen it like the executables.
 
     `rebuilt` is the set of executables (relative to the build dir) the drift
     reaches through the graph; `all_executables` the ones the graph builds.
@@ -1073,10 +1089,17 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
             rebuilt_all = all_executables if cmake else rebuilt | commit_bound
         else:
             rebuilt_all = set(rebuilt)
-        spawn_all = strict and bool(spawnable & rebuilt_all)
+        modules_rebuilt = set(modules) if (pins or stamped or (cmake and not exact_cmake)) else set(rebuilt_modules)
+        runtime_rebuilt = rebuilt_all | modules_rebuilt
+        # A rebuilt program some test may reach without an edge: tests the
+        # spawn scan cannot vouch for run.
+        spawn_all = strict and bool((spawnable | modules) & runtime_rebuilt)
+        spawn_all_legacy = strict and bool(spawnable & rebuilt_all)
         fallback_only = 0  # compiled tests that run only because of the spawnable fallback
-        spawn_hit = (lambda exes: any((spawned or {}).get(e, set()) & rebuilt_all for e in exes)) if strict \
-            else (lambda exes: False)
+        fallback_only_legacy = 0  # the same under the earlier rule: no scan, every compiled test
+        spawn_undeclared = 0  # compiled tests that run because the scan found an unreviewed spawn
+        spawn_hit = (lambda exes: spawns is not None and any(spawns.closure(e) & runtime_rebuilt for e in exes)) \
+            if strict else (lambda exes: False)
         # The re-key rule a CMake change triggers: everything, or only the
         # executables whose codemodel entry moved (and the undescribed ones).
         cmake_hit = (lambda exes: pins or stamped or bool(set(exes) & rekeyed)
@@ -1091,10 +1114,17 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
             elif exes:
                 keyed = (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or data))
                          or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or []) or spawn_hit(exes))
-                if keyed or spawn_all:
+                statuses = {spawn_status(e, spawn_scan) for e in exes} if strict else set()
+                undeclared = "undeclared" in statuses
+                fallback = spawn_all and "unknown" in statuses
+                if keyed or undeclared or fallback:
                     run.append(name)
-                if spawn_all and not keyed:
+                if undeclared and not keyed:
+                    spawn_undeclared += 1
+                if fallback and not (keyed or undeclared):
                     fallback_only += 1
+                if spawn_all_legacy and not keyed:
+                    fallback_only_legacy += 1
             elif group_entries is not None and name in group_entries and head_entries is not None:
                 entry = group_entries[name]
                 if (head_entries.get(name) != entry or _declared_hit(entry.get("inputs") or [], drift)
@@ -1107,10 +1137,13 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
         rebuilt_set = rebuilt_all & counted
         out[variant] = {"run": sorted(run), "executables_total": total, "executables_rebuilt": len(rebuilt_set),
                         "cmake_changed": cmake, "data_changed": data[:20],
-                        "spawnable_rebuilt": sorted(spawnable & rebuilt_all)[:20],
-                        # The interim spawnable fallback's cost: when it is the
-                        # only reason tests run, the source-scan guard is due.
-                        "spawnable_fallback": spawn_all, "fallback_only_tests": fallback_only}
+                        "spawnable_rebuilt": sorted((spawnable | modules) & runtime_rebuilt)[:20],
+                        # The spawnable fallback's cost: tests that run only
+                        # because a rebuilt program might reach them unseen,
+                        # now and under the rule before the spawn scan.
+                        "spawnable_fallback": spawn_all, "fallback_only_tests": fallback_only,
+                        "fallback_only_tests_legacy": fallback_only_legacy,
+                        "spawn_scanned": spawn_scan is not None, "spawn_undeclared_tests": spawn_undeclared}
         if codemodel is not None:
             # The same counts over the executables the recorded build
             # describes, where the variants can be compared exactly, and for
@@ -1250,18 +1283,23 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
     collector._git_lock, collector._commit_cache = threading.Lock(), {}
     collector.gh = gh
     entries_cache: dict[str, dict | None] = {}
-    with_codemodel = with_recorded = with_v2 = 0
+    with_codemodel = with_recorded = with_v2 = with_scan = 0
     index = GraphIndex(graph, graph_source_root, graph_build_dir) if gh is not None else None
 
     unread: list[str] = []
 
-    def entries(sha: str) -> dict | None:
-        if sha not in entries_cache:
-            doc = collector.script_inputs_at(sha)
-            entries_cache[sha] = None if doc is None else doc.get("tests", {})
-            if entries_cache[sha] is None:
+    docs_cache: dict[str, dict | None] = {}
+
+    def doc_at(sha: str) -> dict | None:
+        if sha not in docs_cache:
+            docs_cache[sha] = collector.script_inputs_at(sha)
+            if docs_cache[sha] is None:
                 unread.append(sha)
-        return entries_cache[sha]
+        return docs_cache[sha]
+
+    def entries(sha: str) -> dict | None:
+        doc = doc_at(sha)
+        return None if doc is None else doc.get("tests", {})
 
     build_real = os.path.realpath(graph_build_dir)
     # Executables the graph builds; a test mapped to anything else is unknown.
@@ -1324,14 +1362,26 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             v2 = (not legacy_rules and content_keyed(head_record) and content_keyed(group_record)
                   and group_record.get("declared_commit_bound") is not None)
             bound = frozenset(group_record["declared_commit_bound"]) if v2 else commit_bound_set
-            spawned = executable_dependencies(group_record["targets"])
+            spawns = SpawnIndex(group_record["targets"])
+            # A module is rebuilt when its codemodel entry moved, or when the
+            # drift reaches its recorded link members; a record from before
+            # modules were recorded leaves the Ninja graph's build of it, and
+            # (unknown to that graph) any code drift.
+            mods_rekeyed, modules = codemodel_rekeyed(head_cm, group_record["targets"], ("MODULE_LIBRARY",))
+            code_drift = any(f.endswith(CODE_SUFFIXES) for f in drift)
+            linked_rebuilt = recorded_rebuilt(link, drift, index)
+            rebuilt_modules = {m for m in modules if m in mods_rekeyed or (
+                m in linked_rebuilt if m in link else m in rebuilt if m in built else code_drift)}
             recorded = classify_source_keys(
                 drift, test_ids, recorded_map, head_entries, group_entries,
-                recorded_rebuilt(link, drift, index), set(link), codemodel, bound, generated_keyed=v2,
-                spawned=spawned, spawnable=frozenset(set(link) - set(group_record["executables"].values())))
+                linked_rebuilt, set(link), codemodel, bound, generated_keyed=v2,
+                spawns=spawns, spawnable=frozenset(set(link) - set(group_record["executables"].values())),
+                spawn_scan=spawn_scan_of(doc_at(group["checkout_sha"])),
+                modules=frozenset(modules), rebuilt_modules=frozenset(rebuilt_modules))
             test_exes = set(group_record["executables"].values())
-            spawned_by_tests = {d for e in test_exes for d in spawned.get(e, set())}
+            spawned_by_tests = {d for e in test_exes for d in spawns.closure(e)}
             with_v2 += int(v2)
+            with_scan += int(recorded["strict-data"]["spawn_scanned"])
             # The executable-level control: every executable whose recorded
             # bytes differ between the head and group jobs must be rebuilt.
             head_bins, group_bins = head_record["binaries"], group_record["binaries"]
@@ -1361,5 +1411,5 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
     # name the commits so a low number is traceable to its cause.
     return {"pairs_annotated": done, "pairs_with_codemodel": with_codemodel, "pairs_with_recorded_graph": with_recorded,
             "commit_bound_executables": sorted(commit_bound), "commit_bound_learned_from_pairs": learned_from,
-            "pairs_content_keyed": with_v2,
+            "pairs_content_keyed": with_v2, "pairs_spawn_scanned": with_scan,
             "script_lists_unread": unread[:20], "script_lists_unread_count": len(unread)}

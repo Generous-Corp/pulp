@@ -36,7 +36,8 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import reuse_policy_replay as rpr  # noqa: E402
-import reuse_replay_collect as rrc  # noqa: E402
+import reuse_replay_collect as rrc
+from spawn_closure import SpawnIndex  # noqa: E402
 
 SCENARIOS = HERE / "fixtures" / "reuse_policy_replay"
 TOOL = HERE / "reuse_policy_replay.py"
@@ -526,10 +527,9 @@ class CodemodelTests(unittest.TestCase):
     def test_a_rebuilt_spawned_executable_reruns_the_test_that_depends_on_it(self):
         # tb's executable depends (add_dependencies) on the tool test/tool;
         # only the tool's source drifted.
-        spawned = {"test/b": {"test/tool"}}
         out = rrc.classify_source_keys(["tools/x/tool.cpp"], ["ta", "tb"], self.MAP, {}, {}, {"test/tool"},
                                        self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
-                                       spawned=spawned)
+                                       spawns=self.spawns(b=["tool"]))
         for variant in ("strict-data", "cmake-codemodel"):
             self.assertEqual(out[variant]["run"], ["tb"], variant)
             self.assertEqual(out[variant]["executables_rebuilt"], 0, variant)  # the tests' own binaries stay
@@ -559,11 +559,73 @@ class CodemodelTests(unittest.TestCase):
                                          spawnable=frozenset({"test/tool"}))
         self.assertEqual(quiet["cmake-codemodel"]["run"], [])
 
-    def test_executable_dependencies_follow_targets_transitively(self):
-        targets = {"t": {"type": "EXECUTABLE", "artifacts": ["<build>/test/t"], "dependencies": ["lib"]},
-                   "lib": {"type": "STATIC_LIBRARY", "artifacts": ["<build>/libl.a"], "dependencies": ["tool"]},
-                   "tool": {"type": "EXECUTABLE", "artifacts": ["<build>/tools/tool"], "dependencies": []}}
-        self.assertEqual(rrc.executable_dependencies(targets), {"test/t": {"tools/tool"}, "tools/tool": set()})
+    @staticmethod
+    def spawns(**deps):
+        """A SpawnIndex over test executables a, b and tools test/tool and
+        module test/mod.so, with the given add_dependencies edges."""
+        targets = {n: {"type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": deps.get(n, [])}
+                   for n in ("a", "b", "tool")}
+        targets["mod"] = {"type": "MODULE_LIBRARY", "artifacts": ["<build>/test/mod.so"], "dependencies": []}
+        return SpawnIndex(targets)
+
+    def scanned(self, rebuilt, scan, modules=frozenset(), rebuilt_modules=frozenset(), drift=("tools/x/tool.cpp",)):
+        return rrc.classify_source_keys(list(drift), ["ta", "tb"], self.MAP, {}, {}, set(rebuilt),
+                                        self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                        spawns=self.spawns(), spawnable=frozenset({"test/tool"}), spawn_scan=scan,
+                                        modules=frozenset(modules), rebuilt_modules=frozenset(rebuilt_modules))
+
+    @staticmethod
+    def scan(scanned, **entries):
+        return rrc.spawn_scan_of({"executables_scanned_for": ["data", "spawns"], "executables_scanned": list(scanned),
+                                  "executables": dict(entries)})
+
+    def test_a_scanned_clean_executable_skips_the_spawnable_fallback(self):
+        out = self.scanned({"test/tool"}, self.scan(["a", "b", "tool"]))
+        for variant in ("strict-data", "cmake-codemodel"):
+            self.assertEqual(out[variant]["run"], [], variant)
+            self.assertEqual((out[variant]["fallback_only_tests"], out[variant]["fallback_only_tests_legacy"]), (0, 2))
+            self.assertTrue(out[variant]["spawn_scanned"])
+
+    def test_an_executable_the_scan_did_not_cover_keeps_the_fallback(self):
+        out = self.scanned({"test/tool"}, self.scan(["a", "tool"]))       # b added after the scan
+        self.assertEqual(out["cmake-codemodel"]["run"], ["tb"])
+        self.assertEqual(out["cmake-codemodel"]["fallback_only_tests"], 1)
+        quiet = self.scanned(set(), self.scan(["a", "tool"]), drift=("docs/a.md",))
+        self.assertEqual(quiet["cmake-codemodel"]["run"], [])             # nothing it could reach was rebuilt
+
+    def test_no_scan_or_an_older_list_keeps_the_fallback_for_every_test(self):
+        for scan in (None, rrc.spawn_scan_of({"executables": {}}),
+                     rrc.spawn_scan_of({"executables_scanned_for": ["data"], "executables_scanned": ["a", "b"]})):
+            out = self.scanned({"test/tool"}, scan)
+            self.assertEqual(out["cmake-codemodel"]["run"], ["ta", "tb"], scan)
+            self.assertFalse(out["cmake-codemodel"]["spawn_scanned"])
+
+    def test_spawn_states_declared_and_none_are_clean_anything_else_always_runs(self):
+        names = ["a", "b", "tool"]
+        clean = self.scanned({"test/tool"}, self.scan(names, a={"spawns": "declared"}, b={"spawns": "none"}))
+        self.assertEqual(clean["cmake-codemodel"]["run"], [])
+        for state in ("undeclared", "untracked", "maybe"):
+            out = self.scanned(set(), self.scan(names, b={"spawns": state}), drift=("docs/a.md",))
+            self.assertEqual(out["cmake-codemodel"]["run"], ["tb"], state)  # nothing rebuilt, still runs
+            self.assertEqual(out["cmake-codemodel"]["spawn_undeclared_tests"], 1, state)
+            self.assertEqual(out["per-entry"]["run"], [], state)            # not a strict variant
+
+    def test_a_rebuilt_module_triggers_the_fallback_and_reaches_its_loader(self):
+        scan = self.scan(["a", "tool"])
+        out = self.scanned(set(), scan, modules={"test/mod.so"}, rebuilt_modules={"test/mod.so"})
+        self.assertEqual(out["cmake-codemodel"]["run"], ["tb"])           # b unscanned: a module may reach it
+        self.assertEqual(out["cmake-codemodel"]["spawnable_rebuilt"], ["test/mod.so"])
+        idle = self.scanned(set(), scan, modules={"test/mod.so"})
+        self.assertEqual(idle["cmake-codemodel"]["run"], [])
+        loader = rrc.classify_source_keys(["docs/a.md"], ["ta", "tb"], self.MAP, {}, {}, set(),
+                                          self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                          spawns=self.spawns(a=["mod"]), spawn_scan=self.scan(["a", "b", "tool"]),
+                                          modules=frozenset({"test/mod.so"}),
+                                          rebuilt_modules=frozenset({"test/mod.so"}))
+        self.assertEqual(loader["cmake-codemodel"]["run"], ["ta"])          # its closure holds the module
+        widened = self.scanned(set(), self.scan(["a", "tool"]), modules={"test/mod.so"},
+                               drift=("CMakeLists.txt", "cmake/x.cmake"))
+        self.assertIn("test/mod.so", widened["strict-data"]["spawnable_rebuilt"])  # a CMake change rebuilds all
 
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
@@ -724,6 +786,36 @@ class RecordedGraphTests(unittest.TestCase):
         unreached(("test/t.cpp",), "spawned")
         self.assertEqual(next(rpr.read_jsonl(Path(self.tmp) / "ctl-spawned" / "pairs.jsonl"))["source_key"][
             "cmake-codemodel-recorded"]["unreached_kinds"], {"test/group-c": "spawnable"})
+
+    def test_a_recorded_module_is_rebuilt_only_by_drift_its_link_reaches(self):
+        import gzip
+        targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
+                   for n in ("group-a", "group-b")}
+        targets["plug"] = {"digest": "m", "type": "MODULE_LIBRARY", "artifacts": ["<build>/test/plug.so"],
+                           "dependencies": []}
+
+        def rebuilt_programs(drift, recorded, label):
+            corpus = Path(self.tmp) / f"mod-{label}"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
+            rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
+            link = dict(self.link)
+            if recorded:
+                link["test/plug.so"] = {"objects": [], "members": {"core/liba.a": ["b.cpp.o"]}}
+            cache = corpus / "cache" / "record-v4"
+            cache.mkdir(parents=True)
+            for rid, rec in (("p1", {"link": None, "executables": None, "binaries": None}),
+                             ("g1", {"link": link, "executables": {"ta": "test/group-a"}, "binaries": None})):
+                with gzip.open(cache / f"{rid}.json.gz", "wt") as fh:
+                    json.dump({"targets": targets, **rec}, fh)
+            rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
+                                     {}, None, mock.Mock())
+            return next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"][
+                "spawnable_rebuilt"]
+        self.assertIn("test/plug.so", rebuilt_programs(("core/b.cpp",), True, "member"))
+        self.assertNotIn("test/plug.so", rebuilt_programs(("test/t.cpp",), True, "elsewhere"))
+        # Control: the same drift with the module's link unrecorded fails closed.
+        self.assertIn("test/plug.so", rebuilt_programs(("test/t.cpp",), False, "unrecorded"))
 
     def test_commit_bound_executables_are_learned_from_same_tree_pairs(self):
         import gzip
@@ -992,7 +1084,12 @@ class GraftTests(unittest.TestCase):
             head_sha, parent_sha = subprocess.run(git + ["rev-parse", "HEAD", "HEAD~1"], check=True,
                                                   capture_output=True, text=True).stdout.split()
             (repo / ".git" / "shallow").write_text(head_sha + "\n")
-            grafted = subprocess.run(git + ["log", "-1", "--format=%P", head_sha], capture_output=True, text=True)
+            # The control is plain git, so an ambient GIT_SHALLOW_FILE (the
+            # collector's own override, often exported while replaying) must
+            # not reach it.
+            plain = {k: v for k, v in os.environ.items() if k != "GIT_SHALLOW_FILE"}
+            grafted = subprocess.run(git + ["log", "-1", "--format=%P", head_sha], capture_output=True, text=True,
+                                     env=plain)
             self.assertEqual(grafted.stdout.strip(), "", "control: the graft hides the parent from plain git")
             c = rrc.Collector.__new__(rrc.Collector)
             c.repo, c.cache = repo, Path(tmp) / "cache"
