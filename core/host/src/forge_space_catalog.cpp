@@ -1,7 +1,3 @@
-#include <pulp/host/forge_space_catalog.hpp>
-#include <pulp/host/detail/forge_space_catalog_descriptor.hpp>
-#include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -9,6 +5,10 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <pulp/host/detail/forge_space_catalog_descriptor.hpp>
+#include <pulp/host/forge_param_descriptor.hpp>
+#include <pulp/host/forge_space_catalog.hpp>
+#include <pulp/host/signal_graph.hpp>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -26,8 +26,6 @@ namespace pulp::host::space {
 // filter corner, or a delay, and all of it injects.
 namespace convolution {
 
-
-
 /// An impulse response, owned by the registered type.
 ///
 /// Held by `shared_ptr` because `CustomNodeType` is copied into the graph's
@@ -42,13 +40,15 @@ bool valid_impulse_response(const ImpulseResponse& ir) {
         return false;
     const std::size_t length = ir.channels[0].size();
     if (length > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
-        !Engine::valid_resample_geometry(static_cast<int>(length), ir.sample_rate,
-                                         48000.0, Engine::kResampTapsPerPhaseDefault))
+        !Engine::valid_resample_geometry(static_cast<int>(length), ir.sample_rate, 48000.0,
+                                         Engine::kResampTapsPerPhaseDefault))
         return false;
     for (const auto& channel : ir.channels) {
-        if (channel.size() != length) return false;
+        if (channel.size() != length)
+            return false;
         for (float sample : channel)
-            if (!std::isfinite(sample)) return false;
+            if (!std::isfinite(sample))
+                return false;
     }
     return true;
 }
@@ -77,10 +77,8 @@ struct Instance {
 /// IR-DEPENDENT BY CONSTRUCTION. `||h||_1` is a property of the impulse
 /// response, so a registry row for this type carries the formula and the IR
 /// reference; the number is only meaningful once an IR is named.
-float convolution_reverb_worst_case_gain(const ImpulseResponse& ir,
-                                                const IrPolicy& policy,
-                                                double sample_rate,
-                                                int max_block) {
+float convolution_reverb_worst_case_gain(const ImpulseResponse& ir, const IrPolicy& policy,
+                                         double sample_rate, int max_block) {
     Engine probe;
     probe.prepare(sample_rate, max_block, 2);
     probe.set_normalize_mode(policy.normalize);
@@ -90,16 +88,16 @@ float convolution_reverb_worst_case_gain(const ImpulseResponse& ir,
     probe.set_true_stereo(policy.true_stereo);
 
     std::vector<const float*> ptrs(ir.channels.size());
-    for (std::size_t c = 0; c < ir.channels.size(); ++c) ptrs[c] = ir.channels[c].data();
+    for (std::size_t c = 0; c < ir.channels.size(); ++c)
+        ptrs[c] = ir.channels[c].data();
     if (ir.channels.empty() ||
         !probe.load_impulse_response(ptrs.data(), static_cast<int>(ir.channels.size()),
-                                     static_cast<int>(ir.channels[0].size()),
-                                     ir.sample_rate))
+                                     static_cast<int>(ir.channels[0].size()), ir.sample_rate))
         return 0.0f;
 
     probe.set_ir_gain_db(Engine::kIrGainDbMax);
-    const double dry_max = 1.0;   // kDryPercent ceiling, as a linear gain
-    const double wet_max = 1.0;   // kWetPercent ceiling
+    const double dry_max = 1.0; // kDryPercent ceiling, as a linear gain
+    const double wet_max = 1.0; // kWetPercent ceiling
     const double width_max = Engine::kWidthPercentMax / 100.0;
     return static_cast<float>(dry_max + wet_max * width_max * probe.worst_case_gain());
 }
@@ -110,16 +108,16 @@ float convolution_reverb_worst_case_gain(const ImpulseResponse& ir,
 /// copied once into a shared buffer, and every instance re-ingests it in
 /// `prepare()` because the ingest resamples to the SESSION rate — which is not
 /// known until then.
-CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
-                                                   IrPolicy policy) {
+CustomNodeType make_convolution_reverb_node(ImpulseResponse ir, IrPolicy policy) {
     if (!valid_impulse_response(ir))
-        throw std::invalid_argument("convolution IR must have finite, representable rate/length geometry and 1, 2, or 4 equal-length channels");
+        throw std::invalid_argument("convolution IR must have finite, representable rate/length "
+                                    "geometry and 1, 2, or 4 equal-length channels");
     auto shared = std::make_shared<ImpulseResponse>(std::move(ir));
 
     CustomNodeType t;
     t.type_id = kTypeId;
     t.version = 1;
-    t.num_input_ports = 2;  // 0 = left, 1 = right (ONE logical stereo wire)
+    t.num_input_ports = 2; // 0 = left, 1 = right (ONE logical stereo wire)
     t.num_output_ports = 2;
     t.default_name = "Convolution Reverb";
     t.lowerable = true;
@@ -142,7 +140,8 @@ CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
             const bool loaded = s->engine.load_impulse_response(
                 ptrs.data(), static_cast<int>(shared->channels.size()),
                 static_cast<int>(shared->channels[0].size()), shared->sample_rate);
-            if (!loaded) throw std::runtime_error("validated convolution IR failed to load");
+            if (!loaded)
+                throw std::runtime_error("validated convolution IR failed to load");
         }
     };
     t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
@@ -153,10 +152,10 @@ CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
     t.baked_params.push_back({kPredelayMs, static_cast<float>(Engine::kPredelayMsMin),
                               static_cast<float>(Engine::kPredelayMsMax),
                               static_cast<float>(Engine::kPredelayMsDefault)});
-    t.baked_params.push_back({kWetPercent, 0.0f, 100.0f,
-                              static_cast<float>(Engine::kWetPercentDefault)});
-    t.baked_params.push_back({kDryPercent, 0.0f, 100.0f,
-                              static_cast<float>(Engine::kDryPercentDefault)});
+    t.baked_params.push_back(
+        {kWetPercent, 0.0f, 100.0f, static_cast<float>(Engine::kWetPercentDefault)});
+    t.baked_params.push_back(
+        {kDryPercent, 0.0f, 100.0f, static_cast<float>(Engine::kDryPercentDefault)});
     t.baked_params.push_back({kWidthPercent, static_cast<float>(Engine::kWidthPercentMin),
                               static_cast<float>(Engine::kWidthPercentMax),
                               static_cast<float>(Engine::kWidthPercentDefault)});
@@ -191,7 +190,6 @@ CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
 }
 
 #if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
-
 
 int gpu_internal_block_size(int max_block) noexcept {
     if (max_block <= 0)
@@ -232,9 +230,8 @@ CustomNodeDiagnosticsDescriptor gpu_convolution_diagnostics() {
 /// one/two-channel asset shapes admitted by Forge: two concrete authenticated
 /// mono lanes preserve dual-mono identity, while a four-cell true-stereo IR
 /// remains on the CPU realization until a channel-matrix GPU node exists.
-CustomNodeType
-make_gpu_convolution_reverb_node(ImpulseResponse ir, IrPolicy policy = {},
-                                 gpu_audio::GpuConvolverTraceConfig trace) {
+CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir, IrPolicy policy = {},
+                                                gpu_audio::GpuConvolverTraceConfig trace) {
     if (!valid_impulse_response(ir) || ir.channels.size() > 2u || policy.true_stereo)
         throw std::invalid_argument("GPU convolution requires a one- or two-channel dual-mono IR");
     auto shared = std::make_shared<ImpulseResponse>(std::move(ir));
@@ -346,18 +343,29 @@ ForgeNodeDescriptor descriptor_with_gpu() {
 #endif
 
 ForgeNodeDescriptor descriptor() {
-    return {"convolution_reverb", "Convolution Reverb", "Applies a supplied impulse response with stereo wet-path shaping.",
-            {}, {{"default", kTypeId}},
-            {{"ir_gain_db", kIrGainDb, "IR Gain", "dB", "Trims the convolved return.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"predelay_ms", kPredelayMs, "Predelay", "ms", "Delays the wet return.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"wet_percent", kWetPercent, "Wet", "%", "Sets the convolved signal level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"dry_percent", kDryPercent, "Dry", "%", "Sets the direct signal level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"width_percent", kWidthPercent, "Width", "%", "Shapes stereo width on the wet return.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"lowcut_hz", kLowcutHz, "Low Cut", "Hz", "High-passes the reverb send.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
-             {"highcut_hz", kHighcutHz, "High Cut", "Hz", "Low-passes the reverb send.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic}}};
+    return {
+        "convolution_reverb",
+        "Convolution Reverb",
+        "Applies a supplied impulse response with stereo wet-path shaping.",
+        {},
+        {{"default", kTypeId}},
+        {{"ir_gain_db", kIrGainDb, "IR Gain", "dB", "Trims the convolved return.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"predelay_ms", kPredelayMs, "Predelay", "ms", "Delays the wet return.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"wet_percent", kWetPercent, "Wet", "%", "Sets the convolved signal level.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"dry_percent", kDryPercent, "Dry", "%", "Sets the direct signal level.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"width_percent", kWidthPercent, "Width", "%", "Shapes stereo width on the wet return.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"lowcut_hz", kLowcutHz, "Low Cut", "Hz", "High-passes the reverb send.",
+          ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+         {"highcut_hz", kHighcutHz, "High Cut", "Hz", "Low-passes the reverb send.",
+          ForgeParamKind::continuous, ForgeParamCurve::logarithmic}}};
 }
 
-}  // namespace convolution
+} // namespace convolution
 
 // ── The nonlin / gated ambience (designed spaces) ──────────────────────────
 //
@@ -388,31 +396,31 @@ ForgeNodeDescriptor descriptor() {
 namespace nonlin_ambience {
 using Engine = signal::NonlinAmbience;
 namespace cal = signal::nonlin_ambience;
-using ::pulp::host::space::nonlin_ambience::kTypeId;
-using ::pulp::host::space::nonlin_ambience::kProgram;
-using ::pulp::host::space::nonlin_ambience::kLengthMs;
-using ::pulp::host::space::nonlin_ambience::kPredelayMs;
-using ::pulp::host::space::nonlin_ambience::kDensityPct;
-using ::pulp::host::space::nonlin_ambience::kDensityGrowth;
-using ::pulp::host::space::nonlin_ambience::kGateHoldPct;
 using ::pulp::host::space::nonlin_ambience::kAttackPct;
-using ::pulp::host::space::nonlin_ambience::kDiffusion;
-using ::pulp::host::space::nonlin_ambience::kTone;
-using ::pulp::host::space::nonlin_ambience::kHfDampHz;
-using ::pulp::host::space::nonlin_ambience::kWidthPct;
-using ::pulp::host::space::nonlin_ambience::kConverterAmount;
-using ::pulp::host::space::nonlin_ambience::kOutputGainDb;
-using ::pulp::host::space::nonlin_ambience::kMixPct;
-using ::pulp::host::space::nonlin_ambience::kProgramSteps;
-using ::pulp::host::space::nonlin_ambience::kLengthMsMin;
-using ::pulp::host::space::nonlin_ambience::kLengthMsDefault;
-using ::pulp::host::space::nonlin_ambience::kPredelayMsMax;
-using ::pulp::host::space::nonlin_ambience::kDensityPctMin;
-using ::pulp::host::space::nonlin_ambience::kGateHoldPctMin;
-using ::pulp::host::space::nonlin_ambience::kGateHoldPctMax;
-using ::pulp::host::space::nonlin_ambience::kAttackPctMin;
 using ::pulp::host::space::nonlin_ambience::kAttackPctMax;
+using ::pulp::host::space::nonlin_ambience::kAttackPctMin;
+using ::pulp::host::space::nonlin_ambience::kConverterAmount;
+using ::pulp::host::space::nonlin_ambience::kDensityGrowth;
+using ::pulp::host::space::nonlin_ambience::kDensityPct;
+using ::pulp::host::space::nonlin_ambience::kDensityPctMin;
+using ::pulp::host::space::nonlin_ambience::kDiffusion;
+using ::pulp::host::space::nonlin_ambience::kGateHoldPct;
+using ::pulp::host::space::nonlin_ambience::kGateHoldPctMax;
+using ::pulp::host::space::nonlin_ambience::kGateHoldPctMin;
+using ::pulp::host::space::nonlin_ambience::kHfDampHz;
+using ::pulp::host::space::nonlin_ambience::kLengthMs;
+using ::pulp::host::space::nonlin_ambience::kLengthMsDefault;
+using ::pulp::host::space::nonlin_ambience::kLengthMsMin;
+using ::pulp::host::space::nonlin_ambience::kMixPct;
+using ::pulp::host::space::nonlin_ambience::kOutputGainDb;
 using ::pulp::host::space::nonlin_ambience::kOutputGainDbMax;
+using ::pulp::host::space::nonlin_ambience::kPredelayMs;
+using ::pulp::host::space::nonlin_ambience::kPredelayMsMax;
+using ::pulp::host::space::nonlin_ambience::kProgram;
+using ::pulp::host::space::nonlin_ambience::kProgramSteps;
+using ::pulp::host::space::nonlin_ambience::kTone;
+using ::pulp::host::space::nonlin_ambience::kTypeId;
+using ::pulp::host::space::nonlin_ambience::kWidthPct;
 
 // Topology — read once per block (see the file note on param rate).
 
@@ -441,9 +449,9 @@ using ::pulp::host::space::nonlin_ambience::kOutputGainDbMax;
 ///
 /// `last` starts as NaN so the first sample always forwards (`x == NaN` is
 /// false for every x, including NaN).
-template <typename Fn>
-void forward_if_changed(float& last, float value, Fn&& apply) {
-    if (value == last) return;
+template <typename Fn> void forward_if_changed(float& last, float value, Fn&& apply) {
+    if (value == last)
+        return;
     last = value;
     apply(value);
 }
@@ -489,15 +497,14 @@ float nonlin_ambience_worst_case_gain() {
 /// items 4 and 5. The seed selects which velvet realization this node IS — two
 /// nodes differing only in seed are two different rooms — and law 2 forbids
 /// automating it.
-CustomNodeType make_nonlin_ambience_node(std::uint32_t seed,
-                                                double max_length_ms) {
+CustomNodeType make_nonlin_ambience_node(std::uint32_t seed, double max_length_ms) {
     const double normalized_max_length_ms = std::isfinite(max_length_ms)
                                                 ? std::max(cal::kMinLengthMs, max_length_ms)
                                                 : cal::kMaxLengthMs;
     CustomNodeType t;
     t.type_id = kTypeId;
     t.version = 1;
-    t.num_input_ports = 2;  // 0 = left, 1 = right (ONE logical stereo wire)
+    t.num_input_ports = 2; // 0 = left, 1 = right (ONE logical stereo wire)
     t.num_output_ports = 2;
     t.default_name = "Nonlin Ambience";
     t.lowerable = true;
@@ -514,28 +521,25 @@ CustomNodeType make_nonlin_ambience_node(std::uint32_t seed,
     t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
 
     t.baked_params.push_back({kProgram, 0.0f, kProgramSteps, 0.0f});
-    t.baked_params.push_back({kLengthMs, kLengthMsMin,
-                              static_cast<float>(normalized_max_length_ms),
-                              std::min(kLengthMsDefault,
-                                       static_cast<float>(normalized_max_length_ms))});
+    t.baked_params.push_back(
+        {kLengthMs, kLengthMsMin, static_cast<float>(normalized_max_length_ms),
+         std::min(kLengthMsDefault, static_cast<float>(normalized_max_length_ms))});
     t.baked_params.push_back({kPredelayMs, 0.0f, kPredelayMsMax, 0.0f});
-    t.baked_params.push_back({kDensityPct, kDensityPctMin, 100.0f,
-                              static_cast<float>(cal::kDensityRefPct)});
-    t.baked_params.push_back({kDensityGrowth, 0.0f, 2.0f,
-                              static_cast<float>(cal::kGammaDefault)});
+    t.baked_params.push_back(
+        {kDensityPct, kDensityPctMin, 100.0f, static_cast<float>(cal::kDensityRefPct)});
+    t.baked_params.push_back({kDensityGrowth, 0.0f, 2.0f, static_cast<float>(cal::kGammaDefault)});
     t.baked_params.push_back({kGateHoldPct, kGateHoldPctMin, kGateHoldPctMax,
                               static_cast<float>(cal::kGateHold * 100.0)});
-    t.baked_params.push_back({kAttackPct, kAttackPctMin, kAttackPctMax,
-                              static_cast<float>(cal::kRevRise * 100.0)});
+    t.baked_params.push_back(
+        {kAttackPct, kAttackPctMin, kAttackPctMax, static_cast<float>(cal::kRevRise * 100.0)});
     t.baked_params.push_back({kDiffusion, 0.0f, static_cast<float>(cal::kDiffusionMax),
                               static_cast<float>(cal::kDiffusionDefault)});
     t.baked_params.push_back({kTone, -1.0f, 1.0f, 0.0f});
-    t.baked_params.push_back({kHfDampHz, 1000.0f, 18000.0f,
-                              static_cast<float>(cal::kFcDark)});
+    t.baked_params.push_back({kHfDampHz, 1000.0f, 18000.0f, static_cast<float>(cal::kFcDark)});
     t.baked_params.push_back({kWidthPct, 0.0f, 100.0f, 100.0f});
     t.baked_params.push_back({kConverterAmount, 0.0f, 1.0f, 0.0f});
     t.baked_params.push_back({kOutputGainDb, -kOutputGainDbMax, kOutputGainDbMax, 0.0f});
-    t.baked_params.push_back({kMixPct, 0.0f, 100.0f, 100.0f});  // send-style default
+    t.baked_params.push_back({kMixPct, 0.0f, 100.0f, 100.0f}); // send-style default
 
     t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
                                         const audio::BufferView<const float>& in, int n,
@@ -593,45 +597,72 @@ CustomNodeType make_nonlin_ambience_node(std::uint32_t seed,
 }
 
 ForgeNodeDescriptor descriptor() {
-    return {"nonlin_ambience", "Nonlinear Ambience", "A designed stereo ambience with gated, reverse, and nonlinear envelope programs.",
-            {}, {{"default", kTypeId}},
-            {{"program", kProgram, "Program", "", "Selects the ambience envelope program.", ForgeParamKind::stepped, ForgeParamCurve::linear,
-              {{"nonlinear_one", "Nonlinear One", 0}, {"gated", "Gated", 1}, {"reverse", "Reverse", 2}, {"nonlinear_two", "Nonlinear Two", 3}}},
-             {"length_ms", kLengthMs, "Length", "ms", "Sets the ambience duration.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
-             {"predelay_ms", kPredelayMs, "Predelay", "ms", "Delays the wet response.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"density_pct", kDensityPct, "Density", "%", "Sets the initial reflection density.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"density_growth", kDensityGrowth, "Density Growth", "", "Shapes density across the response.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"gate_hold_pct", kGateHoldPct, "Gate Hold", "%", "Sets the hold portion of the gated program.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"attack_pct", kAttackPct, "Attack", "%", "Sets the rise portion of reverse and nonlinear programs.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"diffusion", kDiffusion, "Diffusion", "", "Smears reflection detail.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"tone", kTone, "Tone", "", "Moves the response from dark to bright.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"hf_damp_hz", kHfDampHz, "HF Damping", "Hz", "Sets high-frequency damping.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
-             {"width_pct", kWidthPct, "Width", "%", "Sets stereo width.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"converter_amount", kConverterAmount, "Converter", "%", "Adds converter coloration.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"output_gain_db", kOutputGainDb, "Output Gain", "dB", "Trims the processed output.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"mix_pct", kMixPct, "Mix", "%", "Blends dry and ambience signals.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+    return {"nonlin_ambience",
+            "Nonlinear Ambience",
+            "A designed stereo ambience with gated, reverse, and nonlinear envelope programs.",
+            {},
+            {{"default", kTypeId}},
+            {{"program",
+              kProgram,
+              "Program",
+              "",
+              "Selects the ambience envelope program.",
+              ForgeParamKind::stepped,
+              ForgeParamCurve::linear,
+              {{"nonlinear_one", "Nonlinear One", 0},
+               {"gated", "Gated", 1},
+               {"reverse", "Reverse", 2},
+               {"nonlinear_two", "Nonlinear Two", 3}}},
+             {"length_ms", kLengthMs, "Length", "ms", "Sets the ambience duration.",
+              ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"predelay_ms", kPredelayMs, "Predelay", "ms", "Delays the wet response.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"density_pct", kDensityPct, "Density", "%", "Sets the initial reflection density.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"density_growth", kDensityGrowth, "Density Growth", "",
+              "Shapes density across the response.", ForgeParamKind::continuous,
+              ForgeParamCurve::linear},
+             {"gate_hold_pct", kGateHoldPct, "Gate Hold", "%",
+              "Sets the hold portion of the gated program.", ForgeParamKind::continuous,
+              ForgeParamCurve::linear},
+             {"attack_pct", kAttackPct, "Attack", "%",
+              "Sets the rise portion of reverse and nonlinear programs.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"diffusion", kDiffusion, "Diffusion", "", "Smears reflection detail.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"tone", kTone, "Tone", "", "Moves the response from dark to bright.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"hf_damp_hz", kHfDampHz, "HF Damping", "Hz", "Sets high-frequency damping.",
+              ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"width_pct", kWidthPct, "Width", "%", "Sets stereo width.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"converter_amount", kConverterAmount, "Converter", "%", "Adds converter coloration.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"output_gain_db", kOutputGainDb, "Output Gain", "dB", "Trims the processed output.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"mix_pct", kMixPct, "Mix", "%", "Blends dry and ambience signals.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear}}};
 }
 
-}  // namespace nonlin_ambience
+} // namespace nonlin_ambience
 
 namespace cabinet {
 using Engine = signal::SpeakerModel;
-using ::pulp::host::space::cabinet::kTypeId;
-using ::pulp::host::space::cabinet::kDriver;
 using ::pulp::host::space::cabinet::kBox;
-using ::pulp::host::space::cabinet::kVolumeL;
-using ::pulp::host::space::cabinet::kResonanceTrimSt;
-using ::pulp::host::space::cabinet::kQ;
 using ::pulp::host::space::cabinet::kBreakupPct;
-using ::pulp::host::space::cabinet::kTrebleHz;
-using ::pulp::host::space::cabinet::kDriveDb;
 using ::pulp::host::space::cabinet::kCompressionPct;
+using ::pulp::host::space::cabinet::kDiffractionPct;
+using ::pulp::host::space::cabinet::kDriveDb;
+using ::pulp::host::space::cabinet::kDriver;
+using ::pulp::host::space::cabinet::kMicAxisDeg;
 using ::pulp::host::space::cabinet::kMicDistanceCm;
 using ::pulp::host::space::cabinet::kMicPositionPct;
-using ::pulp::host::space::cabinet::kMicAxisDeg;
-using ::pulp::host::space::cabinet::kDiffractionPct;
 using ::pulp::host::space::cabinet::kOutputTrimDb;
-
+using ::pulp::host::space::cabinet::kQ;
+using ::pulp::host::space::cabinet::kResonanceTrimSt;
+using ::pulp::host::space::cabinet::kTrebleHz;
+using ::pulp::host::space::cabinet::kTypeId;
+using ::pulp::host::space::cabinet::kVolumeL;
 
 struct Instance {
     Engine engine;
@@ -735,29 +766,59 @@ CustomNodeType make_speaker_emulation_node() {
 }
 
 ForgeNodeDescriptor descriptor() {
-    return {"speaker_cabinet", "Speaker Cabinet", "Models a driven loudspeaker, enclosure, microphone, and diffraction path.",
-            {}, {{"default", kTypeId}},
-            {{"driver", kDriver, "Driver", "", "Selects the loudspeaker driver archetype.", ForgeParamKind::stepped, ForgeParamCurve::linear,
-              {{"brit_twelve_ceramic", "British Twelve Ceramic", 0},
-               {"amer_twelve_ceramic", "American Twelve Ceramic", 1},
-               {"alnico_twelve", "Alnico Twelve", 2},
-               {"brit_ten", "British Ten", 3},
-               {"bass_fifteen", "Bass Fifteen", 4}}},
-             {"box", kBox, "Box", "", "Selects a sealed or open-back enclosure.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"sealed", "Sealed", 0}, {"open_back", "Open Back", 1}}},
-             {"volume_l", kVolumeL, "Box Volume", "L", "Sets enclosure volume.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
-             {"resonance_trim_st", kResonanceTrimSt, "Resonance Trim", "st", "Retunes the enclosure resonance.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"q", kQ, "Resonance Q", "", "Sets resonance emphasis.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"breakup_pct", kBreakupPct, "Cone Breakup", "%", "Adds cone-breakup coloration.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"treble_hz", kTrebleHz, "Treble Rolloff", "Hz", "Sets the high-frequency rolloff.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
-             {"drive_db", kDriveDb, "Drive", "dB", "Drives the speaker nonlinearity.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"compression_pct", kCompressionPct, "Compression", "%", "Adds power compression.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"mic_distance_cm", kMicDistanceCm, "Mic Distance", "cm", "Sets microphone distance.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
-             {"mic_position_pct", kMicPositionPct, "Mic Position", "%", "Moves the microphone from center toward edge.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"mic_axis_deg", kMicAxisDeg, "Mic Axis", "deg", "Turns the microphone off axis.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"diffraction_pct", kDiffractionPct, "Diffraction", "%", "Adds cabinet-edge diffraction.", ForgeParamKind::continuous, ForgeParamCurve::linear},
-             {"output_trim_db", kOutputTrimDb, "Output Trim", "dB", "Trims the modeled output.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+    return {
+        "speaker_cabinet",
+        "Speaker Cabinet",
+        "Models a driven loudspeaker, enclosure, microphone, and diffraction path.",
+        {},
+        {{"default", kTypeId}},
+        {{"driver",
+          kDriver,
+          "Driver",
+          "",
+          "Selects the loudspeaker driver archetype.",
+          ForgeParamKind::stepped,
+          ForgeParamCurve::linear,
+          {{"brit_twelve_ceramic", "British Twelve Ceramic", 0},
+           {"amer_twelve_ceramic", "American Twelve Ceramic", 1},
+           {"alnico_twelve", "Alnico Twelve", 2},
+           {"brit_ten", "British Ten", 3},
+           {"bass_fifteen", "Bass Fifteen", 4}}},
+         {"box",
+          kBox,
+          "Box",
+          "",
+          "Selects a sealed or open-back enclosure.",
+          ForgeParamKind::stepped,
+          ForgeParamCurve::linear,
+          {{"sealed", "Sealed", 0}, {"open_back", "Open Back", 1}}},
+         {"volume_l", kVolumeL, "Box Volume", "L", "Sets enclosure volume.",
+          ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+         {"resonance_trim_st", kResonanceTrimSt, "Resonance Trim", "st",
+          "Retunes the enclosure resonance.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"q", kQ, "Resonance Q", "", "Sets resonance emphasis.", ForgeParamKind::continuous,
+          ForgeParamCurve::linear},
+         {"breakup_pct", kBreakupPct, "Cone Breakup", "%", "Adds cone-breakup coloration.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"treble_hz", kTrebleHz, "Treble Rolloff", "Hz", "Sets the high-frequency rolloff.",
+          ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+         {"drive_db", kDriveDb, "Drive", "dB", "Drives the speaker nonlinearity.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"compression_pct", kCompressionPct, "Compression", "%", "Adds power compression.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"mic_distance_cm", kMicDistanceCm, "Mic Distance", "cm", "Sets microphone distance.",
+          ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+         {"mic_position_pct", kMicPositionPct, "Mic Position", "%",
+          "Moves the microphone from center toward edge.", ForgeParamKind::continuous,
+          ForgeParamCurve::linear},
+         {"mic_axis_deg", kMicAxisDeg, "Mic Axis", "deg", "Turns the microphone off axis.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"diffraction_pct", kDiffractionPct, "Diffraction", "%", "Adds cabinet-edge diffraction.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear},
+         {"output_trim_db", kOutputTrimDb, "Output Trim", "dB", "Trims the modeled output.",
+          ForgeParamKind::continuous, ForgeParamCurve::linear}}};
 }
 
 } // namespace cabinet
 
-}  // namespace pulp::host::space
+} // namespace pulp::host::space
