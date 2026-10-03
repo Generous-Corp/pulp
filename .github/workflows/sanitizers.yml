@@ -225,6 +225,12 @@ jobs:
       - name: Build
         run: cmake --build build-asan -j$(sysctl -n hw.ncpu)
 
+      # The visual-analysis ctests skip without these and the non-skippable
+      # visual-python-deps-present check fails, as in every job running ctest.
+      - name: Install visual-analysis Python dependencies
+        shell: bash
+        run: bash tools/ci/install_visual_python_deps.sh build-asan
+
       # Keep the host/editor lifetime regressions as an explicit ASan gate in
       # addition to the broad ctest pass. These reproduce the orderings real
       # hosts are allowed to use: owner before editor, callback destroying its
@@ -326,6 +332,12 @@ jobs:
       - name: Build
         run: cmake --build build-tsan -j$(sysctl -n hw.ncpu)
 
+      # The visual-analysis ctests skip without these and the non-skippable
+      # visual-python-deps-present check fails, as in every job running ctest.
+      - name: Install visual-analysis Python dependencies
+        shell: bash
+        run: bash tools/ci/install_visual_python_deps.sh build-tsan
+
       - name: Test with TSan
         env:
           TSAN_OPTIONS: "halt_on_error=1:suppressions=${{ github.workspace }}/test/tsan.supp"
@@ -387,6 +399,12 @@ jobs:
 
       - name: Build
         run: cmake --build build-ubsan -j$(sysctl -n hw.ncpu)
+
+      # The visual-analysis ctests skip without these and the non-skippable
+      # visual-python-deps-present check fails, as in every job running ctest.
+      - name: Install visual-analysis Python dependencies
+        shell: bash
+        run: bash tools/ci/install_visual_python_deps.sh build-ubsan
 
       - name: Test with UBSan
         # Skip "Toolbar add items" — pre-existing UBSan-only failure
@@ -473,6 +491,12 @@ jobs:
 
       - name: Build
         run: cmake --build build-rtsan -j$(nproc)
+
+      # The visual-analysis ctests skip without these and the non-skippable
+      # visual-python-deps-present check fails, as in every job running ctest.
+      - name: Install visual-analysis Python dependencies
+        shell: bash
+        run: bash tools/ci/install_visual_python_deps.sh build-rtsan
 
       - name: Test with RTSan
         run: ctest --test-dir build-rtsan --output-on-failure -j$(nproc) --exclude-regex "GpuSurface|compileShader"

@@ -142,6 +142,38 @@ class CorpusDeclarations(unittest.TestCase):
         self.assertNotIn("api.vcvrack.com", need)
 
 
+class StepScripts(unittest.TestCase):
+    """A gate step that runs a repository shell script downloads what the script
+    does; moving an install into a script must not hide its host."""
+
+    def test_a_script_a_step_runs_contributes_its_downloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "tools/ci").mkdir(parents=True)
+            (root / "tools/ci/fetch.sh").write_text(
+                "#!/bin/bash\n# https://in-a-comment.example.org\ncurl -fsSL https://downloads.example.com/x\n"
+                "python3 -m pip install -r reqs.txt\n", encoding="utf-8")
+            workflow = add_macos_step(
+                "      - name: Fetch\n        run: bash tools/ci/fetch.sh build\n")
+            need, errors = rc.required_hosts(workflow, root)
+        self.assertEqual([e for e in errors if "fetch.sh" in e], [])
+        self.assertTrue(any("via tools/ci/fetch.sh" in why for why in need["downloads.example.com"]))
+        self.assertIn("pypi.org", need)
+        self.assertNotIn("in-a-comment.example.org", need)
+
+    def test_a_step_running_a_missing_script_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = add_macos_step(
+                "      - name: Fetch\n        run: bash tools/ci/absent.sh build\n")
+            _need, errors = rc.required_hosts(workflow, pathlib.Path(tmp))
+        self.assertTrue(any("tools/ci/absent.sh, which does not exist" in e for e in errors), errors)
+
+    def test_the_visual_install_reaches_pypi_through_its_script(self):
+        need, _errors = rc.required_hosts(WORKFLOW)
+        self.assertTrue(any("via tools/ci/install_visual_python_deps.sh" in why
+                            for why in need["pypi.org"]), need.get("pypi.org"))
+
+
 class SourceCheck(unittest.TestCase):
     def _tartci(self, tmp: pathlib.Path, text: str) -> pathlib.Path:
         path = tmp / rc.TARTCI_FILE

@@ -139,7 +139,21 @@ def parse_ninja(build_dir: Path) -> list[CompileLine]:
     return lines
 
 
+# The Makefile generator writes a target's PCH flags per object, as a comment
+# beside the per-language flags it applies at compile time:
+#   # PCH options: <object>_OPTIONS = -Winvalid-pch;-Xclang;-include-pch;...
+_PCH_OPTIONS = re.compile(r"^# PCH options: (?P<object>\S+?)_OPTIONS = (?P<options>.*)$")
+_OBJECT_LANG = (("cmake_pch.hxx.pch", "CXX"), ("cmake_pch.h.pch", "C"), (".mm.o", "OBJCXX"),
+                (".m.o", "OBJC"), (".c.o", "C"))
+
+
+def _object_lang(obj: str) -> str:
+    return next((lang for suffix, lang in _OBJECT_LANG if obj.endswith(suffix)), "CXX")
+
+
 def parse_makefiles(build_dir: Path) -> list[CompileLine]:
+    """One line per object that carries PCH options, as Ninja lists them, and
+    one per language for a target whose objects carry none."""
     lines: list[CompileLine] = []
     for flags_make in build_dir.rglob("flags.make"):
         target = flags_make.parent.name
@@ -147,11 +161,27 @@ def parse_makefiles(build_dir: Path) -> list[CompileLine]:
             continue
         target = target[: -len(".dir")]
         per_lang: dict[str, dict[str, str]] = {}
+        pch_objects: list[tuple[str, str]] = []
         for raw in flags_make.read_text(encoding="utf-8", errors="replace").splitlines():
             m = re.match(r"^(CXX|C|OBJCXX|OBJC)_(FLAGS|DEFINES) = (.*)$", raw)
             if m:
                 per_lang.setdefault(m.group(1), {})[m.group(2)] = m.group(3)
+                continue
+            m = _PCH_OPTIONS.match(raw)
+            if m:
+                pch_objects.append((m.group("object"), m.group("options").replace(";", " ")))
+        with_pch = {_object_lang(obj) for obj, _ in pch_objects}
+        for obj, options in pch_objects:
+            kv = per_lang.get(_object_lang(obj), {})
+            lines.append(CompileLine(
+                target=target,
+                output=obj,
+                flags=f"{kv.get('FLAGS', '')} {options}".strip(),
+                defines=kv.get("DEFINES", ""),
+            ))
         for lang, kv in per_lang.items():
+            if lang in with_pch:
+                continue
             lines.append(CompileLine(
                 target=target,
                 output=f"{flags_make.parent.relative_to(build_dir)}/<{lang}>",

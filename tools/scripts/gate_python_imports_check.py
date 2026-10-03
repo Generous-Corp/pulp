@@ -10,7 +10,8 @@ ones) through repo-local modules.
 
 What each lane provides is derived, never hand-listed:
   * the macOS gate installs exactly tools/motion/visual/requirements.lock into
-    the configured Python (build.yml's visual-analysis step) on top of the
+    the configured Python (build.yml's visual-analysis step, which runs
+    tools/ci/install_visual_python_deps.sh) on top of the
     standard library, so ctest scripts may import those packages;
   * the build-free source-selftest lane (tools/ci/source_selftests.json)
     installs nothing, so its scripts get the standard library only.
@@ -42,6 +43,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE_LOCK = "tools/motion/visual/requirements.lock"
 GATE_WORKFLOW = ".github/workflows/build.yml"
+# build.yml installs the lock by running this script against the gate's tree.
+GATE_INSTALLER = "tools/ci/install_visual_python_deps.sh"
 SOURCE_SELFTEST_MANIFEST = "tools/ci/source_selftests.json"
 # Distribution name → import name, where they differ.
 DIST_TO_MODULE = {"pillow": "PIL", "scikit-image": "skimage", "pyyaml": "yaml"}
@@ -51,7 +54,10 @@ GUARD_EXCEPTIONS = {"ImportError", "ModuleNotFoundError", "Exception", "BaseExce
 def gate_modules(repo: Path = REPO_ROOT) -> set[str]:
     """Import names the gate VM's Python has beyond the standard library."""
     workflow = (repo / GATE_WORKFLOW).read_text(encoding="utf-8")
-    if f"lock={GATE_LOCK}" not in workflow:
+    installer = repo / GATE_INSTALLER
+    via_installer = (f"bash {GATE_INSTALLER}" in workflow and installer.is_file()
+                     and f"lock={GATE_LOCK}" in installer.read_text(encoding="utf-8"))
+    if f"lock={GATE_LOCK}" not in workflow and not via_installer:
         raise RuntimeError(
             f"{GATE_WORKFLOW} no longer installs {GATE_LOCK}; re-derive what the "
             "gate's Python provides before trusting this check")
