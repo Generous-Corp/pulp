@@ -8,4 +8,13 @@ Captured from `origin/main` at `c3c37bfc05fd58686dcc0dc369e4aaff9f4ccb06` before
 - Export snapshot: `forge-wave2b-space-baseline-catalog.json` (415,732 bytes).
 - Export SHA-256: `350567a6c9ca5a6b981f0efe8354207479f3341765871d7af4a821fc094c3e46`.
 - The snapshot is copied byte-for-byte from `docs/status/forge-catalog.json`; it is the comparison artifact for the post-extraction export.
-- Space catalog rows present in the snapshot: convolution reverb, non-linear ambience, and speaker cabinet.
+- Space catalog rows present in the snapshot: convolution reverb, nonlin ambience, and speaker cabinet.
+
+## Post-extraction evidence
+
+- Public header after extraction: 5,167 bytes, 114 lines; implementation: 43,205 bytes, 763 lines; private descriptor: 394 bytes, 15 lines.
+- Direct include consumers remain 5 across source and tests; the implementation is now compiled as `core/host/src/forge_space_catalog.cpp` through `core/host/CMakeLists.txt`.
+- Governed `pulp-host` compile passed, followed by governed `pulp-test-forge-space-catalog` link.
+- Direct focused binary `build/test/pulp-test-forge-space-catalog --reporter compact`: 19 cases, 3,374 assertions, all passed.
+- Export after extraction: 415,732 bytes, SHA-256 `350567a6c9ca5a6b981f0efe8354207479f3341765871d7af4a821fc094c3e46`; `cmp` against the baseline returned 0.
+- `dsp_capability_registry.py --check` and `consumption_census.py --check` passed.
