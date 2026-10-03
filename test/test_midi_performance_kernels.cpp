@@ -719,6 +719,35 @@ TEST_CASE("note delay rolls an armed echo back to the authored length",
         REQUIRE(length == kHeld);
 }
 
+TEST_CASE("note delay gate zero preserves source-held echo lifecycle",
+          "[midi][note-delay][parity]") {
+    // Zero is the compatibility value: echoes remain armed until the authored
+    // source release arrives, just as they did before authorable gates existed.
+    constexpr std::int64_t kHeld = 1'500;
+    const std::array input{on(0, 60, 100), off(kHeld, 60)};
+    midi::NoteDelaySpec spec{};
+    spec.interval = {kSixteenthTicks};
+    spec.repeats = 1;
+    spec.gate_percent = 0;
+    midi::NoteDelay<> delay{spec};
+    auto out = render(
+        [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
+            delay.process(in, o, constant_block(start, count));
+        },
+        15'000, kRaggedBlocks, input);
+
+    std::vector<std::int64_t> attacks;
+    std::vector<std::int64_t> releases;
+    for (const auto& event : out) {
+        if (event.attack() && event.event.note() == 60)
+            attacks.push_back(event.sample);
+        if (event.release() && event.event.note() == 60)
+            releases.push_back(event.sample);
+    }
+    REQUIRE(attacks == std::vector<std::int64_t>{0, 6'000});
+    REQUIRE(releases == std::vector<std::int64_t>{1'500, 7'500});
+}
+
 TEST_CASE("note delay accepts an authorable echo gate",
           "[midi][note-delay][gate]") {
     // A non-zero gate is measured from the authored delay stride, not from the
@@ -1430,7 +1459,12 @@ TEST_CASE("every MIDI utility kernel rejects a spec it cannot honour", "[midi][p
     auto in = prepared_buffer();
     auto out = prepared_buffer();
     REQUIRE(in.add(midi::MidiEvent::note_on(0, 60, 100)));
-    REQUIRE_FALSE(invalid.process(in, out, constant_block(0, 512)).complete);
+    const auto report = invalid.process(in, out, constant_block(0, 512));
+    REQUIRE_FALSE(report.complete);
+    REQUIRE(report.dropped == in.size());
+    REQUIRE(out.empty());
+    REQUIRE(invalid.scheduled() == 0);
+    REQUIRE(invalid.sounding() == 0);
 }
 
 TEST_CASE("chord memory returns to passthrough when its memory is cleared",
