@@ -2142,7 +2142,7 @@ and each one fails a different check on the PR head if it is hand-edited:
 `test/ctest_script_inputs.json` (`script-test-inputs-drift`),
 `tools/ci/source_selftests.json` (`source-selftest-lane-contract`, which also
 compares each entry's TIMEOUT, RESOURCE_LOCK and argv to the registration), and
-the changed-surface script families block in `.shipyard/config.toml`
+the changed-surface script families file `.shipyard/changed-surface-families.toml`
 (`changed-surface-script-families-drift`, which must map every new script and
 list every new reader of `.agents/skills/*/SKILL.md`). Regenerate all three from
 a configured build: `script_test_inputs.py --build-dir B --write`,
@@ -7098,7 +7098,7 @@ still select full validation. Top-level `tools/scripts/*.py` and
 `test/ctest_script_inputs.json` by `changed_surface_script_families.py`, which
 also adds the whole-tree drift/lint/sync tests; a script native code, shell or
 CMake names stays full. After regenerating the script-inputs list, regenerate
-the block with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`
+the families file with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`
 blocks the next change to a script or skill doc. A test whose outcome follows
 host load, the toolchain or host state rather than its inputs belongs in the
 `environment-bound` ctest label: the generator then runs it with every bounded
