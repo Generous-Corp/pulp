@@ -223,5 +223,50 @@
     },
     "classification": "The branch-owned Kotlin/SurfaceRuntime teardown completed for every measured cycle, and the growth is in native heap with zero Graphics PSS. The prior explicit wgpu::Device::Destroy and Skia freeGpuResources experiments did not change the slope. No safe five-file Android lifecycle fix is supported by this evidence; the allocation pattern is escalated as common Dawn/Skia or emulator Vulkan-driver retention.",
     "follow_up": "Common render-toolchain/emulator-driver owner must reproduce with a clean process, identify the 4718592-byte allocation class, and provide a Dawn/Skia or emulator-driver fix and before/after counters. B3 remains blocked until that evidence exists."
+  },
+  "allow_no_gpu_control_investigation": {
+    "device": "emulator-5554",
+    "command": "export ANDROID_HOME=\"$HOME/Library/Android/sdk\"; export PATH=\"$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH\"; PULP_ANDROID_SMOKE_TIMEOUT=90 tools/scripts/android_smoke.sh --skip-build --allow-no-gpu --device emulator-5554",
+    "smoke_result": "PASS",
+    "smoke_output_markers": [
+      "JNI_OnLoad: Pulp native bridge initialized",
+      "Android GPU surface: ANativeWindow received (1080x2400)",
+      "SurfaceRuntime: Dawn initialized (1080x2400)",
+      "SurfaceRuntime: Skia Graphite context created",
+      "DemoSynth: playing",
+      "nativeOnBackground",
+      "nativeOnForeground",
+      "RECORD_AUDIO runtime permission toggled successfully",
+      "no FATAL exceptions attributed to com.pulp.app in logcat"
+    ],
+    "control_limitation": "The allow-no-gpu path was exercised, but this emulator initialized Dawn/Skia; the degraded Dawn-failure branch was not entered.",
+    "probe_command": "Clear logcat; launch com.pulp.app/com.pulp.PulpActivity; record dumpsys meminfo; for each of five cycles send KEYCODE_HOME, wait for SurfaceRuntime: destroy complete, relaunch the activity, wait for SurfaceRuntime: creating surface, then record dumpsys meminfo.",
+    "native_pss_kb": [43365, 55677, 67989, 80317, 92565, 104901],
+    "total_pss_kb": [140746, 153154, 165470, 177806, 190042, 202382],
+    "graphics_pss_kb": [0, 0, 0, 0, 0, 0],
+    "cycle_deltas": {
+      "native_pss_kb": 61536,
+      "total_pss_kb": 61636,
+      "native_pss_kb_per_cycle": 12307.2,
+      "total_pss_kb_per_cycle": 12327.2
+    },
+    "markers": {
+      "surface_created": 5,
+      "surface_destroyed_waiting": 5,
+      "destroy_complete": 5,
+      "surface_created_runtime": 5,
+      "dawn_initialized": 5,
+      "skia_graphite_context_created": 5,
+      "fatal_exception": 0,
+      "fatal_signal": 0
+    },
+    "unreachable_native_scan": {
+      "command": "adb -s emulator-5554 shell dumpsys meminfo --unreachable com.pulp.app",
+      "bytes": 66061568,
+      "allocations": 30,
+      "shape": "Repeated 4718592-byte unreachable allocations; native heap, not Graphics PSS."
+    },
+    "comparison_to_existing_gpu_slope": "Existing GPU run: native PSS 30396 to 92480 KB over five cycles (+62084 KB, +12416.8 KB/cycle), total PSS 140295 to 189970 KB (+49675 KB). This allow-no-gpu-capable control: native PSS 43365 to 104901 KB (+61536 KB, +12307.2 KB/cycle), total PSS 140746 to 202382 KB (+61636 KB). The same approximately 12 MB native slope persists with zero Graphics PSS.",
+    "classification": "The control reproduces the native-memory retention after five completed SurfaceView destroy/create cycles. Teardown markers are complete, and no B3-owned lifecycle retention is isolated. Preserve BLOCKED and escalate the repeated 4718592-byte allocation pattern to the common Dawn/Skia or emulator Vulkan-driver owner."
   }
 }
