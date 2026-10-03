@@ -429,6 +429,14 @@ block and renders `--demo cube --capture` to a non-empty PNG.
 
 ## Gotchas
 
+**Selector parses are memoized.** `_parseSelector` (web-compat-document-
+selectors.js) caches its record by selector text (bounded, cleared when
+full), so `Element.matches()`/`closest()` in a loop over many elements parse
+once. The record is shared: never mutate what `_parseSelector` returns --
+copy it first, as StyleSheet does before stripping a pseudo-class.
+`_parseSelector.__pulpMemoized` tells a vendored runtime carrying its own
+memo to step aside.
+
 ### The split preludes and the legacy `web-compat.js` must agree on `window`
 
 The runtime embeds the SPLIT preludes (`web-compat-document.js` and friends,
