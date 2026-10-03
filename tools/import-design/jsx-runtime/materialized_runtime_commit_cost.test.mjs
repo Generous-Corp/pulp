@@ -647,3 +647,124 @@ test('publishes every attribute a captured-state selector names up front', () =>
   sandbox.__pulpFindMaterializedElement__('[data-late]');
   assert.ok(sandbox.__pulpMaterializedSelectorAttributes__.has('data-late'));
 });
+
+// ── Batched lookups (captured-state resolution) ─────────────────────────
+//
+// Resolution asks one selector per atlas state on every qualifying React
+// commit. Answered one by one, every state that is not open was a miss that
+// match-tested the whole registry, so a commit paid states x nodes match
+// tests. Answered together, the registry is walked once and a node is
+// match-tested against a state only when it carries the attributes that
+// state's selector names.
+
+function atlasStates(count) {
+  const states = [];
+  for (let index = 0; index < count; ++index) {
+    states.push({ id: `s${index}`, match: { selector: `[data-open-${index}]` },
+      metadata: { layout_bindings: [], text_bindings: [], paint_bindings: [] } });
+  }
+  return states;
+}
+
+test('captured-state resolution walks the registry once for every state', () => {
+  let tests = 0;
+  const registryNodes = scanCountingRegistry(100, () => { ++tests; });
+  const sandbox = evaluateEntry({ registryNodes, stateAtlas: atlasStates(10) });
+  sandbox.__pulpMaterializedTreeEpoch__ = 1;
+  const stats = sandbox.__pulpMaterializedFindBatchStats__;
+  assert.ok(stats, 'resolution did not go through the batched lookup');
+  const before = { ...stats };
+  tests = 0;
+  assert.equal(sandbox.__pulpRefreshMaterializedState__(), '');
+  // Ten states, all closed: one pass, and no node carries any of their
+  // attributes, so nothing is match-tested at all (one by one this was
+  // 10 x 100 match tests).
+  assert.equal(stats.passes - before.passes, 1);
+  assert.equal(stats.matchTests - before.matchTests, 0);
+  assert.equal(tests, 0, `${tests} match tests for ten closed states`);
+  assert.ok(stats.attributeReads - before.attributeReads <= 100 * 10);
+  // Positive control: the same counter sees a single unbatched miss.
+  sandbox.__pulpMaterializedTreeEpoch__ = 2;
+  assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
+  assert.ok(tests >= 100, 'the match-test counter is dead');
+});
+
+test('resolution still answers with the last state whose selector matches', () => {
+  const make = (id, attrs = {}) => ({ tagName: 'DIV', __pulpId: id, id,
+    _children: [], className: '', parentElement: null,
+    getAttribute: (name) => (name in attrs ? attrs[name] : null) });
+  const registryNodes = [make('a'), make('b', { 'data-open-3': '' }),
+    make('c', { 'data-open-7': 'yes' })];
+  const sandbox = evaluateEntry({ registryNodes, stateAtlas: atlasStates(10) });
+  sandbox.__pulpMaterializedTreeEpoch__ = 1;
+  assert.equal(sandbox.__pulpRefreshMaterializedState__(), 's7');
+  sandbox.__pulpMaterializedTreeEpoch__ = 2;
+  registryNodes[2].getAttribute = () => null;
+  assert.equal(sandbox.__pulpRefreshMaterializedState__(), 's3');
+});
+
+test('a batched lookup answers exactly as each single lookup does', () => {
+  // A small tree with ancestors, direct parents, value-matched attributes and
+  // a class-only selector the attribute prefilter cannot narrow.
+  const node = (id, tag, attrs, parent, className = '') => {
+    const element = { tagName: tag, __pulpId: id, id, _children: [], className,
+      parentElement: parent || null,
+      getAttribute: (name) => (name in attrs ? attrs[name] : null) };
+    if (parent) parent._children.push(element);
+    return element;
+  };
+  const root = node('root', 'DIV', { 'data-root': '' }, null);
+  const menuA = node('menuA', 'DIV', { 'data-menu': 'a' }, root);
+  const menuB = node('menuB', 'DIV', { 'data-menu': 'b' }, root);
+  const optA = node('optA', 'UL', { 'data-options': '' }, menuA, 'list');
+  const optB = node('optB', 'UL', { 'data-options': '' }, menuB, 'list');
+  const item = node('item', 'LI', { 'data-item': '1', role: 'option' }, optB);
+  const registryNodes = [root, menuA, menuB, optA, optB, item];
+  const queries = [
+    { selector: '[data-options]', ancestor: '[data-menu="b"]' },
+    { selector: '[data-options]', ancestor: '[data-menu="a"]' },
+    { selector: '[data-options]', ancestor: '[data-menu="c"]' },
+    { selector: '[data-menu="b"] > [data-options]' },
+    { selector: '[data-menu="a"] [data-item]' },
+    { selector: '[data-root] [data-item="1"]' },
+    { selector: 'li[role="option"]' },
+    { selector: 'ul.list' },
+    { selector: '.list' },
+    { selector: '[data-missing]' },
+    null,
+    { selector: '' },
+  ];
+  for (const epoch of [undefined, 7]) {
+    const sandbox = evaluateEntry({ registryNodes });
+    if (epoch !== undefined) sandbox.__pulpMaterializedTreeEpoch__ = epoch;
+    const batched = sandbox.__pulpFindMaterializedElements__(queries);
+    const single = queries.map((query) => query
+      ? sandbox.__pulpFindMaterializedElement__(query.selector, query.ancestor)
+      : null);
+    // Copied out of the sandbox realm so deepEqual compares values only.
+    const ids = Array.from(batched, (found) => found && found.__pulpId);
+    assert.deepEqual(ids, single.map((found) => found && found.__pulpId),
+      `epoch ${epoch}`);
+    assert.deepEqual(ids,
+      ['optB', 'optA', null, 'optB', null, 'item', 'item', 'optA', 'optA',
+        null, null, null]);
+  }
+});
+
+test('a batched miss is retained for the epoch like a single lookup\'s', () => {
+  let tests = 0;
+  const registryNodes = scanCountingRegistry(40, () => { ++tests; });
+  const sandbox = evaluateEntry({ registryNodes });
+  sandbox.__pulpMaterializedTreeEpoch__ = 1;
+  tests = 0;
+  // A tag-only selector cannot be prefiltered, so the pass tests every node.
+  assert.deepEqual(Array.from(sandbox.__pulpFindMaterializedElements__(
+    [{ selector: 'span.absent' }])), [null]);
+  const firstScan = tests;
+  assert.ok(firstScan >= 40, 'no match test observed, so the counter is dead');
+  assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
+  assert.equal(tests, firstScan, 'the batched miss was not retained');
+  sandbox.__pulpMaterializedTreeEpoch__ = 2;
+  assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
+  assert.ok(tests > firstScan, 'a bumped epoch did not invalidate the miss');
+});
