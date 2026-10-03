@@ -1108,8 +1108,10 @@ def data_hit(executable: str, scan: dict | None, drift: list[str], data: list[st
     `data` is the drift's runtime-surface files. With no data scan, or an
     executable the scan did not cover, any of them counts. An entry whose
     reads are all declared is hit only through its declared inputs; one
-    with undeclared reads (or any other state) by any runtime-surface file;
-    `data: none`, or no entry for a scanned executable, by none."""
+    with undeclared reads by any runtime-surface file; one that may read
+    the whole checkout (a tree walker), or in a state this reader does not
+    know, by any drift at all, docs included; `data: none`, or no entry for
+    a scanned executable, by none."""
     if scan is None:
         return bool(data)
     entry, scanned = _scan_entry(executable, scan)
@@ -1120,7 +1122,9 @@ def data_hit(executable: str, scan: dict | None, drift: list[str], data: list[st
         return False
     if state == "declared":
         return _declared_hit(entry.get("inputs") or [], drift)
-    return bool(data)
+    if state == "undeclared":
+        return bool(data)
+    return bool(drift)
 
 
 def spawn_status(executable: str, scan: dict | None) -> str:

@@ -720,6 +720,12 @@ class CodemodelTests(unittest.TestCase):
         odd = self.data_scan(["a", "b"], a={"data": "partly"})
         self.assertEqual(run(odd)["manifest-data"]["run"], ["ta"])         # an unknown state fails closed
         self.assertEqual(run(scan, ["docs/a.md"])["manifest-data"]["run"], [])
+        # A tree walker, or a state this reader does not know, is hit by any
+        # drift, docs included; undeclared reads only by runtime surface.
+        walker = self.data_scan(["a", "b"], a={"data": "whole_checkout"}, b={"data": "undeclared"})
+        self.assertEqual(run(walker, ["docs/a.md"])["manifest-data"]["run"], ["ta"])
+        self.assertEqual(run(odd, ["docs/a.md"])["manifest-data"]["run"], ["ta"])
+        self.assertEqual(run(walker, [])["manifest-data"]["run"], [])
 
     def outputs(self, drift, hashed, changed, rebuilt=frozenset(), **kw):
         return rrc.classify_source_keys(list(drift), ["ta", "tb"], self.MAP, {}, {}, set(rebuilt), self.EXES | {"test/tool"},
@@ -777,6 +783,11 @@ class CodemodelTests(unittest.TestCase):
     def test_an_absent_input_is_hit_by_its_creation(self):
         self.assertTrue(rrc._declared_hit(["!pulp.toml"], ["pulp.toml"]))
         self.assertFalse(rrc._declared_hit(["!pulp.toml"], ["docs/pulp.toml.md"]))
+
+    def test_a_directory_input_is_hit_by_files_beneath_it(self):
+        self.assertTrue(rrc._declared_hit(["test/fixtures/timeline"], ["test/fixtures/timeline/a/b.json"]))
+        self.assertTrue(rrc._declared_hit(["tools/x/"], ["tools/x/tool.cpp"]))
+        self.assertFalse(rrc._declared_hit(["tools/x"], ["tools/xy/a.cpp"]))     # a sibling with the same prefix
 
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
