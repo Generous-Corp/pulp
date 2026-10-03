@@ -432,7 +432,8 @@ def base_projection(
     python = cache_entries.get("Python3_EXECUTABLE", "")
     head_provisioning = [f"{k}={v}" for k, v in provisioning(cache_entries).items()]
     key = hashlib.sha256(
-        "\0".join([base_sha, generator, python, *flags, *head_provisioning]).encode()
+        "\0".join([base_sha, "shape=configure", generator, python, *flags,
+                   *head_provisioning]).encode()
     ).hexdigest()[:16]
     cache_dir = build_dir / BASE_INVENTORY_CACHE
     cached = cache_dir / f"{base_sha}-{key}.json"
@@ -474,7 +475,7 @@ def base_projection(
                 )
         try:
             projected = inventory.project_registrations(
-                ctest_payload(tree / "build"), tree, tree / "build"
+                ctest_payload(tree / "build"), tree, tree / "build", shape="configure"
             )
             projected["provisioning"] = provisioning(_cache_entries(tree / "build"))
             projected["linked_externals"] = linked_externals(tree)
@@ -494,22 +495,33 @@ def base_projection(
     return projected
 
 
+PROTECTED_BASE = "the protected base"
+PREBUILD_SNAPSHOT = "this tree before the build"
+
+
 def validate_registrations_match_base(
     full_payload: dict[str, Any], source_root: Path, build_dir: Path, base: dict[str, Any],
-    require_built: bool = True,
+    require_built: bool = True, reference_label: str = PROTECTED_BASE,
 ) -> None:
-    """This tree's registrations must equal the base's. A bounded plan never
-    carries a registration change: CMake and test/cmake edits are
+    """This tree's registrations must equal the reference's: the base's, or
+    after the full build this tree's own pre-build snapshot. A bounded plan
+    never carries a registration change: CMake and test/cmake edits are
     test-topology paths, which select the full suite, so any difference here
     is drift the plan cannot account for.
 
-    Before the full build a cold or partly built tree still lists unbuilt
-    targets without a command; the comparison already folds those programs,
-    so only `require_built` (after the full build) refuses them."""
+    Both sides are compared in configure shape, so a cold, partly built and
+    fully built tree compare alike; only `require_built` (after the full
+    build) refuses a registration still without a command. Against the
+    pre-build snapshot the comparison catches what a build can change: a
+    CMake re-run mid-build that registers tests the earlier check never saw."""
 
-    live = inventory.project_registrations(full_payload, source_root, build_dir)
+    live = inventory.project_registrations(full_payload, source_root, build_dir, shape="configure")
+    # A registration the authoritative filter excludes is never selected or
+    # run by a bounded plan; a validator the host lacks lists no command.
+    excluded = {test.get("name") for test in full_payload.get("tests", [])
+                if inventory.excluded_from_inventory(test)}
     unresolved = [name for name in live["incomplete"]
-                  if not inventory.NOT_BUILT_PLACEHOLDER.match(name)]
+                  if not inventory.NOT_BUILT_PLACEHOLDER.match(name) and name not in excluded]
     if require_built and unresolved:
         raise SelectionExecutionError(
             "ctest registrations have no command after the build; require full suite: "
@@ -518,7 +530,7 @@ def validate_registrations_match_base(
     differences = inventory.projection_differences(base, live)
     if differences:
         raise SelectionExecutionError(
-            "ctest registrations differ from the protected base; require full suite: "
+            f"ctest registrations differ from {reference_label}; require full suite: "
             + "; ".join(differences)
         )
 
@@ -534,6 +546,7 @@ def validate_selection(
     base: dict[str, Any],
     target: str,
     require_built: bool = True,
+    reference_label: str = PROTECTED_BASE,
 ) -> None:
     """Fail closed unless CTest's file selection equals the reviewed expansion."""
 
@@ -545,7 +558,8 @@ def validate_selection(
         raise SelectionExecutionError(f"selection contains undeclared names: {undeclared}")
 
     full_tests = full_payload["tests"]
-    validate_registrations_match_base(full_payload, source_root, build_dir, base, require_built)
+    validate_registrations_match_base(full_payload, source_root, build_dir, base, require_built,
+                                      reference_label)
     live_manifest = inventory.build_manifest(
         full_tests,
         source_root,
@@ -1021,6 +1035,12 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
         full_payload = ctest_payload(build_dir)
         full_tests = full_payload["tests"]
         selected_tests = ctest_json(build_dir, selected_file)
+        # The reference for the check after the full build, which a
+        # configure-only base cannot be for a built tree.
+        prebuild_snapshot = inventory.project_registrations(
+            full_payload, source_root, build_dir, shape="configure")
+        (Path(directory) / "prebuild-registrations.json").write_text(
+            json.dumps(prebuild_snapshot, sort_keys=True), encoding="utf-8")
         prebuild_unbuilt_placeholder_count = 0
         try:
             validate_selection(
@@ -1137,8 +1157,9 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                         source_root=source_root,
                         build_dir=build_dir,
                         policy=policy,
-                        base=base,
+                        base=prebuild_snapshot,
                         target=args.target,
+                        reference_label=PREBUILD_SNAPSHOT,
                     )
             full_seconds = 0.0
             if full_build_result in (None, 0):

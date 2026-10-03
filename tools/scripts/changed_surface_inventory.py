@@ -56,8 +56,9 @@ def split_proven_unbuilt_placeholders(
     ``catch_discover_tests`` registers a commandless ``*_NOT_BUILT-*`` test
     until its producer target has run.  A name match alone is not authority:
     require CTest's exact one-property shape and the exact generated include
-    file in that working directory.  Every other missing or malformed command
-    remains an inventory error.
+    file in that working directory.  A registration the authoritative filter
+    excludes is skipped; every other missing or malformed command remains an
+    inventory error.
     """
 
     build_root = build_dir.resolve(strict=True)
@@ -73,6 +74,10 @@ def split_proven_unbuilt_placeholders(
             and all(isinstance(token, str) for token in command)
         ):
             ready.append(test)
+            continue
+        if excluded_from_inventory(test):
+            # Never selected or compared, so its command is not the inventory's
+            # to prove: a validator a host lacks lists no command at all.
             continue
         name = test.get("name")
         match = (
@@ -282,32 +287,28 @@ def _property_records(test: dict[str, Any]) -> list[dict[str, Any]]:
     return records
 
 
+def excluded_from_inventory(test: dict[str, Any]) -> bool:
+    """Whether the authoritative filter drops this registration by name or label."""
+    name = test.get("name")
+    if not isinstance(name, str) or not name:
+        raise InventoryError("CTest registration name must be a nonempty string")
+    if "\n" in name or "\r" in name:
+        raise InventoryError("CTest registration names cannot contain newlines")
+    labels: list[str] = []
+    for prop in _property_records(test):
+        if prop["name"] != "LABELS":
+            continue
+        value = prop["value"]
+        values = value if isinstance(value, list) else [value]
+        if not all(isinstance(label, str) for label in values):
+            raise InventoryError("CTest LABELS must contain strings")
+        labels.extend(values)
+    return bool(re.search(EXCLUDED_NAME_REGEX, name)) or any(
+        re.search(EXCLUDED_LABEL_REGEX, label) for label in labels)
+
+
 def authoritative_tests(tests: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    excluded_names = re.compile(EXCLUDED_NAME_REGEX)
-    excluded_labels = re.compile(EXCLUDED_LABEL_REGEX)
-    kept: list[dict[str, Any]] = []
-    for test in tests:
-        name = test.get("name")
-        if not isinstance(name, str) or not name:
-            raise InventoryError("CTest registration name must be a nonempty string")
-        if "\n" in name or "\r" in name:
-            raise InventoryError("CTest registration names cannot contain newlines")
-        properties = _property_records(test)
-        labels: list[str] = []
-        for prop in properties:
-            if prop["name"] != "LABELS":
-                continue
-            value = prop["value"]
-            values = value if isinstance(value, list) else [value]
-            if not all(isinstance(label, str) for label in values):
-                raise InventoryError("CTest LABELS must contain strings")
-            labels.extend(values)
-        if excluded_names.search(name):
-            continue
-        if any(excluded_labels.search(label) for label in labels):
-            continue
-        kept.append(test)
-    return kept
+    return [test for test in tests if not excluded_from_inventory(test)]
 
 
 def _path_anchor(path: str, source_root: Path, build_dir: Path) -> str | None:
@@ -1521,14 +1522,23 @@ def _build_relative(test: dict[str, Any], command: list[str], build: str) -> str
 
 
 def project_registrations(
-    payload: dict[str, Any], source_root: Path, build_dir: Path
+    payload: dict[str, Any], source_root: Path, build_dir: Path, shape: str = "listing"
 ) -> dict[str, Any]:
     """The configuration-neutral multiset of a ctest listing.
 
     ``incomplete`` lists registrations whose command is missing: an
     unbuilt target, or an unbuilt Catch2 executable's placeholder. A
     projection with any is not ``recordable`` as a base inventory, so a
-    half-built tree can never pin one."""
+    half-built tree can never pin one.
+
+    ``shape="configure"`` folds a built tree to what a configure alone
+    lists, so trees in different build states compare: a discovered case,
+    which ctest lists without a backtrace from the executable's generated
+    include file, collapses to its executable's row like a placeholder, and
+    a registration whose program is in the build tree lists no command, as
+    an unbuilt target does."""
+    if shape not in ("listing", "configure"):
+        raise ValueError(f"unknown projection shape {shape!r}")
     import script_test_inputs as sti  # tools/scripts: the gate-profile filter
 
     source = os.path.realpath(source_root)
@@ -1559,6 +1569,11 @@ def project_registrations(
         placeholder = NOT_BUILT_PLACEHOLDER.match(name)
         generated = registered and os.path.realpath(registered).startswith(build + os.sep)
         location = _build_relative(test, command, build)
+        in_build = bool(command) and os.path.realpath(command[0]).startswith(build + os.sep)
+        # ctest gives every add_test a backtrace; a case it read from a
+        # discovery include file at test time has none.
+        if shape == "configure" and "backtrace" not in test and in_build:
+            generated = True
         if location.split("/", 1)[0] == "examples":
             continue  # an example's own suite: registered only with examples ON
         if placeholder or generated:
@@ -1573,6 +1588,8 @@ def project_registrations(
             continue
         if not command or not command[0]:
             incomplete.append(name)
+        if shape == "configure" and in_build:
+            command = [""]
         program = _neutral(command[0], roots, build_type) if command else ""
         if not program.startswith((sti.BINARY_DIR_TOKEN + "/", SOURCE_DIR_TOKEN + "/")):
             program = os.path.basename(program)
@@ -1603,6 +1620,7 @@ def project_registrations(
     ordered = sorted(rows.items())
     return {
         "schema": REGISTRATION_PROJECTION_SCHEMA,
+        "shape": shape,
         "build_type": build_type,
         "rows": [{"row": json.loads(key), "count": count} for key, count in ordered],
         "row_count": sum(count for _, count in ordered),

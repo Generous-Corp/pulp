@@ -7224,6 +7224,18 @@ base_provisioning_mismatch: <entry> base=... head=...`, so the next provisioning
 gap names itself rather than reading as drift. The receipt records the compared
 `base_inventory_environment` and `base_inventory_linked_externals`.
 
+Registrations are compared in configure shape: a discovered Catch2 case (ctest
+lists it with no backtrace) folds to its executable's row like the
+`*_NOT_BUILT-*` placeholder, and a build-tree program lists no command, as an
+unbuilt one does. A configure-only base cannot represent a built tree, so after
+the full build the tree is compared with its own pre-build snapshot (catching a
+CMake re-run mid-build), never with the base. A registration the authoritative
+filter excludes (`validation`, `slow`, ...) is never proven or required to have
+a command: on m3 the examples' `find_program(PLUGINVAL pluginval)` resolves to a
+doubled path that does not exist, so those tests list no command at all.
+`SelectedLegPipelineTest` drives every gate through the cold, selected-built and
+fully built states; add a state there before a proof run finds it.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued

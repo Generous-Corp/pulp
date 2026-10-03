@@ -567,6 +567,29 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
                     [{"name": name, "properties": []}], build
                 )
 
+    def test_a_commandless_excluded_registration_is_not_the_inventorys_to_prove(self) -> None:
+        # A validator the host lacks (or that find_program resolved to a path
+        # that does not exist) lists no command even after the build. A
+        # registration the authoritative filter drops is never selected or
+        # compared, so it is skipped; the same registration unexcluded refuses.
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            excluded = {
+                "name": "pluginval-PulpGain-VST3",
+                "properties": [
+                    {"name": "LABELS", "value": ["validation", "vst3"]},
+                    {"name": "WORKING_DIRECTORY", "value": str(build)},
+                ],
+            }
+            ready, placeholders = inventory.split_proven_unbuilt_placeholders(
+                [fixture("ready", str(build / "ready")), excluded], build
+            )
+            self.assertEqual([test["name"] for test in ready], ["ready"])
+            self.assertEqual(placeholders, [])
+            unexcluded = {**excluded, "properties": excluded["properties"][1:]}
+            with self.assertRaisesRegex(inventory.InventoryError, "unambiguous command"):
+                inventory.split_proven_unbuilt_placeholders([unexcluded], build)
+
     def test_commandless_direct_test_requires_ctestfile_and_codemodel_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory).resolve()
