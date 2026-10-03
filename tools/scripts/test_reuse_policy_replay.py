@@ -472,6 +472,63 @@ class CodemodelTests(unittest.TestCase):
             g[name]["digest"] = d
         return g
 
+    def version_bump(self):
+        """A VERSION bump as content-keyed digests see it: the CLI and the CLI
+        support library re-key directly; their consumers do not."""
+        def t(kind, deps=(), art=None, digest="1"):
+            return {"type": kind, "digest": digest, "dependencies": list(deps),
+                    "artifacts": [] if art is False else [f"<build>/{art}"]}
+        head = {"pulp-cli": t("EXECUTABLE", ["cli-support"], "tools/cli/pulp-cli"),
+                "cli-support": t("STATIC_LIBRARY", [], "tools/cli/libcli-support.a"),
+                "objs": t("OBJECT_LIBRARY", [], "CMakeFiles/objs.dir/o.cpp.o"),
+                "iface": t("INTERFACE_LIBRARY", [], False),
+                "core": t("STATIC_LIBRARY", [], "core/libcore.a"),
+                "spawner": t("EXECUTABLE", ["pulp-cli", "core"], "test/spawner"),
+                "linker": t("EXECUTABLE", ["cli-support"], "test/linker"),
+                "idle-linker": t("EXECUTABLE", ["cli-support"], "test/idle-linker"),
+                "unrecorded": t("EXECUTABLE", ["cli-support"], "test/unrecorded"),
+                "unrecorded-spawner": t("EXECUTABLE", ["pulp-cli"], "test/unrecorded-spawner"),
+                "obj-user": t("EXECUTABLE", ["objs"], "test/obj-user"),
+                "iface-user": t("EXECUTABLE", ["iface"], "test/iface-user"),
+                "plain": t("EXECUTABLE", ["core"], "test/plain")}
+        group = json.loads(json.dumps(head))
+        for n in ("pulp-cli", "cli-support", "objs", "iface"):
+            group[n]["digest"] = "2"
+        link = {"tools/cli/pulp-cli": {"objects": [], "members": {"tools/cli/libcli-support.a": ["v.cpp.o"]}},
+                "test/spawner": {"objects": ["test/CMakeFiles/spawner.dir/s.cpp.o"], "members": {"core/libcore.a": ["c.o"]}},
+                "test/linker": {"objects": [], "members": {"tools/cli/libcli-support.a": ["v.cpp.o"]}},
+                "test/idle-linker": {"objects": [], "members": {}},
+                "test/obj-user": {"objects": ["CMakeFiles/objs.dir/o.cpp.o"], "members": {}},
+                "test/iface-user": {"objects": [], "members": {}},
+                "test/plain": {"objects": [], "members": {"core/libcore.a": ["c.o"]}}}
+        return head, group, link
+
+    def test_a_version_bump_rekeys_link_consumers_not_spawners(self):
+        head, group, link = self.version_bump()
+        rekeyed, _ = rrc.codemodel_rekeyed(head, group, link=link, link_edges_only=True)
+        self.assertEqual(rekeyed, {"tools/cli/pulp-cli", "test/linker", "test/unrecorded", "test/obj-user",
+                                   "test/iface-user"})
+        # spawners: only a run-time edge to the CLI, recorded link or not;
+        # idle-linker: depends on the library but its link pulled nothing
+        # from it; plain: unrelated.
+        legacy, _ = rrc.codemodel_rekeyed(head, group, link=link)
+        self.assertEqual(legacy - rekeyed, {"test/spawner", "test/unrecorded-spawner", "test/idle-linker"})
+
+    def test_a_spawner_of_a_rekeyed_cli_reruns_without_being_rebuilt(self):
+        head, group, link = self.version_bump()
+        exes = {a["artifacts"][0].removeprefix("<build>/") for a in group.values()
+                if a["type"] == "EXECUTABLE"}
+        test_map = {"spawns-cli": {"executables": ["test/spawner"], "sources": []},
+                    "links-cli": {"executables": ["test/linker"], "sources": []},
+                    "plain": {"executables": ["test/plain"], "sources": []}}
+        out = rrc.classify_source_keys(["CMakeLists.txt"], list(test_map), test_map, {}, {}, set(), exes,
+                                       rrc.codemodel_rekeyed(head, group, link=link, link_edges_only=True),
+                                       generated_keyed=True, spawns=SpawnIndex(group),
+                                       spawn_scan=rrc.spawn_scan_of({"executables_scanned_for": ["spawns"],
+                                                                     "executables_scanned": [], "executables": {}}))
+        self.assertEqual(out["cmake-codemodel"]["run"], ["links-cli", "spawns-cli"])
+        self.assertEqual(out["cmake-codemodel"]["executables_rebuilt"], 1)   # the linker, not the spawner
+
     def test_unchanged_codemodel_rekeys_nothing(self):
         self.assertEqual(rrc.codemodel_rekeyed(self.HEAD, self.group()), (set(), {"test/a", "test/b"}))
 
@@ -947,11 +1004,11 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual(keys["g2"]["cmake-codemodel-recorded"]["unreached_changed_binaries"], [])
 
     def annotate_v2(self, drift, head_schema, group_schema, declared=("test/group-c",), headers="ninja-deps",
-                    legacy=False):
+                    legacy=False, legacy_propagation=False):
         """One pair whose head and group records carry the given codemodel
         schemas; the group declares `declared` commit-bound."""
         import gzip
-        corpus = Path(self.tmp) / f"v2-{head_schema}-{group_schema}-{headers}-{legacy}-{len(drift)}"
+        corpus = Path(self.tmp) / f"v2-{head_schema}-{group_schema}-{headers}-{legacy}-{legacy_propagation}-{len(drift)}"
         rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
         rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
@@ -969,9 +1026,31 @@ class RecordedGraphTests(unittest.TestCase):
             with gzip.open(cache / f"{run_id}.json.gz", "wt") as fh:
                 json.dump(rec, fh)
         result = rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
-                                          {}, None, mock.Mock(), legacy)
+                                          {}, None, mock.Mock(), legacy, legacy_propagation)
         keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"]
         return result, keys
+
+    def test_content_keyed_pairs_propagate_only_along_link_edges(self):
+        v1, v2 = "pulp-codemodel-digest/v1", "pulp-codemodel-digest/v2"
+        seen, given = [], []
+        real, real_classify = rrc.codemodel_rekeyed, rrc.classify_source_keys
+
+        def spy(*args, **kw):
+            out = real(*args, **kw)
+            seen.append((kw.get("link_edges_only", False), out))
+            return out
+
+        def classify_spy(*args, **kw):
+            given.append(args[7])
+            return real_classify(*args, **kw)
+        for head_schema, legacy_propagation, expect in ((v2, False, True), (v2, True, False), (v1, False, False)):
+            seen.clear(), given.clear()
+            with mock.patch.object(rrc, "codemodel_rekeyed", spy), \
+                    mock.patch.object(rrc, "classify_source_keys", classify_spy):
+                self.annotate_v2(("docs/a.md",), head_schema, v2, legacy_propagation=legacy_propagation)
+            recorded = seen[1:]  # the first call is the graph-path variant, which has no link record
+            self.assertTrue(recorded and all(x is expect for x, _ in recorded), (head_schema, legacy_propagation))
+            self.assertIs(given[1], recorded[0][1])  # the recorded variants read the link-aware re-key
 
     def test_content_keyed_records_retire_the_root_cmakelists_rule(self):
         v2 = "pulp-codemodel-digest/v2"

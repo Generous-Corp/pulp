@@ -747,6 +747,8 @@ def main(argv: list[str]) -> int:
     k.add_argument("--runs", type=Path, help="JSON list of group runs ([{run: id}] or ids) to restrict to")
     k.add_argument("--codemodel", action="store_true",
                    help="also write the cmake-codemodel variant from each job's recorded reuse-record codemodel")
+    k.add_argument("--legacy-propagation", action="store_true",
+                   help="propagate a codemodel change to every dependent, link or run-time edge alike")
     k.add_argument("--legacy-rules", action="store_true",
                    help="keep the root-CMakeLists and learned commit-bound rules even for content-keyed (v2) records")
     k.add_argument("--repository", default="Generous-Corp/pulp")
@@ -797,7 +799,8 @@ def main(argv: list[str]) -> int:
             only = {str(x["run"] if isinstance(x, dict) else x) for x in json.loads(a.runs.read_text())}
         gh = rrc.GitHub(a.repository, a.token) if a.codemodel else None
         result = rrc.annotate_source_keys(a.corpus, a.repo, graph, a.source_root or build_dir.parent,
-                                          build_dir, doc["tests"], only, gh, a.legacy_rules)
+                                          build_dir, doc["tests"], only, gh, a.legacy_rules,
+                                          a.legacy_propagation)
         print(json.dumps(result))
         return 0 if result["pairs_annotated"] else 1
 

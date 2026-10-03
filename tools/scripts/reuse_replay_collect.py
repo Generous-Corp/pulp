@@ -981,31 +981,77 @@ def environment_bound(mapped: dict) -> bool:
     return bool(mapped.get("resource_locks")) or bool(ENVIRONMENT_LABELS & set(mapped.get("labels") or []))
 
 
+LIBRARY_TYPES = frozenset({"STATIC_LIBRARY", "OBJECT_LIBRARY", "SHARED_LIBRARY", "INTERFACE_LIBRARY"})
+
+
 def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict],
-                      types: tuple[str, ...] = ("EXECUTABLE",)) -> tuple[set[str], set[str]]:
+                      types: tuple[str, ...] = ("EXECUTABLE",),
+                      link: dict[str, dict] | None = None,
+                      link_edges_only: bool = False) -> tuple[set[str], set[str]]:
     """(artifacts re-keyed by a codemodel change, artifacts the group's
     codemodel describes), both relative to the build dir, for targets of
     `types` (executables by default).
 
     A target is re-keyed when its digest differs from the head job's or it
-    is new, and so is every target that depends on one, transitively: the
-    digest names its dependencies but does not cover their content."""
+    is new. By default so is every target that depends on one, transitively:
+    the digest names its dependencies but does not cover their content.
+
+    With `link_edges_only` (content-keyed digests, which already cover each
+    target's own compile inputs and generated headers) a change travels only
+    where bytes do: from a library to the libraries that depend on it, and
+    on to a target whose recorded link (`link`) pulled that library's
+    archive members or objects, or, with no recorded link, that depends on
+    it. A dependency on an executable, module or utility target is a run-time
+    or ordering edge: the dependent is not rebuilt for it (the spawn closure
+    re-runs its tests instead)."""
     changed = {n for n, t in group.items() if n not in head or head[n].get("digest") != t.get("digest")}
     dependents: dict[str, set[str]] = {}
     for n, t in group.items():
         for d in t.get("dependencies") or []:
             dependents.setdefault(d, set()).add(n)
-    stack = list(changed)
-    while stack:
-        for n in dependents.get(stack.pop(), ()):
-            if n not in changed:
-                changed.add(n)
-                stack.append(n)
 
     def exes(names: Iterable[str]) -> set[str]:
         return {a.removeprefix("<build>/") for n in names for a in group[n].get("artifacts") or []
                 if group[n].get("type") in types}
-    return exes(changed), exes(group)
+    if not link_edges_only:
+        stack = list(changed)
+        while stack:
+            for n in dependents.get(stack.pop(), ()):
+                if n not in changed:
+                    changed.add(n)
+                    stack.append(n)
+        return exes(changed), exes(group)
+    libs = {n for n in changed if group[n].get("type") in LIBRARY_TYPES}
+    stack = list(libs)
+    while stack:
+        for n in dependents.get(stack.pop(), ()):
+            if n not in libs and group[n].get("type") in LIBRARY_TYPES:
+                libs.add(n)
+                stack.append(n)
+    archives = {a.removeprefix("<build>/") for n in libs for a in group[n].get("artifacts") or []}
+    object_dirs = tuple(f"CMakeFiles/{n}.dir/" for n in libs if group[n].get("type") == "OBJECT_LIBRARY")
+    # A library with no artifact (an interface library) reaches its
+    # dependents only through their own digests; count them anyway.
+    bodiless = {n for n in libs if not group[n].get("artifacts")}
+    rekeyed = set(changed)
+    for n, t in group.items():
+        if n in rekeyed or t.get("type") not in types:
+            continue
+        deps = set(t.get("dependencies") or [])
+        if deps & bodiless:
+            rekeyed.add(n)
+            continue
+        recs = [link.get(a.removeprefix("<build>/")) for a in t.get("artifacts") or []] if link else [None]
+        for rec in recs:
+            if rec is None:
+                hit = bool(deps & libs)
+            else:
+                hit = bool(set(rec.get("members") or {}) & archives) or any(
+                    d in o for o in rec.get("objects") or [] for d in object_dirs)
+            if hit:
+                rekeyed.add(n)
+                break
+    return exes(rekeyed), exes(group)
 
 
 def spawn_scan_of(doc: dict | None, kind: str = "spawns") -> dict | None:
@@ -1230,7 +1276,8 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                         "spawnable_fallback": spawn_all, "fallback_only_tests": fallback_only,
                         "fallback_only_tests_legacy": fallback_only_legacy,
                         "spawn_scanned": spawn_scan is not None, "spawn_undeclared_tests": spawn_undeclared,
-                        "data_scanned": data_scan is not None}
+                        "data_scanned": data_scan is not None,
+                        "executables_rekeyed": len(rekeyed & all_executables) if exact_cmake else None}
         if codemodel is not None:
             # The same counts over the executables the recorded build
             # describes, where the variants can be compared exactly, and for
@@ -1358,7 +1405,8 @@ def load_graph(build_dir: Path | None, pickle_path: Path | None):
 
 def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root: Path, graph_build_dir: Path,
                          test_map: dict[str, dict], only_runs: set[str] | None = None,
-                         gh: "GitHub | None" = None, legacy_rules: bool = False) -> dict:
+                         gh: "GitHub | None" = None, legacy_rules: bool = False,
+                         legacy_propagation: bool = False) -> dict:
     """Write the source-key variants into each pair that has a valid head run
     with per-test records; with `gh`, also the cmake-codemodel variant for
     pairs whose head and group jobs both recorded a codemodel. Returns counts
@@ -1449,19 +1497,26 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             v2 = (not legacy_rules and content_keyed(head_record) and content_keyed(group_record)
                   and group_record.get("declared_commit_bound") is not None)
             bound = frozenset(group_record["declared_commit_bound"]) if v2 else commit_bound_set
+            # Content-keyed digests cover each target's own inputs, so a
+            # change re-keys only what links its bytes; a run-time edge
+            # re-runs through the spawn closure instead.
+            split = v2 and not legacy_propagation
+            recorded_codemodel = codemodel_rekeyed(head_cm, group_record["targets"], link=link,
+                                                   link_edges_only=split)
             spawns = SpawnIndex(group_record["targets"])
             # A module is rebuilt when its codemodel entry moved, or when the
             # drift reaches its recorded link members; a record from before
             # modules were recorded leaves the Ninja graph's build of it, and
             # (unknown to that graph) any code drift.
-            mods_rekeyed, modules = codemodel_rekeyed(head_cm, group_record["targets"], ("MODULE_LIBRARY",))
+            mods_rekeyed, modules = codemodel_rekeyed(head_cm, group_record["targets"], ("MODULE_LIBRARY",),
+                                                      link=link, link_edges_only=split)
             code_drift = any(f.endswith(CODE_SUFFIXES) for f in drift)
             linked_rebuilt = recorded_rebuilt(link, drift, index)
             rebuilt_modules = {m for m in modules if m in mods_rekeyed or (
                 m in linked_rebuilt if m in link else m in rebuilt if m in built else code_drift)}
             recorded = classify_source_keys(
                 drift, test_ids, recorded_map, head_entries, group_entries,
-                linked_rebuilt, set(link), codemodel, bound, generated_keyed=v2,
+                linked_rebuilt, set(link), recorded_codemodel, bound, generated_keyed=v2,
                 spawns=spawns, spawnable=frozenset(set(link) - set(group_record["executables"].values())),
                 spawn_scan=spawn_scan_of(doc_at(group["checkout_sha"])),
                 data_scan=spawn_scan_of(doc_at(group["checkout_sha"]), "data"),
