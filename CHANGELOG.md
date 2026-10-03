@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09041"></a>
+## [0.904.1] - 2026-10-03
+
+- release/version bump ([#9431](https://github.com/Generous-Corp/pulp/pull/9431))
+- codex/neural integration 20261003 ([#9331](https://github.com/Generous-Corp/pulp/pull/9331))
+
+<a id="v09040"></a>
+## [0.904.0] - 2026-10-03
+
+- release/version bump ([#9429](https://github.com/Generous-Corp/pulp/pull/9429))
+- codex/android skia pin alignment 20261003 ([#9427](https://github.com/Generous-Corp/pulp/pull/9427))
+- codex/neural package a gatefix 20261003 ([#9415](https://github.com/Generous-Corp/pulp/pull/9415))
+- codex/neural package b 20261003 ([#9412](https://github.com/Generous-Corp/pulp/pull/9412))
+- codex/neural package h 20261003 ([#9413](https://github.com/Generous-Corp/pulp/pull/9413))
+
 <a id="v09030"></a>
 ## [0.903.0] - 2026-10-03
 
@@ -9633,6 +9648,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.904.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.1
+[0.904.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.0
 [0.903.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.903.0
 [0.902.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.902.0
 [0.901.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.901.0
