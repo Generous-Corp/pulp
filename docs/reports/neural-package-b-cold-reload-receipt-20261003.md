@@ -17,6 +17,13 @@ sample rate, and retained-state schema/version. The test then performs a fresh
 Unix process reload, verifies the installed metadata and every asset, and only
 then prepares and publishes a `NeuralProcessor` instance.
 
+All manifest and installed-asset verification in this receipt is control-plane
+admission work; no filesystem, hashing, JSON, or process-reload operation is
+performed on the realtime callback path. The test binds the generic
+`MicroTcnModel` only to prove the admission-to-prepare transition. It does not
+prove that an arbitrary model implementation, architecture, or provider can
+consume the manifest without its own compatibility and parity evidence.
+
 ## Evidence
 
 ```text
@@ -29,4 +36,3 @@ The focused cases include same-size hash tampering, truncated-byte tampering,
 sidecar schema/metadata rejection, and install-metadata → fresh-process reload
 → manifest verification → processor prepare/publish. The test also verifies a
 two-asset bundle (weights plus state) before allowing preparation.
-
