@@ -28,6 +28,11 @@ struct NoteDelaySpec {
     timebase::TickDuration interval{timebase::kTicksPerQuarter / 4};
     std::int64_t milliseconds = 250;
     std::uint8_t repeats = 0;
+    /// Gate length for generated echoes as a percentage of their delay stride.
+    /// Zero preserves the original source-held gate policy: the authored
+    /// release determines each echo's length. Values 1..100 make the gate
+    /// authorable and keep it independent of the source note's release.
+    std::uint8_t gate_percent = 0;
     std::uint8_t velocity_decay_percent = 70;
     std::int8_t transpose_semitones = 0;
     constexpr auto operator<=>(const NoteDelaySpec&) const = default;
@@ -49,7 +54,7 @@ class NoteDelay {
     }
 
     static constexpr bool valid_spec(NoteDelaySpec spec) noexcept {
-        if (spec.velocity_decay_percent > 100)
+        if (spec.gate_percent > 100 || spec.velocity_decay_percent > 100)
             return false;
         return spec.sync == NoteDelaySync::Division ? spec.interval.value > 0
                                                     : spec.milliseconds > 0;
@@ -68,6 +73,17 @@ class NoteDelay {
         return spec.sync == NoteDelaySync::Division
                    ? note_schedule::samples_for_duration(block, spec.interval)
                    : note_schedule::samples_for_milliseconds(block, spec.milliseconds);
+    }
+
+    /// Length of an authorable echo gate. A zero result means the legacy
+    /// source-held policy is active and the release remains armed until the
+    /// authored source release arrives.
+    static std::int64_t repeat_gate(NoteDelaySpec spec, const Block& block) noexcept {
+        if (spec.gate_percent == 0)
+            return 0;
+        const auto stride = repeat_stride(spec, block);
+        return std::max<std::int64_t>(
+            1, (stride * static_cast<std::int64_t>(spec.gate_percent)) / 100);
     }
 
     /// Absolute sample of repeat `index` (1-based; index 0 is the dry note).
@@ -240,6 +256,7 @@ class NoteDelay {
     void schedule_echoes(const MidiEvent& event, std::int64_t absolute, const Block& block,
                          MidiUtilityProcessReport& report) noexcept {
         const auto stride = repeat_stride(spec_, block);
+        const auto gate = repeat_gate(spec_, block);
         const auto group = group_for(event.channel(), event.note());
         // A re-attack before the previous release ends the earlier press's
         // echoes here, using the length that press had actually been held. They
@@ -269,7 +286,9 @@ class NoteDelay {
             }
             slot->start = utility_detail::saturating_sample_add(
                 absolute, stride * static_cast<std::int64_t>(index));
-            slot->end = note_schedule::kArmedEnd;
+            slot->end = gate == 0
+                            ? note_schedule::kArmedEnd
+                            : utility_detail::saturating_sample_add(slot->start, gate);
             slot->channel = event.channel();
             slot->note = *pitch;
             slot->velocity = repeat_velocity(spec_, event.velocity(), index);

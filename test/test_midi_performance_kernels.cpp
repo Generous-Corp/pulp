@@ -719,12 +719,49 @@ TEST_CASE("note delay rolls an armed echo back to the authored length",
         REQUIRE(length == kHeld);
 }
 
+TEST_CASE("note delay accepts an authorable echo gate",
+          "[midi][note-delay][gate]") {
+    // A non-zero gate is measured from the authored delay stride, not from the
+    // source note's release. The source release arrives before the first echo,
+    // so this also proves the fixed gate does not inherit source-held length.
+    constexpr std::int64_t kHeld = 1'500;
+    const std::array input{on(0, 60, 100), off(kHeld, 60)};
+    midi::NoteDelaySpec spec{};
+    spec.interval = {kSixteenthTicks};
+    spec.repeats = 2;
+    spec.gate_percent = 25;
+    spec.velocity_decay_percent = 100;
+    midi::NoteDelay<> delay{spec};
+    REQUIRE(midi::NoteDelay<>::repeat_gate(spec, constant_block(0, 512)) == 1'500);
+    auto out = render(
+        [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
+            delay.process(in, o, constant_block(start, count));
+        },
+        15'000, kRaggedBlocks, input);
+
+    std::vector<std::int64_t> attacks;
+    std::vector<std::int64_t> releases;
+    for (const auto& event : out) {
+        if (event.attack() && event.event.note() == 60)
+            attacks.push_back(event.sample);
+        if (event.release() && event.event.note() == 60)
+            releases.push_back(event.sample);
+    }
+    REQUIRE(attacks == std::vector<std::int64_t>{0, 6'000, 12'000});
+    REQUIRE(releases == std::vector<std::int64_t>{1'500, 7'500, 13'500});
+    EventLedger ledger;
+    for (const auto& event : out)
+        ledger.feed(event);
+    REQUIRE(ledger.balanced());
+}
+
 TEST_CASE("note delay is invariant under block partition", "[midi][note-delay][parity]") {
     const std::array input{on(0, 60, 100), off(2'500, 60)};
     auto run = [&](std::span<const std::int32_t> partitions) {
         midi::NoteDelaySpec spec{};
         spec.interval = {kSixteenthTicks};
         spec.repeats = 4;
+        spec.gate_percent = 37;
         spec.velocity_decay_percent = 75;
         spec.transpose_semitones = -2;
         midi::NoteDelay<> delay{spec};
@@ -1372,6 +1409,9 @@ TEST_CASE("every MIDI utility kernel rejects a spec it cannot honour", "[midi][p
     delay.sync = midi::NoteDelaySync::Milliseconds;
     delay.milliseconds = 0;
     REQUIRE_FALSE(midi::NoteDelay<>::valid_spec(delay));
+    delay = {};
+    delay.gate_percent = 101;
+    REQUIRE_FALSE(midi::NoteDelay<>::valid_spec(delay)); // gate > 100 refuses
 
     midi::StrumSpec strum{};
     strum.window_samples = -1;
