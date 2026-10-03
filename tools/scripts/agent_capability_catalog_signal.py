@@ -2629,4 +2629,18 @@ EXPORTS = [
                        "binding": "pulp::signal::SpectralCrossSynthesisT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
+    capability(
+        key="signal.parametric-eq", domain="signal", status="experimental", rt_class="mixed",
+        summary="Bounded arbitrary-band parametric equalizer with transactional configuration and response analysis.",
+        lifecycle={"construction": "control", "prepare": "control", "process": "audio", "reset": "audio", "release": "control"},
+        state_model="Fixed-capacity double-buffered SOS cascades with bounded transition state; rejected configurations preserve the active cascade.",
+        seed_model="none", input_domain="scalar audio and bounded ordered EQ bands", output_domain="sample-synchronous filtered audio",
+        units=["hertz", "decibels", "Q", "samples", "linear amplitude"], latency="zero additional algorithmic latency",
+        tail="bounded by the configured SOS state", scheduling="sample-synchronous",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "invariant", "platform_scope": "same_build", "transport_history": "irrelevant"},
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/parametric_eq.hpp",
+                          qualified_name="pulp::signal::ParametricEqT<float>", target="Pulp::signal",
+                          header_fingerprint="sha256:a213fcce6ab12b3e62108af2ad99a414e875ba6245969ff1b7c037d67ab4151a")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::ParametricEqT<float>", "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
 ]
