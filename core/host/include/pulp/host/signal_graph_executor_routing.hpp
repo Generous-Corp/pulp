@@ -267,6 +267,9 @@ struct ExecutorSnapshotBinders {
     // transport-sensitive (consistent with GraphNode::transport_sensitive
     // resolved at compile).
     std::function<const CustomNodeTransportProcessFn*(NodeId)> custom_transport_for;
+    // Event-aware custom callback for a Custom node whose type reads events.
+    // Resolved from the same snapshot map the reference walk reads, so the two
+    // execution paths cannot disagree about which nodes consume events.
     std::function<const CustomNodeEventProcessFn*(NodeId)> custom_event_for;
     // Prepare-stable intrinsic latency for a resolved Custom node, resolved from
     // CustomNodeType once at compile/prepare (the caller has already evaluated
@@ -312,8 +315,12 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              std::vector<CustomBindingContext>* custom_ctx = nullptr);
 
 // Positional-resolver forwarder onto the binder-struct overload above, kept for
-// call sites that have not migrated yet. Each argument maps to the
-// same-named ExecutorSnapshotBinders field and the semantics are identical.
+// call sites that have not migrated yet. Each argument maps to the same-named
+// ExecutorSnapshotBinders field, but the semantics are NOT identical: this
+// signature carries no `custom_event_for`, so a Custom node whose type declares
+// the event lane is built event-UNAWARE through here and silently reads no
+// events. It fails open, not closed. Use the binder-struct overload when a
+// snapshot may contain an event-aware Custom node.
 // Prefer the ExecutorSnapshotBinders overload for new code: two same-shaped
 // resolvers cannot be silently swapped there.
 bool build_executor_snapshot(std::span<const GraphNode> nodes,

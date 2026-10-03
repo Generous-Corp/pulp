@@ -3,6 +3,7 @@
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/format/process_block.hpp>
+#include <pulp/midi/block_ops.hpp>
 #include <pulp/graph/graph_runtime_buffer_assignment.hpp>
 
 #include <algorithm>
@@ -202,9 +203,7 @@ bool custom_binding(fmt::ProcessBlock& block,
             // Fully, matching the per-node clear a plugin node gets: a partial
             // clear would leave stale sysex or UMP for the executor's post-process
             // drop check to read.
-            ctx.node_midi_out->clear();
-            ctx.node_midi_out->clear_sysex();
-            if (auto* ump = ctx.node_midi_out->ump()) ump->clear();
+            midi::clear_midi_block(*ctx.node_midi_out);
         }
         const CustomNodeEventBlock events{ctx.node_midi_in, ctx.node_midi_out};
         cctx->process_events(out, in, static_cast<int>(frames), events);
