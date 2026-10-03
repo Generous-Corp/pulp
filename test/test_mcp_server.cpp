@@ -2225,6 +2225,16 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
 #endif
 }
 
+// A minimal Pulp project root for pulp_status. Run from the checkout, the
+// tool lists core/ and test/ and asks git for the branch, so the test would
+// read the whole tree; these cases only need it to find a project.
+static std::filesystem::path make_status_project(const std::filesystem::path& dir) {
+    std::filesystem::create_directories(dir / "core");
+    std::filesystem::create_directories(dir / "test");
+    std::ofstream(dir / "CMakeLists.txt") << "project(StatusFixture VERSION 1.0.0)\n";
+    return dir;
+}
+
 TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
     TempDir home;
     {
@@ -2235,7 +2245,8 @@ TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
     ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
     ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
     ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
-    ScopedCurrentPath cwd(repo_root_path());
+    TempDir project;
+    ScopedCurrentPath cwd(make_status_project(project.path));
 
     auto response = handle_request(tool_call("21", "pulp_status"));
     require_contains(response,
@@ -2320,7 +2331,8 @@ TEST_CASE("temp-repo git stays isolated despite an inherited GIT_DIR",
 
 TEST_CASE("MCP status resolves import-design defaults from config and env",
           "[mcp][tools][import-design]") {
-    ScopedCurrentPath cwd(repo_root_path());
+    TempDir project;
+    ScopedCurrentPath cwd(make_status_project(project.path));
 
     SECTION("built-ins stay live and js when no config or env is present") {
         TempDir home;

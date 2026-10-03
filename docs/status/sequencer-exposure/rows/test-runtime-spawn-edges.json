@@ -29,7 +29,8 @@
       "path": "test/test_mcp_server.cpp",
       "needles": [
         "TEST_CASE(\"pulp audio shell-outs say so when no CLI is there to run\"",
-        "require_contains(response, kCompareRanMarker);"
+        "require_contains(response, kCompareRanMarker);",
+        "static std::filesystem::path make_status_project("
       ]
     },
     {
