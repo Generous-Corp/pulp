@@ -219,6 +219,16 @@ class AffectedSetTests(unittest.TestCase):
         r = self.compiled([ats.SCRIPT_INPUTS_LIST], data)                  # the list itself moved
         self.assertEqual(r["compiled_selected_by_data"], 2, r)
 
+    def test_creating_an_absent_path_reselects_its_prober(self) -> None:
+        # (A root file no edge reads already selects everything; one under
+        # test/ is left to the declared inputs, which is what this proves.)
+        data = {"pulp-test-a": {"kind": "compiled", "data": "declared",
+                                "inputs": ["test/fixtures/a", "!test/fixtures/probe.lock"]}}
+        r = self.compiled(["test/fixtures/probe.lock"], data)               # the probed file appears
+        self.assertEqual(r["compiled_selected_by_data"], 2, r)
+        r = self.compiled(["test/fixtures/other.lock"], data)               # a different path
+        self.assertEqual(r["compiled_selected_by_data"], 0, r)
+
     def test_undeclared_compiled_data_is_never_skipped(self) -> None:
         data = {"pulp-test-b": {"kind": "compiled", "data": "undeclared", "inputs": []}}
         r = self.compiled(["docs/guide.md"], data)                         # nothing any graph reads

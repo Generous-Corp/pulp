@@ -229,6 +229,9 @@ def load_script_inputs(source_root: Path) -> dict[str, list[str]]:
 
 
 def declared_hit(inputs: list[str], changed: list[str]) -> bool:
+    # `!path` is a path the test probes for and expects missing
+    # (pulp_test_data ABSENT); any change to it can only be its creation.
+    inputs = [i[1:] if i.startswith("!") else i for i in inputs]
     for f in changed:
         for i in inputs:
             if f == i or f.startswith(i.rstrip("/") + "/"):
