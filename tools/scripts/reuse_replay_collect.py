@@ -1009,13 +1009,43 @@ def spawn_scan_of(doc: dict | None, kind: str = "spawns") -> dict | None:
     if not doc or kind not in (doc.get("executables_scanned_for") or []) \
             or not isinstance(doc.get("executables_scanned"), list):
         return None
-    return {"entries": dict(doc.get("executables") or {}), "scanned": frozenset(doc["executables_scanned"])}
+    entries = dict(doc.get("executables") or {})
+    if kind == "data" and not data_scan_saw_readers(entries):
+        return None
+    return {"entries": entries, "scanned": frozenset(doc["executables_scanned"])}
+
+
+# A data scan that finds no reads in an executable is trusted only when it
+# demonstrably detects the readers it already knows: this share of the
+# executables with declared reads must carry a source the scan itself
+# matched (`detected_sources`), or every executable falls to the broad rule.
+DATA_SCAN_MIN_DETECTED = 0.85
+
+
+def data_scan_saw_readers(entries: dict[str, dict]) -> bool:
+    """Whether a data scan detected its known readers; a list that does not
+    record what the scan matched cannot show it."""
+    declared = [e for e in entries.values() if e.get("data") == "declared"]
+    if not declared or any("detected_sources" not in e for e in declared):
+        return False
+    seen = sum(1 for e in declared if e["detected_sources"])
+    return seen / len(declared) >= DATA_SCAN_MIN_DETECTED
 
 
 def _scan_entry(executable: str, scan: dict) -> tuple[dict | None, bool]:
     name = os.path.basename(executable)
     name = name[:-4] if name.endswith(".exe") else name
     return scan["entries"].get(name), name in scan["scanned"]
+
+
+def recorded_outputs(head_bins: dict[str, str] | None, group_bins: dict[str, str] | None,
+                     link: Iterable[str]) -> tuple[frozenset[str], frozenset[str]] | None:
+    """(executables both jobs recorded a hash for, those whose hash differs),
+    or None when either job recorded none."""
+    if head_bins is None or group_bins is None:
+        return None
+    hashed = frozenset(e for e in link if e in head_bins and e in group_bins)
+    return hashed, frozenset(e for e in hashed if head_bins[e] != group_bins[e])
 
 
 def data_hit(executable: str, scan: dict | None, drift: list[str], data: list[str]) -> bool:
@@ -1066,6 +1096,7 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                          spawnable: frozenset[str] = frozenset(),
                          spawn_scan: dict | None = None,
                          data_scan: dict | None = None,
+                         outputs: tuple[frozenset[str], frozenset[str]] | None = None,
                          modules: frozenset[str] = frozenset(),
                          rebuilt_modules: frozenset[str] = frozenset()) -> dict[str, dict]:
     """Per variant: the tests that must run and the share of executables rebuilt.
@@ -1104,14 +1135,21 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
     # project(VERSION) reaches generated headers) re-keys everything; with
     # them the digests re-key exactly the consumers.
     stamped = bool(CONFIGURE_STAMP_PATHS & set(drift)) and not generated_keyed
-    variants = SOURCE_KEY_VARIANTS + (("cmake-codemodel", "manifest-data") if codemodel is not None else ())
+    variants = SOURCE_KEY_VARIANTS + (("cmake-codemodel", "manifest-data") if codemodel is not None else ()) \
+        + (("output-key",) if codemodel is not None and outputs is not None else ())
+    hashed, changed = outputs or (frozenset(), frozenset())
     for variant in variants:
         # manifest-data is cmake-codemodel with the data rule scoped to each
         # executable's data manifest entry instead of every compiled test.
-        exact_cmake = variant in ("cmake-codemodel", "manifest-data")
-        strict = variant in ("strict-data", "cmake-codemodel", "manifest-data")
+        # output-key is manifest-data keyed on outputs: an executable whose
+        # recorded bytes are the same in both jobs is not rebuilt, whatever
+        # its sources or codemodel did; one without a recorded hash in both
+        # keeps the source key.
+        exact_cmake = variant in ("cmake-codemodel", "manifest-data", "output-key")
+        strict = variant in ("strict-data", "cmake-codemodel", "manifest-data", "output-key")
+        by_output = variant == "output-key"
         reads = (lambda exes: any(data_hit(e, data_scan, drift, data) for e in exes)) \
-            if variant == "manifest-data" else (lambda exes: bool(data))
+            if variant in ("manifest-data", "output-key") else (lambda exes: bool(data))
         # Every executable this variant rebuilds, before narrowing to the
         # ones the group's tests run: a spawned tool counts too.
         if exact_cmake:
@@ -1121,6 +1159,9 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
             rebuilt_all = all_executables if cmake else rebuilt | commit_bound
         else:
             rebuilt_all = set(rebuilt)
+        if by_output:
+            rebuilt_all = (rebuilt_all - hashed) | changed
+        direct = rebuilt_all if by_output else rebuilt
         modules_rebuilt = set(modules) if (pins or stamped or (cmake and not exact_cmake)) else set(rebuilt_modules)
         runtime_rebuilt = rebuilt_all | modules_rebuilt
         # A rebuilt program some test may reach without an edge: tests the
@@ -1137,6 +1178,12 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
         cmake_hit = (lambda exes: pins or stamped or bool(set(exes) & rekeyed)
                      or (cmake and not set(exes) <= described)) if exact_cmake \
             else (lambda exes: cmake or bool(set(exes) & commit_bound))
+        if by_output:
+            # The bytes answer for a hashed executable; the CMake rules only
+            # for the rest.
+            source_hit = cmake_hit
+            cmake_hit = (lambda exes: any(e not in hashed for e in exes)
+                         and source_hit([e for e in exes if e not in hashed]))
         run: list[str] = []
         for name in group_tests:
             mapped = test_map.get(name) or {}
@@ -1145,7 +1192,7 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                 run.append(name)
             elif exes:
                 keyed = (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or reads(exes)))
-                         or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or []) or spawn_hit(exes))
+                         or set(exes) & direct or drift_set & set(mapped.get("sources") or []) or spawn_hit(exes))
                 statuses = {spawn_status(e, spawn_scan) for e in exes} if strict else set()
                 undeclared = "undeclared" in statuses
                 fallback = spawn_all and "unknown" in statuses
@@ -1411,7 +1458,8 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                 spawns=spawns, spawnable=frozenset(set(link) - set(group_record["executables"].values())),
                 spawn_scan=spawn_scan_of(doc_at(group["checkout_sha"])),
                 data_scan=spawn_scan_of(doc_at(group["checkout_sha"]), "data"),
-                modules=frozenset(modules), rebuilt_modules=frozenset(rebuilt_modules))
+                modules=frozenset(modules), rebuilt_modules=frozenset(rebuilt_modules),
+                outputs=recorded_outputs(head_record["binaries"], group_record["binaries"], link))
             test_exes = set(group_record["executables"].values())
             spawned_by_tests = {d for e in test_exes for d in spawns.closure(e)}
             with_v2 += int(v2)
@@ -1419,7 +1467,7 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             # The executable-level control: every executable whose recorded
             # bytes differ between the head and group jobs must be rebuilt.
             head_bins, group_bins = head_record["binaries"], group_record["binaries"]
-            for variant in ("strict-data", "cmake-codemodel", "manifest-data"):
+            for variant in [v for v in ("strict-data", "cmake-codemodel", "manifest-data", "output-key") if v in recorded]:
                 if head_bins is not None and group_bins is not None:
                     both = (set(head_bins) & set(group_bins) & set(link))
                     changed = {e for e in both if head_bins[e] != group_bins[e]}
@@ -1438,6 +1486,8 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             pair["source_key"]["strict-data-recorded"] = recorded["strict-data"]
             pair["source_key"]["cmake-codemodel-recorded"] = recorded["cmake-codemodel"]
             pair["source_key"]["manifest-data-recorded"] = recorded["manifest-data"]
+            if "output-key" in recorded:
+                pair["source_key"]["output-key-recorded"] = recorded["output-key"]
             with_recorded += 1
         pair["source_key_head_run_id"] = head_row["run_id"]
         done += 1
