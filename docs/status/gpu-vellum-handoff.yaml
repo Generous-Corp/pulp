@@ -2759,8 +2759,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "2db12668cc4a180c1548d51dcc9f3b6ae3d40213",
-          "object_id": "afaa1734e14c07053d2e39cd1eb369b2ae401a93",
+          "revision": "0c5ee7404a79570ecc21317c61d1fe7f9bf7a53b",
+          "object_id": "d5a78629a0cbd3fee5ff1e537362dbb214703092",
           "object_type": "blob"
         },
         {
