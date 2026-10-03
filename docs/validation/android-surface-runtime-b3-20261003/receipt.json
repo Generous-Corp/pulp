@@ -113,16 +113,17 @@
   "blockers": [
     "Android Studio JBR 25.0.3 remains incompatible with this Gradle/Kotlin toolchain (IllegalArgumentException: 25.0.3); OpenJDK 17 builds successfully.",
     "Surface recreation leak: native PSS grows approximately 12 MB per HOME/relaunch surface cycle despite destroy-complete markers and an explicit Device::Destroy experiment. Root cause requires further Dawn/Skia lifecycle investigation.",
-    "Java 17 Android sample build reaches CMake but fails because external/skia-build/modules/skunicode/include/SkUnicode.h includes missing src/base/SkUTF.h; this is a checkout/Skia source-alignment blocker separate from the measured B3 retention attribution."
+    "Pre-9427 Java 17 Android sample build reached CMake but failed because external/skia-build/modules/skunicode/include/SkUnicode.h includes missing src/base/SkUTF.h; the subsequent reported 9427 build success does not change the measured B3 retention blocker."
   ],
   "android_sample_build_blocker": {
     "owner": "Android sample checkout/Skia source-alignment owner",
     "doctor": "pulp doctor android: 4/4 passed",
     "command": "Gradle assembleDebug with Java 17 and Android SDK environment",
-    "result": "BLOCKED",
+    "historical_result": "BLOCKED",
+    "post_9427_reported_result": "PASS",
     "observed": "Gradle reaches CMake, then external/skia-build/modules/skunicode/include/SkUnicode.h includes missing src/base/SkUTF.h.",
     "classification": "Checkout/Skia source alignment failure; separate from the measured B3 native-memory retention attribution.",
-    "follow_up": "Align or repair the external Skia source/build checkout, then rerun the Android sample build. This receipt remains BLOCKED and does not claim B3 green."
+    "follow_up": "Align or repair the external Skia source/build checkout in a separate toolchain PR. This receipt remains BLOCKED and does not claim B3 green."
   },
   "skia_alignment_investigation": {
     "artifact": {
@@ -158,6 +159,29 @@
       "secondary_environment_warnings": "CXX5304 SDK XML version 4 versus 3 and an inconsistent NDK 30.0.16248370 package location were also reported; neither is the fatal compile cause."
     },
     "recommendation": "Ownership is the Skia toolchain/release packaging owner: publish or fetch a self-consistent chrome/m153 artifact/source pair, or align the checkout and generated headers to one pinned revision. Do not patch B3 Android lifecycle code or add a src/base compatibility shim in this branch. Re-run the Java 17 assembleDebug probe after repair; B3 remains BLOCKED."
+  },
+  "toolchain_pin_follow_up": {
+    "tracked_generated_header": {
+      "path": "external/skia-build/modules/skunicode/include/SkUnicode.h",
+      "commit": "cdfffb607223df137b3afbf7422b3abd6759b3e5",
+      "include_at_line_15": "src/base/SkUTF.h"
+    },
+    "checkout_and_builder_metadata": {
+      "source_path": "external/skia-src",
+      "source_branch": "chrome/m151",
+      "artifact_release": "external/skia-build/VERSION.md: chrome/m153",
+      "android_builder": "tools/build-skia-android.sh",
+      "builder_default": "SKIA_BRANCH=chrome/m144"
+    },
+    "reported_post_9427_build": {
+      "pull_request": "https://github.com/Generous-Corp/pulp/pull/9427",
+      "merge_commit": "https://github.com/Generous-Corp/pulp/commit/7349abc588d046b475764733d949fe21a8a0a39a",
+      "command": "cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=$HOME/Library/Android/sdk ./gradlew :app:assembleDebug --no-daemon --stacktrace",
+      "result": "PASS (coordinator-provided)",
+      "scope": "sample-build/toolchain repair only; not retention acceptance"
+    },
+    "classification": "The m144 builder default, m151 source checkout, m153 generated artifact, and src/base versus src/core header split are a separate Skia toolchain/source-alignment defect. It is not a B3 production-ownership claim.",
+    "repair_owner": "Skia toolchain/bootstrap owner via a separate toolchain PR; B3 should consume the repaired, self-consistent pin and remain BLOCKED on native-memory retention."
   },
   "surface_recreation_leak_check": {
     "command": "Five HOME -> relaunch surface recreation cycles with dumpsys meminfo after each cycle; then force-stop and inspect logcat.",
