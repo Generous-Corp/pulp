@@ -2100,6 +2100,20 @@ test runs before marking it. The MCP audio tests now stage this build's CLI
 under a temp project root (`CliProjectRoot`) and assert text only a real run
 prints.
 
+One edge is not enough. Configure writes
+`<build>/test/test-data/runtime-targets.json` (every program or module the
+tree builds, by artifact file name, with its own runtime targets). The scan
+checks every string-literal path component in a spawning test's code that
+names one of those artifacts (`"pulp-cpp"`): it must be reached by an edge,
+directly or through a program the test runs, or be reviewed with
+`pulp_test_spawns(<test> NOT_RUN <target>...)` (named but never run, e.g. a
+fake staged at the real tool's name). Otherwise the test is `spawns:
+undeclared` with `unmatched_programs`. A built test whose declared tool this
+configuration does not build is recorded as `absent_spawns`, named in the
+configure output, and stays undeclared there; Linux and Windows build fewer
+tools than macOS, so the same test can be declared on one and undeclared on
+another.
+
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the

@@ -1076,3 +1076,12 @@ pulp_add_test_suite(pulp-test-widget-bridge-flex-text-children GROUP pulp-test-g
 
 # The crash fixture starts the trusted-host fixture its parent test stages.
 pulp_test_spawns(pulp-control-broker-crash-fixture pulp-control-trusted-host-e2e-fixture)
+
+# The broker checks the code identity of the CLI and MCP clients it trusts
+# (inspect/src/control_broker_daemon.cpp), and the control manifests these
+# tests load name their host fixtures, so they depend on all of them.
+pulp_test_spawns(pulp-control-broker-crash-fixture pulp-cli pulp-mcp)
+pulp_test_spawns(pulp-test-control-broker-daemon pulp-cli pulp-mcp
+    pulp-control-installed-host-e2e-fixture pulp-control-trusted-host-fixture)
+pulp_test_spawns(pulp-test-control-endpoint-enrollment pulp-control-installed-host-e2e-fixture
+    pulp-control-trusted-host-e2e-fixture pulp-control-trusted-host-fixture)

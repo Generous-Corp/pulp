@@ -919,7 +919,10 @@ edge after every tool directory has been read. An inline
 `if(TARGET <tool>)` in `test/cmake` is evaluated too early and creates no
 edge. An executable whose sources call a process API with no such edge and no
 reviewed `pulp_test_spawns(<test> NONE)` is `spawns: undeclared`, and the
-shadow selects it on every change.
+shadow selects it on every change. So is one whose code names a built
+program (a string such as `"pulp-cpp"`) that no edge reaches and no reviewed
+`pulp_test_spawns(<test> NOT_RUN <target>)` covers, and one whose declared
+tool this configuration does not build.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
