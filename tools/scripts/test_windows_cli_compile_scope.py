@@ -189,7 +189,7 @@ class GitDiffEndToEnd(unittest.TestCase):
 
     def test_unreadable_diff_fails_toward_compiling(self) -> None:
         code, _, output = self.run_cli("--base", "0" * 40, "--head", "HEAD")
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 3)
         self.assertIn("relevant=true", output)
 
 

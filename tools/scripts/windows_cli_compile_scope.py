@@ -33,7 +33,8 @@ Run:
 
 Exit status is 0 whether or not the change is relevant; the verdict is printed
 and, under GitHub Actions, written to $GITHUB_OUTPUT as `relevant=true|false`.
-Exit 2 means the diff could not be read, which the workflow treats as relevant.
+Exit 3 means the diff could not be read; the verdict is then `relevant=true`
+so the workflow compiles rather than skips. (Exit 2 stays argparse's usage error.)
 """
 
 from __future__ import annotations
@@ -196,7 +197,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 file=sys.stderr,
             )
             _write_output(True)
-            return 2
+            return 3
         reader = git_reader(args.head, repo)
 
     hits = classify(paths, reader)
