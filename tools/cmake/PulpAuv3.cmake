@@ -31,6 +31,7 @@
 # pulp_add_ios_auv3() stamps build identity into the .appex, and this module can
 # be included on its own without PulpUtils.cmake, so pull the helper in here.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpBuildInfo.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpInstall.cmake")
 
 function(_pulp_add_auv3 target name bundle_id version manufacturer category plugin_code manufacturer_code accepts_midi)
     if(NOT APPLE)

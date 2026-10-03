@@ -102,6 +102,35 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ accepts a materialized browser sid
                 .getWithDefault<std::string>("").empty());
 }
 
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ finds inline scripts by the tag rules",
+          "[view][bridge][runtime-import][materialized-browser]") {
+    // The inline-script scan replaced std::regex
+    //   <script\b([^>]*)>([\s\S]*?)</script>        (case-insensitive)
+    // Each script pins one rule: the tag and its close are case-insensitive,
+    // `<scripts>` is not a script (\b), a body ends at the FIRST close, JSON
+    // payloads are not run, and a tag that is never closed is not a script.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string sidecar = R"JSON({
+      "schema":"pulp-materialized-browser-document-v1",
+      "version":1,
+      "html":"<html><body><script>globalThis.__order = ['plain'];</script><SCRIPT TYPE=\"text/javascript\">__order.push('upper');</SCRIPT><scripts>__order.push('scripts');</scripts><script type=\"application/json\">{\"x\":1}</script><script>__order.push('first');</script><script >__order.push('second');</Script><script>__order.push('never');</body></html>",
+      "assets":[]
+    })JSON";
+    engine.evaluate(
+        "__pulpRuntimeImport__('" + js_single_quoted(sidecar) +
+        "','materialized-browser');");
+    REQUIRE(engine.evaluate("String(globalThis.__pulpRuntimeImportErr__ || '')")
+                .getWithDefault<std::string>("").empty());
+    CHECK(engine.evaluate("JSON.stringify(globalThis.__order || null)")
+              .getWithDefault<std::string>("") ==
+          R"(["plain","upper","first","second"])");
+}
+
 TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches v0 parser by source label",
           "[view][bridge][runtime-import-dispatch][v0][phase-6.6.2]") {
     ScriptEngine engine;

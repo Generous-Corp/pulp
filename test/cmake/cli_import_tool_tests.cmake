@@ -223,6 +223,24 @@ pulp_test_spawns(pulp-test-cli-tool-registry NONE)       # python3, cmake, tar, 
 pulp_test_spawns(pulp-test-cli-importer-install NONE)     # links the registry's runner; the importer is a temp script
 pulp_test_spawns(pulp-test-cli-import-install NONE)       # links the import runner but never runs an importer
 pulp_test_spawns(pulp-test-cli-project-command NONE)      # git against temp repos; cmake only for --verify-builds
+pulp_test_spawns(pulp-test-cli-project-command NOT_RUN pulp-mcp) # doctor is handed a missing pulp-mcp path
 pulp_test_spawns(pulp-test-cli-update-check NONE)         # curl, behind an injected fetcher
 pulp_test_spawns(pulp-test-cli-update-mode NONE)          # curl, behind an injected fetcher
 pulp_test_spawns(pulp-test-cli-migration-index NONE)      # python3 on tools/scripts/build_migration_index.py
+
+# The WidgetBridge doctor check reads its generator inputs and generated outputs
+# (tools/cli/cli_doctor_helpers.cpp), and `project bump` from the checkout
+# probes the root's CMakeLists.txt and tools/shipyard.toml.
+if(TARGET pulp-test-cli-project-command)
+    pulp_test_data(pulp-test-cli-project-command NO_DEFINE PATHS
+        tools/scripts/generate_widget_bridge_api.py
+        core/view/src/widget_bridge_api_manifest.tsv
+        core/view/include/pulp/view/reload_autocaps.hpp
+        core/view/include/pulp/view/reload_capabilities.hpp
+        packages/pulp-react/src/bridge-globals.generated.d.ts
+        packages/pulp-react/src/bridge-mock-functions.generated.ts
+        packages/pulp-react/src/bridge-mock-safe-functions.generated.ts
+        docs/reference/js-bridge.md
+        tools/shipyard.toml
+        CMakeLists.txt)
+endif()
