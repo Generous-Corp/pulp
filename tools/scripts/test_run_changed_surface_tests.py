@@ -1412,6 +1412,15 @@ class BaseInventoryTest(unittest.TestCase):
             built.append(discovered)
         return cold, built
 
+    def test_an_unknown_projection_shape_refuses_rather_than_listing(self) -> None:
+        # A misspelt shape must not fall back to the listing shape: a built
+        # tree compared in listing shape refuses every bounded run after its
+        # full build, which is the failure the configure shape exists to end.
+        cold, _ = self.cold_and_built_trees()
+        with self.assertRaisesRegex(ValueError, "unknown projection shape 'confgure'"):
+            inventory.project_registrations({"tests": cold}, Path("/repo"), Path("/repo/build"),
+                                            shape="confgure")
+
     def test_a_placeholder_and_its_discovered_cases_fold_to_one_row(self) -> None:
         source, build = Path("/repo"), Path("/repo/build")
         cold, built = self.cold_and_built_trees()
