@@ -87,7 +87,11 @@ What Pulp does for you (every hosted format, nothing to opt into):
   the view arrives already holding the frame; in a window that is already on
   screen (VST3/CLAP/AU v3 attach) there is no vsync of backing colour. A plain
   asynchronous present lost that race (an empty-colour image on most in-window
-  opens; repro: the hidden `[composite]` case below).
+  opens; repro: the hidden `[composite]` case below). Until the display link
+  paints its first frame, a host resize (a restored or minimum size, a
+  container settling) is presented the same way, at the new size, from inside
+  `set_size()`; otherwise the content-first frame shows stretched into the new
+  bounds for a vsync.
 - Hosts that only paint from the platform's display pass (CPU host, Windows,
   Linux) mark themselves dirty; their first paint is already the document
   because it mounted before they got the view.
@@ -133,7 +137,8 @@ Gates: `[content-first]` in `test/test_view_bridge.cpp` (the document is
 mounted when the host is asked for its first frame; a commit two frames after
 the mount is in that frame; `view-first` presents nothing out of turn; the env
 switch) and in `test_plugin_view_host_first_frame_macos.mm` (the GPU host
-paints with no window and the layer holds contents; the hidden `[composite]`
+paints with no window and the layer holds contents; a resize before the
+display link's first frame re-presents at the new size; the hidden `[composite]`
 case opens six times into an on-screen window and fails on any image that
 shows only the backing colour — run it explicitly, it needs a window server).
 The `[editor-open]` cases still pin that `open()` itself evaluates nothing.
@@ -250,10 +255,9 @@ yet" cannot pass as a dark background. What only this path shows:
   passed 800x600 on every open while its window was 792x516. The AU v2 view is
   still created at the preferred size and follows the container afterwards.
   With a content-first open the frame inside the factory is therefore at the
-  preferred size; a host that then shrinks the view shows it scaled into the
-  new bounds until the next display-link frame (~1 vsync). For an
-  aspect-locked editor (a pinned design viewport) that scaled frame is the
-  same picture; a reflowing editor sees one frame of the old layout.
+  preferred size, and a host that then shrinks the view gets a fresh frame at
+  the new size presented with that resize (the GPU host re-presents any resize
+  that lands before its display link's first frame).
 - Host window animation: AppKit zooms a newly ordered-in window from slightly
   smaller than its final size over ~100 ms. Whatever the editor shows during
   it reads as "small first": an empty frame there is the "small, then empty,
