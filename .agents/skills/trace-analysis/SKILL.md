@@ -448,6 +448,17 @@ document is evaluated twice), `scripted_ui_live_realm`, `script_compile` vs
 `script_execute`, `runtime_import_parse` / `runtime_import_fonts` /
 `runtime_import_payload_eval` / `runtime_import_inline_eval`,
 `frame_callback_pump` → `raf_flush` (the post-mount settle).
+`runtime_import_verify` (a child of `runtime_import_parse`) is the full
+decode + SHA-256 pass of a materialized document: it should appear on the
+first open only. On a reopen `runtime_import_parse` is a lookup well under
+1 ms; a `runtime_import_verify` there means the document's bytes differ
+between opens (or `PULP_RUNTIME_IMPORT_CACHE=0`). Count, don't time:
+
+```sql
+SELECT name, COUNT(*) n, ROUND(SUM(dur)/1e6,1) ms FROM slice
+WHERE name IN ('runtime_import_verify','script_compile','script_bytecode_read')
+GROUP BY name;   -- 3 opens of one document: runtime_import_verify n = 1
+```
 
 Fingerprints and what they mean:
 
