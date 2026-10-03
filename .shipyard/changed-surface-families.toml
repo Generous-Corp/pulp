@@ -4185,6 +4185,7 @@ tests = [
   "decisions-contract-validate",
   "diff-cover-targets-selftest",
   "example-validation-paths",
+  "executable-keys-selftest",
   "framework-neutrality",
   "framework-neutrality-selftest",
   "gpu-audio-trace-validator-selftest",

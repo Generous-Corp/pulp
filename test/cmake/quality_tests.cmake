@@ -739,6 +739,12 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/ci/test_spawn_closure.py")
     set_tests_properties(spawn-closure-selftest PROPERTIES TIMEOUT 60)
 
+    # Per-executable source keys over the base's recorded input set (the
+    # reuse lane's key manifest), with every always_run reason.
+    add_test(NAME executable-keys-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_executable_keys.py")
+    set_tests_properties(executable-keys-selftest PROPERTIES TIMEOUT 120)
+
     # Per-job ccache delta printed by build.yml's "Ccache stats" step. The
     # cumulative `ccache --show-stats` counters belong to the host-shared cache
     # directory, so only the before/after difference describes one job.
