@@ -2,7 +2,7 @@
   "receipt_version": 1,
   "status": "BLOCKED",
   "scope": "B3 Android SurfaceRuntime",
-  "tested_commit": "4c2663d9c0528c154e37eac497b28a8f5c16d15e",
+  "tested_commit": "0a9fd46eb6822f82f9a7b75fafb8ee6cf638c123",
   "worktree_branch": "codex/b3-android-surface-runtime-20261003",
   "scope_audit": {
     "android_files": [
@@ -120,7 +120,7 @@
     "cycles": 8,
     "markers": "8 SurfaceRuntime destroy complete events and 9 Dawn initialized events; no FATAL EXCEPTION or Fatal signal.",
     "native_pss_kb": "~30,584 before the first probe; ~129,689 after eight cycles (about +12 MB per recreation).",
-    "follow_up_experiment": "Temporarily called wgpu::Device::Destroy() before Dawn handle release; a separate five-cycle run still rose from 42,981 KB to 92,369 KB native PSS, so this simple teardown addition does not resolve the growth.",
-    "classification": "GPU lifecycle is functional, but repeated surface recreation retains substantial native memory. Full B3 leak acceptance is unproven and treated as failed."
+    "follow_up_experiment": "Two temporary teardown experiments were tested and reverted: wgpu::Device::Destroy() before Dawn handle release, and Skia Context::freeGpuResources() after synchronous completion. Neither changed the observed growth: a five-cycle run still rose from 42,969 KB to 92,549 KB native PSS. The experiments are not part of the committed five-file Android scope.",
+    "classification": "GPU lifecycle is functional, but repeated surface recreation retains substantial native memory. The growth persists after explicit Dawn device destruction and Skia resource purging, so full B3 leak acceptance is failed and the root cause likely requires common Dawn/Skia or emulator-driver investigation outside this isolated five-file Android slice."
   }
 }
