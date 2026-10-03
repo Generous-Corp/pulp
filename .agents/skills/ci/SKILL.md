@@ -25,11 +25,24 @@ Every step below exists because skipping it cost a CI round trip (20-40 min)
 on a real PR. Do them in order.
 
 1. **Run `tools/scripts/gates.sh origin/main` before every push.** It runs the
-   offline gates CI runs, including the Vellum watch-event gate: a range that
-   touches a watched capability-family path without a committed event FAILS
-   here and prints the exact event JSON (or run
-   `python3 tools/scripts/vellum_watch_preflight.py --write-event --rationale "..."`).
-   Commit the event before re-running — the checker reads the commit range.
+   offline gates CI runs, including both halves of the required `Vellum freeze`
+   check, over the merge-base range:
+   - **watch events** — a range touching a watched capability-family path
+     without a committed `.github/vellum-expansion-watch-events/` event FAILS
+     (exit 10) and prints the exact JSON; or run
+     `python3 tools/scripts/vellum_watch_preflight.py --write-event --rationale "..."`.
+   - **change events** (`vellum_freeze_check.py`) — a range touching a path in
+     a transferred slice of `.github/vellum-ownership.json` (e.g.
+     `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
+     committed `.github/vellum-change-events/` event FAILS (exit 12) and prints
+     the JSON (disposition `pulp-only`, suggested tests); or run
+     `python3 tools/scripts/vellum_watch_preflight.py --write-change-event --rationale "..."`.
+     One edit can owe BOTH events. A committed event whose rationale is still
+     the `<REPLACE: ...>` placeholder also fails here, because CI accepts it.
+
+   Commit the event(s) before re-running — both checkers read the commit
+   range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
+   on its own for just the Vellum verdict.
 2. **Know the required contexts, and only those.** They come from branch
    protection, not from the check list on the PR page:
 

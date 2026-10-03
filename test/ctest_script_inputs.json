@@ -7521,11 +7521,15 @@
    "entry": "tools/scripts/test_vellum_watch_preflight.py",
    "inputs": [
     ".githooks/pre-push",
+    ".github/vellum-change-events",
     ".github/vellum-expansion-watch-events",
+    ".github/vellum-ownership.json",
+    "core/view/src/pointer_dispatch.cpp",
     "tools/scripts/gates.sh",
     "tools/scripts/generate_vellum_ownership_projection.py",
     "tools/scripts/pulp_tooling_disposition.py",
-    "tools/scripts/test_vellum_watch_preflight.py"
+    "tools/scripts/test_vellum_watch_preflight.py",
+    "tools/scripts/vellum_freeze_check.py"
    ],
    "kind": "python"
   },

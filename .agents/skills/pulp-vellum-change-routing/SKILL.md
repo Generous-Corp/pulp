@@ -391,12 +391,24 @@ compares against the merge-base for the same reason the reproduce command below
 does. It is silent for a range that touches nothing watched, so silence from it
 is not proof — run the checker by hand if you want a verdict on the record.
 
+The same preflight also runs the FIRST checker, `vellum_freeze_check.py`, over
+the merge-base range, because it fails too: a touched path in a transferred
+slice (e.g. `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) owes
+a `.github/vellum-change-events/` event, and that path is often ALSO under a
+watched glob, so one edit can owe both events. On that failure it exits 12 and
+prints the change-event JSON (`pulp-only`, the slices, suggested tests, a
+`<REPLACE: ...>` rationale); `--write-change-event --rationale "..."` writes it.
+The checker accepts any non-empty rationale, so the preflight separately
+refuses a committed change event that still carries the placeholder.
+
 Four non-obvious rules of the expansion-watch checker, none derivable from a
 skim of the source:
 
-- **Both `--base` and `--head` must be full 40-char SHAs.** A ref name fails with
-  `base: expected full commit SHA`, which reads like a different bug than the one
-  CI hit. Always `--base $(git rev-parse ...) --head $(git rev-parse HEAD)`.
+- **`verify()` requires full 40-char SHAs; the CLI resolves refs for you.**
+  `--head HEAD` or a short SHA is resolved with `git rev-parse` before
+  `verify()` runs; only an unresolvable ref still fails with
+  `expected full commit SHA`. Callers that import the module and call
+  `verify()` directly (as the preflight does) must pass full SHAs.
 - **Coverage is exact set equality**, not a superset test: the checker raises on
   `covered != affected`, so claiming an extra capability family fails exactly as
   hard as omitting one. Claiming the same family from two event files in one diff
