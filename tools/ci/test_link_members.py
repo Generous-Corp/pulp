@@ -13,8 +13,9 @@ What must hold:
   same members per executable; an unreadable record is counted;
 - the launcher adds `-Wl,-map`, passes the linker's exit status through,
   keeps only the map's head and the arguments after a successful executable
-  link, deletes the map, and leaves shared libraries, failed links and an
-  unwritable record directory exactly as the plain command would.
+  or loadable-module (`-bundle`) link, recorded with its kind, deletes the
+  map, and leaves shared libraries, failed links and an unwritable record
+  directory exactly as the plain command would.
 
 Run:
     python3 tools/ci/test_link_members.py
@@ -127,6 +128,8 @@ class CollectTests(unittest.TestCase):
                          {"members": ["state_migration.cpp.o", "store.cpp.o"], "whole": False})
         self.assertEqual(full["<build>/test/pulp-test-other"]["archives"]["<build>/core/state/libpulp-state.a"],
                          {"members": ["store.cpp.o"], "whole": False})
+        self.assertEqual({k: v["kind"] for k, v in full.items()},
+                         {"<build>/test/pulp-test-state": "executable", "<build>/test/pulp-test-other": "executable"})
         self.assertTrue(full["<build>/test/pulp-test-state"]["archives"]["<build>/fonts/libpulp-fonts.a"]["whole"])
         self.assertFalse(full["<build>/test/pulp-test-other"]["archives"]["<build>/fonts/libpulp-fonts.a"]["whole"])
 
@@ -180,6 +183,19 @@ class LauncherTests(unittest.TestCase):
             rc, argv, folder = self.run_launcher(tmp, "-dynamiclib", "a.o", "-o", "libx.dylib")
         self.assertEqual((rc, argv), (0, ["-dynamiclib", "a.o", "-o", "libx.dylib"]))
         self.assertFalse(folder.exists())
+
+    def test_a_loadable_module_link_is_recorded_as_a_module(self) -> None:
+        # A CMake MODULE_LIBRARY (plug-in bundle, LV2 binary, reload probe)
+        # links with -bundle; its pulled members are as much an input as an
+        # executable's.
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, argv, folder = self.run_launcher(tmp, "-bundle", "main.o", "-o", "plugin.so")
+            self.assertEqual(rc, 0)
+            self.assertTrue(argv[-1].startswith("-Wl,-map,"))
+            doc = lm.collect(Path(tmp) / "build")
+        rec = doc["executables"]["<build>/out"]  # the fake linker names its output `out`
+        self.assertEqual((doc["schema"], rec["kind"]), ("pulp-link-members/v2", "module"))
+        self.assertEqual(lm.expand(doc)["<build>/out"]["archives"]["<build>/lib.a"]["members"], ["one.o"])
 
     def test_an_unwritable_record_directory_runs_the_plain_link(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
