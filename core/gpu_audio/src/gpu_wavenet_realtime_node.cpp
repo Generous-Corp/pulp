@@ -463,6 +463,31 @@ void GpuWaveNetRealtimeNode::process_block(const audio::BufferView<const float>&
 bool GpuWaveNetRealtimeNode::fenced() const noexcept {
     return !impl_->prepared || !impl_->bridge || impl_->bridge->delivery_epoch() == 0;
 }
+GpuAudioRecoveryReason GpuWaveNetRealtimeNode::recovery_reason() const noexcept {
+    if (!impl_->bridge)
+        return GpuAudioRecoveryReason::None;
+    switch (impl_->bridge->recovery_reason()) {
+    case detail::SharedIoRecoveryReason::None:
+        return GpuAudioRecoveryReason::None;
+    case detail::SharedIoRecoveryReason::SequenceGap:
+        return GpuAudioRecoveryReason::SequenceGap;
+    case detail::SharedIoRecoveryReason::InputSaturated:
+        return GpuAudioRecoveryReason::InputSaturated;
+    case detail::SharedIoRecoveryReason::ProviderFailure:
+        return GpuAudioRecoveryReason::ProviderFailure;
+    case detail::SharedIoRecoveryReason::ProviderLost:
+        return GpuAudioRecoveryReason::ProviderLost;
+    case detail::SharedIoRecoveryReason::OfflineFence:
+        return GpuAudioRecoveryReason::OfflineFence;
+    case detail::SharedIoRecoveryReason::InvalidCallback:
+        return GpuAudioRecoveryReason::InvalidCallback;
+    }
+    return GpuAudioRecoveryReason::None;
+}
+std::uint64_t GpuWaveNetRealtimeNode::recovery_sequence() const noexcept {
+    return impl_->bridge ? impl_->bridge->recovery_sequence()
+                         : std::numeric_limits<std::uint64_t>::max();
+}
 bool GpuWaveNetRealtimeNode::ready() const noexcept {
     return impl_->prepared;
 }
