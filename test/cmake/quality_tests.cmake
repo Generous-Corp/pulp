@@ -659,6 +659,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME reuse-policy-replay-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_reuse_policy_replay.py")
         set_tests_properties(reuse-policy-replay-selftest PROPERTIES TIMEOUT 120)
+        # Shadow-plan ranking over every PR head, and the advisory workflow
+        # that records those plans without gating or executing anything.
+        add_test(NAME changed-surface-shadow-plans-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_shadow_plans.py")
+        set_tests_properties(changed-surface-shadow-plans-selftest PROPERTIES TIMEOUT 120)
         # Cross-VM test-binary identity measurement (per-binary receipt reuse
         # precondition), annotated by merge-group macos jobs after the build.
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}

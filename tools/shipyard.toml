@@ -20,10 +20,9 @@
 # That flow owns the pin edit and worktree-safety checks; keep the
 # lockstep doc skim below as part of the bump PR.
 #
-# Do not hand-edit the platform assets when moving to newer Shipyard
-# releases. Shipyard v0.50.0+ is Rust-backed, macOS is Apple-Silicon-only,
-# and the macOS asset is a signed/notarized/stapled `.dmg`; let
-# `shipyard pin bump` update the version/asset shape together.
+# Shipyard v0.50.0+ is Rust-backed, macOS is Apple-Silicon-only, and the
+# macOS asset is a signed/notarized/stapled `.dmg`; the upstream installer
+# picks the asset, so a bump changes only `version`.
 #
 # Lockstep docs:
 # When bumping the pin, also re-check that the following docs still
@@ -176,18 +175,7 @@
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
 version = "v0.262.0"
 
-# Public release source. The bootstrap script downloads from
-# https://github.com/{repo}/releases/download/{version}/{asset}
+# Release repository. tools/install-shipyard.sh reads only `version` and runs
+# the upstream installer at refs/tags/{version}/install.sh, which resolves the
+# platform asset and its checksum itself; nothing reads per-asset names here.
 repo = "danielraffel/Shipyard"
-
-# SHA-256 verification asset name (downloaded alongside the binary).
-checksums_asset = "checksums.sha256"
-
-# Per-platform binary asset names. The bootstrap script picks the
-# right one for the current host.
-[shipyard.assets]
-darwin-arm64  = "shipyard-macos-arm64"
-darwin-x64    = "shipyard-macos-x64"
-linux-arm64   = "shipyard-linux-arm64"
-linux-x64     = "shipyard-linux-x64"
-windows-x64   = "shipyard-windows-x64.exe"
