@@ -1462,6 +1462,20 @@ TEST_CASE("every MIDI utility kernel rejects a spec it cannot honour", "[midi][p
     REQUIRE(out.empty());
     REQUIRE(invalid.scheduled() == 0);
     REQUIRE(invalid.sounding() == 0);
+
+    midi::NoteDelaySpec invalid_delay_spec{};
+    invalid_delay_spec.gate_percent = 101;
+    midi::NoteDelay<> invalid_delay{invalid_delay_spec};
+    auto delay_input = prepared_buffer();
+    auto delay_output = prepared_buffer();
+    REQUIRE(delay_input.add(midi::MidiEvent::note_on(0, 60, 100)));
+    const auto delay_report =
+        invalid_delay.process(delay_input, delay_output, constant_block(0, 512));
+    REQUIRE_FALSE(delay_report.complete);
+    REQUIRE(delay_report.dropped == delay_input.size());
+    REQUIRE(delay_output.empty());
+    REQUIRE(invalid_delay.scheduled() == 0);
+    REQUIRE(invalid_delay.sounding() == 0);
 }
 
 TEST_CASE("chord memory returns to passthrough when its memory is cleared",
