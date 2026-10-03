@@ -47,7 +47,7 @@
           },
           {
             "type": "command",
-          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec python3 \"$root/hooks/scripts/claude_md_sync.py\" --hook-json'",
+          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" || exit 0; py=\"$(command -v python3 2>/dev/null || true)\"; [ -x \"$py\" ] || { for candidate_py in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do [ -x \"$candidate_py\" ] && py=\"$candidate_py\" && break; done; }; [ -x \"$py\" ] || exit 0; exec \"$py\" \"$root/hooks/scripts/claude_md_sync.py\" --hook-json'",
             "timeout": 3000
           }
         ]
