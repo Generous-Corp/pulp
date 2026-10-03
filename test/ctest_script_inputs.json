@@ -6169,6 +6169,7 @@
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/ios_gate_digest.py",
+    "tools/ci/link_members.py",
     "tools/ci/source_selftests.json",
     "tools/ci/spawn_closure.py",
     "tools/ci/test_receipts_shadow.py",

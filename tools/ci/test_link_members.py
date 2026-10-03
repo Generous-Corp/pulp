@@ -134,6 +134,37 @@ class CollectTests(unittest.TestCase):
         self.assertFalse(full["<build>/test/pulp-test-other"]["archives"]["<build>/fonts/libpulp-fonts.a"]["whole"])
 
 
+class UnusableTests(unittest.TestCase):
+    """A reader falls back to "no record" for anything it cannot vouch for."""
+
+    @staticmethod
+    def doc(schema: str = lm.SCHEMA, kind: str | None = "executable", **extra) -> dict:
+        rec = {"objects": ["<build>/a.o"], "archives": {}}
+        if kind is not None:
+            rec["kind"] = kind
+        return {"schema": schema, "members": {}, "executables": {"<build>/t": rec}, "unreadable": 0, **extra}
+
+    def test_known_schemas_and_modelled_kinds_are_usable(self) -> None:
+        self.assertIsNone(lm.unusable(self.doc()))
+        self.assertIsNone(lm.unusable(self.doc(kind="module")))
+        self.assertIsNone(lm.unusable(self.doc("pulp-link-members/v2", kind="module")))
+        self.assertIsNone(lm.unusable(self.doc("pulp-link-members/v1", kind=None)))
+
+    def test_an_unknown_schema_is_no_record(self) -> None:
+        for schema in ("pulp-link-members/v99", None, "something-else"):
+            self.assertEqual(lm.unusable(self.doc(schema)), f"unknown schema {schema!r}")
+            with self.assertRaises(ValueError):
+                lm.expand(self.doc(schema))
+
+    def test_an_unmodelled_kind_is_no_record(self) -> None:
+        for kind in ("shared", "framework"):
+            self.assertIn(kind, lm.unusable(self.doc(kind=kind)) or "")
+
+    def test_an_unrecorded_link_or_a_missing_document_is_no_record(self) -> None:
+        self.assertEqual(lm.unusable(self.doc(unrecorded=2)), "2 link(s) not recorded")
+        self.assertEqual(lm.unusable(None), "no record")
+
+
 FAKE_LINKER = """#!/bin/sh
 # Writes an ld-style map where asked, records its arguments, exits $FAKE_RC.
 printf '%s\\n' "$@" > "$FAKE_LOG"
@@ -178,11 +209,26 @@ class LauncherTests(unittest.TestCase):
             left = sorted(p.name for p in folder.iterdir())
         self.assertEqual((rc, left), (3, []))
 
-    def test_shared_libraries_run_untouched(self) -> None:
+    def test_a_shared_library_link_is_recorded_as_shared(self) -> None:
+        # An in-tree dylib's content reaches every binary that loads it without
+        # changing their bytes or maps, so it is recorded under its own kind and
+        # a reader that does not model that kind must refuse the record.
         with tempfile.TemporaryDirectory() as tmp:
-            rc, argv, folder = self.run_launcher(tmp, "-dynamiclib", "a.o", "-o", "libx.dylib")
-        self.assertEqual((rc, argv), (0, ["-dynamiclib", "a.o", "-o", "libx.dylib"]))
-        self.assertFalse(folder.exists())
+            rc, argv, _ = self.run_launcher(tmp, "-dynamiclib", "a.o", "-o", "libx.dylib")
+            doc = lm.collect(Path(tmp) / "build")
+        self.assertEqual(rc, 0)
+        self.assertTrue(argv[-1].startswith("-Wl,-map,"))
+        self.assertEqual(doc["executables"]["<build>/out"]["kind"], "shared")
+        self.assertIn("shared", lm.unusable(doc))
+
+    def test_a_partial_link_runs_untouched_and_is_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, argv, folder = self.run_launcher(tmp, "-r", "a.o", "-o", "part.o")
+            left = sorted(p.suffix for p in folder.iterdir())
+            doc = lm.collect(Path(tmp) / "build")
+        self.assertEqual((rc, argv, left), (0, ["-r", "a.o", "-o", "part.o"], [".unrecorded"]))
+        self.assertEqual((doc["executables"], doc["unrecorded"]), ({}, 1))
+        self.assertEqual(lm.unusable(doc), "1 link(s) not recorded")
 
     def test_a_loadable_module_link_is_recorded_as_a_module(self) -> None:
         # A CMake MODULE_LIBRARY (plug-in bundle, LV2 binary, reload probe)
@@ -194,8 +240,9 @@ class LauncherTests(unittest.TestCase):
             self.assertTrue(argv[-1].startswith("-Wl,-map,"))
             doc = lm.collect(Path(tmp) / "build")
         rec = doc["executables"]["<build>/out"]  # the fake linker names its output `out`
-        self.assertEqual((doc["schema"], rec["kind"]), ("pulp-link-members/v2", "module"))
+        self.assertEqual((doc["schema"], rec["kind"]), ("pulp-link-members/v3", "module"))
         self.assertEqual(lm.expand(doc)["<build>/out"]["archives"]["<build>/lib.a"]["members"], ["one.o"])
+        self.assertIsNone(lm.unusable(doc))
 
     def test_an_unwritable_record_directory_runs_the_plain_link(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

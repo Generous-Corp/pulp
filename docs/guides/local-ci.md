@@ -999,14 +999,18 @@ the head issued no receipt (annotation field `source: reuse-record`). The
 macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
 (`tools/cmake/PulpLinkMaps.cmake`): every link runs through
 `tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
-linker's status, and for an executable or a loadable module (a `-bundle`
-link: plug-in bundles, LV2 binaries, reload probes) keeps only the map's object list and
-the link arguments under `<build>/link-members/` (the map, megabytes of
-symbol table, is deleted). The linked bytes are identical with and without
-it. `link-members-<sha>.json` in the record then lists, per executable and
-module (each entry's `kind`, schema `pulp-link-members/v2`), the
-archive members its link pulled, with `whole` set on archives the link line
-force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
+linker's status, and for an executable, a loadable module (a `-bundle`
+link: plug-in bundles, LV2 binaries, reload probes) or a shared library keeps
+only the map's object list and the link arguments under `<build>/link-members/`
+(the map, megabytes of symbol table, is deleted). The linked bytes are
+identical with and without it. `link-members-<sha>.json` in the record then
+lists, per link (each entry's `kind`: `executable`, `module` or `shared`;
+schema `pulp-link-members/v3`), the archive members it pulled, with `whole`
+set on archives the link line force-loads (`-force_load`, `-all_load`,
+`-ObjC`); partial links (`-r`) are only counted, as `unrecorded`. Every reader
+calls `link_members.unusable()` first and treats an unknown schema, a `shared`
+link (its content reaches the binaries that load it without changing their
+maps) or an unrecorded link as no record at all, and the record job warns. `codemodel-<sha>.json`
 (`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
 source list, compile groups, link line and the ctest registrations that run
 its artifact, read from the file-API codemodel reply the configure step
