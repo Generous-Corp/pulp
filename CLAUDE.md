@@ -390,6 +390,18 @@ Non-obvious things that cost real time when you don't know them:
 - **An offline render cannot hear a dropped buffer**: a DAW-only click at a transition is
   usually a per-callback cost spike; gate its operation counts (`audio-harness`).
 
+### Plugin editors open view-first
+
+A host shows no editor until its view-creation call returns, so nothing heavy
+runs there: `ViewBridge` (via `Options::hosted_editor()`) defers a scripted
+document to the editor's second idle tick for every plug-in format. A
+processor that builds its own `ScriptedUiSession` in `create_view()` must load
+it with `load_deferrable()` and do post-load work in
+`set_document_loaded_callback()` — plain `load()` there blocks the host and
+logs a warning. Rules, gates and the measurement recipe: the
+[`view-bridge`](.agents/skills/view-bridge/SKILL.md) skill ("Editor open") and
+`trace-analysis` ("Editor-open recipe").
+
 ### Thread Model
 
 - **Audio thread**: reads params via `std::atomic<float>` (relaxed), processes buffers, pushes meter data via `TripleBuffer`
@@ -1967,7 +1979,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `update-demos` | Rebuild, re-pin, and republish Pulp's downstream demo/example repos against a new or the latest SDK. |
 | `upgrade` | Guide users through `pulp upgrade` — discover new CLI releases, interpret migration notes for the hop they're performing, and apply breaking-change fixes (CMake macro renames, API surface changes, config file moves). |
 | `video-proof` | Record, compose, publish, serve, and review short desktop validation video proofs for Pulp UX/test-harness work. |
-| `view-bridge` | Plugin editors — load before writing or changing a JS/scripted plugin UI that animates, shows meters, analyzers or modulation, or handles pointer drawing, drag or zoom, and for editor lifecycle and multi-view attach. |
+| `view-bridge` | Plugin editors — load before writing or changing a JS/scripted plugin UI, its create_view(), or anything an editor does at open (view-first document load, never blocking the host's view-creation call), or a UI that animates, shows meters, analyzers or modulation, or handles pointer drawing, drag or zoom, and for editor lifecycle and multi-view attach. |
 | `vst3` | VST3 format adapter for Pulp — SingleComponentEffect wiring, bus arrangement negotiation, parameter / MIDI event routing, state round-trip, and the pitfalls discovered while wiring the adapter against Steinberg's SDK. |
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |

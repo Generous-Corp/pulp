@@ -6,8 +6,13 @@
 #include <choc/javascript/choc_javascript_Console.h>
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/js_engine.hpp>
 #include <charconv>
+#include <cstdlib>
+#include <deque>
+#include <mutex>
+#include <string_view>
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
@@ -377,6 +382,98 @@ static std::string_view logging_level_name(choc::javascript::LoggingLevel level)
     }
 }
 
+namespace {
+
+// Scripts below this size are cheap to parse and are the per-frame expression
+// traffic (dispatches, flushes); caching them would only add a lookup.
+constexpr std::size_t kMinCacheableScriptBytes = 32 * 1024;
+// A handful of distinct large scripts per process (a UI runtime per loaded
+// plug-in build plus the bridge preludes). Bounded so an app that evaluates
+// many distinct large scripts cannot grow this without limit.
+constexpr std::size_t kMaxCachedScripts = 16;
+constexpr std::size_t kMaxCachedBytes = 96u * 1024u * 1024u;
+
+class ScriptBytecodeCache {
+public:
+    static ScriptBytecodeCache& instance() {
+        static ScriptBytecodeCache cache;
+        return cache;
+    }
+
+    static bool enabled() {
+        static const bool on = [] {
+            const char* value = std::getenv("PULP_JS_BYTECODE_CACHE");
+            return !(value != nullptr && std::string_view{value} == "0");
+        }();
+        return on;
+    }
+
+    // Copies the bytecode out under the lock, so a concurrent eviction never
+    // frees bytes a reader is still deserializing.
+    bool lookup(const std::string& source, std::vector<std::uint8_t>& out) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& entry : entries_) {
+            if (entry.source.size() == source.size() && entry.source == source) {
+                out = entry.bytecode;
+                ++stats_.hits;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void store(const std::string& source, const std::uint8_t* bytes, std::size_t size) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& entry : entries_)
+            if (entry.source == source) return;  // another realm stored it first
+        entries_.push_back({source, std::vector<std::uint8_t>(bytes, bytes + size)});
+        stats_.bytes += source.size() + size;
+        ++stats_.compiles;
+        while (!entries_.empty()
+               && (entries_.size() > kMaxCachedScripts || stats_.bytes > kMaxCachedBytes)) {
+            stats_.bytes -= entries_.front().source.size() + entries_.front().bytecode.size();
+            entries_.pop_front();
+        }
+    }
+
+    void note_bypass() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++stats_.bypassed;
+    }
+
+    ScriptBytecodeCacheStats stats() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto copy = stats_;
+        copy.entries = entries_.size();
+        return copy;
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        entries_.clear();
+        stats_ = {};
+    }
+
+private:
+    struct Entry {
+        std::string source;
+        std::vector<std::uint8_t> bytecode;
+    };
+    std::mutex mutex_;
+    std::deque<Entry> entries_;
+    ScriptBytecodeCacheStats stats_;
+};
+
+} // namespace
+
+ScriptBytecodeCacheStats script_bytecode_cache_stats() {
+    return ScriptBytecodeCache::instance().stats();
+}
+
+void clear_script_bytecode_cache() {
+    ScriptBytecodeCache::instance().clear();
+}
+
 class QuickJsEngine final : public JsEngine {
 public:
     QuickJsEngine() {
@@ -394,6 +491,52 @@ public:
 
     choc::value::Value evaluate(const std::string& code) override {
         return context_.evaluateExpression(code);
+    }
+
+    // A large script compiles once per process: the bytecode of the first
+    // compile is kept, and a later realm evaluating byte-identical source
+    // deserializes it instead of parsing. Compile + execute is exactly what
+    // JS_Eval does for global code, so results and exceptions match
+    // evaluate(); any failure to reuse falls back to compiling.
+    choc::value::Value evaluate_script(const std::string& code) override {
+        auto& cache = ScriptBytecodeCache::instance();
+        if (code.size() < kMinCacheableScriptBytes || !ScriptBytecodeCache::enabled()
+            || !backend_ || !backend_->context) {
+            if (code.size() >= kMinCacheableScriptBytes) cache.note_bypass();
+            return evaluate(code);
+        }
+        using qjs::JS_TAG_UNDEFINED;  // JS_UNDEFINED expands to unqualified names
+        using qjs::JSValue;
+        auto* ctx = backend_->context;
+        qjs::JSValue function = JS_UNDEFINED;
+        std::vector<std::uint8_t> bytecode;
+        if (cache.lookup(code, bytecode)) {
+            PULP_TRACE_SCOPE_NAMED("js", "script_bytecode_read");
+            function = qjs::JS_ReadObject(ctx, bytecode.data(), bytecode.size(),
+                                          qjs::JS_READ_OBJ_BYTECODE);
+            if (qjs::JS_IsException(function)) {
+                qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
+                function = JS_UNDEFINED;
+            }
+        }
+        if (qjs::JS_IsUndefined(function)) {
+            PULP_TRACE_SCOPE_NAMED("js", "script_compile");
+            function = qjs::JS_Eval(ctx, code.c_str(), code.size(), "",
+                                    JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+            if (qjs::JS_IsException(function)) {
+                // Surfaces the syntax error exactly as evaluate() would.
+                return backend_->takeValue(function).toChocValue();
+            }
+            std::size_t size = 0;
+            if (auto* bytes = qjs::JS_WriteObject(ctx, &size, function,
+                                                  qjs::JS_WRITE_OBJ_BYTECODE)) {
+                cache.store(code, bytes, size);
+                qjs::js_free(ctx, bytes);
+            }
+        }
+        PULP_TRACE_SCOPE_NAMED("js", "script_execute");
+        // JS_EvalFunction takes ownership of the compiled function.
+        return backend_->takeValue(qjs::JS_EvalFunction(ctx, function)).toChocValue();
     }
 
     bool supports_bounded_json_evaluation() const override { return true; }

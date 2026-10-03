@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 2,
+  "revision": 3,
   "fixes": [
     {
       "revision": 1,
@@ -31,6 +31,12 @@
       "id": "captured-paint-reconcile",
       "summary": "a colour/opacity/fill/stroke-only commit is paint-only: where the capture owns that channel on that node the runtime restores just that property, instead of re-running the metadata pass over the subtree and bumping the mutation epoch",
       "signature": "__pulpReconcileMaterializedPaint__"
+    },
+    {
+      "revision": 3,
+      "id": "batched-host-callbacks",
+      "summary": "the setState calls one requestAnimationFrame or timer callback makes commit once when it returns, instead of once per call under LegacyRoot (one editor's post-mount state hydrate made 13 commits from a single animation frame, ~380 ms of its editor-open settle)",
+      "signature": "__pulpBatchUpdates__"
     }
   ]
 }

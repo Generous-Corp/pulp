@@ -1177,10 +1177,13 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
             record = json.loads(held.stdout)["lease"]
             if record["host_boot_time"] == "unknown":
                 self.skipTest("host does not expose a boot identity")
+            # A process recorded on another boot cannot share the start time of
+            # one alive now, so a real cross-boot record differs in both.
             self._replace_record_identity(
                 store,
                 "old-boot-owner",
                 host_boot_time="definitely-not-the-current-boot",
+                process_start_time="Mon Jan 1 00:00:00 2001",
             )
 
             recovered = self._acquire(store, "replacement", os.getpid())
@@ -1192,6 +1195,28 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
                 body["reaped"],
                 [{"id": "old-boot-owner", "reason": "identity_mismatch"}],
             )
+
+    def test_matching_start_outranks_a_changed_boot_string(self) -> None:
+        # kern.boottime is a rendered string that moves when the calendar is
+        # adjusted; a recorded start time that still matches proves the owner
+        # alive, so its lease is kept and the second build is refused.
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            store = Path(raw_tmp) / "leases"
+            held = self._acquire(store, "boot-string-moved", os.getpid())
+            self.assertEqual(held.returncode, 0, held.stdout + held.stderr)
+            record = json.loads(held.stdout)["lease"]
+            if record["host_boot_time"] == "unknown" or not record.get("process_start_time"):
+                self.skipTest("host does not expose a boot or process-start identity")
+            self._replace_record_identity(
+                store,
+                "boot-string-moved",
+                host_boot_time="definitely-not-the-current-boot",
+            )
+
+            refused = self._acquire(store, "replacement", os.getpid())
+            self.assertEqual(refused.returncode, 75, refused.stdout + refused.stderr)
+            body = json.loads(refused.stdout)
+            self.assertEqual(body.get("reaped", []), [])
 
 
 class BuildMetricRecordTests(unittest.TestCase):

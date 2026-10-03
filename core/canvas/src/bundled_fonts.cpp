@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <future>
 #include <fstream>
 #include <limits>
@@ -301,6 +302,9 @@ namespace {
 // letting a later face silently replace an earlier one.
 struct RegisteredEntry {
     std::vector<sk_sp<SkTypeface>> faces;
+    // The bytes each face was built from, index-aligned with `faces`, so a
+    // re-registration of identical bytes can be recognised by CONTENT.
+    std::vector<sk_sp<SkData>> sources;
 };
 
 std::mutex& registered_mutex() {
@@ -420,10 +424,31 @@ bool register_font(const std::uint8_t* data, std::size_t size,
         return false;
     }
 
+    // Re-registering bytes this family already holds is a no-op that
+    // reports success. Every registration builds a fresh SkTypeface, so the
+    // pointer check below can never see a repeat: a captured design that
+    // registers its @font-face files on every editor open used to append a
+    // duplicate face per binding per open and bump the generation each time,
+    // which invalidates every typeface cache and makes the next SkParagraph
+    // FontCollection rebuild clone every accumulated variable face at nine
+    // weights. Checked before building a typeface so a repeat costs one
+    // compare and leaves every cache valid.
+    if (!family_override.empty()) {
+        std::lock_guard<std::mutex> guard(registered_mutex());
+        const auto& map = registered_fonts();
+        if (const auto it = map.find(family_override); it != map.end()) {
+            for (const auto& source : it->second.sources) {
+                if (source && source->size() == size
+                    && std::memcmp(source->data(), data, size) == 0)
+                    return true;
+            }
+        }
+    }
+
     // SkData::MakeWithCopy so the caller can free `data` immediately. The
     // typeface owns the SkData reference for its full lifetime.
     auto sk_data = SkData::MakeWithCopy(data, size);
-    sk_sp<SkTypeface> face = mgr->makeFromData(std::move(sk_data));
+    sk_sp<SkTypeface> face = mgr->makeFromData(sk_data);
     if (!face) return false;
 
     std::string family = family_override;
@@ -442,15 +467,22 @@ bool register_font(const std::uint8_t* data, std::size_t size,
         std::lock_guard<std::mutex> guard(registered_mutex());
         // Append rather than overwrite. The lookup side picks the best style
         // match across all registered faces for this family. Idempotency: skip
-        // if this exact typeface ptr is already present (same Skia identity),
-        // but allow multiple physically-distinct faces (a Regular + Italic +
-        // Bold trio is the normal case for "drop the font family folder in").
+        // a face this family already holds -- the same Skia identity or the
+        // same source bytes -- but allow multiple physically-distinct faces (a
+        // Regular + Italic + Bold trio is the normal case for "drop the font
+        // family folder in").
         auto& entry = registered_fonts()[family];
-        bool dup = false;
-        for (const auto& existing : entry.faces) {
-            if (existing.get() == face.get()) { dup = true; break; }
+        for (std::size_t i = 0; i < entry.faces.size(); ++i) {
+            if (entry.faces[i].get() == face.get()) return true;
+            // Same bytes under a family resolved from the face's own name
+            // (no override, so the pre-decode check above could not run).
+            const auto& source = entry.sources[i];
+            if (source && source->size() == size
+                && std::memcmp(source->data(), data, size) == 0)
+                return true;
         }
-        if (!dup) entry.faces.push_back(std::move(face));
+        entry.faces.push_back(std::move(face));
+        entry.sources.push_back(std::move(sk_data));
     }
     bump_generation();
     return true;

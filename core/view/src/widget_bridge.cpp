@@ -430,7 +430,7 @@ if (!globalThis.window.__pulpListenerShim__) {
 
 static void eval_or_throw(ScriptEngine& engine, const char* name, const std::string& js) {
     try {
-        engine.evaluate(js);
+        engine.evaluate_script(js);  // whole script: reuses compiled bytecode
     } catch (const choc::javascript::Error& e) {
         runtime::log_error("PULP_EVAL_THROW: name={} js_len={} choc_error={}", name, js.size(), e.what());
         throw std::runtime_error(std::string("failed to evaluate ") + name + ": " + e.what());
