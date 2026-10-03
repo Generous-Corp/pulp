@@ -378,8 +378,8 @@ TEST_CASE("WaveNet depth telemetry reports bounded multi-flight",
     const auto depth_eight = run(8);
     CHECK(depth_two.submitted_blocks == 6);
     CHECK(depth_eight.submitted_blocks == 6);
-    CHECK(depth_two.high_water_in_flight >= 1);
-    CHECK(depth_eight.high_water_in_flight >= depth_two.high_water_in_flight);
+    CHECK(depth_two.in_flight_high_water >= 1);
+    CHECK(depth_eight.in_flight_high_water >= depth_two.in_flight_high_water);
 }
 
 TEST_CASE("WaveNet incomplete timed submission stops after two service passes",

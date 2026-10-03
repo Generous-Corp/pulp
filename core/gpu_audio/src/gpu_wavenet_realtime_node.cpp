@@ -557,6 +557,8 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
             s.telemetry.record_submit();
         ++s.next_input;
         ++s.pending_count;
+        if (s.trace)
+            s.telemetry.observe_in_flight(s.pending_count);
         all_submitted = all_submitted || submission_ok;
         (void)s.bridge->release_input(*input);
     }
