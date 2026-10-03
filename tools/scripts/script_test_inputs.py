@@ -481,10 +481,10 @@ def ctest_programs(build_dir: Path) -> set[str] | None:
 
 def test_executables(build_dir: Path | None) -> dict[str, dict] | None:
     """executables.json's records for the executables this list scans: every
-    one under test/, and any other one ctest runs. Each is keyed by the
-    program name a ctest command carries, which is what a selector looks it
-    up by (pulp-cli is run as pulp-cpp), and keeps its target name under
-    `target`. None without the index."""
+    one under test/, and any other one ctest runs. Each is keyed by its
+    artifact, the program name a ctest command carries and so what a
+    selector looks it up by (pulp-cli is run as pulp-cpp), and keeps its
+    target name under `target`. None without the index."""
     if build_dir is None:
         return None
     index = _read_json(build_dir / TEST_DATA_DIR / "executables.json")
@@ -493,15 +493,16 @@ def test_executables(build_dir: Path | None) -> dict[str, dict] | None:
     artifacts = load_runtime_artifacts(build_dir) or {}
     run = ctest_programs(build_dir)
     out = {}
-    for target, rec in (index.get("executables") or {}).items():
+    for target, rec in sorted((index.get("executables") or {}).items()):
         program = str((artifacts.get(target) or {}).get("artifact") or target)
-        if run is not None and program in run:
-            name = program
-        elif rec.get("under_test", True) or run is None or target in run:
-            name = target
-        else:
+        # A ctest command names the artifact; a Catch2 discovery include is
+        # named after the target.
+        if not (rec.get("under_test", True) or run is None or program in run or target in run):
             continue
-        out[name] = dict(rec, target=target)
+        if program in out:
+            raise ValueError(f"{out[program]['target']} and {target} both build {program}; "
+                             "a selector could not tell their tests apart")
+        out[program] = dict(rec, target=target)
     return out
 
 
@@ -687,7 +688,13 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         doc["executables_scanned_for"] = list(EXECUTABLE_SCANS)
         # And which executables were scanned: a missing entry means "clean" only
         # for a name in this list; one that is not here was never scanned.
-        doc["executables_scanned"] = sorted(test_executables(build_dir) or {})
+        scanned = test_executables(build_dir) or {}
+        doc["executables_scanned"] = sorted(scanned)
+        # Every name above is the program ctest runs; the few built from a
+        # target of another name map back to it, which is the name
+        # pulp_test_data() and pulp_test_spawns() take.
+        doc["executable_targets"] = {name: rec["target"] for name, rec in sorted(scanned.items())
+                                     if rec["target"] != name}
     return doc
 
 

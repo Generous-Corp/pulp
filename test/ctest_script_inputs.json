@@ -1,4 +1,9 @@
 {
+ "executable_targets": {
+  "Pulp Test (dev) Plugin": "PulpBundleNameQuoting_Standalone",
+  "pulp-cli-run-fixture": "pulp-test-cli-run-fixture",
+  "pulp-cpp": "pulp-cli"
+ },
  "executables": {
   "pulp-control-broker-crash-fixture": {
    "data": "none",
@@ -2023,9 +2028,10 @@
   }
  },
  "executables_scanned": [
-  "PulpBundleNameQuoting_Standalone",
+  "Pulp Test (dev) Plugin",
   "pulp-browser-capture-launcher-fixture",
   "pulp-child-process-input-fixture",
+  "pulp-cli-run-fixture",
   "pulp-connected-child-process-fixture",
   "pulp-control-broker-crash-fixture",
   "pulp-control-enrollment-host-fixture",
@@ -2143,7 +2149,6 @@
   "pulp-test-cli-project-bump-all",
   "pulp-test-cli-project-command",
   "pulp-test-cli-projects-registry",
-  "pulp-test-cli-run-fixture",
   "pulp-test-cli-run-options",
   "pulp-test-cli-sdk-tarball-filename",
   "pulp-test-cli-shell-quote",
