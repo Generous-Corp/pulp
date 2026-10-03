@@ -114,6 +114,17 @@ latency remain unchanged.
 
 ## Pattern data
 
+### Latch lifecycle controls
+
+`pulp::midi::Latch` Hold mode keeps one sounding voice for a key. Repeated
+attacks while that key is physically held still increase retention depth;
+re-pressing after its physical release does not retrigger the already latched
+voice. If an output buffer is full, a note-off is queued in the bounded
+per-key debt table and drained at the start of the next process block. This
+keeps lifecycle balancing deterministic without allocating or dropping a
+release. `Off` remains an exact passthrough and `Toggle` retains its existing
+per-key flip behavior.
+
 `pattern_gate`, `step_seq`, `note_gen`, `morph_seq`, and `drum_gen` consume
 bounded pattern data: at most eight lanes, each with at most 32 steps.
 

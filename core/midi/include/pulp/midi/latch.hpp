@@ -71,6 +71,7 @@ class Latch {
             report.complete = false;
             return report;
         }
+        drain_pending_releases(output, report);
         for (const auto& event : input) {
             const bool is_attack = event.is_note_on() && event.velocity() != 0;
             const bool is_release =
@@ -99,6 +100,9 @@ class Latch {
             report.complete = false;
             return report;
         }
+        drain_pending_releases(output, report);
+        if (pending_release_total_ != 0)
+            return report;
         for (std::size_t key = 0; key < kKeySpace && owned_total_ != 0; ++key) {
             while (owned_depth_[key] != 0) {
                 if (!utility_detail::emit(output, note_off_for(key), report)) {
@@ -165,6 +169,15 @@ class Latch {
         }
         if (spec_.mode == LatchMode::Hold && physical_down_ == 0)
             release_all_owned(event.sample_offset, output, report);
+        if (spec_.mode == LatchMode::Hold && physical_depth_[static_cast<std::size_t>(key)] == 0 &&
+            owned_depth_[static_cast<std::size_t>(key)] != 0) {
+            // Hold mode keeps one sounding voice per key. A re-press while
+            // another physical key is held updates physical ownership but
+            // does not retrigger the already latched voice.
+            increment(physical_depth_[static_cast<std::size_t>(key)]);
+            increment(physical_down_);
+            return;
+        }
         if (spec_.mode == LatchMode::Toggle &&
             owned_depth_[static_cast<std::size_t>(key)] != 0) {
             // A second press on a latched key releases it and consumes the
@@ -191,6 +204,8 @@ class Latch {
         if (spec_.mode == LatchMode::Off) {
             if (utility_detail::emit(output, event, report))
                 surrender(key);
+            else
+                queue_pending_release(key);
             return;
         }
         // Retained: the latch, not the player, decides when this note ends.
@@ -243,6 +258,27 @@ class Latch {
             release_key(static_cast<int>(key), sample_offset, output, report);
     }
 
+    void queue_pending_release(int key) noexcept {
+        auto& pending = pending_release_[static_cast<std::size_t>(key)];
+        if (pending != std::numeric_limits<std::uint32_t>::max()) {
+            ++pending;
+            ++pending_release_total_;
+        }
+    }
+
+    void drain_pending_releases(MidiBuffer& output, MidiUtilityProcessReport& report) noexcept {
+        for (std::size_t key = 0; key < kKeySpace && pending_release_total_ != 0; ++key) {
+            auto& pending = pending_release_[key];
+            while (pending != 0) {
+                if (!utility_detail::emit(output, note_off_for(key), report))
+                    return;
+                --pending;
+                --pending_release_total_;
+                surrender(static_cast<int>(key));
+            }
+        }
+    }
+
     static MidiEvent note_off_for(std::size_t key) noexcept {
         return MidiEvent::note_off(static_cast<std::uint8_t>(key / 128),
                                    static_cast<std::uint8_t>(key % 128));
@@ -258,6 +294,8 @@ class Latch {
     std::optional<LatchSpec> pending_spec_{};
     std::array<std::uint32_t, kKeySpace> owned_depth_{};
     std::array<std::uint32_t, kKeySpace> physical_depth_{};
+    std::array<std::uint32_t, kKeySpace> pending_release_{};
+    std::uint32_t pending_release_total_ = 0;
     std::uint32_t physical_down_ = 0;
     std::uint32_t owned_total_ = 0;
 };

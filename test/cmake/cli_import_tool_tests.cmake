@@ -216,3 +216,13 @@ target_link_libraries(pulp-test-cli-migration-index PRIVATE
 pulp_test_data(pulp-test-cli-migration-index PATHS tools/scripts/build_migration_index.py)
 catch_discover_tests(pulp-test-cli-migration-index
     PROPERTIES ENVIRONMENT "PULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}")
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-cli-tool-registry NONE)       # python3, cmake, tar, sh; registered tools are temp scripts
+pulp_test_spawns(pulp-test-cli-importer-install NONE)     # links the registry's runner; the importer is a temp script
+pulp_test_spawns(pulp-test-cli-import-install NONE)       # links the import runner but never runs an importer
+pulp_test_spawns(pulp-test-cli-project-command NONE)      # git against temp repos; cmake only for --verify-builds
+pulp_test_spawns(pulp-test-cli-update-check NONE)         # curl, behind an injected fetcher
+pulp_test_spawns(pulp-test-cli-update-mode NONE)          # curl, behind an injected fetcher
+pulp_test_spawns(pulp-test-cli-migration-index NONE)      # python3 on tools/scripts/build_migration_index.py

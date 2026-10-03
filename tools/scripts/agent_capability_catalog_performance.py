@@ -677,7 +677,7 @@ EXPORTS = [
             include="pulp/midi/latch.hpp",
             qualified_name="pulp::midi::Latch",
             target="Pulp::midi",
-            header_fingerprint="sha256:b690accb10c2278d4fe41bd1f886f831a9f9aacd11cf78a5a7d7e1bc76266cb6",
+            header_fingerprint="sha256:b00c053ad5172fa56273fabcbcd28001ecc4fba71b81564a7cf20aed0e5e9552",
         )],
         _link_probes=[{
             "role": "entrypoint",

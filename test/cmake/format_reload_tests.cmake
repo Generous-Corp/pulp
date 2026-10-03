@@ -540,3 +540,8 @@ pulp_add_test_suite(pulp-test-step-sequencer-roundtrip GROUP pulp-test-group-fmt
 # it needs no adapter or SDK — pulp::audio supplies BufferView.
 pulp_add_test_suite(pulp-test-state-restore-gate GROUP pulp-test-group-fmt-format
     LIBRARIES pulp::audio pulp::format)
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-au-v2-param-display NONE)      # re-runs its own executable
+pulp_test_spawns(pulp-test-group-fmt-ship NONE)           # xar, pkgbuild and productbuild

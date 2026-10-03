@@ -1,0 +1,90 @@
+{
+  "id": "e126-latch-block-debt-drain",
+  "title": "Latch drains bounded release debt and defines Hold re-press lifecycle",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "96fe75e5-654d-4a27-8b0b-0a71084b938d",
+  "owned_paths": [
+    "core/midi/include/pulp/midi/latch.hpp",
+    "test/test_midi_performance_kernels.cpp",
+    "docs/guides/midi-fx.md",
+    "docs/status/sequencer-exposure/rows/e126-latch-block-debt-drain.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/midi/include/pulp/midi/latch.hpp",
+      "needles": [
+        "drain_pending_releases",
+        "pending_release_",
+        "physical_depth_[static_cast<std::size_t>(key)] == 0"
+      ]
+    },
+    {
+      "path": "test/test_midi_performance_kernels.cpp",
+      "needles": [
+        "latch hold suppresses a re-press",
+        "latch drains an output-refused note-off"
+      ]
+    },
+    {
+      "path": "docs/guides/midi-fx.md",
+      "needles": [
+        "Latch lifecycle controls",
+        "debt table"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The existing pulp::midi::Latch public header now defines bounded release debt draining and Hold re-press semantics.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/midi/include/pulp/midi/latch.hpp",
+          "needles": [
+            "class Latch",
+            "drain_pending_releases"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline command or node schema is added."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or response shape is added."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No Product A operation or executor is added; the Forge transform remains a separate downstream consumer."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The existing midi.latch capability binding remains the authoritative discovery surface.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"midi.latch\""
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}
