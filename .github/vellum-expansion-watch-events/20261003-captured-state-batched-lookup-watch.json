@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-captured-state-batched-lookup-watch",
+  "created_at": "2026-10-03T02:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record per-commit performance changes that cross these families' selectors. The materialized runtime entry answers captured-state resolution with one registry pass (__pulpFindMaterializedElements__ returns exactly what __pulpFindMaterializedElement__ returns for each query; a node is match-tested only when it carries the attributes a plain-compound target names), and the web-compat selector engine memoizes _parseSelector by selector text. Skill docs record the hydrate-before-first-render pattern. No importer lowering, DesignIR shape, capture path, renderer selection, asset format, fixture or threshold changes, and no existing test's verdict changes. Registered as watch-only so the families' coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "node --test tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
+    "pulp-test-web-compat-events [selector]"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

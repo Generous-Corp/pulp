@@ -9,6 +9,38 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v08960"></a>
+## [0.896.0] - 2026-10-03
+
+- release/version bump ([#9291](https://github.com/Generous-Corp/pulp/pull/9291))
+- feat/spawn closure edges ([#9269](https://github.com/Generous-Corp/pulp/pull/9269))
+- fix/bump fastpath complete history ([#9229](https://github.com/Generous-Corp/pulp/pull/9229))
+- feature/audit require offline trees ([#9246](https://github.com/Generous-Corp/pulp/pull/9246))
+
+<a id="v08951"></a>
+## [0.895.1] - 2026-10-03
+
+- release/version bump ([#9285](https://github.com/Generous-Corp/pulp/pull/9285))
+- feature/changed surface families file ([#9242](https://github.com/Generous-Corp/pulp/pull/9242))
+- perf/editor open fast default ([#9282](https://github.com/Generous-Corp/pulp/pull/9282))
+- fix/font register content dedup ([#9275](https://github.com/Generous-Corp/pulp/pull/9275))
+- codex/metal comparator dawn 20261002 ([#9274](https://github.com/Generous-Corp/pulp/pull/9274))
+- fix/governed build selftest cross boot ([#9277](https://github.com/Generous-Corp/pulp/pull/9277))
+- ci/reuse replay spawn fallback proxy ([#9278](https://github.com/Generous-Corp/pulp/pull/9278))
+- docs/ci skill multiconfig generate ([#9273](https://github.com/Generous-Corp/pulp/pull/9273))
+
+<a id="v08950"></a>
+## [0.895.0] - 2026-10-02
+
+- codex/metal comparator matched 20261002 ([#9272](https://github.com/Generous-Corp/pulp/pull/9272))
+- release/version bump ([#9271](https://github.com/Generous-Corp/pulp/pull/9271))
+- feature/changed surface base provisioning ([#9268](https://github.com/Generous-Corp/pulp/pull/9268))
+- codex/gpu trace max inflight 20261002 ([#9270](https://github.com/Generous-Corp/pulp/pull/9270))
+- ci/reuse replay digest v2 ([#9266](https://github.com/Generous-Corp/pulp/pull/9266))
+- ci/codemodel generated content ([#9264](https://github.com/Generous-Corp/pulp/pull/9264))
+- codex/wavenet multiflight 20261002 ([#9265](https://github.com/Generous-Corp/pulp/pull/9265))
+- feature/changed surface base check precedes cache ([#9262](https://github.com/Generous-Corp/pulp/pull/9262))
+
 <a id="v08940"></a>
 ## [0.894.0] - 2026-10-02
 
@@ -9470,6 +9502,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.896.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.896.0
+[0.895.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.895.1
+[0.895.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.895.0
 [0.894.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.894.0
 [0.893.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.893.0
 [0.892.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.892.0

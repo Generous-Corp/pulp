@@ -1,14 +1,45 @@
 {
  "executables": {
+  "pulp-control-broker-crash-fixture": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-control-trusted-host-e2e-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-au-v2-param-display": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_au_v2_param_display.mm"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-authoring-capsule-hostile": {
    "data": "declared",
    "inputs": [
     "core/authoring_capsule"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_authoring_capsule_hostile.cpp"
    ],
+   "spawning_sources": [
+    "test/test_authoring_capsule_hostile.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-browser-capture-import": {
@@ -24,6 +55,34 @@
     "test/test_browser_capture_text_metrics.cpp",
     "test/test_browser_capture_tree.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-child-process-standard-input": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-child-process-input-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_child_process_standard_input.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-configure-defaults": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_configure_defaults.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-cli-content-commands": {
@@ -46,9 +105,16 @@
    "data": "undeclared",
    "inputs": [],
    "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
    "sources": [
     "test/test_cli_create_shellout.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_create_shellout.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": [
     "test/test_cli_create_shellout.cpp"
    ]
@@ -72,11 +138,18 @@
     "tools/import/known-frameworks.json"
    ],
    "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
    "sources": [
     "test/test_cli_import.cpp",
     "tools/cli/import_detect.cpp",
     "tools/cli/import_spi.cpp"
    ],
+   "spawning_sources": [
+    "tools/cli/import_spi.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-cli-import-design": {
@@ -102,6 +175,48 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-cli-import-emit": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_import_emit.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-import-figma-url": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-import-design"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_import_figma_url.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-import-install": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/cli/import_spi.cpp",
+    "tools/cli/tool_registry.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-import-terms": {
    "data": "declared",
    "inputs": [
@@ -109,10 +224,30 @@
     "tools/scripts/check_import_provenance.py"
    ],
    "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
    "sources": [
     "test/test_cli_import_terms.cpp",
     "tools/cli/import_terms.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_import_terms.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-importer-install": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/cli/import_spi.cpp",
+    "tools/cli/tool_registry.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-cli-kit-commands": {
@@ -122,6 +257,9 @@
     "tools/kits/pulp-package.schema.json"
    ],
    "kind": "compiled",
+   "runtime_targets": [
+    "pulp-fake-screenshot-tool"
+   ],
    "sources": [
     "test/test_cli_kit_commands.cpp",
     "tools/cli/cli_fs_util.cpp",
@@ -129,6 +267,22 @@
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/package_registry.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_kit_commands.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-mac-runtime-validators": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/cli/mac_runtime_validators.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-cli-migration-index": {
@@ -137,10 +291,15 @@
     "tools/scripts/build_migration_index.py"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_migration_index.cpp",
     "tools/cli/migration_runtime.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_migration_index.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-cli-package-analyzer-descriptors": {
@@ -156,16 +315,72 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-cli-package-commands": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/cli/import_spi.cpp",
+    "tools/cli/tool_registry.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-project-command": {
    "data": "undeclared",
    "inputs": [],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_project_command.cpp"
    ],
+   "spawning_sources": [
+    "tools/cli/cli_common.cpp",
+    "tools/cli/cli_delegate.cpp",
+    "tools/cli/cli_doctor_helpers.cpp",
+    "tools/cli/cli_sdk.cpp",
+    "tools/cli/focused_build.cpp",
+    "tools/cli/local_sdk_install.cpp",
+    "tools/cli/tartci_lease.cpp",
+    "tools/cli/update_check.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": [
     "test/test_cli_project_command.cpp"
    ]
+  },
+  "pulp-test-cli-shellout": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-import-design",
+    "pulp-sampler-cli-sidecar-probe",
+    "pulp-test-cli-run-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-ship-shellout": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_ship_shellout.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
   },
   "pulp-test-cli-skew-banner": {
    "data": "declared",
@@ -190,6 +405,44 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-cli-tool-registry": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_tool_registry.cpp",
+    "tools/cli/import_spi.cpp",
+    "tools/cli/tool_registry.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-update-check": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/cli/update_check.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-update-mode": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/cli/update_check.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-upgrade-install": {
    "data": "declared",
    "inputs": [
@@ -200,6 +453,91 @@
    "sources": [
     "test/test_cli_upgrade_install.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-validator-discovery": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/cli/validator_discovery.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-control-broker-daemon": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-control-broker",
+    "pulp-control-broker-crash-fixture",
+    "pulp-control-trusted-host-e2e-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp",
+    "test/test_control_broker_daemon.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-control-endpoint-enrollment": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-control-enrollment-host-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_control_endpoint_enrollment.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-control-gpu-health-standalone-product": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-control-gpu-health-standalone-product-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-control-host-bootstrap": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-control-host-bootstrap-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_control_host_bootstrap.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-control-host-preflight": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-control-host-preflight-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_control_host_preflight.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-coreaudio-input-only": {
@@ -213,6 +551,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-coreaudio-native-lifetime": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_coreaudio_native_lifetime.mm"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-cross-platform-audio-golden": {
    "data": "declared",
    "inputs": [
@@ -222,6 +572,20 @@
    "sources": [
     "test/test_cross_platform_audio_golden.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-denormal-null": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-denormal-null-refgen"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/denormal_null_launcher.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-design-import": {
@@ -306,9 +670,16 @@
    "data": "undeclared",
    "inputs": [],
    "kind": "compiled",
+   "runtime_targets": [
+    "pulp-fixture-runner"
+   ],
    "sources": [
     "test/test_fixture_runner_cli.cpp"
    ],
+   "spawning_sources": [
+    "test/test_fixture_runner_cli.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": [
     "test/test_fixture_runner_cli.cpp"
    ]
@@ -330,9 +701,14 @@
     "docs/status/forge-catalog.json"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_forge_descriptor_audit.cpp"
    ],
+   "spawning_sources": [
+    "test/test_graph_serializer.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-group-app-view": {
@@ -372,6 +748,42 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-group-core-audio": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_mmap_reader_ranged.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-group-core-events": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_events.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-group-core-platform": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_dbus.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-group-design-import-bridge": {
    "data": "declared",
    "inputs": [
@@ -381,6 +793,31 @@
    "sources": [
     "test/test_design_import_anchors.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-group-fmt-ship": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_codesign.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-group-native-platform": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_child_process.cpp",
+    "test/test_progress_parser.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-group-sampler-host-graph": {
@@ -452,13 +889,47 @@
     "test/test_timeline_replay_golden.cpp"
    ]
   },
+  "pulp-test-host": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_host.cpp",
+    "test/test_plugin_slot_au.mm"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-host-regression": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_host_regression.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-import-design-tool": {
    "data": "undeclared",
    "inputs": [],
    "kind": "compiled",
+   "runtime_targets": [
+    "pulp-import-design"
+   ],
    "sources": [
     "test/test_import_design_tool.cpp"
    ],
+   "spawning_sources": [
+    "test/test_import_design_tool.cpp",
+    "tools/import-design/fig_lane.cpp",
+    "tools/import-design/node_runtime.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": [
     "test/test_import_design_tool.cpp"
    ]
@@ -472,6 +943,34 @@
    "sources": [
     "test/test_import_object_coverage.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-ipc": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-connected-child-process-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_ipc.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-lv2-host-discovery": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-lv2-slot-probe"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_lv2_host_discovery.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-mac-platform-harness": {
@@ -490,9 +989,17 @@
    "data": "undeclared",
    "inputs": [],
    "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-test-mcp-gpu-probe-fake-cli"
+   ],
    "sources": [
     "test/test_mcp_server.cpp"
    ],
+   "spawning_sources": [
+    "test/test_mcp_server.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": [
     "test/test_mcp_server.cpp"
    ]
@@ -502,12 +1009,10 @@
    "inputs": [],
    "kind": "compiled",
    "sources": [
-    "test/test_mcp_timeline_sessions.cpp",
-    "test/test_mcp_timeline_tools.cpp"
+    "test/test_mcp_timeline_sessions.cpp"
    ],
    "undeclared_sources": [
-    "test/test_mcp_timeline_sessions.cpp",
-    "test/test_mcp_timeline_tools.cpp"
+    "test/test_mcp_timeline_sessions.cpp"
    ]
   },
   "pulp-test-modal-spec": {
@@ -520,6 +1025,59 @@
     "test/harness/rt_allocation_probe.cpp",
     "test/test_modal_spec.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-native-core-processor": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_native_core_processor.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-offscreen-capture-rt-contract": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_offscreen_capture_rt_contract.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-osc-render-wav-cli": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-osc-render-wav"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_osc_render_wav_cli.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-project-package": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-project-package-mutant-helper",
+    "pulp-project-package-publish-helper"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_project_package.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-real-plugin-runner-cache": {
@@ -586,6 +1144,30 @@
     "test/test_timeline_document_fuzz.cpp"
    ]
   },
+  "pulp-test-timeline-graph-binding": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_timeline_graph_automation_delivery.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-timeline-journal": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_timeline_file_journal.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-widget-bridge-api-contracts": {
    "data": "declared",
    "inputs": [
@@ -609,6 +1191,611 @@
    "undeclared_sources": []
   }
  },
+ "executables_scanned": [
+  "pulp-browser-capture-launcher-fixture",
+  "pulp-child-process-input-fixture",
+  "pulp-connected-child-process-fixture",
+  "pulp-control-broker-crash-fixture",
+  "pulp-control-enrollment-host-fixture",
+  "pulp-control-gpu-health-standalone-product-fixture",
+  "pulp-control-host-bootstrap-fixture",
+  "pulp-control-host-preflight-fixture",
+  "pulp-control-installed-host-e2e-fixture",
+  "pulp-control-trusted-host-e2e-fixture",
+  "pulp-control-trusted-host-fixture",
+  "pulp-denormal-null-refgen",
+  "pulp-fake-screenshot-tool",
+  "pulp-generate-control-protocol-fuzz-corpus",
+  "pulp-gpu-host-mapped-pointer-probe",
+  "pulp-gpu-roofline-harness",
+  "pulp-heritage-adaptive-calibration-render",
+  "pulp-heritage-c1-c5-calibration-render",
+  "pulp-heritage-cyclic-calibration-render",
+  "pulp-isolated-scanner-crash-helper",
+  "pulp-osc-render-wav",
+  "pulp-project-package-mutant-helper",
+  "pulp-project-package-publish-helper",
+  "pulp-reload-ship-fixture-dev",
+  "pulp-reload-ship-fixture-ship",
+  "pulp-sampler-cli-sidecar-probe",
+  "pulp-sampler-heritage-render-wav",
+  "pulp-sampler-render-wav",
+  "pulp-test-aax-rt-safety",
+  "pulp-test-ableton-link-sdk",
+  "pulp-test-adapter-audio-parity",
+  "pulp-test-agent-capability-compile",
+  "pulp-test-analog-vcf",
+  "pulp-test-analysis-frontends",
+  "pulp-test-anticipation-lane",
+  "pulp-test-ara-scaffold",
+  "pulp-test-au-bundle-entry",
+  "pulp-test-au-param-visibility",
+  "pulp-test-au-plugin-state",
+  "pulp-test-au-v2-cocoa-ui",
+  "pulp-test-au-v2-instrument-rt",
+  "pulp-test-au-v2-param-display",
+  "pulp-test-audio",
+  "pulp-test-audio-contracts",
+  "pulp-test-audio-device-manager",
+  "pulp-test-audio-doctor",
+  "pulp-test-audio-edge-cases",
+  "pulp-test-audio-matrix",
+  "pulp-test-audio-probe",
+  "pulp-test-audio-support",
+  "pulp-test-audio-system-hotplug",
+  "pulp-test-audio-tone-regression",
+  "pulp-test-audio-tools",
+  "pulp-test-audio-workgroup-wiring",
+  "pulp-test-authoring-capsule",
+  "pulp-test-authoring-capsule-hostile",
+  "pulp-test-baked-graph-param-injection",
+  "pulp-test-baked-graph-processor-parity",
+  "pulp-test-baked-node-fixture",
+  "pulp-test-beat-repeat-kernel",
+  "pulp-test-browser-capture-backend",
+  "pulp-test-browser-capture-import",
+  "pulp-test-build-check",
+  "pulp-test-canvas-drawlist-format",
+  "pulp-test-canvas-widget-layer-gpu",
+  "pulp-test-cfrunloop-cooperation",
+  "pulp-test-character-delay",
+  "pulp-test-child-process-standard-input",
+  "pulp-test-clap-ara-extension",
+  "pulp-test-clap-bundle-entry",
+  "pulp-test-clap-editor-audio-continuity",
+  "pulp-test-clap-entry",
+  "pulp-test-clap-host-validation",
+  "pulp-test-clap-hosted-editor",
+  "pulp-test-clap-latency-quirk",
+  "pulp-test-clap-midi-events",
+  "pulp-test-clap-webview",
+  "pulp-test-cli-audio-compare",
+  "pulp-test-cli-audio-latency",
+  "pulp-test-cli-audio-validate",
+  "pulp-test-cli-checkout-dependencies",
+  "pulp-test-cli-configure-defaults",
+  "pulp-test-cli-content-commands",
+  "pulp-test-cli-create-shellout",
+  "pulp-test-cli-create-targets",
+  "pulp-test-cli-design-binding",
+  "pulp-test-cli-designmd-subcommands",
+  "pulp-test-cli-docs-command",
+  "pulp-test-cli-fetchcontent-cache",
+  "pulp-test-cli-git-lock-health",
+  "pulp-test-cli-import",
+  "pulp-test-cli-import-design",
+  "pulp-test-cli-import-detect",
+  "pulp-test-cli-import-emit",
+  "pulp-test-cli-import-figma-url",
+  "pulp-test-cli-import-install",
+  "pulp-test-cli-import-terms",
+  "pulp-test-cli-importer-install",
+  "pulp-test-cli-inspect-shellout",
+  "pulp-test-cli-install-paths-mac",
+  "pulp-test-cli-json-parser",
+  "pulp-test-cli-kit-commands",
+  "pulp-test-cli-local-sdk-profile",
+  "pulp-test-cli-mac-runtime-validators",
+  "pulp-test-cli-migration-index",
+  "pulp-test-cli-overflow-selector",
+  "pulp-test-cli-overflow-shellout",
+  "pulp-test-cli-package-analyzer-descriptors",
+  "pulp-test-cli-package-commands",
+  "pulp-test-cli-package-registry",
+  "pulp-test-cli-project-bump",
+  "pulp-test-cli-project-bump-all",
+  "pulp-test-cli-project-command",
+  "pulp-test-cli-projects-registry",
+  "pulp-test-cli-run-fixture",
+  "pulp-test-cli-run-options",
+  "pulp-test-cli-sdk-tarball-filename",
+  "pulp-test-cli-shell-quote",
+  "pulp-test-cli-shellout",
+  "pulp-test-cli-shellout-lifecycle",
+  "pulp-test-cli-shellout-loop",
+  "pulp-test-cli-shellout-pr",
+  "pulp-test-cli-shellout-scan-projects",
+  "pulp-test-cli-ship-shellout",
+  "pulp-test-cli-skew-banner",
+  "pulp-test-cli-tartci-lease",
+  "pulp-test-cli-tool-registry",
+  "pulp-test-cli-tweaks-shellout",
+  "pulp-test-cli-update-check",
+  "pulp-test-cli-update-mode",
+  "pulp-test-cli-upgrade-install",
+  "pulp-test-cli-upgrade-url",
+  "pulp-test-cli-validator-discovery",
+  "pulp-test-cli-version-diag",
+  "pulp-test-commuted-string-excitation",
+  "pulp-test-control-broker-daemon",
+  "pulp-test-control-client-connection",
+  "pulp-test-control-endpoint",
+  "pulp-test-control-endpoint-enrollment",
+  "pulp-test-control-gpu-health-provider",
+  "pulp-test-control-gpu-health-read-executor",
+  "pulp-test-control-gpu-health-standalone-product",
+  "pulp-test-control-health",
+  "pulp-test-control-host-bootstrap",
+  "pulp-test-control-host-enrollment",
+  "pulp-test-control-host-observability-bundle",
+  "pulp-test-control-host-preflight",
+  "pulp-test-control-host-ui-executor",
+  "pulp-test-control-installed-host-lifecycle",
+  "pulp-test-control-manifest",
+  "pulp-test-control-offline-render-executor",
+  "pulp-test-control-peer",
+  "pulp-test-control-protocol",
+  "pulp-test-control-protocol-fuzz",
+  "pulp-test-control-runtime-closure-sanitizer-guard",
+  "pulp-test-control-sample-region",
+  "pulp-test-control-service",
+  "pulp-test-control-shipping-real-component",
+  "pulp-test-control-telemetry-tap",
+  "pulp-test-control-timeline-document-session",
+  "pulp-test-control-trusted-host-e2e",
+  "pulp-test-control-trusted-host-inventory",
+  "pulp-test-convolver-bg-swap",
+  "pulp-test-coreaudio-default-follow",
+  "pulp-test-coreaudio-input-only",
+  "pulp-test-coreaudio-native-lifetime",
+  "pulp-test-coremidi-shared-client",
+  "pulp-test-cross-platform-audio-golden",
+  "pulp-test-crossfade",
+  "pulp-test-css-gradient-render",
+  "pulp-test-css-translator-gaps-1434",
+  "pulp-test-dawproject-export",
+  "pulp-test-denormal-null",
+  "pulp-test-design-debug-contracts",
+  "pulp-test-design-fidelity",
+  "pulp-test-design-import",
+  "pulp-test-design-import-benchmark",
+  "pulp-test-design-import-benchmark-contracts",
+  "pulp-test-design-import-designmd",
+  "pulp-test-design-import-jsx-runtime",
+  "pulp-test-design-import-native-common",
+  "pulp-test-design-import-native-materializer",
+  "pulp-test-design-import-parity",
+  "pulp-test-design-import-react-runtime",
+  "pulp-test-design-import-screenshot-parity",
+  "pulp-test-design-import-toggle-binding",
+  "pulp-test-design-multi-state",
+  "pulp-test-design-swift-codegen",
+  "pulp-test-design-tokens-w3c",
+  "pulp-test-dsl-processor",
+  "pulp-test-dsp-runtime-no-alloc",
+  "pulp-test-edit-history",
+  "pulp-test-faithful-port-toolkit",
+  "pulp-test-fdn-reverb",
+  "pulp-test-fdn-reverb-catalog",
+  "pulp-test-fir-filter",
+  "pulp-test-fixture-runner-cli",
+  "pulp-test-foreign-framework-coexistence",
+  "pulp-test-forge-analog-vcf-catalog",
+  "pulp-test-forge-catalog-index",
+  "pulp-test-forge-character-delay-catalog",
+  "pulp-test-forge-distortion-catalog",
+  "pulp-test-forge-drum-catalog",
+  "pulp-test-forge-dynamics-catalog",
+  "pulp-test-forge-dynamics-lineage-catalog",
+  "pulp-test-forge-effect-modulation-catalog",
+  "pulp-test-forge-fuzz-catalog",
+  "pulp-test-forge-lofi-catalog",
+  "pulp-test-forge-modulation-catalog",
+  "pulp-test-forge-modulation-catalog-contracts",
+  "pulp-test-forge-pitch-catalog",
+  "pulp-test-forge-saturator-catalog",
+  "pulp-test-forge-sequencing-catalog",
+  "pulp-test-forge-space-catalog",
+  "pulp-test-forge-spectral-dynamics-catalogs",
+  "pulp-test-forge-synthesis-catalog",
+  "pulp-test-forge-tape-catalog",
+  "pulp-test-format-core-only-consumer",
+  "pulp-test-gesture-threading",
+  "pulp-test-golden",
+  "pulp-test-golden-effect",
+  "pulp-test-gpu-audio-execution-controller",
+  "pulp-test-gpu-audio-trace",
+  "pulp-test-gpu-audio-transport",
+  "pulp-test-gpu-compute",
+  "pulp-test-gpu-compute-async",
+  "pulp-test-gpu-compute-kernel-override",
+  "pulp-test-gpu-compute-pool",
+  "pulp-test-gpu-diagnostics",
+  "pulp-test-gpu-shared-io-convolution-pipeline",
+  "pulp-test-gpu-shared-io-convolution-session",
+  "pulp-test-gpu-shared-io-slot-ledger",
+  "pulp-test-gpu-shared-io-wavenet-spec",
+  "pulp-test-gpu-surface",
+  "pulp-test-gpu-wavenet-descriptor",
+  "pulp-test-gpu-wavenet-realtime-node",
+  "pulp-test-gpu-wavenet-session",
+  "pulp-test-graph-executor-routing",
+  "pulp-test-graph-runtime-worker-pool",
+  "pulp-test-graphic-eq",
+  "pulp-test-group-app-audio",
+  "pulp-test-group-app-audio-support",
+  "pulp-test-group-app-host",
+  "pulp-test-group-app-midi",
+  "pulp-test-group-app-signal",
+  "pulp-test-group-app-state",
+  "pulp-test-group-app-view",
+  "pulp-test-group-canvas",
+  "pulp-test-group-canvas-text",
+  "pulp-test-group-canvas-text-gpu",
+  "pulp-test-group-canvas-text-view-gpu",
+  "pulp-test-group-cap-audio",
+  "pulp-test-group-cap-clap",
+  "pulp-test-group-cap-format",
+  "pulp-test-group-cap-midi",
+  "pulp-test-group-cap-state",
+  "pulp-test-group-control-core",
+  "pulp-test-group-control-executors",
+  "pulp-test-group-core-analysis",
+  "pulp-test-group-core-audio",
+  "pulp-test-group-core-canvas",
+  "pulp-test-group-core-events",
+  "pulp-test-group-core-gpu-audio-private",
+  "pulp-test-group-core-gpu-audio-signal",
+  "pulp-test-group-core-gpu-shared-io-private",
+  "pulp-test-group-core-osc",
+  "pulp-test-group-core-platform",
+  "pulp-test-group-core-runtime",
+  "pulp-test-group-core-runtime-http",
+  "pulp-test-group-core-signal",
+  "pulp-test-group-core-standalone",
+  "pulp-test-group-core-state",
+  "pulp-test-group-core-view",
+  "pulp-test-group-design-import-bridge",
+  "pulp-test-group-design-import-tool",
+  "pulp-test-group-design-import-widgets",
+  "pulp-test-group-design-system",
+  "pulp-test-group-dsp-rt-format",
+  "pulp-test-group-dsp-rt-midi",
+  "pulp-test-group-dsp-rt-signal",
+  "pulp-test-group-dsp-rt-signal-fft",
+  "pulp-test-group-fmt-au-v2",
+  "pulp-test-group-fmt-audio",
+  "pulp-test-group-fmt-format",
+  "pulp-test-group-fmt-format-view",
+  "pulp-test-group-fmt-httplib",
+  "pulp-test-group-fmt-midi",
+  "pulp-test-group-fmt-reload-view",
+  "pulp-test-group-fmt-runtime",
+  "pulp-test-group-fmt-ship",
+  "pulp-test-group-graph-editor",
+  "pulp-test-group-inspector",
+  "pulp-test-group-late-audio",
+  "pulp-test-group-late-midi",
+  "pulp-test-group-late-runtime",
+  "pulp-test-group-late-signal",
+  "pulp-test-group-mac-view",
+  "pulp-test-group-motion",
+  "pulp-test-group-motion-inspect",
+  "pulp-test-group-native-platform",
+  "pulp-test-group-native-runtime",
+  "pulp-test-group-render-helpers",
+  "pulp-test-group-sampler-audio",
+  "pulp-test-group-sampler-format",
+  "pulp-test-group-sampler-graph-runtime",
+  "pulp-test-group-sampler-host-graph",
+  "pulp-test-group-sampler-timebase",
+  "pulp-test-group-sampler-view",
+  "pulp-test-group-script-format",
+  "pulp-test-group-script-view",
+  "pulp-test-group-timeline",
+  "pulp-test-group-timeline-editor",
+  "pulp-test-group-timeline-playback",
+  "pulp-test-group-timeline-session",
+  "pulp-test-group-timeline-view",
+  "pulp-test-group-view-host",
+  "pulp-test-group-view-host-audio-devices",
+  "pulp-test-group-view-host-format",
+  "pulp-test-group-view-host-format-view",
+  "pulp-test-group-view-host-hosting",
+  "pulp-test-group-view-host-mac",
+  "pulp-test-group-view-host-midi",
+  "pulp-test-group-view-widgets",
+  "pulp-test-headless-frame-pump",
+  "pulp-test-headless-surface",
+  "pulp-test-host",
+  "pulp-test-host-param-surface",
+  "pulp-test-host-regression",
+  "pulp-test-host-signal-graph",
+  "pulp-test-hosted-editor-container-adopt",
+  "pulp-test-hosted-editor-migration",
+  "pulp-test-identity",
+  "pulp-test-image-codecs-extended",
+  "pulp-test-image-decode",
+  "pulp-test-image-view-fill-gpu",
+  "pulp-test-import-design-tool",
+  "pulp-test-import-object-coverage",
+  "pulp-test-inspector-audit",
+  "pulp-test-inspector-domain-helpers",
+  "pulp-test-inspector-session",
+  "pulp-test-inspector-shipping-report",
+  "pulp-test-inspector-stripped-artifact",
+  "pulp-test-inspector-test-input",
+  "pulp-test-inspector-value-channel-telemetry",
+  "pulp-test-interaction-residual",
+  "pulp-test-interchange",
+  "pulp-test-ipc",
+  "pulp-test-isolated-scanner",
+  "pulp-test-latency-contract",
+  "pulp-test-live-dsp-telemetry",
+  "pulp-test-live-dsp-telemetry-graph",
+  "pulp-test-live-kernel-crossfade-null",
+  "pulp-test-load-measurer",
+  "pulp-test-lv2-adapter",
+  "pulp-test-lv2-bundle-discovery-e2e",
+  "pulp-test-lv2-host-discovery",
+  "pulp-test-lv2-rt",
+  "pulp-test-mac-hover-cursor-live",
+  "pulp-test-mac-platform-harness",
+  "pulp-test-matrix",
+  "pulp-test-matrix-compressor",
+  "pulp-test-matrix-drums",
+  "pulp-test-matrix-effect",
+  "pulp-test-matrix-sampler",
+  "pulp-test-matrix-synth",
+  "pulp-test-matrix-tone",
+  "pulp-test-mcp-gpu-probe-fake-cli",
+  "pulp-test-mcp-server",
+  "pulp-test-mcp-timeline-tools",
+  "pulp-test-meter-source",
+  "pulp-test-midi-arpeggiator",
+  "pulp-test-midi-parameter-map-scaling",
+  "pulp-test-midi-performance-kernels",
+  "pulp-test-midi-step-player",
+  "pulp-test-midi-utility-note-length",
+  "pulp-test-midi-voice-modulation-adapter",
+  "pulp-test-minimal-append",
+  "pulp-test-mirrored-history-buffer",
+  "pulp-test-modal-bank",
+  "pulp-test-modal-spec",
+  "pulp-test-model-download",
+  "pulp-test-model-manager-view",
+  "pulp-test-modulation-language",
+  "pulp-test-motion-android-bridge",
+  "pulp-test-motion-swift-bridge",
+  "pulp-test-mpe-synth-voice",
+  "pulp-test-multi-channel-meter",
+  "pulp-test-multi-window",
+  "pulp-test-music-compatibility",
+  "pulp-test-music-generative",
+  "pulp-test-music-pattern-development",
+  "pulp-test-music-theory",
+  "pulp-test-music-voicing",
+  "pulp-test-native-core-ffi",
+  "pulp-test-native-core-processor",
+  "pulp-test-native-metal-audio-comparator",
+  "pulp-test-native-metal-compute",
+  "pulp-test-negative-path",
+  "pulp-test-network-service-discovery",
+  "pulp-test-node-pack",
+  "pulp-test-notary-env",
+  "pulp-test-nsis-installer",
+  "pulp-test-nway-linkwitz-riley",
+  "pulp-test-offline-tracing",
+  "pulp-test-offscreen-capture-rt-contract",
+  "pulp-test-osc-channel",
+  "pulp-test-osc-minblep",
+  "pulp-test-osc-parameter-map",
+  "pulp-test-osc-render-wav-cli",
+  "pulp-test-param-host-sync",
+  "pulp-test-parameter-event-queue",
+  "pulp-test-playback-audio-renderer",
+  "pulp-test-playback-automation-cursor",
+  "pulp-test-playback-capture-engine",
+  "pulp-test-playback-clip-launch",
+  "pulp-test-playback-note-renderer",
+  "pulp-test-playback-production",
+  "pulp-test-playback-program",
+  "pulp-test-playback-program-wire",
+  "pulp-test-playback-track-automation-renderer",
+  "pulp-test-playback-transport",
+  "pulp-test-plugin-editor-headless-gpu",
+  "pulp-test-plugin-editor-host-smoke-mac",
+  "pulp-test-plugin-manager-panel",
+  "pulp-test-plugin-state-io",
+  "pulp-test-plugin-view-host-design-viewport",
+  "pulp-test-popover-row-template-1147",
+  "pulp-test-processor-node-adapter",
+  "pulp-test-project-package",
+  "pulp-test-pulp-node-v1",
+  "pulp-test-real-plugin-runner-cache",
+  "pulp-test-reed-waveguide-loop",
+  "pulp-test-relative-point",
+  "pulp-test-reload-controller",
+  "pulp-test-reload-library",
+  "pulp-test-reload-transaction",
+  "pulp-test-reloadable-shell",
+  "pulp-test-render-loop",
+  "pulp-test-render-scenario",
+  "pulp-test-routing-primitives",
+  "pulp-test-runtime",
+  "pulp-test-runtime-slot",
+  "pulp-test-sample-heritage",
+  "pulp-test-sample-heritage-live-cyclic",
+  "pulp-test-sample-heritage-pitch",
+  "pulp-test-sample-heritage-record-commit",
+  "pulp-test-sample-heritage-shipping-gates",
+  "pulp-test-sample-interpolation-quality",
+  "pulp-test-sample-region-authoring",
+  "pulp-test-sample-region-parameters",
+  "pulp-test-sample-region-runtime",
+  "pulp-test-sample-region-sequencer",
+  "pulp-test-sample-resource",
+  "pulp-test-sample-sinc-kernel",
+  "pulp-test-sample-starvation-envelope",
+  "pulp-test-sample-stream-async-service",
+  "pulp-test-sample-stream-decode-pool",
+  "pulp-test-sample-stream-loop-voice-reader",
+  "pulp-test-sample-stream-service",
+  "pulp-test-sample-stream-voice-reader",
+  "pulp-test-sampler-stream-parity",
+  "pulp-test-screenshot-compare",
+  "pulp-test-scripted-ui",
+  "pulp-test-sdk-distribution-guard",
+  "pulp-test-sdl3-surface",
+  "pulp-test-settings-sections",
+  "pulp-test-ship-tracing-guard",
+  "pulp-test-signal-additive-bank",
+  "pulp-test-signal-analysis-frontends",
+  "pulp-test-signal-blit-oscillator-no-exceptions",
+  "pulp-test-signal-chorus-family",
+  "pulp-test-signal-comb-filter",
+  "pulp-test-signal-cyclic-stretch",
+  "pulp-test-signal-diode-bridge-compressor",
+  "pulp-test-signal-dynamic-eq",
+  "pulp-test-signal-explicit-q-resonator-bank",
+  "pulp-test-signal-fet-compressor",
+  "pulp-test-signal-filter-morph",
+  "pulp-test-signal-fir-design",
+  "pulp-test-signal-fir-remez",
+  "pulp-test-signal-flanger",
+  "pulp-test-signal-fm-operator-engine",
+  "pulp-test-signal-formant-filter-bank",
+  "pulp-test-signal-fractional-delay",
+  "pulp-test-signal-frequency-shifter-ssb",
+  "pulp-test-signal-granular",
+  "pulp-test-signal-graph-audio-parity",
+  "pulp-test-signal-graph-executor-parity",
+  "pulp-test-signal-graph-offline-parity",
+  "pulp-test-signal-harmony-engine",
+  "pulp-test-signal-leslie",
+  "pulp-test-signal-modular-sequencing",
+  "pulp-test-signal-no-exceptions",
+  "pulp-test-signal-nonlin-ambience",
+  "pulp-test-signal-phaser-stages",
+  "pulp-test-signal-pitch-shifter",
+  "pulp-test-signal-speaker-cabinet",
+  "pulp-test-signal-spectral-delay-matrix",
+  "pulp-test-signal-sub-oscillator-no-exceptions",
+  "pulp-test-signal-tape-machine",
+  "pulp-test-signal-transient-designer",
+  "pulp-test-signal-unison",
+  "pulp-test-signal-vca-compressor",
+  "pulp-test-signal-vibrato",
+  "pulp-test-signal-vocoder",
+  "pulp-test-signal-zero-latency-convolver",
+  "pulp-test-simd",
+  "pulp-test-simd-header-fallback",
+  "pulp-test-simd-parity",
+  "pulp-test-simd-signal-link",
+  "pulp-test-six-band-eq",
+  "pulp-test-skewed-range",
+  "pulp-test-skia-surface",
+  "pulp-test-smf-interchange",
+  "pulp-test-sos-cascade",
+  "pulp-test-spectral-cross-synthesis",
+  "pulp-test-spectral-feature-frontends",
+  "pulp-test-spectral-feature-frontends-no-exceptions",
+  "pulp-test-spectral-gate-blur",
+  "pulp-test-spectral-morph",
+  "pulp-test-standalone-recording",
+  "pulp-test-standalone-rt",
+  "pulp-test-state",
+  "pulp-test-step-grid-view",
+  "pulp-test-super-convolver-clap-params",
+  "pulp-test-super-convolver-dsp",
+  "pulp-test-super-convolver-web-cpu",
+  "pulp-test-super-convolver-web-gpu",
+  "pulp-test-svg-path-range-orientation-1899",
+  "pulp-test-svg-primitives-1926",
+  "pulp-test-synthesiser",
+  "pulp-test-template-ui-scripts",
+  "pulp-test-texture-atlas",
+  "pulp-test-threejs-bridge",
+  "pulp-test-tilt-eq",
+  "pulp-test-tilt-eq-no-exceptions",
+  "pulp-test-timebase-groove-kernels",
+  "pulp-test-timebase-loop-region",
+  "pulp-test-timebase-tempo-map-capability",
+  "pulp-test-timeline-agent",
+  "pulp-test-timeline-agent-view",
+  "pulp-test-timeline-cli-offline-render",
+  "pulp-test-timeline-document-fuzz",
+  "pulp-test-timeline-edit-intents",
+  "pulp-test-timeline-graph-binding",
+  "pulp-test-timeline-journal",
+  "pulp-test-timeline-modulation",
+  "pulp-test-timeline-multitrack-pdc",
+  "pulp-test-timeline-nesting",
+  "pulp-test-timeline-offline-renderer",
+  "pulp-test-timeline-phase1-examples",
+  "pulp-test-timeline-smf",
+  "pulp-test-tracing",
+  "pulp-test-transition-cost",
+  "pulp-test-true-peak-limiter",
+  "pulp-test-udev-monitor",
+  "pulp-test-unison-voice-stack",
+  "pulp-test-unit-delay",
+  "pulp-test-validation-contract",
+  "pulp-test-view-core-link",
+  "pulp-test-view-core-window-host-link",
+  "pulp-test-visual",
+  "pulp-test-visualization",
+  "pulp-test-voice-modulation-sources",
+  "pulp-test-voice-runtime-facade",
+  "pulp-test-vst3-audio-parity",
+  "pulp-test-vst3-bundle-entry",
+  "pulp-test-vst3-connection",
+  "pulp-test-vst3-editor",
+  "pulp-test-vst3-host-process-clock",
+  "pulp-test-vst3-hosted-editor",
+  "pulp-test-vst3-note-names",
+  "pulp-test-vst3-param-display",
+  "pulp-test-vst3-plugin-state",
+  "pulp-test-vst3-state-sync",
+  "pulp-test-wam-adapter",
+  "pulp-test-wam-wclap",
+  "pulp-test-wav-memory-decoder",
+  "pulp-test-waveset-transformer",
+  "pulp-test-wavetable-authoring",
+  "pulp-test-web-compat-animation",
+  "pulp-test-web-compat-events",
+  "pulp-test-web-compat-fixture",
+  "pulp-test-web-compat-layout",
+  "pulp-test-web-compat-parser",
+  "pulp-test-web-compat-prelude",
+  "pulp-test-web-compat-reftest",
+  "pulp-test-web-demos",
+  "pulp-test-web-gpu-convolver",
+  "pulp-test-webgpu-mock-buffer",
+  "pulp-test-webgpu-native-draw",
+  "pulp-test-widget-bridge-api-contracts",
+  "pulp-test-widget-bridge-no-gpu-gates",
+  "pulp-test-windowing",
+  "pulp-test-xcode-developer-path",
+  "pulp-test-yoga-layout-bench",
+  "sample-region-allpass-consumer",
+  "sample-region-allpass-control-editable",
+  "sample-region-allpass-control-frozen"
+ ],
+ "executables_scanned_for": [
+  "data",
+  "spawns"
+ ],
  "schema": "pulp-ctest-script-inputs/v1",
  "tests": {
   "a2t-headroom-annotation-selftest": {
@@ -639,6 +1826,7 @@
     "docs/status",
     "test/fixtures",
     "test/harness/rt_allocation_probe.cpp",
+    "test/support",
     "test/test_cli_shellout.cpp",
     "test/test_host.cpp",
     "test/test_runtime.cpp",
@@ -660,6 +1848,8 @@
    "inputs": [
     "docs/status",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/spawn_closure.py",
     "tools/ci/test_affected_tests_shadow.py",
     "tools/cmake",
     "tools/scripts/lib",
@@ -1046,9 +2236,11 @@
     "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/fixtures/child_process_input_fixture.cpp",
+    "test/support",
     "test/test_child_process.cpp",
     "test/test_child_process_standard_input.cpp",
     "test/test_runtime_utils.cpp",
+    "tools/ci/build_dir_lock.py",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",
@@ -1078,6 +2270,7 @@
    "inputs": [
     "docs/status",
     "test/fixtures",
+    "test/support",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/script_test_inputs.py",
@@ -1090,6 +2283,7 @@
    "inputs": [
     "docs/status",
     "test/fixtures",
+    "test/support",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts",
     "tools/scripts/changed_surface_inventory.py",
@@ -1111,6 +2305,7 @@
     "docs/status",
     "test/ctest_script_inputs.json",
     "test/fixtures",
+    "test/support",
     "tools/ci/source_selftests.json",
     "tools/ci/wide_non_native_checks.json",
     "tools/cli/cmd_run.cpp",
@@ -1601,6 +2796,7 @@
    "inputs": [
     "docs/status",
     "test/fixtures",
+    "test/support",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/ctest_inventory_parity.py",
@@ -1669,6 +2865,13 @@
    "entry": "tools/scripts/decisions_contract.py",
    "inputs": [
     "tools/scripts/decisions_contract.py"
+   ],
+   "kind": "python"
+  },
+  "deps-offline-fetch-contract": {
+   "entry": "tools/deps/audit.py",
+   "inputs": [
+    "tools/deps/audit.py"
    ],
    "kind": "python"
   },
@@ -3665,6 +4868,7 @@
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "test/fixtures",
+    "test/support",
     "tools/ci/build_dir_lock.py",
     "tools/ci/cmake_registration_impact.py",
     "tools/ci/ctest_gate_args.py",
@@ -4921,9 +6125,11 @@
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/ios_gate_digest.py",
     "tools/ci/source_selftests.json",
+    "tools/ci/spawn_closure.py",
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake",
@@ -4960,6 +6166,7 @@
     "docs/status",
     "test/ctest_script_inputs.json",
     "test/fixtures",
+    "test/support",
     "tools/ci/codemodel_digest.py",
     "tools/ci/link_members.py",
     "tools/ci/reuse_record.py",
@@ -5106,6 +6313,7 @@
    "inputs": [
     "docs/status",
     "test/fixtures",
+    "test/support",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/script_test_inputs.py"
    ],
@@ -5114,10 +6322,14 @@
   "script-test-inputs-selftest": {
    "entry": "tools/scripts/test_script_test_inputs.py",
    "inputs": [
+    "core/events/include/pulp/events/child_process_manager.hpp",
+    "core/host/include/pulp/host",
+    "core/platform/include/pulp/platform/child_process.hpp",
     "docs/status",
     "docs/status/consumption-profiles.json",
     "examples/pulp-gain/CMakeLists.txt",
     "test/fixtures",
+    "test/support",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_script_test_inputs.py"
@@ -5325,6 +6537,14 @@
    ],
    "kind": "python"
   },
+  "spawn-closure-selftest": {
+   "entry": "tools/ci/test_spawn_closure.py",
+   "inputs": [
+    "tools/ci/spawn_closure.py",
+    "tools/ci/test_spawn_closure.py"
+   ],
+   "kind": "python"
+  },
   "spectr-roundtrip-window-only-capture": {
    "entry": "test/test_spectr_roundtrip_window_only_capture.sh",
    "inputs": [
@@ -5383,7 +6603,9 @@
     ".github/workflows/build.yml",
     "docs/status",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/spawn_closure.py",
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/test_test_receipts_shadow.py",
     "tools/cmake",
@@ -5823,6 +7045,7 @@
     "tools/ci/test_source_selftests.py",
     "tools/cli/cmd_pr.cpp",
     "tools/cmake/PulpTestSuite.cmake",
+    "tools/deps/audit.py",
     "tools/import-validation/check_agent_panel_invariants.py",
     "tools/rack/test_generate_safety.py",
     "tools/scene3d/verify_renderer_probe_route_inventory_contract.py",

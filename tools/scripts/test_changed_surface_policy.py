@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 import changed_surface_inventory as inventory
+import run_changed_surface_tests as runner
 import changed_surface_script_families as script_families
 
 
@@ -92,7 +93,10 @@ def load_config() -> dict:
 
 
 def load_policy() -> dict:
-    return load_config()["targets"]["mac"]["changed_surface_selection"]
+    # The same merge Shipyard applies to the selection's families_file.
+    return runner.merge_families_file(
+        load_config()["targets"]["mac"]["changed_surface_selection"], REPO_ROOT
+    )
 
 
 def matches(path: str, patterns: list[str]) -> bool:
@@ -389,12 +393,43 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         )
 
     def generated_families(self) -> list[dict]:
-        text = CONFIG_PATH.read_text(encoding="utf-8")
-        start = text.index(script_families.BEGIN)
-        end = text.index(script_families.END)
-        block = tomllib.loads(text[start:end].replace(
-            script_families.FAMILY_TABLE, "[[families]]"))
-        return block.get("families", [])
+        return tomllib.loads((REPO_ROOT / script_families.FAMILIES_FILE).read_text(
+            encoding="utf-8"))["families"]
+
+    def test_generated_families_live_in_the_families_file(self) -> None:
+        selection = load_config()["targets"]["mac"]["changed_surface_selection"]
+        self.assertEqual(selection["families_file"], str(script_families.FAMILIES_FILE))
+        inline = {f["name"] for f in selection.get("families", [])}
+        self.assertFalse(inline & {f["name"] for f in self.generated_families()})
+        self.assertIn(str(script_families.FAMILIES_FILE), self.policy["policy_paths"])
+        self.assertEqual(
+            disposition(self.policy, str(script_families.FAMILIES_FILE)), "selector_policy"
+        )
+
+    def test_families_file_merge_fails_closed(self) -> None:
+        base = {"families": [{"name": "inline"}], "policy_paths": []}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            (root / ".shipyard").mkdir(parents=True)
+            (root / "tools").mkdir()
+            valid = "[[families]]\nname = \"file\"\n"
+            # Every path below exists with valid content, so only the path rule refuses it.
+            for rel in ["../x.toml", "tools/x.toml", ".shipyard/x.json", ".shipyard/../x.toml"]:
+                (root / rel).write_text(valid)
+            for path in ["../x.toml", "tools/x.toml", ".shipyard/x.json", ".shipyard/../x.toml"]:
+                with self.subTest(path=path):
+                    with self.assertRaisesRegex(runner.SelectionExecutionError, "under .shipyard"):
+                        runner.merge_families_file({**base, "families_file": path}, root)
+            target = root / ".shipyard" / "f.toml"
+            for body in ["", "families = []\n", "x = 1\n[[families]]\nname = \"a\"\n"]:
+                target.write_text(body)
+                with self.subTest(body=body), self.assertRaises(runner.SelectionExecutionError):
+                    runner.merge_families_file({**base, "families_file": ".shipyard/f.toml"}, root)
+            target.write_text("[[families]]\nname = \"file\"\n")
+            merged = runner.merge_families_file({**base, "families_file": ".shipyard/f.toml"}, root)
+        self.assertEqual([f["name"] for f in merged["families"]], ["inline", "file"])
+        self.assertEqual(merged["policy_paths"], [".shipyard/f.toml"])
+        self.assertNotIn("families_file", merged)
 
     def test_policy_prose_does_not_force_full_validation(self) -> None:
         self.assertNotIn(".agents/skills/ci/SKILL.md", self.policy["policy_paths"])

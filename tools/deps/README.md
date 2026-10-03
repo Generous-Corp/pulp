@@ -34,7 +34,12 @@ run configures its protected base with `FETCHCONTENT_FULLY_DISCONNECTED=ON`
 nothing else, so a raw download in such a dependency could reach the network
 mid-plan. When you bump a marked dependency, the audit fails with the file and
 line if the new pin downloads outside FetchContent. A tree that is not checked
-out is reported as unverified, never as a pass.
+out is reported as unverified, never as a pass. On a configured macOS build the
+`deps-offline-fetch-contract` ctest runs
+`audit.py --offline-fetch-only --require-offline-trees --build-dir <build>`:
+it reads the tree the build configured with (`<cache_name>_SOURCE_DIR` in the
+CMake cache) and fails if that tree is absent, so the gate and the m3 lane can
+never report "no raw downloads" without having read one.
 
 ## Local SSH Host Config
 
