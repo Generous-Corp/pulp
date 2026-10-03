@@ -111,6 +111,18 @@ function(pulp_wire_android_sources)
             target_link_libraries(pulp-midi PRIVATE amidi)
         endif()
         target_link_libraries(pulp-midi PRIVATE log)
+        # PulpMidiManager callbacks are Java entry points in the Android MIDI
+        # translation unit.  The shared JNI target links pulp-midi normally,
+        # so the linker may otherwise discard this object file as unreferenced.
+        # Keep only these callbacks; whole-archiving pulp-midi would pull the
+        # entire MIDI implementation into the Android shared library.
+        foreach(_android_midi_jni_symbol IN ITEMS
+            Java_com_pulp_midi_PulpMidiManager_nativeOnDeviceAdded
+            Java_com_pulp_midi_PulpMidiManager_nativeOnDeviceRemoved
+            Java_com_pulp_midi_PulpMidiManager_nativeOnMidiReceived)
+            target_link_options(pulp-midi INTERFACE
+                "-Wl,--undefined=${_android_midi_jni_symbol}")
+        endforeach()
     endif()
 
     # -- Accessibility: TalkBack bridge (#87) --

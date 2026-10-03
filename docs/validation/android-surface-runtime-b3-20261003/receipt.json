@@ -2,7 +2,7 @@
   "receipt_version": 1,
   "status": "BLOCKED",
   "scope": "B3 Android SurfaceRuntime",
-  "tested_commit": "0782d778afabd42bce73ff8fb23c237e6437bac8",
+  "tested_commit": "0782d778afabd42bce73ff8fb23c237e6437bac8 plus Android MIDI JNI retention in tools/cmake/PulpAndroid.cmake (committed with this receipt)",
   "worktree_branch": "codex/b3-android-surface-runtime-20261003",
   "scope_audit": {
     "android_files": [
@@ -13,7 +13,7 @@
       "tools/cmake/PulpAndroid.cmake"
     ],
     "out_of_scope_changes": [],
-    "note": "The attempted core/midi/CMakeLists.txt JNI retention workaround was reverted and is not part of this receipt commit."
+    "note": "The core/midi/CMakeLists.txt workaround was inspected and reverted. Equivalent targeted JNI retention is confined to the existing Android-owned tools/cmake/PulpAndroid.cmake file; the implementation scope remains five files."
   },
   "environment": {
     "host": "macOS 27.0.0 arm64",
@@ -40,9 +40,9 @@
       "[JNI_OnLoad] JNI_OnLoad: Pulp native bridge initialized",
       "[surface received] Android GPU surface: ANativeWindow received (1080x2400)",
       "[GPU init (allow-no-gpu)] SurfaceRuntime: failed to create Dawn GpuSurface",
-      "NOTE: Dawn/GPU unavailable — skipping Skia context check",
+      "NOTE: Dawn/GPU unavailable \u2014 skipping Skia context check",
       "[DemoSynth] DemoSynth: playing",
-      "Stage 7: Lifecycle (background → foreground)",
+      "Stage 7: Lifecycle (background \u2192 foreground)",
       "android-smoke: timeout waiting for background (pattern=nativeOnBackground, tags=Pulp)"
     ],
     "fatal_cause": {
@@ -51,7 +51,7 @@
       "message": "No implementation found for void com.pulp.midi.PulpMidiManager.nativeOnDeviceRemoved(int)",
       "stack": "PulpMidiManager$1.onDeviceRemoved(PulpMidiManager.kt:37) -> MidiManager.DeviceListener.onDeviceRemoved"
     },
-    "classification": "The five-file Android SurfaceRuntime slice cannot claim a green lifecycle gate because the APK crashes on the Android MIDI callback before HOME can deliver nativeOnBackground. The linker retention fix is outside this task's Android scope and was deliberately reverted."
+    "classification": "Pre-fix failure: the Android linker discarded the android_midi.cpp object from libpulp.so, causing UnsatisfiedLinkError on nativeOnDeviceRemoved before nativeOnBackground. Fixed by retaining the three Java MIDI callback symbols in Android-specific CMake wiring. The historical exit-7 evidence remains recorded; it is not treated as a pass."
   },
   "other_checks": {
     "android_premerge_probe_contract": {
@@ -68,5 +68,37 @@
       "result": "PASS"
     }
   },
-  "required_follow_up": "Retain PulpMidiManager JNI exports in libpulp.so through the owning MIDI/linker change, then rerun the full smoke lifecycle and clean-shutdown gate before claiming B3 complete."
+  "required_follow_up": "Provide the Android Dawn/Skia build, run strict GPU smoke and surface recreation/resource leak acceptance before claiming full B3 complete. The original missing MIDI JNI export has been repaired within the five-file Android scope.",
+  "lifecycle_fix": {
+    "file": "tools/cmake/PulpAndroid.cmake",
+    "mechanism": "pulp-midi INTERFACE --undefined link options retain the Java callbacks in libpulp.so without whole-archiving MIDI",
+    "export_verification": [
+      "Java_com_pulp_midi_PulpMidiManager_nativeOnDeviceAdded",
+      "Java_com_pulp_midi_PulpMidiManager_nativeOnDeviceRemoved",
+      "Java_com_pulp_midi_PulpMidiManager_nativeOnMidiReceived"
+    ],
+    "result": "All three verified exported by nm -D on the rebuilt APK lib/arm64-v8a/libpulp.so."
+  },
+  "post_fix_lifecycle_gate": {
+    "command": "export ANDROID_HOME=\"$HOME/Library/Android/sdk\"; export PATH=\"$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH\"; PULP_ANDROID_SMOKE_TIMEOUT=90 tools/scripts/android_smoke.sh --skip-build --allow-no-gpu",
+    "exit_code": 0,
+    "runs": 2,
+    "output": [
+      "JNI_OnLoad: Pulp native bridge initialized",
+      "Android GPU surface: ANativeWindow received (1080x2400)",
+      "SurfaceRuntime: failed to create Dawn GpuSurface",
+      "NOTE: Dawn/GPU unavailable \u2014 skipping Skia context check",
+      "DemoSynth: playing",
+      "nativeOnBackground",
+      "nativeOnForeground",
+      "RECORD_AUDIO runtime permission toggled successfully",
+      "no FATAL exceptions attributed to com.pulp.app in logcat",
+      "android-smoke: PASS"
+    ],
+    "limitation": "The original MIDI device-removal event was not deliberately injected during these runs. Export verification proves the missing native entry point is present. The allow-no-gpu smoke does not prove successful Dawn/Skia rendering or GPU resource leak acceptance."
+  },
+  "blockers": [
+    "Android Studio JBR 25.0.3 remains incompatible with this Gradle/Kotlin toolchain (IllegalArgumentException: 25.0.3); OpenJDK 17 builds successfully.",
+    "Dawn/Skia unavailable in the tested APK; successful GPU rendering and GPU resource/leak acceptance remain unproven."
+  ]
 }
