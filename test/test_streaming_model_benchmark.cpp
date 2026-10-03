@@ -1,11 +1,11 @@
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include "detail/streaming_model.hpp"
 #include "harness/scoped_rt_process_probe.hpp"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -23,8 +23,7 @@ struct HostCase {
 // Provider-neutral scalar oracle: the same causal depthwise convolution and
 // ReLU as MicroTcnModel, expressed independently so the receipt can detect
 // numerical drift in a future provider adapter.
-template <std::size_t Channels, std::size_t KernelSize>
-class CpuOracle {
+template <std::size_t Channels, std::size_t KernelSize> class CpuOracle {
   public:
     using Weights = MicroTcnWeights<Channels, KernelSize>;
 
@@ -60,8 +59,7 @@ class CpuOracle {
     std::size_t cursor_ = 0;
 };
 
-template <std::size_t Channels, std::size_t KernelSize>
-void run_cpu_receipt(const HostCase host) {
+template <std::size_t Channels, std::size_t KernelSize> void run_cpu_receipt(const HostCase host) {
     using Model = MicroTcnModel<Channels, KernelSize>;
     typename Model::Weights weights;
     for (std::size_t channel = 0; channel < Channels; ++channel) {
@@ -98,8 +96,8 @@ void run_cpu_receipt(const HostCase host) {
             input[channel][frame] = static_cast<float>((frame + channel * 3) % 17) / 17.0f;
     }
 
-    const auto in = pulp::audio::BufferView<const float>(input_channels.data(), Channels,
-                                                         host.frames);
+    const auto in =
+        pulp::audio::BufferView<const float>(input_channels.data(), Channels, host.frames);
     auto out = pulp::audio::BufferView<float>(output_channels.data(), Channels, host.frames);
     auto oracle_out =
         pulp::audio::BufferView<float>(oracle_output_channels.data(), Channels, host.frames);
@@ -146,9 +144,9 @@ void run_cpu_receipt(const HostCase host) {
                 for (std::size_t frame = 0; frame < host.frames; ++frame) {
                     parity_model_checksum += static_cast<double>(output[channel][frame]);
                     oracle_checksum += static_cast<double>(oracle_output[channel][frame]);
-                    max_abs_error = std::max(
-                        max_abs_error,
-                        std::abs(output[channel][frame] - oracle_output[channel][frame]));
+                    max_abs_error =
+                        std::max(max_abs_error,
+                                 std::abs(output[channel][frame] - oracle_output[channel][frame]));
                 }
         }
         const auto oracle_started = std::chrono::steady_clock::now();
@@ -174,20 +172,17 @@ void run_cpu_receipt(const HostCase host) {
     REQUIRE(std::isfinite(checksum));
     REQUIRE(model.last_stamp() ==
             StreamingBlockStamp{.epoch = 1, .sequence = static_cast<std::uint64_t>(blocks)});
-    INFO("streaming receipt channels=" << Channels << " kernel=" << KernelSize
-                                        << " host_sample_rate_metadata=" << host.sample_rate
-                                        << " blocks=" << blocks << " frames=" << host.frames
-                                        << " model_elapsed_us=" << elapsed_us
-                                        << " oracle_elapsed_us=" << oracle_elapsed_us
-                                        << " max_abs_error=" << max_abs_error
-                                        << " model_checksum=" << checksum
-                                        << " oracle_checksum=" << oracle_checksum);
+    INFO("streaming receipt channels="
+         << Channels << " kernel=" << KernelSize
+         << " host_sample_rate_metadata=" << host.sample_rate << " blocks=" << blocks
+         << " frames=" << host.frames << " model_elapsed_us=" << elapsed_us
+         << " oracle_elapsed_us=" << oracle_elapsed_us << " max_abs_error=" << max_abs_error
+         << " model_checksum=" << checksum << " oracle_checksum=" << oracle_checksum);
     std::cout << "streaming-receipt channels=" << Channels << " kernel=" << KernelSize
               << " host_sample_rate_metadata=" << host.sample_rate << " blocks=" << blocks
               << " frames=" << host.frames << " model_elapsed_us=" << elapsed_us
-              << " oracle_elapsed_us=" << oracle_elapsed_us
-              << " max_abs_error=" << max_abs_error << " model_checksum=" << checksum
-              << " oracle_checksum=" << oracle_checksum
+              << " oracle_elapsed_us=" << oracle_elapsed_us << " max_abs_error=" << max_abs_error
+              << " model_checksum=" << checksum << " oracle_checksum=" << oracle_checksum
               << " allocations=" << callback_allocations << " parity=pass\n";
 }
 
