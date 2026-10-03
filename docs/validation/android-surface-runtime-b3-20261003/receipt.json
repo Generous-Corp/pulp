@@ -124,6 +124,41 @@
     "classification": "Checkout/Skia source alignment failure; separate from the measured B3 native-memory retention attribution.",
     "follow_up": "Align or repair the external Skia source/build checkout, then rerun the Android sample build. This receipt remains BLOCKED and does not claim B3 green."
   },
+  "skia_alignment_investigation": {
+    "artifact": {
+      "path": "external/skia-build/modules/skunicode/include/SkUnicode.h",
+      "version_file": "external/skia-build/VERSION.md",
+      "release": "chrome/m153",
+      "built_skia": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "header_sha256": "4879aa4b1b55bac14a78cda00b5c20e0c78b4497d1a992502ffd5828e0af9394",
+      "include_at_line_15": "src/base/SkUTF.h"
+    },
+    "source_checkout": {
+      "path": "external/skia-src",
+      "branch": "chrome/m151",
+      "commit": "b91d74bf28bcc5bc94e0f7b810b4f023f74537ab",
+      "unicode_header_sha256": "2bbe2c35440912f74a7781b44363f822437d6c47c06e6d3adab860ced9825fc3",
+      "skutf_path": "src/core/SkUTF.h",
+      "skutf_sha256": "e5392c7515074a06f917f1fbd5ecbafd0d43d9e33d93a776caccc9837139aeb6",
+      "src_base_skutf_present": false
+    },
+    "pinned_source_probe": {
+      "release_lock": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-release-lock.json",
+      "pinned_commit": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "src_base_skutf_http": 404,
+      "src_core_skutf_http": 200,
+      "src_core_skutf_sha256": "e5392c7515074a06f917f1fbd5ecbafd0d43d9e33d93a776caccc9837139aeb6",
+      "interpretation": "The pinned upstream source also has src/core/SkUTF.h and no src/base/SkUTF.h; the generated artifact header is inconsistent with both the local checkout and the pinned upstream source."
+    },
+    "build_probe": {
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=$HOME/Library/Android/sdk ANDROID_SDK_ROOT=$HOME/Library/Android/sdk ./gradlew :app:assembleDebug --no-daemon --stacktrace",
+      "exit_code": 1,
+      "failed_task": ":app:buildCMakeDebug[arm64-v8a]",
+      "fatal": "external/skia-build/modules/skunicode/include/SkUnicode.h:15:10: fatal error: 'src/base/SkUTF.h' file not found",
+      "secondary_environment_warnings": "CXX5304 SDK XML version 4 versus 3 and an inconsistent NDK 30.0.16248370 package location were also reported; neither is the fatal compile cause."
+    },
+    "recommendation": "Ownership is the Skia toolchain/release packaging owner: publish or fetch a self-consistent chrome/m153 artifact/source pair, or align the checkout and generated headers to one pinned revision. Do not patch B3 Android lifecycle code or add a src/base compatibility shim in this branch. Re-run the Java 17 assembleDebug probe after repair; B3 remains BLOCKED."
+  },
   "surface_recreation_leak_check": {
     "command": "Five HOME -> relaunch surface recreation cycles with dumpsys meminfo after each cycle; then force-stop and inspect logcat.",
     "result": "BLOCKED",
