@@ -230,8 +230,11 @@ CustomNodeDiagnosticsDescriptor gpu_convolution_diagnostics() {
 /// one/two-channel asset shapes admitted by Forge: two concrete authenticated
 /// mono lanes preserve dual-mono identity, while a four-cell true-stereo IR
 /// remains on the CPU realization until a channel-matrix GPU node exists.
-CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir, IrPolicy policy = {},
-                                                gpu_audio::GpuConvolverTraceConfig trace) {
+// clang-format off
+CustomNodeType
+make_gpu_convolution_reverb_node(ImpulseResponse ir, IrPolicy policy,
+                                gpu_audio::GpuConvolverTraceConfig trace) {
+    // clang-format on
     if (!valid_impulse_response(ir) || ir.channels.size() > 2u || policy.true_stereo)
         throw std::invalid_argument("GPU convolution requires a one- or two-channel dual-mono IR");
     auto shared = std::make_shared<ImpulseResponse>(std::move(ir));
