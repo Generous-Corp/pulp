@@ -405,6 +405,7 @@
       "pulp/host/detail/forge_drum_catalog_impl.hpp",
       "pulp/host/detail/forge_drum_catalog_instance.hpp",
       "pulp/host/detail/forge_drum_catalog_processing.hpp",
+      "pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
       "pulp/host/detail/forge_effect_modulation_catalog_descriptor.hpp",
       "pulp/host/detail/forge_effect_modulation_extended_catalog.hpp",
       "pulp/host/detail/forge_lofi_catalog_descriptor.hpp",

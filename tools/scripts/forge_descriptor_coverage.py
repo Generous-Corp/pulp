@@ -52,7 +52,7 @@ CATALOG = (
       "drum_snare", "drum_hat", "drum_clap", "drum_tom_generic",
       "drum_tom_simmons", "drum_cymbal", "drum_membrane", "drum_string",
       "drum_zap", "drum_fm2", "drum_fm6", "drum_fm8")),
-    ("forge_dynamics_catalog.hpp", "forge_dynamics_catalog.hpp",
+    ("forge_dynamics_catalog.hpp", "core/host/src/forge_dynamics_catalog.cpp",
      ("feedforward_compressor", "true_peak_limiter", "vca_compressor", "fet_compressor",
       "diode_bridge_compressor")),
     ("forge_eurorack_utility_catalog.hpp",
@@ -170,7 +170,13 @@ def main() -> int:
         print("\n  catalog index contains duplicate includes", file=sys.stderr)
 
     for pack, descriptor_source, owned_keys in CATALOG:
-        path = root / HOST_INCLUDE / descriptor_source
+        # Most descriptors live beside their public catalog header.  Families
+        # whose metadata is assembled out of line may point at their
+        # implementation TU so the static authoring check follows the source
+        # that actually carries the semantic keys.
+        source_path = Path(descriptor_source)
+        path = (root / source_path if source_path.parts[:1] == ("core",)
+                else root / HOST_INCLUDE / source_path)
         if not path.is_file():
             ok = False
             print(f"\n  descriptor source does not exist: {descriptor_source}",

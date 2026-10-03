@@ -1,0 +1,105 @@
+{
+  "schema": "pulp.a4-forge-dynamics-pilot-receipt/v1",
+  "commit": "8d12d467718f5973066e69ce0daea7f6f0c9b0e8",
+  "branch": "codex/forge-dynamics-pilot",
+  "base": "b91ad1d7e67b909d3cc8cfae50344c0f941cbb1d",
+  "family": "dynamics",
+  "scope": "Forge dynamics catalog header-to-source pilot",
+  "governed_build": {
+    "command": "pulp build --all",
+    "result": "passed",
+    "targets": 2735
+  },
+  "focused_tests": [
+    {
+      "target": "pulp-test-forge-dynamics-catalog",
+      "result": "passed",
+      "assertions": 1677,
+      "cases": 12
+    },
+    {
+      "target": "pulp-test-forge-dynamics-lineage-catalog",
+      "result": "passed",
+      "assertions": 1931,
+      "cases": 33
+    },
+    {
+      "test": "cmake-forge-catalog-install",
+      "result": "passed"
+    }
+  ],
+  "installed_sdk_staging": {
+    "command": "ctest --test-dir build -R ^cmake-installed-sdk-runtime-staging$ --output-on-failure",
+    "result": "passed",
+    "tests_passed": 1,
+    "tests_total": 1,
+    "test_number": 21462,
+    "elapsed_seconds": 59.02
+  },
+  "export": {
+    "command": "./build/pulp forge catalog export --json",
+    "result": "passed",
+    "bytes": 415732,
+    "sha256": "350567a6c9ca5a6b981f0efe8354207479f3341765871d7af4a821fc094c3e46",
+    "check": "passed",
+    "descriptor_coverage": {
+      "canonical_families": 89,
+      "indexed_packs": 20,
+      "export_registrations": 89
+    }
+  },
+  "include_measurements": {
+    "public_header_include_trace_lines": 1423,
+    "public_header_preprocessed_bytes": 3979062,
+    "baseline_include_trace_lines": 1454,
+    "baseline_preprocessed_bytes": 4151756,
+    "result": "improved"
+  },
+  "roadmap_changed": false,
+  "excluded_worktree": "/Users/danielraffel/Code/pulp-dsp-next-20261001",
+  "status": "green",
+  "projection_equivalence": {
+    "pre_pilot_source": "5ea08fd824",
+    "pre_pilot_snapshot": "docs/status/dsp-capabilities.json at 5ea08fd824",
+    "current_snapshot": "docs/status/dsp-capabilities.json",
+    "semantic_equivalent": true,
+    "byte_equivalent": true,
+    "bytes": 104049,
+    "pre_pilot_sha256": "83793dfc7db043e9c6849c782f6f36447523903b3c51ea3d5dd86e685be71b0d",
+    "current_sha256": "83793dfc7db043e9c6849c782f6f36447523903b3c51ea3d5dd86e685be71b0d",
+    "counts": {
+      "catalogs": 31,
+      "type_ids": 115,
+      "factories": 77,
+      "baked_params": 400
+    },
+    "dynamics": {
+      "header": "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+      "factories": 5,
+      "baked_params": 40,
+      "factory_param_counts": {
+        "make_feedforward_compressor_node": 11,
+        "make_node": 2,
+        "make_vca_compressor_node": 9,
+        "make_fet_compressor_node": 8,
+        "make_diode_bridge_compressor_node": 10
+      }
+    },
+    "generator_mapping": "catalog_source appends core/host/src/<catalog>.cpp; matching forge_dynamics_catalog_descriptor.hpp is excluded from catalog enumeration",
+    "proof": "cmp pre-pilot snapshot vs regenerated current snapshot returned 0"
+  },
+  "validation_follow_up": {
+    "focused_registry_regression": "passed",
+    "ctest": "4/4 passed (cli-dsp-capabilities-check,json,write,dynamics-regression)",
+    "forge_export_check": "passed",
+    "forge_descriptor_coverage": "passed (89 canonical families, 20 indexed packs, 89 registrations)",
+    "consumption_census": "passed (targets=72)",
+    "pre_push_gates": {
+      "command": "tools/scripts/gates.sh origin/main",
+      "result": "failed_on_existing_a2t_source_binding_contract",
+      "branch_owned_failure": false,
+      "evidence": "gpu-first-visible-acceptance-selftest and gpu-dpr-runner-selftest reject modified tools/cli/CMakeLists.txt as A2T source blob drift; 3 gpu-trace-overhead acceptance tests error on the same binding; all DSP/Forge gates passed",
+      "not_checked": "tools/scripts/test_generated_version_bump_check.py"
+    }
+  }
+}

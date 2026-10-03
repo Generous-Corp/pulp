@@ -1557,6 +1557,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-f49a7456bc49"
+paths = ["tools/scripts/test_dsp_capability_registry.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "cli-dsp-capabilities-dynamics-regression",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-ff1cf91232e5"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
@@ -4381,6 +4408,7 @@ paths = [
   "tools/scripts/test_docs_sync_check_extra.py",
   "tools/scripts/test_downstream_validation_manifest.py",
   "tools/scripts/test_doxygen_installed_header_check.py",
+  "tools/scripts/test_dsp_capability_registry.py",
   "tools/scripts/test_dsp_provenance_audit.py",
   "tools/scripts/test_embed_js.py",
   "tools/scripts/test_encode_binary_data.py",
@@ -4847,6 +4875,7 @@ paths = [
   "tools/scripts/test_docs_sync_check_extra.py",
   "tools/scripts/test_downstream_validation_manifest.py",
   "tools/scripts/test_doxygen_installed_header_check.py",
+  "tools/scripts/test_dsp_capability_registry.py",
   "tools/scripts/test_dsp_provenance_audit.py",
   "tools/scripts/test_embed_js.py",
   "tools/scripts/test_encode_binary_data.py",
