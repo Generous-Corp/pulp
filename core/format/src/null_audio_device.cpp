@@ -12,8 +12,13 @@ using audio::CallbackContext;
 
 namespace {
 
-// A callback this many periods late is treated as a dropped run of periods.
-constexpr int kMaxCatchUpPeriods = 4;
+// How late the render thread may wake and still deliver every owed period, back
+// to back, so the delivered sample count keeps up with the wall clock. A wake
+// later than this is a stall: the periods it spans are dropped and counted.
+// Coarse wakeups are routine on a busy host and under background QoS, where
+// macOS coalesces timers; a cap of a few periods there dropped most blocks
+// (7 of every 100 under `taskpolicy -b`).
+constexpr std::chrono::milliseconds kMaxCatchUp{250};
 
 DeviceInfo null_device_info(const DeviceConfig* config) {
     DeviceInfo info;
@@ -62,6 +67,7 @@ bool NullAudioDevice::start(AudioCallback callback) {
     if (!open_ || !callback || is_running()) return false;
     callback_ = std::move(callback);
     blocks_.store(0, std::memory_order_relaxed);
+    periods_dropped_.store(0, std::memory_order_relaxed);
     running_.store(true, std::memory_order_release);
     thread_ = std::thread([this] { run(); });
     return true;
@@ -91,6 +97,8 @@ void NullAudioDevice::run() {
     context.sample_rate = config_.sample_rate;
     context.buffer_size = config_.buffer_size;
 
+    const auto max_late = std::chrono::duration_cast<clock::duration>(
+        null_device_max_late(config_.sample_rate, config_.buffer_size));
     auto deadline = clock::now();
     while (running_.load(std::memory_order_acquire)) {
         for (auto& ch : output_) std::fill(ch.begin(), ch.end(), 0.0f);
@@ -102,8 +110,10 @@ void NullAudioDevice::run() {
 
         deadline += period;
         const auto now = clock::now();
-        if (now - deadline > period * kMaxCatchUpPeriods) {
+        if (now - deadline > max_late) {
             xruns_.fetch_add(1, std::memory_order_relaxed);
+            periods_dropped_.fetch_add(static_cast<std::uint64_t>((now - deadline) / period),
+                                       std::memory_order_relaxed);
             deadline = now;
         }
         std::this_thread::sleep_until(deadline);
@@ -123,6 +133,12 @@ DeviceInfo NullAudioSystem::default_input_device() { return null_device_info(nul
 
 std::unique_ptr<AudioSystem> create_null_audio_system() {
     return std::make_unique<NullAudioSystem>();
+}
+
+std::chrono::nanoseconds null_device_max_late(double sample_rate, int buffer_size) noexcept {
+    const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>(buffer_size / sample_rate));
+    return std::max<std::chrono::nanoseconds>(period * 4, kMaxCatchUp);
 }
 
 bool null_audio_device_requested(const char* env_value) noexcept {
