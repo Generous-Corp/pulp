@@ -71,6 +71,11 @@ CENSUS_PROFILES = Path("docs") / "status" / "consumption-profiles.json"
 # The gate configures with these switches (build.yml); the consumption census
 # records the same scope per measured profile and is read first.
 GATE_BUILD_SCOPE = {"PULP_BUILD_TESTS": "ON", "PULP_BUILD_EXAMPLES": "OFF"}
+# The compiled entries are configuration-dependent too: examples add runtime
+# edges, and a sanitizer or Debug configure changes which targets exist. The
+# list is generated from the gate's configure, so a build of any other shape
+# cannot be compared with it, or written into it.
+SKIP_EXIT = 77
 # Prefixes a literal string must start with to count as a repository path.
 REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/", "ship/",
                  "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
@@ -119,6 +124,39 @@ def gate_build_scope(root: Path) -> dict[str, str]:
     except (OSError, json.JSONDecodeError, AttributeError):
         pass
     return dict(GATE_BUILD_SCOPE)
+
+
+def _cache_values(build_dir: Path) -> dict[str, str] | None:
+    try:
+        text = (build_dir / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    out = {}
+    for line in text.splitlines():
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*):[A-Z]+=(.*)$", line)
+        if m:
+            out[m.group(1)] = m.group(2).strip()
+    return out
+
+
+def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
+    """Why this build's compiled entries cannot stand for the gate's: each
+    switch whose value differs from the gate's configure (examples off, a
+    Release build, no sanitizer). Empty for a gate-shaped build, and for one
+    with no CMakeCache.txt to read (no build tree, no compiled entries)."""
+    cache = _cache_values(build_dir) if build_dir else None
+    if cache is None:
+        return []
+    off = lambda v: v.upper() in ("", "OFF", "FALSE", "0", "NO", "N", "NONE") or v.upper().endswith("-NOTFOUND")
+    reasons = []
+    if not off(cache.get("PULP_BUILD_EXAMPLES", "OFF")):
+        reasons.append(f"PULP_BUILD_EXAMPLES={cache['PULP_BUILD_EXAMPLES']} (the gate configures OFF)")
+    if not off(cache.get("PULP_SANITIZER", "")):
+        reasons.append(f"PULP_SANITIZER={cache['PULP_SANITIZER']} (the gate builds without one)")
+    build_type = cache.get("CMAKE_BUILD_TYPE", "")
+    if build_type and build_type != "Release":
+        reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
+    return reasons
 
 
 def registered_from(test: dict, inventory: dict) -> str | None:
@@ -867,8 +905,15 @@ def main(argv: list[str]) -> int:
         print(json.dumps(summary, indent=1, sort_keys=True))
         return 0
     current = build_list(inventory, root, build_dir)
+    off_profile = outside_gate_profile_build(build_dir) if "executables" in current else []
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
+    if a.write and off_profile:
+        print("script-test-inputs: refusing to write: the compiled entries depend on the configuration and "
+              "this build is not the gate's: " + "; ".join(off_profile) + ".\nRegenerate from a gate-profile "
+              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
+              file=sys.stderr)
+        return 2
     if a.write:
         list_path.parent.mkdir(parents=True, exist_ok=True)
         list_path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
@@ -886,6 +931,11 @@ def main(argv: list[str]) -> int:
         checked_in = json.loads(list_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         checked_in = {"tests": {}}
+    if off_profile:
+        # Script entries are filtered to the gate's registrations and still
+        # compare; this build's compiled entries cannot, so they are left out
+        # and the result says so.
+        current = {k: v for k, v in current.items() if k != "executables"}
     problems = drift(current, checked_in)
     if not current["tests"]:
         print("script-test-inputs: ERROR: no script-driven test found; wrong build directory?", file=sys.stderr)
@@ -973,6 +1023,11 @@ def main(argv: list[str]) -> int:
         return 1
     print(f"script-test-inputs: OK, {len(current['tests'])} declared tests in sync for this change "
           f"({scope}; {total_scripts} interpreter-driven entries)")
+    if off_profile:
+        print("script-test-inputs: SKIPPED the compiled entries: this build is not the gate's ("
+              + "; ".join(off_profile) + "), and the list holds the gate's. They are checked on a "
+              "gate-profile build.")
+        return SKIP_EXIT
     return 0
 
 
