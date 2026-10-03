@@ -119,6 +119,82 @@ went from 1.4–2.1 s to 12–20 ms, and the full document drew at ~0.5 s warm /
 ~0.9 s cold once the costs below were also removed (see `import-design`,
 "Editor-open cost of a materialized document").
 
+### The first frame must already look like the plug-in
+
+View-first opening means the DAW **shows** the editor for a while before the
+document draws: first the host view's backing layer (until the first Metal
+frame), then every frame painted over an empty tree (until the document
+mounts, ~0.5–1 s for a materialized document, several seconds on a loaded
+host). Whatever colour fills those is the first impression of the plug-in. It
+used to be the framework default navy (`kEditorHostClearRgb`, 0x1E1E2E, which
+is also `Theme::dark()`'s `bg.primary`) for every plug-in — a dark editor
+flashed blue-grey on every open.
+
+- Declare the editor's own background:
+  `std::optional<std::uint32_t> editor_background() const override` returning
+  0xRRGGBB — for a scripted UI, its page/root background (`:root { --bg }`).
+  It is called on the main thread at each open, so an editor with
+  user-selectable colour schemes returns the active scheme's colour.
+  Undeclared, `ViewBridge` uses the root theme's `bg.primary` (right for a
+  native/AutoUi editor), then the default.
+- Derive the value from the design source at build time rather than
+  restating it in C++, or a redesign leaves the open frame stale (Spectr's
+  CMake reads `--bg` out of its materialized document).
+- Adapters must build host options through `editor_host_options(bridge, gpu,
+  size)` (`gpu_host_select.hpp`); a hand-built `PluginViewHost::Options` drops
+  the colour and that format opens on the default again.
+- Hosts paint it in **three** places, and a check that sees one is not
+  enough: the backing layer (seeded before the view can join a window), the
+  frame fill under the tree, and the letterbox bars around a pinned viewport
+  (visible after the UI is up when the host's aspect differs).
+- Do not paint a poster/snapshot of the UI instead: a default-state poster
+  shows the wrong knob positions, band counts and spectrum for the user's
+  session and then jumps to the real ones — a different flash, not none. The
+  honest pre-document frame is the plug-in's own background plus any chrome
+  the editor already draws in its final place (e.g. a native resize grip).
+- An SDK older than this API: shim from the plug-in — paint the root's
+  background (`View::set_background_color`) and recolour the host view's
+  backing layer in `on_view_opened()` (AU v2 attaches before it returns the
+  view) — keyed on `PULP_FORMAT_HAS_EDITOR_BACKGROUND` for removal.
+
+Gate it on **presented pixels**, not on the option being set: read back every
+presented drawable (a GPU blit into a shared buffer — no screenshot or
+screen-recording permission) from view creation until the UI is stable, cold
+and warm, at the preferred and minimum host sizes, and fail any frame that is
+neither the background (plus already-final chrome) nor the settled UI, and a
+backing layer that is not the background. Keep the framework navy as a named
+class so the defect reads as itself. Negative control: the same gate on a
+build without the declaration must fail on every open. In-tree:
+`test_plugin_view_host_first_frame_macos.mm` (both macOS hosts, layer +
+read-back frame, with an undeclared host as the control); downstream example:
+Spectr's `Spectr-au-editor-first-frame-*` ctests driving the real AU v2 Cocoa
+view off screen. Time the gap with the `trace-analysis` first-frame recipe.
+
+Out of process (Logic hosts AU v2 in AUHostingService): instantiate with
+`kAudioComponentInstantiation_LoadOutOfProcess`, take the editor from
+`-[AUAudioUnit requestViewControllerWithCompletionHandler:]`, and read back the
+**host's own window** (a process may read its own windows without
+screen-recording permission; the window server composites the remote editor
+into it). Give the host window a loud backdrop (magenta) so "nothing composited
+yet" cannot pass as a dark background. What only this path shows:
+
+- The host container has no background of its own; until the remote layer
+  arrives the host's window shows through. The plug-in's backing-layer colour
+  is what the remote layer shows first.
+- A host resize sent right after open is handled by the plug-in process's main
+  thread, which is busy mounting the document, so the document can present at
+  the old size and be shown cropped (plus host backdrop) until the resize is
+  processed. Blocking main-thread document work costs resize latency OOP, not
+  only time-to-content.
+- Edge-anchored chrome can sit a pixel or two off and a black 1-px host edge
+  can show for a frame while the remote content and the host converge on one
+  size; classify that separately from an off-brand colour.
+- `launchctl setenv` does not reach AUHostingService, so `PULP_TRACE_PATH`
+  cannot start a trace in the plug-in process there; measure OOP from the host
+  window and use the in-process probe for spans.
+- Requesting a second view controller from the same remote instance did not
+  paint in a probe; instantiate a fresh unit per measured open.
+
 ## Lifecycle protocol — adapter author side
 
 ```

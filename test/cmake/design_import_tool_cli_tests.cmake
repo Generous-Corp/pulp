@@ -420,3 +420,6 @@ if(Python3_Interpreter_FOUND)
         LABELS "parser-import;import"
         TIMEOUT 60)
 endif()
+
+# pulp-svg-probe appears only in the import tool's expected output text.
+pulp_test_spawns(pulp-test-import-design-tool NOT_RUN pulp-svg-probe)

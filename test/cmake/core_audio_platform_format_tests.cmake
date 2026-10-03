@@ -714,3 +714,13 @@ if(TARGET pulp-test-mcp-server)
         test/fixtures/timeline/v1/minimal.json
         test/fixtures/timeline/v4/sequence-markers.json)
 endif()
+
+# The session cases read two timeline fixtures from the checkout.
+if(TARGET pulp-test-mcp-timeline-tools)
+    pulp_test_data(pulp-test-mcp-timeline-tools NO_DEFINE PATHS
+        test/fixtures/timeline/v1/minimal.json
+        test/fixtures/timeline/v4/sequence-markers.json)
+endif()
+
+# The install and screenshot cases stage fakes at the real tools' names.
+pulp_test_spawns(pulp-test-mcp-server NOT_RUN pulp-mcp pulp-screenshot)

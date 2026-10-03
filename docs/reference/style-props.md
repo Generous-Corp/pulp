@@ -136,7 +136,7 @@ JS callers and the bridge.
 | `text-transform` | `setTextTransform(id, "uppercase" \| "lowercase" \| "capitalize" \| "none")` | |
 | `text-decoration` | `setTextDecoration(id, "none" \| "underline" \| "line-through")` | |
 | `text-overflow` | `setTextOverflow(id, "ellipsis" \| "clip")` | |
-| `white-space` | `setWhiteSpace(id, "normal" \| "nowrap" \| "pre" \| "pre-wrap" \| "pre-line" \| "break-spaces")` | |
+| `white-space` | `setWhiteSpace(id, "normal" \| "nowrap" \| "pre" \| "pre-wrap" \| "pre-line" \| "break-spaces")` | Inherited: a text Label left at `normal` follows its nearest ancestor that set another mode, so text inside a `nowrap` container stays on one line. |
 | `user-select` | `setUserSelect(id, "auto" \| "none" \| "text" \| "all" \| "contain")` | Stored on the View for selection-aware widgets; unsupported keywords fall back to `auto`. |
 | `placeholder` (text input) | `setPlaceholder(id, text)` | |
 

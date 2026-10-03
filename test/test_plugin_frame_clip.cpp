@@ -9,6 +9,7 @@
 // that sit on top of these functions are covered by
 // test_plugin_frame_renderer.cpp, which needs a real SkiaSurface.
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/canvas/recording_canvas.hpp>
@@ -128,6 +129,31 @@ TEST_CASE("the scene paint fills the host background at host size",
     // The background fill is what makes the editor opaque; a host that skipped
     // it showed the DAW's own window content through the editor.
     REQUIRE_FALSE(canvas.commands().empty());
+}
+
+TEST_CASE("the scene paint fills with the editor's declared background",
+          "[plugin-frame-renderer][first-frame]") {
+    // Before a view-first editor's document mounts the tree is empty, so this
+    // fill IS the frame. It must be the plug-in's colour, not the default.
+    View root;
+    FrameGeometry g = plain_geometry();
+    g.background_rgb = 0x05070A;
+    pulp::canvas::RecordingCanvas canvas;
+    paint_plugin_scene(canvas, root, g, nullptr);
+
+    const auto& cmds = canvas.commands();
+    const auto fill = std::find_if(cmds.begin(), cmds.end(), [](const auto& c) {
+        return c.type == pulp::canvas::DrawCommand::Type::set_fill_color;
+    });
+    REQUIRE(fill != cmds.end());
+    const auto expected = pulp::canvas::Color::hex(0x05070A);
+    CHECK(fill->color.r == expected.r);
+    CHECK(fill->color.g == expected.g);
+    CHECK(fill->color.b == expected.b);
+    CHECK(fill->color.a == 1.0f);
+
+    // Unset, the host default is unchanged.
+    CHECK(FrameGeometry{}.background_rgb == kEditorHostClearRgb);
 }
 
 TEST_CASE("a design viewport lays the root out at design size, not host size",

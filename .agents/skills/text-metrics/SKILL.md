@@ -126,6 +126,16 @@ and assert the draw origin on both branches of the cache predicate.
 
 ## Gotchas
 
+- **`white-space` is inherited, and wrapping is `soft_wraps()`, not
+  `multi_line()`.** The React and DOM importers stamp `white-space: normal` on
+  every text element they create, so `multi_line()` is true for nearly every
+  imported Label even inside a `nowrap` container. `Label::soft_wraps()` applies
+  the inheritance (own mode `normal` defers to the nearest ancestor that set
+  another one) and is what measurement, the measure cache and paint read. A
+  symptom of reading `multi_line()` instead: an absolutely positioned
+  auto-width box (a tooltip) collapses to its padding while its text paints at
+  full width outside it, because the text wrapped into whatever room the
+  containing block offered.
 - **Captured line boxes in tests are usually hand-authored fixtures, not real
   Chromium captures.** `single.text_line_boxes.push_back({0,0,53.6719f,15.0f,...})`
   is a literal. An expectation written beside it encodes whatever rule the author

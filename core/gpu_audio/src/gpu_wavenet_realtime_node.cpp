@@ -557,6 +557,8 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
             s.telemetry.record_submit();
         ++s.next_input;
         ++s.pending_count;
+        if (s.trace)
+            s.telemetry.observe_in_flight(s.pending_count);
         all_submitted = all_submitted || submission_ok;
         (void)s.bridge->release_input(*input);
     }
@@ -599,6 +601,10 @@ void detail::WaveNetRealtimeTestAccess::observe_trace(
 detail::SharedIoTraceStats
 detail::WaveNetRealtimeTestAccess::trace_stats(const GpuWaveNetRealtimeNode& node) noexcept {
     return node.impl_->trace ? node.impl_->trace->stats() : node.impl_->closed_trace_stats;
+}
+detail::SharedIoTelemetrySnapshot
+detail::WaveNetRealtimeTestAccess::telemetry(const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->telemetry.snapshot();
 }
 detail::SharedIoTraceRecord
 detail::WaveNetRealtimeTestAccess::last_terminal(const GpuWaveNetRealtimeNode& node) noexcept {

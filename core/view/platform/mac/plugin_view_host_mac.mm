@@ -1322,6 +1322,12 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     }
 }
 
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) _backgroundRGB = pulp::view::kEditorHostClearRgb;
+    return self;
+}
+
 - (void)drawRect:(NSRect)dirtyRect {
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
     NSRect bounds = self.bounds;
@@ -1330,12 +1336,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 
     pulp::canvas::CoreGraphicsCanvas canvas(ctx, bw, bh);
 
-    // Clear at host bounds so the letterbox bars (visible only when the
-    // OS aspect-lock briefly diverges during user drag) share the design
-    // background color — same approach as the standalone host.
-    canvas.set_fill_color(pulp::canvas::Color::rgba8(
-        pulp::view::mac_host::kHostClearR, pulp::view::mac_host::kHostClearG,
-        pulp::view::mac_host::kHostClearB));
+    // Clear at host bounds with the editor's own background: it is the whole
+    // frame until the document mounts, and the letterbox bars after.
+    canvas.set_fill_color(pulp::canvas::Color::hex(self.backgroundRGB));
     canvas.fill_rect(0, 0, bw, bh);
 
     if (!self.rootView) return;
@@ -1455,7 +1458,8 @@ namespace pulp::view {
 
 class MacPluginViewHost : public PluginViewHost {
 public:
-    MacPluginViewHost(View& root, Size size)
+    MacPluginViewHost(View& root, Size size,
+                      std::uint32_t background_rgb = kEditorHostClearRgb)
         : root_(root), size_(size) {
         @autoreleasepool {
             pulp_mac_plugin_text_input_client_category_anchor();
@@ -1465,6 +1469,7 @@ public:
             root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(0, 0, size.width, size.height);
             view_ = [[PulpPluginView alloc] initWithFrame:frame];
+            view_.backgroundRGB = background_rgb;
             view_.rootView = &root_;
             view_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
             view_.onResize = ^(uint32_t w, uint32_t h) {
@@ -2147,6 +2152,7 @@ private:
         // backing layer, never a wrapped sublayer. (This is the standard
         // backing-layer hook for a Metal-backed NSView.) Trigger it now by
         // requesting layer-backing; AppKit calls -makeBackingLayer synchronously.
+        _backgroundRGB = pulp::view::kEditorHostClearRgb;
         self.wantsLayer = YES;
     }
     return self;
@@ -2169,14 +2175,27 @@ private:
     layer.drawableSize = CGSizeMake(self.bounds.size.width * scale,
                                     self.bounds.size.height * scale);
 
-    // pulp #1382 — opaque + seeded dark background (RGB 30,30,46 = 0x1E1E2E),
-    // mirroring the standalone PulpMetalView, so there is no clear/undefined
-    // composite while the foreign host reparents and relayers the view.
+    // Opaque + seeded background, mirroring the standalone
+    // PulpMetalView, so there is no clear/undefined composite while the foreign
+    // host reparents and relayers the view. The seed is the editor's own
+    // background (-setBackgroundRGB: recolours it as soon as the host knows
+    // it): this colour is all a DAW shows between the view joining its window
+    // and the first Metal frame.
     layer.opaque = YES;
-    layer.backgroundColor = pulp::view::mac_host::cg_host_clear_color();
+    CGColorRef seed = pulp::view::mac_host::cg_color_from_rgb(_backgroundRGB);
+    layer.backgroundColor = seed;
+    CGColorRelease(seed);
 
     _metalLayer = layer;
     return layer;
+}
+
+- (void)setBackgroundRGB:(uint32_t)rgb {
+    _backgroundRGB = rgb & 0xFFFFFFu;
+    if (!_metalLayer) return;
+    CGColorRef color = pulp::view::mac_host::cg_color_from_rgb(_backgroundRGB);
+    _metalLayer.backgroundColor = color;
+    CGColorRelease(color);
 }
 
 // pulp #1382 — `wantsUpdateLayer = YES` puts AppKit on the layer-update path
@@ -2248,14 +2267,18 @@ namespace pulp::view { // reopen for C++ classes
 
 class MacGpuPluginViewHost : public PluginViewHost {
 public:
-    MacGpuPluginViewHost(View& root, Size size)
-        : root_(root), size_(size),
+    MacGpuPluginViewHost(View& root, Size size,
+                         std::uint32_t background_rgb = kEditorHostClearRgb)
+        : root_(root), size_(size), background_rgb_(background_rgb & 0xFFFFFFu),
           alive_(std::make_shared<std::atomic<bool>>(true)) {
         @autoreleasepool {
             pulp_mac_plugin_text_input_client_category_anchor();
             root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(0, 0, size.width, size.height);
             metal_view_ = [[PulpGpuPluginView alloc] initWithFrame:frame];
+            // Before the view can join any window: the backing layer's colour
+            // is the first thing the window server composites.
+            metal_view_.backgroundRGB = background_rgb_;
             metal_view_.rootView = &root_;
 
             // Wire the embeddable lifecycle hooks. The display link starts
@@ -2489,6 +2512,8 @@ public:
 private:
     View& root_;
     Size size_;
+    // The editor's own background (Options::background_rgb), 0xRRGGBB.
+    std::uint32_t background_rgb_ = kEditorHostClearRgb;
     PulpGpuPluginView* metal_view_ = nil;
     bool design_top_align_ = false;
 
@@ -2579,12 +2604,10 @@ private:
         const float w = static_cast<float>(size_.width);
         const float h = static_cast<float>(size_.height);
 
-        // Letterbox bg first at host bounds so the bars (visible only when
-        // the OS aspect-lock briefly diverges during user drag) share the
-        // design background color. Matches the standalone host.
-        canvas.set_fill_color(pulp::canvas::Color::rgba8(
-        pulp::view::mac_host::kHostClearR, pulp::view::mac_host::kHostClearG,
-        pulp::view::mac_host::kHostClearB));
+        // The editor's own background first, at host bounds: it is the whole
+        // frame until the document mounts (view-first opening) and the
+        // letterbox bars after.
+        canvas.set_fill_color(pulp::canvas::Color::hex(background_rgb_));
         canvas.fill_rect(0, 0, w, h);
 
         float sx, sy, tx, ty;
@@ -2631,6 +2654,17 @@ private:
             return false;
         }
 
+        // One span per presented editor frame; `frame` restarts at 0 for every
+        // host, so each editor open starts at a frame-0 span. The first frame
+        // showing the document is the first span after that open's
+        // `scripted_ui_document_load` ends (trace-analysis, first-frame
+        // recipe). `root_children` counts what the root holds: the mounted
+        // document adds its tree, chrome a processor adds up front counts too.
+        PULP_TRACE_SCOPE_NAMED_ARGS("render", "plugin_editor_frame",
+                                    "frame", static_cast<int64_t>(frame_ok_count_),
+                                    "background_rgb", static_cast<int64_t>(background_rgb_),
+                                    "root_children",
+                                    static_cast<int64_t>(root_.child_count()));
         if (frame_ok_count_++ == 0) {
             CGFloat scale = metal_view_.metalLayer.contentsScale;
             fprintf(stderr, "[plugin-gpu-host] first frame logical=%ux%u gpu=%ux%u scale=%.1f\n",
@@ -2951,7 +2985,8 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, Size size) {
 std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options& options) {
 #ifdef PULP_HAS_SKIA
     if (options.use_gpu) {
-        auto host = std::make_unique<MacGpuPluginViewHost>(root, options.size);
+        auto host = std::make_unique<MacGpuPluginViewHost>(root, options.size,
+                                                           options.background_rgb);
         if (host->is_gpu_backed()) {
             root.set_plugin_view_host(host.get());
             return host;
@@ -2962,7 +2997,8 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
         host.reset();
     }
 #endif
-    auto host = std::make_unique<MacPluginViewHost>(root, options.size);
+    auto host = std::make_unique<MacPluginViewHost>(root, options.size,
+                                                    options.background_rgb);
     root.set_plugin_view_host(host.get());
     return host;
 }

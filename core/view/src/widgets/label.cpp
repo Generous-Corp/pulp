@@ -426,7 +426,7 @@ bool Label::sync_measure_basis() const {
     fresh.font_style = font_style_;
     fresh.text_direction = static_cast<int>(text_direction_);
     fresh.line_clamp = line_clamp_;
-    fresh.multi_line = multi_line_;
+    fresh.multi_line = soft_wraps();
     fresh.wrap_fallback = captured_wrap_fallback_;
     fresh.font_gen = canvas::font_registration_generation();
     fresh.line_height = line_height_;
@@ -443,6 +443,16 @@ bool Label::sync_measure_basis() const {
         measure_wrapped_height_ = -1.0f;
     }
     return true;
+}
+
+bool Label::inherits_nowrap() const {
+    if (white_space_mode() != WhiteSpaceMode::normal) return false;
+    for (const View* node = parent(); node != nullptr; node = node->parent()) {
+        const auto mode = node->white_space_mode();
+        if (mode == WhiteSpaceMode::normal) continue;
+        return mode == WhiteSpaceMode::nowrap;
+    }
+    return false;
 }
 
 float Label::intrinsic_width() const {
@@ -534,7 +544,7 @@ float Label::compute_intrinsic_height() const {
     // return so single-line widths/heights match exactly what paint()
     // computes for `text_h = effective_font_size` (the contract every
     // existing test depends on).
-    if (multi_line_ && !text_.empty()) {
+    if (soft_wraps() && !text_.empty()) {
         int line_count = 1;
         for (char c : text_) {
             if (c == '\n') ++line_count;
@@ -654,7 +664,7 @@ float Label::compute_measured_height(float available_width) const {
     // and takes a per-segment lock on every call, and its cache is keyed per
     // segment width rather than per prepare(). Repeat measurement is avoided
     // by the memo in front of this function, not by the shaper's own cache.
-    if ((!multi_line_ && !captured_wrap_fallback_) || text_.empty() ||
+    if ((!soft_wraps() && !captured_wrap_fallback_) || text_.empty() ||
         available_width <= 0.0f)
         return intrinsic_height();
 
@@ -694,7 +704,7 @@ float Label::measured_width(float available_width) const {
     //
     // Same shaped block `measured_height()` reads, so the width and the line
     // count always describe one layout.
-    if ((!multi_line_ && !captured_wrap_fallback_) || text_.empty() ||
+    if ((!soft_wraps() && !captured_wrap_fallback_) || text_.empty() ||
         available_width <= 0.0f)
         return intrinsic_width();
 
@@ -761,7 +771,7 @@ Label::painted_text_extents(float available_width) const {
     if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
     else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
 
-    const bool wraps = (multi_line_ || captured_wrap_fallback_) &&
+    const bool wraps = (soft_wraps() || captured_wrap_fallback_) &&
                        available_width > 0.0f;
     const float shaping_line_height =
         has_attributed_ && line_height_ <= 0.0f ? 0.0f : lh;
@@ -854,7 +864,7 @@ float Label::baseline_y() const {
 float Label::max_content_width() const {
     // A non-wrapping label's intrinsic width already IS its max-content width,
     // and that path is memoized — only the wrapping case has to re-shape.
-    if (!multi_line_) return intrinsic_width();
+    if (!soft_wraps()) return intrinsic_width();
     return compute_max_content_width();
 }
 
@@ -862,7 +872,7 @@ float Label::compute_intrinsic_width() const {
     // A soft-wrapping label reports 0 so the parent's width — not the
     // single-line advance — drives where its lines break. Its unwrapped width
     // is still available to callers through max_content_width().
-    if (multi_line_) return 0;
+    if (soft_wraps()) return 0;
     return compute_max_content_width();
 }
 
@@ -1725,7 +1735,7 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         text_box.width > 0.0f &&
         cached_line_layout_usable(display_text, effective_font_size,
                                   effective_letter_spacing, text_box.width);
-    const bool paint_as_lines = multi_line_ || captured_wrap_fallback_ ||
+    const bool paint_as_lines = soft_wraps() || captured_wrap_fallback_ ||
                                 captured_cache_usable || has_attributed_;
     const float shape_width = text_box.width > 0.0f
         ? text_box.width : std::numeric_limits<float>::max();
@@ -1748,7 +1758,7 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         // e.g. an async register_font_url() completing after the first paint.
         // Without it a Label that first shaped against the fallback face would
         // serve that stale wrap until some other key field happened to change.
-        const int shaped_max_lines = has_attributed_ && !multi_line_ &&
+        const int shaped_max_lines = has_attributed_ && !soft_wraps() &&
                 !captured_wrap_fallback_ ? 1 : 0;
         std::string shaped_family_key = family;
         if (has_attributed_) {

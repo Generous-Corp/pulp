@@ -54,6 +54,8 @@ on:
       - 'tools/scripts/test_queue_age_watchdog.py'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
+      - 'tools/scripts/stale_run_reaper.py'
+      - 'tools/scripts/test_stale_run_reaper.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/test_coverage_surface_contract.py'
@@ -157,6 +159,8 @@ on:
       - 'tools/scripts/test_queue_age_watchdog.py'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
+      - 'tools/scripts/stale_run_reaper.py'
+      - 'tools/scripts/test_stale_run_reaper.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/test_coverage_surface_contract.py'
@@ -330,6 +334,7 @@ jobs:
           python3 tools/scripts/test_api_contracts_workflow.py
           python3 tools/scripts/test_queue_age_watchdog.py
           python3 tools/scripts/test_merge_stall_watchdog.py
+          python3 tools/scripts/test_stale_run_reaper.py
           python3 tools/scripts/test_gpu_provenance_ci_wiring.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
