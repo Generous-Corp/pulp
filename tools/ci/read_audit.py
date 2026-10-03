@@ -53,6 +53,10 @@ sys.path.insert(0, str(HERE))
 from affected_tests_shadow import classify_changes, declared_hit, executable_name, is_binary_test  # noqa: E402
 
 SCHEMA = "pulp-read-audit/v1"
+# A manifest `data` value for a test that may read anything in the checkout (a
+# tree walker such as `pulp doctor`): the selector never skips it, so no read
+# of it is a finding.
+WHOLE_CHECKOUT = "whole_checkout"
 MANIFEST = Path("test") / "ctest_script_inputs.json"
 STRACE_FILTER = "trace=%file,%process,fchdir,getdents64"
 CONTROL_NAME = "read-audit-control"
@@ -294,7 +298,10 @@ def checkout_accesses(trace: Trace, root: Path, excluded: list[Path], files: set
     return {(rel, kind): program for rel, (kind, program) in best.items()}
 
 
-def findings_for(accesses: dict[tuple[str, str], str], inputs: list[str]) -> tuple[list[Finding], int]:
+def findings_for(accesses: dict[tuple[str, str], str], inputs: list[str],
+                 data: str | None = None) -> tuple[list[Finding], int]:
+    if data == WHOLE_CHECKOUT:
+        return [], len(accesses)
     found, covered = [], 0
     for (rel, kind), program in sorted(accesses.items()):
         if covered_by(rel, inputs):
@@ -361,7 +368,7 @@ def audit_group(g: Group, build_dir: Path, root: Path, work: Path, files: set[st
         rec["status"] = "unobserved"  # strace saw no process besides ctest: nothing ran
         return rec
     accesses = checkout_accesses(trace, root, [build_dir], files, dirs)
-    found, covered = findings_for(accesses, inputs)
+    found, covered = findings_for(accesses, inputs, data)
     rec.update(status="audited", processes=len(trace.pids), unresolved=trace.unresolved,
                checkout_accesses=len(accesses), covered=covered)
     if found and len(g.tests) > 1 and len(g.tests) <= per_test_limit:
@@ -424,11 +431,39 @@ def run_control(root: Path, work: Path, files: set[str], dirs: set[str]) -> dict
                                       "flagged or not seen"}
 
 
+def stage0(report: dict, declared: set[str]) -> dict:
+    """The per-run verdict over every executable the manifest declares.
+
+    `clean` needs the control to have flagged its read, every declared
+    executable this platform registers to have been audited, and no finding
+    on any audited executable, declared or not: one the manifest omits is
+    treated by the selector as reading nothing, so its reads matter as much."""
+    recs = report["executables"]
+    registered = declared & set(recs)
+    audited = {e for e in registered if recs[e].get("status") == "audited"}
+    flagged = {e for e, r in recs.items() if r.get("findings")}
+    verdict = ("incomplete" if not report["control"].get("ok") or registered - audited else
+               "findings" if flagged else "clean")
+    return {"verdict": verdict, "declared": len(declared), "declared_audited": len(audited),
+            "declared_clean": len(audited - flagged), "declared_with_findings": sorted(audited & flagged),
+            "declared_not_audited": sorted(registered - audited),
+            "declared_not_registered": sorted(declared - set(recs)),
+            "undeclared_with_findings": sorted(flagged - declared)}
+
+
 def summarize(report: dict) -> str:
     t = report["totals"]
     lines = ["## Compiled-test read audit (Linux, strace)", ""]
     c = report["control"]
     lines.append(f"Control: {'flagged its undeclared read' if c.get('ok') else 'FAILED: ' + str(c.get('reason'))}")
+    s0 = report.get("stage0")
+    if s0:
+        lines += ["", f"**Stage 0 verdict: {s0['verdict']}**. Declared executables: {s0['declared']}; "
+                      f"audited {s0['declared_audited']}, clean {s0['declared_clean']}, "
+                      f"with findings {len(s0['declared_with_findings'])}, not audited "
+                      f"{len(s0['declared_not_audited'])}, not registered on this platform "
+                      f"{len(s0['declared_not_registered'])}. Executables outside the manifest with findings: "
+                      f"{len(s0['undeclared_with_findings'])}."]
     lines += ["", f"- executables audited: {t['audited']} of {t['executables']} registered "
                   f"({t['unobserved']} unobserved, {t.get('errors', 0)} failed to audit, "
                   f"{t['tests']} ctest registrations)",
@@ -505,6 +540,12 @@ def cmd_run(a: argparse.Namespace) -> int:
         "finding_listings": sum(f["kind"] == "listing" for f in found),
         "finding_probes": sum(f["kind"] == "probe" for f in found),
         "covered": sum(r.get("covered", 0) for r in recs), "unresolved": sum(r.get("unresolved", 0) for r in recs)}
+    report["stage0"] = s0 = stage0(report, set(manifest.get("executables") or {}))
+    print(f"read-audit stage0: verdict={s0['verdict']} declared={s0['declared']} "
+          f"audited={s0['declared_audited']} clean={s0['declared_clean']} "
+          f"findings={len(s0['declared_with_findings'])} not_audited={len(s0['declared_not_audited'])} "
+          f"not_registered={len(s0['declared_not_registered'])} "
+          f"undeclared_with_findings={len(s0['undeclared_with_findings'])}", flush=True)
     Path(a.out).write_text(json.dumps(report, indent=1, sort_keys=True), encoding="utf-8")
     text = summarize(report)
     if a.summary:
