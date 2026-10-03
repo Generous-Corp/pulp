@@ -35,6 +35,7 @@ concurrency:
 permissions:
   contents: write   # tag push
   issues: write     # open the "stranded fix/feat" tracker (issue #1009)
+  actions: read     # the Windows CLI pre-tag check reads windows-cli-compile.yml runs
   # NO `actions: write`. This workflow must not be able to cancel a workflow
   # run. It held that scope to cancel "superseded" release builds, which is how
   # healthy in-flight releases were destroyed. Withholding the scope is what
@@ -367,6 +368,54 @@ jobs:
           echo "sdk decision:    $sdk_decision"
           echo "plugin decision: $plugin_decision"
 
+      # ── Windows CLI pre-tag check ─────────────────────────────────────
+      #
+      # Every required PR gate compiles with Clang, so an MSVC-only error under
+      # `#ifdef _WIN32` reaches main unseen and then fails release-cli.yml's
+      # Windows legs on every tag until it is fixed: each such tag builds for
+      # ~50 minutes and publishes nothing. windows-cli-compile.yml compiles the
+      # CLI targets with MSVC on every push that can affect them; when its newest
+      # compiled verdict for an ancestor of HEAD is a failure, the SDK tag is
+      # withheld here instead.
+      #
+      # Withholding is self-healing, not sticky: the version stays untagged
+      # (release-cadence-check.yml reports it), and auto-release tags whatever
+      # version main carries on the first push after a clean compile, because
+      # tagging compares HEAD's version with the latest tag. Missing or
+      # unreadable evidence never withholds (see the script's docstring), and
+      # the repository variable PULP_RELEASE_WINDOWS_PRECHECK=off disables it.
+      # The plugin surface is not built by release-cli.yml and is never held.
+      - name: Windows CLI pre-tag check
+        id: windows_precheck
+        if: >-
+          steps.guard.outputs.skip == '0' &&
+          steps.versions.outputs.sdk_should_tag == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+          PULP_RELEASE_WINDOWS_PRECHECK: ${{ vars.PULP_RELEASE_WINDOWS_PRECHECK }}
+          SDK_AFTER: ${{ steps.versions.outputs.sdk_after }}
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/windows_cli_release_precheck.py
+          if grep -q '^block=1$' "$GITHUB_OUTPUT"; then
+            reason=$(sed -n 's/^reason=//p' "$GITHUB_OUTPUT" | tail -n 1)
+            run_url=$(sed -n 's/^run_url=//p' "$GITHUB_OUTPUT" | tail -n 1)
+            echo "::error title=SDK tag withheld::v${SDK_AFTER} not tagged: ${reason} (${run_url})"
+            {
+              echo "### SDK tag withheld"
+              echo ""
+              echo "\`v${SDK_AFTER}\` was not tagged: ${reason}."
+              echo ""
+              echo "Failing compile: ${run_url}"
+              echo ""
+              echo "Land the MSVC fix on main; the first push after a clean"
+              echo "\`Windows CLI compile (MSVC)\` run tags the then-current version."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Configure release bot SSH signing
         if: >-
           steps.guard.outputs.skip == '0' &&
@@ -383,7 +432,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           SDK_AFTER: ${{ steps.versions.outputs.sdk_after }}
-          SDK_SHOULD_TAG: ${{ steps.versions.outputs.sdk_should_tag }}
+          # The pre-tag check can withhold the SDK tag; it never touches the
+          # plugin surface.
+          SDK_SHOULD_TAG: ${{ steps.windows_precheck.outputs.block == '1' && '0' || steps.versions.outputs.sdk_should_tag }}
           PLUGIN_AFTER: ${{ steps.versions.outputs.plugin_after }}
           PLUGIN_SHOULD_TAG: ${{ steps.versions.outputs.plugin_should_tag }}
         run: |

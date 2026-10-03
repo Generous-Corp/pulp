@@ -26,6 +26,10 @@ name: Release reconciler
 #     yet, to cover the gap between the tag push and the run appearing.
 #   - A completed terminal result opens the circuit and is reported. SDK tags are
 #     immutable, so retrying a real validation failure only repeats runner load.
+#     A compiler error against a source file is such a result too (see
+#     TAG_IMMUTABLE_COMPILE_ERRORS in release_reconcile.py).
+#   - A tag unpublished for DROUGHT_HOURS with a failed leg (or no run at all) is
+#     reported by age, naming the failing legs, while it stays on the retry path.
 #   - No release run, or a run interrupted by cancellation/staleness, is
 #     re-dispatched up to MAX_ATTEMPTS times.
 #   - An interrupted tag that exhausts MAX_ATTEMPTS is a real, human-shaped
@@ -63,6 +67,11 @@ jobs:
       GRACE_MINUTES: '45'
       # Look-back for reconciliation. Older tags are history, not incidents.
       MAX_AGE_HOURS: '72'
+      # A tag still unpublished this long after it was cut is reported, naming
+      # its failing legs, even while it is still on the re-dispatch path. A
+      # first build that is merely slow (live run, no failed leg) never counts,
+      # so this does not alarm on the 70-165+ minute healthy pipeline.
+      DROUGHT_HOURS: '2'
       # Re-dispatch budget per tag for interrupted runs only. A genuine build
       # failure opens the circuit immediately and never consumes this budget.
       MAX_ATTEMPTS: '3'

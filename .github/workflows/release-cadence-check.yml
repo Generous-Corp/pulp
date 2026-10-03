@@ -181,6 +181,9 @@ jobs:
           lines.append("- `auto-release.yml` is broken at the workflow-file or runtime level (check the watchdog tracker)")
           lines.append("- `Release: skip` trailer applied to a merge that should NOT have skipped")
           lines.append("- Manual tag-push permissions / token drift")
+          lines.append("- auto-release.yml's Windows CLI pre-tag check withheld the SDK tag because main "
+                       "does not compile with MSVC (its run summary says `SDK tag withheld`); fix main "
+                       "and the next push tags the current version")
           lines.append("- Tagged but failed downstream (release-cli.yml / sign-and-release.yml)")
           lines.append("")
           lines.append("### Missing tags")

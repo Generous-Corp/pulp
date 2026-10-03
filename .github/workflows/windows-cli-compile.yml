@@ -1,0 +1,258 @@
+name: Windows CLI compile
+
+# Compiles the release CLI targets with MSVC before a tag does.
+#
+# Every required build gate compiles with Clang (the `macos` gate), and the
+# PR-time Linux lanes use Clang or GCC, so code under `#ifdef _WIN32` is compiled
+# by nothing until release-cli.yml's `CLI windows-x64` / `CLI windows-arm64` legs
+# build a tag. An MSVC-only error there (on 2026-10-03, a helper defined twice
+# under `_WIN32` in tools/cli/kit_profile_verification.cpp: C2668, ambiguous
+# call) passed every PR check, then failed the Windows legs of three consecutive
+# tags; each `release` job was skipped and nothing was published.
+#
+# Cost boundary. build.yml took Windows off PR heads and merge groups because
+# four hosted Windows jobs per run starved the required hosted ubuntu check.
+# This lane does not reintroduce that: the `scope` job (ubuntu, seconds) runs the
+# classifier in tools/scripts/windows_cli_compile_scope.py and the Windows job
+# runs only when a change can reach the MSVC CLI compile -- tools/cli/,
+# tools/mcp/, tools/cmake/, or C/C++ carrying a Windows/MSVC marker. Over the
+# two weeks before this lane landed that was 39 of 556 merges (about 3 a day),
+# one Windows job each.
+#
+# Advisory, but shaped to be promotable. It is not in branch protection's
+# required contexts. The `scope` job always reports and the compile job is
+# skipped (which satisfies a required check) when irrelevant, so promoting
+# `Windows CLI compile (MSVC)` to required needs only a merge_group trigger and
+# the ruleset change, not a redesign. Until then the release-time backstop is
+# auto-release.yml's pre-tag check (tools/scripts/windows_cli_release_precheck.py),
+# which reads this workflow's push runs on main and withholds an SDK tag while
+# the latest compiled verdict for an ancestor of the tagged commit is a failure.
+#
+# Push runs on main are what that check reads. They carry no concurrency group,
+# so a newer push never cancels an older one's verdict, and each run judges only
+# its own before..after range.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    # The trees the CLI and MCP server are built from; the scope job narrows
+    # them further. Version-bump commits touch only the root CMakeLists.txt and
+    # plugin manifests, so they never start a run here.
+    paths:
+      - 'tools/cli/**'
+      - 'tools/mcp/**'
+      - 'tools/cmake/**'
+      - 'core/**'
+      - 'inspect/**'
+      - 'ship/**'
+      - 'tools/audio/**'
+      - '.github/workflows/windows-cli-compile.yml'
+      - 'tools/scripts/windows_cli_compile_scope.py'
+  workflow_dispatch:
+
+concurrency:
+  # Pull requests: a new commit supersedes the previous compile of the branch.
+  # Pushes to main: one group per run, so no verdict is ever cancelled.
+  group: >-
+    ${{ github.event_name == 'pull_request'
+        && format('windows-cli-compile-{0}', github.ref)
+        || format('windows-cli-compile-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    name: Windows CLI compile scope
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.scope.outputs.relevant }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      # A pull request is judged by its whole diff against the merge base; a
+      # push by its own before..after range. An unreadable range (a new branch,
+      # a force push) fails toward compiling.
+      - name: Decide whether this change can affect the MSVC CLI compile
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              python3 tools/scripts/windows_cli_compile_scope.py \
+                --base "origin/${BASE_REF}" --head HEAD || true
+              ;;
+            push)
+              if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                echo "relevant=true" >> "$GITHUB_OUTPUT"
+                echo "no previous push to diff against: compiling"
+              else
+                python3 tools/scripts/windows_cli_compile_scope.py \
+                  --base "$BEFORE" --head "$AFTER" --two-dot || true
+              fi
+              ;;
+            *)
+              echo "relevant=true" >> "$GITHUB_OUTPUT"
+              echo "$EVENT_NAME: compiling"
+              ;;
+          esac
+          grep -q '^relevant=' "$GITHUB_OUTPUT" || {
+            echo "::error::scope classifier produced no verdict"
+            exit 1
+          }
+
+  compile:
+    name: Windows CLI compile (MSVC)
+    needs: scope
+    if: needs.scope.outputs.relevant == 'true'
+    # GitHub-hosted only: windows-latest is the image release-cli.yml builds the
+    # Windows legs on (tools/scripts/test_windows_runner_policy.py pins both).
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}\.ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPILERCHECK: content
+      CCACHE_NODEPEND: "true"
+      CCACHE_SLOPPINESS: time_macros
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      # One cache entry per ISO week, saved only from main: the repository's
+      # Actions cache is shared and near its limit, so a per-run key would evict
+      # the Android and Linux caches other lanes rely on. A week-old ccache still
+      # serves every file the week did not change.
+      - name: Compute compiler-cache key
+        id: cache-key
+        shell: bash
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}\.ccache
+          key: windows-cli-msvc-ccache-v1-${{ steps.cache-key.outputs.week }}
+          restore-keys: |
+            windows-cli-msvc-ccache-v1-
+
+      # Ninja parallelises per translation unit, which the Visual Studio
+      # generator release-cli.yml uses does not; the compiler, flags and
+      # preprocessor branches are the same cl.exe either way.
+      - name: Enter the MSVC x64 developer environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vs) { throw 'no Visual Studio installation with the x64 C++ toolset' }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          cmd /c "`"$vcvars`" >nul && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') {
+              "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            }
+          }
+
+      - name: Install Ninja and ccache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The developer environment puts Visual Studio's bundled Ninja on PATH;
+          # install one only if that ever stops being true.
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw "ninja install failed ($LASTEXITCODE)" }
+          }
+          choco install ccache --no-progress -y
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::ccache install failed; compiling without a compiler cache"
+          }
+
+      # Mirrors the windows-* branch of release-cli.yml's `Configure (CLI, no
+      # WebView on Linux)` step. tools/scripts/test_windows_cli_compile_workflow.py
+      # fails if the two drift apart.
+      - name: Configure (matches release-cli.yml Windows legs)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cl 2>&1 | Select-Object -First 1
+          $launcher = @()
+          if (Get-Command ccache -ErrorAction SilentlyContinue) {
+            $launcher = @('-DCMAKE_C_COMPILER_LAUNCHER=ccache', '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache')
+            ccache --zero-stats | Out-Null
+          }
+          cmake -S . -B build-win-cli -G Ninja `
+            -DCMAKE_C_COMPILER=cl `
+            -DCMAKE_CXX_COMPILER=cl `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DPULP_SKIA_AUTOFETCH=OFF `
+            -DPULP_BUILD_TESTS=OFF `
+            -DPULP_BUILD_EXAMPLES=OFF `
+            -DPULP_ENABLE_AUDIO_PROBES=OFF `
+            -DPULP_ENABLE_INSPECTOR=ON `
+            -DPULP_REQUIRE_GPU_FOR_SDK=OFF `
+            -DPULP_ENABLE_SCENE3D=OFF `
+            -DPULP_BUILD_WEBVIEW=ON `
+            @launcher
+          if ($LASTEXITCODE -ne 0) { throw "configure failed ($LASTEXITCODE)" }
+
+      # The C++ CLI (`pulp-cli`, shipped as pulp-cpp.exe) and the MCP server are
+      # the release's MSVC-compiled binaries; building them builds every library
+      # they link. `-k 0` reports every failing translation unit, not the first.
+      # The explicit job count is the runner's visible cores: a GitHub-hosted
+      # Windows runner is single-tenant, so there is no shared host to divide.
+      - name: Build CLI targets (MSVC)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $jobs = [int]$env:NUMBER_OF_PROCESSORS
+          if ($jobs -lt 1) { $jobs = 2 }
+          cmake --build build-win-cli --parallel $jobs --target pulp-cli pulp-mcp -- -k 0
+          if ($LASTEXITCODE -ne 0) { throw "MSVC build of the CLI targets failed ($LASTEXITCODE)" }
+
+      - name: Compiler cache stats
+        if: always()
+        shell: pwsh
+        run: |
+          if (Get-Command ccache -ErrorAction SilentlyContinue) { ccache --show-stats }
+
+      - name: Save compiler cache (main)
+        if: >-
+          always()
+          && github.event_name == 'push'
+          && steps.ccache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}\.ccache
+          key: windows-cli-msvc-ccache-v1-${{ steps.cache-key.outputs.week }}
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "MSVC compiled the release CLI targets (pulp-cli, pulp-mcp) with the"
+            echo "release-cli.yml Windows configure. A failure here is the error the"
+            echo "Windows release legs would hit after the next tag."
+          } >> "$GITHUB_STEP_SUMMARY"

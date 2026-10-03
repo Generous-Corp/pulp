@@ -36,10 +36,11 @@ firehose.
 | Layer | Trigger | Failure mode caught | Median detection |
 |---|---|---|---|
 | 0. release-path PR gate | PR touching release-path files | prebuilt-Skia / link-order / CMake breakage at PR time (#1962) | 5-15 min (pre-merge) |
+| 0. Windows CLI compile + pre-tag check | PR or main push that can reach the MSVC CLI build | an MSVC-only error under `#ifdef _WIN32` that every Clang/GCC gate accepts | pre-merge (advisory); pre-tag (blocking) |
 | 1. Workflow lint | PR review | bad YAML / bad `uses:` / bad shell | seconds (pre-merge) |
 | 2. Auto-release watchdog | `workflow_run` completion | auto-release.yml runtime failure (any cause) | 1-2 minutes |
 | 3. Cadence check | `schedule` every 30 min | version bumped on main but no tag created | ≤45 min |
-| 4. **Release reconciler** | `schedule` every 30 min | **tag exists but never published — and REPAIRS it** | ≤30 min |
+| 4. **Release reconciler** | `schedule` every 30 min | **tag exists but never published — and REPAIRS it**; reports a compile error at once and any tag unpublished after 2 h, naming the failing leg | ≤30 min |
 | 5. Release content gate | each native release leg + release finalizer | correctly named archives containing missing, stale, wrong-version, non-executable, or invalidly signed products | pre-publish |
 | 6. Deletion tripwire | `release: [deleted]` | a human/agent deleted a release or draft — burned tag name, destroyed assets | ~1 minute |
 
@@ -154,6 +155,30 @@ The decision rules — `decide()` in `release_reconcile.py`, unit-tested in
 | No release, no live run, not superseded | re-dispatch `release-cli.yml` (up to 3 attempts) |
 | A draft was left behind | re-dispatch — the re-run re-drives the draft to published |
 | Retry budget exhausted | ONE incident issue, updated in place, closes on recovery |
+| A failed leg whose log carries a compiler error against a source file | incident at once, no re-dispatch — see "Compile errors are tag-immutable" |
+| Unpublished `DROUGHT_HOURS` (2) after tagging, with a failed leg or no run at all | listed in the incident, naming the failing legs; still re-dispatched if on the retry path |
+
+Every entry in the incident names the failing legs of the tag's newest
+completed run (`<job> › <first failed step>`, e.g. `CLI windows-x64 › Build`),
+so the issue says which platform broke without anyone opening the run.
+
+**Compile errors are tag-immutable.** The sources are frozen at the tag, so a
+compiler diagnostic against one fails identically on every re-run.
+`TAG_IMMUTABLE_COMPILE_ERRORS` matches MSVC `file(line,col): error C2xxx–C9xxx:`
+and Clang/GCC `file:line:col: error:` and returns the first diagnostic as the
+signature. It deliberately does not match C1xxx fatal errors (out of heap space,
+cannot open include file), `fatal error:`, internal compiler errors, or linker
+errors, all of which a resource limit or an interrupted fetch can cause; those
+stay on the retry path. Before this rule, three tags that failed their Windows
+legs on one MSVC C2668 were each re-dispatched on every sweep — a full release
+matrix per attempt — while no incident opened.
+
+**The drought rule does not alarm on a slow build.** An age threshold alone is
+exactly what made the retired watchdogs fire on healthy releases. A tag counts
+only when its newest completed run has a failed leg, or when it has no live run
+at all; a first build that is merely taking 150 minutes is left alone. A tag
+that is being re-dispatched after a failure keeps counting, so the incident does
+not close and reopen around every retry.
 
 **"Superseded" is not the old reaper.** The reaper *cancelled* in-flight runs and
 *deleted* drafts for any tag older than the latest published release — destructive,
@@ -321,6 +346,55 @@ gate is lying. Mirror any structural change to release-cli.yml here
 (or refactor both into a shared composite action). The "Mirror
 release-cli.yml's Linux deps step verbatim" comment in the workflow
 calls this out.
+
+## Windows CLI compile (MSVC) and the pre-tag check
+
+**Files:** `.github/workflows/windows-cli-compile.yml`,
+`tools/scripts/windows_cli_compile_scope.py`,
+`tools/scripts/windows_cli_release_precheck.py` (called from `auto-release.yml`).
+
+Every required build gate compiles with Clang, and the PR-time Linux lanes use
+Clang or GCC, so code under `#ifdef _WIN32` is compiled by nothing until
+`release-cli.yml` builds a tag on `windows-latest`. An MSVC-only error there
+passes every PR check and then fails the `CLI windows-x64` / `CLI windows-arm64`
+legs of every tag until it is fixed; each such release builds for ~50 minutes,
+skips its `release` job, and publishes nothing. That is how v0.897.3, v0.898.0
+and v0.899.0 went unpublished on 2026-10-03 (a helper defined twice under
+`_WIN32` in `tools/cli/kit_profile_verification.cpp`, MSVC C2668).
+
+**PR time (advisory).** `Windows CLI compile (MSVC)` configures exactly like the
+release's Windows legs (`test_windows_cli_compile_workflow.py` fails on drift)
+and builds `pulp-cli` and `pulp-mcp` with Ninja, `cl.exe` and a weekly ccache.
+A `scope` job on ubuntu first runs the classifier and the Windows job runs only
+when the change can reach that compile: `tools/cli/`, `tools/mcp/`,
+`tools/cmake/`, or C/C++ outside `test/`, `examples/` and `external/` that names
+a Windows platform path or carries `_WIN32` / `_WIN64` / `_MSC_VER` /
+`WIN32_LEAN_AND_MEAN` / `NOMINMAX`. That was 39 of 556 merges in the two weeks
+before it landed, one hosted Windows job each — not the four-per-PR load that
+made `build.yml` drop Windows from PR heads. It is not a required check, but it
+is shaped to be one: the scope job always reports and an irrelevant change skips
+the compile job, so promotion needs a `merge_group` trigger and the ruleset
+entry, not a redesign. Its boundaries: it does not compile Windows code outside
+the CLI's link closure, and MSVC strictness in a file with no Windows marker is
+only caught here when the file is under `tools/cli/` or `tools/mcp/` (the
+nightly `cross-platform-check.yml` builds everything).
+
+**Release time (blocking).** The same workflow runs on every push to `main`
+that touches the CLI's source trees, without cancelling earlier pushes. Before
+`auto-release.yml` creates an SDK tag, `windows_cli_release_precheck.py` finds
+the newest of those runs whose commit is an ancestor of the tagged commit and
+whose `Build CLI targets (MSVC)` step actually ran. A failure there withholds
+the `vX.Y.Z` tag (the plugin tag is never held), with an `SDK tag withheld`
+annotation and step summary naming the failing run. The version stays untagged,
+which Layer 3 reports, and the first push to `main` after a clean compile tags
+the then-current version, because tagging compares HEAD's version with the
+latest tag. Missing or unreadable evidence, or a run that failed before
+compiling (runner or bootstrap trouble), never withholds a tag. Set the
+repository variable `PULP_RELEASE_WINDOWS_PRECHECK=off` to disable the check.
+
+The pre-tag check cannot stop the first tag after a bad merge if that tag is cut
+before the merge's compile finishes; Layer 4 then reports that tag as soon as its
+Windows legs fail.
 
 ## fix/feat-needs-bump (PR-time prevention, issue #1009)
 
