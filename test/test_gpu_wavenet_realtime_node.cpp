@@ -338,6 +338,50 @@ TEST_CASE("WaveNet bounded multi-flight retires contiguous results in order",
     CHECK(h.outa[0] == 3);
 }
 
+TEST_CASE("WaveNet depth telemetry reports bounded multi-flight",
+          "[gpu_audio][wavenet][realtime][depth]") {
+    Shape shape;
+    const auto run = [&](std::uint32_t capacity) {
+        auto config = shape.config(1, 1, 0, capacity - 1);
+        config.capacity = capacity;
+        GpuWaveNetRealtimeNode node(config);
+        REQUIRE(node.configure_trace({.enabled = true,
+                                      .capture_admissions = true,
+                                      .capture_callback_timing = true,
+                                      .success_stride = 1}));
+        Control control;
+        std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+        providers.push_back(std::make_unique<Channel>(control));
+        REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+        auto path = detail::realtime_gpu_node_path(&node);
+        std::array<float, 2> input{}, output{};
+        const std::array<const float*, 1> inputs{input.data()};
+        const std::array<float*, 1> outputs{output.data()};
+        std::uint64_t sequence = 0;
+        for (std::uint64_t block = 0; block < 6; ++block) {
+            input[0] = static_cast<float>(block + 1);
+            pulp::audio::BufferView<const float> in(inputs.data(), 1, 2);
+            pulp::audio::BufferView<float> out(outputs.data(), 1, 2);
+            const auto status = path.process(path.context, in, out, 2, sequence, true, 0);
+            const auto disposition = status == detail::kRealtimeGpuReady
+                                         ? detail::SharedIoDeliveryDisposition::GpuDelivered
+                                     : status == detail::kRealtimeGpuPriming
+                                         ? detail::SharedIoDeliveryDisposition::Priming
+                                         : detail::SharedIoDeliveryDisposition::SilenceDelivered;
+            path.delivered(path.context, sequence++, static_cast<std::uint8_t>(disposition), 0, 0);
+            (void)path.service(path.context, 0);
+        }
+        REQUIRE(node.release());
+        return detail::WaveNetRealtimeTestAccess::telemetry(node);
+    };
+    const auto depth_two = run(2);
+    const auto depth_eight = run(8);
+    CHECK(depth_two.submitted_blocks == 6);
+    CHECK(depth_eight.submitted_blocks == 6);
+    CHECK(depth_two.high_water_in_flight >= 1);
+    CHECK(depth_eight.high_water_in_flight >= depth_two.high_water_in_flight);
+}
+
 TEST_CASE("WaveNet incomplete timed submission stops after two service passes",
           "[gpu_audio][wavenet][realtime]") {
     Harness h(1, 2, 500'000);

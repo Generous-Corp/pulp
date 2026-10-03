@@ -600,6 +600,10 @@ detail::SharedIoTraceStats
 detail::WaveNetRealtimeTestAccess::trace_stats(const GpuWaveNetRealtimeNode& node) noexcept {
     return node.impl_->trace ? node.impl_->trace->stats() : node.impl_->closed_trace_stats;
 }
+detail::SharedIoTelemetrySnapshot
+detail::WaveNetRealtimeTestAccess::telemetry(const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->telemetry.snapshot();
+}
 detail::SharedIoTraceRecord
 detail::WaveNetRealtimeTestAccess::last_terminal(const GpuWaveNetRealtimeNode& node) noexcept {
     return node.impl_->trace_record;
