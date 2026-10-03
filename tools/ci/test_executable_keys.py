@@ -69,6 +69,7 @@ class Fixture:
                      obj("plug", "plug/plug.cpp"): []}
         self.stale: list[str] = []
         self.record_fields = {**TOOLCHAIN, "os_version": "26.4", "os_build": "25E246"}
+        self.job_extra: dict = {}
 
     def targets(self) -> dict:
         def t(kind, art, deps=()):
@@ -100,7 +101,8 @@ class Fixture:
             {"schema": V2, "generated_headers": "ninja-deps", "targets": self.base_targets}))
         (self.record / "link-members-x.json").write_text(json.dumps(self.links))
         (self.record / "object-deps-x.json").write_text(json.dumps(deps_doc))
-        (self.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "img", "fields": self.record_fields}}))
+        (self.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "img", "fields": self.record_fields},
+                                                          **self.job_extra}))
 
     def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN) -> dict:
         self.write_record()
@@ -192,6 +194,20 @@ class KeyTests(unittest.TestCase):
         keys = self.fx.keys(head)
         self.assertEqual({e["always_run"] for e in keys.values()}, {None})
         self.assertTrue(self.equal(keys, EXE))
+
+    def test_a_record_from_another_platform_or_an_incomplete_probe_keys_nothing(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        for extra in ({"platform": "linux-x86_64"}, {"toolchain": {"complete": False, "missing": ["sdk_build"]}}):
+            self.fx.job_extra = extra
+            self.assertEqual({e["always_run"] for e in self.fx.keys(head).values()}, {"toolchain_unknown"}, extra)
+        # Control: the same record saying darwin and complete keys.
+        self.fx.job_extra = {"platform": "darwin-arm64", "toolchain": {"complete": True, "missing": []}}
+        self.assertEqual({e["always_run"] for e in self.fx.keys(head).values()}, {None})
+
+    def test_an_absent_probe_field_reads_unknown(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        self.fx.record_fields = {k: v for k, v in self.fx.record_fields.items() if k != "sdk_version"}
+        self.assertEqual({e["always_run"] for e in self.fx.keys(head).values()}, {"toolchain_unknown"})
 
     def test_the_os_version_alone_does_not_change_the_toolchain(self):
         self.assertEqual(ek.toolchain_of({**TOOLCHAIN, "os_version": "27.0", "os_build": "26A428"}), TOOLCHAIN)

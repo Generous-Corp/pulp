@@ -914,8 +914,6 @@ def _required_contexts(repo: Path) -> tuple[str, ...]:
     return pmr.required_contexts_from_ruleset(repo / ".github" / "rulesets" / "main-protection.json")
 
 
-
-
 # --------------------------------------------------------------------------
 # Tier-1a source keys reconstructed from git and a build graph
 # --------------------------------------------------------------------------
@@ -958,12 +956,6 @@ def _required_contexts(repo: Path) -> tuple[str, ...]:
 # the graph does not build, a script test with no entry) always runs.
 
 SOURCE_KEY_VARIANTS = ("per-entry", "strict-data", "list-level")
-# Files that pin third-party dependencies. A bump can change a dependency's
-# content without changing any path the codemodel digests or any archive
-# the recorded graph follows (FetchContent archives are treated as pinned),
-# so drift in one of them re-keys every executable.
-DEPENDENCY_PIN_PATHS = frozenset({"tools/deps/manifest.json", "tools/cmake/PulpDependencies.cmake",
-                                  "tools/cmake/PulpFetchContent.cmake"})
 # The root CMakeLists.txt carries project(VERSION), which configure_file
 # stamps into generated headers; the codemodel digests the generated file's
 # path, not its content, so a version bump moves bytes no digest covers.
@@ -977,27 +969,19 @@ CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
 def content_keyed(record: dict | None) -> bool:
     return bool(record) and record.get("digest_schema") == CONTENT_KEYED_SCHEMA \
         and record.get("generated_headers") == "ninja-deps"
-# Registration labels that mean the test drives a shared host resource.
-ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
 
 
 sys.path.insert(0, str(HERE.parent / "ci"))
 from spawn_closure import SpawnIndex  # noqa: E402  tools/ci: the shared spawn-edge source
+from executable_keys import (  # noqa: E402  tools/ci: one implementation for the replay and the lane
+    CODE_SUFFIXES, COMPILE_SUFFIXES, DATA_SCAN_MIN_DETECTED, DATA_SCAN_MIN_DETECTED_READERS,
+    DEPENDENCY_PIN_PATHS, ENVIRONMENT_LABELS, data_scan_saw_readers, environment_bound, object_source,
+    spawn_scan_of, spawn_status)
+from executable_keys import declared_hit as _declared_hit, scan_entry as _scan_entry  # noqa: E402
 
 
 def _is_cmake(path: str) -> bool:
     return path.endswith(("CMakeLists.txt", ".cmake"))
-
-
-def _declared_hit(inputs: Iterable[str], changed: Iterable[str]) -> bool:
-    # `!path` (pulp_test_data ABSENT) is a probed path expected missing; a
-    # change to it is its creation.
-    inputs = [(i[1:] if i.startswith("!") else i).rstrip("/") for i in inputs]
-    return any(f == i or f.startswith(i + "/") for f in changed for i in inputs)
-
-
-def environment_bound(mapped: dict) -> bool:
-    return bool(mapped.get("resource_locks")) or bool(ENVIRONMENT_LABELS & set(mapped.get("labels") or []))
 
 
 LIBRARY_TYPES = frozenset({"STATIC_LIBRARY", "OBJECT_LIBRARY", "SHARED_LIBRARY", "INTERFACE_LIBRARY"})
@@ -1073,46 +1057,6 @@ def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict],
     return exes(rekeyed), exes(group)
 
 
-def spawn_scan_of(doc: dict | None, kind: str = "spawns") -> dict | None:
-    """The `kind` scan (spawns or data) a checked-in script-input list
-    carries: per-executable entries plus the set of executables the scan
-    covered, or None when that list did not scan for it (an older tree, or
-    an unreadable list)."""
-    if not doc or kind not in (doc.get("executables_scanned_for") or []) \
-            or not isinstance(doc.get("executables_scanned"), list):
-        return None
-    entries = dict(doc.get("executables") or {})
-    if kind == "data" and not data_scan_saw_readers(entries):
-        return None
-    return {"entries": entries, "scanned": frozenset(doc["executables_scanned"])}
-
-
-# A data scan that finds no reads in an executable is trusted only when it
-# demonstrably detects the readers it already knows: this share of the
-# executables with declared reads, and at least this many of them, must
-# carry a source the scan itself matched (`detected_sources`), or every
-# executable falls to the broad rule. The floor keeps a list with a handful
-# of declared readers from passing on the share alone.
-DATA_SCAN_MIN_DETECTED = 0.85
-DATA_SCAN_MIN_DETECTED_READERS = 20
-
-
-def data_scan_saw_readers(entries: dict[str, dict]) -> bool:
-    """Whether a data scan detected its known readers; a list that does not
-    record what the scan matched cannot show it."""
-    declared = [e for e in entries.values() if e.get("data") == "declared"]
-    if not declared or any("detected_sources" not in e for e in declared):
-        return False
-    seen = sum(1 for e in declared if e["detected_sources"])
-    return seen >= DATA_SCAN_MIN_DETECTED_READERS and seen / len(declared) >= DATA_SCAN_MIN_DETECTED
-
-
-def _scan_entry(executable: str, scan: dict) -> tuple[dict | None, bool]:
-    name = os.path.basename(executable)
-    name = name[:-4] if name.endswith(".exe") else name
-    return scan["entries"].get(name), name in scan["scanned"]
-
-
 def recorded_outputs(head_bins: dict[str, str] | None, group_bins: dict[str, str] | None,
                      link: Iterable[str]) -> tuple[frozenset[str], frozenset[str]] | None:
     """(executables both jobs recorded a hash for, those whose hash differs),
@@ -1147,22 +1091,6 @@ def data_hit(executable: str, scan: dict | None, drift: list[str], data: list[st
     if state == "undeclared":
         return bool(data)
     return bool(drift)
-
-
-def spawn_status(executable: str, scan: dict | None) -> str:
-    """`clean`, `undeclared` or `unknown` for one test executable (relative
-    to the build dir) under a spawn scan.
-
-    An entry whose `spawns` is absent, `declared` (its edges are in the
-    codemodel) or `none` (reviewed: it runs nothing this repo builds) is
-    clean; any other value is undeclared. A missing entry is clean only when
-    the scan covered that executable; otherwise nothing is known about it."""
-    if scan is None:
-        return "unknown"
-    entry, scanned = _scan_entry(executable, scan)
-    if entry is None:
-        return "clean" if scanned else "unknown"
-    return "clean" if entry.get("spawns") in (None, "declared", "none") else "undeclared"
 
 
 def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dict[str, dict],
@@ -1329,21 +1257,6 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
 # drifted, since a header is the only drift that reaches a source the graph
 # never compiled. Toolchain, prebuilt and FetchContent archives are pinned; a
 # CMake-level change to them reaches executables through the codemodel.
-
-COMPILE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".mm", ".m")
-CODE_SUFFIXES = COMPILE_SUFFIXES + (".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".inc", ".def")
-
-
-def object_source(obj: str) -> str | None:
-    """The repo-relative source a CMake object path compiles, or None.
-
-    `<dir>/CMakeFiles/<target>.dir/<path>.o` compiles `<dir>/<path>`, with
-    `__/` standing for `../`."""
-    head, sep, rest = obj.partition("CMakeFiles/")
-    if not sep or "/" not in rest or not rest.endswith(".o"):
-        return None
-    path = os.path.normpath(os.path.join(head, rest.split("/", 1)[1][:-2].replace("__/", "../")))
-    return None if path.startswith("..") or os.path.isabs(path) else path
 
 
 class GraphIndex:

@@ -97,6 +97,10 @@ KEY_CODE_PATHS = ("tools/ci/executable_keys.py", "tools/ci/link_members.py", "to
                   "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py")
 SCRIPT_INPUTS_PATH = "test/ctest_script_inputs.json"
 CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
+# Files that pin third-party dependencies. A bump can change a dependency's
+# content without changing any path the codemodel digests or any archive a
+# recorded link names (FetchContent archives are treated as pinned), so a
+# change to one of them re-keys every executable.
 DEPENDENCY_PIN_PATHS = frozenset({"tools/deps/manifest.json", "tools/cmake/PulpDependencies.cmake",
                                   "tools/cmake/PulpFetchContent.cmake"})
 # Registration labels that mean the test drives a shared host resource.
@@ -245,9 +249,17 @@ def load_record(directory: Path | None) -> tuple[dict | None, str | None]:
             return None
     job = read(directory / "job.json") or {}
     image = job.get("runner_image") if isinstance(job.get("runner_image"), dict) else {}
+    toolchain = toolchain_of(image.get("fields") or {})
+    # A record from another platform (the gate's no-suite alias job uploads
+    # one), or one whose toolchain probe says it is incomplete, keys nothing.
+    platform = job.get("platform")
+    block = job.get("toolchain")
+    if (platform is not None and not str(platform).startswith("darwin-")) \
+            or (isinstance(block, dict) and block.get("complete") is False):
+        toolchain = None
     return {"codemodel": read(_one(directory, "codemodel-")), "links": read(_one(directory, "link-members-")),
             "deps": read(_one(directory, "object-deps-")),
-            "image": image.get("digest"), "toolchain": toolchain_of(image.get("fields") or {})}, digest.hexdigest()
+            "image": image.get("digest"), "toolchain": toolchain}, digest.hexdigest()
 
 
 TOOLCHAIN_FIELDS = ("os", "arch", "sdk_version", "sdk_build", "clang")
