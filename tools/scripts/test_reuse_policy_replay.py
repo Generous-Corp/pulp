@@ -680,6 +680,7 @@ class RecordedGraphTests(unittest.TestCase):
         keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]
         self.assertEqual(keys["cmake-codemodel-recorded"]["run"], ["ta"])  # t.cpp drifted: group-a only
         self.assertEqual(keys["cmake-codemodel-recorded"]["unreached_changed_binaries"], ["test/group-b"])
+        self.assertEqual(keys["cmake-codemodel-recorded"]["unreached_kinds"], {"test/group-b": "backs_test"})
         self.assertEqual(keys["cmake-codemodel-recorded"]["binaries_compared"], 3)
         self.assertEqual(keys["cmake-codemodel-recorded"]["rebuilt_identical_binaries"], 1)
         p2 = dict(pair(drift=("test/t.cpp",)), source_key=keys, source_key_head_run_id="p1")
@@ -715,6 +716,14 @@ class RecordedGraphTests(unittest.TestCase):
                 "unreached_changed_binaries"]
         self.assertEqual(unreached(("core/added_since.cpp",), "reached"), [])        # rebuilt, no test runs it
         self.assertEqual(unreached(("test/t.cpp",), "missed"), ["test/group-c"])     # changed and not rebuilt
+        kinds = next(rpr.read_jsonl(Path(self.tmp) / "ctl-missed" / "pairs.jsonl"))["source_key"][
+            "cmake-codemodel-recorded"]["unreached_kinds"]
+        self.assertEqual(kinds, {"test/group-c": "neither"})
+        # The same miss labelled by what reaches it: a test spawning it, or a test running it.
+        targets["group-a"]["dependencies"] = ["group-c"]
+        unreached(("test/t.cpp",), "spawned")
+        self.assertEqual(next(rpr.read_jsonl(Path(self.tmp) / "ctl-spawned" / "pairs.jsonl"))["source_key"][
+            "cmake-codemodel-recorded"]["unreached_kinds"], {"test/group-c": "spawnable"})
 
     def test_commit_bound_executables_are_learned_from_same_tree_pairs(self):
         import gzip
@@ -951,6 +960,23 @@ class ScriptInputsTests(unittest.TestCase):
             self.assertTrue(all("test/ctest_script_inputs.json" in u for u in calls))
             c.gh = None
             self.assertIsNone(c.script_inputs_at("c" * 40))       # offline: unread, not guessed
+
+    def test_a_failed_fetch_is_unread_and_retried_next_time(self):
+        attempts = []
+
+        def request(url, accept):
+            attempts.append(url)
+            raise urllib.error.HTTPError(url, 502, "bad gateway", {}, None)
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._git = lambda *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal: bad object")
+        gh = mock.Mock()
+        gh.repository, gh._request = "o/r", request
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            self.assertIsNone(c.script_inputs_at("d" * 40))
+            self.assertIsNone(c.input_list_at("d" * 40))
+            self.assertEqual(len(attempts), 2)                    # the failure was not cached
+            self.assertFalse(any(Path(tmp).rglob("*.json.gz")))
 
 
 class GraftTests(unittest.TestCase):

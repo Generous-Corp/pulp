@@ -593,9 +593,12 @@ class Collector:
                         return resp.read().decode("utf-8")
                 except urllib.error.HTTPError as err:
                     if err.code == 404:
-                        return None
+                        return None  # absent at that commit: cached
                     raise
-            text = self._cached(f"script-inputs/{rev}.json.gz", fetch)
+            try:
+                text = self._cached(f"script-inputs/{rev}.json.gz", fetch)
+            except (urllib.error.URLError, RuntimeError, OSError, UnicodeDecodeError):
+                text = None  # a failed fetch is unread (its script tests run), and is not cached
         if text is None:
             return None
         try:
@@ -1321,11 +1324,13 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             v2 = (not legacy_rules and content_keyed(head_record) and content_keyed(group_record)
                   and group_record.get("declared_commit_bound") is not None)
             bound = frozenset(group_record["declared_commit_bound"]) if v2 else commit_bound_set
+            spawned = executable_dependencies(group_record["targets"])
             recorded = classify_source_keys(
                 drift, test_ids, recorded_map, head_entries, group_entries,
                 recorded_rebuilt(link, drift, index), set(link), codemodel, bound, generated_keyed=v2,
-                spawned=executable_dependencies(group_record["targets"]),
-                spawnable=frozenset(set(link) - set(group_record["executables"].values())))
+                spawned=spawned, spawnable=frozenset(set(link) - set(group_record["executables"].values())))
+            test_exes = set(group_record["executables"].values())
+            spawned_by_tests = {d for e in test_exes for d in spawned.get(e, set())}
             with_v2 += int(v2)
             # The executable-level control: every executable whose recorded
             # bytes differ between the head and group jobs must be rebuilt.
@@ -1336,7 +1341,13 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                     changed = {e for e in both if head_bins[e] != group_bins[e]}
                     recorded[variant]["binaries_compared"] = len(both)
                     recorded[variant]["binaries_changed"] = len(changed)
-                    recorded[variant]["unreached_changed_binaries"] = sorted(changed - set(recorded[variant]["rebuilt"]))
+                    unreached = sorted(changed - set(recorded[variant]["rebuilt"]))
+                    recorded[variant]["unreached_changed_binaries"] = unreached
+                    # Where to look, not a second gate: one a group test runs,
+                    # one a test spawns, or one neither reaches.
+                    recorded[variant]["unreached_kinds"] = {
+                        e: "backs_test" if e in test_exes else "spawnable" if e in spawned_by_tests else "neither"
+                        for e in unreached}
                     # The inverse: rebuilt although the bytes came out the
                     # same, the policy's over-approximation.
                     recorded[variant]["rebuilt_identical_binaries"] = len((both - changed) & set(recorded[variant]["rebuilt"]))
