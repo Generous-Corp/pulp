@@ -20,6 +20,7 @@
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/midi/block_ops.hpp>
 #include <pulp/host/parameter_event_queue.hpp>
 #include "signal_graph_internal.hpp"
 
@@ -541,9 +542,7 @@ void SignalGraph::run_reference_walk_(
                 // the other.
                 if (auto event_it = cg->custom_event_processors.find(id);
                     event_it != cg->custom_event_processors.end()) {
-                    rt.midi_out.clear();
-                    rt.midi_out.clear_sysex();
-                    if (auto* ump = rt.midi_out.ump()) ump->clear();
+                    midi::clear_midi_block(rt.midi_out);
                     const CustomNodeEventBlock events{&rt.midi_in, &rt.midi_out};
                     event_it->second(out_view, in_view, num_samples, events);
                 } else if (auto custom_it = cg->custom_processors.find(id);

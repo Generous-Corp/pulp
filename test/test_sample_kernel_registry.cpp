@@ -144,6 +144,41 @@ TEST_CASE("Sample kernel descriptor validates the fixed lifecycle matrix",
     REQUIRE_FALSE(value.is_valid_registration());
 }
 
+TEST_CASE("A scalar-paired type may not declare the event lane",
+          "[host][sample-kernel][registry][midi]") {
+    // A region MEMBER is quotiented out of the executable topology and an ANCHOR
+    // has its event binding dropped at compile, so an event callback registered
+    // here would never be invoked. That is the same silent MIDI-less degradation
+    // the lowerable refusal exists to prevent, so the pairing registrar refuses
+    // it rather than accepting a callback it will never call.
+    SignalGraph graph;
+    auto scalar = descriptor();
+
+    auto stateless = block_type();
+    stateless.process_events = [](auto&, const auto&, int,
+                                  const pulp::host::CustomNodeEventBlock&) {};
+    REQUIRE(stateless.consumes_events());
+    REQUIRE(stateless.is_valid_registration());  // valid on its own
+    CHECK_FALSE(graph.register_custom_node_type(stateless, scalar));
+    CHECK(graph.custom_node_type_count() == 0);
+    CHECK(graph.sample_kernel_type("pulp.test.scalar", 1) == nullptr);
+
+    auto stateful = block_type();
+    stateful.create = []() -> void* { return nullptr; };
+    stateful.destroy = [](void*) {};
+    stateful.process_instance_events = [](void*, auto&, const auto&, int,
+                                          const pulp::host::CustomNodeEventBlock&) {};
+    REQUIRE(stateful.consumes_events());
+    CHECK_FALSE(graph.register_custom_node_type(stateful, scalar));
+
+    // The control: the same type without the event lane still pairs, so the
+    // refusal above is the event declaration and not an unrelated shape error.
+    auto plain = block_type();
+    REQUIRE_FALSE(plain.consumes_events());
+    CHECK(graph.register_custom_node_type(plain, scalar));
+    CHECK(graph.sample_kernel_type("pulp.test.scalar", 1) != nullptr);
+}
+
 TEST_CASE("Sample kernel registration is exact paired and additive",
           "[host][sample-kernel][registry]") {
     SignalGraph graph;
