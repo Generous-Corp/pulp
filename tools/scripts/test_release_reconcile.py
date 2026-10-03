@@ -9,6 +9,8 @@ was dead and cancelling it.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -933,6 +935,270 @@ class TagImmutableClassifier(unittest.TestCase):
         # Missing evidence is not evidence of doom.
         failures, _ = rr.validation_outcomes(self._jobs(), lambda job_id: "")
         self.assertEqual(failures, {})
+
+
+class CompileErrorsAreTagImmutable(unittest.TestCase):
+    """A compiler diagnostic against a frozen source cannot change on re-run.
+
+    v0.897.3, v0.898.0 and v0.899.0 failed their Windows legs on one MSVC C2668
+    and were re-dispatched every sweep while no incident opened. The circuit
+    must open on the first terminal failure; environmental compiler failures
+    must stay retryable.
+    """
+
+    MSVC_LOG = (
+        "2026-10-03T11:57:09.1310300Z   kit_profile_verification.cpp\n"
+        "2026-10-03T11:57:10.7365733Z D:\\a\\pulp\\pulp\\tools\\cli\\"
+        "kit_profile_verification.cpp(586,47): error C2668: "
+        "'pulp::cli::kit::shell_quote_local': ambiguous call to overloaded "
+        "function [D:\\a\\pulp\\pulp\\build\\tools\\cli\\pulp-cli.vcxproj]\n"
+    )
+    CLANG_LOG = "/src/core/view/src/label.cpp:41:12: error: no member named 'x'\n"
+
+    def _jobs(self, step: str = "Build"):
+        return [
+            {
+                "id": 7,
+                "name": "CLI windows-x64",
+                "conclusion": "failure",
+                "steps": [{"name": step, "conclusion": "failure"}],
+            }
+        ]
+
+    def test_msvc_language_error_opens_the_circuit(self) -> None:
+        failures, _ = rr.validation_outcomes(self._jobs(), lambda _: self.MSVC_LOG)
+        text = " ".join(failures.values())
+        self.assertIn("tag-immutable", text)
+        self.assertIn("kit_profile_verification.cpp(586,47): error C2668", text)
+        self.assertNotIn(".vcxproj", text, "the MSBuild project suffix is noise")
+        self.assertNotIn("D:\\a\\pulp", text, "the runner's checkout path is noise")
+
+    def test_clang_error_opens_the_circuit(self) -> None:
+        signature = rr.tag_immutable_failure(self.CLANG_LOG)
+        self.assertEqual(
+            signature, "compile error: label.cpp:41:12: error: no member named 'x'"
+        )
+
+    def test_environmental_compiler_failures_stay_retryable(self) -> None:
+        for log in (
+            "a.cpp(1): fatal error C1060: compiler is out of heap space\n",
+            "a.cpp(3): fatal error C1083: Cannot open include file: 'gen.h'\n",
+            "a.cpp:1:10: fatal error: 'gen.h' file not found\n",
+            "a.cpp:9:1: internal compiler error: Segmentation fault\n",
+            "c++: fatal error: Killed signal terminated program cc1plus\n",
+            "lld-link: error: undefined symbol: pulp::x()\n",
+            "a.obj : error LNK2019: unresolved external symbol\n",
+            "a.cpp:4:2: warning: unused variable 'y'\n",
+        ):
+            with self.subTest(log=log):
+                self.assertIsNone(rr.tag_immutable_failure(log))
+
+    def test_capacity_caller_agrees(self) -> None:
+        self.assertTrue(
+            rr.run_is_doomed(self._jobs(), lambda _: self.MSVC_LOG).startswith(
+                "compile error:"
+            )
+        )
+
+    def test_compile_error_tag_is_circuit_open_not_redispatched(self) -> None:
+        failures, _ = rr.validation_outcomes(self._jobs(), lambda _: self.MSVC_LOG)
+        decision = decide(
+            state(age_minutes=60, validation_failures=tuple(failures.values())),
+            NOW,
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, CIRCUIT_OPEN)
+        self.assertIn("C2668", decision.reason)
+
+
+def tag_state(*, age_hours: float, run_states=(), failed_legs=(), published=False,
+              tag: str = "v0.899.0") -> TagState:
+    return TagState(
+        tag=tag,
+        created_at=NOW - timedelta(hours=age_hours),
+        published=published,
+        has_release_object=published,
+        assets=REQUIRED_ASSETS if published else frozenset(),
+        run_states=tuple(run_states),
+        validation_failures=(),
+        dispatch_attempts=0,
+        failed_legs=tuple(failed_legs),
+    )
+
+
+class Drought(unittest.TestCase):
+    """An unpublished tag is reported by age, naming the failing legs."""
+
+    LEGS = ("CLI windows-x64 › Build", "CLI windows-arm64 › Build")
+
+    def check(self, **kw):
+        return rr.drought(
+            tag_state(**kw), NOW, drought_hours=2, newest_published=(0, 897, 2)
+        )
+
+    def test_old_failed_tag_is_reported_with_its_legs(self) -> None:
+        why = self.check(age_hours=3, run_states=("completed",), failed_legs=self.LEGS)
+        self.assertIsNotNone(why)
+        self.assertIn("3.0h", why)
+        self.assertIn("CLI windows-x64 › Build", why)
+        self.assertIn("CLI windows-arm64 › Build", why)
+
+    def test_young_tag_is_not_reported(self) -> None:
+        self.assertIsNone(
+            self.check(age_hours=1.5, run_states=("completed",), failed_legs=self.LEGS)
+        )
+
+    def test_slow_first_build_is_never_reported(self) -> None:
+        # The pipeline legitimately takes 70-165+ minutes; age alone is what
+        # made the retired watchdogs alarm on healthy releases.
+        self.assertIsNone(self.check(age_hours=2.5, run_states=("in_progress",)))
+        self.assertIsNone(self.check(age_hours=2.5, run_states=("queued",)))
+
+    def test_retry_in_flight_after_a_failure_keeps_reporting(self) -> None:
+        # Otherwise the incident would close whenever a re-dispatch starts.
+        why = self.check(
+            age_hours=3, run_states=("completed", "in_progress"), failed_legs=self.LEGS
+        )
+        self.assertIsNotNone(why)
+
+    def test_tag_with_no_run_at_all_is_reported(self) -> None:
+        why = self.check(age_hours=3)
+        self.assertIsNotNone(why)
+        self.assertIn("no failed leg recorded", why)
+
+    def test_published_and_superseded_tags_are_not_droughts(self) -> None:
+        self.assertIsNone(self.check(age_hours=5, published=True))
+        self.assertIsNone(
+            self.check(age_hours=5, failed_legs=self.LEGS, tag="v0.897.0")
+        )
+
+
+class FailedLegs(unittest.TestCase):
+    def test_newest_completed_runs_latest_attempt_names_the_legs(self) -> None:
+        runs = [
+            {"id": 1, "status": "completed", "created_at": "2026-10-03T09:00:00Z"},
+            {"id": 2, "status": "completed", "created_at": "2026-10-03T11:00:00Z"},
+            {"id": 3, "status": "in_progress", "created_at": "2026-10-03T12:00:00Z"},
+        ]
+        job_cache = {
+            1: [{"name": "CLI linux-x64", "conclusion": "failure", "run_attempt": 1,
+                 "steps": [{"name": "Build", "conclusion": "failure"}]}],
+            2: [
+                {"name": "CLI windows-x64", "conclusion": "failure", "run_attempt": 1,
+                 "steps": [{"name": "Configure", "conclusion": "failure"}]},
+                {"name": "CLI windows-x64", "conclusion": "failure", "run_attempt": 2,
+                 "steps": [
+                     {"name": "Configure", "conclusion": "success"},
+                     {"name": "Build", "conclusion": "failure"},
+                     {"name": "Package CLI (Windows)", "conclusion": "skipped"},
+                 ]},
+                {"name": "CLI darwin-arm64", "conclusion": "success", "run_attempt": 2,
+                 "steps": []},
+            ],
+        }
+        self.assertEqual(
+            rr.newest_failed_legs(runs, job_cache), ("CLI windows-x64 › Build",)
+        )
+
+    def test_no_completed_run_means_no_legs(self) -> None:
+        self.assertEqual(
+            rr.newest_failed_legs(
+                [{"id": 1, "status": "queued", "created_at": "x"}], {}
+            ),
+            (),
+        )
+
+
+def sweep(states: list[TagState]) -> tuple[dict[str, str], list[str]]:
+    """Run main() over `states` with all I/O stubbed; return (report, rebuilt)."""
+    import os
+
+    captured: dict = {}
+    redispatched: list[str] = []
+    saved = (rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.datetime)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+
+    old_env = dict(os.environ)
+    try:
+        rr.sdk_tags = lambda *_: [(s.tag, s.created_at) for s in states]
+        rr.collect = lambda *_: states
+        rr.sync_incident = lambda repo, report, dry: captured.setdefault("r", report)
+        rr.redispatch = lambda repo, tag, dry: redispatched.append(tag)
+        rr.datetime = FrozenDatetime
+        os.environ.update({"REPO": "example/repo", "DRY_RUN": "true"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert rr.main() == 0
+    finally:
+        os.environ.clear()
+        os.environ.update(old_env)
+        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.datetime = saved
+    return dict(captured["r"]), redispatched
+
+
+PUBLISHED_PRIOR = TagState(
+    tag="v0.897.2", created_at=NOW - timedelta(hours=6), published=True,
+    has_release_object=True, assets=REQUIRED_ASSETS, run_states=("completed",),
+    validation_failures=(), dispatch_attempts=0,
+)
+
+
+class SweepReportsTheIncidentShape(unittest.TestCase):
+    """Drive main() over the incident shapes with the I/O stubbed."""
+
+    def test_three_failed_windows_tags_open_one_incident_and_no_rebuilds(self) -> None:
+        jobs = CompileErrorsAreTagImmutable()._jobs()
+        failures, _ = rr.validation_outcomes(
+            jobs, lambda _: CompileErrorsAreTagImmutable.MSVC_LOG
+        )
+        states = [
+            TagState(
+                tag=tag, created_at=NOW - timedelta(hours=age), published=False,
+                has_release_object=False, assets=frozenset(),
+                run_states=("completed",), validation_failures=tuple(failures.values()),
+                dispatch_attempts=0, failed_legs=("CLI windows-x64 › Build",),
+            )
+            for tag, age in (("v0.899.0", 1.5), ("v0.898.0", 3), ("v0.897.3", 4.5))
+        ] + [PUBLISHED_PRIOR]
+        report, rebuilt = sweep(states)
+        self.assertEqual(rebuilt, [], "a compile error must not be rebuilt")
+        self.assertEqual(sorted(report), ["v0.897.3", "v0.898.0", "v0.899.0"])
+        for tag, why in report.items():
+            with self.subTest(tag=tag):
+                self.assertIn("C2668", why)
+                self.assertIn("CLI windows-x64 › Build", why)
+
+    def test_retryable_failure_past_two_hours_is_reported_and_still_rebuilt(self) -> None:
+        # No signature, so it stays on the retry path — but it is overdue, and
+        # before the drought rule nothing said so until retries ran out.
+        overdue = tag_state(
+            age_hours=3, run_states=("completed",),
+            failed_legs=("CLI windows-x64 › Configure",),
+        )
+        report, rebuilt = sweep([overdue, PUBLISHED_PRIOR])
+        self.assertEqual(rebuilt, ["v0.899.0"])
+        self.assertIn("CLI windows-x64 › Configure", report["v0.899.0"])
+        self.assertIn("unpublished 3.0h", report["v0.899.0"])
+
+    def test_overdue_tag_is_reported_even_when_the_rebuild_budget_is_spent(self) -> None:
+        newer = tag_state(
+            age_hours=2.5, run_states=("completed",), failed_legs=("CLI a › Build",),
+            tag="v0.899.1",
+        )
+        older = tag_state(
+            age_hours=3, run_states=("completed",), failed_legs=("CLI b › Build",),
+        )
+        report, rebuilt = sweep([newer, older, PUBLISHED_PRIOR])
+        self.assertEqual(rebuilt, ["v0.899.1"])
+        self.assertEqual(sorted(report), ["v0.899.0", "v0.899.1"])
+
+    def test_healthy_young_release_opens_nothing(self) -> None:
+        building = tag_state(age_hours=1, run_states=("in_progress",))
+        report, rebuilt = sweep([building, PUBLISHED_PRIOR])
+        self.assertEqual((report, rebuilt), ({}, []))
 
 
 if __name__ == "__main__":

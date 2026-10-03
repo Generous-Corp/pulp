@@ -649,6 +649,10 @@ What it does **not** cover is GCC *behavior* — nothing is executed, so a
 construct both compilers accept but implement differently is still only caught
 by the Clang test lanes.
 
+MSVC sees PR code in one place: `windows-cli-compile.yml`, scoped to the CLI and
+MCP targets (see "Windows is nightly-only" below). Everything else Windows-only is
+compiled by the nightly `cross-platform-check.yml` and by the release legs.
+
 Release-path configurations use `PULP_ENABLE_INSPECTOR=ON` starting at the
 `inspector_sdk_floor` in `release_product_matrix.json`; earlier marker-era
 backfills keep it OFF. The option controls whether the optional inspector SDK
@@ -3940,6 +3944,37 @@ explicit: up to ~24 h of latency on a Windows regression, bought with merge-queu
 capacity. Revisit only if Windows parity becomes an active workstream rather than a
 background one.
 
+**The one PR-time exception: `Windows CLI compile (MSVC)`.** The 24 h latency is
+not harmless for the CLI, because `release-cli.yml` compiles it with MSVC on every
+tag: an MSVC-only error under `#ifdef _WIN32` (a helper defined twice in
+`tools/cli/kit_profile_verification.cpp`, C2668) failed the Windows legs of
+v0.897.3, v0.898.0 and v0.899.0 on 2026-10-03, and the nightly that should have
+caught it had been cancelled on both preceding nights.
+`windows-cli-compile.yml` compiles only `pulp-cli` and `pulp-mcp`, and only when
+`tools/scripts/windows_cli_compile_scope.py` says the change can reach them
+(`tools/cli/`, `tools/mcp/`, `tools/cmake/`, or C/C++ carrying a Windows/MSVC
+marker) — ~3 merges a day, one hosted Windows job each, against the four jobs per
+PR this section removed. It is advisory. Its main-push runs post a
+`Windows CLI compile verdict` check, which feeds a **blocking** pre-tag check in
+`auto-release.yml` (`windows_cli_release_precheck.py`): while the newest verdict
+for an ancestor of the tagged commit is a failure, the SDK tag is withheld and the
+step summary says why. The check reads check runs with `checks: read` — do not
+"simplify" it to the workflow-runs API, which needs an `actions` scope that
+auto-release deliberately does not hold. Read it as:
+
+- **`SDK tag withheld` on an auto-release run** — main does not compile with MSVC.
+  Fix the code; the first push after a clean `Windows CLI compile (MSVC)` run tags
+  the current version. Do not tag by hand, and do not set
+  `PULP_RELEASE_WINDOWS_PRECHECK=off` unless the lane itself is broken (that
+  variable disables the check).
+- **A red `Windows CLI compile (MSVC)` on your PR** — it cannot flake on code: it
+  runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
+  failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
+  job is skipped, so the pre-tag check ignores it too.
+- **Promoting it to required** needs a `merge_group` trigger plus the ruleset
+  entry. The scope job always reports and an irrelevant change skips the compile
+  job (a skipped job satisfies a required check), so nothing else changes.
+
 Related, and rejected on measurement: moving the Ubuntu preamble jobs off the Macs.
 `pulp-preamble-m5` and `pulp-studio-02` do also carry the `pulp-build` gate label,
 so the starvation mechanism is real — but it is ~0.6 min of Mac time per run, and
@@ -4748,6 +4783,15 @@ bisectable.
   incidents. A pile of open `release: stuck` trackers therefore means the
   release pipeline is genuinely stuck NOW — check release-reconcile's single
   incident issue first, don't triage the trackers one by one.
+- **The reconciler's incident names the failing leg** (`CLI windows-x64 › Build`)
+  for every tag it lists, and it lists a tag on either of two grounds: retries
+  are exhausted or cannot help, or the tag is still unpublished 2 h
+  (`DROUGHT_HOURS`) after it was cut with a failed leg behind it. A compiler
+  error in a leg's log (MSVC `error C2xxx`, Clang/GCC `file:line:col: error:`) is
+  treated as tag-immutable: the circuit opens on the first failure and the tag
+  is not re-dispatched, because the frozen sources fail identically every time.
+  Fix it on main and let the next tag publish; re-dispatching that tag by hand
+  only burns another release matrix.
 - **NEVER delete a GitHub release or draft — deletion of a once-published
   release permanently burns its tag name.** GitHub reserves an immutable
   release's `tag_name` forever; every later publish attempt 422s with
