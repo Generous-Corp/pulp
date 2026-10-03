@@ -439,6 +439,8 @@ OSStatus PulpAUEffect::Initialize()
 {
     auto result = AUEffectBase::Initialize();
     if (result != noErr) return result;
+    // A host offline-render write older than this session no longer applies.
+    offline_render_.begin_session();
 
     // The side chain is delivered sample-for-sample against the main bus, so
     // both must run at one rate. ChangeStreamFormat keeps them in step for a

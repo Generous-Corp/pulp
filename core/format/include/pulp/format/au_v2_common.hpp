@@ -124,6 +124,16 @@ inline ProcessContext make_render_process_context(double sample_rate,
 /// implement it, so without this an AU v2 plug-in rejects the write and every
 /// block reports realtime. The value is written on the host's property thread
 /// and read on the render thread, so it is held in an atomic.
+///
+/// The flag is scoped to one render session. Not every host writes it back
+/// after a bounce, and a processor that waits for worker results on offline
+/// blocks would then wait on every later realtime block. So each adapter calls
+/// `begin_session()` from `Initialize()`: a host write made since the previous
+/// `Initialize()` survives it (a host may set the flag and then re-initialize
+/// for the bounce, or set it before the first `Initialize()`), and an older
+/// write belongs to a previous session and is cleared. `Reset()` does not
+/// clear it, because hosts reset at transport start, which can follow the
+/// write that set up the bounce.
 class OfflineRenderProperty {
 public:
     OSStatus property_info(AudioUnitScope scope, UInt32& out_size,
@@ -148,7 +158,18 @@ public:
             return kAudioUnitErr_InvalidPropertyValue;
         offline_.store(*static_cast<const UInt32*>(in_data) != 0,
                        std::memory_order_release);
+        written_since_session_start_.store(true, std::memory_order_release);
         return noErr;
+    }
+
+    /// Start a render session (call from `Initialize()`). Keeps a value the
+    /// host wrote since the previous session started; otherwise returns the
+    /// flag to realtime, so a bounce the host never cleared cannot leak into
+    /// the next session.
+    void begin_session() noexcept {
+        if (!written_since_session_start_.exchange(false,
+                                                    std::memory_order_acq_rel))
+            offline_.store(false, std::memory_order_release);
     }
 
     /// Render-thread read of the latest host value.
@@ -158,6 +179,7 @@ public:
 
 private:
     std::atomic<bool> offline_{false};
+    std::atomic<bool> written_since_session_start_{false};
 };
 
 /// Populate AU v2 render-context transport metadata from host callbacks and

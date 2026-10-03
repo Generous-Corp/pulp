@@ -456,6 +456,17 @@ had no `SetProperty` override before; it needs one for this. Tests:
 `test_au_plugin_state.mm` (`[auv2][offline]`, effect and instrument) and
 `test_au_v2_midi_processor.cpp` (`[midi-processor][offline]`).
 
+The flag is **scoped to one render session**: each adapter's `Initialize()`
+calls `OfflineRenderProperty::begin_session()`, which keeps a host write made
+since the previous `Initialize()` and otherwise returns the flag to realtime.
+Not every host writes it back after a bounce, and a processor that waits for
+worker results on offline blocks (Spectr waits for its design workers) would
+then stall every later realtime block. A write survives exactly one
+re-initialization because hosts both set it before the first `Initialize()`
+and set it and then re-initialize for the bounce. `Reset()` does not clear it:
+hosts reset at transport start, which can follow the write that set up the
+bounce. A plug-in no longer needs its own `PulpAUEffect` subclass for this.
+
 ### Multi-bus output — instruments carry it, effects can't (SDK wall)
 
 The genuine AU v2 multi-bus vehicle is the **instrument** (`aumu` /
