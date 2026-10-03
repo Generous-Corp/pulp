@@ -526,6 +526,10 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         # entry was scanned and showed neither, which a list written before a
         # scan existed cannot say: a reader treats a missing scan as unknown.
         doc["executables_scanned_for"] = list(EXECUTABLE_SCANS)
+        # And which executables were scanned: a missing entry means "clean" only
+        # for a name in this list; one that is not here was never scanned.
+        index = _read_json(build_dir / TEST_DATA_DIR / "executables.json") or {}
+        doc["executables_scanned"] = sorted(index.get("executables") or {})
     return doc
 
 

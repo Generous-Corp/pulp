@@ -481,6 +481,11 @@ class CompiledDataTests(unittest.TestCase):
                 "sources": ["test/test_a.cpp"], "undeclared_sources": []})
             self.assertIn("alpha", lst["tests"])  # script entries unchanged, same file
             self.assertEqual(lst["executables_scanned_for"], ["data", "spawns"])
+            # Every executable configure saw is listed, clean ones included
+            # (pulp-test-d reads nothing and has no entry), so a missing entry
+            # can be told apart from a never-scanned executable.
+            self.assertEqual(lst["executables_scanned"], ["pulp-test-a", "pulp-test-b", "pulp-test-c", "pulp-test-d"])
+            self.assertNotIn("pulp-test-d", lst["executables"])
 
     def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

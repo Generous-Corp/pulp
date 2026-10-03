@@ -309,6 +309,15 @@ function(_pulp_test_data_finalize)
         _pulp_test_data_tree_defines(_names "${_defs}")
         _pulp_test_data_runtime_targets(_runtime _unbound ${_t} "${_defs}")
         list(APPEND _spawn_errors ${_unbound})
+        # Every edge pulp_test_spawns() added must reach the index; one that
+        # does not (a tool that is not an executable or module, or an edge
+        # added after this ran) would otherwise vanish from the record.
+        get_property(_declared_spawns GLOBAL PROPERTY PULP_TEST_SPAWNS_OF_${_t})
+        foreach(_tool IN LISTS _declared_spawns)
+            if(NOT _tool IN_LIST _runtime)
+                list(APPEND _spawn_errors "${_t} declares ${_tool}, which is not a recorded runtime target")
+            endif()
+        endforeach()
         if(_names)
             list(REMOVE_DUPLICATES _names)
             list(SORT _names)
@@ -379,6 +388,7 @@ function(_pulp_test_spawns_apply TEST TOOL)
     endif()
     if(TARGET ${TOOL})
         add_dependencies(${TEST} ${TOOL})
+        set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_OF_${TEST} "${TOOL}")
     endif()
 endfunction()
 

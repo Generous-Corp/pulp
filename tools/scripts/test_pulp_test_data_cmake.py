@@ -20,7 +20,8 @@ What must hold:
   directory, where an inline `if(TARGET tool)` is false and silently drops
   it; `runtime_targets` lists the edge, and `spawns_none` a reviewed NONE;
 - a `$<TARGET_FILE:x>` definition without an edge to x fails the configure,
-  and so does a NONE on an executable that has one.
+  and so does a NONE on an executable that has one, or a pulp_test_spawns()
+  edge that does not reach the written index.
 
 Run:
     python3 tools/scripts/test_pulp_test_data_cmake.py
@@ -224,6 +225,14 @@ class PulpTestSpawnsCMakeTests(unittest.TestCase):
         proc, _ = self.configure("pulp_test_spawns(spawner NONE)\npulp_test_spawns(spawner tool)\n")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("spawner is declared pulp_test_spawns(NONE) but depends on tool", proc.stderr)
+
+    def test_a_declared_edge_must_reach_the_index(self) -> None:
+        # A utility target is not something a test runs, so its edge cannot be
+        # recorded as a runtime target; the configure says so instead of
+        # dropping it.
+        proc, _ = self.configure("add_custom_target(stage)\npulp_test_spawns(spawner stage)\n")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("spawner declares stage, which is not a recorded runtime target", proc.stderr)
 
 
 if __name__ == "__main__":
