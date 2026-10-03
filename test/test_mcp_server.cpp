@@ -354,6 +354,21 @@ std::filesystem::path make_fake_command(const std::filesystem::path& dir, const 
     return command;
 }
 
+void make_fake_governed_build(const std::filesystem::path& project) {
+    const auto governor = project / "tools" / "ci" / "governed-build.sh";
+    std::filesystem::create_directories(governor.parent_path());
+    std::ofstream script(governor);
+    script << "#!/bin/sh\n"
+           << "[ \"$1\" = cmake ] && shift\n"
+           << "exec cmake \"$@\"\n";
+    script.close();
+    std::filesystem::permissions(governor,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+}
+
 } // namespace
 
 TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
@@ -1821,6 +1836,7 @@ TEST_CASE("MCP build and test handlers quote project paths and filters", "[mcp][
     TempDir fake_bin;
     make_fake_command(fake_bin.path, "cmake", "fake-cmake");
     make_fake_command(fake_bin.path, "ctest", "fake-ctest");
+    make_fake_governed_build(project);
     const char* old_path = std::getenv("PATH");
     ScopedEnvVar path_env("PATH", fake_bin.path.string() + ":" + (old_path ? old_path : ""));
     ScopedCurrentPath cwd(project);
@@ -2127,6 +2143,7 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
     std::ofstream(project / "build" / "CMakeCache.txt") << "CMAKE_BUILD_TYPE:STRING=Release\n";
     make_package_workflow_fake_pulp_cli(project, log);
     make_fake_command(bin, "cmake", "fake-cmake");
+    make_fake_governed_build(project);
     {
         const auto screenshot = project / "build" / "tools" / "screenshot" / "pulp-screenshot";
         std::ofstream script(screenshot);

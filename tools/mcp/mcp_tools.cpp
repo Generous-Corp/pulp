@@ -36,10 +36,8 @@ std::string handle_build(const std::string& /*params_json*/) {
     // would turn a failing build with diagnostic output into a successful
     // handler response.
     const auto governor = root / "tools" / "ci" / "governed-build.sh";
-    const auto build = fs::exists(governor)
-                           ? "bash " + shell_quote(governor.string()) + " cmake --build " +
-                                 shell_quote(build_dir.string()) + " 2>&1"
-                           : "cmake --build " + shell_quote(build_dir.string()) + " 2>&1";
+    const auto build = "bash " + shell_quote(governor.string()) + " cmake --build " +
+                       shell_quote(build_dir.string()) + " 2>&1";
     const auto result = exec_with_status(build);
     output += result.output;
     if (result.failed()) {
