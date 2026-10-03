@@ -7423,6 +7423,16 @@ only: every registration has a command after the build, no composite identity
 is ambiguous, and every literal test the policy names exists. A run bare
 checks the policy tables alone.
 
+The selftest also runs inside a bounded leg, where only the selected targets
+are built, so a registration without a command passes only with the runner's
+proof that it is merely unbuilt (`split_proven_unbuilt_placeholders`: a Catch2
+NOT_BUILT placeholder with its include file, or a direct test whose program is
+a CMake artifact not built yet). A built registration without a command, or one
+with no proof, still refuses. Literal names that may be undiscovered Catch2
+cases are checked once no placeholder remains, which the same test does in the
+full suite. Without this it failed in every bounded leg and passed in the full
+run, so no plan could compare cleanly.
+
 Reasons a bounded run selects the full suite instead: `inventory: base not
 recorded` (the base did not configure), `inventory: base mismatch` (the
 checkout's merge base is not the plan's base), a registration left without a
