@@ -22,7 +22,11 @@ cmake-driven test. What must hold:
 - the scan covers an executable defined outside test/ when ctest runs it
   (as a command or through a Catch2 discovery include), keyed by the program
   name ctest runs, and not one a test only passes as an argument;
-- WHOLE_CHECKOUT reads as `data: whole_checkout`, never undeclared.
+- WHOLE_CHECKOUT reads as `data: whole_checkout`, never undeclared;
+- a build configured off the gate's profile (examples ON, a sanitizer, a
+  Debug build) cannot stand for the list's compiled entries: `--check`
+  still compares the script entries, then reports the compiled half
+  SKIPPED with the switch that differs, and `--write` refuses.
 
 Run:
     python3 tools/scripts/test_script_test_inputs.py
@@ -680,6 +684,47 @@ class CompiledDataTests(unittest.TestCase):
             proc = self.run_tool(repo, "--check", "--full")
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+
+
+class GateProfileTests(unittest.TestCase):
+    run_tool = CompiledDataTests.run_tool
+
+    def cache(self, repo: Repo, **values: str) -> None:
+        lines = [f"{k}:STRING={v}" for k, v in values.items()]
+        (repo.build / "CMakeCache.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_a_gate_shaped_build_compares_the_compiled_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.cache(repo, PULP_BUILD_EXAMPLES="OFF", CMAKE_BUILD_TYPE="Release", PULP_SANITIZER="")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            compiled_evidence(repo, declare_b=True)
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+
+    def test_an_off_profile_build_skips_the_compiled_half_by_name(self) -> None:
+        for values, reason in ((dict(PULP_BUILD_EXAMPLES="ON"), "PULP_BUILD_EXAMPLES=ON"),
+                               (dict(PULP_SANITIZER="address", CMAKE_BUILD_TYPE="Debug"), "PULP_SANITIZER=address"),
+                               (dict(CMAKE_BUILD_TYPE="Debug"), "CMAKE_BUILD_TYPE=Debug")):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp)); compiled_evidence(repo)
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)   # no cache: the gate's
+                compiled_evidence(repo, declare_b=True)                         # a compiled entry moves
+                self.cache(repo, **values)
+                proc = self.run_tool(repo, "--check", "--full")
+                self.assertEqual(proc.returncode, sti.SKIP_EXIT, proc.stdout + proc.stderr)
+                self.assertIn("SKIPPED the compiled entries", proc.stdout)
+                self.assertIn(reason, proc.stdout)
+                self.assertNotIn("stale compiled entry", proc.stdout)
+                # Script entries still compare: a stale one fails as before.
+                write(repo.root, "tools/scripts/test_alpha.py", "import alpha_lib\nimport newmod\n")
+                write(repo.root, "tools/scripts/newmod.py", "")
+                self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 1)
+                # And the list is never written from such a build.
+                proc = self.run_tool(repo, "--write")
+                self.assertEqual(proc.returncode, 2)
+                self.assertIn("refusing to write", proc.stderr)
 
 
 class ScanScopeTests(unittest.TestCase):
