@@ -451,6 +451,22 @@ that a symlink inside the root still reads as "within") is pinned in the header
 comments and covered by the `[fs-safety]` cases in
 `test/test_cli_kit_commands.cpp` — update both sides when changing it.
 
+#### `#ifdef _WIN32` CLI code is compiled only by the release legs
+
+Every required gate is Clang on macOS, so nothing a PR runs compiles a
+`#ifdef _WIN32` block in `tools/cli/`. A Windows-only mistake there stays green
+through merge and surfaces only when `release-cli.yml`'s `CLI windows-x64` /
+`CLI windows-arm64` legs build the tag — and the `release` job is gated on every
+leg, so one MSVC error publishes nothing for that tag and every tag after it
+until a fix lands (a tag's own source is what gets built; a fix on `main` cannot
+rescue an already-cut tag). The concrete case: a refactor that extracted
+`kit_profile_verification.cpp` carried two `_WIN32`
+`shell_quote_local(const fs::path&)` definitions — one in the anonymous
+namespace, one in `pulp::cli::kit` — and MSVC rejected the call site as
+ambiguous (C2668). When moving or extracting helpers, grep the destination TU
+for an existing definition inside *both* branches of every platform `#ifdef`,
+and keep the cmd.exe-correct quoting (double quotes) on the Windows side.
+
 ### 2. Update the CLI commands manifest
 - [ ] Add entry to `docs/status/cli-commands.yaml` with:
   - `name`, `status` (use status vocabulary: stable/usable/experimental), `summary`
