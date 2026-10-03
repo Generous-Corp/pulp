@@ -139,6 +139,14 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_plugin_view_host_first_mouse_macos.mm
         LIBRARIES pulp::view "-framework AppKit")
 endif()
+# A plug-in editor opens on its own declared background: the backing layer and
+# every pixel of a frame painted before the document mounts, on both macOS
+# plug-in hosts (PluginViewHost::Options::background_rgb).
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-plugin-view-first-frame-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_plugin_view_host_first_frame_macos.mm
+        LIBRARIES pulp::view "-framework AppKit")
+endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.

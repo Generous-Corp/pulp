@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-white-space-inheritance-watch",
+  "created_at": "2026-10-03T05:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a layout-semantics fix that crosses these families' selectors. CSS white-space is now inherited by native text: a Label left at the initial value normal follows its nearest ancestor that set another mode (Label::soft_wraps), so text inside a white-space: nowrap container stays on one line, and setWhiteSpace invalidates layout when a mode changes. The compat css/whiteSpace row and style-props reference record the rule. No importer lowering, DesignIR shape, capture path, renderer selection, asset format, fixture or threshold changes. Registered as watch-only so the families' coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-widget-bridge-yoga [white-space]",
+    "pulp-test-widget-bridge-yoga [absolute]"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

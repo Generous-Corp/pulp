@@ -380,7 +380,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     const char *mode = "fallback";
     if (_bridge) {
         const auto gpu = pulp::format::decide_gpu_host(*_bridge);
-        opts.use_gpu = gpu.use_gpu;
+        opts = pulp::format::editor_host_options(*_bridge, gpu, opts.size);
         mode = gpu.mode;
         _viewHost = pulp::view::PluginViewHost::create(*_pendingRoot, opts);
         if (_viewHost) {

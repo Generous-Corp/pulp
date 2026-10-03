@@ -4,11 +4,12 @@
 #   link-members-launcher.sh <build-root> <link command...>
 #
 # Runs the link command with one extra `-Wl,-map,<file>` and exits with the
-# linker's status. After a successful executable link it keeps the head of the
+# linker's status. After a successful executable or loadable-module (`-bundle`,
+# a CMake MODULE_LIBRARY such as a plug-in bundle) link it keeps the head of the
 # map (output path and "# Object files:" list, not the multi-megabyte symbol
 # table) as <build-root>/link-members/<name>-<id>.objects, and the link
 # arguments as .args, for tools/ci/link_members.py to read; the map itself is
-# deleted. Shared libraries, bundles and partial links are run untouched, and
+# deleted. Shared libraries and partial links are run untouched, and
 # so is any link whose record directory cannot be written: recording never
 # changes whether a link succeeds. See tools/cmake/PulpLinkMaps.cmake.
 
@@ -19,7 +20,7 @@ prev=""
 for arg in "$@"; do
     [ "$prev" = "-o" ] && out=$arg
     case $arg in
-        -dynamiclib|-shared|-bundle|-r) exec "$@" ;;
+        -dynamiclib|-shared|-r) exec "$@" ;;
     esac
     prev=$arg
 done

@@ -470,6 +470,67 @@ Fingerprints and what they mean:
 - `getLayoutBoxMetrics` counts are a symptom, not the cost; measure the
   commit (see `getLayoutRect` coalescing in view-bridge).
 
+### First-frame colour recipe: what did the editor show before its UI?
+
+A view-first editor presents frames before its document mounts. Time that gap
+from the trace and prove what those frames showed from the pixels — the trace
+alone cannot tell a correct background from a framework default.
+
+1. **Trace**: the macOS plug-in GPU host emits one `plugin_editor_frame`
+   (`render`) span per presented frame with args `frame` (restarts at 0 for
+   each host, so every open begins at a frame-0 span), `background_rgb` (the
+   colour painted under the tree) and `root_children`. Pair them with
+   `scripted_ui_document_load`:
+
+```sql
+with frames as (
+  select ts, dur, extract_arg(arg_set_id, 'debug.frame') as frame,
+         extract_arg(arg_set_id, 'debug.background_rgb') as bg
+  from slice where name = 'plugin_editor_frame'
+), opens as (
+  select ts as open_ts, bg, row_number() over (order by ts) as n,
+         lead(ts) over (order by ts) as next_open
+  from frames where frame = 0
+), docs as (
+  select o.n, min(d.ts + d.dur) as doc_end
+  from slice d join opens o
+    on d.ts >= o.open_ts and (o.next_open is null or d.ts < o.next_open)
+  where d.name = 'scripted_ui_document_load' group by o.n
+)
+select o.n as open, printf('#%06X', o.bg) as pre_document_colour,
+       (select count(*) from frames f where f.ts >= o.open_ts and f.ts < d.doc_end)
+         as frames_before_document,
+       round(((select min(f.ts + f.dur) from frames f where f.ts >= d.doc_end
+               and (o.next_open is null or f.ts < o.next_open)) - o.open_ts) / 1e6, 1)
+         as first_document_frame_ms
+from opens o join docs d using (n) order by o.n;
+```
+
+   `pre_document_colour` reading `#1E1E2E` (`kEditorHostClearRgb`) means the
+   plug-in declared no `editor_background()` and its root theme is the default
+   dark one; every frame in `frames_before_document` showed that colour. Do
+   not use `root_children > 0` as "document mounted": chrome a processor adds
+   in `create_view()` (a resize grip) counts too.
+2. **Pixels**: read back every presented drawable in the host process (swizzle
+   `-[CAMetalDrawable present]` / `-[MTLCommandBuffer presentDrawable:]`, blit
+   the texture into a shared `MTLBuffer`) — never a screenshot, which needs
+   screen-recording permission and sees the compositor, not the frame. Also
+   read the view's `layer.backgroundColor` before the window is ordered in:
+   that colour is on screen until the first frame and no frame read-back sees
+   it. Stamp each present with `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` —
+   Perfetto's clock on macOS — and a present lands within ~1 ms of its
+   `plugin_editor_frame` span's end, so frames join spans without guessing.
+3. **Classify every frame**, not a sample: the editor's background (plus
+   chrome already in its final place), the settled UI, the framework default,
+   or other. Report counts per class and how long an off-brand frame stayed on
+   screen (until the next present). Run it cold and warm, at the preferred and
+   minimum host sizes, and on a build without the declaration as the negative
+   control. A traced SDK draws a `TRACING` badge in the editor's corner: expect
+   those pixels in the classes; gate on an untraced build.
+4. **Keep the display awake** for any off-screen probe:
+   `caffeinate -u -d -i <probe>`. A sleeping display stops the display link,
+   so every variant presents zero frames and the run reads as a broken build.
+
 The other canonical case is the offline DSP reveal — "CPU pinned but the meter
 looks calm — which node?" — run against a deterministic `offline_process()`
 render (`examples/trace-demo`) so the answer reproduces exactly. See

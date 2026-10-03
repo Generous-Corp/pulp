@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-test-spawn-site-checks-watch",
+  "created_at": "2026-10-03T04:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record test-registration lines that cross design-source-ingest through test/cmake/design_import_tool_cli_tests.cmake and visual-proof-harness through test/cmake/view_widget_bridge_tests.cmake. pulp-test-import-design-tool gains pulp_test_spawns(... NOT_RUN pulp-svg-probe), a reviewed note that the name appears only in the import tool's expected output; the control broker, crash-fixture and endpoint-enrollment tests gain build edges to pulp-cli, pulp-mcp and the host fixtures their control manifests name. Test sources, capture, rendering, DesignIR, fixtures and thresholds are unchanged. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-data-cmake-selftest",
+    "script-test-inputs-selftest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

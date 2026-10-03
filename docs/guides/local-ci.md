@@ -919,7 +919,10 @@ edge after every tool directory has been read. An inline
 `if(TARGET <tool>)` in `test/cmake` is evaluated too early and creates no
 edge. An executable whose sources call a process API with no such edge and no
 reviewed `pulp_test_spawns(<test> NONE)` is `spawns: undeclared`, and the
-shadow selects it on every change.
+shadow selects it on every change. So is one whose code names a built
+program (a string such as `"pulp-cpp"`) that no edge reaches and no reviewed
+`pulp_test_spawns(<test> NOT_RUN <target>)` covers, and one whose declared
+tool this configuration does not build.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
@@ -996,10 +999,12 @@ the head issued no receipt (annotation field `source: reuse-record`). The
 macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
 (`tools/cmake/PulpLinkMaps.cmake`): every link runs through
 `tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
-linker's status, and for an executable keeps only the map's object list and
+linker's status, and for an executable or a loadable module (a `-bundle`
+link: plug-in bundles, LV2 binaries, reload probes) keeps only the map's object list and
 the link arguments under `<build>/link-members/` (the map, megabytes of
 symbol table, is deleted). The linked bytes are identical with and without
-it. `link-members-<sha>.json` in the record then lists, per executable, the
+it. `link-members-<sha>.json` in the record then lists, per executable and
+module (each entry's `kind`, schema `pulp-link-members/v2`), the
 archive members its link pulled, with `whole` set on archives the link line
 force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
 (`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its

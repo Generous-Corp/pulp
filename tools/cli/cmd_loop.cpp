@@ -9,9 +9,8 @@
 // Compatibility flags for PR polling and object swapping are accepted so old
 // scripts fail gently, but they only print diagnostics today.
 
+#include "build_plan.hpp"
 #include "cli_common.hpp"
-#include "focused_build.hpp"
-#include "tartci_lease.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -28,7 +27,8 @@ const char* kFocusPlatforms[] = {"macos", "linux", "windows"};
 
 bool is_known_focus_platform(const std::string& name) {
     for (const char* p : kFocusPlatforms) {
-        if (name == p) return true;
+        if (name == p)
+            return true;
     }
     return false;
 }
@@ -37,42 +37,46 @@ bool is_known_focus_platform(const std::string& name) {
 // strings to the umbrella names used by the focus-mode surface. Any unknown host degrades
 // to an empty string so the caller can warn.
 std::string umbrella_from_detected(const std::string& detected) {
-    if (detected.rfind("darwin", 0) == 0) return "macos";
-    if (detected.rfind("linux", 0) == 0) return "linux";
-    if (detected.rfind("windows", 0) == 0) return "windows";
+    if (detected.rfind("darwin", 0) == 0)
+        return "macos";
+    if (detected.rfind("linux", 0) == 0)
+        return "linux";
+    if (detected.rfind("windows", 0) == 0)
+        return "windows";
     return {};
 }
 
 void print_help() {
-    std::cout <<
-        "pulp loop — leveraged-prototype focus mode\n\n"
-        "Usage: pulp loop [options] [-- launch-args...]\n\n"
-        "Single-platform iteration marker plus the normal watch + rebuild loop.\n"
-        "Pair with `shipyard pr` /\n"
-        "`pulp pr` at land time to restore full cross-platform validation.\n\n"
-        "Options:\n"
-        "  --platform=<macos|linux|windows>  Override the auto-detected host platform\n"
-        "  --off                             Restore cross-platform mode (clear focus)\n"
-        "  --status                          Print the current focus state and exit\n"
-        "  --watch-issues N1,N2,...          Recognized; prints a not-implemented diagnostic\n"
-        "  --ar-swap-from <ref>              Superseded; points you to `pulp dev --hot-dsp`\n"
-        "  --test, -t                        Run tests after each successful build\n"
-        "  --test-filter=PATTERN             Run only tests matching PATTERN (implies --test)\n"
-        "  --validate                        Run quick plugin dlopen validation after build\n"
-        "  --run TARGET                      Launch TARGET from build dir, relaunch on rebuild\n"
-        "  --target T                        Pass --target T to cmake --build\n"
-        "  --all                             Build every target and run every test\n"
-        "                                    (default: only those affected by the diff)\n"
-        "  --examples                        Configure the source checkout with example projects\n"
-        "  --no-watch                        Set/clear focus state and exit (no watch)\n"
-        "  --allow-unsupported-sdk           Bypass the CLI-vs-project SDK guard (unsupported)\n"
-        "  -h, --help                        Show this help\n\n"
-        "Examples:\n"
-        "  pulp loop                         # Enter focus mode on the auto-detected host\n"
-        "  pulp loop --platform=macos --test # Pin to macOS + run tests on every save\n"
-        "  pulp loop --status                # Print current focus state\n"
-        "  pulp loop --off                   # Restore cross-platform mode\n"
-        "  pulp loop --watch-issues 924,927 --no-watch\n";
+    std::cout
+        << "pulp loop — leveraged-prototype focus mode\n\n"
+           "Usage: pulp loop [options] [-- launch-args...]\n\n"
+           "Single-platform iteration marker plus the normal watch + rebuild loop.\n"
+           "Pair with `shipyard pr` /\n"
+           "`pulp pr` at land time to restore full cross-platform validation.\n\n"
+           "Options:\n"
+           "  --platform=<macos|linux|windows>  Override the auto-detected host platform\n"
+           "  --off                             Restore cross-platform mode (clear focus)\n"
+           "  --status                          Print the current focus state and exit\n"
+           "  --watch-issues N1,N2,...          Recognized; prints a not-implemented diagnostic\n"
+           "  --ar-swap-from <ref>              Superseded; points you to `pulp dev --hot-dsp`\n"
+           "  --test, -t                        Run tests after each successful build\n"
+           "  --test-filter=PATTERN             Run only tests matching PATTERN (implies --test)\n"
+           "  --validate                        Run quick plugin dlopen validation after build\n"
+           "  --run TARGET                      Launch TARGET from build dir, relaunch on rebuild\n"
+           "  --target T                        Pass --target T to cmake --build\n"
+           "  --all                             Build every target and run every test\n"
+           "                                    (default: only those affected by the diff)\n"
+           "  --examples                        Configure the source checkout with example "
+           "projects\n"
+           "  --no-watch                        Set/clear focus state and exit (no watch)\n"
+           "  --allow-unsupported-sdk           Bypass the CLI-vs-project SDK guard (unsupported)\n"
+           "  -h, --help                        Show this help\n\n"
+           "Examples:\n"
+           "  pulp loop                         # Enter focus mode on the auto-detected host\n"
+           "  pulp loop --platform=macos --test # Pin to macOS + run tests on every save\n"
+           "  pulp loop --status                # Print current focus state\n"
+           "  pulp loop --off                   # Restore cross-platform mode\n"
+           "  pulp loop --watch-issues 924,927 --no-watch\n";
 }
 
 // Persist focus state. `platform` empty clears the marker.
@@ -93,12 +97,12 @@ bool missing_value(const std::vector<std::string>& args, size_t i) {
     return i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-');
 }
 
-}  // namespace
+} // namespace
 
 int cmd_loop(const std::vector<std::string>& args) {
     bool standalone_mode = false;
     auto project_root = resolve_active_project_root(&standalone_mode);
-    (void)standalone_mode;  // Reserved for future loop-mode-specific divergences.
+    (void)standalone_mode; // Reserved for future loop-mode-specific divergences.
 
     // Parse flags. We accept --status / --off / --help even outside a
     // project root so the user can clear focus state from anywhere.
@@ -114,8 +118,8 @@ int cmd_loop(const std::vector<std::string>& args) {
     bool after_separator = false;
     std::string test_filter;
     std::string launch_target;
-    std::string watch_issues;     // recognized compatibility flag
-    std::string ar_swap_from;     // recognized compatibility flag
+    std::string watch_issues; // recognized compatibility flag
+    std::string ar_swap_from; // recognized compatibility flag
     std::vector<std::string> launch_args;
     std::vector<std::string> build_args;
 
@@ -125,8 +129,14 @@ int cmd_loop(const std::vector<std::string>& args) {
             print_help();
             return 0;
         }
-        if (a == "--") { after_separator = true; continue; }
-        if (after_separator) { launch_args.push_back(a); continue; }
+        if (a == "--") {
+            after_separator = true;
+            continue;
+        }
+        if (after_separator) {
+            launch_args.push_back(a);
+            continue;
+        }
 
         if (a == "--off") {
             clear_focus = true;
@@ -196,7 +206,8 @@ int cmd_loop(const std::vector<std::string>& args) {
         auto umbrella = umbrella_from_detected(detected);
         std::cout << "pulp loop — focus mode status\n";
         std::cout << "  detected host:  " << (detected.empty() ? "unknown" : detected);
-        if (!umbrella.empty()) std::cout << " (" << umbrella << ")";
+        if (!umbrella.empty())
+            std::cout << " (" << umbrella << ")";
         std::cout << "\n";
         if (current.empty()) {
             std::cout << "  focus platform: (none — cross-platform mode)\n";
@@ -234,8 +245,8 @@ int cmd_loop(const std::vector<std::string>& args) {
     if (focus_platform.empty()) {
         focus_platform = read_focus_state();
         if (!focus_platform.empty() && !is_known_focus_platform(focus_platform)) {
-            std::cerr << "pulp loop: ignoring unknown persisted focus platform '"
-                      << focus_platform << "'. Expected one of: macos, linux, windows.\n";
+            std::cerr << "pulp loop: ignoring unknown persisted focus platform '" << focus_platform
+                      << "'. Expected one of: macos, linux, windows.\n";
             focus_platform.clear();
         }
     }
@@ -269,8 +280,8 @@ int cmd_loop(const std::vector<std::string>& args) {
     if (!watch_issues.empty()) {
         std::cout << "\npulp loop: --watch-issues=" << watch_issues
                   << " is recognized but not implemented.\n"
-                     "  Run `gh pr list --search \"" << watch_issues
-                  << "\"` manually.\n";
+                     "  Run `gh pr list --search \""
+                  << watch_issues << "\"` manually.\n";
     }
     if (!ar_swap_from.empty()) {
         std::cout << "\npulp loop: --ar-swap-from=" << ar_swap_from
@@ -295,85 +306,27 @@ int cmd_loop(const std::vector<std::string>& args) {
     }
 
     // ── Enter watch loop (same plumbing as `pulp dev`) ──────────────────────
-    if (!enforce_project_cli_compatibility(project_root,
-                                           "pulp loop",
-                                           allow_unsupported_sdk)) {
+    if (!enforce_project_cli_compatibility(project_root, "pulp loop", allow_unsupported_sdk)) {
         return 1;
     }
 
     auto build_dir = project_root / "build";
 
-    auto lease = TartciAgentBuildLease::acquire({
-        project_root,
-        "pulp-loop",
-        true,
-    });
-    if (!lease.ok()) {
-        std::cerr << "pulp loop: " << lease.error() << "\n";
-        return lease.exit_code();
+    BuildPlan plan(
+        {project_root, build_dir, standalone_mode, examples, build_all, build_args, "pulp loop"});
+    if (!plan.ok()) {
+        std::cerr << "pulp loop: " << plan.error() << "\n";
+        return plan.exit_code();
     }
-    ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
-    auto capped_build = cap_cmake_build_parallel_args(build_args, lease.jobs());
+    int rc = plan.ensure_configured(allow_unsupported_sdk);
+    if (rc != 0)
+        return rc;
 
-    // A build dir an older CLI configured (Makefiles, Debug, examples ON)
-    // moves aside here so the bootstrap below reconfigures it.
-    migrate_slow_build_dir(build_dir, !standalone_mode, examples);
-
-    // Ensure configured. Reuse cmd_build's bootstrap path and the current
-    // project's normal build configuration.
-    if (!fs::exists(build_dir / "CMakeCache.txt")
-        || (!standalone_mode
-            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))
-        || (examples && !standalone_mode && build_dir_has_examples_off(build_dir))) {
-        std::cout << "Project not configured. Configuring + building first...\n";
-        std::vector<std::string> bootstrap_args;
-        if (allow_unsupported_sdk) bootstrap_args.push_back("--allow-unsupported-sdk");
-        if (examples) bootstrap_args.push_back("--examples");
-        // The bootstrap build focuses like this command would; an explicit
-        // target or --all here means the bootstrap builds everything.
-        if (build_all || build_args_name_target(build_args)) bootstrap_args.push_back("--all");
-        int rc = cmd_build(bootstrap_args);
-        if (rc != 0) return rc;
-    }
-
-
-    // Focused build: select the targets the working diff affects. The
-    // selector reads the CMake file-API codemodel, which only a configure
-    // that finds the query already in place produces.
-    const bool focus = focused_build_applicable(project_root, standalone_mode, build_args, build_all);
-    if (focus) {
-        int crc = ensure_codemodel_reply(project_root, build_dir, !standalone_mode, examples);
-        if (crc != 0) return crc;
-    }
-    const auto selection = select_for_rebuild(project_root, build_dir, focus, "");
-
-    // Initial build
-    std::string build_cmd = "cmake --build " + build_dir.string();
-    for (auto& arg : capped_build.args) build_cmd += " " + arg;
-    build_cmd = focused_build_command(build_cmd, selection);
-    int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
-        apply_build_dir_lock(
-            apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos(), lease.floor()),
-                                       lease.jobs(),
-                                       lease.active()),
-            project_root, build_dir),
-        "Building");
+    rc = plan.select_and_build();
     if (rc != 0) {
         std::cerr << "Initial build failed. Watch loop will retry on changes.\n";
     }
 
-    WatchOptions opts;
-    opts.root = project_root;
-    opts.build_dir = build_dir;
-    opts.build_args = capped_build.args;
-    opts.run_tests = run_tests;
-    opts.test_filter = test_filter;
-    opts.run_validate = run_validate;
-    opts.focus = focus;
-    opts.launch_target = launch_target;
-    opts.launch_args = launch_args;
-    opts.build_jobs = capped_build.jobs;
-    opts.build_qos = lease.qos();
-    opts.build_watchdog = lease.active();
-    return watch_loop(opts);
+    return watch_loop(plan.watch_options(run_tests, test_filter, run_validate, launch_target,
+                                         launch_args, false));
 }

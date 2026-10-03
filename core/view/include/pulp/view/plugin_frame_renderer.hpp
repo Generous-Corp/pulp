@@ -48,9 +48,13 @@ class View;
 // pipeline, not of any one OS. macOS additionally needs NSColor and CGColor
 // spellings of the same value (window_host_mac_internal.hpp), which is exactly
 // the kind of divergence a single definition prevents.
-inline constexpr std::uint8_t kEditorHostClearR = 30;
-inline constexpr std::uint8_t kEditorHostClearG = 30;
-inline constexpr std::uint8_t kEditorHostClearB = 46;
+//
+// That is the DEFAULT. A plug-in that declares its own background
+// (`Processor::editor_background()`) gets that instead, through
+// `PluginViewHost::Options::background_rgb` → `FrameGeometry::background_rgb`.
+inline constexpr std::uint8_t kEditorHostClearR = (kEditorHostClearRgb >> 16) & 0xff;
+inline constexpr std::uint8_t kEditorHostClearG = (kEditorHostClearRgb >> 8) & 0xff;
+inline constexpr std::uint8_t kEditorHostClearB = kEditorHostClearRgb & 0xff;
 
 /// The size/scale/viewport a frame is painted against, in one value.
 ///
@@ -64,6 +68,10 @@ struct FrameGeometry {
     float design_width = 0.0f;   ///< 0 disables the design viewport
     float design_height = 0.0f;
     bool design_top_align = false;
+    /// 0xRRGGBB painted under the view tree: the whole frame before the
+    /// editor's document mounts, the letterbox bars after. Hosts copy it from
+    /// `PluginViewHost::Options::background_rgb`.
+    std::uint32_t background_rgb = kEditorHostClearRgb;
 
     bool has_design_viewport() const {
         return design_width > 0.0f && design_height > 0.0f;
@@ -97,8 +105,8 @@ private:
 bool compute_frame_clip(View& root, const PendingDamage::Snapshot& damage,
                         const FrameGeometry& geometry, Rect& out_clip);
 
-/// Paint one editor frame: background fill, design-viewport transform, view
-/// tree, overlays.
+/// Paint one editor frame: background fill (`geometry.background_rgb`),
+/// design-viewport transform, view tree, overlays.
 ///
 /// When `clip` is non-null the ENTIRE body is clipped, background fill
 /// included — everything outside the clip must remain the retained scene's

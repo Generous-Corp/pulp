@@ -753,6 +753,10 @@ def main(argv: list[str]) -> int:
         gh = rrc.GitHub(a.repository, a.token, reserve=a.rate_reserve)
         manifest = rrc.Collector(gh, a.out, a.repo, a.workers).collect(since, until)
         print(json.dumps(manifest, indent=2))
+        cov = manifest.get("record_coverage") or {}
+        print(f"collect: record coverage: {cov.get('without_record')} of {cov.get('executed_jobs')} executed macOS jobs "
+              f"since {cov.get('since')} published no reuse record (expected 0); "
+              f"{cov.get('interrupted_jobs')} jobs lost their runner before the record step", file=sys.stderr)
         if manifest["merge_groups"] == 0 or manifest["pairs_with_head_run"] == 0:
             print("collect: CONTROL FAILED: no merge groups or no PR-head pairs in the window; "
                   "the instrument is broken, not the history", file=sys.stderr)

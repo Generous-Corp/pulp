@@ -2,6 +2,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/alive_token.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/view.hpp>
 #include <atomic>
 #include <cstdlib>
@@ -58,6 +59,13 @@ enum class ViewRole {
 ///
 /// Construction is cheap — no view is built until `open()` is called.
 /// Destruction closes the view if it is still open.
+/// Resolve an editor's background (0xRRGGBB): the processor's declared
+/// `editor_background()`, else `root`'s theme `bg.primary`, else
+/// `view::kEditorHostClearRgb`. A throwing override falls through to the next
+/// source rather than failing the editor open.
+std::uint32_t resolve_editor_background(const Processor& processor,
+                                        const view::View* root) noexcept;
+
 class ViewBridge {
 public:
     struct Options {
@@ -257,6 +265,14 @@ public:
     uint32_t height() const { return height_; }
     const ViewSize& size_hints() const { return size_hints_; }
 
+    /// The editor's background as 0xRRGGBB, resolved when `open()` builds the
+    /// view: `Processor::editor_background()` when the plug-in declares one,
+    /// else the root view's theme `bg.primary`, else
+    /// `view::kEditorHostClearRgb`. Format adapters pass it to the editor host
+    /// (`PluginViewHost::Options::background_rgb`) so the frames a host shows
+    /// before the document mounts are the plug-in's own colour.
+    std::uint32_t editor_background_rgb() const { return editor_background_rgb_; }
+
     const std::string& last_error() const { return last_error_; }
 
     /// Attach a secondary inspector view to this bridge.
@@ -363,6 +379,7 @@ private:
     std::vector<Secondary> secondaries_;
 
     ViewSize size_hints_;
+    std::uint32_t editor_background_rgb_ = view::kEditorHostClearRgb;
     uint32_t width_ = 0;
     uint32_t height_ = 0;
     std::string last_error_;

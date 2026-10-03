@@ -414,6 +414,17 @@ inline CGColorRef cg_host_clear_color() {
     return color;
 }
 
+// Core Graphics spelling of an arbitrary 0xRRGGBB background (a plug-in's
+// declared editor background). Same ownership rule as cg_host_clear_color().
+inline CGColorRef cg_color_from_rgb(std::uint32_t rgb) {
+    const CGFloat comps[4] = {((rgb >> 16) & 0xff) / 255.0, ((rgb >> 8) & 0xff) / 255.0,
+                              (rgb & 0xff) / 255.0, 1.0};
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGColorRef color = CGColorCreate(cs, comps);
+    CGColorSpaceRelease(cs);
+    return color;
+}
+
 }  // namespace pulp::view::mac_host
 
 #endif  // __OBJC__
