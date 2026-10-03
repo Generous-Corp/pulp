@@ -684,13 +684,16 @@ def cmd_write(a: argparse.Namespace) -> int:
             (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
             kinds = [rec.get("kind", "executable") for rec in doc["executables"].values()]
             link_members = {"file": name, "executables": kinds.count("executable"),
-                            "modules": kinds.count("module"),
-                            "unreadable": doc["unreadable"], "bytes": (out / name).stat().st_size,
+                            "modules": kinds.count("module"), "shared": kinds.count("shared"),
+                            "unreadable": doc["unreadable"], "unrecorded": doc["unrecorded"], "bytes": (out / name).stat().st_size,
                             "whole_archives": sorted({arch for rec in doc["executables"].values()
                                                       for arch, info in rec["archives"].items() if info["whole"]})}
             if not doc["executables"] and a.build_outcome in (None, "success"):
                 problems.append("link members requested but the build recorded none "
                                 "(PULP_RECORD_LINK_MAPS off, or every executable was already linked)")
+            reason = lm.unusable(doc)
+            if reason:
+                problems.append(f"link members not usable for reuse: {reason}")
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
             problems.append(f"link members unavailable: {exc}")
 

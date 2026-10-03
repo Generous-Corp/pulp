@@ -812,7 +812,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v4"
+        cache = corpus / "cache" / "record-v5"
         cache.mkdir(parents=True)
         # group-a is rebuilt but its bytes came out the same (over-approximation);
         # group-b's bytes changed but nothing in the drift reaches it: the
@@ -855,7 +855,7 @@ class RecordedGraphTests(unittest.TestCase):
             rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
             rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
             rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
-            cache = corpus / "cache" / "record-v4"
+            cache = corpus / "cache" / "record-v5"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": {"test/group-c": "3"}}),
                              ("g1", {"link": self.link, "executables": {"ta": "test/group-a"},
@@ -892,7 +892,7 @@ class RecordedGraphTests(unittest.TestCase):
             link = dict(self.link)
             if recorded:
                 link["test/plug.so"] = {"objects": [], "members": {"core/liba.a": ["b.cpp.o"]}}
-            cache = corpus / "cache" / "record-v4"
+            cache = corpus / "cache" / "record-v5"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": None}),
                              ("g1", {"link": link, "executables": {"ta": "test/group-a"}, "binaries": None})):
@@ -919,7 +919,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v4"
+        cache = corpus / "cache" / "record-v5"
         cache.mkdir(parents=True)
         recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
                 "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
@@ -953,7 +953,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
         targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
                    for n in ("group-a", "group-b", "group-c")}
-        cache = corpus / "cache" / "record-v4"
+        cache = corpus / "cache" / "record-v5"
         cache.mkdir(parents=True)
         common = {"targets": targets, "binaries": None, "generated_headers": headers}
         recs = {"p1": {**common, "link": None, "executables": None, "digest_schema": head_schema,
@@ -1032,6 +1032,7 @@ class RecordedGraphTests(unittest.TestCase):
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("link-members-abc.json", json.dumps({
+                "schema": "pulp-link-members/v1",
                 "members": {"<build>/core/liba.a": ["a.cpp.o", "b.cpp.o"]},
                 "executables": {"<build>/test/x": {"objects": ["<build>/test/CMakeFiles/x.dir/t.cpp.o"],
                                                    "archives": {"<build>/core/liba.a": {"members": [1], "whole": False}}},
@@ -1051,6 +1052,22 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual(rec["executables"], {"t1": "test/x"})
         self.assertEqual(rec["link"]["test/x"], {"objects": ["test/CMakeFiles/x.dir/t.cpp.o"], "members": {"core/liba.a": ["b.cpp.o"]}})
         self.assertEqual(rec["link"]["test/y"]["members"], {"core/liba.a": ["a.cpp.o", "b.cpp.o"]})
+
+    def test_a_link_record_the_reader_cannot_vouch_for_is_no_record(self):
+        # An unknown schema, a kind the replay does not model (a shared library
+        # changes what loads without changing the loader's map) or an
+        # unrecorded link all read as "no link record", so every executable
+        # falls back to the blunt rules instead of trusting part of the map.
+        def links(schema="pulp-link-members/v3", kind="module", **extra):
+            return json.dumps({"schema": schema, "members": {}, "unreadable": 0, **extra,
+                               "executables": {"<build>/p.so": {"kind": kind, "objects": ["<build>/p.o"],
+                                                                "archives": {}}}})
+        # Held for the whole test: record_from keys its cache on id(files).
+        files = [{"link-members-a.json": doc} for doc in (
+            links(), links("pulp-link-members/v4"), links(None), links(kind="shared"), links(unrecorded=1))]
+        self.assertEqual(self.record_from(files[0])["link"], {"p.so": {"objects": ["p.o"], "members": {}}})
+        for f in files[1:]:
+            self.assertIsNone(self.record_from(f)["link"], f)
 
 
 class SourceKeyPolicyTests(unittest.TestCase):
