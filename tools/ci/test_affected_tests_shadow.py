@@ -242,6 +242,12 @@ class AffectedSetTests(unittest.TestCase):
         self.assertEqual((r["selected"], r["compiled_whole_checkout"], r["compiled_data_undeclared"]), (1, 1, 0), r)
         self.assertEqual(self.compiled(["docs/guide.md"], {})["selected"], 0)
 
+    def test_a_data_state_this_reader_does_not_know_is_never_skipped(self) -> None:
+        # A newer list may carry a state this selector predates; it must fail closed.
+        future = {"pulp-test-b": {"kind": "compiled", "data": "some_future_state", "inputs": []}}
+        r = self.compiled(["docs/guide.md"], future)
+        self.assertEqual((r["selected"], r["compiled_data_undeclared"]), (1, 1), r)
+
     def test_a_directory_on_the_command_line_is_read_through(self) -> None:
         corpus = self.fx.src / "test" / "fixtures" / "corpus"
         corpus.mkdir(parents=True)
