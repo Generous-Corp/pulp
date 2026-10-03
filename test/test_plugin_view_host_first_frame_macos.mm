@@ -169,7 +169,12 @@ namespace {
 class CountingRoot : public View {
 public:
     int paints = 0;
-    void paint(pulp::canvas::Canvas&) override { ++paints; }
+    float last_w = 0, last_h = 0;
+    void paint(pulp::canvas::Canvas&) override {
+        ++paints;
+        last_w = bounds().width;
+        last_h = bounds().height;
+    }
 };
 
 }  // namespace
@@ -197,6 +202,26 @@ TEST_CASE("GPU plug-in host: present_first_frame paints the tree before the view
     // only asks for one and never presents out of turn.
     CHECK_FALSE(host->present_first_frame());
     CHECK(root.paints == 1);
+}
+
+TEST_CASE("GPU plug-in host: a resize before the display link paints re-presents at the new size",
+          "[plugin-view-host][first-frame][content-first][macos][gpu]") {
+    [NSApplication sharedApplication];
+    CountingRoot root;
+    auto host = PluginViewHost::create(root, options(true, kDeclared));
+    REQUIRE(host);
+    if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
+    REQUIRE(host->present_first_frame());
+    REQUIRE(root.paints == 1);
+    CHECK(root.last_w == 64.0f);
+
+    // A host that shrinks the editor right after open (a restored or minimum
+    // size): the only frame on screen is the content-first one, so the new
+    // size is presented now instead of that frame stretched into new bounds.
+    host->set_size(48, 30);
+    CHECK(root.paints == 2);
+    CHECK(root.last_w == 48.0f);
+    CHECK(root.last_h == 30.0f);
 }
 #endif
 
