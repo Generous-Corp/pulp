@@ -1236,6 +1236,17 @@ class BaseInventoryTest(unittest.TestCase):
                                         r"PULP_HAS_LV2 base=<unset> head=TRUE"):
                 self.run_base(build, [0, 0, 0, 0], base_cache=self.HEAD_WITH_SDKS)
 
+    def test_a_tree_records_only_the_links_setup_made(self) -> None:
+        # A scratch base whose setup.sh linked nothing (an offline cache miss
+        # fails earlier) has no external/ yet; that is no links, not an error.
+        with tempfile.TemporaryDirectory() as directory:
+            tree = Path(directory)
+            self.assertEqual(runner.linked_externals(tree), [])
+            (tree / "external" / "tracked").mkdir(parents=True)
+            self.assertEqual(runner.linked_externals(tree), [])
+            (tree / "external" / "vst3sdk").symlink_to(tree / "external" / "tracked")
+            self.assertEqual(runner.linked_externals(tree), ["vst3sdk"])
+
     def test_a_base_provisioned_like_the_head_is_projected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
