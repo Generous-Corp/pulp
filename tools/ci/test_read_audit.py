@@ -229,6 +229,10 @@ class Stage0Tests(unittest.TestCase):
         got = ra.stage0(self.report(a=bad), {"a"})
         self.assertEqual((got["verdict"], got["declared_with_findings"], got["declared_clean"]), ("findings", ["a"], 0))
 
+    def test_failing_on_findings_follows_the_verdict(self) -> None:
+        self.assertEqual([ra.exit_code(v, True) for v in ("clean", "findings", "incomplete")], [0, 1, 2])
+        self.assertEqual([ra.exit_code(v, False) for v in ("clean", "findings", "incomplete")], [0, 0, 0])
+
     def test_a_blind_control_or_an_unaudited_declared_executable_is_incomplete(self) -> None:
         self.assertEqual(ra.stage0(self.report(ok=False, a={"status": "audited"}), {"a"})["verdict"], "incomplete")
         got = ra.stage0(self.report(a={"status": "error"}), {"a"})
@@ -254,6 +258,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("strace", text)
         self.assertIn("tools/ci/read_audit.py run", text)
         self.assertIn("tools/ci/governed-build.sh", text)
+        # On the audit's own command line, not only in a comment.
+        run = text.split("tools/ci/read_audit.py run", 1)[1].split("|| status", 1)[0]
+        self.assertIn("--fail-on-findings", run)
 
 
 if __name__ == "__main__":
