@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 115,
+  "inventory_version": 116,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,12 +42,12 @@
     }
   ],
   "counts": {
-    "public_headers": 500,
-    "reviewed_headers": 220,
+    "public_headers": 501,
+    "reviewed_headers": 221,
     "legacy_unreviewed_headers": 280,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 119,
+      "capability_entrypoint": 120,
       "capability_support": 44,
       "infrastructure": 55,
       "legacy_unreviewed": 280,
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 268,
-        "reviewed_headers": 121,
+        "public_headers": 269,
+        "reviewed_headers": 122,
         "legacy_unreviewed_headers": 147,
         "unsupported_headers": 2
       },
@@ -102,10 +102,7 @@
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
-    },
-    "headers": 501,
-    "capability_support": 45,
-    "capability_entrypoint": 119
+    }
   },
   "headers": [
     {
@@ -1921,7 +1918,7 @@
       "capability_keys": [
         "sequence.controller-playback"
       ],
-      "rationale": "AutomationProgramInstanceToken, AutomationProgramErrorCode/Error, and AutomationProgramSegment \u2014 the compiled automation vocabulary a track program is expressed over, carrying both tick and sample bounds so a segment means the same thing to the document and to the render path. It reaches pulp/playback/program.hpp through track_mixer_program.hpp, so the sequence.controller-playback bindings depend on it at compile time."
+      "rationale": "AutomationProgramInstanceToken, AutomationProgramErrorCode/Error, and AutomationProgramSegment — the compiled automation vocabulary a track program is expressed over, carrying both tick and sample bounds so a segment means the same thing to the document and to the render path. It reaches pulp/playback/program.hpp through track_mixer_program.hpp, so the sequence.controller-playback bindings depend on it at compile time."
     },
     {
       "domain": "playback",
@@ -1930,7 +1927,7 @@
       "include": "pulp/playback/automation_recording.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Automation capture vocabulary \u2014 AutomationRecordMode Touch/Latch/Write, RecordedAutomationPoint, and the record and curve-materialization error enums. It describes how captured gestures become lane data inside the playback module and makes no installed agent capability claim."
+      "rationale": "Automation capture vocabulary — AutomationRecordMode Touch/Latch/Write, RecordedAutomationPoint, and the record and curve-materialization error enums. It describes how captured gestures become lane data inside the playback module and makes no installed agent capability claim."
     },
     {
       "domain": "playback",
@@ -1939,7 +1936,7 @@
       "include": "pulp/playback/buffered_content_source.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Ring-backed source for content produced ahead of the playhead \u2014 the buffering half of timeline::ProductionMode::Buffered, with its thread model documented in the header. Its own documentation states that Pulp ships no inference runtime, no model weights, and no producer that performs inference, so this is a bounded buffering primitive for a host- supplied producer rather than an advertised capability."
+      "rationale": "Ring-backed source for content produced ahead of the playhead — the buffering half of timeline::ProductionMode::Buffered, with its thread model documented in the header. Its own documentation states that Pulp ships no inference runtime, no model weights, and no producer that performs inference, so this is a bounded buffering primitive for a host- supplied producer rather than an advertised capability."
     },
     {
       "domain": "playback",
@@ -2011,7 +2008,7 @@
       "include": "pulp/playback/external_sync.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "MTC vocabulary \u2014 MtcFrameRate (including 29.97 drop), MtcTimecode, validity checking and conversion to samples. It is a bounded timecode conversion primitive for an external-sync source and advertises no installed agent capability of its own."
+      "rationale": "MTC vocabulary — MtcFrameRate (including 29.97 drop), MtcTimecode, validity checking and conversion to samples. It is a bounded timecode conversion primitive for an external-sync source and advertises no installed agent capability of its own."
     },
     {
       "domain": "playback",
@@ -2056,7 +2053,7 @@
       "include": "pulp/playback/production_class.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Derivations of what a compiled program may honestly claim about being replayed \u2014 provider and track production declarations and the resulting program reproducibility. It is an internal honesty derivation over the program graph and binds no installed agent capability of its own."
+      "rationale": "Derivations of what a compiled program may honestly claim about being replayed — provider and track production declarations and the resulting program reproducibility. It is an internal honesty derivation over the program graph and binds no installed agent capability of its own."
     },
     {
       "domain": "playback",
@@ -2096,7 +2093,7 @@
       "include": "pulp/playback/program_wire.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "The flat, pointer-free byte layout one compiled program generation is published in, plus its native encoder and validating decoder \u2014 the crossing form for a consumer that does not share the producer's address space, such as an AudioWorklet and its Worker. Sections tile the payload exactly and a length that disagrees with its content is a rejection rather than an interpretation; a static_assert refuses a big-endian host. It is a serialization surface with no typed capability binding of its own today."
+      "rationale": "The flat, pointer-free byte layout one compiled program generation is published in, plus its native encoder and validating decoder — the crossing form for a consumer that does not share the producer's address space, such as an AudioWorklet and its Worker. Sections tile the payload exactly and a length that disagrees with its content is a rejection rather than an interpretation; a static_assert refuses a big-endian host. It is a serialization surface with no typed capability binding of its own today."
     },
     {
       "domain": "playback",
@@ -2114,7 +2111,7 @@
       "include": "pulp/playback/realtime_stretch_state_bank.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "RealtimeStretchStateSpec and the state bank's refusal vocabulary \u2014 duplicate identity, state, channel, time-ratio and byte limits, processor- prepare rejection and allocation failure. It is a bounded preallocated state pool for the realtime stretch path and makes no installed agent capability claim."
+      "rationale": "RealtimeStretchStateSpec and the state bank's refusal vocabulary — duplicate identity, state, channel, time-ratio and byte limits, processor- prepare rejection and allocation failure. It is a bounded preallocated state pool for the realtime stretch path and makes no installed agent capability claim."
     },
     {
       "domain": "playback",
@@ -2141,7 +2138,7 @@
       "include": "pulp/playback/stable_renderer_shell.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "RendererCarryState \u2014 what survives a program swap \u2014 and PlaybackProgramBlock, the move-only non-owning block view whose documentation requires an enclosing immutable audio-thread publication to keep the program alive for its whole lifetime. It is the realtime borrow and latch side of the program surface, composed by the renderer rather than advertised on its own."
+      "rationale": "RendererCarryState — what survives a program swap — and PlaybackProgramBlock, the move-only non-owning block view whose documentation requires an enclosing immutable audio-thread publication to keep the program alive for its whole lifetime. It is the realtime borrow and latch side of the program surface, composed by the renderer rather than advertised on its own."
     },
     {
       "domain": "playback",
@@ -2188,7 +2185,7 @@
       "include": "pulp/playback/transport.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "The transport control surface \u2014 play, stop, loop, scrub and tempo \u2014 with a refusal vocabulary that rejects a loop or scrub window too short for the maximum block and an epoch advance that fails rather than wrap to an aliased identity. It is the playback engine's own control object; its agent-facing exposure is claimed by the capability rows that bind a transport surface, not by this header."
+      "rationale": "The transport control surface — play, stop, loop, scrub and tempo — with a refusal vocabulary that rejects a loop or scrub window too short for the maximum block and an epoch advance that fails rather than wrap to an aliased identity. It is the playback engine's own control object; its agent-facing exposure is claimed by the capability rows that bind a transport surface, not by this header."
     },
     {
       "domain": "sequence",
@@ -3893,6 +3890,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/parametric_eq.hpp",
+      "fingerprint": "sha256:a213fcce6ab12b3e62108af2ad99a414e875ba6245969ff1b7c037d67ab4151a",
+      "include": "pulp/signal/parametric_eq.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.parametric-eq"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/particle_collision_exciter.hpp",
       "fingerprint": "sha256:bfacb7a8890939910c7614e354646a6c9bdfe14d506848a69aa93c93b458d66e",
       "include": "pulp/signal/particle_collision_exciter.hpp",
@@ -4979,17 +4987,6 @@
         "timebase.trigger-grid"
       ],
       "rationale": "Public binding for a curated consumer capability."
-    },
-    {
-      "domain": "signal",
-      "source": "core/signal/include/pulp/signal/parametric_eq.hpp",
-      "fingerprint": "sha256:2881977e2c5925f08aad98dce279b9831805e3cc89cad0806a40f428771ab659",
-      "include": "pulp/signal/parametric_eq.hpp",
-      "disposition": "capability_support",
-      "capability_keys": [
-        "signal.parametric-eq"
-      ],
-      "rationale": "Public support header for the bounded parametric EQ capability entrypoint."
     }
   ],
   "tombstones": []
