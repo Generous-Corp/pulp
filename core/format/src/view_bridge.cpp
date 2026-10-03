@@ -31,6 +31,14 @@ ViewSize safe_view_size(Processor& processor) noexcept {
     PULP_CATCH_ALL { return {}; }
 }
 
+std::uint32_t pack_rgb(const canvas::Color& c) noexcept {
+    const auto channel = [](float v) -> std::uint32_t {
+        const float clamped = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+        return static_cast<std::uint32_t>(clamped * 255.0f + 0.5f);
+    };
+    return (channel(c.r) << 16) | (channel(c.g) << 8) | channel(c.b);
+}
+
 // Pull host values into every DesignFrameView at or below `v`. Walks the LIVE
 // tree rather than a cached pointer list: a cached list would dangle whenever a
 // view is removed (editor reload transplants children), and a dangling
@@ -49,6 +57,23 @@ std::size_t sync_design_frames(view::View* v) {
 }
 
 } // namespace
+
+std::uint32_t resolve_editor_background(const Processor& processor,
+                                        const view::View* root) noexcept {
+    PULP_TRY {
+        if (auto declared = processor.editor_background())
+            return *declared & 0xFFFFFFu;
+    }
+    PULP_CATCH_ALL {}
+    if (root) {
+        PULP_TRY {
+            if (auto themed = root->theme().color("bg.primary"))
+                return pack_rgb(*themed);
+        }
+        PULP_CATCH_ALL {}
+    }
+    return view::kEditorHostClearRgb;
+}
 
 ViewBridge::ViewBridge(Processor& processor, state::StateStore& store)
     : ViewBridge(processor, store, Options{}) {}
@@ -131,6 +156,10 @@ bool ViewBridge::open(std::string* error) {
         uses_auto_ui_ = !instance.uses_script_ui;
     }
     view_raw_ = view_.get();
+    // Resolved now, before any adapter builds its host: the host paints this
+    // under the tree from its very first frame, while the document may still
+    // be pending (view-first opening).
+    editor_background_rgb_ = resolve_editor_background(processor_, view_raw_);
 
     // Tell the scripted editor where it lives, so a document can keep its
     // plain-key global shortcuts standalone-only (see EditorHostKind).

@@ -53,6 +53,11 @@
 @property(nonatomic, assign) float designW;
 @property(nonatomic, assign) float designH;
 @property(nonatomic, assign) BOOL designTopAlign;
+// The editor's own background, 0xRRGGBB (PluginViewHost::Options::background_rgb).
+// drawRect fills the host bounds with it before painting the tree, so it is
+// what shows before the document mounts and in the letterbox bars.
+// Defaults to pulp::view::kEditorHostClearRgb.
+@property(nonatomic, assign) uint32_t backgroundRGB;
 // Reconcile first-responder with the pulp text-input focus slot. Declared here
 // so the host's frame-tick block (below the @implementation) can call it every
 // vsync — the event-independent cadence that hands the DAW keyboard back the
@@ -114,6 +119,11 @@
 @property(nonatomic, assign) float designW;
 @property(nonatomic, assign) float designH;
 @property(nonatomic, assign) BOOL designTopAlign;
+// The editor's own background, 0xRRGGBB. Setting it recolours the backing
+// CAMetalLayer at once — that colour is what the window server composites
+// before the first Metal frame lands — and the host fills every frame with it
+// under the tree. Defaults to pulp::view::kEditorHostClearRgb.
+@property(nonatomic, assign) uint32_t backgroundRGB;
 // See PulpPluginView::syncKeyFocus — declared so the GPU host's display-link
 // frame-tick block can reconcile first-responder every vsync.
 - (void)syncKeyFocus;

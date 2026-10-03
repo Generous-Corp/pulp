@@ -922,6 +922,7 @@ class IOSGpuPluginViewHost : public PluginViewHost {
 public:
     IOSGpuPluginViewHost(View& root, const Options& opts)
         : root_(root), size_(opts.size),
+          background_rgb_(opts.background_rgb & 0xFFFFFFu),
           alive_(std::make_shared<std::atomic<bool>>(true)) {
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
@@ -1200,6 +1201,7 @@ public:
 private:
     View& root_;
     Size size_;
+    std::uint32_t background_rgb_ = kEditorHostClearRgb;  ///< Options::background_rgb
     PulpMetalPluginView* metal_view_ = nil;
     PulpIOSDragDrop* drag_drop_ = nil;
     std::unique_ptr<render::GpuSurface> gpu_surface_;
@@ -1292,9 +1294,9 @@ private:
         if (cv) {
             const float bw = static_cast<float>(size_.width);
             const float bh = static_cast<float>(size_.height);
-            // Clear at host bounds first so any design-viewport letterbox bars
-            // share the design background color.
-            cv->set_fill_color(canvas::Color::rgba8(30, 30, 46));
+            // The editor's own background first, at host bounds: the whole
+            // frame until the document mounts, the letterbox bars after.
+            cv->set_fill_color(canvas::Color::hex(background_rgb_));
             cv->fill_rect(0, 0, bw, bh);
 
             float sx, sy, tx, ty;
