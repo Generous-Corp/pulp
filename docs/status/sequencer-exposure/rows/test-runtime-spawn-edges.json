@@ -30,7 +30,8 @@
     {
       "path": ".agents/skills/timeline/SKILL.md",
       "needles": [
-        "## A timeline test that loads a plugin or forks declares it in its manifest"
+        "## A timeline test that loads a plugin or forks declares it in its manifest",
+        "A timeline test that opens checkout files declares them in the same manifest"
       ]
     },
     {
