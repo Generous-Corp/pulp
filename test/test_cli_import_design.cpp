@@ -1715,7 +1715,7 @@ TEST_CASE("import-design --emit-w3c-tokens without a path exits 2",
             != std::string::npos);
 }
 
-TEST_CASE("the suite runs against an isolated, empty PULP_HOME", "[cli][import-design][isolation]") {
+TEST_CASE("cli-import-design runs against an isolated, empty PULP_HOME", "[cli][import-design][isolation]") {
     const char* home = std::getenv("PULP_HOME");
     REQUIRE(home != nullptr);
     REQUIRE(std::filesystem::path(home) == isolated_home.path());

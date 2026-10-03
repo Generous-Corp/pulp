@@ -3691,7 +3691,7 @@ TEST_CASE("pulp-import-design requires a validation pass for --fail-on-unvalidat
           == std::string::npos);
 }
 
-TEST_CASE("the suite runs against an isolated, empty PULP_HOME", "[cli][import-design][isolation]") {
+TEST_CASE("import-design-tool runs against an isolated, empty PULP_HOME", "[cli][import-design][isolation]") {
     const char* home = std::getenv("PULP_HOME");
     REQUIRE(home != nullptr);
     REQUIRE(std::filesystem::path(home) == isolated_home.path());
