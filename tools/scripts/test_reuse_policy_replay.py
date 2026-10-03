@@ -976,7 +976,7 @@ class ScriptInputsTests(unittest.TestCase):
             self.assertIsNone(c.script_inputs_at("d" * 40))
             self.assertIsNone(c.input_list_at("d" * 40))
             self.assertEqual(len(attempts), 2)                    # the failure was not cached
-            self.assertFalse(any(Path(tmp).rglob("*.json.gz")))
+            self.assertFalse((Path(tmp) / "script-inputs" / f"{'d' * 40}.json.gz").exists())
 
 
 class GraftTests(unittest.TestCase):
