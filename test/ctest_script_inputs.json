@@ -1,17 +1,185 @@
 {
+ "executable_targets": {
+  "Pulp Test (dev) Plugin": "PulpBundleNameQuoting_Standalone",
+  "pulp-cli-run-fixture": "pulp-test-cli-run-fixture",
+  "pulp-cpp": "pulp-cli"
+ },
  "executables": {
   "pulp-control-broker-crash-fixture": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-control-trusted-host-e2e-fixture"
+    "pulp-cli",
+    "pulp-control-trusted-host-e2e-fixture",
+    "pulp-mcp"
    ],
    "sources": [],
    "spawning_sources": [
     "inspect/src/control_broker_daemon.cpp"
    ],
    "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-cpp": {
+   "data": "whole_checkout",
+   "detected_sources": [],
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [
+    "${CMAKE_BINARY_DIR}/tools/cli/generated/migration_index.cpp",
+    "tools/cli/atomic_text_file.cpp",
+    "tools/cli/au_info_plist.cpp",
+    "tools/cli/authority_navigation.cpp",
+    "tools/cli/build_plan.cpp",
+    "tools/cli/cli_common.cpp",
+    "tools/cli/cli_delegate.cpp",
+    "tools/cli/cli_doctor_helpers.cpp",
+    "tools/cli/cli_fs_util.cpp",
+    "tools/cli/cli_sdk.cpp",
+    "tools/cli/cmd_audio.cpp",
+    "tools/cli/cmd_audio_compare.cpp",
+    "tools/cli/cmd_audio_heritage.cpp",
+    "tools/cli/cmd_audio_plugin_common.cpp",
+    "tools/cli/cmd_audio_plugin_inspect.cpp",
+    "tools/cli/cmd_audio_render.cpp",
+    "tools/cli/cmd_audio_render_parse.cpp",
+    "tools/cli/cmd_audio_sampler_mip.cpp",
+    "tools/cli/cmd_audio_validate.cpp",
+    "tools/cli/cmd_authority.cpp",
+    "tools/cli/cmd_bake.cpp",
+    "tools/cli/cmd_build.cpp",
+    "tools/cli/cmd_ci_host.cpp",
+    "tools/cli/cmd_config.cpp",
+    "tools/cli/cmd_control.cpp",
+    "tools/cli/cmd_coverage.cpp",
+    "tools/cli/cmd_create.cpp",
+    "tools/cli/cmd_design.cpp",
+    "tools/cli/cmd_design_subcommands.cpp",
+    "tools/cli/cmd_dev.cpp",
+    "tools/cli/cmd_docs.cpp",
+    "tools/cli/cmd_doctor.cpp",
+    "tools/cli/cmd_doctor_gpu.cpp",
+    "tools/cli/cmd_dsp.cpp",
+    "tools/cli/cmd_forge.cpp",
+    "tools/cli/cmd_gpu.cpp",
+    "tools/cli/cmd_host.cpp",
+    "tools/cli/cmd_import.cpp",
+    "tools/cli/cmd_inspect.cpp",
+    "tools/cli/cmd_loop.cpp",
+    "tools/cli/cmd_macos.cpp",
+    "tools/cli/cmd_minos.cpp",
+    "tools/cli/cmd_misc.cpp",
+    "tools/cli/cmd_overflow.cpp",
+    "tools/cli/cmd_pr.cpp",
+    "tools/cli/cmd_project.cpp",
+    "tools/cli/cmd_project_bump.cpp",
+    "tools/cli/cmd_project_common.cpp",
+    "tools/cli/cmd_project_undo.cpp",
+    "tools/cli/cmd_projects.cpp",
+    "tools/cli/cmd_run.cpp",
+    "tools/cli/cmd_run_parse.cpp",
+    "tools/cli/cmd_sdk.cpp",
+    "tools/cli/cmd_seq.cpp",
+    "tools/cli/cmd_ship.cpp",
+    "tools/cli/cmd_tweaks.cpp",
+    "tools/cli/cmd_upgrade.cpp",
+    "tools/cli/cmd_validate.cpp",
+    "tools/cli/cmd_version.cpp",
+    "tools/cli/content_commands.cpp",
+    "tools/cli/create_build_commands.cpp",
+    "tools/cli/create_targets.cpp",
+    "tools/cli/design_binding.cpp",
+    "tools/cli/fetchcontent_cache.cpp",
+    "tools/cli/focused_build.cpp",
+    "tools/cli/gpu_artifact_publication.cpp",
+    "tools/cli/import_detect.cpp",
+    "tools/cli/import_emit.cpp",
+    "tools/cli/import_emit_scan.cpp",
+    "tools/cli/import_run.cpp",
+    "tools/cli/import_spi.cpp",
+    "tools/cli/import_terms.cpp",
+    "tools/cli/importer_git_install.cpp",
+    "tools/cli/importer_install.cpp",
+    "tools/cli/inspector_container_report.cpp",
+    "tools/cli/inspector_shipping_report.cpp",
+    "tools/cli/install_paths_mac.cpp",
+    "tools/cli/kit_commands.cpp",
+    "tools/cli/kit_manifest_validation.cpp",
+    "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/local_sdk_install.cpp",
+    "tools/cli/local_sdk_profile.cpp",
+    "tools/cli/mac_runtime_validators.cpp",
+    "tools/cli/migration_runtime.cpp",
+    "tools/cli/notary_env.cpp",
+    "tools/cli/overflow_selector.cpp",
+    "tools/cli/package_analyzer_descriptors.cpp",
+    "tools/cli/package_commands.cpp",
+    "tools/cli/package_commands_add.cpp",
+    "tools/cli/package_commands_search.cpp",
+    "tools/cli/package_commands_util.cpp",
+    "tools/cli/package_registry.cpp",
+    "tools/cli/project_bump.cpp",
+    "tools/cli/projects_registry.cpp",
+    "tools/cli/pulp_cli.cpp",
+    "tools/cli/sdk_cache_paths.cpp",
+    "tools/cli/sdk_distribution_guard.cpp",
+    "tools/cli/shell_quote.cpp",
+    "tools/cli/shell_redirect.cpp",
+    "tools/cli/tartci_lease.cpp",
+    "tools/cli/tool_registry.cpp",
+    "tools/cli/update_check.cpp",
+    "tools/cli/update_mode.cpp",
+    "tools/cli/validator_discovery.cpp",
+    "tools/cli/version_diag.cpp"
+   ],
+   "spawning_sources": [
+    "tools/cli/cli_common.cpp",
+    "tools/cli/cli_delegate.cpp",
+    "tools/cli/cli_doctor_helpers.cpp",
+    "tools/cli/cli_sdk.cpp",
+    "tools/cli/cmd_audio_compare.cpp",
+    "tools/cli/cmd_audio_plugin_common.cpp",
+    "tools/cli/cmd_audio_plugin_inspect.cpp",
+    "tools/cli/cmd_audio_render.cpp",
+    "tools/cli/cmd_config.cpp",
+    "tools/cli/cmd_design_subcommands.cpp",
+    "tools/cli/cmd_doctor.cpp",
+    "tools/cli/cmd_host.cpp",
+    "tools/cli/cmd_macos.cpp",
+    "tools/cli/cmd_misc.cpp",
+    "tools/cli/cmd_overflow.cpp",
+    "tools/cli/cmd_pr.cpp",
+    "tools/cli/cmd_sdk.cpp",
+    "tools/cli/cmd_ship.cpp",
+    "tools/cli/cmd_version.cpp",
+    "tools/cli/focused_build.cpp",
+    "tools/cli/import_spi.cpp",
+    "tools/cli/importer_git_install.cpp",
+    "tools/cli/importer_install.cpp",
+    "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/local_sdk_install.cpp",
+    "tools/cli/mac_runtime_validators.cpp",
+    "tools/cli/package_registry.cpp",
+    "tools/cli/tartci_lease.cpp",
+    "tools/cli/tool_registry.cpp",
+    "tools/cli/update_check.cpp",
+    "tools/cli/validator_discovery.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
+  "pulp-fixture-runner": {
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "core/interchange/tools/fixture_runner_main.cpp"
+   ],
    "undeclared_sources": []
   },
   "pulp-test-au-v2-param-display": {
@@ -28,6 +196,9 @@
   },
   "pulp-test-authoring-capsule-hostile": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_authoring_capsule_hostile.cpp"
+   ],
    "inputs": [
     "core/authoring_capsule"
    ],
@@ -44,6 +215,13 @@
   },
   "pulp-test-browser-capture-import": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_ir.cpp",
+    "test/test_browser_capture_svg_render.cpp",
+    "test/test_browser_capture_text_metrics.cpp",
+    "test/test_browser_capture_tree.cpp"
+   ],
    "inputs": [
     "test/fixtures/browser-capture-*"
    ],
@@ -71,6 +249,74 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-cli-audio-compare": {
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "tools/packages/tool-registry.json"
+   ],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [
+    "test/test_cli_audio_compare.cpp"
+   ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-latency": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-validate": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-bake": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_cli_bake.cpp"
+   ],
+   "inputs": [
+    "CMakeLists.txt"
+   ],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [
+    "test/test_cli_bake.cpp"
+   ],
+   "spawning_sources": [
+    "test/test_cli_bake.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-configure-defaults": {
    "data": "none",
    "inputs": [],
@@ -87,23 +333,43 @@
   },
   "pulp-test-cli-content-commands": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_content_commands.cpp"
+   ],
    "inputs": [
     "fixtures/packages/basic-content-pack"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_content_commands.cpp",
     "tools/cli/cli_fs_util.cpp",
     "tools/cli/content_commands.cpp",
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
+    "tools/cli/kit_profile_verification.cpp",
     "tools/cli/package_registry.cpp"
    ],
+   "spawning_sources": [
+    "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/package_registry.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-cli-create-shellout": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_cli_create_shellout.cpp"
+   ],
+   "inputs": [
+    "!packages.lock.json",
+    "fixtures/packages/gain-dsp-kit",
+    "fixtures/packages/simple-plugin-template",
+    "tools/packages/registry.json",
+    "tools/templates/gain",
+    "tools/templates/standalone"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-cli"
@@ -115,12 +381,27 @@
     "test/test_cli_create_shellout.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_cli_create_shellout.cpp"
-   ]
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-designmd-subcommands": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
   },
   "pulp-test-cli-docs-command": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_docs_command.cpp"
+   ],
    "inputs": [
     "docs/status/authority-navigation.schema.json"
    ],
@@ -132,10 +413,29 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-cli-gpu-artifact-publication": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_cli_gpu_artifact_publication.cpp"
+   ],
+   "inputs": [
+    "tools/cli/gpu_artifact_publication.cpp"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_cli_gpu_artifact_publication.cpp",
+    "tools/cli/gpu_artifact_publication.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-cli-import": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_import.cpp"
+   ],
    "inputs": [
-    "tools/import/known-frameworks.json"
+    "tools/import/known-frameworks.json",
+    "tools/packages/tool-registry.json"
    ],
    "kind": "compiled",
    "runtime_targets": [
@@ -153,18 +453,34 @@
    "undeclared_sources": []
   },
   "pulp-test-cli-import-design": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_cli_import_design.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/imports/claude/2024.10",
+    "test/fixtures/imports/designmd/alpha",
+    "test/fixtures/imports/figma-plugin"
+   ],
    "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-import-design"
+   ],
    "sources": [
     "test/test_cli_import_design.cpp"
    ],
-   "undeclared_sources": [
+   "spawning_sources": [
     "test/test_cli_import_design.cpp"
-   ]
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
   },
   "pulp-test-cli-import-detect": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_import_detect.cpp"
+   ],
    "inputs": [
     "compat.json",
     "test/fixtures/imports"
@@ -176,13 +492,21 @@
    "undeclared_sources": []
   },
   "pulp-test-cli-import-emit": {
-   "data": "none",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "tools/packages/tool-registry.json"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-cli"
    ],
-   "sources": [],
+   "sources": [
+    "test/test_cli_import_emit.cpp",
+    "tools/cli/import_detect.cpp",
+    "tools/cli/import_emit.cpp",
+    "tools/cli/import_emit_scan.cpp"
+   ],
    "spawning_sources": [
     "test/test_cli_import_emit.cpp"
    ],
@@ -211,7 +535,10 @@
    "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
+    "test/test_cli_import_install.cpp",
     "tools/cli/import_spi.cpp",
+    "tools/cli/importer_git_install.cpp",
+    "tools/cli/importer_install.cpp",
     "tools/cli/tool_registry.cpp"
    ],
    "spawns": "none",
@@ -219,6 +546,9 @@
   },
   "pulp-test-cli-import-terms": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_import_terms.cpp"
+   ],
    "inputs": [
     "tools/import/known-frameworks.json",
     "tools/scripts/check_import_provenance.py"
@@ -244,14 +574,33 @@
    "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
+    "test/test_cli_importer_install.cpp",
     "tools/cli/import_spi.cpp",
+    "tools/cli/importer_install.cpp",
     "tools/cli/tool_registry.cpp"
    ],
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-cli-inspect-shellout": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-kit-commands": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_kit_commands.cpp"
+   ],
    "inputs": [
     "fixtures/packages",
     "tools/kits/pulp-package.schema.json"
@@ -265,10 +614,13 @@
     "tools/cli/cli_fs_util.cpp",
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
+    "tools/cli/kit_profile_verification.cpp",
     "tools/cli/package_registry.cpp"
    ],
    "spawning_sources": [
-    "test/test_cli_kit_commands.cpp"
+    "test/test_cli_kit_commands.cpp",
+    "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/package_registry.cpp"
    ],
    "spawns": "declared",
    "undeclared_sources": []
@@ -287,6 +639,9 @@
   },
   "pulp-test-cli-migration-index": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_migration_index.cpp"
+   ],
    "inputs": [
     "tools/scripts/build_migration_index.py"
    ],
@@ -302,17 +657,39 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-cli-overflow-shellout": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-package-analyzer-descriptors": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_package_analyzer_descriptors.cpp"
+   ],
    "inputs": [
     "tools/packages/registry.json"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_package_analyzer_descriptors.cpp",
     "tools/cli/package_analyzer_descriptors.cpp",
     "tools/cli/package_registry.cpp"
    ],
+   "spawning_sources": [
+    "tools/cli/package_registry.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-cli-package-commands": {
@@ -323,18 +700,52 @@
    "sources": [],
    "spawning_sources": [
     "tools/cli/import_spi.cpp",
+    "tools/cli/importer_install.cpp",
+    "tools/cli/package_registry.cpp",
     "tools/cli/tool_registry.cpp"
    ],
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-cli-package-registry": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/cli/package_registry.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-project-command": {
-   "data": "undeclared",
+   "data": "whole_checkout",
+   "detected_sources": [
+    "test/test_cli_project_command.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [],
    "sources": [
-    "test/test_cli_project_command.cpp"
+    "test/test_cli_project_command.cpp",
+    "tools/cli/cli_common.cpp",
+    "tools/cli/cli_delegate.cpp",
+    "tools/cli/cli_doctor_helpers.cpp",
+    "tools/cli/cli_sdk.cpp",
+    "tools/cli/fetchcontent_cache.cpp",
+    "tools/cli/focused_build.cpp",
+    "tools/cli/local_sdk_install.cpp",
+    "tools/cli/local_sdk_profile.cpp",
+    "tools/cli/migration_runtime.cpp",
+    "tools/cli/package_registry.cpp",
+    "tools/cli/project_bump.cpp",
+    "tools/cli/projects_registry.cpp",
+    "tools/cli/shell_quote.cpp",
+    "tools/cli/shell_redirect.cpp",
+    "tools/cli/tartci_lease.cpp",
+    "tools/cli/update_check.cpp",
+    "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
     "tools/cli/cli_common.cpp",
@@ -343,16 +754,18 @@
     "tools/cli/cli_sdk.cpp",
     "tools/cli/focused_build.cpp",
     "tools/cli/local_sdk_install.cpp",
+    "tools/cli/package_registry.cpp",
     "tools/cli/tartci_lease.cpp",
     "tools/cli/update_check.cpp"
    ],
    "spawns": "none",
-   "undeclared_sources": [
-    "test/test_cli_project_command.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-cli-shellout": {
-   "data": "none",
+   "data": "whole_checkout",
+   "detected_sources": [
+    "test/test_cli_shellout.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
@@ -361,9 +774,81 @@
     "pulp-sampler-cli-sidecar-probe",
     "pulp-test-cli-run-fixture"
    ],
+   "sources": [
+    "test/test_cli_audio_heritage.cpp",
+    "test/test_cli_fmt_shellout.cpp",
+    "test/test_cli_shellout.cpp",
+    "test/test_cli_timeline_render_shellout.cpp"
+   ],
+   "spawning_sources": [
+    "test/test_cli_shellout.cpp",
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-shellout-lifecycle": {
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    ".claude-plugin/plugin.json"
+   ],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [
+    "test/test_cli_shellout_lifecycle.cpp"
+   ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp",
+    "test/test_cli_shellout_lifecycle.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-shellout-loop": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
    "sources": [],
    "spawning_sources": [
-    "test/test_cli_shellout.cpp"
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-shellout-pr": {
+   "data": "whole_checkout",
+   "detected_sources": [],
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [
+    "test/test_cli_shellout_pr.cpp"
+   ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp",
+    "test/test_cli_shellout_pr.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-shellout-scan-projects": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
    ],
    "spawns": "declared",
    "undeclared_sources": []
@@ -384,18 +869,50 @@
   },
   "pulp-test-cli-skew-banner": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_skew_banner.cpp"
+   ],
    "inputs": [
     ".claude-plugin/plugin.json",
     "tools/scripts/cli_version_check.sh"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_skew_banner.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_skew_banner.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-swap-pack": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_cli_swap_pack.cpp"
+   ],
+   "inputs": [
+    "CMakeLists.txt"
+   ],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [
+    "test/test_cli_swap_pack.cpp"
+   ],
+   "spawning_sources": [
+    "test/test_cli_swap_pack.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-cli-tartci-lease": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_tartci_lease.cpp"
+   ],
    "inputs": [
     "tools/ci/build_dir_lock.py"
    ],
@@ -405,18 +922,55 @@
    ],
    "undeclared_sources": []
   },
-  "pulp-test-cli-tool-registry": {
+  "pulp-test-cli-timeline": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [],
+   "runtime_targets": [
+    "pulp-cli"
+   ],
    "sources": [],
+   "spawning_sources": [
+    "test/test_cli_timeline.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-tool-registry": {
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "tools/packages/tool-registry.json"
+   ],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [
+    "test/test_cli_tool_registry.cpp",
+    "tools/cli/import_spi.cpp",
+    "tools/cli/importer_install.cpp",
+    "tools/cli/tool_registry.cpp"
+   ],
    "spawning_sources": [
     "test/test_cli_tool_registry.cpp",
     "tools/cli/import_spi.cpp",
+    "tools/cli/importer_install.cpp",
     "tools/cli/tool_registry.cpp"
    ],
    "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-tweaks-shellout": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-cli-update-check": {
@@ -445,6 +999,9 @@
   },
   "pulp-test-cli-upgrade-install": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_upgrade_install.cpp"
+   ],
    "inputs": [
     "tools/cli/cmd_upgrade.cpp",
     "tools/import-design/browser_capture"
@@ -472,9 +1029,13 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
+    "pulp-cli",
     "pulp-control-broker",
     "pulp-control-broker-crash-fixture",
-    "pulp-control-trusted-host-e2e-fixture"
+    "pulp-control-installed-host-e2e-fixture",
+    "pulp-control-trusted-host-e2e-fixture",
+    "pulp-control-trusted-host-fixture",
+    "pulp-mcp"
    ],
    "sources": [],
    "spawning_sources": [
@@ -489,7 +1050,10 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-control-enrollment-host-fixture"
+    "pulp-control-enrollment-host-fixture",
+    "pulp-control-installed-host-e2e-fixture",
+    "pulp-control-trusted-host-e2e-fixture",
+    "pulp-control-trusted-host-fixture"
    ],
    "sources": [],
    "spawning_sources": [
@@ -503,7 +1067,9 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-control-gpu-health-standalone-product-fixture"
+    "pulp-cli",
+    "pulp-control-gpu-health-standalone-product-fixture",
+    "pulp-mcp"
    ],
    "sources": [],
    "spawning_sources": [
@@ -540,8 +1106,47 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-control-phase15-aggregate-e2e": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-control-trusted-host-e2e-fixture",
+    "pulp-mcp"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp",
+    "test/test_control_phase15_aggregate_e2e.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-control-sample-region-e2e": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-control-sample-region-proof-host",
+    "pulp-mcp",
+    "sample-region-allpass-control-editable",
+    "sample-region-allpass-control-frozen"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp",
+    "test/support/control_sample_region_e2e.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-coreaudio-input-only": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_coreaudio_input_only.mm"
+   ],
    "inputs": [
     "core/audio/platform/mac/coreaudio_device.mm"
    ],
@@ -565,6 +1170,9 @@
   },
   "pulp-test-cross-platform-audio-golden": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cross_platform_audio_golden.cpp"
+   ],
    "inputs": [
     "test/fixtures/audio/cross_platform_signal_chain.wav"
    ],
@@ -590,6 +1198,10 @@
   },
   "pulp-test-design-import": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_ir.cpp",
+    "test/test_recognition_resolver.cpp"
+   ],
    "inputs": [
     "test/fixtures/import-fidelity/assets/knob_ref.png",
     "test/fixtures/imports/claude/vite-assets.html",
@@ -603,9 +1215,28 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-design-import-benchmark": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-design-import-bench"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_design_import_benchmark.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-design-import-designmd": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_designmd.cpp",
+    "test/test_design_import_designmd_040.cpp"
+   ],
    "inputs": [
+    "compat.json",
     "test/fixtures/imports/designmd/alpha"
    ],
    "kind": "compiled",
@@ -616,18 +1247,40 @@
    "undeclared_sources": []
   },
   "pulp-test-design-import-native-materializer": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_native_materializer.cpp"
+   ],
+   "inputs": [
+    "core/audio/include",
+    "core/canvas/include",
+    "core/events/include",
+    "core/host/include",
+    "core/midi/include",
+    "core/music/include/pulp/music/pitch.hpp",
+    "core/platform/include",
+    "core/runtime/include",
+    "core/signal/include",
+    "core/state/include",
+    "core/view/include",
+    "test/fixtures/import-fidelity/assets/fader_ref.png"
+   ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_design_import_native_materializer.cpp"
    ],
-   "undeclared_sources": [
+   "spawning_sources": [
     "test/test_design_import_native_materializer.cpp"
-   ]
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
   },
   "pulp-test-design-import-parity": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_parity.cpp"
+   ],
    "inputs": [
     "core/view/cmake/PulpViewSources.cmake",
     "core/view/include/pulp/view/design_ir.hpp",
@@ -641,6 +1294,9 @@
   },
   "pulp-test-design-import-react-runtime": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_react_runtime.cpp"
+   ],
    "inputs": [
     "planning",
     "test/fixtures/figma",
@@ -657,18 +1313,31 @@
   },
   "pulp-test-design-swift-codegen": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_swift_codegen.cpp"
+   ],
    "inputs": [
     "apple/Sources/PulpSwift"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_design_swift_codegen.cpp"
    ],
+   "spawning_sources": [
+    "test/test_design_swift_codegen.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-fixture-runner-cli": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_fixture_runner_cli.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-fixture-runner"
@@ -680,12 +1349,13 @@
     "test/test_fixture_runner_cli.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_fixture_runner_cli.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-forge-catalog-index": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_forge_catalog_index.cpp"
+   ],
    "inputs": [
     "core/host/include/pulp/host"
    ],
@@ -695,8 +1365,23 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-gpu-dpr-native-measurement": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_gpu_dpr_native_measurement.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-group-app-host": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_forge_descriptor_audit.cpp"
+   ],
    "inputs": [
     "docs/status/forge-catalog.json"
    ],
@@ -713,17 +1398,26 @@
   },
   "pulp-test-group-app-view": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_tool_layout.cpp",
+    "test/test_ios_foundation.cpp"
+   ],
    "inputs": [
+    "examples/design-tool/*.js",
     "templates/ios-auv3/HostApp/ContentView.swift"
    ],
    "kind": "compiled",
    "sources": [
+    "test/test_design_tool_layout.cpp",
     "test/test_ios_foundation.cpp"
    ],
    "undeclared_sources": []
   },
   "pulp-test-group-canvas": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_canvas_fonts.cpp"
+   ],
    "inputs": [
     "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
     "external/fonts/Inter-Regular.ttf"
@@ -736,6 +1430,9 @@
   },
   "pulp-test-group-canvas-text": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_font_woff2.cpp"
+   ],
    "inputs": [
     "external/fonts/Inter-Regular.ttf",
     "external/fonts/JetBrainsMono-Regular.ttf",
@@ -786,6 +1483,9 @@
   },
   "pulp-test-group-design-import-bridge": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_anchors.cpp"
+   ],
    "inputs": [
     "test/fixtures/anchor_vectors.json"
    ],
@@ -822,6 +1522,9 @@
   },
   "pulp-test-group-sampler-host-graph": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_baked_codec.cpp"
+   ],
    "inputs": [
     "test/fixtures/sample-region-compat/bake/legacy-v1.pulpbake"
    ],
@@ -833,6 +1536,9 @@
   },
   "pulp-test-group-script-format": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_view_bridge.cpp"
+   ],
    "inputs": [
     "core/format/include/pulp/format/clap_entry.hpp",
     "core/format/src/aax_effect_gui.cpp",
@@ -850,6 +1556,9 @@
   },
   "pulp-test-group-script-view": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_threejs_resources.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -858,10 +1567,8 @@
    "undeclared_sources": []
   },
   "pulp-test-group-timeline": {
-   "data": "undeclared",
-   "inputs": [],
-   "kind": "compiled",
-   "sources": [
+   "data": "declared",
+   "detected_sources": [
     "test/test_timeline_automation_persistence.cpp",
     "test/test_timeline_device_placement_persistence.cpp",
     "test/test_timeline_marker_persistence.cpp",
@@ -869,25 +1576,41 @@
     "test/test_timeline_persistence.cpp",
     "test/test_timeline_session_persistence.cpp"
    ],
-   "undeclared_sources": [
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_timeline_asset_loop_info.cpp",
     "test/test_timeline_automation_persistence.cpp",
+    "test/test_timeline_command_persistence.cpp",
     "test/test_timeline_device_placement_persistence.cpp",
     "test/test_timeline_marker_persistence.cpp",
+    "test/test_timeline_midi_content.cpp",
     "test/test_timeline_note_modifier_persistence.cpp",
     "test/test_timeline_persistence.cpp",
-    "test/test_timeline_session_persistence.cpp"
-   ]
+    "test/test_timeline_persistence_limits.cpp",
+    "test/test_timeline_persistence_registry.cpp",
+    "test/test_timeline_release_serialization.cpp",
+    "test/test_timeline_session_persistence.cpp",
+    "test/test_timeline_take_comp_persistence.cpp",
+    "test/test_timeline_tuning.cpp"
+   ],
+   "undeclared_sources": []
   },
   "pulp-test-group-timeline-playback": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_timeline_replay_golden.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
    "kind": "compiled",
    "sources": [
     "test/test_timeline_replay_golden.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_timeline_replay_golden.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-host": {
    "data": "none",
@@ -915,8 +1638,14 @@
    "undeclared_sources": []
   },
   "pulp-test-import-design-tool": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_import_design_tool.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/imports/fig/synthetic.fig",
+    "tools/import-design"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-import-design"
@@ -930,12 +1659,13 @@
     "tools/import-design/node_runtime.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_import_design_tool.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-import-object-coverage": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_import_object_coverage.cpp"
+   ],
    "inputs": [
     "compat.json"
    ],
@@ -959,6 +1689,21 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-isolated-scanner": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-isolated-scanner-crash-helper",
+    "pulp-scan-worker"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_isolated_scanner.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-lv2-host-discovery": {
    "data": "none",
    "inputs": [],
@@ -975,6 +1720,9 @@
   },
   "pulp-test-mac-platform-harness": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_mac_platform_harness.cpp"
+   ],
    "inputs": [
     "planning"
    ],
@@ -986,37 +1734,55 @@
    "undeclared_sources": []
   },
   "pulp-test-mcp-server": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_mcp_server.cpp"
+   ],
+   "inputs": [
+    "!pulp.toml",
+    "CMakeLists.txt",
+    "core/timeline/schema/timeline_mcp_tools.json",
+    "test/fixtures/gpu-ux",
+    "test/fixtures/timeline/v1/minimal.json",
+    "test/fixtures/timeline/v4/sequence-markers.json",
+    "tools/mcp/pulp_mcp.cpp"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-cli",
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
+    "test/test_mcp_control_adapter.cpp",
     "test/test_mcp_server.cpp"
    ],
    "spawning_sources": [
     "test/test_mcp_server.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_mcp_server.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-mcp-timeline-tools": {
-   "data": "undeclared",
-   "inputs": [],
-   "kind": "compiled",
-   "sources": [
+   "data": "declared",
+   "detected_sources": [
     "test/test_mcp_timeline_sessions.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_mcp_timeline_sessions.cpp"
-   ]
+   "inputs": [
+    "test/fixtures/timeline/v1/minimal.json",
+    "test/fixtures/timeline/v4/sequence-markers.json"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_mcp_timeline_sessions.cpp",
+    "test/test_mcp_timeline_tools.cpp"
+   ],
+   "undeclared_sources": []
   },
   "pulp-test-modal-spec": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_modal_spec.cpp"
+   ],
    "inputs": [
     "examples/modal-specs"
    ],
@@ -1049,6 +1815,18 @@
    "sources": [],
    "spawning_sources": [
     "test/test_native_core_processor.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-nsis-installer": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "ship/platform/win/installer_win.cpp"
    ],
    "spawns": "none",
    "undeclared_sources": []
@@ -1096,6 +1874,9 @@
   },
   "pulp-test-real-plugin-runner-cache": {
    "data": "declared",
+   "detected_sources": [
+    "test/integration/test_real_plugin_fixture.cpp"
+   ],
    "inputs": [
     "test/integration/real_plugins.toml"
    ],
@@ -1107,6 +1888,9 @@
   },
   "pulp-test-reload-library": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_reload_library.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -1115,18 +1899,41 @@
    "undeclared_sources": []
   },
   "pulp-test-sample-region-sequencer": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_sample_region_sequencer.cpp"
+   ],
+   "inputs": [
+    "core/host/src/signal_graph.cpp",
+    "core/host/src/timeline_automation_delivery.cpp",
+    "docs/status/sequencer-exposure/rows/sample-region-sequencer-interoperability.json",
+    "examples/sample-region-allpass/README.md"
+   ],
    "kind": "compiled",
    "sources": [
     "test/test_sample_region_sequencer.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_sample_region_sequencer.cpp"
-   ]
+   "undeclared_sources": []
+  },
+  "pulp-test-scan-worker": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-scan-worker"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "tools/scan-worker/test_scan_worker.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
   },
   "pulp-test-ship-tracing-guard": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_ship_tracing_guard.cpp"
+   ],
    "inputs": [
     "core/runtime/src/trace.cpp"
    ],
@@ -1145,11 +1952,14 @@
    "spawning_sources": [
     "test/test_streaming_model_contract.cpp"
    ],
-   "spawns": "undeclared",
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-template-ui-scripts": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_template_ui_scripts.cpp"
+   ],
    "inputs": [
     "tools/templates/*/ui/main.js"
    ],
@@ -1160,15 +1970,20 @@
    "undeclared_sources": []
   },
   "pulp-test-timeline-document-fuzz": {
-   "data": "undeclared",
-   "inputs": [],
-   "kind": "compiled",
-   "sources": [
+   "data": "declared",
+   "detected_sources": [
     "test/test_timeline_document_fuzz.cpp"
    ],
-   "undeclared_sources": [
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/fuzz/timeline_document_corpus.cpp",
+    "test/fuzz/timeline_document_oracle.cpp",
     "test/test_timeline_document_fuzz.cpp"
-   ]
+   ],
+   "undeclared_sources": []
   },
   "pulp-test-timeline-graph-binding": {
    "data": "none",
@@ -1194,8 +2009,26 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-validation-contract": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_validation_contract.cpp"
+   ],
+   "inputs": [
+    "docs/contracts/phase1-reality-snapshot.yaml",
+    "docs/contracts/validation-report-v1.schema.json"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_validation_contract.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-widget-bridge-api-contracts": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_widget_bridge_api_contracts.cpp"
+   ],
    "inputs": [
     "core/view/src"
    ],
@@ -1207,6 +2040,9 @@
   },
   "pulp-test-widget-bridge-no-gpu-gates": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_widget_bridge_no_gpu_gates.cpp"
+   ],
    "inputs": [
     "core/view/src/widget_bridge.cpp"
    ],
@@ -1218,8 +2054,10 @@
   }
  },
  "executables_scanned": [
+  "Pulp Test (dev) Plugin",
   "pulp-browser-capture-launcher-fixture",
   "pulp-child-process-input-fixture",
+  "pulp-cli-run-fixture",
   "pulp-connected-child-process-fixture",
   "pulp-control-broker-crash-fixture",
   "pulp-control-enrollment-host-fixture",
@@ -1229,8 +2067,10 @@
   "pulp-control-installed-host-e2e-fixture",
   "pulp-control-trusted-host-e2e-fixture",
   "pulp-control-trusted-host-fixture",
+  "pulp-cpp",
   "pulp-denormal-null-refgen",
   "pulp-fake-screenshot-tool",
+  "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
@@ -1295,9 +2135,11 @@
   "pulp-test-clap-latency-quirk",
   "pulp-test-clap-midi-events",
   "pulp-test-clap-webview",
+  "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
   "pulp-test-cli-audio-latency",
   "pulp-test-cli-audio-validate",
+  "pulp-test-cli-bake",
   "pulp-test-cli-checkout-dependencies",
   "pulp-test-cli-configure-defaults",
   "pulp-test-cli-content-commands",
@@ -1308,6 +2150,7 @@
   "pulp-test-cli-docs-command",
   "pulp-test-cli-fetchcontent-cache",
   "pulp-test-cli-git-lock-health",
+  "pulp-test-cli-gpu-artifact-publication",
   "pulp-test-cli-import",
   "pulp-test-cli-import-design",
   "pulp-test-cli-import-detect",
@@ -1332,7 +2175,6 @@
   "pulp-test-cli-project-bump-all",
   "pulp-test-cli-project-command",
   "pulp-test-cli-projects-registry",
-  "pulp-test-cli-run-fixture",
   "pulp-test-cli-run-options",
   "pulp-test-cli-sdk-tarball-filename",
   "pulp-test-cli-shell-quote",
@@ -1343,7 +2185,9 @@
   "pulp-test-cli-shellout-scan-projects",
   "pulp-test-cli-ship-shellout",
   "pulp-test-cli-skew-banner",
+  "pulp-test-cli-swap-pack",
   "pulp-test-cli-tartci-lease",
+  "pulp-test-cli-timeline",
   "pulp-test-cli-tool-registry",
   "pulp-test-cli-tweaks-shellout",
   "pulp-test-cli-update-check",
@@ -1370,10 +2214,12 @@
   "pulp-test-control-manifest",
   "pulp-test-control-offline-render-executor",
   "pulp-test-control-peer",
+  "pulp-test-control-phase15-aggregate-e2e",
   "pulp-test-control-protocol",
   "pulp-test-control-protocol-fuzz",
   "pulp-test-control-runtime-closure-sanitizer-guard",
   "pulp-test-control-sample-region",
+  "pulp-test-control-sample-region-e2e",
   "pulp-test-control-service",
   "pulp-test-control-shipping-real-component",
   "pulp-test-control-telemetry-tap",
@@ -1447,6 +2293,12 @@
   "pulp-test-gpu-compute-kernel-override",
   "pulp-test-gpu-compute-pool",
   "pulp-test-gpu-diagnostics",
+  "pulp-test-gpu-dpr-native-measurement",
+  "pulp-test-gpu-health-provider",
+  "pulp-test-gpu-health-read-result",
+  "pulp-test-gpu-health-result",
+  "pulp-test-gpu-probe-native-recipes",
+  "pulp-test-gpu-probe-result",
   "pulp-test-gpu-shared-io-convolution-pipeline",
   "pulp-test-gpu-shared-io-convolution-session",
   "pulp-test-gpu-shared-io-slot-ledger",
@@ -1680,6 +2532,7 @@
   "pulp-test-sample-stream-service",
   "pulp-test-sample-stream-voice-reader",
   "pulp-test-sampler-stream-parity",
+  "pulp-test-scan-worker",
   "pulp-test-screenshot-compare",
   "pulp-test-scripted-ui",
   "pulp-test-sdk-distribution-guard",
@@ -1817,9 +2670,7 @@
   "pulp-test-windowing",
   "pulp-test-xcode-developer-path",
   "pulp-test-yoga-layout-bench",
-  "sample-region-allpass-consumer",
-  "sample-region-allpass-control-editable",
-  "sample-region-allpass-control-frozen"
+  "sample-region-allpass-consumer"
  ],
  "executables_scanned_for": [
   "data",
@@ -1867,6 +2718,7 @@
     "tools/cli/cmd_build.cpp",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_affected_targets.py"
    ],
@@ -2096,7 +2948,10 @@
     "test/cmake/test_gpu_audio_sdk_consumer.cmake",
     "test/ctest_script_inputs.json",
     "tools/ci/base_poison_detector.py",
+    "tools/ci/install_visual_python_deps.sh",
     "tools/ci/test_base_poison_detector.py",
+    "tools/motion/visual/requirements.lock",
+    "tools/motion/visual/requirements.txt",
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
@@ -2270,6 +3125,7 @@
     "test/test_child_process_standard_input.cpp",
     "test/test_runtime_utils.cpp",
     "tools/ci/build_dir_lock.py",
+    "tools/ci/changed_surface_lane_reds.json",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",
@@ -2285,6 +3141,7 @@
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/changed_surface_script_families.py",
     "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/generate_widget_bridge_api.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
@@ -2302,6 +3159,7 @@
     "test/support",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_changed_surface_registration_projection.py"
    ],
@@ -2317,6 +3175,7 @@
     "tools/scripts",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
@@ -2347,12 +3206,75 @@
     "tools/scripts/classify_changes.py",
     "tools/scripts/docs_noise_lint.py",
     "tools/scripts/fixtures/wide_non_native_replay.json",
+    "tools/scripts/gate_common.py",
     "tools/scripts/generated_version_bump_check.py",
     "tools/scripts/resolve_classify_base.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/skills_doc_check.py",
     "tools/scripts/test_changed_surface_script_families.py",
     "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/wide_non_native.py",
+    "tools/testing"
+   ],
+   "kind": "python"
+  },
+  "changed-surface-shadow-plans-selftest": {
+   "entry": "tools/scripts/test_changed_surface_shadow_plans.py",
+   "inputs": [
+    ".github/ISSUE_TEMPLATE",
+    ".github/rulesets/main-protection.json",
+    ".github/vellum-change-events",
+    ".github/vellum-expansion-watch-events",
+    ".github/workflows",
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/build.yml",
+    "docs/status",
+    "docs/status/agent-capabilities.json",
+    "docs/status/authority-navigation.json",
+    "docs/status/dsp-capabilities.json",
+    "docs/status/forge-catalog.json",
+    "docs/status/gpu-recipes.yaml",
+    "test/CMakeLists.txt",
+    "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/ctest_script_inputs.json",
+    "test/gpu_health_scene3d_acceptance.cpp",
+    "test/mac_objc_coload_probe.cpp",
+    "test/test_agent_capability_compile.cpp",
+    "test/test_control_phase15_aggregate_e2e.cpp",
+    "test/test_coremidi_shared_client.cpp",
+    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/ios_gate_digest.py",
+    "tools/ci/link_members.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/spawn_closure.py",
+    "tools/ci/test_receipts_shadow.py",
+    "tools/ci/wide_non_native_checks.json",
+    "tools/cmake",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpFetchContent.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/dsp_vocabulary.py",
+    "tools/import-validation",
+    "tools/scripts",
+    "tools/scripts/changed_surface_shadow_plans.py",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fixtures/wide_non_native_replay.json",
+    "tools/scripts/generated_version_bump_check.py",
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/resolve_classify_base.py",
+    "tools/scripts/reuse_policy_replay.py",
+    "tools/scripts/reuse_replay_collect.py",
+    "tools/scripts/test_changed_surface_shadow_plans.py",
+    "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_ios_compile_gate_legs.py",
+    "tools/scripts/test_prepush_gate_supervisor.py",
     "tools/scripts/test_wide_non_native.py",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
@@ -2520,6 +3442,18 @@
    "entry": "tools/scripts/test_clean_worktrees.py",
    "inputs": [
     "tools/scripts/test_clean_worktrees.py"
+   ],
+   "kind": "python"
+  },
+  "cli-dsp-capabilities-dynamics-regression": {
+   "entry": "tools/scripts/test_dsp_capability_registry.py",
+   "inputs": [
+    "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
+    "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+    "core/host/src/forge_dynamics_catalog.cpp",
+    "docs/status/dsp-capabilities.json",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/test_dsp_capability_registry.py"
    ],
    "kind": "python"
   },
@@ -2829,6 +3763,7 @@
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/ctest_inventory_parity.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
@@ -3066,6 +4001,14 @@
    ],
    "kind": "python"
   },
+  "find-pluginval-selftest": {
+   "entry": "tools/ci/test_find_pluginval.py",
+   "inputs": [
+    "tools/ci/test_find_pluginval.py",
+    "tools/cmake/PulpFindPluginval.cmake"
+   ],
+   "kind": "python"
+  },
   "findskia-arch-assert-selftest": {
    "entry": "tools/scripts/test_findskia_arch_assert.py",
    "inputs": [
@@ -3087,7 +4030,10 @@
     "tools/ci/base_poison_detector.py",
     "tools/ci/drift_fast.json",
     "tools/ci/flake_exoneration_shadow.py",
+    "tools/ci/install_visual_python_deps.sh",
     "tools/ci/test_flake_exoneration_shadow.py",
+    "tools/motion/visual/requirements.lock",
+    "tools/motion/visual/requirements.txt",
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
@@ -3238,6 +4184,7 @@
    "entry": "tools/scripts/gate_python_imports_check.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "tools/ci/install_visual_python_deps.sh",
     "tools/ci/source_selftests.json",
     "tools/motion/visual/requirements.lock",
     "tools/scripts/gate_python_imports_check.py"
@@ -3248,6 +4195,7 @@
    "entry": "tools/scripts/test_gate_python_imports_check.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "tools/ci/install_visual_python_deps.sh",
     "tools/ci/source_selftests.json",
     "tools/motion/visual/requirements.lock",
     "tools/scripts/gate_python_imports_check.py",
@@ -4531,6 +5479,7 @@
     "tools/mcp",
     "tools/mcp/CMakeLists.txt",
     "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gate_common.py",
     "tools/scripts/inspector_truth_check.py",
     "tools/scripts/test_inspector_truth_check.py"
    ],
@@ -4569,6 +5518,14 @@
    "entry": "tools/scripts/test_install_sha256sums.py",
    "inputs": [
     "tools/scripts/test_install_sha256sums.py"
+   ],
+   "kind": "python"
+  },
+  "install-shipyard-queue-repair": {
+   "entry": "tools/scripts/test_install_shipyard_queue_repair.py",
+   "inputs": [
+    "tools/install-shipyard.sh",
+    "tools/scripts/test_install_shipyard_queue_repair.py"
    ],
    "kind": "python"
   },
@@ -4770,6 +5727,14 @@
    ],
    "kind": "python"
   },
+  "object-deps-selftest": {
+   "entry": "tools/ci/test_object_deps.py",
+   "inputs": [
+    "tools/ci/object_deps.py",
+    "tools/ci/test_object_deps.py"
+   ],
+   "kind": "python"
+  },
   "odr-macro-gated-headers": {
    "entry": "tools/scripts/test_odr_macro_gated_headers.py",
    "inputs": [
@@ -4899,8 +5864,10 @@
     "test/fixtures",
     "test/support",
     "tools/ci/build_dir_lock.py",
+    "tools/ci/changed_surface_lane_reds.json",
     "tools/ci/cmake_registration_impact.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/install_visual_python_deps.sh",
     "tools/ci/pr_head_affected_tests.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
@@ -4915,6 +5882,7 @@
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
     "tools/scripts/consumption_census.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/gpu_audio_provider_identity.py",
     "tools/scripts/json_schema_lite.py",
@@ -5179,6 +6147,9 @@
     "test/cmake/test_gpu_audio_sdk_consumer.cmake",
     "test/ctest_script_inputs.json",
     "test/test_canvas_path_measure.cpp",
+    "tools/ci/install_visual_python_deps.sh",
+    "tools/motion/visual/requirements.lock",
+    "tools/motion/visual/requirements.txt",
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/fixtures/queue_chain_rule.json",
@@ -6041,6 +7012,21 @@
    ],
    "kind": "python"
   },
+  "read-audit-selftest": {
+   "entry": "tools/ci/test_read_audit.py",
+   "inputs": [
+    ".github/workflows/read-audit-nightly.yml",
+    "docs/status",
+    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/governed-build.sh",
+    "tools/ci/read_audit.py",
+    "tools/ci/spawn_closure.py",
+    "tools/ci/test_read_audit.py",
+    "tools/cmake"
+   ],
+   "kind": "python"
+  },
   "refactor-baseline-manifest": {
    "entry": "tools/scripts/verify_refactor_baselines.py",
    "inputs": [
@@ -6089,6 +7075,7 @@
   "relay-contract-hosts-selftest": {
    "entry": "tools/scripts/test_relay_contract_check.py",
    "inputs": [
+    "tools/ci",
     "tools/rack/library_catalog.py",
     "tools/scripts/bundle_threejs_for_jsc.mjs",
     "tools/scripts/relay_contract_check.py",
@@ -6148,6 +7135,7 @@
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
+    "test/fixtures/timeline",
     "test/gpu_health_scene3d_acceptance.cpp",
     "test/mac_objc_coload_probe.cpp",
     "test/test_agent_capability_compile.cpp",
@@ -6157,6 +7145,7 @@
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/ios_gate_digest.py",
+    "tools/ci/link_members.py",
     "tools/ci/source_selftests.json",
     "tools/ci/spawn_closure.py",
     "tools/ci/test_receipts_shadow.py",
@@ -6198,6 +7187,7 @@
     "test/support",
     "tools/ci/codemodel_digest.py",
     "tools/ci/link_members.py",
+    "tools/ci/object_deps.py",
     "tools/ci/reuse_record.py",
     "tools/ci/test_codemodel_digest.py",
     "tools/ci/test_reuse_record.py",
@@ -6206,6 +7196,7 @@
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/script_test_inputs.py"
    ],
@@ -6344,6 +7335,7 @@
     "test/fixtures",
     "test/support",
     "tools/cmake/PulpTestData.cmake",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
@@ -6360,6 +7352,7 @@
     "test/fixtures",
     "test/support",
     "tools/cmake/PulpTestData.cmake",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_script_test_inputs.py"
    ],
@@ -6420,6 +7413,7 @@
     "tools/cmake/PulpUtils.cmake",
     "tools/mcp/CMakeLists.txt",
     "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gate_common.py",
     "tools/scripts/inspector_truth_check.py",
     "tools/scripts/sequencer_control_skill_check.py"
    ],
@@ -6451,6 +7445,7 @@
     "tools/cmake/PulpUtils.cmake",
     "tools/mcp/CMakeLists.txt",
     "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gate_common.py",
     "tools/scripts/inspector_truth_check.py",
     "tools/scripts/sequencer_control_skill_check.py",
     "tools/scripts/test_sequencer_control_skill_check.py"
@@ -6531,6 +7526,7 @@
     "docs/status/consumption-profiles.schema.json",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/install_visual_python_deps.sh",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/motion/visual/requirements.lock",
@@ -6552,6 +7548,7 @@
     "test/cmake/design_import_tool_cli_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/install_visual_python_deps.sh",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/ci/test_source_selftests.py",
@@ -6943,11 +7940,15 @@
    "entry": "tools/scripts/test_vellum_watch_preflight.py",
    "inputs": [
     ".githooks/pre-push",
+    ".github/vellum-change-events",
     ".github/vellum-expansion-watch-events",
+    ".github/vellum-ownership.json",
+    "core/view/src/pointer_dispatch.cpp",
     "tools/scripts/gates.sh",
     "tools/scripts/generate_vellum_ownership_projection.py",
     "tools/scripts/pulp_tooling_disposition.py",
-    "tools/scripts/test_vellum_watch_preflight.py"
+    "tools/scripts/test_vellum_watch_preflight.py",
+    "tools/scripts/vellum_freeze_check.py"
    ],
    "kind": "python"
   },
