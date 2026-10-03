@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "detail/streaming_model.hpp"
 #include "detail/neural_processor.hpp"
+#include "detail/streaming_model.hpp"
 #include "harness/scoped_rt_process_probe.hpp"
 
 #include <array>
@@ -41,7 +41,9 @@ class IdentityModel final : public StreamingModel {
                 .state_schema_version = 0,
                 .deterministic = true} {}
 
-    const StreamingModelSpec& spec() const noexcept override { return spec_; }
+    const StreamingModelSpec& spec() const noexcept override {
+        return spec_;
+    }
     bool prepare(const StreamingPrepareContext& context) noexcept override {
         prepared_ = context.spec == &spec_ && context.max_frames >= spec_.block_size;
         return prepared_;
@@ -59,15 +61,22 @@ class IdentityModel final : public StreamingModel {
             output.channel_ptr(0)[i] = input.channel_ptr(0)[i];
     }
 
-    bool quiesce() noexcept override { return true; }
+    bool quiesce() noexcept override {
+        return true;
+    }
 
     void reset(std::uint64_t epoch, StreamingResetReason) noexcept override {
         last_stamp_ = {.epoch = epoch, .sequence = 0};
     }
 
-    bool release() noexcept override { prepared_ = false; return true; }
+    bool release() noexcept override {
+        prepared_ = false;
+        return true;
+    }
 
-    StreamingBlockStamp last_stamp() const noexcept { return last_stamp_; }
+    StreamingBlockStamp last_stamp() const noexcept {
+        return last_stamp_;
+    }
 
   private:
     StreamingModelSpec spec_;
@@ -95,8 +104,9 @@ class EchoBackend final : public StreamingBackend {
             return 0;
         for (std::size_t i = 0; i < pending_->input.size() && i < pending_->output.size(); ++i)
             pending_->output[i] = pending_->input[i];
-        terminal_ = StreamingTerminal{.stamp = pending_->stamp,
-                                      .disposition = StreamingBackendTerminalDisposition::Completed};
+        terminal_ =
+            StreamingTerminal{.stamp = pending_->stamp,
+                              .disposition = StreamingBackendTerminalDisposition::Completed};
         pending_ = nullptr;
         return 1;
     }
@@ -111,8 +121,9 @@ class EchoBackend final : public StreamingBackend {
 
     bool begin_epoch(std::uint64_t epoch, StreamingResetReason) noexcept override {
         if (pending_) {
-            terminal_ = StreamingTerminal{.stamp = pending_->stamp,
-                                          .disposition = StreamingBackendTerminalDisposition::Stale};
+            terminal_ =
+                StreamingTerminal{.stamp = pending_->stamp,
+                                  .disposition = StreamingBackendTerminalDisposition::Stale};
             pending_ = nullptr;
         }
         epoch_ = epoch;
@@ -122,8 +133,15 @@ class EchoBackend final : public StreamingBackend {
     bool reprepare_after_device_loss(std::uint64_t epoch) noexcept override {
         return begin_epoch(epoch, StreamingResetReason::DeviceLoss);
     }
-    bool quiesce() noexcept override { pending_ = nullptr; return true; }
-    bool release() noexcept override { prepared_ = false; pending_ = nullptr; return true; }
+    bool quiesce() noexcept override {
+        pending_ = nullptr;
+        return true;
+    }
+    bool release() noexcept override {
+        prepared_ = false;
+        pending_ = nullptr;
+        return true;
+    }
 
   private:
     bool prepared_ = false;
@@ -144,8 +162,7 @@ TEST_CASE("streaming model contract classifies callback and worker methods",
           pulp::audio::RtSafetyClass::BackgroundThreadOnly);
 }
 
-TEST_CASE("streaming model spec fails closed before preparation",
-          "[gpu_audio][streaming_model]") {
+TEST_CASE("streaming model spec fails closed before preparation", "[gpu_audio][streaming_model]") {
     IdentityModel model;
     auto spec = model.spec();
     CHECK(validate_streaming_model_spec(spec).accepted());
@@ -158,10 +175,8 @@ TEST_CASE("streaming model spec fails closed before preparation",
     spec.state_bytes = 32;
     CHECK(validate_streaming_model_spec(spec).error == StreamingModelSpecError::InvalidShape);
     const auto valid = model.spec();
-    CHECK(!valid_streaming_prepare_context({.spec = &valid,
-                                            .artifact_id = "id",
-                                            .artifact_hash = "hash",
-                                            .max_frames = 1}));
+    CHECK(!valid_streaming_prepare_context(
+        {.spec = &valid, .artifact_id = "id", .artifact_hash = "hash", .max_frames = 1}));
 }
 
 TEST_CASE("streaming block requires explicit planar or interleaved strides",
@@ -190,13 +205,14 @@ TEST_CASE("streaming block requires explicit planar or interleaved strides",
 TEST_CASE("streaming model owns deterministic CPU state and explicit epochs",
           "[gpu_audio][streaming_model]") {
     IdentityModel model;
-    const auto context = StreamingPrepareContext{.spec = &model.spec(),
-                                                 .artifact_id = "test.identity",
-                                                 .artifact_hash = "test",
-                                                 .fallback = StreamingFallbackStrategy::ContinuouslyPrimedCpuShadow,
-                                                 .max_frames = 4,
-                                                 .lead_blocks = 0,
-                                                 .worker_backend_requested = false};
+    const auto context =
+        StreamingPrepareContext{.spec = &model.spec(),
+                                .artifact_id = "test.identity",
+                                .artifact_hash = "test",
+                                .fallback = StreamingFallbackStrategy::ContinuouslyPrimedCpuShadow,
+                                .max_frames = 4,
+                                .lead_blocks = 0,
+                                .worker_backend_requested = false};
     CHECK(valid_streaming_prepare_context(context));
     REQUIRE(model.prepare(context));
     std::array<float, 4> input{1.0f, 2.0f, 3.0f, 4.0f};
@@ -213,8 +229,7 @@ TEST_CASE("streaming model owns deterministic CPU state and explicit epochs",
     model.release();
 }
 
-TEST_CASE("streaming terminal carries the exact admitted stamp",
-          "[gpu_audio][streaming_model]") {
+TEST_CASE("streaming terminal carries the exact admitted stamp", "[gpu_audio][streaming_model]") {
     const StreamingTerminal terminal{.stamp = {.epoch = 3, .sequence = 19},
                                      .disposition = StreamingBackendTerminalDisposition::Stale};
     CHECK(terminal.stamp == StreamingBlockStamp{.epoch = 3, .sequence = 19});

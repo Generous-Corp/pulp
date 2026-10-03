@@ -165,7 +165,8 @@ TEST_CASE("neural manifest sidecar round-trips execution metadata without changi
 
 TEST_CASE("neural manifest sidecar rejects schema drift and invalid reloads",
           "[gpu_audio][neural][manifest][persistence]") {
-    const auto root = std::filesystem::temp_directory_path() / "pulp-neural-manifest-sidecar-invalid";
+    const auto root =
+        std::filesystem::temp_directory_path() / "pulp-neural-manifest-sidecar-invalid";
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
     const auto sidecar = root / "demo.neural.json";
@@ -178,7 +179,8 @@ TEST_CASE("neural manifest sidecar rejects schema drift and invalid reloads",
 
     // A recognized schema with missing required metadata must fail closed rather
     // than produce a partially populated record that could reach a model loader.
-    std::ofstream(sidecar) << R"({"schema":"pulp.neural-model-manifest","schema_version":1,"model_id":"x"})";
+    std::ofstream(sidecar)
+        << R"({"schema":"pulp.neural-model-manifest","schema_version":1,"model_id":"x"})";
     REQUIRE_FALSE(read_neural_model_manifest(sidecar, loaded, error));
     CHECK(error.find("invalid") != std::string::npos);
 

@@ -62,7 +62,9 @@ enum class StreamingModelSpecError : std::uint8_t {
 struct StreamingModelSpecValidation {
     StreamingModelSpecError error = StreamingModelSpecError::None;
 
-    constexpr bool accepted() const noexcept { return error == StreamingModelSpecError::None; }
+    constexpr bool accepted() const noexcept {
+        return error == StreamingModelSpecError::None;
+    }
 };
 
 constexpr StreamingModelSpecValidation
@@ -120,13 +122,13 @@ struct StreamingBlock {
 };
 
 constexpr bool valid_streaming_block_layout(const StreamingBlock& block) noexcept {
-    if (block.input_channels == 0 || block.output_channels == 0 || block.frames == 0 || block.input.empty() ||
-        block.output.empty() || block.input_channel_stride == 0 ||
+    if (block.input_channels == 0 || block.output_channels == 0 || block.frames == 0 ||
+        block.input.empty() || block.output.empty() || block.input_channel_stride == 0 ||
         block.output_channel_stride == 0 || block.input_frame_stride == 0 ||
         block.output_frame_stride == 0)
         return false;
-    const auto covers = [](std::size_t size, std::uint32_t channels,
-                           std::uint32_t frames, std::uint32_t channel_stride,
+    const auto covers = [](std::size_t size, std::uint32_t channels, std::uint32_t frames,
+                           std::uint32_t channel_stride,
                            std::uint32_t frame_stride) constexpr noexcept {
         const auto last = static_cast<std::size_t>(channels - 1) * channel_stride +
                           static_cast<std::size_t>(frames - 1) * frame_stride;
@@ -140,13 +142,12 @@ constexpr bool valid_streaming_block_layout(const StreamingBlock& block) noexcep
                               std::uint32_t channel_stride,
                               std::uint32_t frame_stride) constexpr noexcept {
         const auto divisor = std::gcd(channel_stride, frame_stride);
-        return frame_stride / divisor >= channels ||
-               channel_stride / divisor >= frames;
+        return frame_stride / divisor >= channels || channel_stride / divisor >= frames;
     };
-    return injective(block.input_channels, block.frames,
-                     block.input_channel_stride, block.input_frame_stride) &&
-           injective(block.output_channels, block.frames,
-                     block.output_channel_stride, block.output_frame_stride) &&
+    return injective(block.input_channels, block.frames, block.input_channel_stride,
+                     block.input_frame_stride) &&
+           injective(block.output_channels, block.frames, block.output_channel_stride,
+                     block.output_frame_stride) &&
            covers(block.input.size(), block.input_channels, block.frames,
                   block.input_channel_stride, block.input_frame_stride) &&
            covers(block.output.size(), block.output_channels, block.frames,
@@ -185,21 +186,21 @@ enum class StreamingModelMethod : std::uint8_t {
     ReceiveBackend,
 };
 
-[[nodiscard]] constexpr audio::RtSafetyClass streaming_method_safety(
-    StreamingModelMethod method) noexcept {
+[[nodiscard]] constexpr audio::RtSafetyClass
+streaming_method_safety(StreamingModelMethod method) noexcept {
     switch (method) {
-        case StreamingModelMethod::Describe:
-            return audio::RtSafetyClass::ControlThreadOnly;
-        case StreamingModelMethod::ProcessCpu:
-            return audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
-        case StreamingModelMethod::Prepare:
-        case StreamingModelMethod::Reset:
-        case StreamingModelMethod::Release:
-            return audio::RtSafetyClass::ControlThreadOnly;
-        case StreamingModelMethod::EnqueueBackend:
-        case StreamingModelMethod::ServiceBackend:
-        case StreamingModelMethod::ReceiveBackend:
-            return audio::RtSafetyClass::BackgroundThreadOnly;
+    case StreamingModelMethod::Describe:
+        return audio::RtSafetyClass::ControlThreadOnly;
+    case StreamingModelMethod::ProcessCpu:
+        return audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+    case StreamingModelMethod::Prepare:
+    case StreamingModelMethod::Reset:
+    case StreamingModelMethod::Release:
+        return audio::RtSafetyClass::ControlThreadOnly;
+    case StreamingModelMethod::EnqueueBackend:
+    case StreamingModelMethod::ServiceBackend:
+    case StreamingModelMethod::ReceiveBackend:
+        return audio::RtSafetyClass::BackgroundThreadOnly;
     }
     return audio::RtSafetyClass::ControlThreadOnly;
 }
@@ -215,8 +216,7 @@ class StreamingModel {
     virtual const StreamingModelSpec& spec() const noexcept = 0;
     virtual bool prepare(const StreamingPrepareContext&) noexcept = 0;
     virtual void process_cpu(const audio::BufferView<const float>& input,
-                             audio::BufferView<float>& output,
-                             std::uint32_t frames,
+                             audio::BufferView<float>& output, std::uint32_t frames,
                              StreamingBlockStamp stamp) noexcept = 0;
     // The owner must stop admission and fence callback/worker users before
     // quiesce, reset, or release. These methods never race process_cpu().
@@ -262,8 +262,7 @@ class StreamingBackend {
 /// one depthwise dilated-convolution layer followed by ReLU.  Weights and the
 /// ring buffer are owned by the instance, so process_cpu() performs no
 /// allocation and carries state across host blocks.
-template <std::size_t Channels, std::size_t KernelSize>
-struct MicroTcnWeights {
+template <std::size_t Channels, std::size_t KernelSize> struct MicroTcnWeights {
     static_assert(Channels > 0 && KernelSize > 0);
     std::array<std::array<float, KernelSize>, Channels> taps{};
     std::array<float, Channels> bias{};
@@ -295,11 +294,12 @@ class MicroTcnModel final : public StreamingModel {
         reset_state();
     }
 
-    const StreamingModelSpec& spec() const noexcept override { return spec_; }
+    const StreamingModelSpec& spec() const noexcept override {
+        return spec_;
+    }
 
     bool prepare(const StreamingPrepareContext& context) noexcept override {
-        prepared_ = valid_streaming_prepare_context(context) &&
-                    context.spec == &spec_ &&
+        prepared_ = valid_streaming_prepare_context(context) && context.spec == &spec_ &&
                     context.spec->input_channels == Channels &&
                     context.spec->output_channels == Channels &&
                     context.spec->block_size <= MaxSupportedFrames &&
@@ -309,9 +309,8 @@ class MicroTcnModel final : public StreamingModel {
         return prepared_;
     }
 
-    void process_cpu(const audio::BufferView<const float>& input,
-                     audio::BufferView<float>& output, std::uint32_t frames,
-                     StreamingBlockStamp stamp) noexcept override {
+    void process_cpu(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+                     std::uint32_t frames, StreamingBlockStamp stamp) noexcept override {
         last_stamp_ = stamp;
         if (!prepared_ || frames > MaxSupportedFrames || input.num_channels() < Channels ||
             output.num_channels() < Channels || input.num_samples() < frames ||
@@ -335,7 +334,9 @@ class MicroTcnModel final : public StreamingModel {
         }
     }
 
-    bool quiesce() noexcept override { return true; }
+    bool quiesce() noexcept override {
+        return true;
+    }
 
     void reset(std::uint64_t epoch, StreamingResetReason) noexcept override {
         reset_state();
@@ -348,7 +349,9 @@ class MicroTcnModel final : public StreamingModel {
         return true;
     }
 
-    StreamingBlockStamp last_stamp() const noexcept { return last_stamp_; }
+    StreamingBlockStamp last_stamp() const noexcept {
+        return last_stamp_;
+    }
 
   private:
     static constexpr std::size_t MaxSupportedFrames = 4096;
@@ -371,8 +374,7 @@ class MicroTcnModel final : public StreamingModel {
 /// adapters. The current sample is included in the window, so the primitive
 /// has zero lookahead and zero intrinsic latency; WindowSize describes the
 /// number of current/previous samples retained in its persistent state.
-template <std::size_t Channels, std::size_t WindowSize>
-class CausalMaxPool {
+template <std::size_t Channels, std::size_t WindowSize> class CausalMaxPool {
   public:
     static_assert(Channels > 0 && WindowSize > 0);
     static constexpr std::size_t lookahead_samples = 0;
@@ -380,10 +382,12 @@ class CausalMaxPool {
     static constexpr std::size_t receptive_field_samples = WindowSize;
     static constexpr std::size_t state_bytes = Channels * WindowSize * sizeof(float);
 
-    CausalMaxPool() noexcept { reset(); }
+    CausalMaxPool() noexcept {
+        reset();
+    }
 
-    void process(const audio::BufferView<const float>& input,
-                 audio::BufferView<float>& output, std::uint32_t frames) noexcept {
+    void process(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+                 std::uint32_t frames) noexcept {
         if (frames > MaxSupportedFrames || input.num_channels() < Channels ||
             output.num_channels() < Channels || input.num_samples() < frames ||
             output.num_samples() < frames) {

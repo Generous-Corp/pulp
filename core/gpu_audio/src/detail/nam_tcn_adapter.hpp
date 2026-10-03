@@ -21,16 +21,17 @@ class NamTcnStreamingAdapter final : public StreamingModel {
     NamTcnStreamingAdapter(StreamingModelSpec spec, NamTcnCpuKernel kernel) noexcept
         : spec_(spec), kernel_(kernel) {}
 
-    const StreamingModelSpec& spec() const noexcept override { return spec_; }
+    const StreamingModelSpec& spec() const noexcept override {
+        return spec_;
+    }
 
     bool prepare(const StreamingPrepareContext& context) noexcept override {
         prepared_ = false;
         max_frames_ = 0;
         if (spec_.input_channels != 1 || spec_.output_channels != 1 ||
             !valid_streaming_prepare_context(context) || context.spec != &spec_ ||
-            kernel_.state == nullptr || kernel_.prepare == nullptr ||
-            kernel_.process == nullptr || kernel_.reset == nullptr ||
-            kernel_.quiesce == nullptr || kernel_.release == nullptr) {
+            kernel_.state == nullptr || kernel_.prepare == nullptr || kernel_.process == nullptr ||
+            kernel_.reset == nullptr || kernel_.quiesce == nullptr || kernel_.release == nullptr) {
             return false;
         }
 
@@ -42,12 +43,10 @@ class NamTcnStreamingAdapter final : public StreamingModel {
         return prepared_;
     }
 
-    void process_cpu(const audio::BufferView<const float>& input,
-                     audio::BufferView<float>& output, std::uint32_t frames,
-                     StreamingBlockStamp) noexcept override {
+    void process_cpu(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+                     std::uint32_t frames, StreamingBlockStamp) noexcept override {
         if (!prepared_ || input.num_channels() != 1 || output.num_channels() != 1 ||
-            frames > max_frames_ || input.num_samples() < frames ||
-            output.num_samples() < frames) {
+            frames > max_frames_ || input.num_samples() < frames || output.num_samples() < frames) {
             output.clear();
             return;
         }

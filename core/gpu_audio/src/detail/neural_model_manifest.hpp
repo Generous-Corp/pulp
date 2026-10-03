@@ -22,8 +22,7 @@ namespace pulp::gpu_audio::detail {
 /// private to the GPU-audio implementation: ModelEntry remains the stable
 /// catalog/download ABI, while this versioned document carries execution
 /// metadata that must survive a ModelStore reload.
-inline constexpr std::string_view kNeuralModelManifestSchema =
-    "pulp.neural-model-manifest";
+inline constexpr std::string_view kNeuralModelManifestSchema = "pulp.neural-model-manifest";
 inline constexpr std::uint32_t kNeuralModelManifestSchemaVersion = 1;
 
 /// Control-plane metadata for a neural artifact.  This is a non-owning view:
@@ -59,7 +58,9 @@ enum class NeuralModelManifestError : std::uint8_t {
 
 struct NeuralModelManifestValidation {
     NeuralModelManifestError error = NeuralModelManifestError::None;
-    constexpr bool accepted() const noexcept { return error == NeuralModelManifestError::None; }
+    constexpr bool accepted() const noexcept {
+        return error == NeuralModelManifestError::None;
+    }
 };
 
 enum class NeuralModelUse : std::uint8_t {
@@ -110,9 +111,10 @@ struct NeuralModelManifestRecord {
 /// metadata file (`m1.json` -> `m1.neural.json`).  Keeping it beside, rather
 /// than inside, the existing metadata preserves old ModelStore readers and
 /// makes the extension removable if the manifest contract changes.
-inline std::filesystem::path neural_model_manifest_sidecar_path(
-    const std::filesystem::path& install_metadata_path) {
-    if (install_metadata_path.empty()) return {};
+inline std::filesystem::path
+neural_model_manifest_sidecar_path(const std::filesystem::path& install_metadata_path) {
+    if (install_metadata_path.empty())
+        return {};
     auto sidecar = install_metadata_path;
     sidecar.replace_filename(install_metadata_path.stem().string() + ".neural.json");
     return sidecar;
@@ -120,21 +122,23 @@ inline std::filesystem::path neural_model_manifest_sidecar_path(
 
 namespace manifest_store_detail {
 
-inline void add_string(choc::value::Value& object, const char* key,
-                       std::string_view value) {
+inline void add_string(choc::value::Value& object, const char* key, std::string_view value) {
     object.addMember(key, choc::value::createString(std::string(value)));
 }
 
 inline std::string read_string(const choc::value::ValueView& object, const char* key) {
-    if (!object.isObject() || !object.hasObjectMember(key) || !object[key].isString()) return {};
+    if (!object.isObject() || !object.hasObjectMember(key) || !object[key].isString())
+        return {};
     return std::string(object[key].toString());
 }
 
 inline bool read_u64(const choc::value::ValueView& object, const char* key,
                      std::uint64_t& destination) {
-    if (!object.isObject() || !object.hasObjectMember(key) || !object[key].isInt()) return false;
+    if (!object.isObject() || !object.hasObjectMember(key) || !object[key].isInt())
+        return false;
     const auto value = object[key].getInt64();
-    if (value < 0) return false;
+    if (value < 0)
+        return false;
     destination = static_cast<std::uint64_t>(value);
     return true;
 }
@@ -142,27 +146,27 @@ inline bool read_u64(const choc::value::ValueView& object, const char* key,
 inline bool read_u32(const choc::value::ValueView& object, const char* key,
                      std::uint32_t& destination) {
     std::uint64_t value = 0;
-    if (!read_u64(object, key, value) || value > 0xffffffffu) return false;
+    if (!read_u64(object, key, value) || value > 0xffffffffu)
+        return false;
     destination = static_cast<std::uint32_t>(value);
     return true;
 }
 
-inline bool read_bool(const choc::value::ValueView& object, const char* key,
-                      bool& destination) {
-    if (!object.isObject() || !object.hasObjectMember(key) || !object[key].isBool()) return false;
+inline bool read_bool(const choc::value::ValueView& object, const char* key, bool& destination) {
+    if (!object.isObject() || !object.hasObjectMember(key) || !object[key].isBool())
+        return false;
     destination = object[key].getBool();
     return true;
 }
 
-}  // namespace manifest_store_detail
+} // namespace manifest_store_detail
 
 /// Persist an execution manifest next to an installed model.  The write is
 /// staged and renamed so a reader observes either the old complete sidecar or
 /// the new complete sidecar, never a partial JSON document.  This is a
 /// control-thread operation and must not be called from process().
 inline bool write_neural_model_manifest(const std::filesystem::path& sidecar_path,
-                                        const NeuralModelManifest& manifest,
-                                        std::string& error,
+                                        const NeuralModelManifest& manifest, std::string& error,
                                         NeuralModelUse use = NeuralModelUse::Shipped) {
     error.clear();
     if (sidecar_path.empty()) {
@@ -173,16 +177,17 @@ inline bool write_neural_model_manifest(const std::filesystem::path& sidecar_pat
         error = "neural model manifest failed validation";
         return false;
     }
-    if (manifest.artifact_size_bytes > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
-        manifest.state_bytes > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+    if (manifest.artifact_size_bytes >
+            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
+        manifest.state_bytes >
+            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
         error = "neural model manifest size exceeds JSON integer range";
         return false;
     }
 
     auto object = choc::value::createObject("");
     manifest_store_detail::add_string(object, "schema", kNeuralModelManifestSchema);
-    object.addMember("schema_version",
-                     choc::value::createInt64(kNeuralModelManifestSchemaVersion));
+    object.addMember("schema_version", choc::value::createInt64(kNeuralModelManifestSchemaVersion));
     manifest_store_detail::add_string(object, "model_id", manifest.model_id);
     manifest_store_detail::add_string(object, "architecture", manifest.architecture);
     manifest_store_detail::add_string(object, "model_version", manifest.model_version);
@@ -191,14 +196,14 @@ inline bool write_neural_model_manifest(const std::filesystem::path& sidecar_pat
     manifest_store_detail::add_string(object, "license", manifest.license);
     manifest_store_detail::add_string(object, "runtime", manifest.runtime);
     manifest_store_detail::add_string(object, "state_schema", manifest.state_schema);
-    object.addMember("artifact_size_bytes",
-                     choc::value::createInt64(static_cast<std::int64_t>(manifest.artifact_size_bytes)));
+    object.addMember("artifact_size_bytes", choc::value::createInt64(static_cast<std::int64_t>(
+                                                manifest.artifact_size_bytes)));
     object.addMember("sample_rate_hz",
                      choc::value::createInt64(static_cast<std::int64_t>(manifest.sample_rate_hz)));
     object.addMember("state_bytes",
                      choc::value::createInt64(static_cast<std::int64_t>(manifest.state_bytes)));
-    object.addMember("state_schema_version",
-                     choc::value::createInt64(static_cast<std::int64_t>(manifest.state_schema_version)));
+    object.addMember("state_schema_version", choc::value::createInt64(static_cast<std::int64_t>(
+                                                 manifest.state_schema_version)));
     object.addMember("redistributable", choc::value::createBool(manifest.redistributable));
 
     const auto temporary = sidecar_path.string() + ".tmp";
@@ -249,8 +254,7 @@ inline bool write_neural_model_manifest(const std::filesystem::path& sidecar_pat
 /// older reader; the schema id/version and all current required fields remain
 /// strict.
 inline bool read_neural_model_manifest(const std::filesystem::path& sidecar_path,
-                                       NeuralModelManifestRecord& record,
-                                       std::string& error,
+                                       NeuralModelManifestRecord& record, std::string& error,
                                        NeuralModelUse use = NeuralModelUse::Shipped) {
     error.clear();
     std::ifstream input(sidecar_path);
@@ -271,8 +275,8 @@ inline bool read_neural_model_manifest(const std::filesystem::path& sidecar_path
         return false;
     }
     const auto root = document.getView();
-    if (!root.isObject() || manifest_store_detail::read_string(root, "schema") !=
-                               kNeuralModelManifestSchema) {
+    if (!root.isObject() ||
+        manifest_store_detail::read_string(root, "schema") != kNeuralModelManifestSchema) {
         error = "unsupported neural manifest schema";
         return false;
     }
@@ -295,7 +299,8 @@ inline bool read_neural_model_manifest(const std::filesystem::path& sidecar_path
     if (!manifest_store_detail::read_u64(root, "artifact_size_bytes", parsed.artifact_size_bytes) ||
         !manifest_store_detail::read_u32(root, "sample_rate_hz", parsed.sample_rate_hz) ||
         !manifest_store_detail::read_u64(root, "state_bytes", parsed.state_bytes) ||
-        !manifest_store_detail::read_u32(root, "state_schema_version", parsed.state_schema_version) ||
+        !manifest_store_detail::read_u32(root, "state_schema_version",
+                                         parsed.state_schema_version) ||
         !manifest_store_detail::read_bool(root, "redistributable", parsed.redistributable) ||
         !validate_neural_model_manifest(parsed.view(), use).accepted()) {
         error = "invalid neural model manifest metadata";
@@ -306,20 +311,20 @@ inline bool read_neural_model_manifest(const std::filesystem::path& sidecar_path
 }
 
 constexpr bool is_hex(char c) noexcept {
-    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
-           (c >= 'A' && c <= 'F');
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
 constexpr bool is_sha256(std::string_view hash) noexcept {
-    if (hash.size() != 64) return false;
+    if (hash.size() != 64)
+        return false;
     for (const char c : hash)
-        if (!is_hex(c)) return false;
+        if (!is_hex(c))
+            return false;
     return true;
 }
 
 constexpr NeuralModelManifestValidation
-validate_neural_model_manifest(const NeuralModelManifest& manifest,
-                               NeuralModelUse use) noexcept {
+validate_neural_model_manifest(const NeuralModelManifest& manifest, NeuralModelUse use) noexcept {
     if (manifest.model_id.empty() || manifest.architecture.empty() ||
         manifest.model_version.empty() || manifest.artifact_id.empty())
         return {NeuralModelManifestError::MissingIdentity};
@@ -343,9 +348,9 @@ validate_neural_model_manifest(const NeuralModelManifest& manifest,
 /// downloadable primary asset has provenance and a declared redistribution
 /// policy.  This seam does not change ModelEntry or weaken existing catalogs;
 /// callers opt into strict neural admission after resolving their policy.
-inline NeuralModelManifestValidation validate_neural_model_entry(
-    const pulp::runtime::ModelEntry& entry, bool redistributable,
-    std::uint32_t sample_rate_hz, std::string_view runtime) noexcept {
+inline NeuralModelManifestValidation
+validate_neural_model_entry(const pulp::runtime::ModelEntry& entry, bool redistributable,
+                            std::uint32_t sample_rate_hz, std::string_view runtime) noexcept {
     NeuralModelManifest manifest{
         .model_id = entry.model_id,
         .architecture = entry.backend,

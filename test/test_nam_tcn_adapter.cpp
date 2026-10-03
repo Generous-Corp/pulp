@@ -28,8 +28,12 @@ void process(void* opaque, const float* input, float* output, std::uint32_t fram
     }
 }
 
-void reset(void* opaque) noexcept { static_cast<TestKernel*>(opaque)->previous = 0.0f; }
-bool quiesce(void*) noexcept { return true; }
+void reset(void* opaque) noexcept {
+    static_cast<TestKernel*>(opaque)->previous = 0.0f;
+}
+bool quiesce(void*) noexcept {
+    return true;
+}
 bool release(void* opaque) noexcept {
     static_cast<TestKernel*>(opaque)->prepared = false;
     return true;
@@ -58,13 +62,12 @@ StreamingModelSpec spec() {
 TEST_CASE("NAM/TCN adapter delegates stateful CPU blocks without allocation",
           "[gpu_audio][neural][nam][streaming_model]") {
     TestKernel state;
-    NamTcnStreamingAdapter model(
-        spec(), {.state = &state,
-                 .prepare = prepare,
-                 .process = process,
-                 .reset = reset,
-                 .quiesce = quiesce,
-                 .release = release});
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
     const auto context = StreamingPrepareContext{.spec = &model.spec(),
                                                  .artifact_id = "fixture.nam",
                                                  .artifact_hash = "fixture-hash",
@@ -100,13 +103,12 @@ TEST_CASE("NAM/TCN adapter delegates stateful CPU blocks without allocation",
 TEST_CASE("NAM/TCN adapter rejects blocks larger than prepared capacity",
           "[gpu_audio][neural][nam][streaming_model]") {
     TestKernel state;
-    NamTcnStreamingAdapter model(
-        spec(), {.state = &state,
-                 .prepare = prepare,
-                 .process = process,
-                 .reset = reset,
-                 .quiesce = quiesce,
-                 .release = release});
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
     const auto context = StreamingPrepareContext{.spec = &model.spec(),
                                                  .artifact_id = "fixture.nam",
                                                  .artifact_hash = "fixture-hash",
@@ -131,13 +133,12 @@ TEST_CASE("NAM/TCN adapter rejects blocks larger than prepared capacity",
 TEST_CASE("NAM/TCN adapter rejects non-mono buffers at the private boundary",
           "[gpu_audio][neural][nam][streaming_model]") {
     TestKernel state;
-    NamTcnStreamingAdapter model(
-        spec(), {.state = &state,
-                 .prepare = prepare,
-                 .process = process,
-                 .reset = reset,
-                 .quiesce = quiesce,
-                 .release = release});
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
     const auto context = StreamingPrepareContext{.spec = &model.spec(),
                                                  .artifact_id = "fixture.nam",
                                                  .artifact_hash = "fixture-hash",

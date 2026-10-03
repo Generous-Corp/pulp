@@ -60,8 +60,12 @@ class NeuralProcessor final {
     NeuralProcessor(const NeuralProcessor&) = delete;
     NeuralProcessor& operator=(const NeuralProcessor&) = delete;
 
-    const NeuralModelEntry& model_entry() const noexcept { return entry_; }
-    const NeuralProcessorSnapshot& snapshot() const noexcept { return active_; }
+    const NeuralModelEntry& model_entry() const noexcept {
+        return entry_;
+    }
+    const NeuralProcessorSnapshot& snapshot() const noexcept {
+        return active_;
+    }
 
     bool prepare(const StreamingPrepareContext& context,
                  NeuralProviderPreference preference = NeuralProviderPreference::Auto,
@@ -101,11 +105,10 @@ class NeuralProcessor final {
         // Auto on a CPU-only host is an honest CPU selection, not a fallback.
         // An explicit non-CPU preference (or an advertised non-CPU capability
         // that this CPU-only facade cannot yet execute) records fallback.
-        pending_.fell_back_to_cpu =
-            preference == NeuralProviderPreference::PreferMlx ||
-            preference == NeuralProviderPreference::PreferDawn ||
-            (preference == NeuralProviderPreference::Auto &&
-             (capabilities.mlx || capabilities.dawn));
+        pending_.fell_back_to_cpu = preference == NeuralProviderPreference::PreferMlx ||
+                                    preference == NeuralProviderPreference::PreferDawn ||
+                                    (preference == NeuralProviderPreference::Auto &&
+                                     (capabilities.mlx || capabilities.dawn));
         pending_.max_frames = context.max_frames;
         pending_.generation = ++next_generation_;
         pending_.prepared = true;
@@ -120,15 +123,13 @@ class NeuralProcessor final {
         return true;
     }
 
-    void process_cpu(const audio::BufferView<const float>& input,
-                     audio::BufferView<float>& output, std::uint32_t frames,
-                     StreamingBlockStamp stamp) noexcept {
+    void process_cpu(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+                     std::uint32_t frames, StreamingBlockStamp stamp) noexcept {
         if (!active_.prepared || active_.entry == nullptr || active_.entry->model == nullptr) {
             output.clear();
             return;
         }
-        active_.entry->model->process_cpu(input, output, frames,
-                                          stamp);
+        active_.entry->model->process_cpu(input, output, frames, stamp);
     }
 
     bool reset(StreamingResetReason reason) noexcept {
