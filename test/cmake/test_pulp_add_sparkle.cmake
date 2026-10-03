@@ -113,4 +113,16 @@ if(_rc EQUAL 0 OR NOT _log MATCHES "FEED_URL must be https")
     message(FATAL_ERROR "http_refused: a plain-http feed was accepted:\n${_log}")
 endif()
 
+_fixture(file_refused
+    "pulp_add_sparkle(App FEED_URL \"file:///tmp/appcast.xml\" PUBLIC_ED_KEY \"${_key}\" DIST_DIR \"${_dist}\")")
+if(_rc EQUAL 0 OR NOT _log MATCHES "Sparkle refuses file://")
+    message(FATAL_ERROR "file_refused: a file:// feed was accepted:\n${_log}")
+endif()
+
+_fixture(loopback_http_ok
+    "pulp_add_sparkle(App FEED_URL \"http://127.0.0.1:8765/appcast.xml\" PUBLIC_ED_KEY \"${_key}\" DIST_DIR \"${_dist}\")")
+if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR "loopback_http_ok: a loopback practice feed was refused:\n${_log}")
+endif()
+
 message(STATUS "pulp_add_sparkle configure contract: OK")

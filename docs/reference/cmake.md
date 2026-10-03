@@ -505,7 +505,7 @@ writes `SUFeedURL`, `SUPublicEDKey` and the optional keys into the app's
 `Info.plist` template, so they survive regeneration and combine with
 `pulp_declare_standalone_document_type()` in either order.
 
-`FEED_URL` must be `https://` (or `file://` for a local practice feed), and
+`FEED_URL` must be `https://`, or `http://127.0.0.1:<port>/…` for a local practice feed served from loopback (Sparkle 2 refuses `file://` feeds at run time), and
 `PUBLIC_ED_KEY` must be the public half of the key pair. The private key never
 belongs in a build file: keep it outside the repository and pass it to
 `pulp ship appcast --sign-key-file` when publishing.

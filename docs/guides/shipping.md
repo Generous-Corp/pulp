@@ -473,8 +473,8 @@ carries, from a feed of signed installer packages:
    as a GitHub *prerelease* can never reach release users — but every release
    that is not marked prerelease must carry an `appcast.xml`, or the feed 404s.
    Practice previews against a separate feed (a different `FEED_URL` in a test
-   build, a fixed prerelease tag that hosts `appcast-beta.xml`, or a `file://`
-   feed) rather than a channel inside the release feed.
+   build, a fixed prerelease tag that hosts `appcast-beta.xml`, or a loopback
+   `http://127.0.0.1` feed — Sparkle refuses `file://`) rather than a channel inside the release feed.
 
 Things that matter for installer-package updates:
 

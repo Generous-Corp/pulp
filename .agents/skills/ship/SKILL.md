@@ -1063,6 +1063,11 @@ because the feed length and signature describe different bytes.
   Release notes: prefer inline `--notes-html-file` over `--release-notes-url`
   when the notes would be a GitHub release asset — those are served with
   `Content-Disposition: attachment`, not as a page.
+- **Sparkle refuses `file://` feeds** at run time ("The download request URL
+  must use http or https"), so a local rehearsal serves the feed and package
+  from loopback (`python3 -m http.server --bind 127.0.0.1`) and
+  `pulp_add_sparkle` rejects `file://` at configure time. Measured on Sparkle
+  2.10.0: the updater started and checked, then failed on the scheme.
 - **Keys.** Pass `--sign-key-file`, never `--sign-key <key>`, so the private key
   stays off argv. Sparkle cannot rotate keys for copies already installed: back
   the private key up before the first release that embeds it.

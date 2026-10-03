@@ -2,6 +2,7 @@
 #
 #   pulp_add_sparkle(MyPlugin_Standalone
 #       FEED_URL      "https://github.com/me/app/releases/latest/download/appcast.xml"
+#                     (https only; http:// is accepted on 127.0.0.1/localhost)
 #       PUBLIC_ED_KEY "<base64 Ed25519 public key>"
 #       [AUTOMATIC_CHECKS ON|OFF]      # writes SUEnableAutomaticChecks; omit to
 #                                      # let Sparkle ask the user on 2nd launch
@@ -174,10 +175,14 @@ function(pulp_add_sparkle target)
     if(NOT ARG_FEED_URL)
         message(FATAL_ERROR "pulp_add_sparkle: FEED_URL is required")
     endif()
-    if(NOT ARG_FEED_URL MATCHES "^(https://|file://)")
+    # Sparkle 2 downloads feeds only over http(s): a file:// feed fails at run
+    # time with "The download request URL must use http or https". Plain http is
+    # accepted only on loopback, for a local rehearsal feed.
+    if(NOT ARG_FEED_URL MATCHES "^https://" AND
+       NOT ARG_FEED_URL MATCHES "^http://(127\\.0\\.0\\.1|localhost)(:[0-9]+)?/")
         message(FATAL_ERROR
-            "pulp_add_sparkle: FEED_URL must be https:// (or file:// for a local "
-            "practice feed); got ${ARG_FEED_URL}")
+            "pulp_add_sparkle: FEED_URL must be https:// (or http://127.0.0.1/... for a "
+            "local practice feed; Sparkle refuses file://); got ${ARG_FEED_URL}")
     endif()
     # CMake regexes have no {n} quantifier: check the length separately.
     string(LENGTH "${ARG_PUBLIC_ED_KEY}" _key_len)
