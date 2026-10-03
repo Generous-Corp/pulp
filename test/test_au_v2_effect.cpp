@@ -459,7 +459,7 @@ TEST_CASE("AU v3 UMP sysex7: multi-packet reassembly emits once, no growth; "
     }
 }
 
-TEST_CASE("AU v2 render context is explicit realtime for effects and instruments",
+TEST_CASE("AU v2 render context defaults to realtime and maps the host offline flag",
           "[au][au-v2][runtime-mode]")
 {
     const auto ctx = pulp::format::au::make_render_process_context(
@@ -472,6 +472,13 @@ TEST_CASE("AU v2 render context is explicit realtime for effects and instruments
     REQUIRE_FALSE(ctx.is_offline());
     REQUIRE_FALSE(ctx.allows_offline_quality_work());
     REQUIRE_FALSE(ctx.is_maintenance_render());
+
+    const auto offline = pulp::format::au::make_render_process_context(
+        /*sample_rate=*/48000.0, /*num_samples=*/128, /*offline=*/true);
+    REQUIRE(offline.process_mode == pulp::format::ProcessMode::Offline);
+    REQUIRE(offline.render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
+    REQUIRE(offline.allows_offline_quality_work());
 }
 
 // ── Channel-config negotiation (kAudioUnitProperty_SupportedNumChannels) ─────
