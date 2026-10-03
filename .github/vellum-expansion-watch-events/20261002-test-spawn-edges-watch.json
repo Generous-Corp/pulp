@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261002-test-spawn-edges-watch",
+  "created_at": "2026-10-02T23:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record test-registration changes that cross design-source-ingest through test/cmake/design_import_tool_cli_tests.cmake and design_import_runtime_bridge_tests.cmake, and visual-proof-harness through test/cmake/view_widget_bridge_tests.cmake. pulp-test-cli-import-design and pulp-test-cli-import-figma-url replace an if(TARGET pulp-cli / pulp-import-design) add_dependencies guard, which was evaluated before those tools exist and so never created the edge, with pulp_test_spawns(), which adds it once the tree is read; the tests now build the CLI and import tool they shell out to. pulp-test-offscreen-capture-rt-contract and pulp-control-broker-crash-fixture gain a reviewed spawn declaration (NONE, and an edge to the trusted-host fixture the crash fixture starts). Test sources, capture, rendering, DesignIR, fixtures and thresholds are unchanged. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-data-cmake-selftest",
+    "script-test-inputs-selftest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

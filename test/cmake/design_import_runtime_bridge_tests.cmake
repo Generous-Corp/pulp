@@ -221,3 +221,7 @@ pulp_add_test_suite(pulp-test-web-compat-menu-keynav GROUP pulp-test-group-desig
 pulp_add_test_suite(pulp-test-web-compat-react-shims GROUP pulp-test-group-design-import-bridge
     LIBRARIES pulp::view
     TIMEOUT 180)
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-offscreen-capture-rt-contract NONE) # fork without exec
