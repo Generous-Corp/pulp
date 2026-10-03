@@ -232,6 +232,9 @@ paths = [
   "tools/scripts/test_visual_python_deps_step.py",
   "tools/scripts/test_webclap_relevance.py",
   "tools/scripts/test_win32_include_lint.py",
+  "tools/scripts/test_windows_cli_compile_scope.py",
+  "tools/scripts/test_windows_cli_compile_workflow.py",
+  "tools/scripts/test_windows_cli_release_precheck.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
@@ -247,6 +250,8 @@ paths = [
   "tools/scripts/verify_standalone_trace_close.py",
   "tools/scripts/version_consistency_check.py",
   "tools/scripts/webclap_relevance.py",
+  "tools/scripts/windows_cli_compile_scope.py",
+  "tools/scripts/windows_cli_release_precheck.py",
 ]
 tests = [
   "build-parallelism-guard",
@@ -4549,6 +4554,9 @@ paths = [
   "tools/scripts/test_web_timeline_source_closure_check.py",
   "tools/scripts/test_webclap_relevance.py",
   "tools/scripts/test_win32_include_lint.py",
+  "tools/scripts/test_windows_cli_compile_scope.py",
+  "tools/scripts/test_windows_cli_compile_workflow.py",
+  "tools/scripts/test_windows_cli_release_precheck.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
@@ -4578,6 +4586,8 @@ paths = [
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
   "tools/scripts/webclap_relevance.py",
+  "tools/scripts/windows_cli_compile_scope.py",
+  "tools/scripts/windows_cli_release_precheck.py",
 ]
 tests = [
   "build-parallelism-guard",
@@ -5011,6 +5021,9 @@ paths = [
   "tools/scripts/test_web_timeline_source_closure_check.py",
   "tools/scripts/test_webclap_relevance.py",
   "tools/scripts/test_win32_include_lint.py",
+  "tools/scripts/test_windows_cli_compile_scope.py",
+  "tools/scripts/test_windows_cli_compile_workflow.py",
+  "tools/scripts/test_windows_cli_release_precheck.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
@@ -5040,6 +5053,8 @@ paths = [
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
   "tools/scripts/webclap_relevance.py",
+  "tools/scripts/windows_cli_compile_scope.py",
+  "tools/scripts/windows_cli_release_precheck.py",
 ]
 tests = [
   "agent-capability-manifest-check",
