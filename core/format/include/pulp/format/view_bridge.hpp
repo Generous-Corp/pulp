@@ -158,9 +158,11 @@ public:
     ///
     /// A document that fails to mount reports through its loaded callback as
     /// it would from the idle tick, and the host presents whatever the root
-    /// holds (a fallback editor, or the editor's background). Without the
-    /// option, or for an editor with no pending document, only step 3 runs.
-    /// Returns true when the host presented a frame. Main thread only.
+    /// holds (a fallback editor, or the editor's background). For an editor
+    /// with no pending document only step 3 runs. Without the option it does
+    /// nothing: the display link paints the first frame once the host shows
+    /// the view, as before. Returns true when the host presented a frame.
+    /// Main thread only.
     bool prepare_first_frame(view::PluginViewHost& host);
 
     static constexpr int kFirstFrameSettleRounds = 8;

@@ -672,8 +672,8 @@ public:
     std::function<void()> on_first_frame;
     int first_frame_requests = 0;
 
-    NativeViewHandle native_handle() override { return nullptr; }
-    void attach_to_parent(NativeViewHandle) override {}
+    view::NativeViewHandle native_handle() override { return nullptr; }
+    void attach_to_parent(view::NativeViewHandle) override {}
     void detach() override {}
     void repaint() override {}
     void set_size(uint32_t w, uint32_t h) override { size_ = {w, h}; }
@@ -802,11 +802,11 @@ TEST_CASE("Editor open: view-first leaves the document to the idle tick",
     format::ViewBridge bridge(p, store, options);
     REQUIRE(bridge.open());
     FirstFrameRecordingHost host;
-    bool pending_at_first_frame = false;
-    host.on_first_frame = [&] { pending_at_first_frame = p.session->document_load_pending(); };
-    bridge.prepare_first_frame(host);
-    CHECK(host.first_frame_requests == 1);
-    CHECK(pending_at_first_frame);
+    // Nothing is mounted or presented out of turn: the display link paints the
+    // empty editor first, as before.
+    CHECK_FALSE(bridge.prepare_first_frame(host));
+    CHECK(host.first_frame_requests == 0);
+    CHECK(p.session->document_load_pending());
     CHECK(p.loaded_callbacks == 0);
     // ... and the idle tick still mounts it, on the second tick as before.
     auto pump = format::make_editor_idle_pump(bridge);

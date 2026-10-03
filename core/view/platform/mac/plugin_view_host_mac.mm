@@ -2401,18 +2401,35 @@ public:
     }
 
     // Content-first open: paint and present the mounted tree into the
-    // CAMetalLayer now, inside the host's view-creation call. A presented
-    // drawable becomes the layer's contents whether or not the view is in a
-    // window yet, so the host composites this frame the moment it shows the
-    // view (out of process, AUHostingService mirrors it on arrival) instead of
-    // the backing colour. Skipped once the display link has painted.
+    // CAMetalLayer now, inside the host's view-creation call, so the first
+    // image the window server composites for this view is that frame.
+    //
+    // A drawable presents asynchronously, once the GPU finishes it, while the
+    // view's insertion into the host's window (and any geometry flush) reaches
+    // the window server with the next Core Animation commit. Presented the
+    // ordinary way, that commit can land first: a host whose window is already
+    // on screen when it attaches the editor (VST3 attached(), CLAP set_parent(),
+    // AU v3) then shows the layer's backing colour for a vsync before the frame.
+    // So this one frame is presented WITH the transaction: the GPU work is
+    // finished before the present, and a single flush commits the layer's
+    // geometry and its first contents together. No window is needed, so out of
+    // process (AUHostingService) the view already holds the frame when it
+    // arrives. Skipped once the display link has painted.
     bool present_first_frame() override {
-        if (frame_ok_count_ > 0) {
-            needs_repaint_.store(true, std::memory_order_relaxed);
-            return false;
-        }
         needs_repaint_.store(true, std::memory_order_relaxed);
-        return render_frame();
+        if (frame_ok_count_ > 0) return false;
+        CAMetalLayer* layer = metal_view_.metalLayer;
+        // The flush below commits this geometry with the frame; flushing it
+        // first would commit an empty layer ahead of the frame.
+        committed_size_ = size_;
+        committed_scale_ = layer.contentsScale;
+        layer.presentsWithTransaction = YES;
+        sync_before_present_ = true;
+        const bool presented = render_frame();
+        sync_before_present_ = false;
+        [CATransaction flush];
+        layer.presentsWithTransaction = NO;
+        return presented;
     }
 
     void set_size(uint32_t width, uint32_t height) override {
@@ -2600,6 +2617,7 @@ private:
     // the first present commits the view's insertion too.
     Size committed_size_{0, 0};
     CGFloat committed_scale_ = 0.0;
+    bool sync_before_present_ = false;
 
     // FIRST-PAINT SIZE matters: the (width,height) this surface is created at
     // becomes the first painted frame's size. In an out-of-process plugin host
@@ -2847,6 +2865,7 @@ private:
         }
 
         skia_surface_->end_frame();
+        if (sync_before_present_) skia_surface_->wait_for_submitted_work();
         gpu_surface_->end_frame();
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),

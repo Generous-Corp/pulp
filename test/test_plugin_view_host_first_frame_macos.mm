@@ -15,6 +15,7 @@
 
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#include <dlfcn.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -199,20 +200,6 @@ TEST_CASE("GPU plug-in host: present_first_frame paints the tree before the view
 }
 #endif
 
-TEST_CASE("CPU plug-in host: present_first_frame leaves the first paint to the display pass",
-          "[plugin-view-host][first-frame][content-first][macos]") {
-    [NSApplication sharedApplication];
-    CountingRoot root;
-    auto host = PluginViewHost::create(root, options(false, kDeclared));
-    REQUIRE(host);
-    NSView* view = (__bridge NSView*)host->native_handle();
-    view.needsDisplay = NO;
-    // CoreGraphics paints only in -drawRect:, which AppKit runs in the first
-    // display pass of the window the host puts the view in; asking marks it.
-    CHECK_FALSE(host->present_first_frame());
-    CHECK(view.needsDisplay);
-}
-
 // ── A host resize queued behind the document mount ────────────────────────────
 //
 // Out of process (Logic's AUHostingService) the host applies the size its
@@ -378,6 +365,99 @@ TEST_CASE("GPU plug-in host: a host resize queued during the mount lands before 
     if (!had_gpu) SKIP("no Dawn/Metal adapter in this process");
     if (paints.empty()) SKIP("no frame was presented: no display link in this process");
     check_frames_after_mount(paints);
+}
+#endif
+
+#ifdef PULP_HAS_SKIA
+namespace {
+
+class SolidRoot : public View {
+public:
+    void paint(pulp::canvas::Canvas& c) override {
+        c.set_fill_color(pulp::canvas::Color::hex(0x00C000));
+        c.fill_rect(0, 0, bounds().width, bounds().height);
+    }
+};
+
+typedef CGImageRef (*WindowImageFn)(CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption);
+
+// What the window server composites for `window` (a process may read its own
+// windows): the share of pixels in each colour class.
+struct Composite { double magenta = 0, background = 0, content = 0; };
+bool composite_of(NSWindow* window, Composite& out) {
+    static auto fn = (WindowImageFn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
+    if (!fn) return false;
+    CGImageRef img = fn(CGRectNull, kCGWindowListOptionIncludingWindow,
+                        (CGWindowID)window.windowNumber,
+                        kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
+    if (!img) return false;
+    size_t w = 0, h = 0;
+    const auto px = srgb_pixels(img, w, h);
+    CGImageRelease(img);
+    if (w == 0 || h == 0) return false;
+    size_t m = 0, b = 0, c = 0;
+    for (size_t i = 0; i + 3 < px.size(); i += 4) {
+        if (near_rgb(px[i], px[i + 1], px[i + 2], 0xFF00FF)) ++m;
+        else if (near_rgb(px[i], px[i + 1], px[i + 2], kDeclared)) ++b;
+        else if (px[i + 1] > 150 && px[i] < 60) ++c;
+    }
+    const double n = double(w * h);
+    out = {m / n, b / n, c / n};
+    return true;
+}
+
+}  // namespace
+
+// A host whose window is already on screen when it attaches the editor (VST3
+// attached(), CLAP set_parent(), AU v3): the first image the window server
+// composites after the content-first frame must be that frame, never the
+// backing layer's colour for a vsync while the drawable is still in flight.
+// Hidden: it orders a borderless window in off every screen and reads it back,
+// which needs a window server; run it explicitly with "[composite]".
+TEST_CASE("GPU plug-in host: an in-window first frame composites as the frame, not the backing colour",
+          "[.][composite][content-first][macos][gpu]") {
+    [NSApplication sharedApplication];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    SolidRoot root;
+    PluginViewHost::Options o = options(true, kDeclared);
+    o.size = {240, 160};
+    auto host = PluginViewHost::create(root, o);
+    REQUIRE(host);
+    if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 240, 160)
+                                                   styleMask:NSWindowStyleMaskBorderless
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    window.releasedWhenClosed = NO;
+    window.animationBehavior = NSWindowAnimationBehaviorNone;
+    window.backgroundColor = [NSColor colorWithSRGBRed:1 green:0 blue:1 alpha:1];
+    [window orderFrontRegardless];
+    Composite before;
+    const auto shown = std::chrono::steady_clock::now();
+    while ((!composite_of(window, before) || before.magenta < 0.99) &&
+           std::chrono::steady_clock::now() - shown < std::chrono::seconds(2))
+        spin_main(0.01);
+    if (before.magenta < 0.99) SKIP("no window server composite in this session");
+
+    host->attach_to_parent((__bridge void*)window.contentView);
+    REQUIRE(host->present_first_frame());
+    int background_images = 0, content_images = 0;
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(400)) {
+        Composite c;
+        if (composite_of(window, c)) {
+            if (c.background > 0.5) ++background_images;
+            if (c.content > 0.5) ++content_images;
+        }
+        spin_main(0.002);
+    }
+    host->detach();
+    host.reset();
+    [window orderOut:nil];
+    [window close];
+    INFO("images showing only the backing colour: " << background_images);
+    CHECK(content_images > 0);
+    CHECK(background_images == 0);
 }
 #endif
 

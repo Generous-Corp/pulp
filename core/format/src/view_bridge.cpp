@@ -323,10 +323,11 @@ bool ViewBridge::rebuild_primary_view() {
 }
 
 bool ViewBridge::prepare_first_frame(view::PluginViewHost& host) {
-    if (!view_raw_) return false;
-    PULP_TRACE_SCOPE_NAMED_ARGS("render", "editor_first_frame", "content_first",
-                                static_cast<int64_t>(options_.content_first_open ? 1 : 0));
-    if (options_.content_first_open) {
+    // View-first keeps the previous order exactly: the display link paints the
+    // first frame once the host shows the view.
+    if (!view_raw_ || !options_.content_first_open) return false;
+    PULP_TRACE_SCOPE_NAMED("render", "editor_first_frame");
+    {
         if (auto* session = scripted_ui(); session && session->document_load_pending()) {
             std::string load_error;
             // Reports through the session's loaded callback either way; a
