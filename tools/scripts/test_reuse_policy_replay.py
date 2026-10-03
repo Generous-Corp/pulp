@@ -119,6 +119,12 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(result["flake_skips"], 0)
         self.assertEqual(result["verdict"], "UNSAFE: false skips")
 
+    def test_the_report_states_how_many_failures_the_window_could_catch(self):
+        result = rpr.score(corpus([t("a", "fail", 2), t("b", "timeout"), t("c"), t("d", "pass", 2)]), "none")
+        self.assertEqual(result["failing_group_tests"], 2)   # a flake that passed on retry is not one
+        self.assertIn("held 2 failing tests", rpr.render(result))
+        self.assertIn("cannot see data reads", rpr.render(result))
+
     def test_a_run_stopped_on_a_failure_is_scored(self):
         stopped = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 1}), head()], [pair()],
                              tests={"g1": [t("a", "fail", 2)]})
@@ -609,6 +615,90 @@ class CodemodelTests(unittest.TestCase):
             self.assertEqual(out["cmake-codemodel"]["run"], ["tb"], state)  # nothing rebuilt, still runs
             self.assertEqual(out["cmake-codemodel"]["spawn_undeclared_tests"], 1, state)
             self.assertEqual(out["per-entry"]["run"], [], state)            # not a strict variant
+
+    @staticmethod
+    def data_scan(scanned, **entries):
+        """A data scan that detected its declared readers (a known reader `k`
+        always rides along so a scan with no other declared entry still
+        proves it saw something)."""
+        entries = {"k": {"data": "declared", "inputs": ["test/fixtures/k"], "detected_sources": ["test/k.cpp"]},
+                   **{n: {"detected_sources": ["test/x.cpp"], **e} for n, e in entries.items()}}
+        return rrc.spawn_scan_of({"executables_scanned_for": ["data", "spawns"], "executables_scanned": list(scanned),
+                                  "executables": entries}, "data")
+
+    def test_a_data_scan_that_cannot_show_it_saw_its_readers_is_not_trusted(self):
+        def doc(*detected):
+            return {"executables_scanned_for": ["data"], "executables_scanned": ["a", "b"],
+                    "executables": {f"r{i}": {"data": "declared", "inputs": ["x"], "detected_sources": d}
+                                    for i, d in enumerate(detected)}}
+        self.assertIsNotNone(rrc.spawn_scan_of(doc(["s"]) , "data"))
+        self.assertIsNone(rrc.spawn_scan_of(doc(*[[]] * 3), "data"))            # blind: nothing detected
+        self.assertIsNone(rrc.spawn_scan_of(doc(*[["s"]] * 5, []), "data"))     # 5 of 6 is below the share
+        self.assertIsNotNone(rrc.spawn_scan_of(doc(*[["s"]] * 6, []), "data"))  # 6 of 7 meets it
+        legacy = doc(["s"])
+        del legacy["executables"]["r0"]["detected_sources"]
+        self.assertIsNone(rrc.spawn_scan_of(legacy, "data"))                    # the list cannot show it
+        self.assertIsNone(rrc.spawn_scan_of({**doc(), "executables": {}}, "data"))  # no known reader at all
+        self.assertIsNotNone(rrc.spawn_scan_of({**doc(), "executables": {}, "executables_scanned_for": ["spawns"]},
+                                               "spawns"))                       # the spawn scan is not gated
+
+    def test_the_data_manifest_scopes_the_data_rule_per_executable(self):
+        drift = ["tools/scripts/foo.py"]   # runtime surface, not a declared input of either test
+        scan = self.data_scan(["a", "b", "tool"], a={"data": "declared", "inputs": ["test/fixtures/a"]})
+
+        def run(scan, drift=drift):
+            return rrc.classify_source_keys(drift, ["ta", "tb"], self.MAP, {}, {}, set(), self.EXES | {"test/tool"},
+                                            (set(), {"test/a", "test/b", "test/tool"}), data_scan=scan)
+        out = run(scan)
+        self.assertEqual(out["cmake-codemodel"]["run"], ["ta", "tb"])      # the broad rule: every compiled test
+        self.assertEqual(out["manifest-data"]["run"], [])
+        self.assertTrue(out["manifest-data"]["data_scanned"])
+        self.assertEqual(run(scan, ["test/fixtures/a/x.json"])["manifest-data"]["run"], ["ta"])  # a declared input
+        undeclared = self.data_scan(["a", "b"], b={"data": "undeclared", "inputs": []})
+        self.assertEqual(run(undeclared)["manifest-data"]["run"], ["tb"])  # undeclared reads: any surface drift
+        self.assertEqual(run(self.data_scan(["a"]))["manifest-data"]["run"], ["tb"])  # b not scanned
+        self.assertEqual(run(None)["manifest-data"]["run"], ["ta", "tb"])  # no scan: the broad rule
+        older = rrc.spawn_scan_of({"executables_scanned_for": ["spawns"], "executables_scanned": ["a", "b"]}, "data")
+        self.assertIsNone(older)
+        odd = self.data_scan(["a", "b"], a={"data": "partly"})
+        self.assertEqual(run(odd)["manifest-data"]["run"], ["ta"])         # an unknown state fails closed
+        self.assertEqual(run(scan, ["docs/a.md"])["manifest-data"]["run"], [])
+
+    def outputs(self, drift, hashed, changed, rebuilt=frozenset(), **kw):
+        return rrc.classify_source_keys(list(drift), ["ta", "tb"], self.MAP, {}, {}, set(rebuilt), self.EXES | {"test/tool"},
+                                        (set(), {"test/a", "test/b", "test/tool"}),
+                                        outputs=(frozenset(hashed), frozenset(changed)), **kw)
+
+    def test_output_key_rebuilds_only_executables_whose_bytes_changed(self):
+        hashed = {"test/a", "test/b", "test/tool"}
+        out = self.outputs(["CMakeLists.txt"], hashed, {"test/b"})   # a version stamp re-keys everything
+        self.assertEqual(out["cmake-codemodel"]["run"], ["ta", "tb"])
+        self.assertEqual(out["output-key"]["run"], ["tb"])
+        self.assertEqual(self.outputs(["CMakeLists.txt"], hashed, set())["output-key"]["run"], [])
+        # Commit-bound by the learned list, yet the bytes came out the same.
+        bound = self.outputs(["docs/a.md"], hashed, set(), commit_bound=frozenset({"test/a"}))
+        self.assertEqual((bound["cmake-codemodel"]["run"], bound["output-key"]["run"]), (["ta"], []))
+
+    def test_output_key_keeps_the_source_key_where_no_hash_was_recorded(self):
+        out = self.outputs(["CMakeLists.txt"], {"test/b"}, set())
+        self.assertEqual(out["output-key"]["run"], ["ta"])            # a has no hash: the stamp still reaches it
+        source_only = self.outputs(["test/test_a.cpp"], {"test/b"}, set(), rebuilt={"test/a", "test/b"})
+        self.assertEqual(source_only["output-key"]["run"], ["ta"])    # a: its source reached it; b: same bytes
+        none = rrc.classify_source_keys(["CMakeLists.txt"], ["ta"], self.MAP, {}, {}, set(), self.EXES,
+                                        (set(), {"test/a"}))
+        self.assertNotIn("output-key", none)                          # no hashes: no variant
+
+    def test_output_key_reruns_a_test_whose_spawned_tool_changed_bytes(self):
+        out = self.outputs(["docs/a.md"], {"test/a", "test/b", "test/tool"}, {"test/tool"},
+                           spawns=self.spawns(b=["tool"]), spawnable=frozenset({"test/tool"}),
+                           spawn_scan=self.scan(["a", "b", "tool"]))
+        self.assertEqual(out["output-key"]["run"], ["tb"])
+        self.assertEqual(out["output-key"]["executables_rebuilt"], 0)  # the tests' own binaries are unchanged
+
+    def test_recorded_outputs_compare_only_executables_both_jobs_hashed(self):
+        self.assertEqual(rrc.recorded_outputs({"a": "1", "b": "2", "c": "3"}, {"a": "1", "b": "9"}, ["a", "b", "c", "d"]),
+                         (frozenset({"a", "b"}), frozenset({"b"})))
+        self.assertIsNone(rrc.recorded_outputs(None, {"a": "1"}, ["a"]))
 
     def test_a_rebuilt_module_triggers_the_fallback_and_reaches_its_loader(self):
         scan = self.scan(["a", "tool"])
