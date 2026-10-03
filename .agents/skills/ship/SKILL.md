@@ -538,7 +538,7 @@ pulp ship sign                                          # Uses identity from con
 pulp ship package --version 1.0.0                       # Creates .pkg in artifacts/
 pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg  # Submit the packaged artifact
 pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0
-pulp ship appcast --url artifacts/Plugin.pkg --download-url https://example.com/Plugin.pkg --sign-key <base64-key>
+pulp ship appcast --url artifacts/Plugin.pkg --download-url https://example.com/Plugin.pkg --sign-key-file ~/.config/pulp/secrets/sparkle/plugin_ed25519
 ```
 
 #### Notarization credentials (`pulp ship notarize`)
@@ -1035,6 +1035,37 @@ file size and Ed25519 signing. Use `--download-url` to write the public
 Sparkle enclosure URL into the feed. The hosted file must be byte-identical to
 the local artifact passed as `--url`; otherwise Sparkle rejects the update
 because the feed length and signature describe different bytes.
+
+### Sparkle in a standalone app (pulp_add_sparkle)
+
+- **App only, never plug-ins.** `pulp_add_sparkle()` refuses a non-`.app`
+  target. The update payload is the whole installer `.pkg`, so updating the app
+  updates every bundle the package installs.
+- **The SDK never links Sparkle.** `pulp-standalone` looks up
+  `SPUStandardUpdaterController` through the Objective-C runtime and only
+  accepts a class whose bundle lives in the app's own `Contents/Frameworks`.
+  The app links the framework with `-needed_framework` so the load command
+  survives even though no Sparkle symbol is referenced.
+- **Scheduled checks start only in a Developer-ID-signed build** (Team ID on the
+  main executable). Dev/CI launches show the menu item but never prompt or reach
+  the network on their own; `PULP_STANDALONE_UPDATER=on|off` overrides.
+- **Signing order is load-bearing.** `codesign` without `--deep` never reaches
+  inside a framework, and notarization rejects Sparkle's upstream ad hoc
+  signatures. `build_combined_installer.sh` signs `XPCServices/*.xpc`
+  (`--preserve-metadata=entitlements`), nested `*.app` (Updater.app), helper
+  executables (Autoupdate), then the framework, then the app.
+  `Versions/Current` is a symlink: walk it with `find -H`, or the helpers are
+  silently skipped and only notarization notices.
+- **Feed metadata.** A `.pkg` enclosure needs
+  `sparkle:installationType="package"` (`pulp ship appcast` adds it). Sparkle
+  compares `sparkle:version` (`--build-number`) with `CFBundleVersion`, so it
+  must rise every release; the CLI refuses an older build in the same channel.
+  Release notes: prefer inline `--notes-html-file` over `--release-notes-url`
+  when the notes would be a GitHub release asset — those are served with
+  `Content-Disposition: attachment`, not as a page.
+- **Keys.** Pass `--sign-key-file`, never `--sign-key <key>`, so the private key
+  stays off argv. Sparkle cannot rotate keys for copies already installed: back
+  the private key up before the first release that embeds it.
 
 ### Android package tests fail only on Windows
 

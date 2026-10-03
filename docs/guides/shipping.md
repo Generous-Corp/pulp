@@ -430,6 +430,65 @@ feed.items.push_back(item);
 auto xml = feed.to_xml();
 ```
 
+### In-app updates for a standalone app (Sparkle 2)
+
+A standalone app can update itself, and everything its installer package
+carries, from a feed of signed installer packages:
+
+1. **Keys, once.** Generate an Ed25519 key pair (Sparkle's `generate_keys`, or
+   any Ed25519 tool that writes the 32-byte seed as one line of base64). Keep the
+   private key outside the repository — for example
+   `~/.config/pulp/secrets/sparkle/<app>_ed25519`, `chmod 600`, with a durable
+   copy in your password manager. Losing it means installed copies can never be
+   updated again: Sparkle has no key rotation for an app already in the field.
+2. **Embed the updater in the app only.**
+
+   ```cmake
+   pulp_add_sparkle(MyPlugin_Standalone
+       FEED_URL      "https://github.com/me/myplugin/releases/latest/download/appcast.xml"
+       PUBLIC_ED_KEY "<public key>")
+   ```
+
+   The app gains **Check for Updates…** in its application menu. Plug-in bundles
+   never carry Sparkle; updating the app updates them because the update is the
+   whole installer package.
+3. **Package as usual.** `build_combined_installer.sh` signs the embedded
+   framework inside-out with the Developer ID identity and the hardened runtime
+   and notarizes the package with everything else.
+4. **Publish the feed beside the package.**
+
+   ```bash
+   pulp ship appcast --url artifacts/MyPlugin-1.2.0.pkg \
+     --download-url https://github.com/me/myplugin/releases/download/v1.2.0/MyPlugin-1.2.0.pkg \
+     --version 1.2.0 --build-number 1.2.0 --min-os 13.0 \
+     --sign-key-file ~/.config/pulp/secrets/sparkle/myplugin_ed25519 \
+     --notes-html-file artifacts/notes-1.2.0.html \
+     --full-release-notes-url https://github.com/me/myplugin/releases/tag/v1.2.0 \
+     --output artifacts/appcast.xml
+   ```
+
+   Upload `appcast.xml` as an asset of the same release. A feed URL of the form
+   `https://github.com/<owner>/<repo>/releases/latest/download/appcast.xml`
+   always resolves to the newest non-prerelease release, so a preview published
+   as a GitHub *prerelease* can never reach release users — but every release
+   that is not marked prerelease must carry an `appcast.xml`, or the feed 404s.
+   Practice previews against a separate feed (a different `FEED_URL` in a test
+   build, a fixed prerelease tag that hosts `appcast-beta.xml`, or a `file://`
+   feed) rather than a channel inside the release feed.
+
+Things that matter for installer-package updates:
+
+- `CFBundleVersion` is what Sparkle compares with `sparkle:version`
+  (`--build-number`), so it must increase with every release.
+- Sparkle installs a package with `/usr/sbin/installer -target /` after an
+  administrator prompt, never silently, and with the package's default choices.
+  A component the user deselected in the original install is installed again.
+- The updater can only update copies that already contain it. The first release
+  that embeds Sparkle has to be installed by hand; it is the first version that
+  can update itself to the one after it.
+- Sparkle 2.7.3+ may refuse to install from a development build whose helper
+  tools were not re-signed; practise with a signed, notarized build.
+
 ### CI Release Pipeline
 
 The `sign-and-release.yml` workflow runs on version tags (`v*`):

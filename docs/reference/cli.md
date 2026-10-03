@@ -1105,7 +1105,8 @@ pulp ship notarize --dry-run                       # print resolved argv, no sub
 pulp ship release --pkg --identity "..." --installer-identity "..."
 pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+verify
 pulp ship appcast --url https://example.com/MyApp-1.0.pkg --version 1.0.0
-pulp ship appcast --url artifacts/MyApp-1.0.pkg --download-url https://example.com/MyApp-1.0.pkg --sign-key <base64-key>
+pulp ship appcast --url artifacts/MyApp-1.0.pkg --download-url https://example.com/MyApp-1.0.pkg --sign-key-file ~/.config/pulp/secrets/sparkle/myapp_ed25519 \
+  --build-number 1.0.0 --notes-html-file artifacts/notes.html --full-release-notes-url https://example.com/releases/1.0.0
 pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 ```
 
@@ -1135,7 +1136,9 @@ identity, not here.
 
 For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 
-`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--download-url` overrides the enclosure URL written to the feed, so a local artifact can be signed while Sparkle downloads from the public URL. The file served from `--download-url` must be byte-identical to the local artifact passed as `--url`, because the feed length and Ed25519 signature are computed from the local bytes. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed.
+`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--download-url` overrides the enclosure URL written to the feed, so a local artifact can be signed while Sparkle downloads from the public URL. The file served from `--download-url` must be byte-identical to the local artifact passed as `--url`, because the feed length and Ed25519 signature are computed from the local bytes. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed. Prefer `--sign-key-file <file>` (Sparkle's `generate_keys -x` format, one line of base64) so the private key never appears in the process list; `--sign-key` takes the key itself and the two are mutually exclusive.
+
+For Sparkle 2 installer-package updates, a `.pkg` / `.mpkg` download URL gets `sparkle:installationType="package"` automatically (`--installation-type auto|package|none` overrides it); Sparkle installs such an update with `/usr/sbin/installer` after an administrator prompt. `--build-number` sets `sparkle:version`, the value Sparkle compares against the app's `CFBundleVersion` (it defaults to `--version`). `--notes-html-file` embeds that HTML as the item's `<description>`, which Sparkle shows as "What's New"; it is preferred over `--release-notes-url` for notes hosted as GitHub release assets, which are served as downloads rather than pages. `--full-release-notes-url` adds the "Version History" link, `--channel` puts the item on a named Sparkle channel, and `--pub-date` fixes the RFC 2822 date for reproducible feeds. Re-running for a version already in the feed replaces that entry, and a build number that is not newer than one the same channel already offers is refused.
 
 #### `pulp ship share` — one-off "sign it for a friend"
 
