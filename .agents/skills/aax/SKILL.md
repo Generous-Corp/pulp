@@ -361,6 +361,17 @@ adapter-side code that instantiates a throwaway processor to read metadata must
 do the same; `[aax][model][latency]` in `test_aax_model.cpp` covers it SDK-free
 with a processor whose latency is a parameter default.
 
+### The editor opens on the plug-in's own background
+
+Build the host's `PluginViewHost::Options` with
+`editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
+by field: it carries the plug-in's declared background
+(`ViewBridge::editor_background_rgb()`), which the host paints on its backing
+layer and under the empty tree until the view-first document mounts. A
+hand-built Options silently drops it and this format opens on the framework
+navy while the others open on the plug-in's colour (`view-bridge`, "The first
+frame must already look like the plug-in").
+
 ### The editor's GPU surface is a SUBSCRIPTION, not a one-shot read
 
 `aax_effect_gui.cpp` must not sample `host_->gpu_surface()` once and hand
