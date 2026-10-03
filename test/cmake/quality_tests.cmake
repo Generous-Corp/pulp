@@ -1197,6 +1197,13 @@ if(Python3_Interpreter_FOUND)
                 --repo-root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}" --check)
             set_tests_properties(changed-surface-script-families-drift PROPERTIES
                 TIMEOUT 120 SKIP_RETURN_CODE 77)
+            # A bounded run's base configure is FetchContent-disconnected, so a
+            # marked dependency must download only through FetchContent. This
+            # configured tree must hold its source, so an absent tree fails.
+            add_test(NAME deps-offline-fetch-contract COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/deps/audit.py" --offline-fetch-only
+                --require-offline-trees --build-dir "${CMAKE_BINARY_DIR}")
+            set_tests_properties(deps-offline-fetch-contract PROPERTIES TIMEOUT 60)
         endif()
     endif()
 

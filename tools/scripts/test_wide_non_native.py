@@ -403,6 +403,9 @@ REVIEWED_SCANNERS = {
     "tools/scripts/raw_this_async_check.py": "walks core/ only",
     "tools/scripts/sample_region_compat_baseline.py": "walks CMake and build trees",
     "tools/scripts/skills_doc_check.py": "walks .agents/skills",
+    "tools/deps/audit.py":
+        "walks only a dependency's fetched source tree (external/ or the FetchContent "
+        "cache) for its offline-fetch contract; it names tools/ only for its own manifest",
     "tools/scripts/style_dedup_table.py": "walks C++ source directories",
     "tools/scripts/thread_assert_check.py": "walks test/*.cpp",
     "tools/scripts/test_agent_capability_installed_sdk.py": "walks its build prefix",
