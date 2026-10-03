@@ -39,25 +39,74 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
                 permissions = text.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
                 self.assertIn("  pull-requests: read", permissions)
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        # The fixture's protected base is the source tree as ONE parentless
+        # commit, borrowing the source's objects. A clone would inherit the
+        # source checkout's depth: CI runs this suite on a one-commit-deep
+        # checkout, and the verifier deepens any shallow repository it is
+        # handed, which a fixture whose origin is itself truncated can never
+        # satisfy. A complete one-commit history also makes every
+        # history-derived regenerator answer the same way on both sides.
+        #
+        # Built once per suite: the ledger re-pin below runs the GPU handoff
+        # regenerator, the slowest step here, and every fixture starts from the
+        # same base. Each test gets its own clone of this template.
+        cls.template_holder = tempfile.TemporaryDirectory(prefix="pulp-generated-bump-base-")
+        source = Path(__file__).resolve().parents[2]
+        template = Path(cls.template_holder.name) / "base"
+        common = Path(run(source, "rev-parse", "--path-format=absolute",
+                          "--git-common-dir"))
+        tree = run(source, "rev-parse", "HEAD^{tree}")
+        run(Path(cls.template_holder.name), "init", "--quiet", str(template))
+        (template / ".git" / "objects" / "info" / "alternates").write_text(
+            f"{common / 'objects'}\n", encoding="utf-8"
+        )
+        run(template, "config", "user.name", CHECK.BOT_NAME)
+        run(template, "config", "user.email", CHECK.BOT_EMAIL)
+        run(template, "config", "commit.gpgsign", "false")
+        root_commit = subprocess.run(
+            ["git", "commit-tree", tree], cwd=template, check=True, text=True,
+            input="fixture protected base\n", capture_output=True,
+        ).stdout.strip()
+        run(template, "checkout", "--quiet", "-B", "main", root_commit)
+        # Re-pin the history-derived ledger pair to that history, as main
+        # always carries it current, so an ordinary fixture bump does not also
+        # re-pin it. The tests that need a re-pin build one deliberately.
+        subprocess.run(
+            [sys.executable, "tools/scripts/gpu_handoff_provenance.py", "write", "--receipt"],
+            cwd=template, check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "--quiet", "--no-verify", "-am", "pin the ledger pair"],
+            cwd=template, check=True,
+        )
+        cls.template = template
+        cls.template_base = run(template, "rev-parse", "HEAD")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.template_holder.cleanup()
+
     def setUp(self) -> None:
         self.holder = tempfile.TemporaryDirectory(prefix="pulp-generated-bump-test-")
         self.root = Path(self.holder.name)
-        source = Path(__file__).resolve().parents[2]
         self.repo = self.root / "repo"
-        # One commit of history, the shape CI's `fetch-depth: 1` checkout gives
-        # the workflow that runs this suite. The derived regenerators resolve
-        # per-path last-owner revisions by walking history, so over a full local
-        # history each regeneration costs tens of seconds; every assertion here
-        # is about the transaction on top of `self.base`, which needs none of it.
+        # A local clone of the template: its own refs and worktree, the
+        # template's objects. The template has no origin and neither does
+        # this, so nothing a test does can reach a remote.
         subprocess.run(
-            ["git", "clone", "--quiet", "--no-local", "--depth", "1",
-             source.as_uri(), str(self.repo)],
+            ["git", "clone", "--quiet", "--shared", "--branch", "main", str(self.template),
+             str(self.repo)],
             check=True,
         )
+        run(self.repo, "remote", "remove", "origin")
         run(self.repo, "config", "user.name", CHECK.BOT_NAME)
         run(self.repo, "config", "user.email", CHECK.BOT_EMAIL)
         run(self.repo, "config", "commit.gpgsign", "false")
+        self.assertEqual(run(self.repo, "rev-parse", "--is-shallow-repository"), "false")
         self.base = run(self.repo, "rev-parse", "HEAD")
+        self.assertEqual(self.base, self.template_base)
 
     def tearDown(self) -> None:
         self.holder.cleanup()
@@ -728,13 +777,14 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
 
     # -- history-derived ledger reproduced from a shallow CI checkout ---------
 
-    # Stands in for gpu_handoff_provenance.py at the same pinned path and with
-    # the same command shape: it answers a per-path last-owner question from
+    # Stands in for gpu_handoff_provenance.py at the same pinned path, with
+    # the same command shape and the same self-anchored root: it answers a per-path last-owner question from
     # history and refuses when the answer is a shallow graft boundary, exactly
     # the refusal that left the real ledger pair stale inside the classify job.
     HISTORY_REGENERATOR = """#!/usr/bin/env python3
 import hashlib, pathlib, subprocess, sys
-root = pathlib.Path.cwd()
+# Anchored to its own location, as the real ROOT is, not to the cwd.
+root = pathlib.Path(__file__).resolve().parents[2]
 def git(*args):
     return subprocess.run(["git", *args], cwd=root, text=True,
                           capture_output=True, check=True).stdout.strip()
@@ -817,6 +867,43 @@ receipt.write_text('{"handoff_sha256": "%s"}\\n'
         result = CHECK.verify(inputs)
         self.assertTrue(result["generated_version_bump"])
         self.assertEqual(run(inputs.repo, "rev-parse", "--is-shallow-repository"), "false")
+
+    def test_ledger_repin_rides_a_merge_group_on_its_own_base(self) -> None:
+        # The group is the bump alone on its base: its projection is the one
+        # the pull-request proof already made, not a second regeneration whose
+        # self-anchored GPU regenerator would write the wrong worktree.
+        candidate = self._ledger_bump()
+        tree = run(self.repo, "rev-parse", f"{candidate}^{{tree}}")
+        group = self._commit_tree(tree, self.base, candidate, message="exact group\n")
+        inputs = self._inputs(candidate)
+        pull = json.loads(inputs.event_path.read_text(encoding="utf-8"))["pull_request"]
+        pull["number"] = 99
+        inputs.event_name = "merge_group"
+        inputs.head = group
+        inputs.event_path.write_text(json.dumps({
+            "repository": {"full_name": "Generous-Corp/pulp"},
+            "merge_group": {"base_sha": self.base, "head_sha": group},
+        }), encoding="utf-8")
+        inputs.pulls_json = self.root / "pulls.json"
+        inputs.pulls_json.write_text(json.dumps([[{"number": 99}]]), encoding="utf-8")
+        inputs.pull_json = self.root / "pull.json"
+        inputs.pull_json.write_text(json.dumps(pull), encoding="utf-8")
+        self.assertTrue(CHECK.verify(inputs)["generated_version_bump"])
+
+        hostile = self._commit_tree(
+            run(self.repo, "rev-parse", f"{self.base}^{{tree}}"), self.base, candidate,
+            message="group that drops the bump\n",
+        )
+        event = json.loads(inputs.event_path.read_text(encoding="utf-8"))
+        event["merge_group"]["head_sha"] = hostile
+        inputs.event_path.write_text(json.dumps(event), encoding="utf-8")
+        inputs.head = hostile
+        # The first proof bound the imported writer's regenerators in place;
+        # a second proof in this process must import it afresh, as CI does.
+        for name in ("version_at_land", "version_bump_surfaces"):
+            sys.modules.pop(name, None)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "cumulative projection"):
+            CHECK.verify(inputs)
 
     def test_shallow_ledger_repin_with_an_extra_byte_is_refused(self) -> None:
         candidate = self._ledger_bump(extra_path="core/hostile.cpp")
