@@ -390,9 +390,8 @@ def spawn_evidence(repo: Repo) -> None:
     """Executables that start a process, as configure records them:
     edge (a runtime target), reviewed (pulp_test_spawns NONE), hidden (the
     call sits in a test/support header it includes, with no edge), member
-    (a `.system(` member call, which is not a process API), data-and-spawn
-    (reads a declared fixture and spawns with no edge), and untracked (a
-    reviewed UNTRACKED: it runs a program no edge describes)."""
+    (a `.system(` member call, which is not a process API), and data-and-spawn
+    (reads a declared fixture and spawns with no edge)."""
     write(repo.root, "test/test_edge.cpp", "auto r = pulp::platform::ChildProcess::run(tool, {});\n")
     write(repo.root, "test/test_reviewed.cpp", "FILE* f = popen(\"git status\", \"r\");\n")
     write(repo.root, "test/test_hidden.cpp", '#include "support/runner.hpp"\nint x = run_it();\n')
@@ -416,10 +415,7 @@ def spawn_evidence(repo: Repo) -> None:
         "pulp-test-both": row("test/test_both.cpp", defines=["PULP_SOURCE_DIR"]),
         "pulp-test-loader": row("test/test_loader.cpp"),
         "pulp-test-fake-slot": row("test/test_fake_slot.cpp"),
-        # Runs a program at a fixed path no edge describes; its own sources
-        # show no call (the spawn is in linked library code).
-        "pulp-test-untracked": dict(row("test/test_member.cpp", runtime=["pulp-cli"]), spawns_untracked=True)}}),
-        encoding="utf-8")
+        }}), encoding="utf-8")
     (ev / "pulp-test-both.inputs.json").write_text(json.dumps({
         "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-both", "kind": "compiled",
         "sources": ["test/test_both.cpp"], "inputs": ["test/fixtures/a"]}), encoding="utf-8")
@@ -442,7 +438,6 @@ class SpawnScanTests(unittest.TestCase):
             # Loading a plugin is a runtime edge; implementing the interface is not.
             self.assertEqual(ex["pulp-test-loader"]["spawns"], "undeclared")
             self.assertNotIn("pulp-test-fake-slot", ex)
-            self.assertEqual(ex["pulp-test-untracked"]["spawns"], "undeclared")
             self.assertEqual((ex["pulp-test-both"]["data"], ex["pulp-test-both"]["spawns"]), ("declared", "undeclared"))
             summary = sti.data_summary(repo.root, repo.build)
             self.assertEqual((summary["data_reading"], summary["declared"], summary["undeclared"]), (1, 1, 0))

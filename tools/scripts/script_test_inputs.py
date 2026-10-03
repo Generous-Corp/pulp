@@ -425,12 +425,8 @@ def spawning_sources(root: Path, sources: list[str]) -> list[str]:
 
 def spawn_state(root: Path, rec: dict) -> tuple[str | None, list[str]]:
     """(`declared` | `none` | `undeclared` | None, the spawning files) for one
-    executables.json record. None: nothing in it starts a process. A reviewed
-    UNTRACKED (it runs a program no edge describes) is `undeclared` whatever
-    its sources or edges say."""
+    executables.json record. None: nothing in it starts a process."""
     spawning = spawning_sources(root, list(rec.get("sources") or []))
-    if rec.get("spawns_untracked"):
-        return "undeclared", spawning
     if not spawning:
         return None, []
     if rec.get("runtime_targets"):

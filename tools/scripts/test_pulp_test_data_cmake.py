@@ -20,7 +20,7 @@ What must hold:
   directory, where an inline `if(TARGET tool)` is false and silently drops
   it; `runtime_targets` lists the edge, and `spawns_none` a reviewed NONE;
 - a `$<TARGET_FILE:x>` definition without an edge to x fails the configure,
-  and so does a NONE on an executable that has one, or that is also UNTRACKED.
+  and so does a NONE on an executable that has one.
 
 Run:
     python3 tools/scripts/test_pulp_test_data_cmake.py
@@ -224,13 +224,6 @@ class PulpTestSpawnsCMakeTests(unittest.TestCase):
         proc, _ = self.configure("pulp_test_spawns(spawner NONE)\npulp_test_spawns(spawner tool)\n")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("spawner is declared pulp_test_spawns(NONE) but depends on tool", proc.stderr)
-
-    def test_untracked_is_recorded_and_excludes_none(self) -> None:
-        proc, index = self.configure("pulp_test_spawns(spawner tool)\npulp_test_spawns(spawner UNTRACKED)\n")
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual((index["spawner"]["spawns_untracked"], index["plain"]["spawns_untracked"]), (True, False))
-        proc, _ = self.configure("pulp_test_spawns(plain NONE)\npulp_test_spawns(plain UNTRACKED)\n")
-        self.assertIn("plain is declared both NONE and UNTRACKED", proc.stderr)
 
 
 if __name__ == "__main__":

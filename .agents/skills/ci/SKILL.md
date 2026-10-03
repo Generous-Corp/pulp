@@ -2007,8 +2007,7 @@ include, comments stripped, for process API calls and for runtime loads
 `LoadLibrary`, `CFBundle`). One with no edge and no reviewed
 `pulp_test_spawns(<test> NONE)` (it starts only system tools, a fork of
 itself, or an in-process plugin) is `spawns: undeclared`, and the shadow
-never skips it. `pulp_test_spawns(<test> UNTRACKED)` forces that for a test
-that runs a program no edge describes. Pass a built artifact's path in from
+never skips it. Pass a built artifact's path in from
 CMake (`$<TARGET_FILE:x>`, or the bundle path beside its edge); never find it
 by a path relative to the working directory. pulp-test-host's PulpSynth case
 did that and silently skipped for its whole life. The scan cannot see a
