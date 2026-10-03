@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-wave2d-claude-fixture-readiness-watch",
+  "created_at": "2026-10-03T23:45:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record that Wave 2D adds checked-in Claude fixture inventory and explicit source-contract mappings for three optional real-bundle test cases. The change crosses the design-output-and-packaging, design-source-ingest, and visual-proof-harness selectors through tools/import-validation/source-contracts.json and test/fixtures/imports/claude/manifest.json, but changes no production parser, DesignIR schema, renderer, capture path, generated output, or Vellum-owned source. The external PULP_CLAUDE_BUNDLE_FIXTURE remains unavailable and the receipt claims no real-bundle result. Registered as watch-only so family coverage stays explicit; no authority moves.",
+  "tests": [
+    "source-contract-strict",
+    "test_source_contracts",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
