@@ -778,13 +778,21 @@ def drift(current: dict, checked_in: dict) -> list[tuple[str, str, set[str]]]:
             problems.append(("stale entry", name, paths - {""}))
     ce = checked_in.get("executables") or {}
     for name, rec in (current.get("executables") or {}).items():
-        paths = set(rec.get("sources") or []) | set(rec.get("inputs") or [])
+        paths = compiled_entry_paths(rec)
         if name not in ce:
             problems.append(("missing compiled entry", name, paths))
         elif ce[name] != rec:
-            paths |= set(ce[name].get("sources") or []) | set(ce[name].get("inputs") or [])
+            paths |= compiled_entry_paths(ce[name])
             problems.append(("stale compiled entry", name, paths))
     return problems
+
+
+def compiled_entry_paths(rec: dict) -> set[str]:
+    """What a change must touch to own a compiled entry's drift: the sources
+    whose text decided it, data readers and spawn sites alike (a spawns-only
+    entry has no `sources`), and its declared inputs."""
+    return (set(rec.get("sources") or []) | set(rec.get("spawning_sources") or [])
+            | set(rec.get("undeclared_sources") or []) | set(rec.get("inputs") or []))
 
 
 def touched_by(changed: set[str], paths: set[str]) -> bool:
@@ -960,7 +968,10 @@ def main(argv: list[str]) -> int:
             entry = current["tests"][name].get("entry") or ""
             return bool(entry) and entry in changed
         if kind == "missing compiled entry":
-            return bool(set(current["executables"][name].get("sources") or []) & changed)
+            # Only the entry's own sources, not its declared inputs: a shared
+            # fixture directory must not make every new entry this change's.
+            rec = current["executables"][name]
+            return bool((compiled_entry_paths(rec) - set(rec.get("inputs") or [])) & changed)
         return touched_by(changed, paths)
     blocking = [pr for pr in problems if owns(*pr)]
     advisory = [pr for pr in problems if pr not in blocking]
