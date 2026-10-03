@@ -446,13 +446,46 @@ def run_context(env: dict[str, str], source_root: Path | None) -> dict:
     return ctx
 
 
-def _probe(cmd: list[str]) -> str:
+def _probe(cmd: list[str], why: dict[str, str] | None = None) -> str:
+    """First line of a command's output, or "unknown". When `why` is given,
+    the reason a probe failed is filed under the command's last argument."""
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError):
+    except subprocess.TimeoutExpired:
+        if why is not None:
+            why[cmd[-1]] = "timed out after 30s"
+        return "unknown"
+    except (OSError, subprocess.SubprocessError) as exc:
+        if why is not None:
+            why[cmd[-1]] = f"{type(exc).__name__}: {exc}"
         return "unknown"
     text = (proc.stdout or proc.stderr).strip().splitlines()
-    return text[0].strip() if proc.returncode == 0 and text else "unknown"
+    if proc.returncode == 0 and text:
+        return text[0].strip()
+    if why is not None:
+        why[cmd[-1]] = f"exit {proc.returncode}: {(proc.stderr or proc.stdout).strip()[:300]}"
+    return "unknown"
+
+
+def sdk_from_files(developer_dir: str) -> tuple[str, str]:
+    """The default macOS SDK's version and build, read from the SDK itself
+    (SDKSettings.json and its SystemVersion.plist): the same values
+    `xcrun --show-sdk-version` / `--show-sdk-build-version` print, without
+    xcrun, whose first run on a fresh VM can fail or stall."""
+    sdk = Path(developer_dir) / "Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+    version = build = "unknown"
+    try:
+        version = str(json.loads((sdk / "SDKSettings.json").read_text(encoding="utf-8"))["Version"])
+    except (OSError, ValueError, KeyError):
+        pass
+    try:
+        import plistlib
+
+        with (sdk / "System/Library/CoreServices/SystemVersion.plist").open("rb") as fh:
+            build = str(plistlib.load(fh)["ProductBuildVersion"])
+    except (OSError, ValueError, KeyError, Exception):  # noqa: BLE001 - a malformed plist is "unknown"
+        pass
+    return version, build
 
 
 def runner_image(env: dict[str, str]) -> dict:
@@ -461,19 +494,39 @@ def runner_image(env: dict[str, str]) -> dict:
     carries (OS build, Xcode, SDK, compiler)."""
     fields = {"os": platform.system(), "arch": platform.machine(),
               "image_os": env.get("ImageOS") or None, "image_version": env.get("ImageVersion") or None}
+    why: dict[str, str] = {}
+    sources: dict[str, str] = {}
     if platform.system() == "Darwin":
+        developer_dir = _probe(["xcode-select", "-p"], why)
         fields.update({
-            "os_version": _probe(["sw_vers", "-productVersion"]),
-            "os_build": _probe(["sw_vers", "-buildVersion"]),
-            "developer_dir": _probe(["xcode-select", "-p"]),
-            "sdk_version": _probe(["xcrun", "--show-sdk-version"]),
-            "sdk_build": _probe(["xcrun", "--show-sdk-build-version"]),
-            "clang": _probe(["clang", "--version"]),
+            "os_version": _probe(["sw_vers", "-productVersion"], why),
+            "os_build": _probe(["sw_vers", "-buildVersion"], why),
+            "developer_dir": developer_dir,
+            "sdk_version": _probe(["xcrun", "--show-sdk-version"], why),
+            "sdk_build": _probe(["xcrun", "--show-sdk-build-version"], why),
+            "clang": _probe(["clang", "--version"], why),
         })
+        # The SDK files carry the same two values; read them when xcrun could
+        # not answer. Where the source differs only `probe` records it, so the
+        # digest of one toolchain does not depend on which probe answered.
+        if "unknown" in (fields["sdk_version"], fields["sdk_build"]) and developer_dir != "unknown":
+            version, build = sdk_from_files(developer_dir)
+            for key, value in (("sdk_version", version), ("sdk_build", build)):
+                if fields[key] == "unknown" and value != "unknown":
+                    fields[key] = value
+                    sources[key] = "sdk-files"
     else:
-        fields.update({"os_version": platform.release(), "clang": _probe(["clang", "--version"])})
+        fields.update({"os_version": platform.release(), "clang": _probe(["clang", "--version"], why)})
     digest = hashlib.sha256(json.dumps(fields, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-    return {"digest": digest, "fields": fields}
+    return {"digest": digest, "fields": fields, "probe": {"failed": why, "sources": sources}}
+
+
+def platform_id() -> str:
+    """The host the record was written on, as `<os>-<arch>` (`darwin-arm64`,
+    `linux-x86_64`). A reader wanting one platform's record refuses others:
+    the gate's alias jobs write a no-suite record under the macOS artifact name
+    from a Linux runner."""
+    return f"{platform.system().lower()}-{platform.machine().lower()}"
 
 
 # --------------------------------------------------------------------------
@@ -722,7 +775,7 @@ def cmd_write(a: argparse.Namespace) -> int:
         "schema": SCHEMA, **ctx,
         "job": env.get("GITHUB_JOB") or None, "runner_name": env.get("RUNNER_NAME") or None,
         "runner_environment": env.get("RUNNER_ENVIRONMENT") or None,
-        "runner_image": image, "build_outcome": a.build_outcome,
+        "platform": platform_id(), "runner_image": image, "build_outcome": a.build_outcome,
         "steps": dict(c.split("=", 1) for c in a.context if "=" in c),
         "no_suite_reason": a.no_suite_reason, "suites": summary,
         "script_inputs_blob": script_inputs_blob,
