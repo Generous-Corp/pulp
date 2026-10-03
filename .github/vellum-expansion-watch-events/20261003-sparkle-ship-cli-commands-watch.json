@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-sparkle-ship-cli-commands-watch",
+  "created_at": "2026-10-03T01:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record a CLI manifest edit under design-output-and-packaging: docs/status/cli-commands.yaml lists the new `pulp ship appcast` options (--sign-key-file, --build-number, --notes-html-file, --release-notes-url, --full-release-notes-url, --channel, --installation-type, --pub-date) that tools/cli/cmd_ship.cpp adds for Sparkle standalone-updater feeds. The rows describe app-update appcast generation only; no design-import command, DesignIR, capture, rendering, threshold or import packaging behaviour changes. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-cli-ship-shellout"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
