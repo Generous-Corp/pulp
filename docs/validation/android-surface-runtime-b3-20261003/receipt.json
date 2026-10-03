@@ -1,0 +1,72 @@
+{
+  "receipt_version": 1,
+  "status": "BLOCKED",
+  "scope": "B3 Android SurfaceRuntime",
+  "tested_commit": "0782d778afabd42bce73ff8fb23c237e6437bac8",
+  "worktree_branch": "codex/b3-android-surface-runtime-20261003",
+  "scope_audit": {
+    "android_files": [
+      "android/app/src/main/kotlin/com/pulp/render/PulpSurfaceView.kt",
+      "core/render/platform/android/gpu_surface_android.cpp",
+      "core/render/platform/android/gpu_surface_android_internal.hpp",
+      "core/render/platform/android/surface_runtime_android.cpp",
+      "tools/cmake/PulpAndroid.cmake"
+    ],
+    "out_of_scope_changes": [],
+    "note": "The attempted core/midi/CMakeLists.txt JNI retention workaround was reverted and is not part of this receipt commit."
+  },
+  "environment": {
+    "host": "macOS 27.0.0 arm64",
+    "android_sdk": "/Users/danielraffel/Library/Android/sdk",
+    "ndk": "30.0.16248370",
+    "avd": "Medium_Phone_API_37.0",
+    "device": "emulator-5554",
+    "abi": "arm64-v8a"
+  },
+  "build": {
+    "command": "cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=$HOME/Library/Android/sdk ./gradlew :app:assembleDebug --no-daemon --stacktrace",
+    "result": "PASS",
+    "apk": "android/app/build/outputs/apk/debug/app-debug.apk",
+    "jbr_probe": {
+      "command": "JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home PATH=$JAVA_HOME/bin:$HOME/Library/Android/sdk/platform-tools:$HOME/Library/Android/sdk/emulator:$PATH java -version; adb version; ./gradlew :app:assembleDebug --no-daemon --stacktrace",
+      "observed": "java 25.0.3; adb 1.0.41; Gradle failed before configuration with java.lang.IllegalArgumentException: 25.0.3 in Kotlin JavaVersion.parse"
+    }
+  },
+  "failed_lifecycle_gate": {
+    "command": "PULP_ANDROID_SMOKE_TIMEOUT=90 tools/scripts/android_smoke.sh --skip-build --allow-no-gpu",
+    "exit_code": 7,
+    "output": [
+      "android-smoke: using device emulator-5554 (abi=arm64-v8a)",
+      "[JNI_OnLoad] JNI_OnLoad: Pulp native bridge initialized",
+      "[surface received] Android GPU surface: ANativeWindow received (1080x2400)",
+      "[GPU init (allow-no-gpu)] SurfaceRuntime: failed to create Dawn GpuSurface",
+      "NOTE: Dawn/GPU unavailable — skipping Skia context check",
+      "[DemoSynth] DemoSynth: playing",
+      "Stage 7: Lifecycle (background → foreground)",
+      "android-smoke: timeout waiting for background (pattern=nativeOnBackground, tags=Pulp)"
+    ],
+    "fatal_cause": {
+      "process": "com.pulp.app",
+      "exception": "java.lang.UnsatisfiedLinkError",
+      "message": "No implementation found for void com.pulp.midi.PulpMidiManager.nativeOnDeviceRemoved(int)",
+      "stack": "PulpMidiManager$1.onDeviceRemoved(PulpMidiManager.kt:37) -> MidiManager.DeviceListener.onDeviceRemoved"
+    },
+    "classification": "The five-file Android SurfaceRuntime slice cannot claim a green lifecycle gate because the APK crashes on the Android MIDI callback before HOME can deliver nativeOnBackground. The linker retention fix is outside this task's Android scope and was deliberately reverted."
+  },
+  "other_checks": {
+    "android_premerge_probe_contract": {
+      "command": "python3 tools/scripts/test_android_premerge_probe.py",
+      "result": "PASS"
+    },
+    "android_target_unit_tests": {
+      "command": "python3 tools/scripts/test_android_target.py",
+      "result": "PASS",
+      "tests": 20
+    },
+    "android_api_floor_compile_probe": {
+      "command": "python3 tools/scripts/test_android_aligned_buffer.py --ndk $HOME/Library/Android/sdk/ndk/30.0.16248370",
+      "result": "PASS"
+    }
+  },
+  "required_follow_up": "Retain PulpMidiManager JNI exports in libpulp.so through the owning MIDI/linker change, then rerun the full smoke lifecycle and clean-shutdown gate before claiming B3 complete."
+}
