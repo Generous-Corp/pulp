@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -15,6 +16,7 @@
 #endif
 
 #include <pulp/runtime/model_registry.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 namespace pulp::gpu_audio::detail {
 
@@ -43,6 +45,16 @@ struct NeuralModelManifest {
     std::uint64_t state_bytes = 0;
     std::uint32_t state_schema_version = 0;
     bool redistributable = false;
+};
+
+/// Installed artifact provenance owned by the private neural admission seam.
+/// Paths and strings belong to the control-plane installer; this view is never
+/// retained by the realtime processor.
+struct NeuralInstalledAsset {
+    std::string_view asset_id{};
+    std::filesystem::path path{};
+    std::string_view sha256{};
+    std::uint64_t size_bytes = 0;
 };
 
 enum class NeuralModelManifestError : std::uint8_t {
@@ -370,5 +382,55 @@ validate_neural_model_entry(const pulp::runtime::ModelEntry& entry, bool redistr
 }
 
 static_assert(is_sha256("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+
+/// Verify the bytes on disk, rather than merely checking that a manifest hash
+/// has SHA-256 shape. This is control-plane admission work and must complete
+/// before a model is prepared or exposed to the realtime callback.
+inline bool verify_neural_installed_assets(std::span<const NeuralInstalledAsset> assets,
+                                           std::string& error) {
+    error.clear();
+    if (assets.empty()) {
+        error = "neural model has no installed assets";
+        return false;
+    }
+
+    for (const auto& asset : assets) {
+        if (asset.asset_id.empty() || asset.path.empty() || asset.size_bytes == 0 ||
+            !is_sha256(asset.sha256)) {
+            error = "neural installed asset metadata is invalid";
+            return false;
+        }
+
+        std::error_code ec;
+        const auto actual_size = std::filesystem::file_size(asset.path, ec);
+        if (ec || actual_size != asset.size_bytes) {
+            error = "neural installed asset byte count mismatch: " +
+                    std::string(asset.asset_id);
+            return false;
+        }
+
+        const auto actual_hash = pulp::runtime::sha256_file_hex(asset.path, asset.size_bytes);
+        if (!actual_hash || *actual_hash != asset.sha256) {
+            error = "neural installed asset SHA-256 mismatch: " +
+                    std::string(asset.asset_id);
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Verify the primary artifact represented by a manifest. Additional bundle
+/// assets are checked with verify_neural_installed_assets in the same admission
+/// transaction.
+inline bool verify_neural_manifest_artifact(const NeuralModelManifest& manifest,
+                                            const std::filesystem::path& artifact_path,
+                                            std::string& error) {
+    const NeuralInstalledAsset asset{.asset_id = manifest.artifact_id,
+                                     .path = artifact_path,
+                                     .sha256 = manifest.artifact_sha256,
+                                     .size_bytes = manifest.artifact_size_bytes};
+    return verify_neural_installed_assets(std::span<const NeuralInstalledAsset>(&asset, 1),
+                                          error);
+}
 
 } // namespace pulp::gpu_audio::detail
