@@ -128,5 +128,31 @@
     "change": "Serialize surfaceCreated and surfaceDestroyed with a lifecycle lock so callbacks cannot overwrite the renderThread/Handler pair during teardown.",
     "build": "PASS with arm64 GPU APK",
     "probe": "No duplicate surfaceCreated warning; each observed surfaceDestroyed reported render thread stopped. Native PSS growth remained unchanged, so this fixes the callback race defensively but not the GPU-memory blocker."
+  },
+  "bounded_leak_investigation": {
+    "owner": "Daniel Raffel (B3 branch owner); escalation owner is the common Dawn/Skia or Android emulator Vulkan-driver maintainer",
+    "observed_at_branch_head": "cba5923c36cddf2feccf625a85329184f47cdb33",
+    "probe_command": "Clean launch, then five HOME -> relaunch SurfaceView destroy/create cycles; dumpsys meminfo after each cycle; dumpsys meminfo --unreachable and logcat marker counts after the final cycle.",
+    "clean_baseline_native_pss_kb": 30396,
+    "native_pss_kb_after_each_cycle": [42888, 55280, 67664, 79972, 92480],
+    "total_pss_kb_after_each_cycle": [140295, 152715, 165129, 177439, 189970],
+    "graphics_pss_kb_after_each_cycle": [0, 0, 0, 0, 0],
+    "markers": {
+      "surface_created": 6,
+      "surface_destroyed": 10,
+      "destroy_complete": 5,
+      "dawn_initialized": 6,
+      "skia_graphite_context_created": 6,
+      "fatal_exception": 0,
+      "fatal_signal": 0
+    },
+    "unreachable_native_scan": {
+      "command": "adb shell dumpsys meminfo --unreachable com.pulp.app",
+      "bytes": 47187040,
+      "allocations": 24,
+      "shape": "Repeated 4718592-byte unreachable allocations; native heap, not Graphics PSS."
+    },
+    "classification": "The branch-owned Kotlin/SurfaceRuntime teardown completed for every measured cycle, and the growth is in native heap with zero Graphics PSS. The prior explicit wgpu::Device::Destroy and Skia freeGpuResources experiments did not change the slope. No safe five-file Android lifecycle fix is supported by this evidence; the allocation pattern is escalated as common Dawn/Skia or emulator Vulkan-driver retention.",
+    "follow_up": "Common render-toolchain/emulator-driver owner must reproduce with a clean process, identify the 4718592-byte allocation class, and provide a Dawn/Skia or emulator-driver fix and before/after counters. B3 remains blocked until that evidence exists."
   }
 }
