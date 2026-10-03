@@ -457,15 +457,20 @@ set(_pulp_standalone_sources
     core/format/src/standalone.cpp
     core/format/src/standalone_control_host.cpp
     core/format/src/standalone_musical_typing.cpp
+    core/format/src/standalone_updater.cpp
     core/format/src/null_audio_device.cpp
     core/format/src/test_signal.cpp
     core/format/src/settings_panel.cpp)
 # Synthetic key delivery for the test harness needs AppKit, so the macOS
 # backend is Obj-C++; every other platform links the unsupported stub.
 if(APPLE)
-    list(APPEND _pulp_standalone_sources core/format/src/standalone_key_driver_mac.mm)
+    list(APPEND _pulp_standalone_sources
+        core/format/src/standalone_key_driver_mac.mm
+        core/format/src/standalone_updater_mac.mm)
 else()
-    list(APPEND _pulp_standalone_sources core/format/src/standalone_key_driver_stub.cpp)
+    list(APPEND _pulp_standalone_sources
+        core/format/src/standalone_key_driver_stub.cpp
+        core/format/src/standalone_updater_stub.cpp)
 endif()
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
@@ -480,6 +485,11 @@ function(_pulp_configure_standalone_target target view_target)
         $<BUILD_INTERFACE:yogacore> $<INSTALL_INTERFACE:Pulp::yogacore>
         $<BUILD_INTERFACE:SDL3::SDL3-static> $<INSTALL_INTERFACE:Pulp::sdl3-static>)
     target_compile_definitions(${target} PRIVATE PULP_ENABLE_INSPECTOR=0)
+    if(APPLE AND NOT IOS)
+        # standalone_updater_mac.mm reads the app's own code signature (Team ID)
+        # to decide whether Sparkle's scheduled checks start at launch.
+        target_link_libraries(${target} PUBLIC "-framework Security")
+    endif()
 endfunction()
 _pulp_configure_standalone_target(pulp-standalone pulp::view)
 _pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)

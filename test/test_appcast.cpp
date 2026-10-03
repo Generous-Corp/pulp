@@ -483,6 +483,80 @@ TEST_CASE("Appcast from_xml captures CDATA with nested markup and brackets",
     REQUIRE(parsed->items[0].file_size == 930);
 }
 
+TEST_CASE("Appcast emits Sparkle 2 package, channel and release-notes metadata",
+          "[ship][appcast][sparkle]") {
+    Appcast feed;
+    feed.title = "Spectr";
+    AppcastItem item;
+    item.version = "1.0.7";
+    item.build_number = "1.0.7";
+    item.title = "Version 1.0.7";
+    item.description = "<h2>What's new</h2><ul><li>Updates</li></ul>";
+    item.pub_date = "Fri, 02 Oct 2026 12:00:00 +0000";
+    item.download_url = "https://example.com/v1.0.7/Spectr-1.0.7.pkg";
+    item.file_size = 99;
+    item.ed_signature = "c2ln";
+    item.installation_type = "package";
+    item.channel = "beta";
+    item.release_notes_link = "https://example.com/notes.html?a=1&b=2";
+    item.full_release_notes_link = "https://example.com/releases/tag/v1.0.7";
+    feed.items.push_back(item);
+
+    const auto xml = feed.to_xml();
+    REQUIRE(xml.find("sparkle:installationType=\"package\"") != std::string::npos);
+    REQUIRE(xml.find("<sparkle:channel>beta</sparkle:channel>") != std::string::npos);
+    REQUIRE(xml.find("<sparkle:releaseNotesLink>https://example.com/notes.html?a=1&amp;b=2"
+                     "</sparkle:releaseNotesLink>") != std::string::npos);
+    REQUIRE(xml.find("<sparkle:fullReleaseNotesLink>https://example.com/releases/tag/v1.0.7"
+                     "</sparkle:fullReleaseNotesLink>") != std::string::npos);
+    REQUIRE(xml.find("<![CDATA[<h2>What's new</h2>") != std::string::npos);
+    // The new attributes sit inside the enclosure element, before it closes.
+    const auto enclosure = xml.find("<enclosure");
+    const auto install = xml.find("sparkle:installationType");
+    REQUIRE(enclosure < install);
+    REQUIRE(install < xml.find("/>", enclosure));
+
+    auto parsed = Appcast::from_xml(xml);
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->items.size() == 1);
+    const auto& back = parsed->items[0];
+    CHECK(back.installation_type == "package");
+    CHECK(back.channel == "beta");
+    CHECK(back.release_notes_link == "https://example.com/notes.html?a=1&b=2");
+    CHECK(back.full_release_notes_link == "https://example.com/releases/tag/v1.0.7");
+    CHECK(back.description == item.description);
+
+    // Re-emitting a parsed feed must be byte-stable: no &amp;amp; creep when
+    // `pulp ship appcast` appends the next release to this file.
+    REQUIRE(parsed->to_xml() == Appcast::from_xml(parsed->to_xml())->to_xml());
+    REQUIRE(parsed->to_xml().find("&amp;amp;") == std::string::npos);
+}
+
+TEST_CASE("Appcast omits Sparkle 2 optional metadata when unset", "[ship][appcast][sparkle]") {
+    Appcast feed;
+    AppcastItem item;
+    item.version = "1.0.0";
+    item.download_url = "https://example.com/App.zip";
+    feed.items.push_back(item);
+    const auto xml = feed.to_xml();
+    REQUIRE(xml.find("installationType") == std::string::npos);
+    REQUIRE(xml.find("sparkle:channel") == std::string::npos);
+    REQUIRE(xml.find("releaseNotesLink") == std::string::npos);
+    REQUIRE(xml.find("fullReleaseNotesLink") == std::string::npos);
+}
+
+TEST_CASE("sparkle_installation_type_for recognises flat packages only",
+          "[ship][appcast][sparkle]") {
+    CHECK(sparkle_installation_type_for("Spectr-1.0.7.pkg") == "package");
+    CHECK(sparkle_installation_type_for("/tmp/Suite.MPKG") == "package");
+    CHECK(sparkle_installation_type_for(
+              "https://example.com/download/Spectr-1.0.7.pkg?token=1#x") == "package");
+    CHECK(sparkle_installation_type_for("Spectr-1.0.7.zip").empty());
+    CHECK(sparkle_installation_type_for("Spectr-1.0.7.dmg").empty());
+    CHECK(sparkle_installation_type_for("pkg").empty());
+    CHECK(sparkle_installation_type_for("Spectr.pkg.zip").empty());
+}
+
 TEST_CASE("Version comparison", "[ship][version]") {
     REQUIRE(compare_versions("1.0.0", "1.0.0") == 0);
     REQUIRE(compare_versions("1.0.0", "1.0.1") == -1);

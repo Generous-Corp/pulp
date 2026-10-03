@@ -149,6 +149,47 @@ if ! "$_self_dir/ensure_signing_ready.sh" --quiet; then
 fi
 echo "[installer] signing keychain ready (timestamped pulp ship doctor probe passed)"
 
+# Sign every Contents/Frameworks/*.framework in $1 inside-out: XPC services
+# (keeping their own entitlements), nested apps (Sparkle's Updater.app), helper
+# executables in the version directory (Sparkle's Autoupdate), then the
+# framework itself. Sparkle documents this order for Developer ID re-signing.
+sign_embedded_frameworks() {  # $1=bundle
+  local _frameworks="$1/Contents/Frameworks"
+  [[ -d "$_frameworks" ]] || return 0
+  local fw
+  while IFS= read -r -d '' fw; do
+    # Versions/Current is a symlink; `find -H` below follows it as a starting
+    # point (plain `find` would list the link itself and nothing inside it).
+    local vdir="$fw"
+    [[ -d "$fw/Versions/Current" ]] && vdir="$fw/Versions/Current"
+    local fw_name
+    fw_name="$(basename "$fw" .framework)"
+    if [[ -d "$vdir/XPCServices" ]]; then
+      local xpc
+      while IFS= read -r -d '' xpc; do
+        echo "  signing framework XPC service: ${xpc#"$1/"}"
+        codesign --force --options runtime --timestamp --preserve-metadata=entitlements \
+          -s "$APP_ID" "$xpc"
+      done < <(find "$vdir/XPCServices" -mindepth 1 -maxdepth 1 -name "*.xpc" -print0)
+    fi
+    local nested_app
+    while IFS= read -r -d '' nested_app; do
+      echo "  signing framework helper app: ${nested_app#"$1/"}"
+      codesign --force --options runtime --timestamp -s "$APP_ID" "$nested_app"
+    done < <(find -H "$vdir" -mindepth 1 -maxdepth 1 -name "*.app" -print0)
+    local helper
+    while IFS= read -r -d '' helper; do
+      [[ "$(basename "$helper")" == "$fw_name" ]] && continue
+      file -b "$helper" 2>/dev/null | grep -q "Mach-O" || continue
+      echo "  signing framework helper: ${helper#"$1/"}"
+      codesign --force --options runtime --timestamp -s "$APP_ID" "$helper"
+    done < <(find -H "$vdir" -mindepth 1 -maxdepth 1 -type f -perm +111 -print0)
+    echo "  signing framework: ${fw#"$1/"}"
+    codesign --force --options runtime --timestamp -s "$APP_ID" "$fw"
+    codesign --verify --deep --strict "$fw"
+  done < <(find "$_frameworks" -mindepth 1 -maxdepth 1 -name "*.framework" -print0)
+}
+
 deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local b="$1" ent="${2:-}"
   # Control-shipping manifests and scan reports are build evidence, not Mach-O
@@ -202,6 +243,13 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
     find "$_libdir" -name "*.dylib" -print0 2>/dev/null | while IFS= read -r -d '' d; do
       codesign --force --options runtime --timestamp -s "$APP_ID" "$d"; done
   done
+  # Embedded FRAMEWORKS (Sparkle.framework from pulp_add_sparkle, or any other
+  # Contents/Frameworks/*.framework). Their nested code must be signed inside-out
+  # with this identity and the hardened runtime before the framework, and the
+  # framework before the app: notarization rejects an ad hoc or third-party
+  # signature anywhere in the archive, and signing the app without --deep never
+  # reaches inside a framework.
+  sign_embedded_frameworks "$b"
   # Helper EXECUTABLES the app carries (a CLI tool staged into Resources, a
   # sidecar in MacOS/ that is not the main binary). Signing the bundle does not
   # sign them, and notarization rejects the whole archive when it finds one:

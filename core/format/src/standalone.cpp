@@ -9,6 +9,7 @@
 #include <pulp/format/detail/standalone_musical_typing.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
+#include <pulp/format/detail/standalone_updater.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
@@ -982,6 +983,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto opts = detail::make_standalone_window_options(
         size_hints, chrome, desc.name + " — Standalone", use_gpu);
     detail::add_standalone_settings_menu_command(opts, chrome);
+    // Sparkle auto-update, when the app embeds it via pulp_add_sparkle().
+    const auto updater_plan = detail::plan_standalone_updater(
+        detail::probe_standalone_updater_environment(effective_config.headless));
+    detail::add_standalone_updater_menu_command(opts, updater_plan);
+    if (updater_plan.start_at_launch) detail::start_standalone_updater();
     opts.initially_hidden = effective_config.headless;
     if (musical_typing_) musical_typing_->add_menu_command(opts);
 

@@ -313,6 +313,31 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship appcast with --output works outside a Pulp project",
+                 "[cli][shellout][ship][appcast]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto dir = fs::temp_directory_path() / ("pulp-appcast-consumer-" + std::to_string(unique));
+    fs::create_directories(dir);
+    auto feed = dir / "appcast.xml";
+    auto r = run_pulp_in(dir,
+        {"ship", "appcast", "--url", "https://example.com/App-1.0.0.pkg",
+         "--version", "1.0.0", "--output", feed.string()});
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(read_text_file(feed), "sparkle:installationType=\"package\""));
+
+    // Without --output it still refuses, rather than writing into a guessed root.
+    auto bare = run_pulp_in(dir,
+        {"ship", "appcast", "--url", "https://example.com/App-1.0.0.pkg"});
+    REQUIRE(bare.exit_code != 0);
+    fs::remove_all(dir);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize outside a project errors cleanly",
                  "[cli][shellout][ship]") {
     if (!binary_exists()) {
@@ -860,6 +885,92 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(contains(second_xml, "https://example.com/FakeShipPlugin-3.0.0.pkg"));
     REQUIRE_FALSE(contains(second_xml, artifact.string()));
     REQUIRE(contains(second_xml, "length=\"0\""));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship appcast writes a Sparkle 2 package item from a key file",
+                 "[cli][shellout][ship][appcast][sparkle]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("appcast-sparkle2", true);
+    auto artifacts = root / "artifacts";
+    fs::create_directories(artifacts);
+    auto artifact = artifacts / "Fake-1.0.7.pkg";
+    { std::ofstream out(artifact, std::ios::binary); out << "pkgdata"; }
+    auto notes = artifacts / "notes.html";
+    { std::ofstream out(notes); out << "<style>body{color:#eee}</style><h2>What&#39;s new</h2>"; }
+    auto key = artifacts / "ed25519.key";
+    // Zero seed, with the trailing newline generate_keys -x writes.
+    { std::ofstream out(key); out << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"; }
+    auto feed = artifacts / "appcast.xml";
+
+    auto r = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", artifact.string(),
+         "--download-url", "https://example.com/v1.0.7/Fake-1.0.7.pkg",
+         "--version", "1.0.7",
+         "--build-number", "1.0.7",
+         "--sign-key-file", key.string(),
+         "--notes-html-file", notes.string(),
+         "--full-release-notes-url", "https://example.com/releases/tag/v1.0.7",
+         "--pub-date", "Fri, 02 Oct 2026 12:00:00 +0000",
+         "--min-os", "13.0",
+         "--output", feed.string()});
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    auto xml = read_text_file(feed);
+    REQUIRE(contains(xml, "sparkle:installationType=\"package\""));
+    REQUIRE(contains(xml, "<sparkle:version>1.0.7</sparkle:version>"));
+    REQUIRE(contains(xml, "<![CDATA[<style>body{color:#eee}</style><h2>What&#39;s new</h2>]]>"));
+    REQUIRE(contains(xml, "<sparkle:fullReleaseNotesLink>https://example.com/releases/tag/v1.0.7"));
+    REQUIRE(contains(xml, "<pubDate>Fri, 02 Oct 2026 12:00:00 +0000</pubDate>"));
+    REQUIRE(contains(xml, "sparkle:edSignature=\""));
+    REQUIRE_FALSE(contains(xml, "sparkle:edSignature=\"\""));
+    // The key never leaks into the feed.
+    REQUIRE_FALSE(contains(xml, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+
+    // Re-running the same version replaces the entry instead of duplicating it.
+    auto again = run_pulp_in(root,
+        {"ship", "appcast", "--url", artifact.string(),
+         "--download-url", "https://example.com/v1.0.7/Fake-1.0.7.pkg",
+         "--version", "1.0.7", "--output", feed.string()});
+    REQUIRE(again.exit_code == 0);
+    REQUIRE(contains(again.stdout_output, "(1 items)"));
+
+    // An older build than one the feed already offers is refused.
+    auto older = run_pulp_in(root,
+        {"ship", "appcast", "--url", "https://example.com/Fake-1.0.6.pkg",
+         "--version", "1.0.6", "--output", feed.string()});
+    REQUIRE(older.exit_code != 0);
+    REQUIRE(contains(older.stdout_output + older.stderr_output, "is not newer than"));
+
+    // A separate channel orders independently of the default channel.
+    auto beta = run_pulp_in(root,
+        {"ship", "appcast", "--url", "https://example.com/Fake-1.0.6.1.zip",
+         "--version", "1.0.6.1", "--channel", "beta", "--output", feed.string()});
+    REQUIRE(beta.exit_code == 0);
+    auto beta_xml = read_text_file(feed);
+    REQUIRE(contains(beta_xml, "<sparkle:channel>beta</sparkle:channel>"));
+
+    // Mutually exclusive inputs and bad enum values fail fast.
+    auto both = run_pulp_in(root,
+        {"ship", "appcast", "--url", artifact.string(), "--version", "1.0.8",
+         "--sign-key", "x", "--sign-key-file", key.string(), "--output", feed.string()});
+    REQUIRE(both.exit_code == 2);
+    auto bad_type = run_pulp_in(root,
+        {"ship", "appcast", "--url", artifact.string(), "--version", "1.0.8",
+         "--installation-type", "interactive", "--output", feed.string()});
+    REQUIRE(bad_type.exit_code == 2);
+    auto missing_key = run_pulp_in(root,
+        {"ship", "appcast", "--url", artifact.string(), "--version", "1.0.8",
+         "--sign-key-file", (artifacts / "nope.key").string(), "--output", feed.string()});
+    REQUIRE(missing_key.exit_code != 0);
+    REQUIRE(contains(missing_key.stdout_output + missing_key.stderr_output,
+                     "cannot read --sign-key-file"));
 
     fs::remove_all(root);
 }

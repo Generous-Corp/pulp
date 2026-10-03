@@ -122,6 +122,22 @@ functions:
       - RELEASE_ICON
     docs: reference/cmake.md#pulp_app_icon
 
+  - name: pulp_add_sparkle
+    status: experimental
+    summary: Embed a SHA-256-pinned Sparkle 2 framework in a macOS standalone app and write its update feed and EdDSA public key into Info.plist.
+    required:
+      - target
+      - FEED_URL
+      - PUBLIC_ED_KEY
+    optional:
+      - AUTOMATIC_CHECKS
+      - CHECK_INTERVAL
+      - KEEP_XPC_SERVICES
+      - VERSION
+      - SHA256
+      - DIST_DIR
+    docs: reference/cmake.md#pulp_add_sparkle
+
   - name: pulp_use_kit_ui
     status: experimental
     summary: Attach reviewed UI-kit script, optional token/theme file, and reviewed asset roots from a generated kit interface target to an existing plugin's format targets.

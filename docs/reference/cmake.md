@@ -478,6 +478,46 @@ pulp_app_icon(MyPlugin_Standalone
 )
 ```
 
+## pulp_add_sparkle
+
+Embeds [Sparkle 2](https://sparkle-project.org) in a macOS standalone app so it
+can offer signed updates. Call it after the app target exists, on the `.app`
+target only; it refuses any target that is not a `MACOSX_BUNDLE` executable, so
+an updater never ends up inside an AU, VST3 or CLAP bundle.
+
+```cmake
+pulp_add_sparkle(MyPlugin_Standalone
+    FEED_URL      "https://github.com/me/myplugin/releases/latest/download/appcast.xml"
+    PUBLIC_ED_KEY "<44-character base64 Ed25519 public key>"
+    [AUTOMATIC_CHECKS ON|OFF]       # SUEnableAutomaticChecks; omit to let Sparkle ask
+    [CHECK_INTERVAL 86400]          # SUScheduledCheckInterval, seconds
+    [KEEP_XPC_SERVICES]             # keep Installer/Downloader.xpc (sandboxed apps only)
+    [VERSION 2.10.0 SHA256 <hash>]  # override the pinned release
+    [DIST_DIR <extracted-dist>])    # offline: an already-extracted distribution
+```
+
+At configure time it downloads the pinned `Sparkle-<version>.tar.xz` release
+asset (verifying its SHA-256) into `<build>/_deps/sparkle-<version>/`. After
+each link it copies `Sparkle.framework` into `Contents/Frameworks` with `ditto`,
+removes the XPC services a non-sandboxed app does not use, links the framework
+with an `@executable_path/../Frameworks` rpath. At the end of configure it
+writes `SUFeedURL`, `SUPublicEDKey` and the optional keys into the app's
+`Info.plist` template, so they survive regeneration and combine with
+`pulp_declare_standalone_document_type()` in either order.
+
+`FEED_URL` must be `https://`, or `http://127.0.0.1:<port>/…` for a local practice feed served from loopback (Sparkle 2 refuses `file://` feeds at run time), and
+`PUBLIC_ED_KEY` must be the public half of the key pair. The private key never
+belongs in a build file: keep it outside the repository and pass it to
+`pulp ship appcast --sign-key-file` when publishing.
+
+At run time the standalone host finds Sparkle through the Objective-C runtime
+and adds **Check for Updates…** to the application menu. Scheduled background
+checks start only when the app carries a Developer ID signature, so local and
+CI launches stay quiet; `PULP_STANDALONE_UPDATER=on` starts them in a
+development build, and `=off` disables the updater entirely.
+`build_combined_installer.sh` signs the embedded framework inside-out with the
+Developer ID identity before it signs the app.
+
 ## pulp_add_binary_data
 
 **Status**: usable
