@@ -2008,6 +2008,16 @@ artifact, `recordable` only when no registration lacks a command, for
 measurement; it is not on the validation path, because Shipyard's validation
 commands carry no GitHub credentials.
 
+When the lane's full suite carries known reds, two failing legs are compared
+per test from each leg's `ctest --output-junit` report. The plan is
+`matched_fail` (never `matched_pass`) when the selected leg failed nothing the
+full suite passed and saw every full-suite failure inside its selection, and it
+graduates only if every full-suite failure outside the selection is an
+unexpired row of `tools/ci/changed_surface_lane_reds.json`, read from the
+protected base. That file is a policy path, so a PR editing it runs in full and
+cannot allowlist its own regression; owners delete their row when they fix the
+test.
+
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes
