@@ -888,3 +888,72 @@ TEST_CASE("JSC evaluate surfaces NSException via std::runtime_error (#3206)",
     REQUIRE(result.getWithDefault<int>(0) == 3);
 }
 #endif
+
+namespace {
+// A script past the cache threshold whose result proves it ran in full.
+std::string large_counting_script(int salt) {
+    std::string code = "var __bc_total = " + std::to_string(salt) + ";\n";
+    while (code.size() < 48 * 1024)
+        code += "__bc_total += 1; // padding to exceed the bytecode-cache threshold\n";
+    code += "__bc_total;\n";
+    return code;
+}
+} // namespace
+
+TEST_CASE("QuickJS reuses a large script's bytecode across engines",
+          "[view][js-engine][editor-open]") {
+    clear_script_bytecode_cache();
+    const auto code = large_counting_script(7);
+
+    auto first = create_js_engine(JsEngineType::quickjs);
+    REQUIRE(first);
+    const auto expected = first->evaluate(code).getWithDefault<double>(-1);
+    REQUIRE(expected > 7);
+
+    auto before = script_bytecode_cache_stats();
+    CHECK(first->evaluate_script(code).getWithDefault<double>(-2) == expected);
+    auto after_compile = script_bytecode_cache_stats();
+    CHECK(after_compile.compiles == before.compiles + 1);
+    CHECK(after_compile.hits == before.hits);
+
+    // A fresh realm evaluating byte-identical source reads the bytecode back
+    // and computes the same result.
+    auto second = create_js_engine(JsEngineType::quickjs);
+    CHECK(second->evaluate_script(code).getWithDefault<double>(-3) == expected);
+    auto after_hit = script_bytecode_cache_stats();
+    CHECK(after_hit.hits == after_compile.hits + 1);
+    CHECK(after_hit.compiles == after_compile.compiles);
+
+    // Control: different source is a different entry, never a hit.
+    auto third = create_js_engine(JsEngineType::quickjs);
+    CHECK(third->evaluate_script(large_counting_script(9)).getWithDefault<double>(-4)
+          == expected + 2);
+    auto after_other = script_bytecode_cache_stats();
+    CHECK(after_other.hits == after_hit.hits);
+    CHECK(after_other.compiles == after_hit.compiles + 1);
+    clear_script_bytecode_cache();
+}
+
+TEST_CASE("QuickJS evaluate_script keeps evaluate's error and small-script behavior",
+          "[view][js-engine][editor-open]") {
+    clear_script_bytecode_cache();
+    auto engine = create_js_engine(JsEngineType::quickjs);
+    // Small scripts bypass the cache entirely.
+    CHECK(engine->evaluate_script("40 + 2").getWithDefault<int>(0) == 42);
+    CHECK(script_bytecode_cache_stats().compiles == 0);
+
+    // A large script with a syntax error throws, and stores nothing.
+    auto broken = large_counting_script(1) + "\nthis is not javascript {{{\n";
+    CHECK_THROWS(engine->evaluate_script(broken));
+    CHECK(script_bytecode_cache_stats().entries == 0);
+
+    // A large script that throws at run time throws from both engines, and
+    // the second throw comes from the reused bytecode.
+    auto throwing = large_counting_script(1) + "\nthrow new Error('runtime boom');\n";
+    CHECK_THROWS(engine->evaluate_script(throwing));
+    auto other = create_js_engine(JsEngineType::quickjs);
+    const auto hits_before = script_bytecode_cache_stats().hits;
+    CHECK_THROWS(other->evaluate_script(throwing));
+    CHECK(script_bytecode_cache_stats().hits == hits_before + 1);
+    clear_script_bytecode_cache();
+}

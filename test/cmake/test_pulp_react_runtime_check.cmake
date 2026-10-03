@@ -26,6 +26,9 @@ file(WRITE "${FIXTURE_DIR}/stale.js"
 # can be judged missing.
 file(WRITE "${FIXTURE_DIR}/partial.js"
     "(() => { const materializedDirtyIds = new Set(); })();\n")
+# A revision named mid-bundle (a hand-transplant note) is not a banner.
+file(WRITE "${FIXTURE_DIR}/mentioned.js"
+    "(() => {\n  // see @pulp/react runtime revision 2\n})();\n")
 # Stamped at the SDK's revision.
 file(WRITE "${FIXTURE_DIR}/current.js"
     "/* @pulp/react runtime revision 2 */\n(() => {})();\n")
@@ -73,6 +76,10 @@ expect("_fix1_at EQUAL -1" "a fix whose signature is present was reported missin
     "${_log}")
 expect("NOT _fix2_at EQUAL -1" "an unsigned fix past a banner-less bundle was not reported"
     "${_log}")
+
+run_case(mentioned mentioned.js STRICT _rc _log)
+expect("NOT _rc EQUAL 0"
+    "a revision named mid-bundle was read as the bundle's banner" "${_log}")
 
 run_case(current current.js STRICT _rc _log)
 string(FIND "${_log}" "is current" _current_at)

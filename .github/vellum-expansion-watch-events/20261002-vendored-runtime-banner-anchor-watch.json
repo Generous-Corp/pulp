@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261002-vendored-runtime-banner-anchor-watch",
+  "created_at": "2026-10-02T23:53:22Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a staleness-check hardening that crosses these families' selectors (tools/cmake/PulpReactRuntime.cmake, tools/import-validation/check_vendored_runtime.py and their tests). The vendored @pulp/react runtime revision banner is now read only from a bundle's first line, in the form runtime_fingerprint.mjs emits, so a comment that merely names a revision cannot claim that revision's fixes; bundle detection still accepts the phrase anywhere. Also covers the @pulp/react runtime-fingerprint revision 3 entry (batched-host-callbacks). No importer lowering, codegen output, packaging layout, proof artifact, threshold or harness verdict changes for a correctly bannered bundle. Registered as watch-only so the families' coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "cmake-pulp-react-runtime-check",
+    "tools/import-validation/test_check_vendored_runtime.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

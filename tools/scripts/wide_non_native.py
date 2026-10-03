@@ -24,9 +24,9 @@ registration names a script) is one of:
   same required context runs them whenever the variable is set;
 * **a CMake registration of a lane or tier test**, and nothing else in that
   CMake file names the stem;
-* **the generated changed-surface families** in ``.shipyard/config.toml``,
-  when nothing else in that file names the stem (the families select tests;
-  they never run the script);
+* **the generated changed-surface families file**
+  (``.shipyard/changed-surface-families.toml``), which selects tests and never
+  runs a script;
 * **another admitted file**, recursively (a greatest fixpoint, so a helper
   imported only by a lane-tested script is admitted with it).
 
@@ -53,16 +53,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LANE_MANIFEST = "tools/ci/source_selftests.json"
 TIER_MANIFEST = "tools/ci/wide_non_native_checks.json"
 
-# The Shipyard config runs scripts as validation commands, so it blocks like any
-# other referrer, except where it only lists them in the changed-surface
-# families that tools/scripts/changed_surface_script_families.py generates.
+# The generated changed-surface families list scripts for test selection and
+# never run them, so naming a script there does not keep it on the native gate.
 # The exemption holds only because `changed-surface-script-families-drift`
-# owns that block: anything hand-written between the markers is drift. Do not
-# relax that check without removing this exemption; the widening replay floor
-# in test_wide_non_native.py depends on it.
-SHIPYARD_CONFIG = ".shipyard/config.toml"
-SELECTOR_BLOCK_BEGIN = "# BEGIN GENERATED changed-surface script families"
-SELECTOR_BLOCK_END = "# END GENERATED changed-surface script families"
+# owns that file: anything hand-written in it is drift. Do not relax that check
+# without removing this exemption; the widening replay floor in
+# test_wide_non_native.py depends on it.
+SELECTOR_FAMILIES_FILE = ".shipyard/changed-surface-families.toml"
 
 # Only these trees may be admitted. Everything outside them keeps its ordinary
 # classify_changes.py verdict.
@@ -110,6 +107,7 @@ INERT_EXACT = frozenset(
         LANE_MANIFEST,
         TIER_MANIFEST,
         REPLAY_FIXTURE,
+        SELECTOR_FAMILIES_FILE,
         ".gitattributes",
         "CODEOWNERS",
         ".gitignore",
@@ -263,22 +261,6 @@ def _cmake_reference_is_lane_registration(
     return True
 
 
-def _only_in_generated_selector_block(ctx: _Context, path: str, stem: str) -> bool:
-    """True when every mention of ``stem`` in the Shipyard config sits inside
-    the generated changed-surface families, which list scripts for test
-    selection and never run them."""
-    try:
-        text = (ctx.repo / path).read_text(encoding="utf-8")
-    except OSError:
-        return False
-    begin = text.find(SELECTOR_BLOCK_BEGIN)
-    end = text.find(SELECTOR_BLOCK_END, begin)
-    if begin < 0 or end < 0:
-        return False
-    word = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(stem)}(?![A-Za-z0-9_])")
-    return all(begin <= match.start() < end for match in word.finditer(text))
-
-
 def _is_cmake(path: str) -> bool:
     name = PurePosixPath(path).name
     return name == "CMakeLists.txt" or name.endswith((".cmake", ".cmake.in"))
@@ -314,8 +296,6 @@ def _hard_blockers(ctx: _Context, path: str) -> list[str] | None:
         if _is_cmake(ref) and not ref.startswith("tools/cmake/"):
             if _cmake_reference_is_lane_registration(ctx, ref, stem):
                 continue
-        if ref == SHIPYARD_CONFIG and _only_in_generated_selector_block(ctx, ref, stem):
-            continue
         blockers.append(ref)
     return blockers
 

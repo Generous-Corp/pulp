@@ -2240,6 +2240,7 @@
     "test/test_child_process.cpp",
     "test/test_child_process_standard_input.cpp",
     "test/test_runtime_utils.cpp",
+    "tools/ci/build_dir_lock.py",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",

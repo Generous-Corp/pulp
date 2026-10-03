@@ -7188,6 +7188,51 @@ five commit sources to audit and the evidence live in one place: the
 `view-bridge` skill, "Realtime scripted editors: the performance checklist";
 the capture recipe is in `trace-analysis`.
 
+## Editor-open cost of a materialized document
+
+Opening a plug-in editor whose UI is a materialized/captured import pays for
+the whole document up front: compile the @pulp/react runtime bundle, import
+the document (JSON parse, asset digests, font registration, payload eval),
+mount React, then settle. Each commit during that settle re-applies captured
+metadata. What Pulp now does by default, and what the document must not undo:
+
+- **View first** — the hosted editor returns its sized root and mounts on the
+  second idle tick (`view-bridge`, "Editor open").
+- **One evaluation** — the first load has no probe realm. Before this, every
+  open compiled, imported, mounted and settled the document twice.
+- **Bytecode reuse** — the runtime bundle, preludes and import payloads
+  compile once per process (`engine`, "Whole scripts reuse compiled
+  bytecode"); a warm reopen reads bytecode in ~2 ms instead of parsing.
+- **Batched host callbacks** (@pulp/react runtime revision 3) — a rAF or timer
+  callback's `setState`s commit once. A vendored `runtime.js` older than that
+  never installs `__pulpBatchUpdates__`; `pulp_check_vendored_react_runtime()`
+  names it. Regenerate the bundle, or transplant the one-line hook after the
+  reconciler is created.
+- **Identical font bytes register once** — several `@font-face` weight rules
+  of one variable font no longer decode and append the same face per binding.
+
+What the document's own code must do (this is the app's cost, not Pulp's):
+
+- **Deliver one native message to all its listeners inside one batch**
+  (`globalThis.__pulpBatchUpdates__(deliver)` when it exists). A post-mount
+  state hydrate fanned out to N `setState`s is N full metadata passes
+  otherwise — measured 13 commits / 449 ms → 1 commit / 70 ms on one editor.
+- **Hydrate before the first render, not after it.** Every piece of state
+  that arrives in a mount effect, a `.then(setX)` chain or a `setTimeout`
+  after mount is another commit. Promise-job and passive-effect commits are
+  not covered by host-callback batching. Read initial state synchronously
+  (a native dispatch that returns the value) and pass it to the first render.
+- **No layout reads in mount effects** that then write state; each round is a
+  commit plus a pass.
+- **Keep responsive-layout passes linear**: a pass that filters the whole
+  node registry per container (`values.filter(n => isDescendant(n, x))`) is
+  O(nodes × depth) and ran ~100 ms on one editor's first commit.
+
+Measure with the `trace-analysis` editor-open recipe. Worked numbers (Spectr,
+AU v2, M5 Max, traced SDK, medians): warm full-UI-drawn 2133 ms → 748 ms
+after probe skip + batching + bytecode reuse, → ~510 ms with view-first
+loading through Pulp; cold 2480 → ~900 ms.
+
 ## A `vm` sandbox is a second realm, and the entry notices
 
 Driving the emitted runtime through `vm.createContext` is the only way to test

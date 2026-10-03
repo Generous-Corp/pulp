@@ -255,6 +255,35 @@ def load_policy(config_path: Path, target: str) -> dict[str, Any]:
         ) from error
     if not isinstance(policy, dict):
         raise SelectionExecutionError("changed-surface policy is not a table")
+    return merge_families_file(policy, config_path.resolve().parent.parent)
+
+
+def merge_families_file(policy: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    """Apply a `families_file` the way Shipyard's planner does: its
+    `[[families]]` tables follow the inline families, and its path joins
+    `policy_paths`. The file must be a relative `.toml` path under `.shipyard/`
+    and hold only `families`."""
+
+    policy = dict(policy)
+    path = policy.pop("families_file", None)
+    if path is None:
+        return policy
+    parts = str(path).split("/")
+    if (not isinstance(path, str) or not path.startswith(".shipyard/")
+            or not path.endswith(".toml") or any(p in {"", ".", ".."} for p in parts)):
+        raise SelectionExecutionError(f"families_file {path!r} must be a .toml path under .shipyard/")
+    try:
+        with (repo_root / path).open("rb") as handle:
+            extra = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise SelectionExecutionError(f"families_file {path!r} is unreadable: {error}") from error
+    if set(extra) != {"families"} or not isinstance(extra["families"], list) or not extra["families"]:
+        raise SelectionExecutionError(f"families_file {path!r} must hold only a nonempty [[families]] list")
+    policy["families"] = [*policy.get("families", []), *extra["families"]]
+    paths = list(policy.get("policy_paths", []))
+    if path not in paths:
+        paths.append(path)
+    policy["policy_paths"] = paths
     return policy
 
 

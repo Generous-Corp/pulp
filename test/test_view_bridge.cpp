@@ -475,6 +475,155 @@ TEST_CASE("ViewBridge tells a scripted editor whether it is hosted or standalone
     }
 }
 
+namespace {
+
+// A processor whose editor is a scripted document loaded view-first, the way
+// a captured/imported editor should open in a plug-in host.
+class DeferredScriptEditorProcessor final : public StubProcessor {
+public:
+    std::filesystem::path script_path;
+    int loaded_callbacks = 0;
+    bool last_loaded = false;
+
+    view::ScriptedUiSession* active_scripted_ui() override { return session.get(); }
+    const view::ScriptedUiSession* active_scripted_ui() const override {
+        return session.get();
+    }
+
+    std::unique_ptr<view::View> create_view() override {
+        auto root = std::make_unique<view::View>();
+        root->set_bounds({0, 0, 480, 320});
+        session = std::make_unique<view::ScriptedUiSession>(
+            *root, state(),
+            view::ScriptedUiOptions{.script_path = script_path,
+                                    .enable_hot_reload = false,
+                                    .enable_theme_reload = false});
+        session->set_document_loaded_callback(
+            [this](bool loaded, const std::string&) {
+                ++loaded_callbacks;
+                last_loaded = loaded;
+            });
+        if (!session->load_deferrable()) return nullptr;
+        return root;
+    }
+
+    std::unique_ptr<view::ScriptedUiSession> session;
+};
+
+std::filesystem::path write_editor_script(const char* stem, const std::string& code) {
+    const auto dir = std::filesystem::temp_directory_path()
+        / (std::string(stem) + "-"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "main.js") << code;
+    return dir / "main.js";
+}
+
+} // namespace
+
+TEST_CASE("Editor open: a hosted editor returns its view before evaluating the document",
+          "[view_bridge][scripted-ui][editor-open]") {
+    state::StateStore store;
+    DeferredScriptEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.script_path = write_editor_script("pulp-editor-open-gate",
+                                        "createLabel('status', 'mounted', '');\n");
+
+    REQUIRE(format::ViewBridge::Options::hosted_editor().defer_document_load);
+    format::ViewBridge bridge(p, store, format::ViewBridge::Options::hosted_editor());
+    const auto opened = std::chrono::steady_clock::now();
+    REQUIRE(bridge.open());
+    const auto open_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - opened).count();
+
+    // The deterministic budget: nothing of the document ran inside open().
+    REQUIRE(p.session != nullptr);
+    CHECK(p.session->document_load_pending());
+    CHECK(p.session->bridge() == nullptr);
+    CHECK(p.loaded_callbacks == 0);
+    // The host's size is known without the document.
+    CHECK(bridge.width() == 480);
+    CHECK(bridge.height() == 320);
+
+    // First idle tick paints the empty editor; the second mounts the document,
+    // on the live realm only.
+    auto pump = format::make_editor_idle_pump(bridge);
+    pump();
+    CHECK(p.session->document_load_pending());
+    pump();
+    CHECK_FALSE(p.session->document_load_pending());
+    REQUIRE(p.session->bridge() != nullptr);
+    CHECK(p.session->bridge()->widget("status") != nullptr);
+    CHECK(p.loaded_callbacks == 1);
+    CHECK(p.last_loaded);
+    CHECK(p.session->probe_realm_evaluations() == 0);
+    // Tracked, not gated: wall time is host-dependent.
+    UNSCOPED_INFO("hosted editor open() returned in " << open_ms << " ms");
+
+    std::filesystem::remove_all(p.script_path.parent_path());
+}
+
+TEST_CASE("Editor open: standalone and harness bridges keep the synchronous load",
+          "[view_bridge][scripted-ui][editor-open]") {
+    state::StateStore store;
+    DeferredScriptEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.script_path = write_editor_script("pulp-editor-open-sync",
+                                        "createLabel('status', 'mounted', '');\n");
+
+    CHECK_FALSE(format::ViewBridge::Options{}.defer_document_load);
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    CHECK_FALSE(p.session->document_load_pending());
+    REQUIRE(p.session->bridge() != nullptr);
+    CHECK(p.session->bridge()->widget("status") != nullptr);
+    CHECK(p.loaded_callbacks == 1);
+
+    std::filesystem::remove_all(p.script_path.parent_path());
+}
+
+TEST_CASE("Editor open: a deferred document that fails reports it from the idle tick",
+          "[view_bridge][scripted-ui][editor-open]") {
+    state::StateStore store;
+    DeferredScriptEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.script_path = write_editor_script(
+        "pulp-editor-open-fail",
+        "createLabel('partial', 'half', '');\nthrow new Error('broken');\n");
+
+    format::ViewBridge bridge(p, store, format::ViewBridge::Options::hosted_editor());
+    REQUIRE(bridge.open());
+    auto* root = bridge.view();
+    REQUIRE(root != nullptr);
+    const auto children_before = root->child_count();
+    auto pump = format::make_editor_idle_pump(bridge);
+    pump();
+    pump();
+    CHECK(p.loaded_callbacks == 1);
+    CHECK_FALSE(p.last_loaded);
+    CHECK(root->child_count() == children_before);
+
+    std::filesystem::remove_all(p.script_path.parent_path());
+}
+
+TEST_CASE("Editor open: a missing script still fails inside open()",
+          "[view_bridge][scripted-ui][editor-open]") {
+    state::StateStore store;
+    DeferredScriptEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.script_path = std::filesystem::temp_directory_path() / "pulp-no-such-editor.js";
+
+    format::ViewBridge bridge(p, store, format::ViewBridge::Options::hosted_editor());
+    // create_view() returns null when load_deferrable() refuses, so open()
+    // falls back to the AutoUi editor instead of a blank deferred root.
+    REQUIRE(bridge.open());
+    CHECK_FALSE(bridge.uses_script_ui());
+}
+
 TEST_CASE("Processor scripted UI accessors default to null", "[view_bridge][scripted-ui]") {
     StubProcessor p;
     REQUIRE(p.active_scripted_ui() == nullptr);

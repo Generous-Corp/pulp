@@ -17,6 +17,7 @@
 // (and widget_bridge.hpp for the WidgetBridge member). Relocated so
 // runtime-import work no longer recompiles the whole importer.
 
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/buttons.hpp>
@@ -1196,7 +1197,9 @@ void run_claude_bundle_payload_pipeline(ScriptEngine& engine,
         // CHOC QuickJS path can recurse on cyclical objects.)
         source += "\n;void 0";
         try {
-            engine.evaluate(source);
+            PULP_TRACE_SCOPE_NAMED("js", "runtime_import_payload_eval");
+            // A whole script: a reopened editor reuses its compiled bytecode.
+            engine.evaluate_script(source);
         } catch (const std::exception& e) {
             report(std::string("payload ") + std::to_string(idx)
                    + " threw: " + e.what());
@@ -1287,7 +1290,8 @@ void run_claude_bundle_payload_pipeline(ScriptEngine& engine,
         const auto& s = inline_scripts[i];
         if (s.kind != "javascript") continue;
         try {
-            engine.evaluate(s.source + "\n;void 0");
+            PULP_TRACE_SCOPE_NAMED("js", "runtime_import_inline_eval");
+            engine.evaluate_script(s.source + "\n;void 0");
         } catch (const std::exception& e) {
             report("inline JS script " + std::to_string(i)
                    + " threw: " + e.what());
@@ -1844,27 +1848,30 @@ void WidgetBridge::evaluate_claude_bundle_in_live_engine(const ClaudeBundle& bun
     // This is intentionally part of the shared materialized-import runtime,
     // not a product prelude: Chromium's resolved family and the packaged font
     // must become the same native typeface for line-box evidence to validate.
-    for (const auto& binding : bundle.font_bindings) {
-        if (binding.asset_index >= bundle.assets.size()) {
-            engine_.evaluate(
-                "globalThis.__pulpRuntimeImportErr__ = "
-                "'captured font binding referenced a missing asset';void 0");
-            return;
-        }
-        const auto& asset = bundle.assets[binding.asset_index];
-        bool registered = false;
-        if (asset.mime == "font/woff2") {
-            registered = pulp::canvas::register_font_woff2(
-                asset.data.data(), asset.data.size(), binding.runtime_family);
-        } else {
-            registered = pulp::canvas::register_font(
-                asset.data.data(), asset.data.size(), binding.runtime_family);
-        }
-        if (!registered) {
-            engine_.evaluate(
-                "globalThis.__pulpRuntimeImportErr__ = "
-                "'captured font registration failed';void 0");
-            return;
+    {
+        PULP_TRACE_SCOPE_NAMED("js", "runtime_import_fonts");
+        for (const auto& binding : bundle.font_bindings) {
+            if (binding.asset_index >= bundle.assets.size()) {
+                engine_.evaluate(
+                    "globalThis.__pulpRuntimeImportErr__ = "
+                    "'captured font binding referenced a missing asset';void 0");
+                return;
+            }
+            const auto& asset = bundle.assets[binding.asset_index];
+            bool registered = false;
+            if (asset.mime == "font/woff2") {
+                registered = pulp::canvas::register_font_woff2(
+                    asset.data.data(), asset.data.size(), binding.runtime_family);
+            } else {
+                registered = pulp::canvas::register_font(
+                    asset.data.data(), asset.data.size(), binding.runtime_family);
+            }
+            if (!registered) {
+                engine_.evaluate(
+                    "globalThis.__pulpRuntimeImportErr__ = "
+                    "'captured font registration failed';void 0");
+                return;
+            }
         }
     }
 

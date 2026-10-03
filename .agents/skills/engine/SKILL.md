@@ -130,6 +130,30 @@ When adding a new Canvas2D method, audit:
    new method's existence + a representative end-to-end Skia render
    (the FilterBank-style raster test pattern).
 
+## Whole scripts reuse compiled bytecode (QuickJS)
+
+`JsEngine::evaluate_script()` / `ScriptEngine::evaluate_script()` evaluate a
+whole script (a bundle, a prelude, a runtime-import payload) with
+`evaluate()`'s exact result and error semantics. On QuickJS a script of 32 KB
+or more is compiled once per process (`JS_EVAL_FLAG_COMPILE_ONLY` +
+`JS_WriteObject`), and every later realm evaluating byte-identical source
+deserializes the bytecode (`JS_ReadObject` + `JS_EvalFunction`) instead of
+parsing. WidgetBridge routes preludes, `load_script()` and runtime-import
+payloads through it, so a reopened plug-in editor or a second instance skips
+parsing its 1–2 MB UI bundle.
+
+- Keyed by the full source text (no hash collisions), bounded (16 scripts /
+  96 MB), in memory only. **Never persist QuickJS bytecode to disk or load it
+  from anywhere else**: QuickJS does not validate bytecode, so only bytes this
+  process produced are read back.
+- Any failure to reuse falls back to compiling; `PULP_JS_BYTECODE_CACHE=0`
+  disables it.
+- `script_bytecode_cache_stats()` (compiles / hits / bypassed) lets a test or
+  an editor-open budget assert reuse by count.
+- Use `evaluate()` for expressions whose value you read and for per-frame
+  traffic; small scripts bypass the cache anyway.
+- JSC and V8 inherit the default (`evaluate_script` → `evaluate`).
+
 ## Commands
 
 ### `status` — Show current engine configuration
