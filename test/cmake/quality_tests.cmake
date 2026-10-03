@@ -684,6 +684,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # Test read audit: strace log parsing, path resolution and the diff of
+        # measured checkout reads against pulp_test_data declarations.
+        add_test(NAME read-audit-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_read_audit.py")
+        set_tests_properties(read-audit-selftest PROPERTIES TIMEOUT 120)
         # Per-target codemodel digests in the reuse record: relocation
         # stability and which part moves with which change.
         add_test(NAME codemodel-digest-selftest COMMAND ${Python3_EXECUTABLE}

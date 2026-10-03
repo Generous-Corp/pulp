@@ -798,6 +798,21 @@ warning and does not fail the check. Compiled tests are never exempted: their
 binary is the pull request's own build, so a base run would compare it with
 itself.
 
+### `pulp_test_data` is a static claim; the nightly read audit measures it
+
+A compiled test's `data: declared` / `data: none` in
+`test/ctest_script_inputs.json` comes from scanning its sources, and the
+selector trusts it to skip the test when nothing declared changed. A path
+assembled at run time, a fixture opened by a helper library, or a file a
+spawned tool reads never shows up in that scan. `read-audit-nightly.yml`
+(`tools/ci/read_audit.py`) runs every compiled test under `strace -f` on Linux
+and reports each tracked checkout file a test opened, listed or probed without
+declaring it. To fix a finding, add the path to the test's `pulp_test_data()`.
+Never treat a clean audit as proof for macOS-only tests: Linux does not
+register them, and the report lists them as not covered. A run whose control
+was not flagged has no verdict, because strace saw nothing, and it fails for
+that reason.
+
 ### Only a ready-to-land PR head issues a receipt
 
 A pull-request head's gate is build + `pr-fast`. The full suite also runs on

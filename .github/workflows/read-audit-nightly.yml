@@ -1,0 +1,130 @@
+name: Test read audit (nightly)
+
+# Test reuse may skip a compiled test whose build inputs did not change,
+# trusting pulp_test_data() (test/ctest_script_inputs.json) to name every
+# checkout file the test reads at run time. That declaration comes from a
+# static scan. This job measures the reads instead: it builds the tree, runs
+# every compiled test's ctest registrations under `strace -f`, and diffs the
+# tracked checkout files they actually open against what they declare
+# (tools/ci/read_audit.py). Each undeclared read is a finding naming the
+# executable, the test and the path.
+#
+# The audit first runs a control through the same ctest + strace path: a
+# program that reads one undeclared and one declared tracked file. If the
+# undeclared read is not flagged the instrument is blind and the job fails
+# with no verdict.
+#
+# Linux only (strace), on a GitHub-hosted runner: it shares no host with the
+# required macOS gate and gates nothing. macOS-only tests are not covered;
+# the report names them. Test failures do not matter here, because a failing
+# test still reads its inputs.
+
+on:
+  schedule:
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Audit only executables whose name matches this regex (empty = all)
+        required: false
+        default: ''
+  pull_request:
+    paths:
+      - .github/workflows/read-audit-nightly.yml
+      - tools/ci/read_audit.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: read-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Read audit (Linux, strace)
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      PULP_BUILD_DIR: build-read-audit
+      CCACHE_COMPILERCHECK: content
+      CCACHE_NODEPEND: "true"
+      CCACHE_SLOPPINESS: time_macros
+      PULP_OFFLINE_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Hydrate bounded GPU provenance commits
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: ccache ninja-build strace
+
+      # Read-only: the PR build lane owns these caches and saves them on main.
+      - name: Restore FetchContent sources
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+          key: Linux-linux-fetchcontent-${{ hashFiles('setup.sh') }}
+          restore-keys: Linux-linux-fetchcontent-
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: Linux-linux-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-${{ github.ref }}
+          restore-keys: |
+            Linux-linux-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
+            Linux-linux-ccache-
+
+      - name: Bootstrap repository dependencies
+        timeout-minutes: 15
+        run: ./setup.sh --ci --deps-only
+
+      - name: Install Node dependencies
+        run: |
+          set -euo pipefail
+          npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
+          npm ci --prefix tools/scripts --no-audit --no-fund
+
+      - name: Configure
+        run: cmake -S . -B "$PULP_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+
+      # Keep going past a broken target: the audit covers whatever built and
+      # reports the rest as not built.
+      - name: Build
+        id: build
+        run: |
+          if tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release -- -k 0; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+            echo "::warning::some targets did not build; their tests are reported as unobserved"
+          fi
+
+      - name: Audit test reads
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          status=0
+          python3 tools/ci/read_audit.py run --build-dir "$PULP_BUILD_DIR" \
+            --out read-audit.json --summary read-audit.md \
+            --jobs "$(( $(nproc) / 2 > 0 ? $(nproc) / 2 : 1 ))" ${ONLY:+--only "$ONLY"} || status=$?
+          [ -f read-audit.md ] && cat read-audit.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-audit
+          path: |
+            read-audit.json
+            read-audit.md
+          retention-days: 30
+          if-no-files-found: ignore

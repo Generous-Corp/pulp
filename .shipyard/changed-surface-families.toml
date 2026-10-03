@@ -4017,6 +4017,7 @@ tests = [
   "prepush-gate-output",
   "prepush-refresh-push",
   "queue-batch-attribute-selftest",
+  "read-audit-selftest",
   "reuse-policy-replay-selftest",
   "reuse-record-selftest",
   "runner-topology-selftest",
