@@ -16,6 +16,8 @@ sys.path.insert(0, str(HERE))
 import executable_keys as ek  # noqa: E402
 
 V2 = "pulp-codemodel-digest/v2"
+TOOLCHAIN = {"os": "Darwin", "arch": "arm64", "sdk_version": "26.4", "sdk_build": "25E236",
+             "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)"}
 EXE, OTHER, MOD = "test/pulp-test-a", "test/pulp-test-b", "test/plug.so"
 # Enough declared readers that the data scan proves it saw something.
 KNOWN_READERS = {f"pulp-test-k{i}": {"data": "declared", "inputs": [f"test/fixtures/k{i}"],
@@ -66,6 +68,7 @@ class Fixture:
                      obj("liba", "core/unpulled.cpp"): [],
                      obj("plug", "plug/plug.cpp"): []}
         self.stale: list[str] = []
+        self.record_fields = {**TOOLCHAIN, "os_version": "26.4", "os_build": "25E246"}
 
     def targets(self) -> dict:
         def t(kind, art, deps=()):
@@ -97,13 +100,13 @@ class Fixture:
             {"schema": V2, "generated_headers": "ninja-deps", "targets": self.base_targets}))
         (self.record / "link-members-x.json").write_text(json.dumps(self.links))
         (self.record / "object-deps-x.json").write_text(json.dumps(deps_doc))
-        (self.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "img"}}))
+        (self.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "img", "fields": self.record_fields}}))
 
-    def keys(self, head: str, record: bool = True, image: str = "img") -> dict:
+    def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN) -> dict:
         self.write_record()
         rec = ek.load_record(self.record)[0] if record else None
         cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": self.head_targets}
-        return ek.compute(self.root, self.base, head, rec, cm, self.ctest, self.build, image)["executables"]
+        return ek.compute(self.root, self.base, head, rec, cm, self.ctest, self.build, toolchain)["executables"]
 
 
 class KeyTests(unittest.TestCase):
@@ -144,19 +147,45 @@ class KeyTests(unittest.TestCase):
         self.assertFalse(self.equal(keys, EXE))   # liba.cpp.o includes it
         self.assertFalse(self.equal(keys, OTHER))
 
-    def test_the_codemodel_digest_and_the_image_are_part_of_the_key(self):
+    def test_the_codemodel_digest_and_the_toolchain_are_part_of_the_key(self):
         head = self.head(**{"docs/readme.md": "new\n"})
         self.fx.head_targets["pulp-test-a"]["digest"] = "moved"
         keys = self.fx.keys(head)
         self.assertFalse(self.equal(keys, EXE))
         self.assertTrue(self.equal(keys, OTHER))
         self.fx.head_targets["pulp-test-a"]["digest"] = self.fx.base_targets["pulp-test-a"]["digest"]
-        self.assertEqual(ek.key_of("d", "img", ["p"], {"p": "1"}) == ek.key_of("d", "other", ["p"], {"p": "1"}), False)
+        other = {**TOOLCHAIN, "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)"}
+        self.assertNotEqual(ek.key_of("d", TOOLCHAIN, ["p"], {"p": "1"}), ek.key_of("d", other, ["p"], {"p": "1"}))
 
-    def test_a_record_from_another_image_keys_nothing(self):
-        keys = self.fx.keys(self.head(**{"docs/readme.md": "new\n"}), image="lane-image")
-        self.assertEqual({e["always_run"] for e in keys.values()}, {"base_other_image"})
-        self.assertEqual({e["base_key"] for e in keys.values()}, {None})
+    def test_a_record_from_another_toolchain_keys_nothing(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        for field, value in (("clang", "Apple clang version 21.0.0 (clang-2100.3.34.2)"), ("sdk_build", "26A425"),
+                             ("sdk_version", "27.0"), ("arch", "x86_64"), ("os", "Linux")):
+            keys = self.fx.keys(head, toolchain={**TOOLCHAIN, field: value})
+            self.assertEqual({e["always_run"] for e in keys.values()}, {"base_other_toolchain"}, field)
+            self.assertEqual({e["base_key"] for e in keys.values()}, {None})
+
+    def test_a_linux_record_keys_nothing_for_a_darwin_lane(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        self.fx.record_fields = {**self.fx.record_fields, "os": "Linux"}
+        keys = self.fx.keys(head)
+        self.assertEqual({e["always_run"] for e in keys.values()}, {"base_other_toolchain"})
+        # Control: the same record with only the OS family flipped back keys,
+        # so the refusal above is the `os` field and nothing else.
+        self.fx.record_fields = {**self.fx.record_fields, "os": "Darwin"}
+        keys = self.fx.keys(head)
+        self.assertEqual({e["always_run"] for e in keys.values()}, {None})
+        self.assertTrue(self.equal(keys, EXE))
+
+    def test_the_os_version_alone_does_not_change_the_toolchain(self):
+        self.assertEqual(ek.toolchain_of({**TOOLCHAIN, "os_version": "27.0", "os_build": "26A428"}), TOOLCHAIN)
+
+    def test_an_unprobed_toolchain_keys_nothing(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        self.assertIsNone(ek.toolchain_of({**TOOLCHAIN, "sdk_version": "unknown"}))
+        self.assertIsNone(ek.toolchain_of({k: v for k, v in TOOLCHAIN.items() if k != "sdk_build"}))
+        keys = self.fx.keys(head, toolchain=None)
+        self.assertEqual({e["always_run"] for e in keys.values()}, {"toolchain_unknown"})
 
     def test_a_base_that_is_not_an_ancestor_of_head_keys_nothing(self):
         head = self.head(**{"docs/readme.md": "new\n"})
@@ -249,9 +278,11 @@ class ManifestTests(unittest.TestCase):
             cm = Path(tmp) / "cm.json"
             cm.write_text(json.dumps({"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}))
             out = Path(tmp) / "keys.json"
+            tc = Path(tmp) / "tc.json"
+            tc.write_text(json.dumps(TOOLCHAIN))
             argv = ["x", "--source-root", str(fx.root), "--base-sha", fx.base, "--head-sha", head,
                     "--base-record", str(fx.record), "--base-record-run-id", "42", "--head-codemodel", str(cm),
-                    "--build-dir", str(fx.build), "--image-id", "img", "--out", str(out)]
+                    "--build-dir", str(fx.build), "--toolchain-json", str(tc), "--out", str(out)]
             self.assertEqual(ek.main(argv), 0)
             doc = json.loads(out.read_text())
             self.assertEqual(doc["schema"], ek.SCHEMA)
@@ -260,9 +291,13 @@ class ManifestTests(unittest.TestCase):
                              (fx.base, head, "42"))
             self.assertEqual(producer["code_paths"], list(ek.KEY_CODE_PATHS))
             first = producer["base_record_sha256"]
+            self.assertEqual(producer["toolchain"], TOOLCHAIN)
+            self.assertEqual(doc["reasons"], {"keyed": 3})
             (fx.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "other"}}))
             ek.main(argv)
-            self.assertNotEqual(json.loads(out.read_text())["producer"]["base_record_sha256"], first)
+            doc = json.loads(out.read_text())
+            self.assertNotEqual(doc["producer"]["base_record_sha256"], first)
+            self.assertEqual(doc["reasons"], {"toolchain_unknown": 3})
 
     def test_every_key_code_path_exists(self):
         repo = HERE.parents[1]

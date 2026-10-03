@@ -8,7 +8,7 @@ objects and archive members its link pulled, and the headers each of those
 objects included). Equal keys mean every one of those files has the same
 content in both trees, the target's content-keyed codemodel digest (flags,
 defines, link fragments, registrations, generated headers) is the same, and
-so is the runner image. Head's preprocessing then follows the same paths
+so is the toolchain. Head's preprocessing then follows the same paths
 over the same bytes, so its objects and links equal base's. The input set
 has to come from a build of one of the two compared trees: a warm build
 directory's dependency log comes from whatever commit it last built, and
@@ -18,7 +18,9 @@ What a key cannot see is made an always_run reason, never a guess:
 
     base_unrecorded    no usable reuse record for the base commit, or its
                        commit is not an ancestor of head
-    base_other_image   the record was produced on another runner image
+    base_other_toolchain
+                       the record was built by another toolchain
+    toolchain_unknown  either side's toolchain identity is incomplete
     dependency_pin     a dependency pin moved (every build input may move)
     codemodel_unknown  no content-keyed codemodel digest for the target on
                        one side
@@ -32,13 +34,21 @@ What a key cannot see is made an always_run reason, never a guess:
     data_*             the data scan cannot vouch for what it reads
     spawns_*           the spawn scan cannot vouch for what it runs
 
+The toolchain is what decides object bytes for equal inputs and flags:
+OS family, architecture, SDK version and build, and the compiler's version
+line. The
+OS version is not part of it (it is recorded for diagnosis), and neither is
+the target triple `clang -print-target-triple` prints, whose OS component is
+the host's; the triple a build targets comes from its deployment-target
+flags, which the codemodel digest covers. A test whose verdict depends on
+the host itself is environment-bound, or is what the sampled re-run of
+would-be skips exists to catch.
+
 Which record is the base is the planner's choice, made where credentials
-exist: a run on the SAME runner image as the one that will use the keys,
-whose tree is an ancestor of head. For the local validation lane that is
-the lane's own most recent record on its image (its warm build directory
-holds that build); for the merge-group gate it is the gate's record at the
-base commit. A record from another image keys nothing: a verdict carried
-across hosts is exactly what nobody has measured.
+exist: a run built by the SAME toolchain as the one that will use the keys,
+whose tree is an ancestor of head. Prefer the lane's own most recent record
+(its warm build directory holds that build), else the gate's record at the
+base commit. A record from another toolchain keys nothing.
 
 The computation reads only local data: the source checkout's git objects,
 the base reuse-record files the host planner fetched, the head codemodel
@@ -50,7 +60,7 @@ runner can re-derive the selection and refuse a difference.
 
     executable_keys.py --source-root S --base-sha B --head-sha H \\
         --base-record DIR --base-record-run-id N --head-codemodel F \\
-        --ctest-json J --build-dir D --image-id I --out M
+        --ctest-json J --build-dir D [--toolchain-json T] --out M
 
 The replay (tools/scripts/reuse_replay_collect.py) imports the scan and
 input-matching helpers from here, so the lane and the replay share one
@@ -229,10 +239,37 @@ def load_record(directory: Path | None) -> tuple[dict | None, str | None]:
         except json.JSONDecodeError:
             return None
     job = read(directory / "job.json") or {}
-    image = job.get("runner_image")
+    image = job.get("runner_image") if isinstance(job.get("runner_image"), dict) else {}
     return {"codemodel": read(_one(directory, "codemodel-")), "links": read(_one(directory, "link-members-")),
             "deps": read(_one(directory, "object-deps-")),
-            "image": image.get("digest") if isinstance(image, dict) else image}, digest.hexdigest()
+            "image": image.get("digest"), "toolchain": toolchain_of(image.get("fields") or {})}, digest.hexdigest()
+
+
+TOOLCHAIN_FIELDS = ("os", "arch", "sdk_version", "sdk_build", "clang")
+
+
+def toolchain_of(fields: dict) -> dict | None:
+    """The key's toolchain identity from a runner-image fingerprint
+    (reuse_record.runner_image's fields), or None when any part is missing
+    or could not be probed."""
+    tc = {k: fields.get(k) for k in TOOLCHAIN_FIELDS}
+    return tc if all(v and v != "unknown" for v in tc.values()) else None
+
+
+def probe_toolchain() -> dict | None:
+    """This host's toolchain identity, probed the way the reuse record does."""
+    import platform
+
+    def first(cmd: list[str]) -> str:
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return "unknown"
+        lines = (proc.stdout or proc.stderr).strip().splitlines()
+        return lines[0].strip() if proc.returncode == 0 and lines else "unknown"
+    return toolchain_of({"os": platform.system(), "arch": platform.machine(), "sdk_version": first(["xcrun", "--show-sdk-version"]),
+                         "sdk_build": first(["xcrun", "--show-sdk-build-version"]),
+                         "clang": first(["clang", "--version"])})
 
 
 def content_keyed(codemodel: dict | None) -> bool:
@@ -305,8 +342,9 @@ def data_paths(inputs: list[str], *trees: dict[str, str]) -> set[str]:
     return found
 
 
-def key_of(digest: str, image: str | None, paths: Iterable[str], blobs: dict[str, str]) -> str:
-    body = {"codemodel": digest, "image": image, "inputs": [[p, blobs.get(p, "absent")] for p in sorted(paths)]}
+def key_of(digest: str, toolchain: dict | None, paths: Iterable[str], blobs: dict[str, str]) -> str:
+    body = {"codemodel": digest, "toolchain": toolchain,
+            "inputs": [[p, blobs.get(p, "absent")] for p in sorted(paths)]}
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -336,7 +374,7 @@ def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[
 
 
 def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None, head_codemodel: dict | None,
-            ctest: dict | None, build_dir: Path | None, image_id: str | None) -> dict:
+            ctest: dict | None, build_dir: Path | None, toolchain: dict | None) -> dict:
     """The key manifest's `executables` and a count per always_run reason.
     Pure over its inputs and the two git trees."""
     ancestor = subprocess.run(["git", "-C", str(source_root), "merge-base", "--is-ancestor", base_sha, head_sha],
@@ -370,7 +408,8 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
         sstate = spawn_status(artifact, spawn_scan)
         reason = (
             "base_unrecorded" if record is None or sets is None or not ancestor else
-            "base_other_image" if record.get("image") != image_id else
+            "toolchain_unknown" if not record.get("toolchain") or not toolchain else
+            "base_other_toolchain" if record["toolchain"] != toolchain else
             "dependency_pin" if pins else
             "codemodel_unknown" if not keyed or not base_target.get("digest") or not target.get("digest") else
             "commit_bound" if target.get("commit_bound") or base_target.get("commit_bound") else
@@ -386,10 +425,11 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
                       or {"undeclared": "spawns_undeclared", "unknown": "spawns_unknown"}.get(sstate))
         entry = {"kind": kind, "registrations": [t["name"] for t in tests], "always_run": reason,
                  "spawns": sorted(spawns.closure(artifact)), "head_key": None, "base_key": None}
-        if paths is not None and reason not in ("base_unrecorded", "base_other_image", "codemodel_unknown"):
+        if paths is not None and reason not in ("base_unrecorded", "toolchain_unknown", "base_other_toolchain",
+                                                "codemodel_unknown"):
             keyed_paths = paths | (data_paths(dinputs, base_tree, head_tree) if dstate == "declared" else set())
-            entry["base_key"] = key_of(base_target["digest"], (record or {}).get("image"), keyed_paths, base_tree)
-            entry["head_key"] = key_of(target["digest"], image_id, keyed_paths, head_tree)
+            entry["base_key"] = key_of(base_target["digest"], record["toolchain"], keyed_paths, base_tree)
+            entry["head_key"] = key_of(target["digest"], toolchain, keyed_paths, head_tree)
         out[artifact] = entry
     counts: dict[str, int] = {}
     for e in out.values():
@@ -416,7 +456,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--head-codemodel", type=Path, help="codemodel_digest.py output for the head configure")
     ap.add_argument("--ctest-json", type=Path, help="`ctest --show-only=json-v1` for the head configure")
     ap.add_argument("--build-dir", type=Path)
-    ap.add_argument("--image-id", default=None)
+    ap.add_argument("--toolchain-json", type=Path,
+                    help="the head toolchain identity ({arch, sdk_version, sdk_build, clang}); probed when absent")
     ap.add_argument("--out", required=True, type=Path)
     a = ap.parse_args(argv[1:])
 
@@ -426,13 +467,15 @@ def main(argv: list[str]) -> int:
     rev = lambda r: subprocess.run(["git", "-C", str(a.source_root), "rev-parse", r],  # noqa: E731
                                    check=True, capture_output=True, text=True).stdout.strip()
     base_sha, head_sha = rev(a.base_sha), rev(a.head_sha)
+    toolchain = read(a.toolchain_json) if a.toolchain_json else probe_toolchain()
     body = compute(a.source_root, base_sha, head_sha, record, read(a.head_codemodel), read(a.ctest_json),
-                   a.build_dir, a.image_id)
+                   a.build_dir, toolchain)
     manifest = {"schema": SCHEMA,
                 "producer": {"base_sha": base_sha, "head_sha": head_sha,
                              "code_paths": list(KEY_CODE_PATHS), "code_sha256": code_digest(a.source_root, base_sha),
                              "base_record_run_id": a.base_record_run_id, "base_record_sha256": record_digest,
-                             "image_id": a.image_id},
+                             "toolchain": toolchain,
+                             "base_record_image": (record or {}).get("image")},
                 **body}
     a.out.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print(f"executable-keys: {len(body['executables'])} entries; {body['reasons']}")
