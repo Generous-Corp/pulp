@@ -720,6 +720,12 @@ class CodemodelTests(unittest.TestCase):
         odd = self.data_scan(["a", "b"], a={"data": "partly"})
         self.assertEqual(run(odd)["manifest-data"]["run"], ["ta"])         # an unknown state fails closed
         self.assertEqual(run(scan, ["docs/a.md"])["manifest-data"]["run"], [])
+        # A tree walker, or a state this reader does not know, is hit by any
+        # drift, docs included; undeclared reads only by runtime surface.
+        walker = self.data_scan(["a", "b"], a={"data": "whole_checkout"}, b={"data": "undeclared"})
+        self.assertEqual(run(walker, ["docs/a.md"])["manifest-data"]["run"], ["ta"])
+        self.assertEqual(run(odd, ["docs/a.md"])["manifest-data"]["run"], ["ta"])
+        self.assertEqual(run(walker, [])["manifest-data"]["run"], [])
 
     def outputs(self, drift, hashed, changed, rebuilt=frozenset(), **kw):
         return rrc.classify_source_keys(list(drift), ["ta", "tb"], self.MAP, {}, {}, set(rebuilt), self.EXES | {"test/tool"},
