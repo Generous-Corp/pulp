@@ -28,8 +28,12 @@
 #   * links the framework (-needed_framework so the linker keeps the load
 #     command even though the app references no Sparkle symbol directly) with
 #     an @executable_path/../Frameworks rpath,
-#   * writes SUFeedURL / SUPublicEDKey (and the optional keys) into the built
-#     Info.plist.
+#   * writes SUFeedURL / SUPublicEDKey (and the optional keys) into the app's
+#     Info.plist TEMPLATE at the end of configure (cmake_language(DEFER)), so
+#     the keys survive every regeneration and do not depend on whether
+#     pulp_declare_standalone_document_type() or pulp_app_icon() ran before or
+#     after this call. (Editing the built plist after link would be undone by
+#     the next reconfigure until the next relink.)
 #
 # The SDK side (pulp-standalone) finds Sparkle at run time through the
 # Objective-C runtime and adds "Check for Updates…" to the app menu; see
@@ -109,6 +113,46 @@ function(pulp_resolve_sparkle_distribution out_dir)
     set(${out_dir} "${_root}/dist" PARENT_SCOPE)
 endfunction()
 
+# Escape a value for a plist <string> that CMake configures again at generate
+# time: `$` and `@` become character references so neither pass eats them.
+function(_pulp_sparkle_plist_escape out_var text)
+    string(REPLACE "&" "&amp;" text "${text}")
+    string(REPLACE "<" "&lt;" text "${text}")
+    string(REPLACE ">" "&gt;" text "${text}")
+    string(REPLACE "@" "&#64;" text "${text}")
+    string(REPLACE "$" "&#36;" text "${text}")
+    set(${out_var} "${text}" PARENT_SCOPE)
+endfunction()
+
+# Deferred to the end of the top-level configure: derive the app's final
+# Info.plist template (whatever MACOSX_BUNDLE_INFO_PLIST ended up as, or
+# CMake's default) and insert the Sparkle keys before its closing </dict>.
+function(_pulp_sparkle_finalize_plist target)
+    get_target_property(_template ${target} MACOSX_BUNDLE_INFO_PLIST)
+    if(NOT _template)
+        set(_template "${CMAKE_ROOT}/Modules/MacOSXBundleInfo.plist.in")
+    endif()
+    if(NOT EXISTS "${_template}")
+        message(FATAL_ERROR "pulp_add_sparkle: Info.plist template not found: ${_template}")
+    endif()
+    file(READ "${_template}" _text)
+    if(_text MATCHES "<key>SUFeedURL</key>")
+        message(FATAL_ERROR
+            "pulp_add_sparkle: ${target}'s Info.plist template already declares SUFeedURL; "
+            "set the feed in one place only")
+    endif()
+    get_target_property(_keys ${target} PULP_SPARKLE_PLIST_XML)
+    string(FIND "${_text}" "</dict>" _close REVERSE)
+    if(_close EQUAL -1)
+        message(FATAL_ERROR "pulp_add_sparkle: no </dict> in ${_template}")
+    endif()
+    string(SUBSTRING "${_text}" 0 ${_close} _head)
+    string(SUBSTRING "${_text}" ${_close} -1 _tail)
+    set(_out "${CMAKE_BINARY_DIR}/PulpSparkle/${target}-Info.plist.in")
+    file(WRITE "${_out}" "${_head}${_keys}${_tail}")
+    set_target_properties(${target} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${_out}")
+endfunction()
+
 function(pulp_add_sparkle target)
     cmake_parse_arguments(ARG "KEEP_XPC_SERVICES"
         "FEED_URL;PUBLIC_ED_KEY;AUTOMATIC_CHECKS;CHECK_INTERVAL;VERSION;SHA256;DIST_DIR" ""
@@ -135,7 +179,9 @@ function(pulp_add_sparkle target)
             "pulp_add_sparkle: FEED_URL must be https:// (or file:// for a local "
             "practice feed); got ${ARG_FEED_URL}")
     endif()
-    if(NOT ARG_PUBLIC_ED_KEY MATCHES "^[A-Za-z0-9+/]{43}=$")
+    # CMake regexes have no {n} quantifier: check the length separately.
+    string(LENGTH "${ARG_PUBLIC_ED_KEY}" _key_len)
+    if(NOT _key_len EQUAL 44 OR NOT ARG_PUBLIC_ED_KEY MATCHES "^[A-Za-z0-9+/]+=$")
         message(FATAL_ERROR
             "pulp_add_sparkle: PUBLIC_ED_KEY must be the 44-character base64 Ed25519 "
             "public key (generate_keys -p). Never pass the private key here.")
@@ -155,12 +201,10 @@ function(pulp_add_sparkle target)
         VERSION "${ARG_VERSION}" SHA256 "${ARG_SHA256}" DIST_DIR "${ARG_DIST_DIR}")
 
     find_program(PULP_DITTO ditto REQUIRED)
-    find_program(PULP_PLUTIL plutil REQUIRED)
     find_program(PULP_CODESIGN codesign REQUIRED)
 
     set(_fw_dir "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Frameworks")
     set(_fw "${_fw_dir}/Sparkle.framework")
-    set(_plist "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Info.plist")
 
     target_link_options(${target} PRIVATE
         "-F${_dist}" "-Wl,-needed_framework,Sparkle")
@@ -178,23 +222,34 @@ function(pulp_add_sparkle target)
             # Removing nested code invalidates the upstream ad hoc seal.
             COMMAND "${PULP_CODESIGN}" --force --sign - --options runtime "${_fw}")
     endif()
-    list(APPEND _commands
-        COMMAND "${PULP_PLUTIL}" -replace SUFeedURL -string "${ARG_FEED_URL}" "${_plist}"
-        COMMAND "${PULP_PLUTIL}" -replace SUPublicEDKey -string "${ARG_PUBLIC_ED_KEY}" "${_plist}")
-    if(DEFINED _auto)
-        list(APPEND _commands
-            COMMAND "${PULP_PLUTIL}" -replace SUEnableAutomaticChecks -bool ${_auto} "${_plist}")
-    endif()
-    if(ARG_CHECK_INTERVAL)
-        list(APPEND _commands
-            COMMAND "${PULP_PLUTIL}" -replace SUScheduledCheckInterval -integer
-                ${ARG_CHECK_INTERVAL} "${_plist}")
-    endif()
     add_custom_command(TARGET ${target} POST_BUILD ${_commands}
         COMMENT "Embedding Sparkle.framework in ${target}"
         VERBATIM)
 
+    _pulp_sparkle_plist_escape(_feed_xml "${ARG_FEED_URL}")
+    _pulp_sparkle_plist_escape(_key_xml "${ARG_PUBLIC_ED_KEY}")
+    set(_keys "\t<key>SUFeedURL</key>\n\t<string>${_feed_xml}</string>\n")
+    string(APPEND _keys "\t<key>SUPublicEDKey</key>\n\t<string>${_key_xml}</string>\n")
+    if(DEFINED _auto)
+        if(_auto STREQUAL "YES")
+            string(APPEND _keys "\t<key>SUEnableAutomaticChecks</key>\n\t<true/>\n")
+        else()
+            string(APPEND _keys "\t<key>SUEnableAutomaticChecks</key>\n\t<false/>\n")
+        endif()
+    endif()
+    if(ARG_CHECK_INTERVAL)
+        string(APPEND _keys
+            "\t<key>SUScheduledCheckInterval</key>\n\t<integer>${ARG_CHECK_INTERVAL}</integer>\n")
+    endif()
+    get_target_property(_already ${target} PULP_SPARKLE_PLIST_XML)
     set_target_properties(${target} PROPERTIES
         PULP_SPARKLE_FEED_URL "${ARG_FEED_URL}"
-        PULP_SPARKLE_DIST_DIR "${_dist}")
+        PULP_SPARKLE_DIST_DIR "${_dist}"
+        PULP_SPARKLE_PLIST_XML "${_keys}")
+    if(NOT _already)
+        # A deferred call expands its arguments when it RUNS, by which time
+        # ${target} is gone; EVAL bakes the target name in now.
+        cmake_language(EVAL CODE
+            "cmake_language(DEFER DIRECTORY [[${CMAKE_SOURCE_DIR}]] CALL _pulp_sparkle_finalize_plist [[${target}]])")
+    endif()
 endfunction()

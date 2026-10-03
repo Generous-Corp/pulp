@@ -500,8 +500,10 @@ At configure time it downloads the pinned `Sparkle-<version>.tar.xz` release
 asset (verifying its SHA-256) into `<build>/_deps/sparkle-<version>/`. After
 each link it copies `Sparkle.framework` into `Contents/Frameworks` with `ditto`,
 removes the XPC services a non-sandboxed app does not use, links the framework
-with an `@executable_path/../Frameworks` rpath, and writes `SUFeedURL`,
-`SUPublicEDKey` and the optional keys into the built `Info.plist`.
+with an `@executable_path/../Frameworks` rpath. At the end of configure it
+writes `SUFeedURL`, `SUPublicEDKey` and the optional keys into the app's
+`Info.plist` template, so they survive regeneration and combine with
+`pulp_declare_standalone_document_type()` in either order.
 
 `FEED_URL` must be `https://` (or `file://` for a local practice feed), and
 `PUBLIC_ED_KEY` must be the public half of the key pair. The private key never
