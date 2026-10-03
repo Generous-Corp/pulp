@@ -6723,6 +6723,7 @@
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
+    "test/fixtures/timeline",
     "test/gpu_health_scene3d_acceptance.cpp",
     "test/mac_objc_coload_probe.cpp",
     "test/test_agent_capability_compile.cpp",
