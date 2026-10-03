@@ -574,9 +574,10 @@ python3 tools/deps/validate_hosts.py
 
 Prefer `shipyard pin bump` over hand-editing `tools/shipyard.toml`. It owns
 the stale-worktree, downgrade, redundant-main-pin, version, and release-asset
-guards. This matters for Rust Shipyard releases because v0.50.0+ changed the
-macOS distribution shape to Apple-Silicon-only signed `.dmg` assets; the pin
-and asset metadata should move together.
+guards. The pin file holds only `version` and `repo`: `tools/install-shipyard.sh`
+runs the upstream installer at that tag, which picks the platform asset (since
+v0.50.0 an Apple-Silicon-only signed `.dmg` on macOS) and verifies its checksum
+itself, so a bump changes `version` and nothing else.
 
 Pulp tracks the latest verified public Shipyard release by default while still
 recording an immutable exact tag. Automation should propose the newest release;
