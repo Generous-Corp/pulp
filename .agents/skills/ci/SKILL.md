@@ -1907,6 +1907,9 @@ behaviour and which jobs call it.
 tools/...sh`) as part of the step, so moving the install into the script kept
 `pypi.org` derived; without that, the relay contract would have stopped
 requiring PyPI egress for the gate.
+Comments are stripped first (comment lines and a trailing `#` that starts a
+word outside quotes), so a script, URL or package manager named only in a
+comment never adds a required host.
 
 `test-pch-wiring` reads compile flags back from the generator. Ninja lists one
 compile line per object; the Makefile generator, which the hosted sanitizer jobs
