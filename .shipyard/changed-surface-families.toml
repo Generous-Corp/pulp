@@ -4,7 +4,7 @@
 # Resolve a merge conflict in this file by regenerating, never by hand.
 
 [[families]]
-name = "script-readers-d26614fee690"
+name = "script-readers-1490e4d4ef76"
 paths = [
   "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
@@ -257,6 +257,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -275,7 +276,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5a9adbde0dda"
+name = "script-readers-035eca3c3ff2"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
   "build-parallelism-guard",
@@ -283,6 +284,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -301,13 +303,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2702846766a6"
+name = "script-readers-64b2357fc840"
 paths = ["tools/scripts/check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -328,13 +331,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7fd97f8409c9"
+name = "script-readers-a07bc990466d"
 paths = ["tools/scripts/ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "ci-routing-digest-check",
   "ci-routing-digest-selftest",
   "gpu-audio-provider-identity-selftest",
@@ -355,13 +359,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ad439ba14af7"
+name = "script-readers-6692cf7ce6e5"
 paths = ["tools/scripts/ctest_inventory_parity.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "ctest-inventory-parity-self-check",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -381,13 +386,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f26f76f9d5a4"
+name = "script-readers-4938c9a72ae9"
 paths = ["tools/scripts/ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "ctest-unique-names",
   "ctest-unique-names-selftest",
   "gpu-audio-provider-identity-selftest",
@@ -408,13 +414,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f82045bd66ee"
+name = "script-readers-700b34e32dee"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "dsp-provenance-audit",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -434,13 +441,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-524379195385"
+name = "script-readers-56cf508a59af"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "cmake-link-floor-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -460,13 +468,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12d68993e0f1"
+name = "script-readers-5c6b2661352d"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "cmake-test-group-discovery",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -488,13 +497,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0328a2f457b4"
+name = "script-readers-7b87857b9905"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -514,7 +524,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0eda54ec6c81"
+name = "script-readers-9473e027eb08"
 paths = [
   "tools/scripts/queue_admission_guard.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -524,6 +534,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -543,13 +554,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2698dfc8ff34"
+name = "script-readers-b74e4cb0caec"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -570,13 +582,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c53096981891"
+name = "script-readers-bba1f5f5a9e8"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -597,13 +610,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1d1546d356c9"
+name = "script-readers-5d74701f1570"
 paths = ["tools/scripts/sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -624,13 +638,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-deda578e1c7b"
+name = "script-readers-abcf70e292b8"
 paths = ["tools/scripts/setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -650,13 +665,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3aa644382e94"
+name = "script-readers-2d8eb0a21332"
 paths = ["tools/scripts/shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -677,13 +693,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-09d952ddb37f"
+name = "script-readers-2c892159c74b"
 paths = ["tools/scripts/status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -703,7 +720,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3c0f6d60ec5e"
+name = "script-readers-f151cca27916"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
   "advisory-macos-runner-policy",
@@ -711,6 +728,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -729,7 +747,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d5a22757d5f0"
+name = "script-readers-fc03906649ee"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
@@ -737,6 +755,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -755,7 +774,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-722c2f7aaebe"
+name = "script-readers-5fcc4a60233d"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
@@ -763,6 +782,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -781,7 +801,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a172f5ac7c7e"
+name = "script-readers-6c7f3fde8991"
 paths = ["tools/scripts/test_build_parallelism_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -789,6 +809,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -807,7 +828,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0ec1e0626b75"
+name = "script-readers-2f80e8e1b899"
 paths = ["tools/scripts/test_build_speed_proxies.py"]
 tests = [
   "build-parallelism-guard",
@@ -815,6 +836,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -833,7 +855,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3a038518d9ec"
+name = "script-readers-1e631961462d"
 paths = ["tools/scripts/test_build_speed_scorecard.py"]
 tests = [
   "build-parallelism-guard",
@@ -841,6 +863,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -859,7 +882,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-18b7908fb847"
+name = "script-readers-563a14334ac0"
 paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -867,6 +890,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -886,7 +910,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5c16fdbdcf41"
+name = "script-readers-08b164c97b0b"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -894,6 +918,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -912,7 +937,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-adb49c47c192"
+name = "script-readers-c1c5247c6cb5"
 paths = ["tools/scripts/test_catch_discover_timeout_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -920,6 +945,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -938,13 +964,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-10fe92455c7b"
+name = "script-readers-78302c5412f1"
 paths = ["tools/scripts/test_catch_multilabel_properties.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "cmake-catch-multilabel-properties",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -964,7 +991,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f2b85ac0f427"
+name = "script-readers-f0e1d2ae9069"
 paths = ["tools/scripts/test_ccache_pch_isolation.py"]
 tests = [
   "build-parallelism-guard",
@@ -972,6 +999,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -990,7 +1018,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-eecab2b4d634"
+name = "script-readers-0343e709e624"
 paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
 tests = [
   "build-parallelism-guard",
@@ -998,6 +1026,7 @@ tests = [
   "changed-surface-registration-projection-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1016,13 +1045,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-73544e1f319f"
+name = "script-readers-a2daedd6ead9"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "check-bundle-architectures-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1042,7 +1072,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d8016f1826c5"
+name = "script-readers-099474d73098"
 paths = ["tools/scripts/test_check_canvas_path_flush.py"]
 tests = [
   "build-parallelism-guard",
@@ -1050,6 +1080,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1068,13 +1099,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-51fd71fa266e"
+name = "script-readers-db072f53c684"
 paths = ["tools/scripts/test_check_installed_rpaths.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1094,13 +1126,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b586405b3007"
+name = "script-readers-c8835432129b"
 paths = ["tools/scripts/test_check_skip_not_pass.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1120,13 +1153,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-914edd72f30c"
+name = "script-readers-b7e6a7693fec"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1146,13 +1180,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5a31b440798d"
+name = "script-readers-24cb606d37a1"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1172,13 +1207,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a04f37eb0d9f"
+name = "script-readers-c7f16c69c392"
 paths = ["tools/scripts/test_check_yoga_oracle_pin.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1198,13 +1234,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d56c494c0d45"
+name = "script-readers-8c75b4334799"
 paths = ["tools/scripts/test_ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "ci-routing-digest-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1224,13 +1261,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cae335a8ab90"
+name = "script-readers-9af1a063918a"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "clean-build-cov-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1250,13 +1288,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5edce8401d95"
+name = "script-readers-53a67023b57c"
 paths = ["tools/scripts/test_clean_worktree_builds.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "clean-worktree-builds-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1276,13 +1315,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-42eb3f1ef080"
+name = "script-readers-b95196b99441"
 paths = ["tools/scripts/test_clean_worktrees.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "clean-worktrees-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1302,13 +1342,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9b38abce047a"
+name = "script-readers-e63b5716a542"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "cmake-manifest-parse",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1328,13 +1369,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bf9d9b06e5ab"
+name = "script-readers-8b34dd4da2e4"
 paths = ["tools/scripts/test_connected_git_history.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-connected-git-history-selftest",
   "gpu-dpr-runner-selftest",
@@ -1354,13 +1396,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-15a2896dc6cf"
+name = "script-readers-fc65047f3219"
 paths = ["tools/scripts/test_consumption_census_contract_note.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "consumption-census-contract-control-note",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1380,13 +1423,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-89c34acebb8f"
+name = "script-readers-d41b4b2fdb7d"
 paths = ["tools/scripts/test_control_profile_downgrade_is_announced.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "control-profile-downgrade-announced",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1406,13 +1450,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ffb429656800"
+name = "script-readers-952560fdfd7f"
 paths = ["tools/scripts/test_ctest_duplicate_registration.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "ctest-duplicate-registration",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1432,13 +1477,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-db22f52d7c57"
+name = "script-readers-4a844a1e6e9d"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "ctest-label-exclusion-guard-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1458,13 +1504,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5ee425a0c3bb"
+name = "script-readers-2c9fca9d0157"
 paths = ["tools/scripts/test_ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "ctest-unique-names-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1484,13 +1531,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3c0b2ba1a2c0"
+name = "script-readers-58c7489f4fd8"
 paths = ["tools/scripts/test_doxygen_installed_header_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "doxygen-installed-header-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1510,13 +1558,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2a10369400e7"
+name = "script-readers-f49a7456bc49"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "cli-dsp-capabilities-dynamics-regression",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1536,13 +1585,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d7a791522cd5"
+name = "script-readers-ff1cf91232e5"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "dsp-provenance-audit-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1562,13 +1612,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-793abb0d7210"
+name = "script-readers-3df70bf670aa"
 paths = ["tools/scripts/test_example_validation_paths.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "example-validation-paths",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1588,13 +1639,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7e21be4132df"
+name = "script-readers-ad1498ed48c2"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "findskia-arch-assert-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1614,13 +1666,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d77276ded680"
+name = "script-readers-4a671bcb04c3"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "fleet-snapshot-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1640,13 +1693,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cde7a02ffda6"
+name = "script-readers-def51aca423d"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "fork-pr-runner-routing",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1666,13 +1720,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f97c022b3ffa"
+name = "script-readers-33210d553715"
 paths = ["tools/scripts/test_format_baseline_diff.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "format-baseline-diff-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1692,13 +1747,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-101849d9cef5"
+name = "script-readers-e01157427a1a"
 paths = ["tools/scripts/test_gallery_visual_diff.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gallery-diff-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1718,13 +1774,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e97b4062e590"
+name = "script-readers-3b31d445954d"
 paths = ["tools/scripts/test_gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gate-python-imports-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1744,13 +1801,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c28500a9aa0f"
+name = "script-readers-4da13e8d6f28"
 paths = ["tools/scripts/test_gate_suite_executed.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gate-suite-executed-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1770,13 +1828,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8e3b6d7b43cc"
+name = "script-readers-8581912fa979"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1798,13 +1857,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f5a200112e4c"
+name = "script-readers-9ce3a6e0837f"
 paths = ["tools/scripts/test_git_read_memo.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "git-read-memo-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1824,13 +1884,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b08e5179f34d"
+name = "script-readers-ce7049396480"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "git-stdin-pipe-deadlock-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1850,13 +1911,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7eb79cf5762e"
+name = "script-readers-c9e6316b5953"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-p4-evidence-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1876,13 +1938,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-adfc2e5c83f9"
+name = "script-readers-ef11a4f54499"
 paths = ["tools/scripts/test_gpu_clean_agent_journey.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-clean-agent-journey-selftest",
   "gpu-dpr-runner-selftest",
@@ -1902,13 +1965,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-964b701684d0"
+name = "script-readers-2db65fac5234"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-experiment-contract-selftest",
   "gpu-dpr-runner-selftest",
@@ -1928,13 +1992,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-62e63c4836e8"
+name = "script-readers-9f779527d0cb"
 paths = ["tools/scripts/test_gpu_dpr_pulp_native_adapter.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-pulp-native-adapter-selftest",
   "gpu-dpr-runner-selftest",
@@ -1954,13 +2019,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4401ea60b718"
+name = "script-readers-2869aafb222f"
 paths = ["tools/scripts/test_gpu_dpr_v2_evidence.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-dpr-v2-evidence-selftest",
@@ -1980,13 +2046,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6439b9174e03"
+name = "script-readers-e19a8287f4b8"
 paths = ["tools/scripts/test_gpu_dpr_web_adapter.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-dpr-web-adapter-selftest",
@@ -2006,13 +2073,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5842fda03d98"
+name = "script-readers-fa9b8afd681b"
 paths = ["tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2032,13 +2100,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c16816f0859e"
+name = "script-readers-f4bbef7e350b"
 paths = ["tools/scripts/test_gpu_handoff_pin_freshness.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2058,13 +2127,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3f7af23bb774"
+name = "script-readers-54ae465fd943"
 paths = ["tools/scripts/test_gpu_health_contract.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2084,13 +2154,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bc0e58af24ee"
+name = "script-readers-1053332e112d"
 paths = ["tools/scripts/test_gpu_health_run_attestation.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2110,13 +2181,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-105e24ffc0cc"
+name = "script-readers-56d14cc818e3"
 paths = ["tools/scripts/test_gpu_recipe_catalog.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2136,13 +2208,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-24427e3b5ce1"
+name = "script-readers-3b8021eaae06"
 paths = ["tools/scripts/test_hydrate_gpu_provenance_commits.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2162,13 +2235,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-24a9a2a0e4eb"
+name = "script-readers-f9255ba0b0dd"
 paths = ["tools/scripts/test_hydrate_real_git.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2188,13 +2262,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b15b62c76ad0"
+name = "script-readers-ee21700f26c8"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2214,13 +2289,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13d1f995ad4f"
+name = "script-readers-509e7b182824"
 paths = ["tools/scripts/test_install_sha256sums.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2240,13 +2316,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6c4e1025847d"
+name = "script-readers-61faabac337e"
 paths = ["tools/scripts/test_live_build_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2266,13 +2343,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2e6844acb8fc"
+name = "script-readers-e9f091e85a0d"
 paths = ["tools/scripts/test_mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2292,13 +2370,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e8c8aaa83141"
+name = "script-readers-2912f2d5298d"
 paths = ["tools/scripts/test_measure_min_os.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2318,13 +2397,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-453f79e919b9"
+name = "script-readers-9e841ca6481f"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2344,13 +2424,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c8c8fb8b077d"
+name = "script-readers-1b71962f3218"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2370,13 +2451,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-49736a700e01"
+name = "script-readers-7c0663198beb"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2396,13 +2478,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0f75bc3b71fc"
+name = "script-readers-4682752e6e7f"
 paths = ["tools/scripts/test_planning_gitlink_guard.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2422,13 +2505,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5de7a06bf8bc"
+name = "script-readers-3959f368b2f0"
 paths = ["tools/scripts/test_pr_batch_advisor.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2448,13 +2532,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-399ff2fbbb35"
+name = "script-readers-acc1e4540705"
 paths = ["tools/scripts/test_pr_check_triage.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2474,13 +2559,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a99d9635faa5"
+name = "script-readers-e62e0a8a39b7"
 paths = ["tools/scripts/test_pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2500,13 +2586,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b88b051f0948"
+name = "script-readers-0e762cb2bf20"
 paths = ["tools/scripts/test_pr_flow_audit.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2526,13 +2613,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cfd32f0d2f6d"
+name = "script-readers-5a82972be479"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2552,13 +2640,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-92381fcdaac5"
+name = "script-readers-e2d13ef87cda"
 paths = ["tools/scripts/test_prepush_gate_output.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2578,13 +2667,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4c16af58364d"
+name = "script-readers-9df37473ba92"
 paths = ["tools/scripts/test_prepush_queue_rebase_hint.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2604,13 +2694,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-86977e073d3a"
+name = "script-readers-3305b061a1c1"
 paths = ["tools/scripts/test_protected_merge_receipt.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2631,13 +2722,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bde6b33f4b7a"
+name = "script-readers-e6bc612dc861"
 paths = ["tools/scripts/test_pulp_test_data_cmake.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2657,13 +2749,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3259bc655b3f"
+name = "script-readers-fb0f876a1aa4"
 paths = ["tools/scripts/test_pulp_test_group.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "cmake-test-group-discovery",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -2683,13 +2776,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d97218f509f2"
+name = "script-readers-1af225ef6e75"
 paths = ["tools/scripts/test_pulp_uninstall.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2709,13 +2803,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c17ce545a888"
+name = "script-readers-7d8f563ed4d3"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2735,13 +2830,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-84d05f943dde"
+name = "script-readers-02b1f361f741"
 paths = ["tools/scripts/test_release_trailer_guard.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2761,13 +2857,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aed2028e1a39"
+name = "script-readers-8466f3aa072b"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2787,13 +2884,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5e29d2bba7ad"
+name = "script-readers-e81ad562a8d2"
 paths = ["tools/scripts/test_runner_topology_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2813,13 +2911,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7e0072fe7dee"
+name = "script-readers-abc8661b019e"
 paths = ["tools/scripts/test_runner_topology_static.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2839,13 +2938,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-76685776a431"
+name = "script-readers-9016a049cb26"
 paths = ["tools/scripts/test_rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2865,13 +2965,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-24d704f91abf"
+name = "script-readers-4d7928c6ef05"
 paths = ["tools/scripts/test_sample_region_catalogs.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2891,13 +2992,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-08e8170d990e"
+name = "script-readers-dde4e0617d12"
 paths = ["tools/scripts/test_sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2917,13 +3019,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-93891fa95026"
+name = "script-readers-a633cfd2772b"
 paths = ["tools/scripts/test_schema_drift_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2943,13 +3046,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-011c967212a3"
+name = "script-readers-c41b916f43f0"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2969,7 +3073,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2461938efbdd"
+name = "script-readers-6c215877708f"
 paths = ["tools/scripts/test_sdk_capability_handoff.py"]
 tests = [
   "agent-capability-sdk-handoff-selftest",
@@ -2977,6 +3081,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2995,13 +3100,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23c108362075"
+name = "script-readers-4e0a68f60875"
 paths = ["tools/scripts/test_sdk_consumer_sweep.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3021,13 +3127,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6b04c6b7d348"
+name = "script-readers-698061062bf8"
 paths = ["tools/scripts/test_sdk_consumer_update.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3047,13 +3154,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b757cb75efbf"
+name = "script-readers-d45b3177518b"
 paths = ["tools/scripts/test_seed_build_dir.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3073,13 +3181,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a21eabcd11d8"
+name = "script-readers-bbc1511759c5"
 paths = ["tools/scripts/test_sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3099,13 +3208,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2cd6b02241a6"
+name = "script-readers-b2ce50b0823c"
 paths = ["tools/scripts/test_setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3125,13 +3235,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5e82d7f1f10f"
+name = "script-readers-bfc5cfa71ef9"
 paths = ["tools/scripts/test_shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3151,13 +3262,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3f9a8104ad8a"
+name = "script-readers-e03539855ed4"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3177,13 +3289,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-97abac1c9bad"
+name = "script-readers-543a35af720c"
 paths = ["tools/scripts/test_skills_doc_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3203,13 +3316,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-38557cb77218"
+name = "script-readers-dde05361ea67"
 paths = ["tools/scripts/test_status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3229,13 +3343,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a0ffcc21ef38"
+name = "script-readers-ae5300c6eed7"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3255,13 +3370,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e657596099a1"
+name = "script-readers-34e95640cbc0"
 paths = ["tools/scripts/test_timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3281,13 +3397,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ca118b3bef46"
+name = "script-readers-9ece129bb475"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3307,13 +3424,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7c9d1ecfd63c"
+name = "script-readers-2bfd1cb2bdad"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3333,13 +3451,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d1a661325aba"
+name = "script-readers-d79aed5ac96d"
 paths = ["tools/scripts/test_unbounded_wait_lint.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3359,13 +3478,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-82add48f8a0c"
+name = "script-readers-4013d3169ffe"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-audio-trace-validator-selftest",
   "gpu-dpr-runner-selftest",
@@ -3385,13 +3505,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-17d6d2f8ec95"
+name = "script-readers-30c9434eee40"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3411,13 +3532,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3b78aab04311"
+name = "script-readers-fe860cd5afb9"
 paths = ["tools/scripts/test_vellum_watch_preflight.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3437,13 +3559,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-05580875e5ce"
+name = "script-readers-1f6bd1c90fa8"
 paths = ["tools/scripts/test_vellum_workflow_dispatch.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3463,13 +3586,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7177977fdefa"
+name = "script-readers-3d72b31960cf"
 paths = ["tools/scripts/test_verify_create_templates.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "create-templates-verify",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -3489,13 +3613,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5fe1bed288dd"
+name = "script-readers-199b06c7822d"
 paths = ["tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-inconclusive-receipt-selftest",
   "gpu-dpr-runner-selftest",
@@ -3515,13 +3640,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9f3747d5d22d"
+name = "script-readers-60e217bc5677"
 paths = ["tools/scripts/test_verify_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3541,13 +3667,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f18dbe284948"
+name = "script-readers-fdc26fc28761"
 paths = ["tools/scripts/test_verify_rendered_panel.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3567,13 +3694,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c6bb91a84d28"
+name = "script-readers-0c0d87d91521"
 paths = ["tools/scripts/test_version_at_land.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3593,13 +3721,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b62e9459e0fe"
+name = "script-readers-7376af5725b7"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3619,13 +3748,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e3bc9f81f2fb"
+name = "script-readers-3e0000557e2c"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3645,13 +3775,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8475e92c8e54"
+name = "script-readers-fefe9b0cc864"
 paths = ["tools/scripts/timeline_engine_dependency_floor_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3672,13 +3803,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-53635a639af1"
+name = "script-readers-51f7fc708043"
 paths = ["tools/scripts/timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3698,13 +3830,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1f586770f1f0"
+name = "script-readers-2be0217c29c8"
 paths = ["tools/scripts/token_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3724,13 +3857,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c0305bd9b0b4"
+name = "script-readers-3a97f8cfeca7"
 paths = ["tools/scripts/token_key_check.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3750,13 +3884,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-50612aa8aa4e"
+name = "script-readers-b7c3ad52c6c5"
 paths = ["tools/scripts/trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3776,13 +3911,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-83c792c5f211"
+name = "script-readers-f407dbb91a3d"
 paths = ["tools/scripts/verify_downstream_consumers.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3803,13 +3939,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-83621a0c74e7"
+name = "script-readers-4dce753842f3"
 paths = ["tools/scripts/verify_downstream_consumers_contract.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3829,13 +3966,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5caa81b38d74"
+name = "script-readers-8d01d5023922"
 paths = ["tools/scripts/verify_refactor_baselines.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3856,13 +3994,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-106b1d3e8d89"
+name = "script-readers-3e0bf567a22b"
 paths = ["tools/scripts/verify_refactor_baselines_contract.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3882,13 +4021,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9446bc979109"
+name = "script-readers-4663bc4de560"
 paths = ["tools/scripts/verify_timeline_launcher_resource_contract.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3910,13 +4050,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6e9415252d6c"
+name = "script-readers-873334bb6a59"
 paths = ["tools/scripts/verify_timeline_live_capture.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3936,13 +4077,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0382d29a3d23"
+name = "script-readers-13dde78b3177"
 paths = ["tools/scripts/verify_timeline_transaction_launcher_complexity.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3963,13 +4105,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a51467295aa1"
+name = "script-readers-b8a6acf600da"
 paths = ["tools/scripts/verify_wasm_skia_slice.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4004,6 +4147,7 @@ tests = [
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
   "ci-routing-digest-check",
   "ci-routing-digest-selftest",
   "classify-changes-selftest",
@@ -4048,6 +4192,7 @@ tests = [
   "prepush-gate-output",
   "prepush-refresh-push",
   "queue-batch-attribute-selftest",
+  "read-audit-selftest",
   "reuse-policy-replay-selftest",
   "reuse-record-selftest",
   "runner-topology-selftest",
