@@ -112,8 +112,18 @@
   },
   "blockers": [
     "Android Studio JBR 25.0.3 remains incompatible with this Gradle/Kotlin toolchain (IllegalArgumentException: 25.0.3); OpenJDK 17 builds successfully.",
-    "Surface recreation leak: native PSS grows approximately 12 MB per HOME/relaunch surface cycle despite destroy-complete markers and an explicit Device::Destroy experiment. Root cause requires further Dawn/Skia lifecycle investigation."
+    "Surface recreation leak: native PSS grows approximately 12 MB per HOME/relaunch surface cycle despite destroy-complete markers and an explicit Device::Destroy experiment. Root cause requires further Dawn/Skia lifecycle investigation.",
+    "Java 17 Android sample build reaches CMake but fails because external/skia-build/modules/skunicode/include/SkUnicode.h includes missing src/base/SkUTF.h; this is a checkout/Skia source-alignment blocker separate from the measured B3 retention attribution."
   ],
+  "android_sample_build_blocker": {
+    "owner": "Android sample checkout/Skia source-alignment owner",
+    "doctor": "pulp doctor android: 4/4 passed",
+    "command": "Gradle assembleDebug with Java 17 and Android SDK environment",
+    "result": "BLOCKED",
+    "observed": "Gradle reaches CMake, then external/skia-build/modules/skunicode/include/SkUnicode.h includes missing src/base/SkUTF.h.",
+    "classification": "Checkout/Skia source alignment failure; separate from the measured B3 native-memory retention attribution.",
+    "follow_up": "Align or repair the external Skia source/build checkout, then rerun the Android sample build. This receipt remains BLOCKED and does not claim B3 green."
+  },
   "surface_recreation_leak_check": {
     "command": "Five HOME -> relaunch surface recreation cycles with dumpsys meminfo after each cycle; then force-stop and inspect logcat.",
     "result": "BLOCKED",
