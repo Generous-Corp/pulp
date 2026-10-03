@@ -419,6 +419,8 @@ full_required_paths = [
 # below instead of forcing the full suite.
 policy_paths = [
   "tools/scripts/run_changed_surface_tests.py",
+  # Read from the protected base: a matched_fail counts only against it.
+  "tools/ci/changed_surface_lane_reds.json",
   "tools/scripts/changed_surface_inventory.py",
   "tools/scripts/changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_policy.py",

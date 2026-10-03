@@ -761,7 +761,9 @@ def validate_build_target_projection(
             )
 
 
-def execution_argv(build_dir: Path, selected_file: Path | None = None) -> list[str]:
+def execution_argv(
+    build_dir: Path, selected_file: Path | None = None, junit: Path | None = None
+) -> list[str]:
     """Return the exact shell-free governed CTest argv."""
 
     command = [
@@ -780,6 +782,8 @@ def execution_argv(build_dir: Path, selected_file: Path | None = None) -> list[s
     ]
     if selected_file is not None:
         command.extend(["--tests-from-file", str(selected_file)])
+    if junit is not None:
+        command.extend(["--output-junit", str(junit)])
     return command
 
 
@@ -818,13 +822,75 @@ def failure_coverage(selected_result: int, full_result: int | None) -> str:
     return "no_failure_observed"
 
 
-def comparison_verdict(selected_result: int, full_result: int | None) -> str:
+# The protected base's named reds the lane's full suite carries regardless of
+# the change. A full-suite failure outside the selection may be one of these and
+# nothing else for a matched_fail to count; the file is a policy path, so a PR
+# that edits it selects the full suite, and it is read from the base, never the
+# head.
+LANE_RED_ALLOWLIST = "tools/ci/changed_surface_lane_reds.json"
+
+
+def junit_failures(path: Path) -> set[str] | None:
+    """Names of the tests a ctest --output-junit report records as failed, or
+    None when the report is absent or unreadable."""
+    import xml.etree.ElementTree as ElementTree
+
+    try:
+        root = ElementTree.parse(path).getroot()
+    except (OSError, ElementTree.ParseError):
+        return None
+    return {
+        case.get("name", "")
+        for case in root.iter("testcase")
+        if case.get("status") == "fail" or case.find("failure") is not None
+    }
+
+
+def lane_red_allowlist(
+    base_sha: str, repo_root: Path = REPO_ROOT, today: str | None = None
+) -> tuple[dict[str, str], str] | None:
+    """The protected base's unexpired lane reds (name -> expiry, `YYYY-MM-DD`
+    UTC) and the sha256 of the file's bytes. An entry past its expiry is
+    dropped, so a fixed red cannot keep hiding a new failure under its name."""
+    shown = subprocess.run(
+        ["git", "-C", str(repo_root), "show", f"{base_sha}:{LANE_RED_ALLOWLIST}"],
+        capture_output=True, shell=False)
+    if shown.returncode != 0:
+        return None
+    today = today or time.strftime("%Y-%m-%d", time.gmtime())
+    try:
+        entries = {entry["name"]: entry["expires"] for entry in json.loads(shown.stdout)["tests"]}
+    except (ValueError, KeyError, TypeError):
+        return None
+    current = {name: expires for name, expires in sorted(entries.items())
+               if isinstance(expires, str) and len(expires) == 10 and expires >= today}
+    return current, hashlib.sha256(shown.stdout).hexdigest()
+
+
+def comparison_verdict(
+    selected_result: int,
+    full_result: int | None,
+    sets: tuple[set[str], set[str], set[str]] | None = None,
+) -> str:
+    """`sets` is (selected registrations, selected-leg failures, full-suite
+    failures). With them, two failing legs compare per test: `matched_fail`
+    when the selected leg failed nothing the full suite passed and saw every
+    full-suite failure inside its selection."""
     if full_result is None:
         return "not_compared"
     if selected_result == 0 and full_result == 0:
         return "matched_pass"
     if selected_result != 0 and full_result != 0:
-        return "failure_overlap_unproven"
+        if sets is None:
+            return "failure_overlap_unproven"
+        selection, selected_failures, full_failures = sets
+        if not selected_failures or not full_failures:
+            return "failure_overlap_unproven"
+        if not selected_failures <= full_failures:
+            return "selected_only_failure"
+        if not (full_failures & selection) <= selected_failures:
+            return "missed_full_failure"
+        return "matched_fail"
     return "mismatched_non_graduation"
 
 
@@ -1145,7 +1211,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
         if selected_build_result in (None, 0):
             selected_started = time.monotonic()
             selected_result = subprocess.run(
-                execution_argv(build_dir, selected_file), shell=False
+                execution_argv(build_dir, selected_file, Path(directory) / "selected-junit.xml"),
+                shell=False,
             ).returncode
             selected_seconds = time.monotonic() - selected_started
         else:
@@ -1194,7 +1261,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             if full_build_result in (None, 0):
                 full_started = time.monotonic()
                 full_result = subprocess.run(
-                    execution_argv(build_dir), shell=False
+                    execution_argv(build_dir, junit=Path(directory) / "full-junit.xml"),
+                    shell=False,
                 ).returncode
                 full_seconds = time.monotonic() - full_started
             else:
@@ -1213,7 +1281,19 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             raise SelectionExecutionError("private selected-tests snapshot changed during execution")
         result_dir = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
         if result_dir:
-            verdict = comparison_verdict(selected_result, full_result)
+            selected_failures = junit_failures(Path(directory) / "selected-junit.xml")
+            full_failures = junit_failures(Path(directory) / "full-junit.xml")
+            sets = (None if selected_failures is None or full_failures is None
+                    else (set(selected_names), selected_failures, full_failures))
+            verdict = comparison_verdict(selected_result, full_result, sets)
+            allowlist = lane_red_allowlist(selection_receipt["base_sha"])
+            outside = sorted(full_failures - set(selected_names)) if full_failures is not None else None
+            absorbed = (len(set(outside or []) & set(allowlist[0]))
+                        if allowlist is not None else None)
+            eligible = compare_full and (
+                verdict == "matched_pass"
+                or (verdict == "matched_fail" and allowlist is not None
+                    and set(outside or []) <= set(allowlist[0])))
             write_result_receipt(
                 Path(result_dir),
                 {
@@ -1270,7 +1350,18 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "full_authoritative": compare_full,
                     "failure_coverage": failure_coverage(selected_result, full_result),
                     "comparison_verdict": verdict,
-                    "graduation_eligible": compare_full and verdict == "matched_pass",
+                    "graduation_eligible": eligible,
+                    # The named sets Shipyard recomputes a matched_fail from.
+                    "selected_tests": list(selected_names),
+                    "selected_failures": (sorted(selected_failures)
+                                          if selected_failures is not None else None),
+                    "full_failures": sorted(full_failures) if full_failures is not None else None,
+                    "full_failures_outside_selection": outside,
+                    "lane_red_allowlist": sorted(allowlist[0]) if allowlist else None,
+                    "lane_red_allowlist_expires": allowlist[0] if allowlist else None,
+                    # How much of a matched_fail rested on the allowlist.
+                    "allowlisted_failure_count": absorbed,
+                    "lane_red_allowlist_sha256": allowlist[1] if allowlist else None,
                 },
             )
         return full_result if full_result is not None else selected_result
