@@ -578,13 +578,34 @@ class Collector:
         files = self.diff_files(head["base_sha"], group["base_sha"])
         return (files, "bases") if files else (None, None)
 
-    def input_list_at(self, rev: str) -> set[str] | None:
+    def script_inputs_at(self, rev: str) -> dict | None:
+        """The checked-in script-input list at `rev`, or None when it cannot
+        be read. A run's checkout is a merge commit GitHub made, which the
+        local clone has usually never fetched (and the collector never
+        fetches), so a commit missing locally is read through the API."""
         res = self._git("show", f"{rev}:{SCRIPT_INPUTS_PATH}", check=False)
-        if res.returncode:
+        text = None if res.returncode else res.stdout
+        if text is None and self.gh is not None and re.fullmatch(r"[0-9a-f]{40}", rev):
+            def fetch() -> str | None:
+                url = f"{API}/repos/{self.gh.repository}/contents/{SCRIPT_INPUTS_PATH}?ref={rev}"
+                try:
+                    with self.gh._request(url, "application/vnd.github.raw+json") as resp:
+                        return resp.read().decode("utf-8")
+                except urllib.error.HTTPError as err:
+                    if err.code == 404:
+                        return None
+                    raise
+            text = self._cached(f"script-inputs/{rev}.json.gz", fetch)
+        if text is None:
             return None
         try:
-            doc = json.loads(res.stdout)
+            return json.loads(text)
         except json.JSONDecodeError:
+            return None
+
+    def input_list_at(self, rev: str) -> set[str] | None:
+        doc = self.script_inputs_at(rev)
+        if doc is None:
             return None
         return {i.rstrip("/") for entry in doc.get("tests", {}).values() for i in entry.get("inputs", [])}
 
@@ -1089,11 +1110,12 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                         "spawnable_fallback": spawn_all, "fallback_only_tests": fallback_only}
         if codemodel is not None:
             # The same counts over the executables the recorded build
-            # describes, where the variants can be compared exactly, and the
-            # set itself for the binary-hash control.
+            # describes, where the variants can be compared exactly, and for
+            # the binary-hash control every executable the variant rebuilds,
+            # including spawned tools and others no group test runs.
             out[variant]["described_total"] = len(counted & described)
             out[variant]["described_rebuilt"] = len(rebuilt_set & described)
-            out[variant]["rebuilt"] = sorted(rebuilt_set)
+            out[variant]["rebuilt"] = sorted(rebuilt_all)
     return out
 
 
@@ -1232,16 +1254,10 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
 
     def entries(sha: str) -> dict | None:
         if sha not in entries_cache:
-            for _ in range(3):
-                res = collector._git("show", f"{sha}:{SCRIPT_INPUTS_PATH}", check=False)
-                if not res.returncode:
-                    break
-            try:
-                entries_cache[sha] = None if res.returncode else json.loads(res.stdout).get("tests", {})
-            except json.JSONDecodeError:
-                entries_cache[sha] = None
+            doc = collector.script_inputs_at(sha)
+            entries_cache[sha] = None if doc is None else doc.get("tests", {})
             if entries_cache[sha] is None:
-                unread.append(f"{sha}: {res.stderr.strip()[:200]}")
+                unread.append(sha)
         return entries_cache[sha]
 
     build_real = os.path.realpath(graph_build_dir)

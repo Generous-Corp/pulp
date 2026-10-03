@@ -24,6 +24,7 @@ import io
 import json
 import os
 import subprocess
+import urllib.error
 import sys
 import tempfile
 import unittest
@@ -688,6 +689,33 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual((keys["cmake-codemodel-recorded"]["executables_rebuilt"],
                           keys["cmake-codemodel-recorded"]["executables_total"]), (1, 2))  # only executables the tests run
 
+    def test_the_binary_control_covers_rebuilt_executables_no_test_runs(self):
+        """A changed binary no group test runs (a spawned tool, a bench) is
+        checked against everything the variant rebuilds, not only the
+        executables behind the group's tests."""
+        import gzip
+        targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
+                   for n in ("group-a", "group-b", "group-c")}
+
+        def unreached(drift, run_id):
+            corpus = Path(self.tmp) / f"ctl-{run_id}"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
+            rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
+            cache = corpus / "cache" / "record-v4"
+            cache.mkdir(parents=True)
+            for rid, rec in (("p1", {"link": None, "executables": None, "binaries": {"test/group-c": "3"}}),
+                             ("g1", {"link": self.link, "executables": {"ta": "test/group-a"},
+                                     "binaries": {"test/group-c": "3x"}})):
+                with gzip.open(cache / f"{rid}.json.gz", "wt") as fh:
+                    json.dump({"targets": targets, **rec}, fh)
+            rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
+                                     {}, None, mock.Mock())
+            return next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"][
+                "unreached_changed_binaries"]
+        self.assertEqual(unreached(("core/added_since.cpp",), "reached"), [])        # rebuilt, no test runs it
+        self.assertEqual(unreached(("test/t.cpp",), "missed"), ["test/group-c"])     # changed and not rebuilt
+
     def test_commit_bound_executables_are_learned_from_same_tree_pairs(self):
         import gzip
         corpus = Path(self.tmp) / "learn"
@@ -896,6 +924,33 @@ class RecordCoverageTests(unittest.TestCase):
         self.assertEqual([m["run_id"] for m in cov["runs_without_record"]], ["2"])
         # runner lost before the record step, whether or not a test step ran first
         self.assertEqual([m["run_id"] for m in cov["interrupted"]], ["6", "7"])
+
+
+class ScriptInputsTests(unittest.TestCase):
+    def test_a_checkout_missing_locally_is_read_through_the_api(self):
+        doc = {"tests": {"t": {"inputs": ["tools/x/"]}}}
+        calls = []
+
+        def request(url, accept):
+            calls.append(url)
+            if "ref=" + "b" * 40 in url:
+                raise urllib.error.HTTPError(url, 404, "nf", {}, None)
+            resp = mock.MagicMock()
+            resp.__enter__.return_value.read.return_value = json.dumps(doc).encode()
+            return resp
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._git = lambda *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal: bad object")
+        gh = mock.Mock()
+        gh.repository, gh._request = "o/r", request
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            self.assertEqual(c.input_list_at("a" * 40), {"tools/x"})
+            self.assertEqual(c.script_inputs_at("a" * 40), doc)  # cached, no second request
+            self.assertIsNone(c.script_inputs_at("b" * 40))       # absent at that commit
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all("test/ctest_script_inputs.json" in u for u in calls))
+            c.gh = None
+            self.assertIsNone(c.script_inputs_at("c" * 40))       # offline: unread, not guessed
 
 
 class GraftTests(unittest.TestCase):
