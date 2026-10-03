@@ -4,10 +4,9 @@
 
 namespace pulp::gpu_audio::detail {
 
-/// Clean-room bridge for a NAM/TCN CPU oracle owned by a consumer repository.
-/// The kernel owns its parsed weights and causal state; Pulp owns lifecycle and
-/// BufferView/StreamingModel admission. No oracle headers or model format are
-/// part of the Pulp ABI.
+/// Adapter for a causal CPU kernel whose parsed weights and state are owned by
+/// the caller. Pulp owns lifecycle and BufferView/StreamingModel admission;
+/// kernel headers and model formats remain outside the Pulp ABI.
 struct NamTcnCpuKernel {
     void* state = nullptr;
     bool (*prepare)(void*, const StreamingPrepareContext&) noexcept = nullptr;
