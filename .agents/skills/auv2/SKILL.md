@@ -479,17 +479,40 @@ The genuine AU v2 multi-bus vehicle is the **instrument** (`aumu` /
   `process(ProcessBuffers&)`. Bus 0 = Main, 1..N-1 = Aux. `PrepareBuffer` is
   idempotent and does not clobber contents, so the copy on each later bus pull
   reads what `Render` wrote. Verified by `auval -v aumu` on `examples/pulp-multi-out`.
-- **Effect (`PulpAUEffect` / AUEffectBase) is a hard single-in/single-out wall.**
-  `AUEffectBase` is `AUBase(ci, 1, 1)` and its `Render` pulls ONLY input element 0,
-  so an AU effect cannot receive live sidechain/aux audio through the stock render
-  path — the `std::array<…,1>` at the effect's `ProcessBufferLists` is NOT an
-  arbitrary cap, it reflects the SDK model. A descriptor-declared sidechain
-  surfaces as an **inactive** Sidechain bus (`build_input_bus_infos`), so
-  `sidechain_input()` returns null gracefully rather than exposing a bus the host
-  would try to feed. Gate any sidechain-view emission on `input_buses.size() > 1`
-  so the common single-input effect stays byte-identical (auval `aufx` regression).
-  Real AU-effect sidechain needs a 2nd input element + manual pull, which auval
-  cannot exercise — do not add it without a real sidechain-capable DAW to verify.
+- **Effect side chain = a second input ELEMENT, pulled by hand.** `AUEffectBase`
+  is `AUBase(ci, 1, 1)` and its `Render` pulls only input element 0, so the
+  side chain cannot ride the stock path. `PulpAUEffect` adds it itself:
+  - `CreateExtendedElements()` (runs inside `CreateElements`, after the input
+    scope exists — the ctor is too early, `SetNumberOfElements` there has no
+    scope creator yet) grows the input scope to 2 when
+    `effect_has_sidechain_element(desc)` (second input bus with >0 channels),
+    names element 1 "Side Chain", and seeds its format from element 0 at the
+    declared width. Hosts key the side-chain UI purely on the input
+    `ElementCount`; Logic's Side Chain pop-up appears only with a 2nd element.
+  - `Render()` pulls element 1 with `Input(1).PullInput` into the element's own
+    preallocated buffer (sized by `ReallocateBuffers` in `DoInitialize`, so no
+    audio-thread allocation), using a PRIVATE flags word so the side chain's
+    `OutputIsSilence` never marks the main render silent, then calls the base
+    `Render`. The pulled list lives only for that call (`sidechain_pulled_`).
+  - `ProcessBufferLists` resolves the pointers with
+    `resolve_sidechain_channels`, offset by `slice_frame_offset_`:
+    `AUEffectBase::ProcessScheduledSlice` advances ONLY the main buffer lists
+    between scheduled-parameter slices, so a side chain read without the offset
+    is misaligned by the slice start on every automated block.
+  - Unconnected (`!HasInput(1)`), failed pull, or malformed list => the Sidechain
+    bus is delivered inactive and `sidechain_input()` returns nullptr, the
+    VST3/CLAP/AU v3 contract. Do not zero-fill a fake side chain.
+  - `SetName` on an AU element RETAINS (`Owned::operator=(T)`), so release a
+    created CFString after storing it.
+  - Rates: `ChangeStreamFormat` copies a main-bus rate change onto an
+    unconnected side-chain element; an explicitly mismatched side-chain rate
+    fails `Initialize()` with `kAudioUnitErr_FormatNotSupported`.
+  - auval feeds no side chain, so it only proves the 2-element unit still
+    validates. Delivery is proven by `pulp-test-au-v2-sidechain`, which drives
+    `AUBase::DoRender` with host render callbacks on BOTH input elements — the
+    test harness pattern is `PulpAUEffect(nullptr)` + `CreateElements()` +
+    `DispatchSetProperty(kAudioUnitProperty_SetRenderCallback, Input, e, …)`.
+  Effects still have a single output element (no aux outputs).
 - **RT-safety.** Cache the descriptor once (`descriptor_` member) in the ctor —
   `descriptor()` returns by value (allocating std::string members), so copying it
   per block on the audio thread is a bug. Bus `string_view`s point into the cached
