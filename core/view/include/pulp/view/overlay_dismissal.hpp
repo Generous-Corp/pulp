@@ -121,6 +121,19 @@ struct OverlayDismissalPolicy {
     ///
     /// Set false to restore strict consume-everywhere dismissal.
     bool trigger_press_passes_through = true;
+
+    /// While any shown overlay is open, a PASSIVE pointer input — a wheel or
+    /// two-finger scroll, a trackpad magnify or rotate — at a point outside
+    /// every shown overlay is dropped (`PassivePointerRoute::blocked`), the
+    /// way scrolling elsewhere does nothing while a macOS menu is open. A
+    /// non-modal popover therefore no longer leaves the content behind it
+    /// scrollable or zoomable: a user scrolling a menu who drifts off its edge
+    /// must not zoom the plot underneath. Passive input still never dismisses.
+    ///
+    /// Set false to restore the earlier rule, under which only a MODAL overlay
+    /// blocked passive input outside it and a non-modal popover let it through
+    /// to the tree.
+    bool passive_input_outside_overlay_blocked = true;
 };
 
 /// The active policy. Reading is cheap and allocation-free.
@@ -168,10 +181,19 @@ struct PassivePointerRoute {
     /// The view to deliver to, or nullptr when nothing is under the point.
     /// Always nullptr when `blocked` is set.
     View* target = nullptr;
-    /// The input must be dropped: an open modal overlay owns the screen and
-    /// the point is outside every overlay that could take it. The host must
-    /// not fall back to any hit test or scroll-pane search.
+    /// The input must be dropped: an open overlay owns the screen and the
+    /// point is outside every overlay that could take it. The host must not
+    /// fall back to any hit test or scroll-pane search.
     bool blocked = false;
+    /// The open overlay `target` was resolved inside, or nullptr when the
+    /// ordinary tree answered. It is the CONTAINMENT boundary for the input:
+    /// a wheel that lands in an overlay is delivered to `target` and its
+    /// ancestors up to and including this view, and never chains past it to
+    /// a listener outside the overlay — even when nothing inside consumes it
+    /// (the end of a list, a fixed header, a horizontal-only delta). This is
+    /// `overscroll-behavior: contain` at every overlay root; a submenu stacked
+    /// on a menu is its own boundary.
+    View* overlay = nullptr;
 };
 
 /// Resolve a passive pointer input through the root's open overlays.
@@ -186,14 +208,22 @@ struct PassivePointerRoute {
 ///
 /// Rules, top of the stack first; like a hover, nothing is ever dismissed:
 ///   1. The point lies inside a shown overlay that resolves it to a view: that
-///      view is the target (a scroll inside a dialog scrolls the dialog).
+///      view is the target (a scroll inside a dialog scrolls the dialog) and
+///      that overlay is `PassivePointerRoute::overlay`, the boundary the input
+///      may not chain past.
 ///   2. The point lies outside every shown overlay, and one of them is MODAL —
 ///      a `ModalOverlay`, or an overlay whose accessible role is `dialog`
 ///      (`role="dialog"` / `role="alertdialog"`): the input is `blocked`.
 ///      A modal dialog makes the content behind it inert, and inert content
 ///      receives no scroll or zoom.
-///   3. Otherwise — no overlay, or only non-modal popovers the point misses —
-///      the ordinary tree `hit_test` answers, exactly as before.
+///   3. The point lies outside every shown overlay and the open ones are all
+///      non-modal popovers (menus, dropdowns, submenus): the input is
+///      `blocked` too, while
+///      `OverlayDismissalPolicy::passive_input_outside_overlay_blocked` is set
+///      (the default) — scrolling elsewhere while a menu is open does nothing,
+///      as on macOS. An overlay with `pointer-events: none` takes no input and
+///      blocks none. With the policy off, the ordinary tree answers here.
+///   4. Otherwise — no overlay open — the ordinary tree `hit_test` answers.
 ///
 /// Hidden overlays and overlays detached from `root` are ignored. Read-only.
 PassivePointerRoute route_passive_pointer(View& root, Point root_pt);

@@ -303,21 +303,28 @@ bool overlay_is_modal(View* open) {
 
 PassivePointerRoute route_passive_pointer(View& root, Point root_pt) {
     bool modal_open = false;
+    bool popover_open = false;
     if (auto* state = root.existing_interaction()) {
         const auto& stack = state->overlay_stack;
         for (std::size_t i = stack.size(); i > 0; --i) {
             View* open = stack[i - 1];
             if (!overlay_shown_in(open, root)) continue;
             modal_open = modal_open || overlay_is_modal(open);
+            // An overlay that takes no pointer input at all (a decorative
+            // badge claimed as an overlay) owns nothing on screen.
+            popover_open = popover_open
+                || open->pointer_events() != View::PointerEvents::none;
             if (!open->overlay_contains(root_pt)) continue;
             if (auto* hit = open->hit_test(point_to_local(root_pt, open, &root)))
-                return {hit, false};
+                return {hit, false, open};
         }
     }
     // A visible ModalOverlay widget is modal whether or not it ever claimed
     // the overlay slot; it covers its root, so the tree hit test lands in it.
-    if (modal_open) return {nullptr, true};
-    return {root.hit_test(root_pt), false};
+    if (modal_open) return {nullptr, true, nullptr};
+    if (popover_open && overlay_dismissal_policy().passive_input_outside_overlay_blocked)
+        return {nullptr, true, nullptr};
+    return {root.hit_test(root_pt), false, nullptr};
 }
 
 ContextPressResult route_context_press(View& root, Point root_pt) {

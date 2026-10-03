@@ -961,6 +961,16 @@ must not silently cancel its independent compatibility `mousedown`. Level 1
 (`stopPropagation`) still allows remaining same-target listeners; level 2
 (`stopImmediatePropagation`) does not.
 
+A wheel that resolved inside an open overlay is contained there: the bridge
+adds `__pulpWheelBoundary: "<overlay element id>"` to the wheel payload,
+`_makeEvent` copies it to `ev._pulpBoundaryId`, and `_dispatchEvent` drops
+every path element above that element from BOTH phases, except `__root__` (the
+React-DOM delegate, which dispatches by fiber tree and would otherwise lose the
+tick inside the overlay too). The native half stops at the overlay root in
+`deliver_mouse_wheel`. Testing the JS half needs its own fail-before: a native
+`on(id,'wheel')` ancestor stops at the native boundary, so only an
+`addEventListener('wheel')` ancestor proves the DOM bubble is cut.
+
 ### ARIA is a PAIR, and the overlay half is easy to leave unread
 
 `_reevaluateOverlay` (in `web-compat-style-decl.js`) decides whether an element

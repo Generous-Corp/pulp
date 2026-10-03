@@ -38,6 +38,15 @@ std::string point_payload(const View* owner, Point local) {
            "offsetY:" + std::to_string(local.y);
 }
 
+// `,__pulpWheelBoundary:"<id>"` while the wheel being dispatched resolved
+// inside an open overlay, else nothing. __dispatch__ hands it to the DOM
+// bubble, which then stops at that element (overlay containment).
+std::string wheel_boundary_member() {
+    const auto* id = detail::wheel_boundary_id();
+    if (!id) return {};
+    return ",__pulpWheelBoundary:" + js_string_literal(*id);
+}
+
 std::string wheel_payload(const MouseEvent& event) {
     return std::string{"{"} +
            "deltaX:" + std::to_string(event.scroll_delta_x) + "," +
@@ -49,6 +58,7 @@ std::string wheel_payload(const MouseEvent& event) {
            "altKey:" + (event.isAltDown() ? "true" : "false") + "," +
            "metaKey:" + ((event.isCmdDown() || event.isMetaDown())
                               ? "true" : "false") +
+           wheel_boundary_member() +
            "}";
 }
 

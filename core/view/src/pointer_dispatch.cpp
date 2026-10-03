@@ -667,7 +667,26 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // pointer events, so the wheel never reached the ancestor wrap-div that
     // registered the zoom handler. A wants_wheel_scroll ancestor still wins and
     // terminates the walk.
-    const auto bubble_path = capture_path_to_root(target);
+    const auto full_path = capture_path_to_root(target);
+    // A wheel that resolved inside an open overlay is contained by it: the
+    // walk stops at the overlay root, so neither a native handler nor a DOM
+    // listener outside the overlay sees a tick that nothing inside consumed
+    // (route_passive_pointer, PassivePointerRoute::overlay).
+    std::size_t boundary_end = full_path.size();
+    if (route.overlay) {
+        for (std::size_t index = 0; index < full_path.size(); ++index) {
+            if (full_path[index].live_in(root) == route.overlay) {
+                boundary_end = index + 1;
+                break;
+            }
+        }
+    }
+    const std::vector<ViewCapture> bubble_path(
+        full_path.begin(),
+        full_path.begin() + static_cast<std::ptrdiff_t>(boundary_end));
+    const std::string boundary_id =
+        route.overlay ? route.overlay->id() : std::string{};
+    detail::ScopedWheelBoundary wheel_boundary(route.overlay ? &boundary_id : nullptr);
 
     // A WidgetBridge wheel registration enters the DOM at exactly one origin.
     // Dispatch from the deepest registered element; __dispatch__ performs the
