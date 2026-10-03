@@ -184,10 +184,14 @@ unset(_pulp_ubsan_enabled)
 # protocol's 10 s management budget on a loaded host. The kernel is portable
 # arithmetic with nothing to step through, so it is optimized in every
 # configuration. MSVC is left alone: /O2 conflicts with Debug's /RTC1.
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
-    set_source_files_properties(src/sha256.cpp PROPERTIES
-        COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
+# Single-config generators only: Xcode rejects a per-config source option,
+# and a plain -O2 would lower Release's -O3 for this file.
+get_property(_pulp_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT _pulp_multi_config AND CMAKE_BUILD_TYPE STREQUAL "Debug"
+        AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    set_source_files_properties(src/sha256.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
+unset(_pulp_multi_config)
 
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
 # The vectorized kernels live in pulp-simd; <pulp/runtime/simd.hpp> forwards to
