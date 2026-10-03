@@ -682,7 +682,9 @@ def cmd_write(a: argparse.Namespace) -> int:
             doc = lm.collect(build_dir)
             name = f"link-members-{ctx['merge_sha'] or 'unknown'}.json"
             (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-            link_members = {"file": name, "executables": len(doc["executables"]),
+            kinds = [rec.get("kind", "executable") for rec in doc["executables"].values()]
+            link_members = {"file": name, "executables": kinds.count("executable"),
+                            "modules": kinds.count("module"),
                             "unreadable": doc["unreadable"], "bytes": (out / name).stat().st_size,
                             "whole_archives": sorted({arch for rec in doc["executables"].values()
                                                       for arch, info in rec["archives"].items() if info["whole"]})}
