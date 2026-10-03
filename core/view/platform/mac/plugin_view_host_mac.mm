@@ -2654,10 +2654,12 @@ private:
             return false;
         }
 
-        // One span per presented editor frame. `root_children` is 0 while a
-        // view-first editor's document is still pending, so the first frame
-        // that shows the document is the first span with it non-zero; the
-        // trace-analysis skill's first-frame recipe joins on this.
+        // One span per presented editor frame; `frame` restarts at 0 for every
+        // host, so each editor open starts at a frame-0 span. The first frame
+        // showing the document is the first span after that open's
+        // `scripted_ui_document_load` ends (trace-analysis, first-frame
+        // recipe). `root_children` counts what the root holds: the mounted
+        // document adds its tree, chrome a processor adds up front counts too.
         PULP_TRACE_SCOPE_NAMED_ARGS("render", "plugin_editor_frame",
                                     "frame", static_cast<int64_t>(frame_ok_count_),
                                     "background_rgb", static_cast<int64_t>(background_rgb_),
