@@ -62,12 +62,24 @@ LOCAL_USES = re.compile(r"^\s*(?:-\s+)?uses:\s*\./([^\s@#]+)", re.MULTILINE)
 
 
 def required_contexts(repo: Path) -> list[str]:
-    ruleset = json.loads((repo / RULESET).read_text(encoding="utf-8"))
-    contexts: list[str] = []
-    for rule in ruleset.get("rules", []):
-        if rule.get("type") == "required_status_checks":
-            for check in rule["parameters"]["required_status_checks"]:
-                contexts.append(check["context"])
+    """The required contexts in the committed ruleset; missing or malformed is empty.
+
+    The file is the declared copy of the live required checks: the ruleset drift
+    workflow compares it with GitHub, and the governance test keeps Shipyard's
+    required-check list equal to it. Reading it needs no administration access,
+    and under pull_request_target it is protected main's copy.
+    """
+    try:
+        ruleset = json.loads((repo / RULESET).read_text(encoding="utf-8"))
+        contexts: list[str] = []
+        for rule in ruleset["rules"]:
+            if rule.get("type") == "required_status_checks":
+                for check in rule["parameters"]["required_status_checks"]:
+                    if not isinstance(check["context"], str):
+                        return []
+                    contexts.append(check["context"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return []
     return contexts
 
 
@@ -94,16 +106,13 @@ def producer_files(repo: Path, contexts: list[str]) -> tuple[set[str], list[str]
     return found, unmapped
 
 
-def classify(files: list[str], repo: Path,
-             contexts: list[str] | None = None) -> dict[str, list[str]]:
+def classify(files: list[str], repo: Path) -> dict[str, list[str]]:
     """Map each flagged file to why it is flagged; unflagged files are omitted.
 
-    ``contexts`` is the live required-context list; ``None`` reads the
-    committed ruleset. An empty list means the required checks could not be
-    read, and every workflow file counts.
+    When the committed ruleset yields no required contexts, every workflow file
+    counts.
     """
-    if contexts is None:
-        contexts = required_contexts(repo)
+    contexts = required_contexts(repo)
     producers, unmapped = producer_files(repo, contexts)
     if not contexts:
         widen = "workflow (required checks unreadable)"
@@ -129,19 +138,6 @@ def classify(files: list[str], repo: Path,
         if reasons:
             flagged[path] = reasons
     return flagged
-
-
-def read_contexts(path: Path | None) -> list[str]:
-    """The live context list a workflow fetched; unreadable or malformed is empty."""
-    if path is None:
-        return []
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        return []
-    return value
 
 
 def _short_name(path: str) -> str:
@@ -188,25 +184,14 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--diff", nargs=2, metavar=("BASE", "HEAD"))
     source.add_argument("--files", nargs="*")
-    live = parser.add_mutually_exclusive_group()
-    live.add_argument("--contexts-file", type=Path,
-                      help="JSON list of the live required contexts; unreadable or empty widens")
-    live.add_argument("--contexts-unavailable", action="store_true",
-                      help="the live required contexts could not be read; widen")
     args = parser.parse_args(argv)
     files = args.files if args.files is not None else changed_files(args.repo, *args.diff)
-    if args.contexts_unavailable:
-        contexts: list[str] | None = []
-    elif args.contexts_file is not None:
-        contexts = read_contexts(args.contexts_file)
-    else:
-        contexts = None
-    flagged = classify(files, args.repo, contexts)
+    flagged = classify(files, args.repo)
     result = {
         "flagged": flagged,
         "description": describe(flagged),
         "conclusion": "neutral" if flagged else "success",
-        "required_checks_read": contexts is None or bool(contexts),
+        "required_checks_read": bool(required_contexts(args.repo)),
     }
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")

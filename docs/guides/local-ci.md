@@ -994,7 +994,14 @@ force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
 source list, compile groups, link line and the ctest registrations that run
 its artifact, read from the file-API codemodel reply the configure step
 requests, with build and source roots written as `<build>/` and `<src>/` so
-the same configuration digests identically on every VM.
+the same configuration digests identically on every VM. A `generated` part
+digests the CONTENT of every build-tree file the target compiles or included
+when it compiled (Ninja's dependency log, `ninja -t deps`), so a VERSION bump
+re-keys only the targets that include the configured version header, and a
+target whose generated marker source or compile definitions embed a build
+identity re-keys on every configure, by declaration rather than by learning it
+from history. Without a Ninja log the record warns that generated headers are
+not keyed.
 
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
@@ -1944,7 +1951,12 @@ instead of cloning mid-plan. That includes the prebuilt WebGPU runtime archive,
 which the webgpu dependency fetches through FetchContent: with its cache entry
 removed, the disconnected configure fails ("requires source directory for
 dependency wgpu-macos-aarch64-release to already be populated") and downloads
-nothing. Its "Fetching WebGPU implementation" status line prints either way. A cold lane build directory refuses by design ("no command
+nothing. Its "Fetching WebGPU implementation" status line prints either way. The one
+download FetchContent does not govern is the second WebGPU slice a universal
+(`arm64;x86_64`) build lipos in `tools/cmake/PulpWgpuUniversal.cmake`; a
+universal policy flag set or build cache therefore refuses before any
+configure, and a test keeps that the only raw `file(DOWNLOAD)` in the CMake
+tree. A cold lane build directory refuses by design ("no command
 after the build"): bounded runs need the lane's normal warm build. The cached
 base inventories live inside the lane's build directory, which pull-request
 code can write; that is acceptable while the lane runs PR code and is not a
@@ -2868,13 +2880,32 @@ job fails and posts no check run.
 | `required-check workflow` | the workflow mapped to each required context in the ruleset, plus the local actions and reusable workflows it calls |
 | `merge rules` | `.github/rulesets/`, `.github/CODEOWNERS`, and the report's own workflow and script |
 
-The required contexts come from the live branch protection when the workflow
-token can read it. When it cannot (reading branch protection needs
-administration access, which a workflow token does not normally have), or the
-list is empty, every `.github/workflows` and `.github/actions` file is counted
-and the check's summary says so. A required context with no mapped producer
-widens the report the same way. Treat a flagged pull request as one whose required checks it can grade
-itself, and review those files before it is enqueued.
+The required contexts come from protected main's committed
+`.github/rulesets/main-protection.json`, which a pull request cannot change for
+its own report and which needs no administration access to read. It is kept
+equal to the live required checks by the ruleset drift workflow
+(`ruleset-drift-check.yml`, with `tools/scripts/test_ruleset_drift_config.py`
+pinning the expected contexts) and to Shipyard's `[governance]` list by
+`tools/ci/test_base_poison_detector.py`. If the file is missing or malformed, or
+lists no required checks, every `.github/workflows` and `.github/actions` file
+is counted and the check's summary says so. A required context with no mapped
+producer widens the report the same way. Treat a flagged pull request as one
+whose required checks it can grade itself, and review those files before it is
+enqueued.
+
+## The A2T scope-history window announces itself before it fails
+
+`gpu-trace-overhead-acceptance-selftest` runs on the required `macos` gate and
+fails every run once the A2T scope-touching revision count passes 75% of
+`A2T_SCOPE_HISTORY_LIMIT`. The count grows with ordinary traffic (shared docs
+are in scope), so the failure has a date. The guard test writes its measurement
+to `PULP_A2T_HEADROOM_OUT`, which the Test step sets, and the
+`Announce A2T scope-history headroom` step turns it into one annotation:
+`::warning title=a2t-scope-history-headroom` from 60% of the limit, naming the
+re-pin, a `::notice` with the numbers below that, and a warning when the
+measurement is missing after the suite ran. The fix is always the re-pin in
+decisions contract row 22: move only `A2T_SCOPE_HISTORY_BASE` on protected
+main, never the limit.
 
 ## A2T evidence receipts get a nonterminal required-job attestation
 
@@ -3969,6 +4000,40 @@ shipyard update --dry-run                 # plan only
 
 # Wait after handoff/rescue without depending solely on GraphQL
 shipyard wait pr <PR> --state green       # REST fallback as of v0.56.2
+```
+
+### Frequent safety nets do not run at their cron cadence
+
+GitHub delays `schedule` events under load and drops the ones that pile up. On
+this repository every hourly-or-faster cron fires roughly once every five hours,
+whatever it says: over 2026-10-01 00:00Z to 2026-10-02 17:00Z each `*/15` and
+`*/30` workflow got 7 or 8 scheduled runs (82 to 164 expected) and each hourly
+one got 6. Daily crons are the control: they fire every day, five to seven
+hours late. Run numbers stay contiguous, so the runs are never created; this is
+GitHub-side, not a disabled job or a deleted run.
+
+`.github/schedule-backstop.json` lists the frequent safety nets (the
+watchdogs in this section, the release reconciler and cadence check,
+`version-at-land`, and the rest). An external dispatcher, tartci's
+schedule-backstop agent, runs on one fleet host every five minutes and calls
+`workflow_dispatch` on a listed workflow when the newest `main` run of that
+workflow, from any event, is older than its `cadence_minutes` and none is
+queued or running. It only dispatches; the workflows still run on
+GitHub-hosted runners. The cron stays as the backstop's own backstop, so with
+the agent off or its host down the behaviour is exactly the throttled cron.
+Because the freshness test counts every event, a workflow that an event trigger
+already keeps fresh is never dispatched.
+
+`tools/scripts/schedule_backstop_check.py` (in `workflow-lint.yml` and
+`gates.sh`) holds every listed workflow to what the dispatcher assumes:
+`workflow_dispatch` with no required input, a cadence equal to its cron, a
+top-level concurrency group, and no self-hosted runner label. A new
+hourly-or-faster cron must be listed or added to `excluded` with a reason.
+
+To judge it, count runs per workflow per day against `1440 / cadence_minutes`:
+
+```bash
+ghapp api "repos/Generous-Corp/pulp/actions/workflows/merge-stall-check.yml/runs?per_page=1&created=>=2026-10-03T00:00:00Z" --jq .total_count
 ```
 
 ### Off-fleet queue-age watchdog (`runner-health-check.yml`)

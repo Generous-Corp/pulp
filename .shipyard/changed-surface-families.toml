@@ -207,6 +207,7 @@ paths = [
   "tools/scripts/test_run_software_gpu_break_confirm.py",
   "tools/scripts/test_run_swift_coverage.py",
   "tools/scripts/test_run_swift_coverage_extra.py",
+  "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
   "tools/scripts/test_sdk_development_provenance.py",
@@ -727,58 +728,6 @@ name = "script-readers-d5a22757d5f0"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
-  "build-parallelism-guard",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-5e7c6c2dc9ea"
-paths = ["tools/scripts/test_agent_capability_installed_sdk_helpers.py"]
-tests = [
-  "agent-capability-installed-sdk-helper-selftest",
-  "build-parallelism-guard",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-488f955aba47"
-paths = ["tools/scripts/test_agent_capability_rederive.py"]
-tests = [
-  "agent-capability-rederive-selftest",
   "build-parallelism-guard",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
@@ -4013,6 +3962,7 @@ risk_class = "low"
 name = "agent-skill-docs"
 paths = [".agents/skills/*/SKILL.md"]
 tests = [
+  "a2t-headroom-annotation-selftest",
   "affected-tests-shadow-selftest",
   "agent-hook-paths",
   "base-poison-detector-selftest",
@@ -4182,8 +4132,6 @@ paths = [
   "tools/scripts/test_add_component.py",
   "tools/scripts/test_advisory_macos_runner_policy.py",
   "tools/scripts/test_affected_targets.py",
-  "tools/scripts/test_agent_capability_installed_sdk_helpers.py",
-  "tools/scripts/test_agent_capability_rederive.py",
   "tools/scripts/test_agent_hook_paths.py",
   "tools/scripts/test_android_aligned_buffer.py",
   "tools/scripts/test_android_premerge_probe.py",
@@ -4404,6 +4352,7 @@ paths = [
   "tools/scripts/test_rust_cli_build_edge_check.py",
   "tools/scripts/test_sample_region_catalogs.py",
   "tools/scripts/test_sample_region_compat_baseline.py",
+  "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
@@ -4644,8 +4593,6 @@ paths = [
   "tools/scripts/test_add_component.py",
   "tools/scripts/test_advisory_macos_runner_policy.py",
   "tools/scripts/test_affected_targets.py",
-  "tools/scripts/test_agent_capability_installed_sdk_helpers.py",
-  "tools/scripts/test_agent_capability_rederive.py",
   "tools/scripts/test_agent_hook_paths.py",
   "tools/scripts/test_android_aligned_buffer.py",
   "tools/scripts/test_android_premerge_probe.py",
@@ -4866,6 +4813,7 @@ paths = [
   "tools/scripts/test_rust_cli_build_edge_check.py",
   "tools/scripts/test_sample_region_catalogs.py",
   "tools/scripts/test_sample_region_compat_baseline.py",
+  "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",

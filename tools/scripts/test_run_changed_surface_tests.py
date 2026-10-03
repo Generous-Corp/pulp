@@ -381,6 +381,8 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 selected_build_targets=["pulp-test-build-check"],
             )
         validate_exact.assert_called_once()
+        # Only the selected targets are built here, so unbuilt programs are fine.
+        self.assertIs(validate_exact.call_args.kwargs["require_built"], False)
         validate_deferred.assert_not_called()
         validate_projection.assert_called_once()
 
@@ -526,7 +528,7 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                     runner,
                     "validate_selection",
                     side_effect=[inventory.InventoryError("has no unambiguous command"), None],
-                ),
+                ) as validate_calls,
                 mock.patch.object(
                     runner.inventory,
                     "split_proven_unbuilt_placeholders",
@@ -542,6 +544,11 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 mock.patch.object(runner, "clear_build_sentinel", return_value=0),
             ):
                 self.assertEqual(runner.run_locked(args, build), 0)
+            # Before any build the comparison tolerates unbuilt programs; after
+            # the full build it requires every registration to have one.
+            prebuild, post_full = validate_calls.call_args_list
+            self.assertIs(prebuild.kwargs["require_built"], False)
+            self.assertNotIn("require_built", post_full.kwargs)
 
             self.assertEqual(
                 [
@@ -1141,32 +1148,58 @@ class BaseInventoryTest(unittest.TestCase):
                     runner.validate_registrations_match_base({"tests": tree}, source, build, base)
 
     def run_base(self, build: Path, results: list[int], payload: dict | None = None,
-                 merge_base: str = BASE):
+                 merge_base: str = BASE, base_cache: str | None = None,
+                 envs: list | None = None, base_links: dict | None = None,
+                 base_policy: dict | None = None):
+        """Run base_projection with a fake runner. The fake base configure
+        writes `base_cache` as the scratch tree's CMakeCache.txt; by default it
+        copies the head's provisioning switches, as a correctly provisioned
+        base would."""
         calls: list[list[str]] = []
+        if base_cache is None:
+            head = runner._cache_entries(build)
+            base_cache = "".join(f"{k}:INTERNAL={v}\n" for k, v in runner.provisioning(head).items())
 
-        def fake(argv, **_):
+        def fake(argv, **kwargs):
             if "merge-base" in argv:
                 return subprocess.CompletedProcess(argv, 0, merge_base + "\n", "")
             calls.append(argv)
+            if envs is not None:
+                envs.append(kwargs.get("env"))
             code = results.pop(0) if results else 0
+            if code == 0 and "cmake" in argv and "-B" in argv:
+                tree_build = Path(argv[argv.index("-B") + 1])
+                tree_build.mkdir(parents=True, exist_ok=True)
+                (tree_build / "CMakeCache.txt").write_text(base_cache)
+                for name, real in (base_links or {}).items():
+                    entry = tree_build.parent / "external" / name
+                    entry.parent.mkdir(parents=True, exist_ok=True)
+                    entry.mkdir() if real else entry.symlink_to(tree_build)
             return subprocess.CompletedProcess(argv, code, "", "boom")
 
         with mock.patch.object(runner, "ctest_payload",
                                return_value=payload or {"tests": [fixture("smoke")]}):
-            return calls, runner.base_projection(self.BASE, policy(), build, Path("/repo"), fake)
+            return calls, runner.base_projection(self.BASE, base_policy or policy(), build,
+                                                 Path("/repo"), fake)
 
     def test_base_is_configured_from_the_exact_commit_and_cached(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "CMakeCache.txt").write_text(
                 "CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
-            calls, first = self.run_base(build, [0, 0, 0])
+            envs: list = []
+            calls, first = self.run_base(build, [0, 0, 0, 0], envs=envs)
             self.assertEqual(calls[0][:6], ["git", "-C", "/repo", "worktree", "add", "--detach"])
             self.assertEqual(calls[0][-1], self.BASE)
-            self.assertIn("-DCMAKE_BUILD_TYPE=Debug", calls[1])
-            self.assertIn("Ninja", calls[1])
-            self.assertTrue(calls[1][1].endswith("tools/ci/governed-build.sh"), calls[1])
-            self.assertIn("-DFETCHCONTENT_FULLY_DISCONNECTED=ON", calls[1])
+            # The base is provisioned like the head, offline, before configuring.
+            self.assertTrue(calls[1][1].endswith("/setup.sh"), calls[1])
+            self.assertEqual(calls[1][2:], ["--deps-only", "--non-interactive"])
+            self.assertTrue(calls[1][1].startswith(calls[0][-2]), calls[1])
+            self.assertEqual(envs[1]["GIT_ALLOW_PROTOCOL"], "file")
+            self.assertIn("-DCMAKE_BUILD_TYPE=Debug", calls[2])
+            self.assertIn("Ninja", calls[2])
+            self.assertTrue(calls[2][1].endswith("tools/ci/governed-build.sh"), calls[2])
+            self.assertIn("-DFETCHCONTENT_FULLY_DISCONNECTED=ON", calls[2])
             self.assertEqual(first["configure"]["flags"], ["-DCMAKE_BUILD_TYPE=Debug"])
             self.assertEqual(calls[-1][3:5], ["worktree", "remove"])
             self.assertEqual(first["base_sha"], self.BASE)
@@ -1174,6 +1207,95 @@ class BaseInventoryTest(unittest.TestCase):
             self.assertEqual(again, [])
             self.assertEqual(second["configure_seconds"], 0.0)
             self.assertEqual(second["digest"], first["digest"])
+
+    HEAD_WITH_SDKS = ("CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                      "PULP_HAS_AUSDK:INTERNAL=TRUE\nPULP_HAS_VST3:INTERNAL=TRUE\n"
+                      "PULP_HAS_SKIA:INTERNAL=TRUE\n")
+
+    def test_a_base_provisioned_without_the_heads_sdks_refuses_by_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text(self.HEAD_WITH_SDKS)
+            without_ausdk = ("CMAKE_GENERATOR:INTERNAL=Ninja\nPULP_HAS_AUSDK:INTERNAL=FALSE\n"
+                             "PULP_HAS_VST3:INTERNAL=TRUE\nPULP_HAS_SKIA:INTERNAL=TRUE\n")
+            with self.assertRaisesRegex(
+                    runner.SelectionExecutionError,
+                    r"base_provisioning_mismatch: PULP_HAS_AUSDK base=FALSE head=TRUE$"):
+                self.run_base(build, [0, 0, 0, 0], base_cache=without_ausdk)
+            # The cached base is refused again, not served as if it matched.
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "base_provisioning_mismatch"):
+                self.run_base(build, [])
+            # A switch the base never set is a mismatch too.
+            (build / "CMakeCache.txt").write_text(self.HEAD_WITH_SDKS + "PULP_HAS_LV2:INTERNAL=TRUE\n")
+            with self.assertRaisesRegex(runner.SelectionExecutionError,
+                                        r"PULP_HAS_LV2 base=<unset> head=TRUE"):
+                self.run_base(build, [0, 0, 0, 0], base_cache=self.HEAD_WITH_SDKS)
+
+    def test_a_base_provisioned_like_the_head_is_projected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text(self.HEAD_WITH_SDKS)
+            _, base = self.run_base(build, [0, 0, 0, 0],
+                                    base_links={"AudioUnitSDK": False, "vst3sdk": False, "miniz": True})
+            self.assertEqual(base["provisioning"], {"CMAKE_GENERATOR": "Ninja", "PULP_HAS_AUSDK": "TRUE",
+                                                    "PULP_HAS_SKIA": "TRUE", "PULP_HAS_VST3": "TRUE"})
+            # Only the links setup.sh made are recorded, never a tracked directory.
+            self.assertEqual(base["linked_externals"], ["AudioUnitSDK", "vst3sdk"])
+
+    def test_a_dependency_pin_difference_refuses_even_with_the_sdks_linked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            contract = "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=pulp-shared-source-v1;ausdk={}\n"
+            (build / "CMakeCache.txt").write_text(self.HEAD_WITH_SDKS + contract.format("AudioUnitSDK-1.4.0"))
+            with self.assertRaisesRegex(
+                    runner.SelectionExecutionError,
+                    r"base_provisioning_mismatch: PULP_CHECKOUT_DEPENDENCY_CONTRACT "
+                    r"base=pulp-shared-source-v1;ausdk=AudioUnitSDK-1.3.0 "
+                    r"head=pulp-shared-source-v1;ausdk=AudioUnitSDK-1.4.0$"):
+                self.run_base(build, [0, 0, 0, 0],
+                              base_cache=self.HEAD_WITH_SDKS + contract.format("AudioUnitSDK-1.3.0"))
+
+    def test_a_cached_base_records_no_provisioning_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(runner.SelectionExecutionError,
+                                        "base provisioning not recorded"):
+                runner.validate_provisioning({"rows": []}, Path(directory))
+
+    def test_a_changed_head_provisioning_is_a_different_base_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            cache = build / "CMakeCache.txt"
+            cache.write_text(self.HEAD_WITH_SDKS)
+            self.run_base(build, [0, 0, 0, 0])
+            cache.write_text(self.HEAD_WITH_SDKS.replace("AUSDK:INTERNAL=TRUE", "AUSDK:INTERNAL=FALSE"))
+            calls, _ = self.run_base(build, [0, 0, 0, 0])
+            self.assertTrue(calls, "a head with different SDKs reused the cached base inventory")
+
+    def test_a_cached_base_inventory_is_reused_only_for_the_same_configure(self) -> None:
+        # The cache key must cover every input of the base configure: a
+        # different flag set, generator or Python is a different inventory.
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            cache = build / "CMakeCache.txt"
+            cache.write_text("CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
+            first_calls, _ = self.run_base(build, [0, 0, 0])
+            self.assertTrue(first_calls)
+            reused, _ = self.run_base(build, [])
+            self.assertEqual(reused, [])
+            for label, change in (
+                ("generator", lambda: cache.write_text(
+                    "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")),
+                ("python", lambda: cache.write_text(
+                    "CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/opt/python3\n")),
+            ):
+                with self.subTest(changed=label):
+                    change()
+                    calls, _ = self.run_base(build, [0, 0, 0])
+                    self.assertTrue(calls, f"a changed {label} reused the cached base inventory")
+            cache.write_text("CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
+            flagged = {**policy(), "build_flags": ["-DCMAKE_BUILD_TYPE=Release"]}
+            calls, _ = self.run_base(build, [0, 0, 0, 0], base_policy=flagged)
+            self.assertTrue(calls, "a changed flag set reused the cached base inventory")
 
     def test_unavailable_base_says_so_and_cleans_up(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1204,10 +1326,70 @@ class BaseInventoryTest(unittest.TestCase):
                     selected_tests=tests, source_root=source, build_dir=build,
                     policy=policy(), base=base, target="mac")
 
+    def test_a_universal_build_refuses_before_any_configure(self) -> None:
+        for cache, flags in [
+            ("CMAKE_OSX_ARCHITECTURES:STRING=arm64;x86_64\n", ["-DCMAKE_BUILD_TYPE=Debug"]),
+            ("", ["-DCMAKE_BUILD_TYPE=Debug", "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"]),
+        ]:
+            with self.subTest(cache=cache, flags=flags), tempfile.TemporaryDirectory() as directory:
+                build = Path(directory)
+                (build / "CMakeCache.txt").write_text(cache)
+                universal = {**policy(), "build_flags": flags}
+                calls: list = []
+                with self.assertRaisesRegex(runner.SelectionExecutionError, "universal build"):
+                    runner.base_projection(self.BASE, universal, build, Path("/repo"),
+                                           lambda argv, **_: calls.append(argv))
+                self.assertEqual(calls, [])
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text("CMAKE_OSX_ARCHITECTURES:STRING=arm64\n")
+            calls, _ = self.run_base(build, [0, 0, 0])
+            self.assertTrue(calls)
+
+    def test_the_only_raw_download_in_cmake_is_the_universal_webgpu_slice(self) -> None:
+        # Every other dependency fetch goes through FetchContent, which the
+        # base configure disconnects. A new file(DOWNLOAD) needs its own guard.
+        listed = subprocess.run(["git", "-C", str(runner.REPO_ROOT), "grep", "-l", "file(DOWNLOAD",
+                                 "--", "*.cmake", "*CMakeLists.txt"],
+                                capture_output=True, text=True)
+        self.assertEqual(
+            listed.stdout.split(), ["tools/cmake/PulpWgpuUniversal.cmake"],
+            "a new raw file(DOWNLOAD) can reach the network during a bounded run's "
+            "disconnected base configure: fetch it through FetchContent instead, or gate "
+            "it like PulpWgpuUniversal.cmake and make base_projection refuse that "
+            "configuration, then list it here",
+        )
+        guard = (runner.REPO_ROOT / "tools/cmake/PulpWgpuUniversal.cmake").read_text()
+        self.assertIn('if(NOT (_want_arm64 AND _want_x86_64))', guard)
+
     def test_a_base_that_is_not_the_checkouts_merge_base_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):
                 self.run_base(Path(directory), [], merge_base="b" * 40)
+
+    def test_a_cached_base_inventory_never_answers_for_another_merge_base(self) -> None:
+        # The cache is keyed by base SHA, not by the checkout. A checkout whose
+        # merge base moved must refuse before the cache can serve the old base.
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            self.run_base(build, [0, 0, 0])
+            self.assertTrue(list((build / runner.BASE_INVENTORY_CACHE).glob(f"{self.BASE}-*.json")))
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):
+                self.run_base(build, [], merge_base="b" * 40)
+
+    def test_a_cold_tree_matches_its_base_until_the_full_build(self) -> None:
+        # A lane checkout with nothing built yet lists unbuilt targets without a
+        # program, exactly as the configure-only base does. That must compare
+        # equal before the build, or every cold run falls back to the full suite.
+        source, build = Path("/repo"), Path("/repo/build")
+        cold = [fixture("smoke"), fixture("core"), fixture("neighbor")]
+        for test in cold:
+            test["command"][0] = ""
+        base = base_of(copy.deepcopy(cold), source, build)
+        runner.validate_registrations_match_base({"tests": cold}, source, build, base,
+                                                 require_built=False)
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "no command after the build"):
+            runner.validate_registrations_match_base({"tests": cold}, source, build, base)
 
     def test_a_registration_left_without_a_command_after_the_build_refuses(self) -> None:
         source, build = Path("/repo"), Path("/repo/build")

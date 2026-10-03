@@ -56,6 +56,7 @@ FLOOR = 2
 #   STUB_FAIL_ALL      any value → every subcommand fails (a wedged store)
 #   STUB_HOLDER_PIDS   comma-separated pids to report as lease holders
 #   STUB_FLOOR_AVAILABLE floor_available_cores to report; unset → omitted
+#   STUB_ACQUIRE_ERROR any value → `leases acquire` prints it to stderr, exits 2
 STUB = r"""#!/usr/bin/env bash
 [ -n "${STUB_FAIL_ALL:-}" ] && exit 3
 if [ "$1" = "host-profile" ]; then
@@ -95,6 +96,10 @@ if [ "$1" = "leases" ] && [ "$2" = "status" ]; then
 fi
 if [ "$1" = "leases" ] && [ "$2" = "acquire" ]; then
   [ -n "${STUB_ARGS_LOG:-}" ] && echo "$*" >> "${STUB_ARGS_LOG}"
+  if [ -n "${STUB_ACQUIRE_ERROR:-}" ]; then
+    echo "${STUB_ACQUIRE_ERROR}" >&2
+    exit 2
+  fi
   cores=""
   floor=""
   class=""
@@ -182,6 +187,7 @@ class GovernedBuildTests(unittest.TestCase):
                   "PULP_GOVERNED_BUILD_WAIT_SECS",
                   "STUB_GOVERNOR", "STUB_INTERACTIVE_JOBS", "STUB_INTERACTIVE_MIN",
                   "STUB_CLASS_GRANT", "STUB_AGENT_QOS", "STUB_ARGS_LOG",
+                  "STUB_ACQUIRE_ERROR",
                   "TARTCI_GUEST_CORES", "TARTCI_GUEST_MEM_MB"):
             env.pop(k, None)
         # The cases below pin the class-less lease contract, which is what a
@@ -1171,10 +1177,13 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
             record = json.loads(held.stdout)["lease"]
             if record["host_boot_time"] == "unknown":
                 self.skipTest("host does not expose a boot identity")
+            # A process recorded on another boot cannot share the start time of
+            # one alive now, so a real cross-boot record differs in both.
             self._replace_record_identity(
                 store,
                 "old-boot-owner",
                 host_boot_time="definitely-not-the-current-boot",
+                process_start_time="Mon Jan 1 00:00:00 2001",
             )
 
             recovered = self._acquire(store, "replacement", os.getpid())
@@ -1186,6 +1195,28 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
                 body["reaped"],
                 [{"id": "old-boot-owner", "reason": "identity_mismatch"}],
             )
+
+    def test_matching_start_outranks_a_changed_boot_string(self) -> None:
+        # kern.boottime is a rendered string that moves when the calendar is
+        # adjusted; a recorded start time that still matches proves the owner
+        # alive, so its lease is kept and the second build is refused.
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            store = Path(raw_tmp) / "leases"
+            held = self._acquire(store, "boot-string-moved", os.getpid())
+            self.assertEqual(held.returncode, 0, held.stdout + held.stderr)
+            record = json.loads(held.stdout)["lease"]
+            if record["host_boot_time"] == "unknown" or not record.get("process_start_time"):
+                self.skipTest("host does not expose a boot or process-start identity")
+            self._replace_record_identity(
+                store,
+                "boot-string-moved",
+                host_boot_time="definitely-not-the-current-boot",
+            )
+
+            refused = self._acquire(store, "replacement", os.getpid())
+            self.assertEqual(refused.returncode, 75, refused.stdout + refused.stderr)
+            body = json.loads(refused.stdout)
+            self.assertEqual(body.get("reaped", []), [])
 
 
 class BuildMetricRecordTests(unittest.TestCase):
@@ -1402,6 +1433,49 @@ class BuildClassTests(unittest.TestCase):
         self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
         self.assertTrue(any("--allow-floor" in line and "--class background" in line
                             for line in args), args)
+
+    # --- the fallback log names the real reason ------------------------------
+    #
+    # Every failure falls back to a bounded leaseless build, but a denial is
+    # host contention while an erroring tartci is a broken governor. The log
+    # used to call both "denied after 90s".
+
+    def test_interactive_denial_names_tartci_reason(self) -> None:
+        r = self._run_class("interactive", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+                            STUB_CLASS_GRANT="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), FLOOR, r.stderr)
+        self.assertIn("denied by tartci", r.stderr)
+        self.assertIn("capacity_exceeded", r.stderr)
+        self.assertNotIn("after 90s", r.stderr)
+
+    def test_interactive_tartci_error_is_not_reported_as_a_denial(self) -> None:
+        r = self._run_class("interactive", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+                            STUB_ACQUIRE_ERROR="lease store unreadable: bad json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), FLOOR, r.stderr)
+        self.assertIn("tartci leases acquire failed rc=2", r.stderr)
+        self.assertIn("lease store unreadable: bad json", r.stderr)
+        self.assertNotIn("denied", r.stderr)
+        self.assertIn("normal QoS", r.stderr)
+
+    def test_background_tartci_error_is_named_before_the_floor(self) -> None:
+        r = self._run_class("background", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+                            STUB_ACQUIRE_ERROR="lease store unreadable: bad json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertGreaterEqual(self._granted(r), 1)
+        self.assertIn("background lease not acquired: tartci leases acquire failed rc=2",
+                      r.stderr)
+
+    def test_missing_host_profile_names_why(self) -> None:
+        disabled = self._run(PULP_TARTCI_LEASES="0")
+        self.assertIn("leases disabled by PULP_TARTCI_LEASES=0", disabled.stderr)
+        broken = self._run(STUB_FAIL_ALL="1")
+        self.assertEqual(broken.returncode, 0, broken.stderr)
+        self.assertIn("host-profile failed rc=3", broken.stderr)
+        missing = self._run(PULP_TARTCI_BIN="/nonexistent/tartci",
+                            PATH="/usr/bin:/bin")
+        self.assertIn("tartci not found", missing.stderr)
 
     def test_unknown_class_runs_interactive_and_says_so(self) -> None:
         r = self._run_class("urgent", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",

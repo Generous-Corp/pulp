@@ -611,6 +611,16 @@
  },
  "schema": "pulp-ctest-script-inputs/v1",
  "tests": {
+  "a2t-headroom-annotation-selftest": {
+   "entry": "tools/ci/test_a2t_headroom_annotation.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/a2t_headroom_annotation.py",
+    "tools/ci/test_a2t_headroom_annotation.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py"
+   ],
+   "kind": "python"
+  },
   "advisory-macos-runner-policy": {
    "entry": "tools/scripts/test_advisory_macos_runner_policy.py",
    "inputs": [
@@ -1418,6 +1428,22 @@
    "entry": "tools/scripts/test_build_combined_installer.py",
    "inputs": [
     "tools/scripts/test_build_combined_installer.py"
+   ],
+   "kind": "python"
+  },
+  "commit-bound-cmake-selftest": {
+   "entry": "tools/ci/test_commit_bound_cmake.py",
+   "inputs": [
+    "tools/ci/test_commit_bound_cmake.py",
+    "tools/cmake"
+   ],
+   "kind": "python"
+  },
+  "commit-bound-labels-selftest": {
+   "entry": "tools/ci/test_commit_bound_labels.py",
+   "inputs": [
+    "test/cmake",
+    "tools/ci/test_commit_bound_labels.py"
    ],
    "kind": "python"
   },
@@ -4902,7 +4928,10 @@
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpFetchContent.cmake",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
     "tools/dsp_vocabulary.py",
     "tools/import-validation",
     "tools/scripts",

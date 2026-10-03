@@ -3,6 +3,13 @@
   "_comment": "Source-only Python ctest registrations run on the build-free required lane (`Enforce version & skill sync`) instead of the required macOS gate. Each entry is the registered command with the interpreter dropped and the source root written as {repo}. test/cmake/source_selftest_lane_tests.cmake labels every entry `source-selftest`; tools/ci/ctest_gate_args.py excludes that label on gate events; `tools/ci/source_selftests.py check` (the source-selftest-lane-contract ctest, on the gate) fails when the two drift. Refresh commands with `python3 tools/ci/source_selftests.py write --build-dir build`; add a test with `--add <name>`. An entry must import only the standard library, read only the checkout, and not carry pr-fast. See docs/guides/test-lanes.md.",
   "tests": [
     {
+      "name": "a2t-headroom-annotation-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_a2t_headroom_annotation.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "affected-targets-selftest",
       "argv": [
         "{repo}/tools/scripts/test_affected_targets.py"
@@ -183,6 +190,12 @@
         "{repo}/tools/scripts/test_pulp_test_group.py"
       ],
       "timeout": 180.0
+    },
+    {
+      "name": "commit-bound-labels-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_commit_bound_labels.py"
+      ]
     },
     {
       "name": "ctest-gate-args-selftest",

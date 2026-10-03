@@ -25,6 +25,17 @@ python3 tools/deps/audit.py --check-upstream --format markdown
 python3 tools/deps/validate_hosts.py
 ```
 
+`--verify-licenses` reads the checked-out dependency trees. It also holds every
+manifest entry marked `"offline_fetch": {"cache_name": "<FetchContent name>"}`
+to an offline-fetch contract: its CMake files fetch only through
+`FetchContent_Declare`, never a raw `file(DOWNLOAD)`. A changed-surface bounded
+run configures its protected base with `FETCHCONTENT_FULLY_DISCONNECTED=ON`
+(`run_changed_surface_tests.base_projection`), which governs FetchContent and
+nothing else, so a raw download in such a dependency could reach the network
+mid-plan. When you bump a marked dependency, the audit fails with the file and
+line if the new pin downloads outside FetchContent. A tree that is not checked
+out is reported as unverified, never as a pass.
+
 ## Local SSH Host Config
 
 Create `tools/deps/hosts.local.json` for your machine-specific validators. This file is gitignored.

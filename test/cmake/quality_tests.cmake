@@ -650,6 +650,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME flake-exoneration-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_exoneration_shadow.py")
         set_tests_properties(flake-exoneration-shadow-selftest PROPERTIES TIMEOUT 120)
+        # Advance notice on the gate before the A2T history-window guard fails.
+        add_test(NAME a2t-headroom-annotation-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_a2t_headroom_annotation.py")
+        set_tests_properties(a2t-headroom-annotation-selftest PROPERTIES TIMEOUT 120)
         # Reuse-policy replay over merge-queue history: false skips, flake-skips,
         # benefit, coverage, and the named incident scenarios.
         add_test(NAME reuse-policy-replay-selftest COMMAND ${Python3_EXECUTABLE}
@@ -685,6 +689,15 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME codemodel-digest-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_codemodel_digest.py")
         set_tests_properties(codemodel-digest-selftest PROPERTIES TIMEOUT 120)
+        # Registrations of executables that embed a per-configure build
+        # identity carry the `commit-bound` label a reuse policy keys on.
+        add_test(NAME commit-bound-labels-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_commit_bound_labels.py")
+        # The commit-bound helpers label catch-discovered tests and write the
+        # declarations the reuse record reads (configures a small project).
+        add_test(NAME commit-bound-cmake-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_commit_bound_cmake.py")
+        set_tests_properties(commit-bound-cmake-selftest PROPERTIES TIMEOUT 300)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.

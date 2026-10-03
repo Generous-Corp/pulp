@@ -76,6 +76,16 @@ POLICIES
   source-key-per-entry
                  the same with script tests keyed on their own entry and
                  compiled tests' data reads assumed declared: the estimate.
+  source-key-codemodel
+                 source-key, except a CMake change re-keys only executables
+                 whose recorded file-API codemodel digest moved between the
+                 head and group jobs (or that depend on one). Unevaluable
+                 where either job recorded no codemodel.
+  source-key-recorded, source-key-codemodel-recorded
+                 the same two on the recorded graph: executables, the tests
+                 each runs, and the members each link pulled come from the
+                 group job's own reuse record, so executable names never go
+                 stale; the Ninja graph only maps headers to sources.
   source-key-list-level
                  control: a list edit re-runs every declared script test; it
                  must read lower than per-entry.
@@ -249,6 +259,12 @@ class Decision:
     skip: frozenset = frozenset()
     # (executables not rebuilt, executables) when the policy also skips builds
     build: tuple[int, int] | None = None
+    # (pair fired the spawnable fallback, tests that ran only because of it)
+    fallback: tuple[bool, int] | None = None
+    # (executables whose recorded bytes changed but the policy did not
+    # rebuild, executables compared, executables rebuilt with identical
+    # bytes) where both jobs recorded binary hashes
+    binaries: tuple[int, int, int] | None = None
 
     def skips(self, test_id: str) -> bool:
         return self.skip_all or test_id in self.skip
@@ -366,7 +382,15 @@ def _source_key(variant: str) -> Callable[[dict, Corpus, dict], Decision]:
                          if t["test_id"] in passed and t["test_id"] not in must_run)
         total = int(keys.get("executables_total") or 0)
         build = (total - int(keys.get("executables_rebuilt") or 0), total) if total else None
-        return Decision(True, f"source key ({variant}): {len(skip)} tests unchanged", skip=skip, build=build)
+        binaries = None
+        if "unreached_changed_binaries" in keys:
+            binaries = (len(keys["unreached_changed_binaries"]), int(keys.get("binaries_compared") or 0),
+                        int(keys.get("rebuilt_identical_binaries") or 0))
+        fallback = None
+        if "spawnable_fallback" in keys:
+            fallback = (bool(keys["spawnable_fallback"]), int(keys.get("fallback_only_tests") or 0))
+        return Decision(True, f"source key ({variant}): {len(skip)} tests unchanged", skip=skip, build=build,
+                        binaries=binaries, fallback=fallback)
     return decide
 
 
@@ -435,6 +459,12 @@ POLICIES: dict[str, Policy] = {p.name: p for p in (
            "tier 1a: per-executable source key, fail closed on undeclared data and whole-tree tests"),
     Policy("source-key-per-entry", _source_key("per-entry"), True,
            "tier 1a estimate: script tests keyed on their own entry, data reads assumed declared"),
+    Policy("source-key-codemodel", _source_key("cmake-codemodel"), True,
+           "tier 1a strict with exact CMake granularity: re-key only targets whose recorded codemodel moved"),
+    Policy("source-key-recorded", _source_key("strict-data-recorded"), True,
+           "tier 1a strict, executables and rebuilds from the group job's recorded link members"),
+    Policy("source-key-codemodel-recorded", _source_key("cmake-codemodel-recorded"), True,
+           "source-key-codemodel on the recorded graph (link members, recorded test executables)"),
     Policy("source-key-list-level", _source_key("list-level"), False,
            "control: any change to the script-input list re-runs every declared script test"),
     Policy("suite-source-key", None, True,
@@ -493,6 +523,9 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
     statuses: dict[str, int] = {}
     benefits: list[float] = []
     build_fracs: list[float] = []
+    unreached: list[dict] = []
+    binary_pairs = binaries_compared = rebuilt_identical = 0
+    fallback_pairs = fallback_only_pairs = 0
     build_skipped = build_total = 0
     false_skips: list[dict] = []
     flake_skips: list[dict] = []
@@ -529,6 +562,15 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         evaluable += 1
         if decision.skip_all:
             skipped_groups += 1
+        if decision.fallback is not None:
+            fallback_pairs += int(decision.fallback[0])
+            fallback_only_pairs += int(decision.fallback[1] > 0)
+        if decision.binaries is not None:
+            binary_pairs += 1
+            binaries_compared += decision.binaries[1]
+            rebuilt_identical += decision.binaries[2]
+            if decision.binaries[0]:
+                unreached.append({"pr": pair.get("pr"), "group_run_id": group["run_id"], "count": decision.binaries[0]})
         if decision.build is not None:
             build_skipped += decision.build[0]
             build_total += decision.build[1]
@@ -564,6 +606,13 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "benefit_pooled": (skipped_seconds / total_seconds) if total_seconds else None,
         "build_skipped_median": statistics.median(build_fracs) if build_fracs else None,
         "build_skipped_pooled": (build_skipped / build_total) if build_total else None,
+        "unreached_changed_binaries": sum(u["count"] for u in unreached),
+        "unreached_rows": unreached,
+        "binary_control_pairs": binary_pairs,
+        "binaries_compared": binaries_compared,
+        "rebuilt_identical_binaries": rebuilt_identical,
+        "spawnable_fallback_pairs": fallback_pairs,
+        "fallback_only_rerun_pairs": fallback_only_pairs,
         "skipped_test_seconds": round(skipped_seconds, 3),
         "group_test_seconds": round(total_seconds, 3),
         "false_skips": len(false_skips),
@@ -575,7 +624,8 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "build_failures_skipped_rows": build_failures_skipped,
         "rejected_runs": rejected_runs,
         "replay_vs_observed": replay_vs_observed,
-        "verdict": verdict_for(false_skips, scored, evaluable, opts.get("min_sample", 20)),
+        "verdict": ("UNSAFE: changed binaries not rebuilt" if unreached else
+                    verdict_for(false_skips, scored, evaluable, opts.get("min_sample", 20))),
     }
 
 
@@ -635,6 +685,11 @@ def render(result: dict) -> str:
         f"({result['skipped_test_seconds']:.0f} of {result['group_test_seconds']:.0f} test-seconds)",
         f"  build skipped (executables not rebuilt) median {_fmt(result['build_skipped_median'], True)} "
         f"pooled {_fmt(result['build_skipped_pooled'], True)}",
+        f"  binary control: {result['unreached_changed_binaries']} changed binaries not rebuilt "
+        f"({result['binaries_compared']} compared over {result['binary_control_pairs']} pairs); "
+        f"{result['rebuilt_identical_binaries']} rebuilt with identical bytes",
+        f"  spawnable fallback fired in {result['spawnable_fallback_pairs']} pairs; the only reason tests "
+        f"ran in {result['fallback_only_rerun_pairs']} (0 = free; above 0 = the source-scan guard is due)",
         f"  FALSE SKIPS {result['false_skips']}  flake-skips {result['flake_skips']}  "
         f"build_failed {result['build_failed']} (skipped by policy {result['build_failures_skipped']})  "
         f"rejected runs {result['rejected_runs']}",
@@ -668,6 +723,12 @@ def main(argv: list[str]) -> int:
     k.add_argument("--source-root", type=Path, help="checkout the graph's paths are under (default: the build dir's parent)")
     k.add_argument("--repo", default=str(REPO_ROOT), type=Path)
     k.add_argument("--runs", type=Path, help="JSON list of group runs ([{run: id}] or ids) to restrict to")
+    k.add_argument("--codemodel", action="store_true",
+                   help="also write the cmake-codemodel variant from each job's recorded reuse-record codemodel")
+    k.add_argument("--legacy-rules", action="store_true",
+                   help="keep the root-CMakeLists and learned commit-bound rules even for content-keyed (v2) records")
+    k.add_argument("--repository", default="Generous-Corp/pulp")
+    k.add_argument("--token", default=None)
     s = sub.add_parser("score", help="score policies over a corpus or the scenario fixtures")
     group = s.add_mutually_exclusive_group(required=True)
     group.add_argument("--corpus", type=Path)
@@ -708,8 +769,9 @@ def main(argv: list[str]) -> int:
         only = None
         if a.runs:
             only = {str(x["run"] if isinstance(x, dict) else x) for x in json.loads(a.runs.read_text())}
+        gh = rrc.GitHub(a.repository, a.token) if a.codemodel else None
         result = rrc.annotate_source_keys(a.corpus, a.repo, graph, a.source_root or build_dir.parent,
-                                          build_dir, doc["tests"], only)
+                                          build_dir, doc["tests"], only, gh, a.legacy_rules)
         print(json.dumps(result))
         return 0 if result["pairs_annotated"] else 1
 

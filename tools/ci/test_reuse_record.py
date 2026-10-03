@@ -105,7 +105,7 @@ class RecordTests(unittest.TestCase):
         bad = next(r for r in records if r["test_id"] == "bad")
         self.assertEqual(bad, {**CTX, "suite": "full", "test_id": "bad", "executable": "<build>/test/t-bad",
                                "outcome": "fail", "attempts": 2, "duration_s": bad["duration_s"],
-                               "runner_image": "img0", "output_key": "k" * 64})
+                               "runner_image": "img0", "output_key": "k" * 64, "commit_bound": None})
         flaky = next(r for r in records if r["test_id"] == "flaky")
         self.assertEqual((flaky["outcome"], flaky["attempts"], flaky["executable"], flaky["output_key"]),
                          ("pass", 2, None, None))
@@ -407,7 +407,42 @@ class CliTests(unittest.TestCase):
                           job["codemodel"]["tests_unmatched"]), (5, 1, 0))
         self.assertEqual(job["bytes"]["codemodel"], job["codemodel"]["bytes"])
         self.assertIn("t", doc["targets"])
-        self.assertNotIn("::warning", stdout)
+        # The fixture build has no Ninja dependency log, which the record says.
+        self.assertEqual(job["codemodel"]["generated_headers"], "unavailable")
+        self.assertIn("::warning title=reuse-record incomplete::codemodel digest has no Ninja dependency log",
+                      stdout)
+
+    def commit_bound_records(self, declare: list[str] | None) -> tuple[str, list[dict]]:
+        import test_codemodel_digest as tcd
+        with tempfile.TemporaryDirectory() as tmp:
+            build, src, tests = tcd.materialise(tmp)
+            tests = tests + [{"name": "labelled", "command": ["python3", f"{tmp}/x.py"],
+                              "properties": [{"name": "LABELS", "value": ["ui", "commit-bound"]}]},
+                             {"name": "plain", "command": ["python3", f"{tmp}/x.py"], "properties": []}]
+            if declare is not None:
+                (build / "pulp-commit-bound").mkdir()
+                for n in declare:
+                    (build / "pulp-commit-bound" / f"{n}.json").write_text(json.dumps({"target": n}))
+            junit = Path(tmp) / "j.xml"
+            junit.write_text('<testsuite><testcase name="t-runs" status="run"/>'
+                             '<testcase name="labelled" status="run"/><testcase name="plain" status="run"/></testsuite>')
+            extra = ("--suite", f"full={junit}", "--not-before-epoch", "0")
+            stdout, _ = self.write_in_process(tmp, build, src, tests, extra)
+            records = [json.loads(l) for l in (Path(tmp) / "out" / "tests.jsonl").read_text().splitlines()]
+        return stdout, records
+
+    def test_tests_are_commit_bound_by_label_or_by_a_declared_dependency(self) -> None:
+        stdout, records = self.commit_bound_records(["f"])  # t-runs runs `t`, which links declared `f`
+        self.assertEqual({r["test_id"]: r["commit_bound"] for r in records},
+                         {"t-runs": True, "labelled": True, "plain": False})
+        self.assertNotIn("no commit-bound declarations", stdout)
+
+    def test_an_undeclared_tree_marks_only_labels_and_says_so(self) -> None:
+        stdout, records = self.commit_bound_records(None)
+        self.assertEqual({r["test_id"]: r["commit_bound"] for r in records},
+                         {"t-runs": False, "labelled": True, "plain": False})
+        self.assertIn("::warning title=reuse-record incomplete::codemodel digest found no commit-bound "
+                      "declarations", stdout)
 
     def test_a_build_without_a_codemodel_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

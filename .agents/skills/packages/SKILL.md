@@ -153,8 +153,8 @@ alternatives from the registry when available.
 
 ## Attribution Audit
 
-`tools/deps/audit.py` runs **three** invariants; the first two are `--strict`,
-the third also needs `--verify-licenses` (both are in `gates.sh`):
+`tools/deps/audit.py` runs **four** invariants; the first two are `--strict`,
+the last two also need `--verify-licenses` (both are in `gates.sh`):
 
 1. **Consistency** — every `manifest.json` entry must appear in
    `DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md`.
@@ -166,6 +166,11 @@ the third also needs `--verify-licenses` (both are in `gates.sh`):
    disk: no NOTICE entry may reproduce a truncated permission notice, and no
    checked-out tree may offer a copyleft alternative while the manifest
    declares something permissive.
+4. **Offline fetch** — an entry marked `"offline_fetch": {"cache_name": ...}`
+   (WebGPU-distribution today) must download only through `FetchContent_Declare`,
+   never a raw `file(DOWNLOAD)`: changed-surface bounded runs configure their
+   base with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, which governs nothing else.
+   Its tree is found as `<cache_name>-<pin>...` in the shared FetchContent cache.
 
 Checks 1 and 2 only ask whether a dep is *named* in each file. That is why
 both of these passed a green `--strict` run for months: NOTICE.md reproduced
