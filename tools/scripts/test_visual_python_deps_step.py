@@ -92,6 +92,17 @@ class EveryCtestJobInstallsTest(unittest.TestCase):
                 first_test = text.index(f"ctest --test-dir {build_dir}")
                 self.assertLess(install, first_test, f"{workflow}: {build_dir} tests before installing")
 
+    def test_the_local_mac_lane_installs_into_the_tree_it_tests(self) -> None:
+        # The Shipyard `mac` lane runs ctest outside any workflow, so it must
+        # call the script itself or visual-python-deps-present fails there.
+        import tomllib
+        config = tomllib.loads((REPO / ".shipyard/config.toml").read_text(encoding="utf-8"))
+        configure = config["validation"]["default"]["overrides"]["macos"]["configure"]
+        self.assertTrue(configure.endswith("&& bash tools/ci/install_visual_python_deps.sh build"),
+                        configure)
+        test = config["validation"]["default"]["test"]
+        self.assertIn("ctest --test-dir build", test)
+
     def test_no_workflow_keeps_its_own_copy_of_the_install(self) -> None:
         for workflow in (REPO / ".github/workflows").glob("*.yml"):
             text = workflow.read_text(encoding="utf-8")

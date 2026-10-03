@@ -1901,8 +1901,10 @@ run's workflow commit carries the event-commit fallback at all.
 Every job that runs a broad ctest installs the set through
 `tools/ci/install_visual_python_deps.sh <build-dir>`; a workflow that runs ctest
 without it makes `visual-python-deps-present` red in every run (the sanitizer
-jobs did, main-wide). `test_visual_python_deps_step.py` pins both the script's
-behaviour and which jobs call it.
+jobs did, main-wide). The Shipyard `mac` lane runs ctest outside any workflow,
+so it calls the script at the end of its macOS configure stage in
+`.shipyard/config.toml`. `test_visual_python_deps_step.py` pins both the
+script's behaviour and which jobs and lanes call it.
 `relay_contract_check.py` scans a shell script a gate step runs (`bash
 tools/...sh`) as part of the step, so moving the install into the script kept
 `pypi.org` derived; without that, the relay contract would have stopped
