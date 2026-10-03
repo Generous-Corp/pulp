@@ -815,6 +815,17 @@ warning and does not fail the check. Compiled tests are never exempted: their
 binary is the pull request's own build, so a base run would compare it with
 itself.
 
+### Reuse-record readers gate on `unusable()`, and an unlisted object counts as changed
+
+The reuse record's link-members and object-deps files each have an
+`unusable()` function (`tools/ci/link_members.py`, `tools/ci/object_deps.py`).
+Every reader calls it first and treats any reason it returns as "no record".
+A new reader that skips the check reads an incomplete map as complete. In
+object deps, an object that is missing from `objects` or listed in `stale`
+has unknown headers. The macOS gate VM can leave Ninja STALE entries after an
+interrupted build, so treat that object as changed, never as "includes
+nothing".
+
 ### `pulp_test_data` is a static claim; the nightly read audit measures it
 
 A compiled test's `data: declared` / `data: none` in
