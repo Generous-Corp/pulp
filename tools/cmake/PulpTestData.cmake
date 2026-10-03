@@ -382,11 +382,10 @@ function(pulp_test_spawns TEST)
     endforeach()
 endfunction()
 
+# A test or tool this configuration does not build (a platform-specific suite,
+# an optional tool) has no edge to add.
 function(_pulp_test_spawns_apply TEST TOOL)
-    if(NOT TARGET ${TEST})
-        message(FATAL_ERROR "pulp_test_spawns: ${TEST} is not a target")
-    endif()
-    if(TARGET ${TOOL})
+    if(TARGET ${TEST} AND TARGET ${TOOL})
         add_dependencies(${TEST} ${TOOL})
         set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_OF_${TEST} "${TOOL}")
     endif()

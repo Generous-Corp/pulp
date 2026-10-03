@@ -205,6 +205,14 @@ class PulpTestSpawnsCMakeTests(unittest.TestCase):
         self.assertEqual(index["plain"]["runtime_targets"], [])
         self.assertEqual((index["spawner"]["spawns_none"], index["plain"]["spawns_none"]), (False, False))
 
+    def test_a_test_this_configuration_does_not_build_is_skipped(self) -> None:
+        # A platform-specific suite may be absent; its declaration must not
+        # break the configure of every other platform.
+        proc, index = self.configure("pulp_test_spawns(not-built-here tool)\npulp_test_spawns(spawner absent-tool)\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("not-built-here", index)
+        self.assertEqual(index["spawner"]["runtime_targets"], [])
+
     def test_a_target_file_definition_needs_an_edge(self) -> None:
         defs = 'target_compile_definitions(spawner PRIVATE TOOL="$<TARGET_FILE:tool>")\n'
         proc, _ = self.configure(defs)
