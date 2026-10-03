@@ -72,13 +72,21 @@
         ],
         "roundtrip_script": null,
         "test_targets": [
-          "pulp-test-design-import"
+          "pulp-test-design-import",
+          "pulp-test-design-import-claude-bundle",
+          "pulp-test-design-import-claude-runtime",
+          "pulp-test-design-import-inline-babel"
         ],
         "test_files": [
-          "test/test_design_import_codegen.cpp"
+          "test/test_design_import_codegen.cpp",
+          "test/test_design_import_claude_bundle.cpp",
+          "test/test_design_import_claude_runtime.cpp",
+          "test/test_design_import_inline_babel.cpp"
         ],
         "test_tags": [
-          "[view][import][issue-709][issue-468]"
+          "[view][import][issue-709][issue-468]",
+          "[view][import][issue-468][.fixture]",
+          "[view][import][issue-758][.fixture]"
         ],
         "pulp_render_reference": {
           "status": "not-applicable",

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "source": "claude",
+  "checked_in": [
+    {
+      "path": "2024.10/example.html",
+      "role": "standalone-html-envelope",
+      "sha256": "8011c77001e19d0ea672d20fb614264ebd320f13269634fbf266758674cedb3f"
+    },
+    {
+      "path": "2024.10/expected.json",
+      "role": "expected-static-ir",
+      "sha256": "b210e4fc3a5dc67f7922c7a02094af0ec7c37da7f7c6bc764d3bcdac8b9cae1b"
+    },
+    {
+      "path": "2024.10/expected-classnames.json",
+      "role": "expected-classname-manifest",
+      "sha256": "1ba4543f5588b4795782c7247193df7275c07c6b5bbc113b989a4fc82f972924"
+    },
+    {
+      "path": "vite-assets.html",
+      "role": "asset-candidate-fixture",
+      "sha256": "238b62169cb98e6befa1f772b4b1703fc474b241cb12f7282fde5054253b2bb8"
+    },
+    {
+      "path": "vite-assets-hero.png",
+      "role": "asset-candidate-fixture-asset",
+      "sha256": "2d5b498200971bc8414ce9b878548df6868c7295d0d1327b8d2e4bdd70074bac"
+    }
+  ],
+  "optional_external": {
+    "environment": "PULP_CLAUDE_BUNDLE_FIXTURE",
+    "expected_shape": "Claude/Spectr editor.html bundle",
+    "status_when_unset": "unavailable",
+    "tests": [
+      "parse_claude_bundle accepts a real Spectr editor.html fixture",
+      "parse_claude_html_with_runtime against the real Spectr fixture",
+      "real Spectr Claude bundle materialises widgets"
+    ],
+    "policy": "Tests skip when the environment variable is unset or unreadable; no result is inferred."
+  }
+}
