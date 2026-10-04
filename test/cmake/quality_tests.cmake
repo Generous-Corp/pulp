@@ -698,6 +698,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # Pure parts of the test-link determinism check (command extraction,
+        # the configure's decision file, the loud skip).
+        add_test(NAME link-determinism-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_link_determinism.py")
+        set_tests_properties(link-determinism-selftest PROPERTIES TIMEOUT 120)
         # Per-object header dependencies from the Ninja log, for the reuse record.
         add_test(NAME object-deps-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_object_deps.py")
