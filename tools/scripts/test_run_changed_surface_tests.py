@@ -96,6 +96,23 @@ def selection_receipt(
     return receipt
 
 
+# The lane runs this file inside its own full suite with its Shipyard
+# environment set (result dir, reuse-record dir, compare-full). Every case
+# here sets what it needs itself, so the ambient values are removed for the
+# whole module: otherwise the mocked pipelines write receipts into the lane's
+# real result directory and record extra legs.
+_AMBIENT_SHIPYARD = mock.patch.dict(
+    os.environ, {k: v for k, v in os.environ.items() if not k.startswith("SHIPYARD_")}, clear=True)
+
+
+def setUpModule() -> None:
+    _AMBIENT_SHIPYARD.start()
+
+
+def tearDownModule() -> None:
+    _AMBIENT_SHIPYARD.stop()
+
+
 def encode_receipt(receipt: dict) -> tuple[str, str]:
     payload = json.dumps(receipt, separators=(",", ":")).encode("utf-8")
     return (
@@ -1670,6 +1687,10 @@ class BaseInventoryTest(unittest.TestCase):
             execute.assert_not_called()
 
 
+
+class LaneEnvironmentTest(unittest.TestCase):
+    def test_the_lane_environment_does_not_reach_these_tests(self) -> None:
+        self.assertEqual(sorted(k for k in os.environ if k.startswith("SHIPYARD_")), [])
 
 class FailureSetTest(unittest.TestCase):
     FIXTURE = Path(__file__).resolve().parent / "fixtures/changed_surface/ctest-junit.xml"
