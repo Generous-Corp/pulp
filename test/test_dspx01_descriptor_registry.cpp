@@ -53,10 +53,17 @@ TEST_CASE("DSPX-01 custom descriptors register and reach graph topology",
     const auto node = graph.add_custom_node("pulp.dspx01.contract", 2, "contract");
     CHECK(node != 0);
 
+    auto second = valid_custom_type();
+    second.type_id = "pulp.dspx01.other";
+    second.version = 1;
+    REQUIRE(graph.register_custom_node_type(std::move(second)));
+
     const auto metadata = graph.custom_node_types();
-    REQUIRE(metadata.size() == 1);
-    CHECK(metadata.front().type_id == "pulp.dspx01.contract");
-    CHECK(metadata.front().version == 2);
+    REQUIRE(metadata.size() == 2);
+    CHECK(metadata[0].type_id == "pulp.dspx01.contract");
+    CHECK(metadata[0].version == 2);
+    CHECK(metadata[1].type_id == "pulp.dspx01.other");
+    CHECK(metadata[1].version == 1);
 }
 
 TEST_CASE("DSPX-01 invalid descriptor combinations refuse without registry mutation",
@@ -82,6 +89,15 @@ TEST_CASE("DSPX-01 invalid descriptor combinations refuse without registry mutat
 TEST_CASE("DSPX-01 scalar descriptor identity is valid and hostile parser shapes refuse",
           "[dspx-01][host][descriptor][sample-region][negative]") {
     CHECK(valid_sample_kernel().is_valid_registration());
+
+    auto invalid_abi = valid_sample_kernel();
+    invalid_abi.abi_version = 0;
+    CHECK_FALSE(invalid_abi.is_valid_registration());
+    auto invalid_range = valid_sample_kernel();
+    invalid_range.metadata.has_value_range = true;
+    invalid_range.metadata.minimum_value = 1.0f;
+    invalid_range.metadata.maximum_value = -1.0f;
+    CHECK_FALSE(invalid_range.is_valid_registration());
 
     SampleRegionParserShape hostile;
     hostile.regions = std::numeric_limits<std::uint64_t>::max();

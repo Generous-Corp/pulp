@@ -21,10 +21,12 @@ counts through `SampleRegionParserProof`.
 
 The executable contract proof is
 `test/test_dspx01_descriptor_registry.cpp`. It covers successful registration
-and graph reachability, invalid identity and bake combinations that preserve
-registry state, valid scalar descriptor identity, and hostile parser input.
-The broader sample-region matrix remains in
-`test/test_sample_region_proof.cpp`; DSPX-01 does not add another runtime or
+and graph reachability, deterministic metadata ordering, invalid identity and
+bake combinations that preserve registry state, valid scalar descriptor
+identity, invalid ABI/range metadata, and hostile parser input. The independent
+resource receipt identity control is `test/sample_region_i2/i2_negative_controls.cpp`
+(`NEG-07`); the broader sample-region matrix remains in
+`test/test_sample_region_proof.cpp`. DSPX-01 does not add another runtime or
 reopen the sample-region kernels.
 
 This packet has no timeline CLI/MCP operation and no live-product control
