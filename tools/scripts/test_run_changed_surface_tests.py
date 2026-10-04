@@ -2097,8 +2097,8 @@ class UnreachedChangedTest(unittest.TestCase):
     base record's hash: the key said unchanged about something that changed."""
 
     def tree(self, root: Path, sampled: list[str], record_hashes: dict[str, str | None]) -> tuple:
-        result, build, record, repo = (root / n for n in ("result", "build", "record", "repo"))
-        for directory in (result, build / "test", record, repo / "tools/ci"):
+        result, build, record, code = (root / n for n in ("result", "build", "record", "code"))
+        for directory in (result, build / "test", record, code / "tools/ci"):
             directory.mkdir(parents=True)
         for artifact in ("a", "b", "c", "blind"):
             (build / "test" / artifact).write_bytes(f"bytes of {artifact}".encode())
@@ -2108,28 +2108,36 @@ class UnreachedChangedTest(unittest.TestCase):
         (record / "identity.json").write_text(json.dumps({"executables": {
             f"<build>/{artifact}": {"sha256": digest} for artifact, digest in record_hashes.items()}}),
             encoding="utf-8")
-        (repo / runner.KEY_BLIND_EXECUTABLES).write_text(json.dumps({"executables": ["test/blind"]}),
-                                                         encoding="utf-8")
+        # The ratchet's shape: artifact -> why its bytes are not keyed.
+        (code / runner.KEY_BLIND_EXECUTABLES).write_text(json.dumps(
+            {"schema": "pulp-key-blind/v1", "executables": {"test/blind": {"explained": "ld order"}}}),
+            encoding="utf-8")
         binding = {"candidates": [{"run_id": "7", "record_sha256": "9" * 64, "record_path": str(record),
-                                   "commit": "a" * 40}]}
-        return result, build, binding, repo
+                                   "commit": "a" * 40}], "derivation_code_dir": str(code)}
+        return result, build, binding, code
 
     @staticmethod
     def sha(text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()
 
-    def measure(self, sampled, hashes, scope, derived=None):
+    def measure(self, sampled, hashes, scope, derived=None, blind_text=None):
         with tempfile.TemporaryDirectory() as directory:
-            result, build, binding, repo = self.tree(Path(directory), sampled, hashes)
-            with mock.patch.object(runner, "REPO_ROOT", repo):
-                return runner.unreached_changed(result, build, binding,
-                                                derived or {"status": "derived", "base_record_run_id": "7"},
-                                                scope)
+            result, build, binding, code = self.tree(Path(directory), sampled, hashes)
+            if blind_text is not None:
+                (code / runner.KEY_BLIND_EXECUTABLES).write_text(blind_text, encoding="utf-8")
+            return runner.unreached_changed(result, build, binding,
+                                            derived or {"status": "derived", "base_record_run_id": "7"},
+                                            scope)
 
     def test_changed_bytes_are_named_and_key_blind_ones_are_not(self) -> None:
         hashes = {"test/a": self.sha("bytes of a"), "test/b": self.sha("old bytes of b"),
                   "test/blind": self.sha("old bytes of blind")}
         self.assertEqual(self.measure([], hashes, "all"), ["test/b"])
+        # Control: unlisted, the key-blind executable's changed bytes are reported.
+        self.assertEqual(self.measure([], hashes, "all", blind_text='{"executables": {}}'),
+                         ["test/b", "test/blind"])
+        # A list the runner cannot read compares nothing rather than everything.
+        self.assertIsNone(self.measure([], hashes, "all", blind_text="{"))
         # Bounded: only what the sample built is compared.
         self.assertEqual(self.measure(["test/b"], hashes, "sampled"), ["test/b"])
         self.assertEqual(self.measure(["test/a"], hashes, "sampled"), [])

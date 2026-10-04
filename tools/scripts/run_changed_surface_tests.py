@@ -1097,7 +1097,8 @@ def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
 
 
 # Executables whose key ignores what decides their bytes; a hash difference
-# there is expected and says nothing about the key.
+# there is expected and says nothing about the key. Read from the base's
+# extracted copy, so a change cannot list itself to hide a difference.
 KEY_BLIND_EXECUTABLES = "tools/ci/key_blind_executables.json"
 
 
@@ -1120,11 +1121,13 @@ def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any]
         identity = json.loads((Path(record["record_path"]) / "identity.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    blind_path = REPO_ROOT / KEY_BLIND_EXECUTABLES
+    blind_path = Path(binding["derivation_code_dir"]) / KEY_BLIND_EXECUTABLES
     try:
-        blind = set(json.loads(blind_path.read_text(encoding="utf-8")).get("executables") or [])
+        blind = set(json.loads(blind_path.read_text(encoding="utf-8")).get("executables") or {})
     except FileNotFoundError:
         blind = set()
+    except (OSError, json.JSONDecodeError):
+        return None
     in_scope = set(selection.get("would_skip") or [])
     if scope == "sampled":
         in_scope &= set(selection.get("sampled_executables") or [])
