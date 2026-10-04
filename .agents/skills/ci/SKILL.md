@@ -11550,3 +11550,7 @@ Two rules follow, and they generalise past this step:
 When adding any step to a required gate, ask whether it can fail because a
 service outside this fleet is down. If it can, you have handed the merge queue
 to someone else's uptime.
+
+## Design-import clean-output and Vellum boundary gates
+
+The design-import refactor adds two cheap, source-only checks to `tools/scripts/gates.sh`: `vellum_boundary_lint.py` verifies that extractable importer packages use only declared public Pulp view interfaces, and `tools/ui-build/lint/clean_output_lint.py` checks a deterministic clean source fixture. Keep both checks in the gate whenever these package or importer paths change; their planted negative controls are registered in the quality CTest manifest.
