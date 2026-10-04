@@ -164,7 +164,9 @@ void print_pr_workflow_status(const fs::path& root, bool source_tree_mode) {
         if (!actual.empty()) std::cout << " (" << actual << ")";
         if (!pinned.empty()) {
             std::cout << " pinned " << pinned;
-            if (!actual.empty() && actual != pinned) std::cout << " [pin mismatch]";
+            if (!actual.empty() && !shipyard_pin_accepts(pinned, actual)) {
+                std::cout << " [pin mismatch]";
+            }
         }
         std::cout << "\n";
         return;
