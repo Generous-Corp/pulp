@@ -117,6 +117,32 @@ def top_level_scripts(tracked: Iterable[str]) -> list[str]:
                   if p.startswith(SCRIPT_DIR) and p.endswith(".py") and "/" not in p[len(SCRIPT_DIR):])
 
 
+def _without_comments_and_add_tests(cmake: str) -> str:
+    """CMake text minus `#` comments and every add_test(...) call: what is
+    left can run a script at configure or build time."""
+    lines = []
+    for line in cmake.splitlines():
+        quoted = False
+        for i, ch in enumerate(line):
+            if ch == '"':
+                quoted = not quoted
+            elif ch == "#" and not quoted:
+                line = line[:i]
+                break
+        lines.append(line)
+    text, kept, pos = "\n".join(lines), [], 0
+    for match in re.finditer(r"\badd_test\s*\(", text):
+        if match.start() < pos:
+            continue
+        kept.append(text[pos:match.start()])
+        depth, pos = 1, match.end()
+        while pos < len(text) and depth:
+            depth += {"(": 1, ")": -1}.get(text[pos], 0)
+            pos += 1
+    kept.append(text[pos:])
+    return "".join(kept)
+
+
 def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
                      text: Any) -> set[str]:
     """Scripts that code outside the declared script tests can run."""
@@ -125,10 +151,14 @@ def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
     cmake = [p for p in tracked if p.endswith(CMAKE_SUFFIXES) and not p.startswith(NON_EXECUTING_PREFIXES)]
     native_text = "\n".join(text(p) for p in native)
     cmake_text = "\n".join(text(p) for p in cmake)
+    # A declared test's entry is still run by CMake when it is also named
+    # outside add_test, by a custom command or a configure-time call.
+    cmake_running = "\n".join(_without_comments_and_add_tests(text(p)) for p in cmake)
     reached = set()
     for script in scripts:
         name = os.path.basename(script)
-        if name in native_text or (name in cmake_text and script not in entries):
+        if name in native_text or (name in cmake_text and script not in entries) \
+                or (script in entries and name in cmake_running):
             reached.add(script)
     pending = sorted(reached)
     while pending:

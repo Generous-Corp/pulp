@@ -150,6 +150,31 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertNotEqual(self.family_for(generated, "tools/scripts/test_entry.py"), [])
         self.assertEqual(self.family_for(generated, "tools/scripts/codegen.py"), [])
 
+    def test_a_test_entry_cmake_also_runs_stays_unmapped(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_tool.py", "")
+        self.write("tools/scripts/tool.py", "")
+        self.write("tools/scripts/test_quiet.py", "")
+        self.write("tools/scripts/quiet.py", "")
+        self.write("tools/scripts/hashed.py", "")
+        self.write("test/cmake/tests.cmake",
+                   "add_test(NAME tool-selftest COMMAND python3 tools/scripts/tool.py --self-test)\n"
+                   "add_custom_command(TARGET probe PRE_LINK COMMAND python3 tools/scripts/tool.py)\n"
+                   "# tools/scripts/quiet.py is only described here\n"
+                   'add_test(NAME quiet COMMAND python3 tools/scripts/quiet.py "#not-a-comment")\n'
+                   'add_test(NAME hashed COMMAND python3 tools/scripts/hashed.py)\n'
+                   'add_custom_command(OUTPUT x COMMAND echo "#1" && python3 tools/scripts/hashed.py)\n')
+        self.script_test("tool-selftest", "tools/scripts/tool.py", [])
+        self.script_test("quiet", "tools/scripts/quiet.py", [])
+        self.script_test("hashed", "tools/scripts/hashed.py", [])
+        generated = self.generate()
+        # A link step runs tool.py, so a change to it must plan the full suite.
+        self.assertEqual(self.family_for(generated, "tools/scripts/tool.py"), [])
+        # A quoted "#" is not a comment: the script after it is still seen.
+        self.assertEqual(self.family_for(generated, "tools/scripts/hashed.py"), [])
+        # Control: an entry CMake names only in add_test and a comment maps.
+        self.assertNotEqual(self.family_for(generated, "tools/scripts/quiet.py"), [])
+
     def test_reader_running_a_build_product_selects_its_producer_target(self) -> None:
         self.add_whole_tree()
         self.write("tools/scripts/test_tool.py", "")
