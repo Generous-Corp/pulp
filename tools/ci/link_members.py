@@ -24,14 +24,16 @@ executables pull largely the same members:
 `expand()` turns that back into member names per executable. The map is named
 for its first use but also holds loadable modules (`-bundle` links, CMake
 MODULE_LIBRARY targets such as plug-in bundles, `"kind": "module"`) and shared
-libraries (`-dynamiclib` / `-shared`, `"kind": "shared"`). Partial links (`-r`)
+libraries (`-dynamiclib` / `-shared`, `"kind": "shared"`). Each link also lists
+the build-produced shared libraries it names (`shared`). Partial links (`-r`)
 are not recorded; `unrecorded` counts them.
 
 A reader must call `unusable()` first and treat any reason it returns as "no
 record": an unknown schema or kind, or a link it could not see, means the map
 does not describe every link, and a reuse key built from it would miss a
-change. A shared library is a kind of its own because its content reaches the
-binaries that load it without changing their bytes or their maps.
+change. A shared library's content reaches the binaries that load it without
+changing their inputs or bytes, so it is not keyed as their input:
+`shared_scope()` names those loaders and a reader runs them.
 
 An archive is `whole` when the link line loads every member regardless of use
 (`-force_load <archive>`, `-all_load`, `-ObjC`): a key over it must cover all
@@ -49,12 +51,13 @@ import re
 import sys
 from pathlib import Path
 
-SCHEMA = "pulp-link-members/v3"
+SCHEMA = "pulp-link-members/v4"
 # Schemas a reader may interpret. v1 recorded executables only and carried no
-# kind; v2 added modules; v3 added shared libraries and the `unrecorded` count.
-READABLE_SCHEMAS = ("pulp-link-members/v1", "pulp-link-members/v2", SCHEMA)
-# Kinds whose dependency on archive members the map describes completely.
-MODELLED_KINDS = ("executable", "module")
+# kind; v2 added modules; v3 added shared libraries and the `unrecorded` count;
+# v4 records, per link, the build-produced shared libraries it names.
+READABLE_SCHEMAS = ("pulp-link-members/v1", "pulp-link-members/v2", "pulp-link-members/v3", SCHEMA)
+# Kinds a map may hold and still describe every link it saw.
+RECORDED_KINDS = ("executable", "module", "shared")
 MEMBERS_DIR = "link-members"
 _ROW = re.compile(r"^\[\s*\d+\]\s+(.*)$")
 _MEMBER = re.compile(r"^(.*\.a)\((.*)\)$")
@@ -97,12 +100,21 @@ def _normalise(path: str, cwd: Path, build_root: Path) -> str:
 
 
 def members_of(inputs: list[str], cwd: Path, build_root: Path) -> dict:
-    """{"objects": [...], "archives": {archive: [members]}}; SDK stubs (.tbd),
-    dylibs, frameworks and the linker's synthesized input are left out."""
+    """{"objects": [...], "archives": {archive: [members]}, "shared": [...]}.
+    `shared` holds the shared libraries and frameworks the BUILD produced
+    (under the build root); SDK stubs (.tbd), system dylibs and frameworks
+    (named by the runner image) and the linker's synthesized input are left
+    out."""
     objects: list[str] = []
     archives: dict[str, list[str]] = {}
+    shared: set[str] = set()
     for item in inputs:
-        if item == "linker synthesized" or item.endswith((".tbd", ".dylib")) or ".framework/" in item:
+        if item == "linker synthesized" or item.endswith(".tbd"):
+            continue
+        if item.endswith((".dylib", ".so")) or ".framework/" in item:
+            path = _normalise(item, cwd, build_root)
+            if path.startswith("<build>/"):
+                shared.add(path)
             continue
         m = _MEMBER.match(item)
         if m:
@@ -110,7 +122,8 @@ def members_of(inputs: list[str], cwd: Path, build_root: Path) -> dict:
         else:
             objects.append(_normalise(item, cwd, build_root))
     return {"objects": sorted(set(objects)),
-            "archives": {a: sorted(set(ms)) for a, ms in sorted(archives.items())}}
+            "archives": {a: sorted(set(ms)) for a, ms in sorted(archives.items())},
+            "shared": sorted(shared)}
 
 
 def _expand_response_files(args: list[str], cwd: Path) -> list[str]:
@@ -158,6 +171,7 @@ def parse_link(objects_text: list[str], args: list[str], build_root: Path) -> tu
         "objects": found["objects"],
         "archives": {a: {"members": ms, "whole": everything or a in forced}
                      for a, ms in found["archives"].items()},
+        "shared": found["shared"],
     }
 
 
@@ -183,20 +197,33 @@ def collect(build_dir: Path) -> dict:
 def unusable(doc: dict | None) -> str | None:
     """Why a reader must not build a reuse key from this record, or None.
 
-    A schema this module does not know may hold kinds it cannot interpret; a
-    shared library or a partial link changes what loads without changing the
-    linking binary's map. Each makes the record incomplete, so the reader falls
-    back to "no record" rather than trusting part of it."""
+    Usable means the map describes every link it saw: a schema this module
+    knows, only the kinds it records, no link left unrecorded, and, when it
+    holds shared libraries, which links name them (v4). A shared library is
+    not modelled as an input of its loaders; shared_scope() names those
+    loaders so a reader runs them instead of keying them."""
     if not isinstance(doc, dict):
         return "no record"
     if doc.get("schema") not in READABLE_SCHEMAS:
         return f"unknown schema {doc.get('schema')!r}"
     kinds = {rec.get("kind", "executable") for rec in (doc.get("executables") or {}).values()}
-    if kinds - set(MODELLED_KINDS):
-        return f"links of kind {', '.join(sorted(kinds - set(MODELLED_KINDS)))} are not modelled"
+    if kinds - set(RECORDED_KINDS):
+        return f"links of kind {', '.join(sorted(kinds - set(RECORDED_KINDS)))} are not recorded"
     if doc.get("unrecorded"):
         return f"{doc['unrecorded']} link(s) not recorded"
+    if "shared" in kinds and doc.get("schema") != SCHEMA:
+        return "shared libraries recorded without the links that name them (before v4)"
     return None
+
+
+def shared_scope(doc: dict) -> frozenset[str]:
+    """Links (executables and modules) that name a shared library the build
+    produced. Such a library's content reaches its loaders without changing
+    their own inputs or bytes, so a reader must not key them: it runs them
+    (always_run `shared_link`). A loader of system libraries only is not in
+    scope; the runner image names those."""
+    return frozenset(exe for exe, rec in (doc.get("executables") or {}).items()
+                     if rec.get("kind", "executable") != "shared" and rec.get("shared"))
 
 
 def compact(doc: dict) -> dict:
@@ -210,7 +237,8 @@ def compact(doc: dict) -> dict:
     executables = {
         exe: {"kind": rec.get("kind", "executable"), "objects": rec["objects"],
               "archives": {a: {"members": sorted(index[a][m] for m in info["members"]), "whole": info["whole"]}
-                           for a, info in rec["archives"].items()}}
+                           for a, info in rec["archives"].items()},
+              "shared": rec.get("shared", [])}
         for exe, rec in doc["executables"].items()}
     return {**doc, "members": members, "executables": executables}
 
@@ -223,7 +251,8 @@ def expand(doc: dict) -> dict[str, dict]:
     members = doc.get("members", {})
     return {exe: {"kind": rec.get("kind", "executable"), "objects": rec["objects"],
                   "archives": {a: {"members": [members[a][i] for i in info["members"]], "whole": info["whole"]}
-                               for a, info in rec["archives"].items()}}
+                               for a, info in rec["archives"].items()},
+                  "shared": rec.get("shared", [])}
             for exe, rec in doc["executables"].items()}
 
 

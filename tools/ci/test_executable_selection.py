@@ -46,6 +46,16 @@ class SelectionTest(unittest.TestCase):
         # and helper's key is equal but changed (which runs) spawns it.
         self.assertEqual(es.would_skip(manifest), ["test/same"])
 
+    def test_a_shared_link_loader_never_skips_even_with_equal_keys(self) -> None:
+        manifest, _, _ = fixture()
+        executables = manifest["executables"]
+        executables["test/loader"] = entry("k9", reason="shared_link", regs=["loader"])
+        self.assertTrue(executables["test/loader"]["head_key"] == executables["test/loader"]["base_key"])
+        self.assertEqual(es.would_skip(manifest), ["test/same"])
+        # A keyed executable that loads it runs too.
+        executables["test/same"]["spawns"] = ["test/loader"]
+        self.assertEqual(es.would_skip(manifest), [])
+
     def test_a_tool_spawned_by_a_running_executable_never_skips_transitively(self) -> None:
         manifest, _, _ = fixture()
         executables = manifest["executables"]

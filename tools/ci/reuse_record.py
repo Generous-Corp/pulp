@@ -918,6 +918,9 @@ def cmd_write(a: argparse.Namespace) -> int:
             kinds = [rec.get("kind", "executable") for rec in doc["executables"].values()]
             link_members = {"file": name, "executables": kinds.count("executable"),
                             "modules": kinds.count("module"), "shared": kinds.count("shared"),
+                            # Executables and modules that load a build-produced
+                            # shared library: always_run `shared_link`, not keyed.
+                            "shared_loaders": len(lm.shared_scope(doc)),
                             "unreadable": doc["unreadable"], "unrecorded": doc["unrecorded"], "bytes": (out / name).stat().st_size,
                             "whole_archives": sorted({arch for rec in doc["executables"].values()
                                                       for arch, info in rec["archives"].items() if info["whole"]})}

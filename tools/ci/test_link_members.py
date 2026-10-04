@@ -134,6 +134,42 @@ class CollectTests(unittest.TestCase):
         self.assertFalse(full["<build>/test/pulp-test-other"]["archives"]["<build>/fonts/libpulp-fonts.a"]["whole"])
 
 
+class SharedScopeTests(unittest.TestCase):
+    """Loaders of a build-produced shared library are named, not keyed."""
+
+    def parse(self, root: Path, inputs: list[str], args: list[str], out: str) -> tuple[str, dict]:
+        lines = [f"# Cwd: {root}\n", f"# Path: {root}/{out}\n", "# Object files:\n"]
+        lines += [f"[{i:3}] {p}\n" for i, p in enumerate(inputs)] + ["# Sections:\n"]
+        return lm.parse_link(lines, args, root)
+
+    def test_a_build_produced_shared_library_scopes_out_its_loaders_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            links = dict([
+                self.parse(root, ["a.o"], ["c++", "-dynamiclib"], "libshared.dylib"),
+                self.parse(root, ["t.o", f"{root}/libshared.dylib", "/usr/lib/libSystem.B.dylib"], ["c++"], "loader"),
+                self.parse(root, ["p.o", f"{root}/libshared.dylib"], ["c++", "-bundle"], "plug.so"),
+                self.parse(root, ["u.o", "/usr/lib/libc++.1.dylib", "/System/Library/Frameworks/Foundation.framework/"
+                                  "Foundation.tbd"], ["c++"], "system-only")])
+        doc = lm.compact({"schema": lm.SCHEMA, "executables": links, "unreadable": 0, "unrecorded": 0})
+        self.assertIsNone(lm.unusable(doc))
+        self.assertEqual(lm.shared_scope(doc), {"<build>/loader", "<build>/plug.so"})
+        self.assertEqual(lm.expand(doc)["<build>/loader"]["shared"], ["<build>/libshared.dylib"])
+
+    def test_a_map_without_shared_libraries_scopes_out_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            links = dict([self.parse(root, ["t.o", "/usr/lib/libSystem.B.dylib"], ["c++"], "t")])
+        doc = lm.compact({"schema": lm.SCHEMA, "executables": links, "unreadable": 0, "unrecorded": 0})
+        self.assertEqual((lm.unusable(doc), lm.shared_scope(doc)), (None, frozenset()))
+
+    def test_shared_libraries_in_a_record_that_does_not_name_their_loaders_fail_closed(self) -> None:
+        doc = {"schema": "pulp-link-members/v3", "members": {}, "unreadable": 0, "unrecorded": 0,
+               "executables": {"<build>/libs.dylib": {"kind": "shared", "objects": [], "archives": {}},
+                               "<build>/t": {"kind": "executable", "objects": [], "archives": {}}}}
+        self.assertIn("before v4", lm.unusable(doc))
+
+
 class UnusableTests(unittest.TestCase):
     """A reader falls back to "no record" for anything it cannot vouch for."""
 
@@ -157,8 +193,8 @@ class UnusableTests(unittest.TestCase):
                 lm.expand(self.doc(schema))
 
     def test_an_unmodelled_kind_is_no_record(self) -> None:
-        for kind in ("shared", "framework"):
-            self.assertIn(kind, lm.unusable(self.doc(kind=kind)) or "")
+        self.assertIn("framework", lm.unusable(self.doc(kind="framework")) or "")
+        self.assertIsNone(lm.unusable(self.doc(kind="shared")))
 
     def test_an_unrecorded_link_or_a_missing_document_is_no_record(self) -> None:
         self.assertEqual(lm.unusable(self.doc(unrecorded=2)), "2 link(s) not recorded")
@@ -210,16 +246,15 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual((rc, left), (3, []))
 
     def test_a_shared_library_link_is_recorded_as_shared(self) -> None:
-        # An in-tree dylib's content reaches every binary that loads it without
-        # changing their bytes or maps, so it is recorded under its own kind and
-        # a reader that does not model that kind must refuse the record.
+        # Recording a shared library no longer makes the map unusable: its
+        # loaders are scoped out instead (shared_scope).
         with tempfile.TemporaryDirectory() as tmp:
             rc, argv, _ = self.run_launcher(tmp, "-dynamiclib", "a.o", "-o", "libx.dylib")
             doc = lm.collect(Path(tmp) / "build")
         self.assertEqual(rc, 0)
         self.assertTrue(argv[-1].startswith("-Wl,-map,"))
         self.assertEqual(doc["executables"]["<build>/out"]["kind"], "shared")
-        self.assertIn("shared", lm.unusable(doc))
+        self.assertIsNone(lm.unusable(doc))
 
     def test_a_partial_link_runs_untouched_and_is_counted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -240,7 +275,7 @@ class LauncherTests(unittest.TestCase):
             self.assertTrue(argv[-1].startswith("-Wl,-map,"))
             doc = lm.collect(Path(tmp) / "build")
         rec = doc["executables"]["<build>/out"]  # the fake linker names its output `out`
-        self.assertEqual((doc["schema"], rec["kind"]), ("pulp-link-members/v3", "module"))
+        self.assertEqual((doc["schema"], rec["kind"]), ("pulp-link-members/v4", "module"))
         self.assertEqual(lm.expand(doc)["<build>/out"]["archives"]["<build>/lib.a"]["members"], ["one.o"])
         self.assertIsNone(lm.unusable(doc))
 

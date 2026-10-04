@@ -1086,12 +1086,21 @@ only the map's object list and the link arguments under `<build>/link-members/`
 (the map, megabytes of symbol table, is deleted). The linked bytes are
 identical with and without it. `link-members-<sha>.json` in the record then
 lists, per link (each entry's `kind`: `executable`, `module` or `shared`;
-schema `pulp-link-members/v3`), the archive members it pulled, with `whole`
+schema `pulp-link-members/v4`), the archive members it pulled, with `whole`
 set on archives the link line force-loads (`-force_load`, `-all_load`,
-`-ObjC`); partial links (`-r`) are only counted, as `unrecorded`. Every reader
-calls `link_members.unusable()` first and treats an unknown schema, a `shared`
-link (its content reaches the binaries that load it without changing their
-maps) or an unrecorded link as no record at all, and the record job warns. `object-deps-<sha>.json`
+`-ObjC`), and in `shared` the shared libraries the build produced that the
+link names. Partial links (`-r`) are only counted, as `unrecorded`. Every
+reader calls `link_members.unusable()` first and treats an unknown schema or
+kind, an unrecorded link, or shared libraries in a map from before v4 as no
+record at all, and the record job warns.
+
+A build-produced shared library's content reaches the binaries that load it
+without changing their inputs or bytes, so it is not keyed as their input.
+`link_members.shared_scope()` names those loaders, executables and modules
+alike. The key manifest marks them always_run `shared_link`, and the replay
+leaves them out of its link map. Loaders of system libraries only are not in
+scope, because the runner image names those. job.json counts the loaders as
+`/link_members/shared_loaders`. `object-deps-<sha>.json`
 (`tools/ci/object_deps.py`, `--object-deps`) holds, per object file, the
 in-tree headers Ninja recorded it including (`ninja -t deps`, as `<src>/` and
 `<build>/` paths, headers under `<build>/_deps` left out), and which objects
