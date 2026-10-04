@@ -1263,6 +1263,7 @@
       "pulp/view/design_sources.hpp",
       "pulp/view/design_tokens.hpp",
       "pulp/view/design_tokens_w3c.hpp",
+      "pulp/view/design_update.hpp",
       "pulp/view/designed_control_painter.hpp",
       "pulp/view/drag_drop.hpp",
       "pulp/view/editor_bridge.hpp",
