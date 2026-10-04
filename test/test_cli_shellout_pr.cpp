@@ -163,6 +163,52 @@ TEST_CASE("pulp pr delegates shipyard workflow when the pinned binary is present
             != std::string::npos);
 }
 
+TEST_CASE("pulp pr accepts a newer Shipyard of the pin's major and refuses another major",
+          "[cli][shellout][pr-workflow][shipyard-pin]") {
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
+    const std::string pinned = pinned_shipyard_version_for_test();
+    std::string core = pinned.rfind('v', 0) == 0 ? pinned.substr(1) : pinned;
+    auto first_dot = core.find('.');
+    auto second_dot = core.find('.', first_dot + 1);
+    REQUIRE(second_dot != std::string::npos);
+    const auto major = std::stoull(core.substr(0, first_dot));
+    const auto minor = std::stoull(core.substr(first_dot + 1, second_dot - first_dot - 1));
+    const std::string newer_minor =
+        std::to_string(major) + "." + std::to_string(minor + 1) + ".0";
+    const std::string next_major = std::to_string(major + 1) + ".0.0";
+
+    for (const auto& [installed, accepted] :
+         {std::pair{newer_minor, true}, std::pair{next_major, false}}) {
+        ScopedEnvVar home_env("PULP_HOME");
+        ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+        ScopedEnvVar path_env("PATH");
+        ScopedEnvVar os_home_env("HOME");
+        update_disabled.set("1");
+        auto home = unique_temp_dir("pulp-pr-pin-floor");
+        auto bin_dir = home / "bin";
+        fs::create_directories(bin_dir);
+        home_env.set(home.string());
+        os_home_env.set(home.string());
+        write_fake_shipyard(bin_dir, installed);
+        prepend_to_path(bin_dir);
+
+        auto result = run_pulp({"pr", "--help"});
+        fs::remove_all(home);
+
+        INFO("pinned " << pinned << ", installed " << installed);
+        REQUIRE_FALSE(result.timed_out);
+        if (accepted) {
+            CHECK(result.exit_code == 0);
+            CHECK(result.stdout_output.find("fake shipyard pr --help") != std::string::npos);
+        } else {
+            CHECK(result.exit_code == 2);
+            CHECK(result.stderr_output.find("shipyard version pin mismatch") != std::string::npos);
+        }
+    }
+}
+
 TEST_CASE("pulp status reports shipyard version and pin health",
           "[cli][shellout][pr-workflow]") {
     if (!binary_exists()) {

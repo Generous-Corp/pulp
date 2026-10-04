@@ -23,6 +23,19 @@ class SharedIoConvolutionSession {
     using Callback = SharedIoConvolutionPipeline::Callback;
     using Delivery = SharedIoConvolutionPipeline::Delivery;
 
+    struct ProviderDiagnostics {
+        std::uint32_t configured_slots = 0;
+        std::uint32_t available_slots = 0;
+        std::uint64_t provider_starved = 0;
+        std::uint64_t high_water_in_flight = 0;
+        std::uint64_t retired_success = 0;
+        std::uint64_t retired_failure = 0;
+        std::uint64_t late_completions = 0;
+        std::uint64_t engine_id = 0;
+        std::uint64_t generation = 0;
+        bool fenced = false;
+    };
+
     struct Config {
         SharedIoConvolutionPipeline::Config pipeline;
         std::uint32_t slots = 0;
@@ -124,6 +137,17 @@ class SharedIoConvolutionSession {
     const SharedIoComputePlan::Telemetry& telemetry() const noexcept {
         return plan_.telemetry();
     }
+    ProviderDiagnostics provider_diagnostics() const noexcept {
+        const auto& plan = plan_.telemetry();
+        const auto trace =
+            trace_recorder_ ? trace_telemetry_.snapshot() : last_closed_trace_telemetry_;
+        const auto identity = trace_recorder_ ? trace_recorder_->config() : trace_template_;
+        return {config_.slots,         static_cast<std::uint32_t>(plan_.available_slots()),
+                provider_starved_,     plan.high_water_in_flight,
+                trace.retired_success, trace.retired_failure,
+                plan.late_completions, identity.engine_id,
+                identity.generation,   fenced()};
+    }
     SharedIoTelemetrySnapshot trace_telemetry() const noexcept {
         return trace_telemetry_.snapshot();
     }
@@ -132,6 +156,12 @@ class SharedIoConvolutionSession {
     }
     SharedIoTraceStats last_closed_trace_stats() const noexcept {
         return last_closed_trace_stats_;
+    }
+    std::vector<SharedIoTraceRecord> take_last_closed_trace_records() noexcept {
+        return std::exchange(last_closed_trace_records_, {});
+    }
+    std::vector<SharedIoTraceAdmission> take_last_closed_trace_admissions() noexcept {
+        return std::exchange(last_closed_trace_admissions_, {});
     }
     bool trace_recording_enabled() const noexcept {
         return trace_recorder_ != nullptr && trace_recorder_->enabled();
@@ -179,9 +209,13 @@ class SharedIoConvolutionSession {
                         bool gpu_elapsed_available = false) noexcept;
     std::vector<TraceSlot> trace_slots_;
     SharedIoTelemetry trace_telemetry_;
+    SharedIoTelemetrySnapshot last_closed_trace_telemetry_{};
     std::unique_ptr<SharedIoTraceRecorder> trace_recorder_;
     SharedIoTraceConfig trace_template_{};
     SharedIoTraceStats last_closed_trace_stats_{};
+    std::vector<SharedIoTraceRecord> last_closed_trace_records_;
+    std::vector<SharedIoTraceAdmission> last_closed_trace_admissions_;
+    std::uint64_t provider_starved_ = 0;
     std::optional<SharedIoConvolutionPipeline::Lease> pending_ingress_;
     std::vector<float> terminal_;
     Config config_{};
