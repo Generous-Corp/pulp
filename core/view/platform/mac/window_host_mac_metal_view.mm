@@ -7,6 +7,7 @@
 #if TARGET_OS_OSX && defined(PULP_HAS_SKIA)
 
 #include <Foundation/Foundation.h>
+#import <Metal/Metal.h>
 
 @implementation PulpMetalView
 
@@ -20,8 +21,8 @@
         layer.device = MTLCreateSystemDefaultDevice();
         layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
         layer.framebufferOnly = NO;
-        CGFloat scale = self.window ? self.window.backingScaleFactor
-                                    : [NSScreen mainScreen].backingScaleFactor;
+        CGFloat scale =
+            self.window ? self.window.backingScaleFactor : [NSScreen mainScreen].backingScaleFactor;
         layer.contentsScale = scale;
         CGSize backing = NSMakeSize(frame.size.width * scale, frame.size.height * scale);
         layer.drawableSize = backing;
@@ -36,18 +37,23 @@
     return self;
 }
 
-- (BOOL)wantsUpdateLayer { return YES; }
+- (BOOL)wantsUpdateLayer {
+    return YES;
+}
 
 - (void)updateLayer {
     // Metal frames are produced by MacGpuWindowHost::render_frame from its
     // display-link callback; AppKit must not paint over the retained layer.
 }
 
-- (void)drawRect:(NSRect)dirtyRect { (void)dirtyRect; }
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+}
 
 - (void)setNeedsDisplay:(BOOL)needsDisplay {
     [super setNeedsDisplay:needsDisplay];
-    if (needsDisplay && self.repaintBlock) self.repaintBlock();
+    if (needsDisplay && self.repaintBlock)
+        self.repaintBlock();
 }
 
 - (void)setFrameSize:(NSSize)newSize {
@@ -56,20 +62,19 @@
     const BOOL expandingLiveResize =
         (self.inLiveResize || self.pulpLiveResizeActive) &&
         (newSize.width > oldSize.width || newSize.height > oldSize.height);
-    const BOOL unchangedLiveResize =
-        (self.inLiveResize || self.pulpLiveResizeActive) &&
-        newSize.width == oldSize.width && newSize.height == oldSize.height;
+    const BOOL unchangedLiveResize = (self.inLiveResize || self.pulpLiveResizeActive) &&
+                                     newSize.width == oldSize.width &&
+                                     newSize.height == oldSize.height;
     if (expandingLiveResize) {
         self.metalLayer.contentsGravity = kCAGravityResize;
     } else if (!unchangedLiveResize) {
         self.metalLayer.contentsGravity = kCAGravityTopLeft;
     }
     [super setFrameSize:newSize];
-    CGFloat scale = self.window ? self.window.backingScaleFactor
-                                : [NSScreen mainScreen].backingScaleFactor;
+    CGFloat scale =
+        self.window ? self.window.backingScaleFactor : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
-    self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale,
-                                              newSize.height * scale);
+    self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
 }
 
 - (void)viewWillStartLiveResize {
@@ -86,24 +91,24 @@
 - (void)releaseResizeCoverAfterPresent {
     const NSUInteger generation = self.resizeCoverGeneration;
     PulpMetalView* view = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 64 * NSEC_PER_MSEC),
-                   dispatch_get_main_queue(), ^{
-        if (view.resizeCoverGeneration == generation)
-            view.metalLayer.contentsGravity = kCAGravityTopLeft;
-    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 64 * NSEC_PER_MSEC), dispatch_get_main_queue(),
+                   ^{
+                     if (view.resizeCoverGeneration == generation)
+                         view.metalLayer.contentsGravity = kCAGravityTopLeft;
+                   });
 }
 
 - (void)viewDidChangeBackingProperties {
     [super viewDidChangeBackingProperties];
-    CGFloat scale = self.window ? self.window.backingScaleFactor
-                                : [NSScreen mainScreen].backingScaleFactor;
+    CGFloat scale =
+        self.window ? self.window.backingScaleFactor : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
-    CGSize backing = CGSizeMake(self.bounds.size.width * scale,
-                                self.bounds.size.height * scale);
+    CGSize backing = CGSizeMake(self.bounds.size.width * scale, self.bounds.size.height * scale);
     self.metalLayer.drawableSize = backing;
-    if (self.backingChangedBlock) self.backingChangedBlock();
+    if (self.backingChangedBlock)
+        self.backingChangedBlock();
 }
 
 @end
 
-#endif  // TARGET_OS_OSX && defined(PULP_HAS_SKIA)
+#endif // TARGET_OS_OSX && defined(PULP_HAS_SKIA)

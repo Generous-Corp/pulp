@@ -20,9 +20,9 @@
 
 #include "app_menu_mac.hpp"
 #include "window_host_mac_capture.h"
+#include "window_host_mac_internal.hpp"
 #include "window_host_mac_lifecycle.h"
 #include "window_host_mac_metal_view.h"
-#include "window_host_mac_internal.hpp"
 #include "window_host_mac_open_documents.h"
 #include "window_host_mac_view.h"
 
@@ -1638,7 +1638,8 @@ public:
     }
 
     void request_close_deferred() override {
-        pulp::view::mac_lifecycle::request_cocoa_window_close_deferred(window_, options_initially_hidden_);
+        pulp::view::mac_lifecycle::request_cocoa_window_close_deferred(window_,
+                                                                       options_initially_hidden_);
     }
 
     void set_close_callback(std::function<void()> cb) override {
@@ -1694,9 +1695,8 @@ public:
             mac_open_documents::install_app_delegate();
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
             pulp::view::mac_lifecycle::register_cocoa_dispatcher_liveness(dispatcher_alive);
-            auto dispatcher_token =
-                pulp::events::MainThreadDispatcher::register_backend(
-                    pulp::view::mac_lifecycle::make_cocoa_main_thread_backend(dispatcher_alive));
+            auto dispatcher_token = pulp::events::MainThreadDispatcher::register_backend(
+                pulp::view::mac_lifecycle::make_cocoa_main_thread_backend(dispatcher_alive));
             // See header for initially_hidden.
             if (options_initially_hidden_) {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
@@ -2080,7 +2080,8 @@ public:
     }
 
     void request_close_deferred() override {
-        pulp::view::mac_lifecycle::request_cocoa_window_close_deferred(window_, options_initially_hidden_);
+        pulp::view::mac_lifecycle::request_cocoa_window_close_deferred(window_,
+                                                                       options_initially_hidden_);
     }
 
     void set_close_callback(std::function<void()> cb) override {
@@ -2165,9 +2166,8 @@ public:
             mac_open_documents::install_app_delegate();
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
             pulp::view::mac_lifecycle::register_cocoa_dispatcher_liveness(dispatcher_alive);
-            auto dispatcher_token =
-                pulp::events::MainThreadDispatcher::register_backend(
-                    pulp::view::mac_lifecycle::make_cocoa_main_thread_backend(dispatcher_alive));
+            auto dispatcher_token = pulp::events::MainThreadDispatcher::register_backend(
+                pulp::view::mac_lifecycle::make_cocoa_main_thread_backend(dispatcher_alive));
             // When initially_hidden is set,
             // skip Dock icon, focus stealing, and the show() call. Window
             // is created and the run loop still drives the bridge; it just
