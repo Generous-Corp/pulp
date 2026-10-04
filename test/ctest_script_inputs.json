@@ -6418,6 +6418,14 @@
    ],
    "kind": "shell"
   },
+  "pulp-materialized-runtime-conformance": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
+   "inputs": [
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
+   ],
+   "kind": "node"
+  },
   "pulp-materialized-runtime-node-dependencies": {
    "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
    "inputs": [
