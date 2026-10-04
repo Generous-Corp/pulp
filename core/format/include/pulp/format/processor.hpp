@@ -532,13 +532,13 @@ public:
     /// on the host's instantiation thread, and never under a headless/CI
     /// environment, so keep it cheap: return views of embedded, static data.
     /// The views must stay valid for the life of the plug-in image.
-    /// Default: nothing to prewarm.
+    /// Default (`editor_prewarm()`, declared after `editor_background()`):
+    /// nothing to prewarm.
     struct EditorPrewarm {
         std::vector<std::string_view> scripts;
         std::vector<std::string_view> materialized_documents;
         bool empty() const noexcept { return scripts.empty() && materialized_documents.empty(); }
     };
-    virtual EditorPrewarm editor_prewarm() const { return {}; }
 
     /// Preferred editor window size in logical pixels.
     virtual std::pair<uint32_t, uint32_t> editor_size() const { return {400, 300}; }
@@ -1104,6 +1104,10 @@ public:
     virtual std::optional<std::uint32_t> editor_background() const {
         return std::nullopt;
     }
+
+    /// See `EditorPrewarm` above. Appended to preserve additive-only vtable
+    /// ordering (node_abi_gate).
+    virtual EditorPrewarm editor_prewarm() const { return {}; }
 
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
