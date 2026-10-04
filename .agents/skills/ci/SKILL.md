@@ -2378,6 +2378,21 @@ the diff touches a Python file under `tools/`, `test/cmake/`, a skill doc or one
 of the generated files, configuring `build-gate` without compiling if no current
 build exists; any check it cannot run is listed NOT CHECKED, never passed.
 
+The families check also has a build-free half, because a fresh worktree has no
+codemodel reply and twice a new `tools/scripts/test_*.py` reached the required
+gate unregistered (`tools/scripts/<script>.py: newly mapped`, ~40 min later).
+`changed_surface_script_families.py --static --base origin/main` predicts each
+added, removed or re-read script's mapping from the committed script-inputs list
+at the merge base and at HEAD, and blocks a mapping flip the families file does
+not carry. It runs in the pre-push hook (about a second) and first in the
+`gates.sh` lane; the configured `--check` decides when the two disagree. When
+`gates.sh` cannot run the configured check (`PULP_GATES_NO_CONFIGURE=1`, a
+failed configure, a skip) and the diff touches a surface the families check
+blocks (a top-level `tools/scripts/*.py`, a skill doc, the script-inputs list,
+the generator, the config or the families file), it FAILS with the commands to
+run instead of reporting NOT CHECKED. Your own new script needs the
+regeneration too.
+
 ## An `a2t-scope-history-headroom` warning means: schedule the re-pin
 
 The merge-group and full-suite `macos` jobs carry one

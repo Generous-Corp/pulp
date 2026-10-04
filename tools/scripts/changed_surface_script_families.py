@@ -34,6 +34,7 @@ script can reach without naming it.
 
     changed_surface_script_families.py --build-dir <dir> --write   # rewrite the block
     changed_surface_script_families.py --build-dir <dir> --check   # drift check
+    changed_surface_script_families.py --static --base origin/main # no build: map flips only
 
 The families live in `.shipyard/changed-surface-families.toml`, which the
 selection names as its `families_file`. `--check` is diff-scoped like
@@ -43,6 +44,11 @@ families file, because
 that is when a stale family could bound the change wrongly; other drift (a
 native file that started naming a script, say) is reported and blocks the
 next change touching that script. A merge group reports drift without failing.
+
+`--static` needs no build: it predicts the mapping of each script the change
+adds, removes or re-reads, at the merge base and at HEAD, and blocks a mapping
+flip the families file does not carry. It runs in the pre-push hook and in
+gates.sh; the configured `--check` stays the authority when the two disagree.
 
 Exit codes: 0 in sync, advisory drift, or written; 1 blocking drift; 2 an
 input could not be read; 77 the build directory has no codemodel reply (a
@@ -309,18 +315,236 @@ def render(families: list[dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# Static pre-check. `--check` needs a configured build (the ctest inventory and
+# the codemodel reply), so a fresh worktree cannot run it before a push, and a
+# script added without regenerating the families file used to surface only on
+# the required gate. `--static` predicts each affected script's mapping from
+# the committed test/ctest_script_inputs.json and the tree, with the reader and
+# reachability rules generate() uses, at the merge base and at HEAD. What the
+# prediction cannot see without a build (the authoritative corpus, fixtures,
+# build products) is cancelled by comparing against the base: a script is
+# flagged only when its prediction agreed with the families file at the base
+# and disagrees at HEAD. A mapping flip blocks; a reader-set change is
+# reported, since a reader the full suite excludes by label would not appear in
+# a regenerated file.
+
+def _git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
+    return subprocess.run(["git", "-C", str(root), *args], input=stdin, check=True,
+                          capture_output=True).stdout
+
+
+class Snapshot:
+    """A revision's tracked files, read from the object store in one batch."""
+
+    def __init__(self, root: Path, rev: str, blobs: dict[str, str]) -> None:
+        self.root = root
+        self.files: dict[str, str] = {}
+        for record in _git(root, "ls-tree", "-r", "-z", rev).decode("utf-8", "replace").split("\0"):
+            meta, _, path = record.partition("\t")
+            parts = meta.split()
+            if len(parts) == 3 and parts[1] == "blob":
+                self.files[path] = parts[2]
+        self.blobs = blobs
+
+    def load(self, paths: Iterable[str]) -> None:
+        wanted = sorted({self.files[p] for p in paths if p in self.files} - set(self.blobs))
+        if not wanted:
+            return
+        out = _git(self.root, "cat-file", "--batch", stdin=("\n".join(wanted) + "\n").encode())
+        pos = 0
+        while pos < len(out):
+            end = out.index(b"\n", pos)
+            header = out[pos:end].split()
+            pos = end + 1
+            if len(header) < 3:
+                continue
+            size = int(header[2])
+            self.blobs[header[0].decode()] = out[pos:pos + size].decode("utf-8", "replace")
+            pos += size + 1
+
+    def text(self, rel: str) -> str:
+        sha = self.files.get(rel)
+        if sha is None:
+            return ""
+        if sha not in self.blobs:
+            self.load([rel])
+        return self.blobs.get(sha, "")
+
+
+class Prediction:
+    """generate()'s mapping rule for one revision, without a configured build."""
+
+    def __init__(self, snap: Snapshot, declared: dict[str, dict]) -> None:
+        self.snap = snap
+        self.declared = declared
+        files = sorted(snap.files)
+        self.scripts = top_level_scripts(files)
+        self.entries = {e.get("entry") for e in declared.values()}
+        native = [p for p in files if p.endswith(NATIVE_SUFFIXES) and not p.startswith(NON_EXECUTING_PREFIXES)]
+        cmake = [p for p in files if p.endswith(CMAKE_SUFFIXES) and not p.startswith(NON_EXECUTING_PREFIXES)]
+        snap.load(native + cmake + self.scripts)
+        self.native_text = "\n".join(snap.text(p) for p in native)
+        self.cmake_text = "\n".join(snap.text(p) for p in cmake)
+        self.memo: dict[str, bool] = {}
+
+    def _seed(self, script: str) -> bool:
+        name = os.path.basename(script)
+        return name in self.native_text or (name in self.cmake_text and script not in self.entries)
+
+    def reached(self, script: str) -> bool:
+        """native_reachable() for one script, walked backwards: it is reached
+        when it is a seed or a reached script names its stem."""
+        if script in self.memo:
+            return self.memo[script]
+        seen, queue = {script}, [script]
+        while queue:
+            node = queue.pop()
+            if self.memo.get(node) or self._seed(node):
+                self.memo[script] = True
+                return True
+            stem = re.compile(r"\b" + re.escape(os.path.basename(node)[:-3]) + r"\b")
+            for other in self.scripts:
+                if other in seen or self.memo.get(other) is False:
+                    continue
+                if stem.search(self.snap.text(other)):
+                    seen.add(other)
+                    queue.append(other)
+        for node in seen:
+            self.memo[node] = False
+        return False
+
+    def readers(self, script: str) -> frozenset[str] | None:
+        """The predicted readers, or None when the script stays unmapped."""
+        if script not in self.snap.files:
+            return None
+        readers = readers_of(script, self.declared)
+        if not readers or self.reached(script):
+            return None
+        return frozenset(readers)
+
+
+def parse_families(text: str) -> dict[str, frozenset[str]]:
+    """Each script's readers in the generated file (its script-readers family)."""
+    try:
+        import tomllib
+        body = tomllib.loads(text) if text else {}
+        families = body.get("families", [])
+    except ModuleNotFoundError:
+        families = _parse_rendered(text)
+    owners: dict[str, frozenset[str]] = {}
+    for family in families:
+        if str(family.get("name", "")).startswith("script-readers-"):
+            for path in family.get("paths", []):
+                owners[path] = frozenset(family.get("tests", []))
+    return owners
+
+
+def _parse_rendered(text: str) -> list[dict[str, Any]]:
+    """render()'s output read back without tomllib (Python before 3.11): one
+    key per line, a list either inline or one JSON string per line."""
+    families: list[dict[str, Any]] = []
+    key, values = None, []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == FAMILY_TABLE:
+            families.append({})
+        elif key is not None:
+            if stripped == "]":
+                families[-1][key], key = values, None
+            else:
+                values.append(json.loads(stripped.rstrip(",")))
+        elif families and " = " in stripped:
+            name, _, value = stripped.partition(" = ")
+            if value == "[":
+                key, values = name, []
+            else:
+                families[-1][name] = json.loads(value)
+    return families
+
+
+def static_drift(root: Path, base: str, head: str = "HEAD") -> tuple[list[str], list[str], int]:
+    """(blocking lines, advisory lines, scripts examined) for ``head`` against ``base``."""
+    mb = subprocess.run(["git", "-C", str(root), "merge-base", base, head], capture_output=True, text=True)
+    anchor = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else base
+    changed = {p for p in _git(root, "diff", "--name-only", "-z", anchor, head)
+               .decode("utf-8", "replace").split("\0") if p}
+    blobs: dict[str, str] = {}
+    snaps = {"base": Snapshot(root, anchor, blobs), "head": Snapshot(root, head, blobs)}
+    declared, owners = {}, {}
+    for side, snap in snaps.items():
+        listing = snap.text(str(SCRIPT_INPUTS))
+        declared[side] = json.loads(listing)["tests"] if listing else {}
+        owners[side] = parse_families(snap.text(str(FAMILIES_FILE)))
+    scripts = set(top_level_scripts(snaps["base"].files)) | set(top_level_scripts(snaps["head"].files))
+    affected = {p for p in changed if p in scripts}
+    if declared["base"] != declared["head"]:
+        affected |= {s for s in scripts
+                     if readers_of(s, declared["base"]) != readers_of(s, declared["head"])}
+    affected |= {s for s in scripts if owners["base"].get(s) != owners["head"].get(s)}
+    if not affected:
+        return [], [], 0
+    predict = {side: Prediction(snaps[side], declared[side]) for side in snaps}
+    blocking, advisory = [], []
+    for script in sorted(affected):
+        pb, ph = predict["base"].readers(script), predict["head"].readers(script)
+        fb, fh = owners["base"].get(script), owners["head"].get(script)
+        if (pb is None) == (fb is None) and (ph is None) != (fh is None):
+            blocking.append(f"{script}: {'newly mapped' if ph else 'no longer mapped'}")
+        elif ph and fh and ph != fh and not (pb and fb and (pb - fb, fb - pb) == (ph - fh, fh - ph)):
+            advisory.append(f"{script}: readers +{sorted(ph - fh)[:3]} -{sorted(fh - ph)[:3]}")
+    return blocking, advisory, len(affected)
+
+
+def static_main(root: Path, base: str | None, head: str = "HEAD") -> int:
+    if base is None:
+        print("changed-surface script families (static): no base to compare against; pass --base")
+        return 2
+    try:
+        blocking, advisory, examined = static_drift(root, base, head)
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+        print(f"changed-surface script families (static): cannot predict: {error}", file=sys.stderr)
+        return 2
+    for line in advisory:
+        print(f"changed-surface script families (static): note: {line} (a regeneration may "
+              "differ; the configured --check decides)")
+    if not blocking:
+        print(f"changed-surface script families (static): OK, {examined} affected script(s) "
+              f"predicted against {base}")
+        return 0
+    print(f"changed-surface script families (static): {FAMILIES_FILE} was not regenerated for "
+          f"{len(blocking)} script(s) this change maps or unmaps:", file=sys.stderr)
+    for line in blocking[:12]:
+        print(f"  {line}", file=sys.stderr)
+    print("  regenerate from a configured build (`tools/scripts/gates.sh` configures build-gate "
+          "and prints the exact command), then commit the file:\n"
+          "  python3 tools/scripts/changed_surface_script_families.py --build-dir <dir> --write",
+          file=sys.stderr)
+    if script_test_inputs.advisory_here():
+        return 0
+    return 1
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo-root", type=Path, default=HERE.parents[1])
-    parser.add_argument("--build-dir", type=Path, required=True)
+    parser.add_argument("--build-dir", type=Path,
+                        help="a configured build with a codemodel reply (required except with --static)")
     parser.add_argument("--base", default=None,
                         help="diff-scope --check to changes since this ref (default: as "
                              "script_test_inputs.py --check resolves it; none means a full check)")
+    parser.add_argument("--head", default="HEAD", help="--static: the revision to check (default HEAD)")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
+    mode.add_argument("--static", action="store_true",
+                      help="predict, without a build, whether this change maps or unmaps a script "
+                           "the families file was not regenerated for")
     args = parser.parse_args(argv)
     root = args.repo_root.resolve()
+    if args.static:
+        return static_main(root, script_test_inputs.resolve_base(root, args.base), args.head)
+    if args.build_dir is None:
+        parser.error("--build-dir is required with --write and --check")
     families_path = root / FAMILIES_FILE
     if not inventory.codemodel_reply_available(args.build_dir):
         # Without the file-API reply the producer targets cannot be read. The

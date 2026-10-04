@@ -231,6 +231,7 @@ GPU_LEDGER_SENTINEL="$ROOT/tools/scripts/gpu_ledger_sentinel_check.py"
 GPU_PROVENANCE_VERIFY="$ROOT/tools/scripts/hydrate_gpu_provenance_commits.py"
 YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
+SURFACE_FAMILIES="$ROOT/tools/scripts/changed_surface_script_families.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
 VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
@@ -705,6 +706,23 @@ if [ -f "$SEQ_EXPOSURE" ]; then
         0) ;;
         1) echo "[pre-push] sequencer-exposure ledger: the ledger is invalid or a delivery slice is unclassified — run \`python3 tools/scripts/sequencer_exposure_check.py --base $BASE\` for the offending row(s)." >&2; fail=1 ;;
         *) gate_could_not_run "sequencer_exposure_check" "$gate_rc"; fail=1 ;;
+    esac
+fi
+
+# Changed-surface script families, build-free half. Adding, removing or
+# re-reading a tools/scripts/*.py changes the generated
+# .shipyard/changed-surface-families.toml, and the required macos gate's
+# `changed-surface-script-families-drift` failed a pushed PR ~40 min later each
+# time it was not regenerated: the exact check needs a configured build, which a
+# fresh worktree lacks. `--static` predicts the mapping from the committed
+# script-inputs list at the merge base and at HEAD and blocks a mapping flip the
+# file does not carry. About a second; examines nothing when no script moved.
+if [ -f "$SURFACE_FAMILIES" ]; then
+    run_gate_captured "$PYTHON" "$SURFACE_FAMILIES" --repo-root "$ROOT" --static --base "$BASE"
+    gate_rc=$?; case $gate_rc in
+        0) ;;
+        1) echo "[pre-push] changed-surface families: regenerate .shipyard/changed-surface-families.toml from a configured build — \`tools/scripts/gates.sh $BASE\` configures build-gate and prints the exact --write command." >&2; fail=1 ;;
+        *) gate_could_not_run "changed_surface_script_families_static" "$gate_rc"; fail=1 ;;
     esac
 fi
 
