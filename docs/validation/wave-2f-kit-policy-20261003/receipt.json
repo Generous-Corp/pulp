@@ -1,0 +1,90 @@
+{
+  "schema": "pulp.wave-2f-kit-policy-validation-receipt.v1",
+  "status": "pass",
+  "validated_commit": "9a07cfc6516ac75ffa8dcfdb903e51704f14ce7d",
+  "base": "origin/main",
+  "scope": [
+    "extracted private kit publish and registry policy validation",
+    "kit/content CLI test sources and generated test-input metadata",
+    "kit_commands.cpp hotspot ceiling ratchet"
+  ],
+  "invariants": {
+    "kit_commands_hpp_changed": false,
+    "buildrunner_semantics_changed": false,
+    "kit_commands_cpp_loc": 2153,
+    "hotspot_ceiling": 2153,
+    "hotspot_ceiling_rationale": "Policy validation extraction reduced kit_commands.cpp from 2336 to 2153 lines; the ceiling is retained exactly at 2153 while the remaining kit/package trust-boundary monolith is split per tools/cli/KIT_COMMANDS_MODULE_MAP.md."
+  },
+  "build": {
+    "command": "tools/ci/governed-build.sh cmake --build build --target pulp-cpp pulp-test-cli-kit-commands pulp-test-cli-content-commands",
+    "configuration": "Release",
+    "result": "pass",
+    "note": "Interactive lease was denied after 90s due host capacity; governed fallback continued at -j2 and completed successfully."
+  },
+  "tests": [
+    {
+      "command": "./build/test/pulp-test-cli-kit-commands",
+      "result": "pass",
+      "assertions": 404,
+      "cases": 70
+    },
+    {
+      "command": "./build/test/pulp-test-cli-content-commands",
+      "result": "pass",
+      "assertions": 137,
+      "cases": 19
+    }
+  ],
+  "shellout_receipts": [
+    {
+      "command": "./build/tools/cli/pulp-cpp kit --help",
+      "result": "pass",
+      "expected": "kit usage lists validate, inspect, plan, verify, apply, remove, pack, publish, and init"
+    },
+    {
+      "command": "./build/tools/cli/pulp-cpp content --help",
+      "result": "pass",
+      "expected": "content usage lists validate, preview, install, update, list, rescan, remove, and reveal"
+    },
+    {
+      "command": "./build/tools/cli/pulp-cpp kit validate fixtures/packages/basic-ui-kit/pulp.package.json --strict --json",
+      "result": "pass",
+      "expected": "{\"ok\":true}"
+    },
+    {
+      "command": "./build/tools/cli/pulp-cpp content validate fixtures/packages/basic-content-pack/pulp.package.json --json",
+      "result": "pass",
+      "expected": "{\"ok\":true}"
+    }
+  ],
+  "script_test_inputs": {
+    "command": "python3 tools/scripts/script_test_inputs.py --check --build-dir build --base origin/main",
+    "result": "pass",
+    "stale_entries": [
+      "pulp-cpp",
+      "pulp-test-cli-content-commands",
+      "pulp-test-cli-kit-commands"
+    ],
+    "stale_entry_note": "Initial diff-scoped report listed stale compiled entries pulp-cpp, pulp-test-cli-content-commands, and pulp-test-cli-kit-commands; mandated --write regeneration removed the drift and the final gate reported 387 declared tests in sync."
+  },
+  "gates": {
+    "command": "tools/scripts/gates.sh origin/main",
+    "result": "pass_with_not_checked",
+    "exit_code": 0,
+    "notes": [
+      "all locally applicable gates passed",
+      "workflow-lint tools/scripts/test_generated_version_bump_check.py was not checked locally; 35 clone/worktree fixtures are deferred to CI workflow-lint",
+      "source-selftests reported 3 pre-existing origin/main failures: scene3d-native-slice-handoff-contract, scene3d-native-slice-handoff-negative-contract, gpu-clean-agent-journey-selftest"
+    ]
+  },
+  "artifacts": [
+    "tools/cli/kit_policy.cpp",
+    "tools/cli/kit_policy.hpp",
+    "tools/cli/kit_commands.cpp",
+    "tools/cli/CMakeLists.txt",
+    "test/cmake/content_workflow_tests.cmake",
+    "test/ctest_script_inputs.json",
+    "tools/scripts/hotspot_size_guard.json",
+    "docs/validation/wave-2f-kit-policy-20261003/receipt.json"
+  ]
+}
