@@ -1,12 +1,12 @@
 # Spectr / Forge / Magenta metadata audit
 
-Audited against `origin/main` at
-`5ea08fd82495687c8e23c85de1a7d4ff429809a8` in the isolated metadata-audit
+Audited against the protected `origin/main` at
+`0130b8b9709e8386f56e12d1b99807519a08f486` in the isolated metadata-audit
 worktree.
 
 The paced-generation receipt remains blocked and metadata-only. Its prior
-parent stamp (`8b10d5ada01466d39de2d519811e7c74bc5b0340`) was stale and is now
-updated to the protected-head SHA. The Forge catalog still has zero
+parent stamp was stale and is now updated to the current protected-head SHA.
+The Forge catalog still has zero
 `spectr.gpu_nam` rows.
 
 The named GPU-NAM checkout exists at
