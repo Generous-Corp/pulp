@@ -38,6 +38,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <pulp/view/value_channel_telemetry.hpp>
@@ -119,6 +120,24 @@ public:
     static const char* describe(DeclareError e) noexcept;
 
 private:
+  struct ChannelNameHash {
+      using is_transparent = void;
+      std::size_t operator()(std::string_view value) const noexcept {
+          return std::hash<std::string_view>{}(value);
+      }
+      std::size_t operator()(const std::string& value) const noexcept {
+          return operator()(std::string_view(value));
+      }
+  };
+  struct ChannelNameEqual {
+      using is_transparent = void;
+      bool operator()(std::string_view lhs, std::string_view rhs) const noexcept {
+          return lhs == rhs;
+      }
+  };
+  using ChannelIndex =
+      std::unordered_map<std::string, std::size_t, ChannelNameHash, ChannelNameEqual>;
+
     /// The sources for one declared channel; exactly one is non-null, matching
     /// the shape recorded in `infos_` at the same index.
     struct Entry {
@@ -141,6 +160,13 @@ private:
     /// the set's lifetime.
     std::vector<std::unique_ptr<Entry>> entries_;
     std::vector<ValueChannelInfo> infos_;
+    // Declarations are setup-only and the vectors are immutable afterwards.
+    // Keep the exact name/shape lookup used by every native binding O(1), while
+    // retaining infos_ as the single ordered metadata source for discovery.
+    ChannelIndex scalar_indices_;
+    ChannelIndex meter_indices_;
+    ChannelIndex vector_indices_;
+    ChannelIndex event_indices_;
     std::shared_ptr<detail::ValueChannelTelemetryControl> telemetry_control_;
 };
 
