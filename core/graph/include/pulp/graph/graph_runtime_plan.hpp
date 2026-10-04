@@ -147,7 +147,10 @@ struct GraphRuntimePlan {
     std::vector<GraphRuntimeConnectionPlan> connections;
     std::vector<std::uint32_t> inbound_connection_indices;
     std::vector<std::uint32_t> outbound_connection_indices;
-    // Dense node indices into `nodes`, not NodeIds.
+    // Dense node indices into `nodes`, not NodeIds. The walk is a stable
+    // topological order: when several nodes are ready, the node with the
+    // lowest NodeId is selected. This keeps equivalent plans independent of
+    // authored dense-vector order without changing connection insertion order.
     std::vector<std::uint32_t> processing_order_indices;
 
     void clear();
