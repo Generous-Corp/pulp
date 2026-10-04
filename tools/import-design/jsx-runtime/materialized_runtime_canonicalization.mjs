@@ -99,20 +99,31 @@ export function canonicalizeMaterializedRuntimeDocument(document) {
   }
 
   let babelCount = 0;
+  // Claude/agent exports commonly repeat the same inline Babel program in
+  // several script tags (for example once per preview frame).  JSX lowering
+  // is pure for the fixed options below, so retain compiled source within a
+  // document pass instead of paying esbuild's parser/codegen cost repeatedly.
+  // The cache is deliberately scoped to this call: it cannot retain source
+  // from an untrusted document or grow across imports.
+  const compiledJsx = new Map();
   let html = rewriteScripts(String(document.html || ''),
     ({ whole, openTag, source }) => {
       const typeAttribute = attribute(openTag, 'type');
       const type = typeAttribute?.value.toLowerCase();
       if (type !== 'text/babel' && type !== 'text/jsx')
         return whole;
-      const compiled = transformSync(source, {
-        loader: 'jsx',
-        target: 'es2020',
-        jsx: 'transform',
-        jsxFactory: 'React.createElement',
-        jsxFragment: 'React.Fragment',
-        legalComments: 'none',
-      }).code.replace(/<\/script/gi, '<\\/script');
+      let compiled = compiledJsx.get(source);
+      if (compiled === undefined) {
+        compiled = transformSync(source, {
+          loader: 'jsx',
+          target: 'es2020',
+          jsx: 'transform',
+          jsxFactory: 'React.createElement',
+          jsxFragment: 'React.Fragment',
+          legalComments: 'none',
+        }).code.replace(/<\/script/gi, '<\\/script');
+        compiledJsx.set(source, compiled);
+      }
       ++babelCount;
       const javascriptOpenTag = openTag.slice(0, typeAttribute.start) +
         openTag.slice(typeAttribute.end);

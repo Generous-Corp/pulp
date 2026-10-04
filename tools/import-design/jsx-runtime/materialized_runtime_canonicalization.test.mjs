@@ -49,6 +49,17 @@ test('parses script attributes without treating quoted markup as a tag end', () 
   assert.match(result.html, /React\.createElement\("span"/);
 });
 
+test('reuses the compiled form for repeated inline JSX programs', () => {
+  const source = 'globalThis.node = <span>OK</span>;';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: `<script type="text/babel">${source}</script>` +
+      `<script type="text/jsx">${source}</script>`,
+    assets: [],
+  });
+  assert.equal(result.runtime_canonicalization.jsx_scripts_compiled, 2);
+  assert.equal((result.html.match(/React\.createElement\("span"/g) || []).length, 2);
+});
+
 test('does not remove a vendor-looking src from a script with authored body', () => {
   const react = '/** @license React react.development.js */';
   const result = canonicalizeMaterializedRuntimeDocument({
