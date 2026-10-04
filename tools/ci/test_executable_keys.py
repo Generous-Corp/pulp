@@ -328,6 +328,32 @@ class KeyTests(unittest.TestCase):
         self.fx.scan["executables"]["plug.so"] = {"data": "undeclared", "inputs": [], "detected_sources": ["plug/plug.cpp"]}
         self.assertEqual(self.fx.keys(self.head())[MOD]["always_run"], "data_undeclared")
 
+    def test_the_lane_keys_the_compiler_cmake_chose_not_the_one_on_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+
+            def compiler(path: Path, line: str) -> Path:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("#!/bin/sh\n"
+                                f'case "$1" in -print-target-triple) echo arm64-apple-darwin99.0.0 ;; '
+                                f'*) echo "{line}" ;; esac\n')
+                path.chmod(0o755)
+                return path
+            chosen = compiler(tmp / "toolchain" / "c++", "CMake-chosen clang 1.0")
+            compiler(tmp / "path" / "clang", "PATH clang 9.9")
+            build = tmp / "build"
+            (build / "CMakeFiles" / "3.30.0").mkdir(parents=True)
+            (build / "CMakeFiles" / "3.30.0" / "CMakeCXXCompiler.cmake").write_text(
+                f'set(CMAKE_CXX_COMPILER "{chosen}")\nset(CMAKE_CXX_COMPILER_ID "AppleClang")\n'
+                'set(CMAKE_CXX_COMPILER_VERSION "1.0.0")\n')
+            (build / "CMakeCache.txt").write_text("CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n")
+            with mock.patch.dict(os.environ, {"PATH": f"{tmp / 'path'}:{os.environ.get('PATH', '')}"}):
+                key = ek.probe_toolchain(build)
+            if key is None:
+                self.skipTest("this host's SDK could not be read, so the identity is incomplete")
+            self.assertEqual(key["compiler"], "CMake-chosen clang 1.0")
+            self.assertNotIn("target", key)
+
     def test_an_undeclared_spawn_always_runs(self):
         self.fx.scan["executables"]["pulp-test-a"] = {"spawns": "undeclared", "data": "none"}
         self.assertEqual(self.fx.keys(self.head())[EXE]["always_run"], "spawns_undeclared")
