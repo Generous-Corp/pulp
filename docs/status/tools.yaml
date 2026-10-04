@@ -270,6 +270,16 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: materialized-runtime-conformance
+  path: tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs
+  category: design-import
+  use_when: Run the deterministic materialized-runtime contract and its planted vendor-tag negative control.
+  invocation: node tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs --json
+  inputs: A representative materialized browser document fixture and the canonicalizer.
+  outputs: Canonical output SHA, byte-size/timing metrics, and a negative-control verdict.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: reembed-mtk
   path: tools/import-design/reembed_mtk.py
   category: design-import
