@@ -80,6 +80,11 @@ cmake -S . -B build-gpu -DCMAKE_BUILD_TYPE=Release \
 layout); flat `mac/lib` + `include` layouts are also accepted (see
 `tools/cmake/FindSkia.cmake`).
 
+For Android, use `tools/build-skia-android.sh` so the shared manifest locks the
+exact Skia/Dawn pair used by desktop. The script checks out the immutable Skia
+revision and stages the `skunicode` headers; mutable milestone tips and stale
+module headers are not valid provenance.
+
 A valid cached generation keeps headers and libraries together and carries both
 the verified archive stamp and extracted-file digest receipt. An arbitrary
 sibling checkout is not provenance: never use its mutable

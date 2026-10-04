@@ -698,6 +698,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # Pure parts of the test-link determinism check (command extraction,
+        # the configure's decision file, the loud skip).
+        add_test(NAME link-determinism-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_link_determinism.py")
+        set_tests_properties(link-determinism-selftest PROPERTIES TIMEOUT 120)
         # Per-object header dependencies from the Ninja log, for the reuse record.
         add_test(NAME object-deps-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_object_deps.py")
@@ -753,6 +758,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME executable-keys-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_executable_keys.py")
     set_tests_properties(executable-keys-selftest PROPERTIES TIMEOUT 120)
+
+    # The selection over a key manifest: would-skip set, seeded sample, and
+    # the tests and build targets left to run, as canonical bytes.
+    add_test(NAME executable-selection-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_executable_selection.py")
+    set_tests_properties(executable-selection-selftest PROPERTIES TIMEOUT 60)
 
     # Per-job ccache delta printed by build.yml's "Ccache stats" step. The
     # cumulative `ccache --show-stats` counters belong to the host-shared cache

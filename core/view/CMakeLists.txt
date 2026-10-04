@@ -303,6 +303,8 @@ if(APPLE)
         target_sources(pulp-view-core PRIVATE
             platform/mac/app_menu_mac.mm
             platform/mac/window_host_mac.mm
+            platform/mac/window_host_mac_lifecycle.mm
+            platform/mac/window_host_mac_metal_view.mm
             platform/mac/window_host_mac_capture.mm
             platform/mac/window_host_mac_geometry.mm
             platform/mac/window_host_mac_open_documents.mm
@@ -390,6 +392,7 @@ elseif(ANDROID)
         src/plugin_view_host_stub.cpp
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
+        $<$<BOOL:${PULP_HAS_SKIA}>:src/screenshot_skia.cpp>
     )
     # Android accessibility wired via Kotlin TalkBack integration
 elseif(UNIX)
@@ -434,8 +437,7 @@ endif()
 # CoreGraphics implementation above; Skia-enabled Windows/Linux builds use the
 # portable raster implementation. Other targets remain provider/GPU-dependent
 # and therefore report unsupported until they install a real producer.
-if((APPLE AND NOT PULP_IOS) OR (WIN32 AND PULP_HAS_SKIA)
-   OR (UNIX AND NOT APPLE AND NOT ANDROID AND PULP_HAS_SKIA))
+if((APPLE AND NOT PULP_IOS) OR (WIN32 AND PULP_HAS_SKIA) OR (UNIX AND NOT APPLE AND NOT ANDROID AND PULP_HAS_SKIA) OR (ANDROID AND PULP_HAS_SKIA))
     target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_BUILTIN_SCREENSHOT=1)
 endif()
 

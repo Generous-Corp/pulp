@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc.
+ * Copyright 2017 Google LLC
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
@@ -38,8 +38,6 @@ public:
 #endif //defined(SK_GANESH)
 
     static void SafetyNetLog(const char*);
-
-    static sk_sp<SkSurface> getSurfaceFromCanvas(SkCanvas* canvas);
 
     static int SaveBehind(SkCanvas* canvas, const SkRect* subset);
 

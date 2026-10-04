@@ -9,8 +9,8 @@
 #define skgpu_graphite_PrecompileContext_DEFINED
 
 #include "include/core/SkRefCnt.h"
-#include "include/private/base/SingleOwner.h"
-#include "include/private/base/SkAPI.h"
+#include "include/private/SingleOwner.h"
+#include "include/private/SkAPI.h"
 
 #include <chrono>
 #include <memory>
@@ -24,6 +24,14 @@ class SharedContext;
 class PrecompileContextPriv;
 class ResourceProvider;
 
+// The PrecompileContext is spawned from a generating Context via Context::makePrecompileContext.
+// It should only be used on a single thread but that can be different from the main thread (i.e.,
+// the one the Context is operating on). Many PrecompileContext's can be operating in parallel
+// but the majority of the benefit will be from the threaded compilation within the
+// PrecompileContext. As for that, the PipelineContext(s) borrow(s) the Executor from the
+// generating Context. To make lifetime management of the Executor reasonable, if the
+// Context is deleted before its PrecompileContexts, the PrecompileContexts will lose access
+// to the Executor and revert to single threaded compilation.
 class SK_API PrecompileContext {
 public:
     ~PrecompileContext();
@@ -75,6 +83,20 @@ public:
     std::string getPipelineLabel(sk_sp<SkData> serializedPipelineKey,
                                  uint32_t* uniqueHash = nullptr);
 
+    enum class ExternalFormatResult {
+        kInvalid,               // the serialized key was invalid
+        kNoExternalFormat,
+        kHasExternalFormat
+    };
+
+    /**
+     * Determine if a serialized pipeline key contains a usage of an external texture format.
+     *
+     * @param serializedPipelineKey   serialized Pipeline key.
+     * @return                        a tri-state value (see ExternalFormatResult)
+     */
+    ExternalFormatResult containsExternalFormat(sk_sp<SkData> serializedPipelineKey) const;
+
     // Provides access to functions that aren't part of the public API.
     PrecompileContextPriv priv();
     const PrecompileContextPriv priv() const;  // NOLINT(readability-const-return-type)
@@ -85,9 +107,9 @@ private:
 
     explicit PrecompileContext(sk_sp<SharedContext>);
 
+    // The PrecompileContext should not be used on multiple threads
     mutable SingleOwner fSingleOwner;
     sk_sp<SharedContext> fSharedContext;
-    std::unique_ptr<ResourceProvider> fResourceProvider;
 };
 
 }  // namespace skgpu::graphite
