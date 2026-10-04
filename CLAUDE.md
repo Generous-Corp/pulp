@@ -392,18 +392,11 @@ Non-obvious things that cost real time when you don't know them:
 
 ### Plugin editors open content-first
 
-A host shows no editor until its view-creation call returns, and then shows
-whatever the view holds — so `ViewBridge` (via `Options::hosted_editor()`)
-mounts a scripted document inside that call and presents it as the first frame:
-never an empty editor. The cost of that call is the host's own placeholder time
-(Logic's empty plug-in window), so keep the mount short: a processor that
-builds its own `ScriptedUiSession` in `create_view()` loads with
-`load_deferrable()`, does post-load work in `set_document_loaded_callback()`,
-and declares its scripts and documents in `Processor::editor_prewarm()` so the
-format adapter compiles and verifies them on a background worker when the host
-instantiates the plug-in. Rules, gates and the measurement recipe: the
-[`view-bridge`](.agents/skills/view-bridge/SKILL.md) skill ("Editor open") and
-`trace-analysis` ("Editor-open recipe").
+`ViewBridge` mounts a scripted document inside the host's view-creation call and
+presents it as the first frame, so that call is the host's placeholder time:
+load with `load_deferrable()`, finish in `set_document_loaded_callback()`, and
+declare `Processor::editor_prewarm()` so adapters compile/verify it at
+instantiation. Rules: [`view-bridge`](.agents/skills/view-bridge/SKILL.md).
 
 ### Thread Model
 

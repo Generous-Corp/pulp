@@ -12,7 +12,7 @@
     {
       "path": "tools/scripts/agent_capability_catalog_performance.py",
       "needles": [
-        "sha256:07a9475d8cb82d042429c8dcaa2d49f7aad80962b0b9258213a8eb1cb540ce57"
+        "sha256:3f58528830083f74bd918b20179b4829381d012da50c8dc3c10716590405197a"
       ]
     },
     {
