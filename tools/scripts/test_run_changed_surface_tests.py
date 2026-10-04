@@ -891,6 +891,53 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             self.assertEqual([suite[0] for suite in record.call_args.args[2]], ["full"])
             self.assertIsInstance(record.call_args.args[3], int)  # the run's start, for --not-before-epoch
 
+    def test_an_unwritable_record_directory_still_leaves_the_fallback_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            results = root / "results"
+            blocker = root / "blocker"
+            blocker.write_text("a file, not a directory")
+            record_dir = blocker / "record"
+            build.mkdir()
+            receipt = selection_receipt(selected_build_targets=["pulp-test-build-check"])
+            encoded, digest = encode_receipt(receipt)
+            args = mock.Mock(
+                build_dir=build,
+                selection_receipt_b64=encoded,
+                selection_receipt_sha256=digest,
+                _changed_surface_full_authority_started=False,
+                _changed_surface_fallback_safe=True,
+                _changed_surface_receipt_identity_verified=True,
+            )
+            commands: list[list[str]] = []
+
+            def execute(argv: list[str], **_: object) -> subprocess.CompletedProcess:
+                commands.append(argv)
+                return subprocess.CompletedProcess(argv, 0)
+
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {
+                        "SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
+                        "SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results),
+                        runner.lane_reuse_record.RECORD_DIR_ENV: str(record_dir),
+                    },
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError("selected native CTest executable has no CMake producer"),
+                ),
+                mock.patch.object(runner.subprocess, "run", side_effect=execute),
+                mock.patch.object(runner, "clear_build_sentinel", return_value=0),
+            ):
+                self.assertEqual(runner.run(args), 0)
+            self.assertNotIn("--output-junit", commands[1], "the full run goes ahead without a report")
+            self.assertEqual(len(list(results.glob("result-*.json"))), 1, "its receipt is still written")
+
     def test_authoritative_mode_refusal_never_uses_shadow_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory).resolve()

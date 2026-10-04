@@ -6752,8 +6752,10 @@ lists no GitHub credentials, so nothing is uploaded.
   --inventory` flags `build.yml` uses. A bounded changed-surface plan is
   recorded by `run_changed_surface_tests.py`, including the full run it falls
   back to when a plan is refused.
-- Recording never changes a verdict. The stage exits with ctest's status, a
-  recorder failure is a warning, and Shipyard's run log ends with one
+- Recording never changes a verdict. The stage exits with ctest's status; a
+  recorder failure, or a record directory that cannot be written, is a
+  warning (the tests still run, and a bounded plan still writes its result
+  receipt); and Shipyard's run log ends with one
   `=== reuse-record: ... ===` line saying whether a record was kept.
 - The lane configures with `-DPULP_RECORD_LINK_MAPS=ON` and with Ninja: the
   record reads per-object dependencies from Ninja's dependency log, which the

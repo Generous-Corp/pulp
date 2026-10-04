@@ -112,6 +112,29 @@ class LaneReuseRecordTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(len(self.calls()), 2)
 
+    def unwritable(self) -> Path:
+        """A record directory that cannot be created: its parent is a file."""
+        blocker = self.root / "blocker"
+        blocker.write_text("a file, not a directory")
+        return blocker / "record"
+
+    def test_an_unwritable_record_directory_never_costs_the_tests(self) -> None:
+        rc = self.run_stage({lrr.RECORD_DIR_ENV: str(self.unwritable()), "FAKE_CTEST_RC": "4"})
+        self.assertEqual(rc, 4, "ctest ran and its status stands")
+        calls = self.calls()
+        self.assertEqual(len(calls), 1, calls)
+        self.assertNotIn("--output-junit", calls[0]["ctest"])
+
+    def test_a_leg_that_cannot_be_copied_is_a_warning_not_an_error(self) -> None:
+        private = self.root / "private"
+        private.mkdir()
+        (private / "selected-junit.xml").write_text("<testsuite/>")
+        with mock.patch.dict(os.environ, {lrr.RECORD_DIR_ENV: str(self.unwritable())}):
+            rc = lrr.record_legs(self.build, self.root, [("pr-affected", private / "selected-junit.xml", None)],
+                                 "success", 0)
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.calls(), [], "nothing half-written is handed to the recorder")
+
     def test_a_bounded_plans_legs_are_copied_out_and_a_silent_leg_is_left_out(self) -> None:
         private = self.root / "private"
         private.mkdir()

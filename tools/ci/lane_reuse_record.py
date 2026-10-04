@@ -16,7 +16,8 @@ Two callers:
 - run_changed_surface_tests.py, after a bounded plan's legs: `record()`.
 
 Recording never changes a verdict: the test subcommand exits with ctest's
-status, and a recorder failure is a warning. Without the variable nothing is
+status, and any recording failure (the recorder's exit status, or a record
+directory that cannot be written) is a warning. Without the variable nothing is
 recorded and ctest runs exactly as given.
 """
 
@@ -43,10 +44,25 @@ def record_dir() -> Path | None:
     return Path(value) if value else None
 
 
+def warn(message: str) -> None:
+    print(f"lane-reuse-record: WARNING: {message}; this run leaves no usable record, "
+          "so the next plan keyed against it runs in full", file=sys.stderr)
+
+
 def suite_dir(out: Path, name: str) -> Path:
     path = out / "suites" / name
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def junit_path(out: Path, name: str) -> Path | None:
+    """Where suite `name`'s JUnit report goes, or None (with a warning) when
+    the record directory cannot hold it; the tests then run without one."""
+    try:
+        return suite_dir(out, name) / "ctest.junit.xml"
+    except OSError as error:
+        warn(f"cannot prepare {out}: {error}")
+        return None
 
 
 def keep_last_test_log(build_dir: Path, out: Path, name: str) -> Path | None:
@@ -55,8 +71,12 @@ def keep_last_test_log(build_dir: Path, out: Path, name: str) -> Path | None:
     log = build_dir / "Testing" / "Temporary" / "LastTest.log"
     if not log.is_file():
         return None
-    dest = suite_dir(out, name) / "LastTest.log"
-    shutil.copyfile(log, dest)
+    try:
+        dest = suite_dir(out, name) / "LastTest.log"
+        shutil.copyfile(log, dest)
+    except OSError as error:
+        warn(f"cannot keep {log}: {error}")
+        return None
     return dest
 
 
@@ -85,10 +105,13 @@ def record(build_dir: Path, source_root: Path, suites: Sequence[Suite], not_befo
     out = record_dir()
     if out is None:
         return 0
-    rc = subprocess.run(recorder_argv(out, build_dir, source_root, suites, build_outcome, not_before)).returncode
+    try:
+        rc = subprocess.run(recorder_argv(out, build_dir, source_root, suites, build_outcome, not_before)).returncode
+    except OSError as error:
+        warn(f"cannot run reuse_record.py: {error}")
+        return 1
     if rc != 0:
-        print(f"lane-reuse-record: WARNING: reuse_record.py exited {rc}; this run leaves no record, "
-              "so the next plan keyed against it runs in full", file=sys.stderr)
+        warn(f"reuse_record.py exited {rc}")
     return rc
 
 
@@ -101,11 +124,15 @@ def record_legs(build_dir: Path, source_root: Path,
     if out is None:
         return 0
     suites: list[Suite] = []
-    for name, junit, attempts in legs:
-        if junit.is_file():
-            dest = suite_dir(out, name) / "ctest.junit.xml"
-            shutil.copyfile(junit, dest)
-            suites.append((name, dest, attempts, True))
+    try:
+        for name, junit, attempts in legs:
+            if junit.is_file():
+                dest = suite_dir(out, name) / "ctest.junit.xml"
+                shutil.copyfile(junit, dest)
+                suites.append((name, dest, attempts, True))
+    except OSError as error:
+        warn(f"cannot copy a leg's report into {out}: {error}")
+        return 1
     return record(build_dir, source_root, suites, not_before, build_outcome)
 
 
@@ -113,7 +140,9 @@ def run_test_stage(build_dir: Path, ctest: list[str]) -> int:
     out = record_dir()
     if out is None:
         return subprocess.run(ctest).returncode
-    junit = suite_dir(out, "full") / "ctest.junit.xml"
+    junit = junit_path(out, "full")
+    if junit is None:
+        return subprocess.run(ctest).returncode
     started = int(time.time())
     rc = subprocess.run(ctest + ["--output-junit", str(junit)]).returncode
     attempts = keep_last_test_log(build_dir, out, "full")

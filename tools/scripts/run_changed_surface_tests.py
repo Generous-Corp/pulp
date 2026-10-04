@@ -1076,7 +1076,7 @@ def run_full_fallback(
     full_seconds = 0.0
     if full_build_result in (None, 0):
         reuse_out = lane_reuse_record.record_dir()
-        junit = lane_reuse_record.suite_dir(reuse_out, "full") / "ctest.junit.xml" if reuse_out else None
+        junit = lane_reuse_record.junit_path(reuse_out, "full") if reuse_out else None
         started_epoch = int(time.time())
         full_started = time.monotonic()
         full_result = subprocess.run(execution_argv(build_dir, junit=junit), shell=False).returncode
