@@ -7,11 +7,13 @@
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
     "design-ir-contract",
+    "design-output-and-packaging",
     "design-source-ingest",
     "render-assets-and-backends"
   ],
   "rationale": "Record source-compatible Pulp optimizations for imported plugin UIs: repeated inline JSX/Babel programs share one deterministic compile result per document pass, the native animation-frame service invokes the already compiled callback directly with one shared timestamp per pass, and keyed DesignIR updates use existing stable anchors while failing closed on ambiguity. These preserve import and rendering behavior; no design source, Chromium capture, rendering authority, packaging authority, or Vellum ownership moves.",
   "tests": [
+    "node --test tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
     "node --test tools/import-design/jsx-runtime/*.test.mjs",
     "ctest --test-dir build -R pulp-test-design-update",
     "ctest --test-dir build -R pulp-test-widget-bridge-canvas2d",
