@@ -302,5 +302,35 @@
       "repeated_4718592_byte_class_owner": "unattributed"
     },
     "classification": "Fail-closed infrastructure limitation, not evidence of a B3 fix or ownership. Preserve BLOCKED and require a profileable emulator with an exposed heapprofd/Perfetto service for the allocation-owner discriminator."
+  },
+  "current_build_verification": {
+    "command": "export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home; export ANDROID_HOME=$HOME/Library/Android/sdk; export ANDROID_SDK_ROOT=$ANDROID_HOME; export PATH=$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH; cd android && ./gradlew :app:assembleDebug --no-daemon --stacktrace",
+    "java": "openjdk version 17.0.20.1",
+    "adb": "Android Debug Bridge version 1.0.41; Version 37.0.1-15733141",
+    "result": "BLOCKED",
+    "failed_task": ":app:buildCMakeDebug[arm64-v8a]",
+    "fatal": "external/skia-build/modules/skunicode/include/SkUnicode.h:15:10: fatal error: 'src/base/SkUTF.h' file not found",
+    "secondary_warnings": "CXX5304 SDK XML version 4 versus 3 and NDK 30.0.16248370 observed at inconsistent 30.0.14904198 location",
+    "existing_apk_note": "android/app/build/outputs/apk/debug/app-debug.apk exists from 2026-10-02 22:11 with SHA-256 f3b0f28ee8397dd808c80a7b4e87c2d15b3be2aeeca1c9ce0cf0b6775117a1bd; it is stale relative to this failed rebuild and is not new build proof."
+  },
+  "source_attribution_audit": {
+    "status": "reviewed_no_owner_attribution",
+    "source_evidence": [
+      "core/render/platform/android/surface_runtime_android.cpp:200-219 marks invalid, waits for active_frames_ == 0, resets Skia before Dawn, then releases ANativeWindow.",
+      "core/render/src/skia_surface.cpp:99-112 clears canvas/layer/image-provider state and submits/checks async Graphite work before destruction; members include Context, Recorder, SkSurface targets, and a retained-layer store.",
+      "core/render/src/gpu_surface_dawn.cpp:107-116 releases current texture, surface, queue, device, adapter, instance, and native Dawn instance in reverse ownership order.",
+      "android/app/src/main/kotlin/com/pulp/render/PulpSurfaceView.kt:116-145 posts nativeOnSurfaceDestroyed on the render Looper and joins the HandlerThread before returning.",
+      "core/render/platform/android/gpu_surface_android_jni.cpp:151-163 clears the cached JNI view/global drag backend before forwarding native surface destruction."
+    ],
+    "proved_boundary": "Every measured cycle has completed branch-owned render-thread and SurfaceRuntime teardown; source inspection finds no safe B3-only ownership correction for the anonymous 4718592-byte class.",
+    "not_proved": "The source does not expose allocator call stacks or identify whether the repeated class is Dawn, Skia, or the emulator Vulkan driver. Existing PSS/unreachable counters cannot make that attribution.",
+    "reviewed_attribution_plan": {
+      "step_1": "Use a profileable debuggable Android emulator exposing android.heapprofd and the Perfetto tracing service; capture one clean cycle with native heap sampling enabled for com.pulp.app.",
+      "step_2": "Record the package PID, trace path and SHA-256, exact trace config, and stack attribution for the repeated 4718592-byte allocations.",
+      "step_3": "Classify stacks by Dawn allocator/device teardown, Skia Graphite Context/Recorder/Surface ownership, or emulator Vulkan/GFXStream driver; require a repeated class and a before/after control.",
+      "step_4": "Only after owner attribution, test a private debug-only diagnostic or owner fix and repeat the five-cycle PSS/unreachable protocol. Do not add a production workaround from counters alone."
+    },
+    "external_capability_required": "A second emulator image or device with the heapprofd native allocation data source and an accessible Perfetto tracing service, plus profileable/debuggable package support. The current emulator lacks this capability, so no allocation-owner claim is made.",
+    "classification": "B3 remains BLOCKED; the current build is independently blocked by the Skia generated-header/source mismatch, and the native retention owner remains unresolved."
   }
 }
