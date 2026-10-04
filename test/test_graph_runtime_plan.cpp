@@ -87,6 +87,51 @@ TEST_CASE("GraphRuntimePlan builds dense node and connection arrays",
     REQUIRE(result.plan.processing_order_indices[2] == 2);
 }
 
+TEST_CASE("GraphRuntimePlan selects ready nodes by stable NodeId",
+          "[graph][graph-runtime][plan][determinism]") {
+    // Dense specification order is intentionally different from the stable
+    // identity order.  The two roots 50 and 10 fan into 20, while root 40 is
+    // also required by the output.  A FIFO ready queue would expose authored
+    // vector order; the runtime plan should use NodeId instead.
+    const std::array nodes = {
+        node(50, 0, 1, pulp::graph::GraphRuntimeNodeKind::AudioInput),
+        node(10, 0, 1, pulp::graph::GraphRuntimeNodeKind::AudioInput),
+        node(20, 2, 1),
+        node(40, 0, 1, pulp::graph::GraphRuntimeNodeKind::AudioInput),
+        node(30, 2, 0, pulp::graph::GraphRuntimeNodeKind::AudioOutput),
+    };
+    const std::array connections = {
+        connect(50, 0, 20, 0),
+        connect(10, 0, 20, 1),
+        connect(20, 0, 30, 0),
+        connect(40, 0, 30, 1),
+    };
+
+    const auto result = pulp::graph::build_graph_runtime_plan(nodes, connections);
+    REQUIRE(result.ok());
+
+    std::vector<pulp::graph::NodeId> processing_ids;
+    processing_ids.reserve(result.plan.processing_order_indices.size());
+    for (const auto index : result.plan.processing_order_indices)
+        processing_ids.push_back(result.plan.nodes[index].id);
+
+    REQUIRE(processing_ids == std::vector<pulp::graph::NodeId>{10, 40, 50, 20, 30});
+
+    // Negative control: changing a stable identity changes the canonical ready
+    // choice.  This guards the test from passing while the comparator silently
+    // ignores NodeId and falls back to dense indices.
+    auto changed_nodes = nodes;
+    changed_nodes[1].id = 60;
+    auto changed_connections = connections;
+    changed_connections[1].source_node = changed_nodes[1].id;
+    const auto changed = pulp::graph::build_graph_runtime_plan(changed_nodes, changed_connections);
+    REQUIRE(changed.ok());
+    std::vector<pulp::graph::NodeId> changed_ids;
+    for (const auto index : changed.plan.processing_order_indices)
+        changed_ids.push_back(changed.plan.nodes[index].id);
+    REQUIRE(changed_ids == std::vector<pulp::graph::NodeId>{40, 50, 60, 20, 30});
+}
+
 TEST_CASE("GraphRuntimePlan rejects duplicate and reserved node ids",
           "[graph][graph-runtime][plan]") {
     const std::array duplicate_nodes = {

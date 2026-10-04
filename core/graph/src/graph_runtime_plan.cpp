@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <functional>
 #include <limits>
 #include <queue>
 #include <utility>
@@ -241,13 +242,22 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             if (!connection.feedback) ++indegree[connection.dest_index];
         }
 
-        std::queue<std::uint32_t> ready;
+        // Node specifications retain authored dense order because the
+        // connection arrays use those indices.  Ready-node selection is a
+        // separate runtime concern: use the stable NodeId as its key so
+        // equivalent plans do not inherit input-vector order or hash-table
+        // iteration order.  Keep the dense index as a tie-breaker for
+        // defensive robustness even though duplicate NodeIds were rejected
+        // above.
+        using ReadyEntry = std::pair<NodeId, std::uint32_t>;
+        std::priority_queue<ReadyEntry, std::vector<ReadyEntry>, std::greater<ReadyEntry>> ready;
         for (std::uint32_t i = 0; i < indegree.size(); ++i) {
-            if (indegree[i] == 0) ready.push(i);
+            if (indegree[i] == 0)
+                ready.push({result.plan.nodes[i].id, i});
         }
 
         while (!ready.empty()) {
-            const auto node_index = ready.front();
+            const auto node_index = ready.top().second;
             ready.pop();
             result.plan.processing_order_indices.push_back(node_index);
 
@@ -260,7 +270,10 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                 auto& dest_indegree = indegree[connection.dest_index];
                 if (dest_indegree == 0) continue;
                 --dest_indegree;
-                if (dest_indegree == 0) ready.push(connection.dest_index);
+                if (dest_indegree == 0) {
+                    ready.push(
+                        {result.plan.nodes[connection.dest_index].id, connection.dest_index});
+                }
             }
         }
 
