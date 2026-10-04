@@ -36,6 +36,9 @@ _pulp_pick_target(_PULP_CONTROL_INSPECT_TARGET Pulp::inspect pulp::inspect)
 _pulp_pick_target(_PULP_CONTROL_RUNTIME_EVAL_TARGET
     Pulp::inspect-runtime-eval pulp::inspect-runtime-eval)
 include("${CMAKE_CURRENT_LIST_DIR}/PulpControlShipping.cmake")
+# The plugin helper included below retains the inspector control declaration
+# contract for compatibility and shipping truth checks:
+# _pulp_cache_control_declarations(${target} ...)
 _pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
 _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
 _pulp_pick_target(_PULP_LV2_TARGET Pulp::lv2-headers lv2-headers)
