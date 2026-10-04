@@ -240,6 +240,20 @@ void BridgeRegistrars::register_widget_typography_color_api(WidgetBridge& self) 
         auto* v = self.widget(id);
         if (!v || hex.empty()) return choc::value::Value();
         auto color = parse_bridge_css_color(hex);
+        // Re-applying the colour a widget already has changes nothing; skip
+        // it rather than restyle the subtree (set_theme repaints the whole
+        // surface), so a script that rewrites a label's colour every frame
+        // costs only the repaint its other changes ask for.
+        {
+            auto* label = dynamic_cast<Label*>(v);
+            const bool own_same = label
+                ? label->has_own_text_color() && label->text_color() == color
+                : v->inheritable_text_color() == color;
+            const auto& colors = v->theme().colors;
+            const auto found = colors.find("text.primary");
+            if (own_same && found != colors.end() && found->second == color)
+                return choc::value::Value();
+        }
         // CSS-style cascade.
         // - On a Label: set the Label's own explicit text_color, which
         //   wins over inheritance and theme tokens.

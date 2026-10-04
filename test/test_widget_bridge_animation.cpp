@@ -1457,6 +1457,14 @@ TEST_CASE("Native message dispatch adds no whole-surface damage when the work ma
             __step++;
             setSvgPath('needle', 'M 5 5 L ' + (10 + __step) + ' 20');
         };
+        createLabel('readout', '1/4', 'box');
+        setFlex('readout', 'width', 40); setFlex('readout', 'height', 12);
+        globalThis.moveNeedleRestyleSame = function(type, payload, id) {
+            __step++;
+            setSvgPath('needle', 'M 5 5 L ' + (10 + __step) + ' 20');
+            setBackground('box', '#202020'); setBorderRadius('box', 4);
+            setTextColor('readout', '#cdb4ff');
+        };
         globalThis.moveNeedleAndRecolour = function(type, payload, id) {
             __step++;
             setSvgPath('needle', 'M 5 5 L ' + (10 + __step) + ' 20');
@@ -1490,6 +1498,16 @@ TEST_CASE("Native message dispatch adds no whole-surface damage when the work ma
     CHECK_FALSE(quiet.full_damage);
     CHECK(quiet.repaint_requests == 0);
     CHECK(quiet.frame_requests >= 1);
+
+    // A handler that re-applies the style the widgets already carry (a
+    // script restyling a label on every step) changed no paint beyond what
+    // it marked. The first dispatch applies the style; the rest re-apply it.
+    bridge.dispatch_native_message("moveNeedleRestyleSame", "tick", payload, "t", "test");
+    const auto& same = probe.measure([&] {
+        bridge.dispatch_native_message("moveNeedleRestyleSame", "tick", payload, "t", "test");
+    });
+    CHECK(same.repaint_requests > 0);
+    CHECK_FALSE(same.full_damage);
 
     // Negative control: an unmarked paint change in the same handler keeps
     // the whole-surface request.

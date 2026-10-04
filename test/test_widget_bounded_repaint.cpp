@@ -546,6 +546,26 @@ TEST_CASE("A paint-only setter is counted as an unmarked paint mutation",
     CHECK(View::unmarked_paint_mutation_count() == unmarked);
 }
 
+TEST_CASE("Re-applying a paint style a view already has changes nothing",
+          "[view][widgets][partial-repaint]") {
+    View v;
+    const auto red = pulp::canvas::Color::rgba8(200, 0, 0);
+    v.set_background_color(red);
+    v.set_border_radius(4.0f);
+    v.set_border_color(red);
+    v.set_border_width(1.0f);
+    const auto unmarked = View::unmarked_paint_mutation_count();
+    v.set_background_color(red);
+    v.set_border_radius(4.0f);
+    v.set_border_color(red);
+    v.set_border_width(1.0f);
+    CHECK(View::unmarked_paint_mutation_count() == unmarked);
+    // Control: a real change is still counted.
+    v.set_background_color(pulp::canvas::Color::rgba8(0, 200, 0));
+    CHECK(View::unmarked_paint_mutation_count() == unmarked + 1);
+    CHECK(v.background_color() == pulp::canvas::Color::rgba8(0, 200, 0));
+}
+
 TEST_CASE("A fixed-box Label repaints its own box when its copy changes",
           "[view][widgets][partial-repaint][label]") {
     auto root = std::make_unique<View>();
