@@ -2405,24 +2405,21 @@ public:
     // CAMetalLayer now, inside the host's view-creation call, so the first
     // image the window server composites for this view is that frame.
     //
-    // Not yet in a window (AU v2's factory; out of process AUHostingService
-    // inserts the view later), an ordinary present suffices: the drawable is
-    // the layer's contents long before the layer reaches the screen.
-    //
-    // Already in a window that is on screen (VST3 attached(), CLAP
-    // set_parent(), AU v3), an ordinary present loses a race: the drawable
-    // presents asynchronously once the GPU finishes it, while the view's
-    // insertion (and any geometry flush) reaches the window server with the
-    // next Core Animation commit, which can land first and show the backing
-    // colour for a vsync. There the frame is presented WITH the transaction:
-    // the GPU work is finished first, and one flush commits the layer's
-    // geometry and its first contents together. Skipped once the display link
-    // has painted.
+    // An ordinary present loses a race: the drawable presents asynchronously
+    // once the GPU finishes it, while the view's insertion (and any geometry
+    // flush) reaches the window server with the next Core Animation commit,
+    // which can land first and show the backing colour for a vsync. A host
+    // whose window is on screen when it attaches (VST3 attached(), CLAP
+    // set_parent(), AU v3) lost it on most opens, and out of process
+    // AUHostingService, which inserts the AU v2 view right after the factory
+    // returns, on about one open in twelve. So the frame is presented WITH the
+    // transaction: the GPU work is finished first, and one flush commits the
+    // layer's geometry and its first contents together, window or not.
+    // Skipped once the display link has painted.
     bool present_first_frame() override {
         needs_repaint_.store(true, std::memory_order_relaxed);
         if (frame_ok_count_ > 0) return false;
-        only_first_frame_presented_ =
-            metal_view_.window ? present_with_transaction() : render_frame();
+        only_first_frame_presented_ = present_with_transaction();
         return only_first_frame_presented_;
     }
 
