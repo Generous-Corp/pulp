@@ -4086,6 +4086,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-f31527bdfdcd"
+paths = ["tools/scripts/test_vellum_boundary_lint.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "vellum-boundary-lint-negative-contract",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-30c9434eee40"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
@@ -5227,6 +5254,7 @@ paths = [
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
   "tools/scripts/test_vellum_authority_workflows.py",
+  "tools/scripts/test_vellum_boundary_lint.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
@@ -5322,6 +5350,8 @@ tests = [
   "minos-registry-absent-selftest",
   "msvc-string-literal-guard",
   "planning-gitlink-guard-selftest",
+  "pulp-ui-clean-output-lint",
+  "pulp-ui-clean-output-lint-negative-contract",
   "raw-this-async-check",
   "raw-this-async-selftest",
   "release-trailer-guard-selftest",
@@ -5351,6 +5381,8 @@ tests = [
   "trace-span-category-lint",
   "trace-span-category-lint-selftest",
   "unbounded-wait-lint-selftest",
+  "vellum-boundary-lint",
+  "vellum-boundary-lint-negative-contract",
 ]
 build_targets = [
   "pulp-cli",
@@ -5728,6 +5760,7 @@ paths = [
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
   "tools/scripts/test_vellum_authority_workflows.py",
+  "tools/scripts/test_vellum_boundary_lint.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
