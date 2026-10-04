@@ -85,3 +85,14 @@ TEST_CASE("the framework's default navy is counted wherever it shows", "[editor-
     CHECK(stages.navy_frames == 1);
     CHECK(stages.non_ui_content_frames == 1);
 }
+
+TEST_CASE("a read-back that only ever saw the host backdrop is blind, not a pass",
+          "[editor-open][tools]") {
+    // Seen on a host whose window read-back could not include the remote
+    // view: every image magenta while the plug-in's trace showed it drawing.
+    const auto stages = classify_open({flat(10, 240, 160, 0xFF00FF), flat(900, 240, 160, 0xFF00FF)}, kBg);
+    CHECK(stages.blind);
+    CHECK(stages.per_frame[1] == "host-empty");
+    // Control: a run that reached the UI is not blind.
+    CHECK_FALSE(classify_open({flat(10, 240, 160, 0xFF00FF), ui(90)}, kBg).blind);
+}

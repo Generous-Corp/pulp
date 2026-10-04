@@ -61,3 +61,4 @@ log=$(mktemp -t editor-open-oop-probe)
 open -W -g -n "$app" --args "$log" "$@"
 cat "$log"
 if grep -q "^FAIL\|failed\|no view controller" "$log"; then exit 1; fi
+if grep -q "BLIND:" "$log"; then exit 3; fi

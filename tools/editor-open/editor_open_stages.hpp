@@ -82,6 +82,10 @@ struct OpenStages {
     std::size_t ready = 0;           // index of the first settled image
     int non_ui_content_frames = 0;   // plug-in images before the UI that are not the UI
     int navy_frames = 0;             // images showing the framework default background
+    // The last image is still the host backdrop: the read-back never saw the
+    // editor (or the editor never drew). The stages are then meaningless —
+    // pair the run with a trace from the plug-in process before believing it.
+    bool blind = false;
 };
 
 // `settled_bg` is the editor's declared background (0xRRGGBB). The last frame
@@ -90,6 +94,24 @@ inline OpenStages classify_open(const std::vector<Frame>& frames, std::uint32_t 
     OpenStages out;
     if (frames.empty()) return out;
     const Frame& last = frames.back();
+    {
+        std::size_t backdrop = 0;
+        for (std::size_t p = 0; p < last.w * last.h; ++p)
+            backdrop += near_rgb(&last.rgb[p * 3], kHostBackdrop, 8);
+        if (backdrop * 2 >= last.w * last.h) {
+            out.blind = true;
+            out.ready = frames.size();
+            for (const auto& f : frames) {
+                out.per_frame.push_back("host-empty");
+                (void)f;
+            }
+            char buf[96];
+            std::snprintf(buf, sizeof buf, "host-empty@%.0fms(%zux%zu)", frames.front().t_ms,
+                          frames.front().w, frames.front().h);
+            out.stages = buf;
+            return out;
+        }
+    }
     // ready: of the pixels where the last image is not the background, >= 95%
     // already match it. Comparing every pixel would call a background-only
     // frame ready, because a dark editor is mostly background.

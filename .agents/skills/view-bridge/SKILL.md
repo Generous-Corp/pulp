@@ -329,7 +329,7 @@ yet" cannot pass as a dark background. What only this path shows:
   registered Audio Units (`invalidComponentID`) nor the window server's
   composite. `launchctl asuser` needs root and `open -W --stdout` fails with
   -10810, so the wrapper app redirects its own output. A run whose every image
-  is `host-empty` while the plug-in's trace shows frames being presented is a
+  is `host-empty` (the probe says BLIND and exits 3) while the plug-in's trace shows frames being presented is a
   blind instrument (seen on a macOS 27 host), not an editor that drew nothing;
   the view-controller latency it prints is still valid. On a host whose login
   shell is zsh, `log` is a builtin — read the unified log with `/usr/bin/log`.

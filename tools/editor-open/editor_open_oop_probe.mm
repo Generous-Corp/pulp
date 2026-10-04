@@ -20,7 +20,8 @@
 //          [--opens 3] [--fresh-instance] [--follow] [--no-anim]
 //          [--view-size WxH] [--watch-ms 2500] [--settled-bg RRGGBB]
 //          [--max-non-ui-frames N] [--out DIR]
-// Exit: 0 ok, 1 a gate failed, 2 setup error.
+// Exit: 0 ok, 1 a gate failed, 2 setup error, 3 the read-back saw only the
+// host backdrop (a blind instrument, not a result).
 #import <AppKit/AppKit.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
@@ -140,6 +141,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     int failures = 0;
+    bool blind = false;
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
@@ -227,6 +229,13 @@ int main(int argc, char** argv) {
                 ++failures;
             } else {
                 const auto stages = pulp::tools::editor_open::classify_open(frames, settled_bg);
+                if (stages.blind) {
+                    std::printf("open %d: BLIND: every image of the host window is its backdrop; this "
+                                "read-back cannot see the remote view here (or the editor never drew). "
+                                "Check a trace from the plug-in process before believing either.\n",
+                                n + 1);
+                    blind = true;
+                }
                 for (size_t i = 0; i < frames.size(); ++i) {
                     std::printf("  +%7.1f ms  %s\n", frames[i].t_ms, stages.per_frame[i].c_str());
                     if (!out.empty()) {
@@ -238,7 +247,7 @@ int main(int argc, char** argv) {
                 }
                 std::printf("  stages: %s\n  non-ui-content-frames %d navy-frames %d ui-at %.1f ms\n",
                             stages.stages.c_str(), stages.non_ui_content_frames, stages.navy_frames,
-                            frames[stages.ready].t_ms);
+                            stages.blind ? -1.0 : frames[stages.ready].t_ms);
                 if (max_non_ui >= 0 && stages.non_ui_content_frames > max_non_ui) {
                     std::printf("FAIL: %d non-UI image(s) before the UI\n", stages.non_ui_content_frames);
                     ++failures;
@@ -251,5 +260,6 @@ int main(int argc, char** argv) {
             spin(400);
         }
     }
-    return failures ? 1 : 0;
+    if (failures) return 1;
+    return blind ? 3 : 0;
 }
