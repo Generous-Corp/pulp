@@ -1176,7 +1176,7 @@ public:
     // Display only, and the contract every modulated control keeps:
     //
     //   * value() stays the BASE. A drag, a wheel notch or a key starts from
-    //     it, the value text prints it, and on_change / gestures report it, so
+    //     it, and on_change / gestures report it, so
     //     host automation records the user's moves and nothing else.
     //   * set_modulated_value() never fires on_change and never writes a
     //     parameter: modulation must not write a host automation lane. It
@@ -1187,9 +1187,12 @@ public:
     //     the whole surface and never the layout, so a modulator animating a
     //     control at the display rate costs one bounded repaint per frame.
     //
-    // The stock paint draws the played value as a modulation-coloured arc from
-    // the base to the played value plus a dot at the played value (token
-    // `knob.modulation`); the base pointer and value arc stay as they are.
+    // One indicator, never two: while a played value is set, the knob's single
+    // pointer and value arc show the value PLAYING, in the modulation colour
+    // (token `knob.modulation`), on every body style; the base is a quiet
+    // notch across the ring. The value text prints the played value, and the
+    // base while the user drags it (the drag edits the base and the notch
+    // follows).
     // Values are normalized 0..1, like value(). Unlike the Saturn rings above,
     // which DERIVE the live value from base + depth x phase, this takes the
     // value the processor computed, for modulation laws that are not a linear
@@ -1461,9 +1464,9 @@ public:
     /// Display-only played value while a modulator moves this parameter
     /// around value(). Same contract as Knob::set_modulated_value(): never
     /// fires on_change, never writes a parameter, repaints the fader's own box
-    /// only. The stock paint draws a modulation-coloured segment along the
-    /// track from the base to the played value and a bar across the track at
-    /// the played value (token `knob.modulation`).
+    /// only. One thumb: while a played value is set, the fader's thumb and
+    /// fill sit at the value PLAYING in the modulation colour (token
+    /// `knob.modulation`), and the base is a quiet tick across the track.
     void set_modulated_value(float normalized) {
         const float v = std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : value_;
         if (has_modulated_ && v == modulated_)
