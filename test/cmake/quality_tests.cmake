@@ -72,6 +72,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME transient-interaction-trace-budget-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_transient_interaction_trace.py")
+    add_test(NAME trace-frame-cost-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_frame_cost.py")
     # The web-compat harness classifies a CSS property as out-of-scope when it
     # is absent from a hand-transcribed table of one Yoga release. A stale table
     # therefore hides real gaps as "out of scope" and the compat numbers improve

@@ -7,6 +7,7 @@ requires:
   - .agents/skills/trace-sql/pulp_frames_over_budget.sql
   - .agents/skills/trace-sql/pulp_xruns.sql
   - .agents/skills/trace-sql/pulp_layout_vs_paint.sql
+  - .agents/skills/trace-sql/pulp_frame_stage_cost.sql
   - .agents/skills/trace-sql/pulp_motion_join.sql
   - .agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql
   - .agents/skills/trace-sql/pulp_gpu_health_transitions.sql
@@ -114,6 +115,7 @@ hand each time. Each `.sql` file carries a header comment explaining its shape.
 | `pulp_frames_over_budget` | frames past the vsync budget (fn takes a budget) | `--preset frames-over-budget` |
 | `pulp_xruns` | xrun / deadline-miss instant events | `pulp trace xruns` |
 | `pulp_layout_vs_paint` | frame-pipeline cost split, one row per stage | `pulp trace layout-vs-paint` |
+| `pulp_frame_stage_cost(name)` | per frame: stage SELF time (layout/canvas/js/text/state/render), whole-surface repaint requests, layout passes | `tools/scripts/trace_frame_cost.py` |
 | `pulp_motion_join` | frames joined to their motion `trace_id` | `--preset motion-join` |
 | `pulp_gpu_startup_breakdown` | ranked startup GPU/render stages | `pulp trace gpu-startup` |
 | `pulp_gpu_health_transitions` | health/device-loss evidence | `pulp trace gpu-health` |
