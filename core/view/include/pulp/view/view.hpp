@@ -1102,12 +1102,17 @@ public:
     // that re-applies the same style every frame must not read as an
     // unmarked paint change (which costs a whole-surface repaint).
     void set_background_color(Color c) {
-        if (has_bg_ && bg_color_ == c) return;
-        bg_color_ = c; has_bg_ = true; invalidate_subtree_caches_up();
+        if (has_bg_ && bg_color_ == c)
+            return;
+        bg_color_ = c;
+        has_bg_ = true;
+        invalidate_subtree_caches_up();
     }
     void clear_background_color() {
-        if (!has_bg_) return;
-        has_bg_ = false; invalidate_subtree_caches_up();
+        if (!has_bg_)
+            return;
+        has_bg_ = false;
+        invalidate_subtree_caches_up();
     }
     bool has_background_color() const { return has_bg_; }
     Color background_color() const { return bg_color_; }
@@ -1162,22 +1167,33 @@ public:
     /// has_border_ flag on so paint_all() actually emits the stroke even when
     /// set_border() was never called.
     void set_border_color(Color c) {
-        if (has_border_ && border_color_ == c) return;
-        border_color_ = c; has_border_ = true; invalidate_subtree_caches_up();
+        if (has_border_ && border_color_ == c)
+            return;
+        border_color_ = c;
+        has_border_ = true;
+        invalidate_subtree_caches_up();
     }
     void set_border_width(float w) {
-        if (has_border_ && border_width_ == w) return;
-        border_width_ = w; has_border_ = true; invalidate_subtree_caches_up();
+        if (has_border_ && border_width_ == w)
+            return;
+        border_width_ = w;
+        has_border_ = true;
+        invalidate_subtree_caches_up();
     }
     void set_border_radius(float r) {
-        if (corner_radius_ == r && corner_radius_pct_ == 0) return;
-        corner_radius_ = r; corner_radius_pct_ = 0; invalidate_subtree_caches_up();
+        if (corner_radius_ == r && corner_radius_pct_ == 0)
+            return;
+        corner_radius_ = r;
+        corner_radius_pct_ = 0;
+        invalidate_subtree_caches_up();
     }
     /// Set corner radius as percent of min(width,height). Resolved at paint
     /// time. Pass 0 to clear the percent and revert to the plain px slot.
     void set_border_radius_pct(float pct) {
-        if (corner_radius_pct_ == pct) return;
-        corner_radius_pct_ = pct; invalidate_subtree_caches_up();
+        if (corner_radius_pct_ == pct)
+            return;
+        corner_radius_pct_ = pct;
+        invalidate_subtree_caches_up();
     }
     float corner_radius_pct() const { return corner_radius_pct_; }
 

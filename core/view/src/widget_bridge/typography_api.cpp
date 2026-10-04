@@ -247,8 +247,8 @@ void BridgeRegistrars::register_widget_typography_color_api(WidgetBridge& self) 
         {
             auto* label = dynamic_cast<Label*>(v);
             const bool own_same = label
-                ? label->has_own_text_color() && label->text_color() == color
-                : v->inheritable_text_color() == color;
+                                      ? label->has_own_text_color() && label->text_color() == color
+                                      : v->inheritable_text_color() == color;
             const auto& colors = v->theme().colors;
             const auto found = colors.find("text.primary");
             if (own_same && found != colors.end() && found->second == color)
