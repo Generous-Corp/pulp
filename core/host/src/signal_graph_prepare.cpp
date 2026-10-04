@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <pulp/format/processor.hpp>
@@ -52,13 +53,16 @@ std::vector<NodeId> processing_order_for(const std::vector<GraphNode>& nodes,
             continue;
         in_degree[c.dest_node]++;
     }
-    std::queue<NodeId> queue;
-    for (auto& [id, deg] : in_degree)
+    // Keep the compiled runtime plan independent of unordered-map iteration
+    // and edge discovery order. NodeId is the compact execution identity and
+    // therefore the stable ready-queue key for equivalent authoring graphs.
+    std::priority_queue<NodeId, std::vector<NodeId>, std::greater<NodeId>> queue;
+    for (const auto& [id, deg] : in_degree)
         if (deg == 0)
             queue.push(id);
     std::vector<NodeId> order;
     while (!queue.empty()) {
-        auto current = queue.front();
+        auto current = queue.top();
         queue.pop();
         order.push_back(current);
         for (const auto& c : connections) {
