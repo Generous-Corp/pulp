@@ -1575,3 +1575,17 @@ design-time capabilities. The sibling diagnostics descriptor is a runtime
 inspection contract. Its new header follows the host directory install/Doxygen
 parity rules; do not expand the deliberately closed sample-region header list
 merely to force runtime diagnostics into the design-time catalog.
+
+## A changed public header moves its fingerprint in two places
+
+Adding a member to a fingerprinted public header (here `Processor::editor_prewarm()`
+in `pulp/format/processor.hpp`) makes the pre-push agent-capability gate report
+`public header fingerprint mismatch`, and `agent_capability_rederive.py` refuses
+to derive counters until it is fixed. The hash lives in the owning catalog
+(`tools/scripts/agent_capability_catalog_*.py`, `header_fingerprint=`) and, when a
+pending sequencer-exposure row pins that catalog, in that row's evidence needles
+too (`git grep` the old hash). Replace both with `shasum -a 256` of the header,
+then re-run the rederive with `PULP_AGENT_CAPABILITY_BASE_REF=$(git rev-parse
+origin/main)`; it reports whether the counters themselves need to move (often
+they do not), and `agent_capability_manifest.py --check` plus
+`sequencer_exposure_check.py --base origin/main` confirm both ledgers.
