@@ -69,6 +69,14 @@ commits. A signature must be an identifier the SDK runtime actually emits
 and the @pulp/react source) and one a hand-patched vendored copy is unlikely
 to share.
 
+**Canonicalize repeated inline JSX once per document.** Claude and agent HTML
+exports can repeat the same `text/babel` or `text/jsx` program in several
+`<script>` blocks. `materialized_runtime_canonicalization.mjs` memoizes the
+deterministic esbuild result for that one document pass, while still emitting
+each script and preserving `jsx_scripts_compiled` as the script count. Keep
+the cache scoped to the call so one untrusted document cannot retain another
+document's source or grow across imports.
+
 **Pixel comparison cannot see a bad palette.** Every visual gate above scores
 agreement with the source, so a colour defect the source ALREADY had — an accent
 that swallows its own ramp, a caption tier under its contrast bar — reproduces
