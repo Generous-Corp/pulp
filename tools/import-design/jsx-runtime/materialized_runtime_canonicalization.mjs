@@ -13,6 +13,7 @@ function nativeVendorKind(asset) {
   return kind === 'react' || kind === 'react-dom' || kind === 'babel' ? kind : '';
 }
 
+
 function tagEnd(html, start) {
   let quote = '';
   for (let i = start; i < html.length; ++i) {

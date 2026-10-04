@@ -68,6 +68,19 @@ describe('commit-scoped bridge setter batching', () => {
         expect(calls).toEqual(['first', 'second']);
     });
 
+    it('preserves the first flush error when it is undefined', () => {
+        const calls: string[] = [];
+        beginBridgeBatch();
+        queueBridgeCall('setWidth', () => { calls.push('first'); throw undefined; }, ['a', 1]);
+        queueBridgeCall('setHeight', () => { calls.push('second'); throw new Error('later'); }, ['b', 2]);
+        let didThrow = false;
+        let thrown: unknown;
+        try { endBridgeBatch(); } catch (error) { didThrow = true; thrown = error; }
+        expect(calls).toEqual(['first', 'second']);
+        expect(didThrow).toBe(true);
+        expect(thrown).toBeUndefined();
+    });
+
     it('keeps independent flex properties for one widget', () => {
         const calls: unknown[][] = [];
         const setFlex = (...args: unknown[]) => { calls.push(args); };

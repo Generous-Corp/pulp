@@ -84,6 +84,17 @@ test('does not classify authored marker collisions as browser vendors', () => {
   assert.match(result.html, /src="app\.js\?v=1"/);
 });
 
+test('preserves legacy captures without explicit vendor metadata', () => {
+  const react = '/** @license React react.development.js */';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    version: 1,
+    html: '<script src="react"></script>',
+    assets: [asset('react', react)],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /src="react"/);
+});
+
 test('preserves a vendor asset when another reference has authored code', () => {
   const react = '/** @license React react.development.js */';
   const result = canonicalizeMaterializedRuntimeDocument({

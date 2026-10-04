@@ -740,6 +740,31 @@ async function configurePage(cdp, width, height, dpr) {
   }
 }
 
+function capturedAttribute(openTag, wanted) {
+  let i = openTag.toLowerCase().indexOf('script') + 6;
+  while (i < openTag.length) {
+    while (/\s/.test(openTag[i])) ++i;
+    if (i >= openTag.length || openTag[i] === '>' || openTag[i] === '/') break;
+    const start = i;
+    while (i < openTag.length && !/[\s=/>]/.test(openTag[i])) ++i;
+    const name = openTag.slice(start, i).toLowerCase();
+    while (/\s/.test(openTag[i])) ++i;
+    let value = '';
+    if (openTag[i] === '=') {
+      ++i;
+      while (/\s/.test(openTag[i])) ++i;
+      const quote = openTag[i] === '"' || openTag[i] === "'" ? openTag[i++] : '';
+      const valueStart = i;
+      if (quote) while (i < openTag.length && openTag[i] !== quote) ++i;
+      else while (i < openTag.length && !/[\s>]/.test(openTag[i])) ++i;
+      value = openTag.slice(valueStart, i);
+      if (quote && openTag[i] === quote) ++i;
+    }
+    if (name === wanted) return value;
+  }
+  return undefined;
+}
+
 async function captureMaterializedDocument(cdp) {
   const metadata = await cdp.call("Runtime.evaluate", {
     expression: `(async () => {
@@ -852,6 +877,11 @@ async function captureMaterializedDocument(cdp) {
     while (cursor < materialized.html.length) {
       const start = lowerHtml.indexOf("<script", cursor);
       if (start < 0) break;
+      const boundary = lowerHtml[start + 7];
+      if (boundary && !/[\s/>]/.test(boundary)) {
+        cursor = start + 7;
+        continue;
+      }
       let openEnd = start + 7;
       let quote = "";
       for (; openEnd < materialized.html.length; ++openEnd) {
@@ -862,31 +892,25 @@ async function captureMaterializedDocument(cdp) {
       }
       if (openEnd >= materialized.html.length) break;
       const openTag = materialized.html.slice(start, openEnd + 1);
-      const srcMatch = openTag.match(/(?:^|\\s)src\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/i);
       const close = lowerHtml.indexOf("</script", openEnd + 1);
-      if (srcMatch && close >= 0) {
-        const src = srcMatch[1] ?? srcMatch[2] ?? srcMatch[3] ?? "";
+      const src = capturedAttribute(openTag, 'src');
+      if (src !== undefined && close >= 0) {
         if (src === asset.url) {
-          scriptRefs.push(materialized.html.slice(openEnd + 1, close).trim() === "");
+          scriptRefs.push({
+            empty: materialized.html.slice(openEnd + 1, close).trim() === "",
+            vendor: capturedAttribute(openTag, 'data-pulp-vendor') || '',
+          });
         }
       }
       cursor = close >= 0 ? close + 8 : openEnd + 1;
     }
-    const emptyScript = scriptRefs.length > 0 && scriptRefs.every(Boolean);
+    const emptyScript = scriptRefs.length > 0 && scriptRefs.every((ref) => ref.empty);
+    const declaredVendor = scriptRefs.find((ref) => ref.vendor)?.vendor || '';
     const javascriptMime = /^(?:text|application)\/javascript(?:\s*;|$)/i.test(asset.mime_type);
-    if (emptyScript && javascriptMime) {
-      const source = Buffer.from(dataBase64, "base64").toString("utf8");
-      if (source.includes("@license React") &&
-          source.includes("react-dom.development.js")) {
-        asset.vendor_kind = "react-dom";
-      } else if (source.includes("@license React") &&
-          source.includes("react.development.js")) {
-        asset.vendor_kind = "react";
-      } else if (source.length > 1_000_000 &&
-                 source.slice(0, 1000).includes(".Babel=") &&
-                 source.includes("transform")) {
-        asset.vendor_kind = "babel";
-      }
+    if (emptyScript && javascriptMime &&
+        (declaredVendor === 'react' || declaredVendor === 'react-dom' || declaredVendor === 'babel') &&
+        scriptRefs.every((ref) => !ref.vendor || ref.vendor === declaredVendor)) {
+      asset.vendor_kind = declaredVendor;
     }
   }
 
