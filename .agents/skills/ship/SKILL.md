@@ -150,6 +150,15 @@ An ACL is baked in at `security import` time, so widening the doctor's `-T` list
 only helps keychains created *after* the change; an existing keychain keeps its
 old ACL.
 
+The combined installer also supports repeatable
+`--plugin-scripts <au|vst3|clap> <bundle name> <scripts directory>` entries.
+Use this for format-specific postinstall work, such as refreshing the macOS
+Audio Unit registrar after replacing an AU. Match the bundle name exactly and
+attach the hook only to the format that needs it; attaching an AU refresh to an
+optional standalone app leaves plugin-only installs stale. Hooks must be
+executable, must resolve the active console user safely, and must treat a
+missing cache or already-stopped registrar as success.
+
 **Control-shipping sidecars are relocated for you.** CMake emits
 `*.inspector-capabilities.json` / `*.control-shipping*.json` beside the target,
 which for a bundle target lands in `Contents/MacOS` — where Apple permits code
