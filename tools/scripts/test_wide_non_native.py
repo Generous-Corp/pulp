@@ -375,69 +375,12 @@ def _gate_registrations() -> list[tuple[str, str, str]]:
 
 # Gate-side registered scripts that walk a directory tree and mention tools/,
 # reviewed as NOT reading tools/scripts, tools/testing or
-# tools/import-validation content. A new walker that is neither here nor in the
-# tier manifest fails test_every_tools_walking_gate_scanner_is_accounted_for.
-REVIEWED_SCANNERS = {
-    "tools/ci/source_selftests.py":
-        "walks test/**/*.cmake for ctest registrations; test/ routes to the native build",
-    "tools/ci/test_source_selftests.py": "walks temporary trees",
-    "tools/ci/test_drift_fast.py":
-        "walks test/ for registration names; tools/ci routes to the native build",
-    "tools/scripts/gate_python_imports_check.py":
-        "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
-    "tools/scripts/script_test_inputs.py":
-        "reads the configured ctest inventory and follows each script test's imports from "
-        "there; script-test-inputs-drift runs in the pr-fast tier on the native gate",
-    "tools/scripts/changed_surface_script_families.py":
-        "reads the configured ctest inventory, test/ctest_script_inputs.json and the "
-        "tracked tree; changed-surface-script-families-drift runs in the native gate's "
-        "full suite",
-    "tools/scripts/agent_capability_manifest.py":
-        "reads core/*/include; its tools/scripts inputs route to the native "
-        "build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS",
-    "tools/scripts/consumption_census.py": "counts installed headers under build roots",
-    "tools/scripts/consumption_census_contract.py": "runs consumption_census.py by name",
-    "tools/scripts/test_consumption_census.py":
-        "lists tracked files under the census's recorded include roots, none of them "
-        "under tools/scripts, tools/testing or tools/import-validation",
-    "tools/scripts/raw_this_async_check.py": "walks core/ only",
-    "tools/scripts/sample_region_compat_baseline.py": "walks CMake and build trees",
-    "tools/scripts/skills_doc_check.py": "walks .agents/skills",
-    "tools/scripts/test_run_changed_surface_tests.py":
-        "its one tree walk is git grep over CMake files for raw downloads, and CMake "
-        "changes are test-topology paths that already run the native gate; its other "
-        "tools/ paths are fixtures",
-    "tools/deps/audit.py":
-        "walks only a dependency's fetched source tree (external/ or the FetchContent "
-        "cache) for its offline-fetch contract; it names tools/ only for its own manifest",
-    "tools/scripts/style_dedup_table.py": "walks C++ source directories",
-    "tools/scripts/thread_assert_check.py": "walks test/*.cpp",
-    "tools/scripts/test_agent_capability_installed_sdk.py": "walks its build prefix",
-    "tools/scripts/test_build_combined_installer.py": "walks a built bundle",
-    "tools/scripts/test_classify_changes.py": "walks CMake the iOS configure reaches",
-    "tools/scripts/test_configure_check_cache.py": "walks a temporary cache dir",
-    "tools/scripts/test_gpu_first_visible_a3_role_producers.py": "walks a temporary tree",
-    "tools/scripts/test_gpu_probe_acceptance.py": "walks temporary directories",
-    "tools/scripts/test_gpu_test_resource_locks.py": "walks test/ and tools/cli CMake",
-    "tools/scripts/test_sdk_plist_templates_installed.py": "walks tools/cmake",
-    "tools/scene3d/verify_renderer_probe_route_inventory_contract.py":
-        "walks tools/scene3d",
-    "tools/import-validation/check_agent_panel_invariants.py": "walks a build tree",
-    "tools/rack/test_generate_safety.py": "walks tools/rack",
-    "tools/scripts/doxygen_installed_header_check.py":
-        "walks installed header roots (core, tools/cli, tools/audio)",
-    "tools/scripts/check_inspector_protocol_registry.py":
-        "walks inspect, core, pulp-rs, tools/cli and tools/mcp",
-    "tools/scripts/check_skip_not_pass.py": "globs C++ test sources",
-    "tools/scripts/msvc_string_literal_guard.py":
-        "walks core, inspect, ship, tools/cli, examples, apple",
-    "tools/scripts/mac_objc_source_list_guard.py": "globs core/*/platform/mac",
-    "tools/scripts/web_timeline_source_closure_check.py": "walks core/*/src",
-    "tools/import/test_project_import_ir_schema.py":
-        "globs only its own fixtures under tools/import/fixtures",
-    "tools/scripts/test_wide_non_native.py":
-        "this file; wide_non_native.HARD_NATIVE keeps any change to it native",
-}
+# tools/import-validation content. They live in a data file: a script body that
+# names a path makes that path reachable to the changed-surface families
+# generator, and this file is itself reachable, so a list here would unmap every
+# script it reviews.
+REVIEWED_SCANNERS_FILE = "tools/ci/wide_non_native_reviewed_scanners.json"
+REVIEWED_SCANNERS = json.loads((REPO / REVIEWED_SCANNERS_FILE).read_text(encoding="utf-8"))["scanners"]
 _WALK = re.compile(r"rglob|os\.walk|ls-files|\.glob\(|\bfind\s+[\"'$.]")
 _TOOLS = re.compile(r"""["']tools["'/]|Path\(["']tools|tools/scripts""")
 
@@ -479,6 +422,12 @@ class LiveTreeContractTests(unittest.TestCase):
         self.assertIn("WIDE_NON_NATIVE: ${{ vars.PULP_CLASSIFY_WIDE_NON_NATIVE }}", build)
         self.assertIn('wide_args=(--wide-non-native)', build)
 
+    def test_every_reviewed_scanner_still_exists(self) -> None:
+        doc = json.loads((REPO / REVIEWED_SCANNERS_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(doc["schema"], "pulp-wide-non-native-reviewed-scanners/v1")
+        self.assertGreater(len(REVIEWED_SCANNERS), 30)  # the file was read, not empty
+        self.assertEqual([p for p in REVIEWED_SCANNERS if not (REPO / p).is_file()], [])
+
     def test_every_tools_walking_gate_scanner_is_accounted_for(self) -> None:
         lane = {
             e["argv"][0].replace("{repo}/", "")
@@ -506,7 +455,7 @@ class LiveTreeContractTests(unittest.TestCase):
         self.assertEqual(
             unaccounted, [],
             "gate scanners that walk a tree and mention tools/ must be run by "
-            f"the tier ({wide.TIER_MANIFEST}) or reviewed in REVIEWED_SCANNERS",
+            f"the tier ({wide.TIER_MANIFEST}) or reviewed in {REVIEWED_SCANNERS_FILE}",
         )
 
 
