@@ -21,6 +21,9 @@ objects its link pulled.
 
 What a key cannot see is made an always_run reason, never a guess:
 
+    inventory_unmatched
+                       the ctest inventory has tests but none run anything
+                       under the build dir (the two are spelled differently)
     base_unrecorded    no usable reuse record for the base commit, or its
                        commit is not an ancestor of head
     base_other_toolchain
@@ -235,6 +238,17 @@ def show(root: Path, rev: str, path: str) -> str | None:
     return None if res.returncode else res.stdout.decode("utf-8", "replace")
 
 
+def record_digest_bytes(directory: Path) -> bytes:
+    """What `base_record_sha256` hashes, the contract a planner reproduces:
+    for every regular file under `directory` (recursively, symlinks
+    followed), in ascending order of the UTF-8 bytes of its POSIX path
+    relative to `directory`, that path, a NUL, the lowercase hex sha256 of
+    the file's bytes, and a newline."""
+    rows = sorted((f.relative_to(directory).as_posix().encode("utf-8"), f)
+                  for f in directory.rglob("*") if f.is_file())
+    return b"".join(rel + b"\0" + hashlib.sha256(f.read_bytes()).hexdigest().encode() + b"\n" for rel, f in rows)
+
+
 def _one(directory: Path, prefix: str) -> Path | None:
     found = sorted(directory.glob(f"{prefix}*.json"))
     return found[0] if len(found) == 1 else None
@@ -246,10 +260,7 @@ def load_record(directory: Path | None) -> tuple[dict | None, str | None]:
     when there is no record."""
     if directory is None or not directory.is_dir():
         return None, None
-    digest = hashlib.sha256()
-    for f in sorted(p for p in directory.rglob("*") if p.is_file()):
-        digest.update(f.relative_to(directory).as_posix().encode() + b"\0")
-        digest.update(hashlib.sha256(f.read_bytes()).hexdigest().encode() + b"\n")
+    digest = hashlib.sha256(record_digest_bytes(directory)).hexdigest()
 
     def read(path: Path | None) -> dict | None:
         try:
@@ -263,7 +274,7 @@ def load_record(directory: Path | None) -> tuple[dict | None, str | None]:
     toolchain = toolchain_key(job)
     return {"codemodel": read(_one(directory, "codemodel-")), "links": read(_one(directory, "link-members-")),
             "deps": read(_one(directory, "object-deps-")),
-            "image": image.get("digest"), "toolchain": toolchain}, digest.hexdigest()
+            "image": image.get("digest"), "toolchain": toolchain}, digest
 
 
 # The toolchain identity the reuse record computes (reuse_record.
@@ -423,7 +434,7 @@ def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[
     out: dict[str, list[dict]] = {}
     if not ctest or build_dir is None:
         return out
-    root = os.path.normpath(str(build_dir))
+    root = os.path.abspath(str(build_dir))
     for test in ctest.get("tests") or []:
         cmd = test.get("command") or []
         if not cmd:
@@ -464,6 +475,10 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
     data_scan, spawn_scan = spawn_scan_of(script_doc, "data"), spawn_scan_of(script_doc)
     spawns = SpawnIndex(head_targets)
     regs = registrations(ctest, build_dir)
+    # Commands that all miss the build dir mean the two were spelled
+    # differently (a relative path, /var vs /private/var), not that no test
+    # runs anything: keying then would skip nothing and say nothing.
+    unmatched = bool((ctest or {}).get("tests")) and not regs
     key_blind = load_key_blind(KEY_BLIND_LIST if key_blind_path is None else key_blind_path)
     by_artifact = {a.removeprefix(BUILD): n for n, t in head_targets.items()
                    if t.get("type") in ("EXECUTABLE", "MODULE_LIBRARY") for a in t.get("artifacts") or []}
@@ -481,6 +496,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
         dstate, dinputs = data_status(artifact, data_scan)
         sstate = spawn_status(artifact, spawn_scan)
         reason = (
+            "inventory_unmatched" if unmatched else
             "base_unrecorded" if record is None or sets is None or not ancestor else
             "toolchain_unknown" if not record.get("toolchain") or not toolchain else
             "base_other_toolchain" if record["toolchain"] != toolchain else
@@ -503,8 +519,8 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
                       or {"undeclared": "spawns_undeclared", "unknown": "spawns_unknown"}.get(sstate))
         entry = {"kind": kind, "registrations": [t["name"] for t in tests], "always_run": reason,
                  "spawns": sorted(spawns.closure(artifact)), "head_key": None, "base_key": None}
-        if paths is not None and reason not in ("base_unrecorded", "toolchain_unknown", "base_other_toolchain",
-                                                "codemodel_unknown"):
+        if paths is not None and reason not in ("inventory_unmatched", "base_unrecorded", "toolchain_unknown",
+                                                "base_other_toolchain", "codemodel_unknown"):
             keyed_paths = paths | (data_paths(dinputs, base_tree, head_tree) if dstate == "declared" else set())
             digests = lambda side: {n: (side.get(n) or {}).get("digest", "absent") for n in sorted(linked)}  # noqa: E731
             entry["base_key"] = key_of(digests(base_targets), record["toolchain"], keyed_paths, base_tree)

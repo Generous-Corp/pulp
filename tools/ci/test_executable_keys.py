@@ -412,6 +412,36 @@ class ManifestTests(unittest.TestCase):
                            {"name": "u", "command": ["/elsewhere/test/y"], "properties": []}]}
         self.assertEqual(list(ek.registrations(ctest, Path("/nowhere/build/"))), ["test/x"])
 
+    def test_a_build_dir_spelled_unlike_the_inventory_keys_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = Fixture(Path(tmp))
+            fx.files["docs/readme.md"] = "new\n"
+            head = fx.commit()
+            fx.write_record()
+            cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}
+            rec = ek.load_record(fx.record)[0]
+            keyed = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, fx.build, TOOLCHAIN)["executables"]
+            self.assertIsNone(keyed[EXE]["always_run"])                        # control: same spelling keys
+            other = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, Path(tmp) / "elsewhere",
+                               TOOLCHAIN)["executables"]
+            self.assertEqual({e["always_run"] for e in other.values()}, {"inventory_unmatched"})
+            self.assertEqual({e["base_key"] for e in other.values()}, {None})
+
+    def test_a_relative_build_dir_is_made_absolute_without_resolving_links(self):
+        ctest = {"tests": [{"name": "t", "command": [os.path.join(os.getcwd(), "build", "test", "x")]}]}
+        self.assertEqual(list(ek.registrations(ctest, Path("build"))), ["test/x"])
+
+    def test_the_record_digest_follows_its_published_formula(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel, body in (("a/b", "slash\n"), ("a.b", "dot\n"), ("suites/x.xml", "<x/>\n")):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(body)
+            # The planner reimplements this; byte order puts a.b before a/b.
+            self.assertTrue(ek.record_digest_bytes(root).startswith(b"a.b\0"))
+            self.assertEqual(ek.load_record(root)[1],
+                             "e35428c1f78bd1c222fcb5efa8b0ecfd07d575c9712ae59254e3ec60922288fb")
+
     def test_every_key_code_path_exists(self):
         repo = HERE.parents[1]
         self.assertEqual([p for p in ek.KEY_CODE_PATHS if not (repo / p).is_file()], [])
