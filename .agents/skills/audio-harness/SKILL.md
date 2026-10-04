@@ -298,6 +298,18 @@ only what must be decided there (layout/control adoption).
 comparing against the immediate path across block sizes 1..1024, and count
 transforms per callback with `rt::RtWorkCounter` rather than timing them.
 
+What the slack cannot buy: the work that must happen AT the frame boundary --
+the forward transforms and whatever decides adoption (a staged mask/layout)
+-- still lands in one callback. Measured on Spectr at 96 kHz: with its
+resynthesis, freeze capture and estimator frame all spread, a 32-sample
+buffer (0.333 ms) holds p99 ~90 us and max ~180-240 us, but a 16-sample
+buffer (0.167 ms) still misses on the callbacks that complete a WOLA frame
+(two 8192-point forward FFTs plus the mask). Closing that needs either a
+pruned/incremental forward transform or moving adoption off the boundary
+(which costs block-size invariance unless adoption is re-keyed to stream
+position) -- or one more hop of latency. Say which, with the numbers,
+before claiming "every buffer size".
+
 ## Copy-this patterns
 
 Describe / debug a render (the "no sound" workflow):
