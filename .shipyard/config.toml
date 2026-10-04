@@ -578,7 +578,9 @@ command = "python3 tools/scripts/run_changed_surface_tests.py --selection-receip
 # re-runs `rederive` over the run's copied inputs and refuses a mismatch; the
 # second refusal on a host sets PULP_REUSE_LIVE to off. This only measures:
 # no keyed run skips any build or test. The list is the key code's import
-# closure (tools/scripts is on its path), plus the adapter.
+# closure (tools/scripts is on its path), the adapter, and the key-blind list
+# the adapter reads from this base copy (so a PR cannot exempt its own
+# executable).
 [targets.mac.changed_surface_selection.executable_reuse]
 switch_variable = "PULP_REUSE_LIVE"
 derivation_paths = [
@@ -591,6 +593,7 @@ derivation_paths = [
     "tools/ci/affected_tests_shadow.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/reuse_record.py",
+    "tools/ci/key_blind_executables.json",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/script_test_inputs.py",
@@ -608,7 +611,9 @@ rederive = [
 
 # Where a reuse record's job.json (tools/ci/reuse_record.py) states each fact.
 # Platform is checked first, then a stated toolchain; `require` is checked in
-# order and the first failure names the refusal.
+# order and the first failure names the refusal. The three `usable` flags
+# carry the recorder's own verdict on its link-member, object-dependency and
+# executable-identity files; `/problems` stays last as the catch-all.
 [targets.mac.changed_surface_selection.executable_reuse.base_record]
 platform = "/platform"
 toolchain = "/toolchain/digest"
@@ -617,6 +622,9 @@ require = [
     { pointer = "/toolchain/complete", equals = true },
     { pointer = "/dirty", equals = false },
     { pointer = "/suites/full", present = true },
+    { pointer = "/link_members/usable", equals = true },
+    { pointer = "/object_deps/usable", equals = true },
+    { pointer = "/identity/usable", equals = true },
     { pointer = "/problems", equals = [] },
 ]
 
