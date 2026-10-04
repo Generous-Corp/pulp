@@ -2950,6 +2950,14 @@
    ],
    "kind": "shell"
   },
+  "audio-glitch-trace-selftest": {
+   "entry": "tools/audio/test_glitch_trace.py",
+   "inputs": [
+    "tools/audio/glitch_trace.py",
+    "tools/audio/test_glitch_trace.py"
+   ],
+   "kind": "python"
+  },
   "auval-helper-worker-selftest": {
    "entry": "tools/ci/test_run_auval_component.py",
    "inputs": [
