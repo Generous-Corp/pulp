@@ -110,11 +110,13 @@ class Fixture:
         (self.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "img", "fields": self.record_fields},
                                                           **self.job_extra}))
 
-    def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN) -> dict:
+    def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN,
+             key_blind: Path | None = None) -> dict:
         self.write_record()
         rec = ek.load_record(self.record)[0] if record else None
         cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": self.head_targets}
-        return ek.compute(self.root, self.base, head, rec, cm, self.ctest, self.build, toolchain)["executables"]
+        return ek.compute(self.root, self.base, head, rec, cm, self.ctest, self.build, toolchain,
+                          key_blind)["executables"]
 
 
 class KeyTests(unittest.TestCase):
@@ -354,6 +356,20 @@ class KeyTests(unittest.TestCase):
             self.assertEqual(key["compiler"], "CMake-chosen clang 1.0")
             self.assertNotIn("target", key)
 
+    def test_a_key_blind_executable_always_runs(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        listed = Path(self.tmp.name) / "key_blind.json"
+        listed.write_text(json.dumps({"schema": ek.KEY_BLIND_SCHEMA, "executables": {
+            EXE: {"example": {"pr": 1, "group_run_id": "g"}, "explained": "linker stub order"}}}))
+        keys = self.fx.keys(head, key_blind=listed)
+        self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"]), ("key_blind", None))
+        listed.write_text(json.dumps({"schema": "something-else", "executables": {}}))
+        with self.assertRaises(ValueError):                 # an unreadable list is an error, not empty
+            self.fx.keys(head, key_blind=listed)
+
+    def test_the_checked_in_key_blind_list_is_readable(self):
+        self.assertIsInstance(ek.load_key_blind(ek.KEY_BLIND_LIST), frozenset)
+
     def test_an_undeclared_spawn_always_runs(self):
         self.fx.scan["executables"]["pulp-test-a"] = {"spawns": "undeclared", "data": "none"}
         self.assertEqual(self.fx.keys(self.head())[EXE]["always_run"], "spawns_undeclared")
@@ -395,6 +411,68 @@ class ManifestTests(unittest.TestCase):
         ctest = {"tests": [{"name": "t", "command": ["/nowhere/build/test/x"], "properties": []},
                            {"name": "u", "command": ["/elsewhere/test/y"], "properties": []}]}
         self.assertEqual(list(ek.registrations(ctest, Path("/nowhere/build/"))), ["test/x"])
+
+    def test_a_build_dir_spelled_unlike_the_inventory_keys_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = Fixture(Path(tmp))
+            fx.files["docs/readme.md"] = "new\n"
+            head = fx.commit()
+            fx.write_record()
+            cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}
+            rec = ek.load_record(fx.record)[0]
+            keyed = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, fx.build, TOOLCHAIN)["executables"]
+            self.assertIsNone(keyed[EXE]["always_run"])                        # control: same spelling keys
+            other = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, Path(tmp) / "elsewhere",
+                               TOOLCHAIN)["executables"]
+            self.assertEqual({e["always_run"] for e in other.values()}, {"inventory_unmatched"})
+            self.assertEqual({e["base_key"] for e in other.values()}, {None})
+
+    def test_a_relative_build_dir_is_made_absolute_without_resolving_links(self):
+        ctest = {"tests": [{"name": "t", "command": [os.path.join(os.getcwd(), "build", "test", "x")]}]}
+        self.assertEqual(list(ek.registrations(ctest, Path("build"))), ["test/x"])
+
+    def test_the_record_digest_follows_its_published_formula(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel, body in (("a/b", "slash\n"), ("a.b", "dot\n"), ("suites/x.xml", "<x/>\n")):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(body)
+            # The planner reimplements this; byte order puts a.b before a/b.
+            self.assertTrue(ek.record_digest_bytes(root).startswith(b"a.b\0"))
+            self.assertEqual(ek.load_record(root)[1],
+                             "e35428c1f78bd1c222fcb5efa8b0ecfd07d575c9712ae59254e3ec60922288fb")
+
+    def test_the_printed_identity_is_the_record_s_own(self):
+        import contextlib
+        import io
+        import reuse_record
+        identity = {"digest": "abc", "complete": True, "missing": [], "fields": dict(IDENTITY)}
+        out = io.StringIO()
+        with mock.patch.object(reuse_record, "runner_image", return_value={"digest": "i", "fields": {"os": "Darwin"}}), \
+                mock.patch.object(reuse_record, "toolchain_identity", return_value=identity), \
+                mock.patch.object(reuse_record, "platform_id", return_value="darwin-arm64"), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(ek.main(["x", "--print-toolchain", "--build-dir", "/b"]), 0)
+        printed = json.loads(out.getvalue())
+        self.assertEqual(printed["toolchain"], identity)            # the record's digest, not a recomputed one
+        self.assertEqual(printed["platform"], "darwin-arm64")
+        with self.assertRaises(SystemExit):
+            ek.main(["x", "--build-dir", "/b"])                     # keys still need their inputs
+
+    def test_a_cold_build_dir_still_states_the_platform(self):
+        # The planner binds a candidate set by platform before the lane has
+        # configured anything; a cold lane must still answer.
+        import contextlib
+        import io
+        import reuse_record
+        for build in (Path(self.id()) / "never-configured", None):
+            out = io.StringIO()
+            argv = ["x", "--print-toolchain"] + (["--build-dir", str(build)] if build else [])
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(ek.main(argv), 0, build)
+            printed = json.loads(out.getvalue())
+            self.assertEqual(printed["platform"], reuse_record.platform_id())
+            self.assertFalse((printed["toolchain"] or {}).get("complete", False))
 
     def test_every_key_code_path_exists(self):
         repo = HERE.parents[1]
