@@ -130,6 +130,7 @@ SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
 VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
+VELLUM_BOUNDARY="$ROOT/tools/scripts/vellum_boundary_lint.py"
 CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -229,6 +230,19 @@ if [ -f "$VELLUM_HINT" ]; then
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
     if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
+        fail=1
+    fi
+fi
+
+# ── 0d. extractable UI package boundary ────────────────────────────────────
+# Keep the importer/compiler/SDK portable for the eventual Vellum extraction:
+# package source may include only public Pulp view headers, and core/view may
+# not reach back into an extractable package.  This is source-only and needs no
+# configured build, so run it in the same cheap gate as the watch preflight.
+if [ -f "$VELLUM_BOUNDARY" ]; then
+    echo "" >&2
+    echo "▸ Vellum extractable-package boundary" >&2
+    if ! "$PYTHON" "$VELLUM_BOUNDARY"; then
         fail=1
     fi
 fi
