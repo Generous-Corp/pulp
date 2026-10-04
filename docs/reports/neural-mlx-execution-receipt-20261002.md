@@ -25,14 +25,16 @@ to Pulp.
 
 ## Private harness
 
-`tools/validation/mlx_worker_harness.py` is a tools-only, default-off probe on
-the feature lineage. It
+`tools/validation/mlx_worker_harness.py` is now present on `origin/main` as a
+tools-only, default-off synthetic probe (landed through
+[PR 9332](https://github.com/Generous-Corp/pulp/pull/9332)). It
 creates/evaluates/releases synthetic arrays on one dedicated Python thread per
 instance and reports owner-thread identity, service-time percentiles, deadline
 misses, and a conservative synthetic weight size. It does not expose MLX types,
 handles, streams, or paths through Pulp's public ABI and is not wired into a
-plugin build. Its absence from the audited `origin/main` ref is recorded in the
-provenance audit; this receipt does not claim that the probe is shipped.
+plugin build. It is a landed developer/validation tool, not a shipped MLX
+provider or product feature; the provenance audit records the source snapshot
+and merged-path status.
 
 The host-default invocation correctly reports MLX unavailable. In the isolated
 venv, the following run completed:
@@ -65,11 +67,13 @@ worker. These are watchdog/failure-path observations only; they do not add
 transport, fallback, parity, thermal, or product-model evidence.
 
 The run proves that two MLX owners can execute concurrently while retaining
-per-instance thread ownership. It does **not** prove a Pulp audio deadline or
-an acceleration win: the workload is a tiny synthetic matrix operation, there
-is no CPU shadow, no model-quality oracle, no Pulp transport, no callback, no
-thermal/contended-load capture, and the weight-size field is only the synthetic
-array allocation.
+per-instance thread ownership in this synthetic tool. It does **not** prove a
+Pulp audio deadline or an acceleration win: the workload is a tiny synthetic
+matrix operation, there is no CPU shadow, no model-quality oracle, no Pulp
+transport, no callback, no thermal/contended-load capture, and the weight-size
+field is only the synthetic array allocation. The landed tool therefore does
+not change the current CPU-only processor facade or constitute shipped-product
+evidence.
 
 ## Gate disposition
 

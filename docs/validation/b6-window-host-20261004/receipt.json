@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "b6-window-host-receipt",
+  "status": "PASS",
+  "base_sha": "e260a88701eb85d1a22e11952826f98a4a36671c",
+  "implementation_sha": "2148dbd6b2154ddbf748169bdbaa9b7cf8df97d3",
+  "scope": [
+    "core/view/platform/mac/window_host_mac.mm",
+    "core/view/platform/mac/window_host_mac_lifecycle.mm",
+    "core/view/platform/mac/window_host_mac_metal_view.mm",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpUtils.cmake"
+  ],
+  "line_counts": {
+    "window_host_mac.mm_before": 3474,
+    "window_host_mac.mm_after": 3106
+  },
+  "validation": [
+    {
+      "command": "git diff origin/main...HEAD --check",
+      "status": "PASS"
+    },
+    {
+      "command": "pulp build --target pulp-view-core",
+      "status": "PASS"
+    },
+    {
+      "command": "installed SDK private source/header list includes lifecycle and metal-view split files",
+      "status": "PASS"
+    },
+    {
+      "command": "pulp build --target pulp-view-core (after ObjC source-list and packaging closure)",
+      "status": "PASS"
+    }
+  ],
+  "invariants": [
+    "PulpView ivars and host lifecycle remain in window_host_mac.mm",
+    "public API unchanged",
+    "macOS source packaging retains split implementation and private headers"
+  ]
+}

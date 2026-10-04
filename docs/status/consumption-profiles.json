@@ -1005,6 +1005,7 @@
       "pulp/signal/pitched_feedback_delay.hpp",
       "pulp/signal/poly_math.hpp",
       "pulp/signal/probability_gate.hpp",
+      "pulp/signal/processing_switch_crossfade.hpp",
       "pulp/signal/processor_chain.hpp",
       "pulp/signal/processor_duplicator.hpp",
       "pulp/signal/realtime_pitch_time_geometry.hpp",

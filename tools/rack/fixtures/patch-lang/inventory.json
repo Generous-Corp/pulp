@@ -1,0 +1,306 @@
+{
+ "Core": {
+  "modules": {
+   "AudioInterface2": {
+    "inputs": [
+     "To \"device output 1\"",
+     "To \"device output 2\""
+    ],
+    "name": "Audio 2",
+    "outputs": [
+     "From \"device input 1\"",
+     "From \"device input 2\""
+    ],
+    "panel": [
+     75.0,
+     380.0
+    ],
+    "params": [
+     {
+      "id": 0,
+      "name": "Level"
+     }
+    ]
+   }
+  },
+  "name": "VCV Core"
+ },
+ "Fixture": {
+  "modules": {
+   "VCO2": {
+    "inputs": [
+     "Pitch"
+    ],
+    "name": "VCO2",
+    "outputs": [
+     "Saw"
+    ],
+    "panel": [
+     60.0,
+     380.0
+    ],
+    "params": [
+     {
+      "default": 0.0,
+      "id": 0,
+      "max": 1.0,
+      "min": -1.0,
+      "name": "Tune"
+     }
+    ]
+   }
+  },
+  "name": "Fixture"
+ },
+ "ForgeModular": {
+  "modules": {
+   "FOURPOLE": {
+    "inputs": [
+     "Cutoff 1V/oct",
+     "Cutoff FM",
+     "Audio in"
+    ],
+    "name": "4POLE",
+    "outputs": [
+     "Low-pass out"
+    ],
+    "panel": [
+     120.0,
+     380.0
+    ],
+    "params": [
+     {
+      "default": 0.5,
+      "id": 0,
+      "max": 1.0,
+      "min": 0.0,
+      "name": "Cutoff"
+     },
+     {
+      "default": 0.0,
+      "id": 1,
+      "max": 1.0,
+      "min": 0.0,
+      "name": "Resonance"
+     },
+     {
+      "default": 0.0,
+      "id": 2,
+      "max": 24.0,
+      "min": -6.0,
+      "name": "Input drive"
+     },
+     {
+      "default": 0.0,
+      "id": 3,
+      "max": 1.0,
+      "min": -1.0,
+      "name": "Cutoff FM amount"
+     },
+     {
+      "default": 0.0,
+      "id": 4,
+      "max": 2.0,
+      "min": 0.0,
+      "name": "Voicing"
+     }
+    ]
+   },
+   "LFO": {
+    "inputs": [
+     "Reset"
+    ],
+    "name": "LFO",
+    "outputs": [
+     "Triangle",
+     "Square",
+     "Sine"
+    ],
+    "panel": [
+     90.0,
+     380.0
+    ],
+    "params": [
+     {
+      "default": 0.0,
+      "id": 0,
+      "max": 8.0,
+      "min": -8.0,
+      "name": "Rate"
+     }
+    ]
+   },
+   "SEQ": {
+    "inputs": [
+     "Clock",
+     "Reset"
+    ],
+    "name": "SEQ",
+    "outputs": [
+     "Pitch CV (1V/oct)",
+     "Gate"
+    ],
+    "panel": [
+     180.0,
+     380.0
+    ],
+    "params": [
+     {
+      "default": 0.0,
+      "id": 0,
+      "max": 2.0,
+      "min": -2.0,
+      "name": "Step 1"
+     },
+     {
+      "default": 0.0,
+      "id": 1,
+      "max": 2.0,
+      "min": -2.0,
+      "name": "Step 2"
+     },
+     {
+      "default": 0.0,
+      "id": 2,
+      "max": 2.0,
+      "min": -2.0,
+      "name": "Step 3"
+     },
+     {
+      "default": 0.0,
+      "id": 3,
+      "max": 2.0,
+      "min": -2.0,
+      "name": "Step 4"
+     },
+     {
+      "default": 0.0,
+      "id": 4,
+      "max": 2.0,
+      "min": -2.0,
+      "name": "Step 5"
+     },
+     {
+      "default": 0.0,
+      "id": 5,
+      "max": 2.0,
+      "min": -2.0,
+      "name": "Step 6"
+     },
+     {
+      "default": 0.0,
+      "id": 6,
+      "max": 2.0,
+      "min": -2.0,
+      "name": "Step 7"
+     },
+     {
+      "default": 0.0,
+      "id": 7,
+      "max": 2.0,
+      "min": -2.0,
+      "name": "Step 8"
+     }
+    ]
+   },
+   "VCA": {
+    "inputs": [
+     "Level CV",
+     "Audio"
+    ],
+    "name": "VCA",
+    "outputs": [
+     "Audio"
+    ],
+    "panel": [
+     45.0,
+     380.0
+    ],
+    "params": [
+     {
+      "default": 0.5,
+      "id": 0,
+      "max": 1.0,
+      "min": 0.0,
+      "name": "Level"
+     }
+    ]
+   },
+   "VCO": {
+    "inputs": [
+     "1V/oct pitch",
+     "Frequency modulation"
+    ],
+    "name": "VCO",
+    "outputs": [
+     "Sawtooth",
+     "Pulse",
+     "Triangle",
+     "Sine"
+    ],
+    "panel": [
+     120.0,
+     380.0
+    ],
+    "params": [
+     {
+      "default": 0.0,
+      "id": 0,
+      "max": 4.0,
+      "min": -4.0,
+      "name": "Frequency"
+     },
+     {
+      "default": 0.0,
+      "id": 1,
+      "max": 1.0,
+      "min": -1.0,
+      "name": "Fine tune"
+     },
+     {
+      "default": 0.5,
+      "id": 2,
+      "max": 0.95,
+      "min": 0.05,
+      "name": "Pulse width"
+     },
+     {
+      "default": 0.0,
+      "id": 3,
+      "max": 1.0,
+      "min": -1.0,
+      "name": "FM amount"
+     }
+    ]
+   }
+  },
+  "name": "Forge Modular"
+ },
+ "Fundamental": {
+  "modules": {
+   "Quantizer": {
+    "inputs": [
+     "1V/octave pitch"
+    ],
+    "name": "Quantizer",
+    "outputs": [
+     "Pitch"
+    ],
+    "panel": [
+     45.0,
+     380.0
+    ],
+    "params": [
+     {
+      "default": 0.0,
+      "id": 0,
+      "max": 1.0,
+      "min": -1.0,
+      "name": "Pre-offset"
+     }
+    ]
+   }
+  },
+  "name": "VCV Free"
+ }
+}
