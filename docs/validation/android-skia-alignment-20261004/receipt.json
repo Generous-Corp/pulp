@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "android-skia-alignment-receipt",
+  "status": "PASS",
+  "generated_at": "2026-10-04T04:40:00Z",
+  "source_checkout": "external/skia-src",
+  "skia_branch": "chrome/m153",
+  "skia_commit": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+  "dawn_commit": "f91da75afe31d4d6f47a6da307e1fbabd1b1691a",
+  "skunicode_header_sha256": "2bbe2c35440912f74a7781b44363f822437d6c47c06e6d3adab860ced9825fc3",
+  "staged_skunicode_header_sha256": "2bbe2c35440912f74a7781b44363f822437d6c47c06e6d3adab860ced9825fc3",
+  "arm64_static_library_count": 31,
+  "arm64_static_library_bytes": 122718542,
+  "arm64_static_library_inventory_sha256": "c30ccf5b97ec66333ccd75ae1ed66be6969d7057f2fb0dee4503ef3c50e9da3e",
+  "commands": [
+    "tools/build-skia-android.sh arm64",
+    "python3 tools/scripts/test_build_skia_android_pin.py",
+    "pulp doctor android"
+  ],
+  "limitations": [
+    "Java 17 Gradle assemble and emulator smoke remain to be run against this freshly staged provider; native SurfaceRuntime retention attribution remains a separate B3 blocker."
+  ]
+}
