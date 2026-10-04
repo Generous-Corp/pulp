@@ -110,11 +110,13 @@ class Fixture:
         (self.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "img", "fields": self.record_fields},
                                                           **self.job_extra}))
 
-    def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN) -> dict:
+    def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN,
+             key_blind: Path | None = None) -> dict:
         self.write_record()
         rec = ek.load_record(self.record)[0] if record else None
         cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": self.head_targets}
-        return ek.compute(self.root, self.base, head, rec, cm, self.ctest, self.build, toolchain)["executables"]
+        return ek.compute(self.root, self.base, head, rec, cm, self.ctest, self.build, toolchain,
+                          key_blind)["executables"]
 
 
 class KeyTests(unittest.TestCase):
@@ -353,6 +355,20 @@ class KeyTests(unittest.TestCase):
                 self.skipTest("this host's SDK could not be read, so the identity is incomplete")
             self.assertEqual(key["compiler"], "CMake-chosen clang 1.0")
             self.assertNotIn("target", key)
+
+    def test_a_key_blind_executable_always_runs(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        listed = Path(self.tmp.name) / "key_blind.json"
+        listed.write_text(json.dumps({"schema": ek.KEY_BLIND_SCHEMA, "executables": {
+            EXE: {"example": {"pr": 1, "group_run_id": "g"}, "explained": "linker stub order"}}}))
+        keys = self.fx.keys(head, key_blind=listed)
+        self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"]), ("key_blind", None))
+        listed.write_text(json.dumps({"schema": "something-else", "executables": {}}))
+        with self.assertRaises(ValueError):                 # an unreadable list is an error, not empty
+            self.fx.keys(head, key_blind=listed)
+
+    def test_the_checked_in_key_blind_list_is_readable(self):
+        self.assertIsInstance(ek.load_key_blind(ek.KEY_BLIND_LIST), frozenset)
 
     def test_an_undeclared_spawn_always_runs(self):
         self.fx.scan["executables"]["pulp-test-a"] = {"spawns": "undeclared", "data": "none"}

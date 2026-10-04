@@ -30,6 +30,8 @@ What a key cannot see is made an always_run reason, never a guess:
     codemodel_unknown  no content-keyed codemodel digest for the target on
                        one side
     commit_bound       the executable embeds the commit
+    key_blind          its bytes have changed while its key did not (the
+                       replay's key-blind list)
     environment        a registration drives a shared host resource, or is
                        one of the always-run names (drift, lint, probes, ...)
     unrecorded         the base link, an object's dependency list, or a
@@ -91,10 +93,17 @@ from spawn_closure import SpawnIndex  # noqa: E402
 from test_receipts_shadow import ALWAYS_RUN_NAME_RE  # noqa: E402
 
 SCHEMA = "pulp-executable-keys/v1"
+KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
 # The files whose base copy computes the keys; touching any of them makes a
 # plan select everything.
 KEY_CODE_PATHS = ("tools/ci/executable_keys.py", "tools/ci/link_members.py", "tools/ci/object_deps.py",
-                  "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py")
+                  "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py",
+                  "tools/ci/key_blind_executables.json")
+# Executables whose recorded bytes changed while their content-keyed source
+# key did not, as the reuse replay measured them (reuse_policy_replay.py
+# key-blind). The list only grows: an entry always runs until the mechanism
+# behind it is keyed and the entry is removed by hand.
+KEY_BLIND_LIST = HERE / "key_blind_executables.json"
 SCRIPT_INPUTS_PATH = "test/ctest_script_inputs.json"
 CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
 # Files that pin third-party dependencies. A bump can change a dependency's
@@ -396,6 +405,16 @@ def key_of(digest: str | dict, toolchain: dict | None, paths: Iterable[str], blo
 
 # -- the manifest ------------------------------------------------------------
 
+def load_key_blind(path: Path) -> frozenset[str]:
+    """The key-blind executables (relative to the build dir). A list that
+    cannot be read is an error, not an empty list: the code runs from the
+    base's copy, which always carries it."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if doc.get("schema") != KEY_BLIND_SCHEMA:
+        raise ValueError(f"{path}: schema is not {KEY_BLIND_SCHEMA}")
+    return frozenset(doc.get("executables") or {})
+
+
 def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[dict]]:
     """artifact (relative to the build dir) -> the ctest registrations that
     run it. `build_dir` is the path the configure used, matched as a string
@@ -422,7 +441,8 @@ def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[
 
 
 def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None, head_codemodel: dict | None,
-            ctest: dict | None, build_dir: Path | None, toolchain: dict | None) -> dict:
+            ctest: dict | None, build_dir: Path | None, toolchain: dict | None,
+            key_blind_path: Path | None = None) -> dict:
     """The key manifest's `executables` and a count per always_run reason.
     Pure over its inputs and the two git trees."""
     ancestor = subprocess.run(["git", "-C", str(source_root), "merge-base", "--is-ancestor", base_sha, head_sha],
@@ -444,6 +464,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
     data_scan, spawn_scan = spawn_scan_of(script_doc, "data"), spawn_scan_of(script_doc)
     spawns = SpawnIndex(head_targets)
     regs = registrations(ctest, build_dir)
+    key_blind = load_key_blind(KEY_BLIND_LIST if key_blind_path is None else key_blind_path)
     by_artifact = {a.removeprefix(BUILD): n for n, t in head_targets.items()
                    if t.get("type") in ("EXECUTABLE", "MODULE_LIBRARY") for a in t.get("artifacts") or []}
     out: dict[str, dict] = {}
@@ -467,6 +488,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             "codemodel_unknown" if not keyed or not base_target.get("digest") or not target.get("digest")
             or any(not (base_targets.get(n) or {}).get("digest") for n in linked or ()) else
             "commit_bound" if target.get("commit_bound") or base_target.get("commit_bound") else
+            "key_blind" if artifact in key_blind else
             "environment" if any(environment_bound(t) or ALWAYS_RUN_NAME_RE.search(t["name"] or "")
                                  for t in tests) else
             "unrecorded" if paths is None else
