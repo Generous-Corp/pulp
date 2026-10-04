@@ -8,6 +8,9 @@ const asset = (id, source) => ({
   id, mime_type: 'text/javascript', byte_length: Buffer.byteLength(source),
   data_base64: Buffer.from(source).toString('base64'), sha256: '0'.repeat(64),
 });
+const vendorAsset = (id, source, vendor_kind) => ({
+  ...asset(id, source), vendor_kind,
+});
 test('precompiles captured JSX and removes redundant browser vendors', () => {
   const react = '/** @license React react.development.js */';
   const reactDom = '/** @license React react-dom.development.js */';
@@ -17,8 +20,9 @@ test('precompiles captured JSX and removes redundant browser vendors', () => {
     html: '<script src="react"></script><script src="react-dom"></script>' +
       '<script src="babel"></script><script src="app"></script>' +
       '<script type="text/babel">globalThis.node = <span>OK</span>;</script>',
-    assets: [asset('react', react), asset('react-dom', reactDom),
-      asset('babel', babel), asset('app', app)],
+    assets: [vendorAsset('react', react, 'react'),
+      vendorAsset('react-dom', reactDom, 'react-dom'),
+      vendorAsset('babel', babel, 'babel'), asset('app', app)],
   });
 
   assert.equal(result.runtime_canonicalization.jsx_scripts_compiled, 1);
@@ -64,7 +68,18 @@ test('does not remove a vendor-looking src from a script with authored body', ()
   const react = '/** @license React react.development.js */';
   const result = canonicalizeMaterializedRuntimeDocument({
     html: '<script src="react">globalThis.authored = true;</script>',
-    assets: [asset('react', react)],
+    assets: [vendorAsset('react', react, 'react')],
   });
   assert.match(result.html, /globalThis\.authored/);
+});
+
+test('does not classify authored marker collisions as browser vendors', () => {
+  const authored = '/** @license React react.development.js */\n' +
+    'globalThis.Authored = true;';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script src="app.js?v=1"></script>',
+    assets: [asset('app.js?v=1', authored)],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /src="app\.js\?v=1"/);
 });
