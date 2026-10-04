@@ -442,6 +442,23 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(ek.load_record(root)[1],
                              "e35428c1f78bd1c222fcb5efa8b0ecfd07d575c9712ae59254e3ec60922288fb")
 
+    def test_the_printed_identity_is_the_record_s_own(self):
+        import contextlib
+        import io
+        import reuse_record
+        identity = {"digest": "abc", "complete": True, "missing": [], "fields": dict(IDENTITY)}
+        out = io.StringIO()
+        with mock.patch.object(reuse_record, "runner_image", return_value={"digest": "i", "fields": {"os": "Darwin"}}), \
+                mock.patch.object(reuse_record, "toolchain_identity", return_value=identity), \
+                mock.patch.object(reuse_record, "platform_id", return_value="darwin-arm64"), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(ek.main(["x", "--print-toolchain", "--build-dir", "/b"]), 0)
+        printed = json.loads(out.getvalue())
+        self.assertEqual(printed["toolchain"], identity)            # the record's digest, not a recomputed one
+        self.assertEqual(printed["platform"], "darwin-arm64")
+        with self.assertRaises(SystemExit):
+            ek.main(["x", "--build-dir", "/b"])                     # keys still need their inputs
+
     def test_every_key_code_path_exists(self):
         repo = HERE.parents[1]
         self.assertEqual([p for p in ek.KEY_CODE_PATHS if not (repo / p).is_file()], [])

@@ -71,6 +71,7 @@ runner can re-derive the selection and refuse a difference.
     executable_keys.py --source-root S --base-sha B --head-sha H \\
         --base-record DIR --base-record-run-id N --head-codemodel F \\
         --ctest-json J --build-dir D [--toolchain-json T] --out M
+    executable_keys.py --print-toolchain --build-dir D
 
 The replay (tools/scripts/reuse_replay_collect.py) imports the scan and
 input-matching helpers from here, so the lane and the replay share one
@@ -303,14 +304,21 @@ def toolchain_key(job: dict) -> dict | None:
     return {"os": fields["os"], "arch": fields["arch"], **key}
 
 
-def probe_toolchain(build_dir: Path | None) -> dict | None:
-    """This host's toolchain identity for a configured build, computed by
-    the same functions that write it into the reuse record."""
+def host_identity(build_dir: Path | None) -> dict:
+    """This host's identity in the shape a reuse record's job.json carries it
+    (`platform`, `runner_image`, `toolchain`), computed by the same functions
+    that write the record, so a planner compares a probe with a stored record
+    field for field."""
     import reuse_record
     env = dict(os.environ)
     image = reuse_record.runner_image(env)
-    return toolchain_key({"platform": reuse_record.platform_id(), "runner_image": image,
-                          "toolchain": reuse_record.toolchain_identity(build_dir, env, image["fields"])})
+    return {"platform": reuse_record.platform_id(), "runner_image": image,
+            "toolchain": reuse_record.toolchain_identity(build_dir, env, image["fields"])}
+
+
+def probe_toolchain(build_dir: Path | None) -> dict | None:
+    """This host's toolchain key for a configured build."""
+    return toolchain_key(host_identity(build_dir))
 
 
 def content_keyed(codemodel: dict | None) -> bool:
@@ -543,8 +551,10 @@ def code_digest(source_root: Path, base_sha: str) -> str:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--source-root", required=True, type=Path)
-    ap.add_argument("--base-sha", required=True)
+    ap.add_argument("--print-toolchain", action="store_true",
+                    help="print this host's identity for --build-dir in job.json shape and exit")
+    ap.add_argument("--source-root", type=Path)
+    ap.add_argument("--base-sha")
     ap.add_argument("--head-sha", default="HEAD")
     ap.add_argument("--base-record", type=Path, help="the base reuse-record files, fetched by the planner")
     ap.add_argument("--base-record-run-id", default=None)
@@ -554,8 +564,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--toolchain-json", type=Path,
                     help="the head toolchain key ({os, arch} plus reuse_record.toolchain_identity's fields "
                          "without `target`); computed from --build-dir when absent")
-    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--out", type=Path)
     a = ap.parse_args(argv[1:])
+    if a.print_toolchain:
+        print(json.dumps(host_identity(a.build_dir), indent=1, sort_keys=True))
+        return 0
+    missing = [f"--{n.replace('_', '-')}" for n in ("source_root", "base_sha", "out") if getattr(a, n) is None]
+    if missing:
+        ap.error(f"the following arguments are required: {', '.join(missing)}")
 
     def read(path: Path | None) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8")) if path and path.is_file() else None
