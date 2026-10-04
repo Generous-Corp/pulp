@@ -20,23 +20,34 @@ Two halves, because neither proves the thing alone:
      share a code path.
 
 Scope: this asserts the asset SHIPS, never that macOS draws it. It does not,
-for a non-.app bundle. See the product-icon comment in PulpUtils.cmake.
+for a non-.app bundle. See the product-icon comment in PulpPlugin.cmake.
 ]]
 
 get_filename_component(_repo_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(_icon_module "${_repo_root}/tools/cmake/PulpAppIcon.cmake")
 set(_utils "${_repo_root}/tools/cmake/PulpUtils.cmake")
+set(_plugin "${_repo_root}/tools/cmake/PulpPlugin.cmake")
 
-foreach(_p IN LISTS _icon_module _utils)
+foreach(_p IN LISTS _icon_module _utils _plugin)
     if(NOT EXISTS "${_p}")
         message(FATAL_ERROR "Required file missing: ${_p}")
     endif()
 endforeach()
 
 # ── Half 2 (runs everywhere): the public API wires every format ────────
+# The public compatibility entry point includes the private plugin module;
+# inspect the implementation there so this source contract follows the split.
 file(READ "${_utils}" _utils_text)
+file(READ "${_plugin}" _plugin_text)
 
-string(FIND "${_utils_text}" "ICON;ICNS" _accepts)
+string(FIND "${_utils_text}" "PulpPlugin.cmake" _plugin_include)
+if(_plugin_include EQUAL -1)
+    message(FATAL_ERROR
+        "PulpUtils.cmake no longer includes the private PulpPlugin.cmake "
+        "implementation module.")
+endif()
+
+string(FIND "${_plugin_text}" "ICON;ICNS" _accepts)
 if(_accepts EQUAL -1)
     message(FATAL_ERROR
         "pulp_add_plugin() does not accept ICON/ICNS. The plug-in plist "
@@ -47,7 +58,7 @@ endif()
 
 set(_missing "")
 foreach(_suffix Standalone VST3 AU CLAP AAX)
-    string(FIND "${_utils_text}" "\${target}_${_suffix}" _found_target)
+    string(FIND "${_plugin_text}" "\${target}_${_suffix}" _found_target)
     if(_found_target EQUAL -1)
         list(APPEND _missing "${_suffix}")
     endif()
@@ -59,7 +70,7 @@ if(_missing)
 endif()
 
 # The loop must actually call the attach helper, not merely name the targets.
-string(FIND "${_utils_text}" "_pulp_icon_configure_macos(\${_pulp_icon_bundle}" _calls)
+string(FIND "${_plugin_text}" "_pulp_icon_configure_macos(\${_pulp_icon_bundle}" _calls)
 if(_calls EQUAL -1)
     message(FATAL_ERROR
         "pulp_add_plugin() names the bundle targets but never calls "

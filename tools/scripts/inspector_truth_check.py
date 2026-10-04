@@ -263,6 +263,9 @@ REQUIRED_BUILD_CONTRACTS = {
         '"${eval_ack}" CACHE INTERNAL "" FORCE)',
     ),
     "tools/cmake/PulpUtils.cmake": (
+        'include("${CMAKE_CURRENT_LIST_DIR}/PulpPlugin.cmake")',
+    ),
+    "tools/cmake/PulpPlugin.cmake": (
         "_pulp_cache_control_declarations(${target}",
     ),
     "tools/cli/CMakeLists.txt": (
