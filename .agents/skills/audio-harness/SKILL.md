@@ -299,6 +299,21 @@ Gotchas that cost real time:
 - **Compare against an unedited render of the same material.** Drum hits score
   like clicks; the edit's score minus the untouched render's score in the same
   window is the number that means something.
+- **Low buffers are a burst problem, not an average one.** At 32 samples the
+  deadline is 0.667 ms at 48 kHz and 0.333 ms at 96 kHz; a processor whose
+  p50 is 20 us can still miss it every hop, because work that runs once per
+  analysis hop (an FFT, a capture/average over bins) lands whole in the one
+  callback that crosses the hop. Measure per-callback thread CPU (not wall
+  time -- the machine's load is not the processor) at 16/32/64 samples and
+  44.1/48/96 kHz, read max and p99 against the deadline, then attribute the
+  burst with `dsp` spans around each per-hop stage. Gate it with a planted
+  burst of about the size you are guarding against as the negative control;
+  a plant ten times too big proves nothing about the margin.
+- **Work a value's only reader needs belongs at that reader.** A per-bin
+  transcendental computed every hop for a value read only on a rare event (a
+  freeze latch) is a per-hop burst for nothing: keep the raw input and derive
+  at the event, which is bit-identical (`FreezeHold` takes its increment's
+  argument at the latch, and counts zero `trig` on capturing hops).
 
 ## Copy-this patterns
 
