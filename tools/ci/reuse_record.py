@@ -881,6 +881,9 @@ def cmd_write(a: argparse.Namespace) -> int:
                 problems.append("link members requested but the build recorded none "
                                 "(PULP_RECORD_LINK_MAPS off, or every executable was already linked)")
             reason = lm.unusable(doc)
+            # One boolean a reader can point at instead of parsing problems:
+            # false (or the whole summary null) means do not key on the map.
+            link_members["usable"] = reason is None and bool(doc["executables"])
             if reason:
                 problems.append(f"link members not usable for reuse: {reason}")
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
@@ -900,6 +903,8 @@ def cmd_write(a: argparse.Namespace) -> int:
                            "stale": len(doc["stale"]), "archives": len(doc["members"]),
                            "bytes": (out / name).stat().st_size}
             reason = od.unusable(doc)
+            # Stale objects stay usable: a reader treats each one as changed.
+            object_deps["usable"] = reason is None
             if reason:
                 problems.append(f"object deps not usable for reuse: {reason}")
             elif doc["stale"]:

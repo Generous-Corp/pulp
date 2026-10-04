@@ -1042,6 +1042,15 @@ HEAD. `dirty` records whether `git status --porcelain` was non-empty, since
 a dirty lane record did not test its commit. The gate and the lane compute
 all of this with the same code.
 
+For a reader that selects records by JSON pointer:
+- `/platform` is the host.
+- `/toolchain/digest` and `/toolchain/complete` are the toolchain key.
+- `/dirty` is lane runs only.
+- `/suites/full` is present when a full suite was recorded.
+- `/link_members/usable` and `/object_deps/usable` are booleans. An absent or
+  null summary means the file was not written.
+- `/problems` is empty exactly when nothing in the record is incomplete.
+
 The record hashes every registered test executable, not only those the job
 ran, so a fast-tier pull-request head's hashes are there for the merge
 group's **binary-identity shadow**, which reads the head's reuse record when
