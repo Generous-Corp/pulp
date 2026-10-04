@@ -129,10 +129,7 @@ public:
     /// wait for the next frame tick. Push per-tick data with
     /// dispatch_native_message() instead.
     void load_script(const std::string& code);
-    /// The exact source load_script() hands the engine for `code` (it appends
-    /// a statement so the evaluation's value is undefined). A prewarm that
-    /// compiles a script ahead of load_script() must compile this, or the
-    /// bytecode cache keys differ and the editor compiles it again.
+    /// What load_script() evaluates for `code` -- what a prewarm must compile.
     static std::string loaded_script_source(const std::string& code);
     bool frame_pump_live() const noexcept { return frame_pump_live_; }
 
