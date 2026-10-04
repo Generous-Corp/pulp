@@ -992,6 +992,7 @@
       "pulp/signal/oversampling_fir.hpp",
       "pulp/signal/panner.hpp",
       "pulp/signal/parallel_dynamics.hpp",
+      "pulp/signal/parametric_eq.hpp",
       "pulp/signal/particle_collision_exciter.hpp",
       "pulp/signal/particle_percussion_voice.hpp",
       "pulp/signal/path_latency_aligner.hpp",
