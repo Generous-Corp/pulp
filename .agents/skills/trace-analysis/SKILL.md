@@ -388,6 +388,7 @@ grounds the analysis in Pulp's real seams and names the specific traps:
 | Symptom | Hints file |
 |---|---|
 | xruns, per-node DSP cost, deadline miss, "meter calm but one node dominates", jitter/denormals | `references/hints_dsp.md` |
+| "it clicks / drops out here": a glitch in a render joined to the block that rendered it, block time vs deadline | `references/hints_dsp.md` ("Block time against the deadline"), `tools/audio/glitch_trace.py` |
 | dropped frames vs vsync budget, layout-vs-paint, `TextShaper::prepare` re-runs, dirty-rect churn, GPU-submit stalls | `references/hints_frame.md` |
 | QuickJS bridge dispatch cost, a JS callback invalidating layout | `references/hints_js.md` |
 | Dawn submit/present stalls, Graphite record cost, per-pass GPU time | `references/hints_gpu.md` |
