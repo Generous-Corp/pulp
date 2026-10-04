@@ -403,6 +403,10 @@ REVIEWED_SCANNERS = {
     "tools/scripts/raw_this_async_check.py": "walks core/ only",
     "tools/scripts/sample_region_compat_baseline.py": "walks CMake and build trees",
     "tools/scripts/skills_doc_check.py": "walks .agents/skills",
+    "tools/scripts/test_run_changed_surface_tests.py":
+        "its one tree walk is git grep over CMake files for raw downloads, and CMake "
+        "changes are test-topology paths that already run the native gate; its other "
+        "tools/ paths are fixtures",
     "tools/deps/audit.py":
         "walks only a dependency's fetched source tree (external/ or the FetchContent "
         "cache) for its offline-fetch contract; it names tools/ only for its own manifest",
@@ -429,6 +433,8 @@ REVIEWED_SCANNERS = {
         "walks core, inspect, ship, tools/cli, examples, apple",
     "tools/scripts/mac_objc_source_list_guard.py": "globs core/*/platform/mac",
     "tools/scripts/web_timeline_source_closure_check.py": "walks core/*/src",
+    "tools/import/test_project_import_ir_schema.py":
+        "globs only its own fixtures under tools/import/fixtures",
     "tools/scripts/test_wide_non_native.py":
         "this file; wide_non_native.HARD_NATIVE keeps any change to it native",
 }

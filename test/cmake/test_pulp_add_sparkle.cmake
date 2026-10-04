@@ -4,7 +4,10 @@
 #   * the Sparkle keys land in the app's Info.plist template, whether the
 #     document-type helper ran before or after the call,
 #   * a non-app target (a plug-in bundle) is refused,
-#   * a private-key-shaped value or a plain-http feed is refused.
+#   * a private-key-shaped value or a plain-http feed is refused,
+#   * with FETCHCONTENT_FULLY_DISCONNECTED ON and no pre-supplied distribution,
+#     configure refuses instead of downloading; PULP_SPARKLE_DIST_DIR and a
+#     hash-verified PULP_SPARKLE_ARCHIVE both satisfy it offline.
 cmake_minimum_required(VERSION 3.24)
 
 if(NOT CMAKE_HOST_APPLE)
@@ -123,6 +126,49 @@ _fixture(loopback_http_ok
     "pulp_add_sparkle(App FEED_URL \"http://127.0.0.1:8765/appcast.xml\" PUBLIC_ED_KEY \"${_key}\" DIST_DIR \"${_dist}\")")
 if(NOT _rc EQUAL 0)
     message(FATAL_ERROR "loopback_http_ok: a loopback practice feed was refused:\n${_log}")
+endif()
+
+set(_offline_call "pulp_add_sparkle(App FEED_URL \"https://e.com/a.xml\" PUBLIC_ED_KEY \"${_key}\")")
+
+_fixture(disconnected_refused "set(FETCHCONTENT_FULLY_DISCONNECTED ON)\n${_offline_call}")
+if(_rc EQUAL 0 OR NOT _log MATCHES "FETCHCONTENT_FULLY_DISCONNECTED is ON, so Sparkle")
+    message(FATAL_ERROR "disconnected_refused: a disconnected configure was not refused:\n${_log}")
+endif()
+file(GLOB _fetched "${FIXTURE_DIR}/disconnected_refused/_deps/sparkle-*/*.tar.xz")
+if(_fetched)
+    message(FATAL_ERROR "disconnected_refused: an archive appeared: ${_fetched}")
+endif()
+
+_fixture(disconnected_dist_dir_ok
+    "set(FETCHCONTENT_FULLY_DISCONNECTED ON)\nset(PULP_SPARKLE_DIST_DIR \"${_dist}\")\n${_offline_call}")
+if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR "disconnected_dist_dir_ok: PULP_SPARKLE_DIST_DIR was not used:\n${_log}")
+endif()
+
+set(_archive "${FIXTURE_DIR}/Sparkle-9.9.9.tar.xz")
+execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cJf "${_archive}" Sparkle.framework
+    WORKING_DIRECTORY "${_dist}" RESULT_VARIABLE _tar_rc)
+if(NOT _tar_rc EQUAL 0)
+    message(FATAL_ERROR "could not build the stub archive")
+endif()
+file(SHA256 "${_archive}" _archive_sha)
+set(_archive_call "pulp_add_sparkle(App FEED_URL \"https://e.com/a.xml\" PUBLIC_ED_KEY \"${_key}\"
+    VERSION 9.9.9 SHA256 SHA_PLACEHOLDER)")
+
+string(REPLACE SHA_PLACEHOLDER "${_archive_sha}" _call_ok "${_archive_call}")
+_fixture(disconnected_archive_ok
+    "set(FETCHCONTENT_FULLY_DISCONNECTED ON)\nset(PULP_SPARKLE_ARCHIVE \"${_archive}\")\n${_call_ok}")
+if(NOT _rc EQUAL 0 OR NOT EXISTS
+        "${FIXTURE_DIR}/disconnected_archive_ok/_deps/sparkle-9.9.9/dist/Sparkle.framework")
+    message(FATAL_ERROR "disconnected_archive_ok: PULP_SPARKLE_ARCHIVE was not extracted:\n${_log}")
+endif()
+
+string(REPLACE SHA_PLACEHOLDER "0000000000000000000000000000000000000000000000000000000000000000"
+    _call_bad "${_archive_call}")
+_fixture(archive_hash_refused
+    "set(FETCHCONTENT_FULLY_DISCONNECTED ON)\nset(PULP_SPARKLE_ARCHIVE \"${_archive}\")\n${_call_bad}")
+if(_rc EQUAL 0 OR NOT _log MATCHES "does not match the pinned")
+    message(FATAL_ERROR "archive_hash_refused: an unverified archive was accepted:\n${_log}")
 endif()
 
 message(STATUS "pulp_add_sparkle configure contract: OK")
