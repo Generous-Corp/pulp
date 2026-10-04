@@ -10,6 +10,7 @@ from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
+    "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
     "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
@@ -160,6 +161,18 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/processing_switch_crossfade.hpp",
+        "fingerprint": "sha256:8b34df01f4ebcdc418f040b2e58a203c3b274867c916648954bfb31fa06287fe",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The sample schedule for switching a processor between two realisations of "
+            "differing latency (warm the incoming one unheard, then a TransitionMixer "
+            "EqualPower fade). It is plumbing a processor composes around the "
+            "realisations it owns, not a behavior an agent selects on its own."
+        ),
+    },
     {
         "include": "pulp/audio/workgroup.hpp",
         "fingerprint": "sha256:e696902515507a5a444feb4aa94335fc92b896a894e2e548aa7466221e934f60",
