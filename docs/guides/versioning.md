@@ -585,11 +585,11 @@ hold an older pin only for a documented incompatibility with an owner and exit
 condition. Never replace the tag with a moving branch or `latest` URL: exact
 pins keep checkouts reproducible and let the fleet prove binary parity.
 
-The current v0.269.0 pin parses `executable_reuse` in a target's
+The current v0.269.1 pin parses `executable_reuse` in a target's
 `changed_surface_selection`. Shipyard reads that table with
 `deny_unknown_fields`, so a host on an older release cannot parse a policy that
 declares it and plans the full suite on every PR: the pin and the lane hosts
-reach v0.269.0 before Pulp's policy declares the table. It also carries keyed
+reach v0.269.1 before Pulp's policy declares the table. It also carries keyed
 shadow runs and their host re-derivation (`shipyard reuse rederive`,
 `rederive-sweep`). Its `shipyard changelog regenerate` renders CHANGELOG.md
 byte-identically to v0.262.0 for the same tag graph.
