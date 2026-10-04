@@ -1,6 +1,6 @@
 #pragma once
-#include <pulp/view/design_ir.hpp>
 #include <cstddef>
+#include <pulp/view/design_ir.hpp>
 #include <span>
 #include <string>
 #include <vector>
@@ -26,7 +26,6 @@ struct DesignChildUpdatePlan {
     bool keyed = false;
     bool ambiguous_keys = false;
 };
-DesignChildUpdatePlan plan_design_child_updates(
-    std::span<const IRNode> old_children,
-    std::span<const IRNode> new_children);
+DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_children,
+                                                std::span<const IRNode> new_children);
 } // namespace pulp::view

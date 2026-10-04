@@ -1,10 +1,18 @@
-#include <pulp/view/design_update.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/view/design_update.hpp>
 
 using namespace pulp::view;
-namespace { IRNode node(const char* key) { IRNode out; out.type = "frame"; out.stable_anchor_id = key; return out; } }
+namespace {
+IRNode node(const char* key) {
+    IRNode out;
+    out.type = "frame";
+    out.stable_anchor_id = key;
+    return out;
+}
+} // namespace
 
-TEST_CASE("keyed design updates retain identity across reorder and batch blocks", "[view][import][update]") {
+TEST_CASE("keyed design updates retain identity across reorder and batch blocks",
+          "[view][import][update]") {
     const std::vector<IRNode> old_children{node("a"), node("b"), node("c")};
     const std::vector<IRNode> new_children{node("c"), node("a"), node("d")};
     const auto plan = plan_design_child_updates(old_children, new_children);
