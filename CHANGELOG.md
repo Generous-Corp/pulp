@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09044"></a>
+## [0.904.4] - 2026-10-04
+
+- release/version bump ([#9448](https://github.com/Generous-Corp/pulp/pull/9448))
+- ci/reuse replay object deps ([#9424](https://github.com/Generous-Corp/pulp/pull/9424))
+- codex/signal graph lifecycle 20261004 wam manifest ([#9447](https://github.com/Generous-Corp/pulp/pull/9447))
+
+<a id="v09043"></a>
+## [0.904.3] - 2026-10-04
+
+- release/version bump ([#9446](https://github.com/Generous-Corp/pulp/pull/9446))
+- codex/wave2e pulputils 20261003 ([#9439](https://github.com/Generous-Corp/pulp/pull/9439))
+
 <a id="v09042"></a>
 ## [0.904.2] - 2026-10-04
 
@@ -9663,6 +9676,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.904.4]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.4
+[0.904.3]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.3
 [0.904.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.2
 [0.904.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.1
 [0.904.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.0
