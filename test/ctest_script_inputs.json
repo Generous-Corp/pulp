@@ -6642,6 +6642,22 @@
    ],
    "kind": "shell"
   },
+  "pulp-ui-clean-output-lint": {
+   "entry": "tools/ui-build/lint/clean_output_lint.py",
+   "inputs": [
+    "tools/ui-build/lint/clean_output_lint.py",
+    "tools/ui-build/lint/fixtures/clean"
+   ],
+   "kind": "python"
+  },
+  "pulp-ui-clean-output-lint-negative-contract": {
+   "entry": "tools/ui-build/lint/test_clean_output_lint.py",
+   "inputs": [
+    "tools/ui-build/lint/clean_output_lint.py",
+    "tools/ui-build/lint/test_clean_output_lint.py"
+   ],
+   "kind": "python"
+  },
   "pulp-materialized-runtime-conformance": {
    "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
    "inputs": [
@@ -9070,6 +9086,28 @@
    "entry": "tools/scripts/test_vellum_trusted_merge.py",
    "inputs": [
     "tools/scripts/test_vellum_trusted_merge.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-boundary-lint": {
+   "entry": "tools/scripts/vellum_boundary_lint.py",
+   "inputs": [
+    "core/view",
+    "core/view/src",
+    "tools/import-design/pulp-package.json",
+    "tools/scripts/vellum_boundary_lint.py",
+    "tools/ui-build/pulp-package.json"
+   ],
+   "kind": "python"
+  },
+  "vellum-boundary-lint-negative-contract": {
+   "entry": "tools/scripts/test_vellum_boundary_lint.py",
+   "inputs": [
+    "tools/import-design",
+    "tools/import-design/pulp-package.json",
+    "tools/scripts/test_vellum_boundary_lint.py",
+    "tools/ui-build",
+    "tools/ui-build/pulp-package.json"
    ],
    "kind": "python"
   },
