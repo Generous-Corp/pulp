@@ -481,7 +481,8 @@ int exec_shipyard_pr(const std::string& shipyard_bin,
     return run_passthrough(shipyard_bin, forwarded);
 }
 
-// Exact-equality guard. Returns 0 (pass) or 2 (fail + printed error).
+// Pin-floor guard (shipyard_pin_accepts). Returns 0 (pass) or 2 (fail +
+// printed error).
 // Skipped entirely when PULP_PR_SKIP_VERSION_GUARD=1 is set.
 int enforce_shipyard_version_pin(const fs::path& root,
                                  const std::string& shipyard_bin) {
@@ -497,12 +498,13 @@ int enforce_shipyard_version_pin(const fs::path& root,
     if (pinned.empty()) return 0;  // can't verify → proceed
     auto actual = capture_shipyard_version(shipyard_bin);
     if (actual.empty()) return 0;  // can't verify → proceed
-    if (actual == pinned) return 0;
+    if (shipyard_pin_accepts(pinned, actual)) return 0;
 
     std::cerr << color::red() << "pulp pr: shipyard version pin mismatch.\n"
               << color::reset()
               << "\n"
-              << "  pinned in tools/shipyard.toml : " << pinned << "\n"
+              << "  pinned in tools/shipyard.toml : " << pinned
+              << " (the minimum, same major)\n"
               << "  shipyard --version            : " << actual << "\n"
               << "  resolved from                 : " << shipyard_bin << "\n"
               << "\n"
