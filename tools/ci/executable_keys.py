@@ -91,10 +91,11 @@ from spawn_closure import SpawnIndex  # noqa: E402
 from test_receipts_shadow import ALWAYS_RUN_NAME_RE  # noqa: E402
 
 SCHEMA = "pulp-executable-keys/v1"
-# The files whose base copy computes the keys; touching any of them makes a
-# plan select everything.
+# The files whose base copy computes the keys and the selection over them;
+# touching any of them makes a plan select everything.
 KEY_CODE_PATHS = ("tools/ci/executable_keys.py", "tools/ci/link_members.py", "tools/ci/object_deps.py",
-                  "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py")
+                  "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py",
+                  "tools/ci/executable_selection.py")
 SCRIPT_INPUTS_PATH = "test/ctest_script_inputs.json"
 CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
 # Files that pin third-party dependencies. A bump can change a dependency's
