@@ -568,6 +568,58 @@ mode = "authoritative"
 stage = "build_and_test"
 command = "python3 tools/scripts/run_changed_surface_tests.py --selection-receipt-b64 {selection_receipt_b64} --selection-receipt-sha256 {selection_receipt_digest} --build-dir build --target mac"
 
+# Executable-keyed shadow runs. On a shadow_compare host, Shipyard copies the
+# key code below from the protected base (a PR that edits any of these files,
+# or drops one from this list, runs the full suite), binds up to eight base
+# reuse records from the host store that pass `base_record`, and the adapter
+# picks the one built with the toolchain it configured. The configured build
+# and full ctest still run with their own verdict; the run reports which tests
+# reuse would have skipped and which of those failed. Afterwards Shipyard
+# re-runs `rederive` over the run's copied inputs and refuses a mismatch; the
+# second refusal on a host sets PULP_REUSE_LIVE to off. This only measures:
+# no keyed run skips any build or test. The list is the key code's import
+# closure (tools/scripts is on its path), plus the adapter.
+[targets.mac.changed_surface_selection.executable_reuse]
+switch_variable = "PULP_REUSE_LIVE"
+derivation_paths = [
+    "tools/ci/executable_keys.py",
+    "tools/ci/executable_selection.py",
+    "tools/ci/link_members.py",
+    "tools/ci/object_deps.py",
+    "tools/ci/spawn_closure.py",
+    "tools/ci/test_receipts_shadow.py",
+    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/reuse_record.py",
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/run_changed_surface_tests.py",
+]
+build_dir = "build"
+sample_percent = 5
+# Read only for its platform; it succeeds on a build directory that was never
+# configured (the toolchain is the adapter's to read after configure).
+platform_probe = ["python3", "-I", "tools/ci/executable_keys.py", "--print-toolchain", "--build-dir", "{build_dir}"]
+rederive = [
+    ["python3", "-I", "tools/ci/executable_keys.py", "--source-root", "{source_root}", "--base-sha", "{base_sha}", "--head-sha", "{head_sha}", "--base-record", "{base_record_dir}", "--base-record-run-id", "{base_record_run_id}", "--head-codemodel", "{result_dir}/codemodel-digest.json", "--ctest-json", "{result_dir}/ctest-listing.json", "--build-dir", "{build_dir}", "--toolchain-json", "{result_dir}/toolchain.json", "--out", "{out_dir}/executable-keys.json"],
+    ["python3", "-I", "tools/ci/executable_selection.py", "--manifest", "{out_dir}/executable-keys.json", "--head-codemodel", "{result_dir}/codemodel-digest.json", "--ctest-json", "{result_dir}/ctest-listing.json", "--seed", "{sample_seed}", "--percent", "{sample_percent}", "--out", "{out_dir}/selection.json"],
+]
+
+# Where a reuse record's job.json (tools/ci/reuse_record.py) states each fact.
+# Platform is checked first, then a stated toolchain; `require` is checked in
+# order and the first failure names the refusal.
+[targets.mac.changed_surface_selection.executable_reuse.base_record]
+platform = "/platform"
+toolchain = "/toolchain/digest"
+toolchain_fields = "/toolchain/fields"
+require = [
+    { pointer = "/toolchain/complete", equals = true },
+    { pointer = "/dirty", equals = false },
+    { pointer = "/suites/full", present = true },
+    { pointer = "/problems", equals = [] },
+]
+
 [cloud]
 provider   = "namespace"
 workflow   = "build"
