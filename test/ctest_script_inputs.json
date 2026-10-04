@@ -3157,6 +3157,7 @@
     "tools/ci/codemodel_digest.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
+    "tools/ci/key_blind_executables.json",
     "tools/ci/lane_reuse_record.py",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
