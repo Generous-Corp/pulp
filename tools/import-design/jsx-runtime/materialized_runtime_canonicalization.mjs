@@ -145,12 +145,11 @@ export function canonicalizeMaterializedRuntimeDocument(document) {
     (kind !== 'babel' || babelCount > 0) &&
     (references.get(id)?.length ?? 0) > 0 &&
     references.get(id).every(Boolean) &&
-    // Keep assets referenced by non-script markup. Those references may be
-    // validated by the materialized-document parser even when the script is
-    // removable. Script bodies are covered by the all-empty check above.
-    !new RegExp(`<(?!(?:script)\\b)[^>]+(?:src|href)\\s*=\\s*["']${
-      id.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')
-    }["']`, 'i').test(html)
+    // Remove only the exact empty script references in a probe copy. Any
+    // remaining occurrence (unquoted attributes, CSS, srcset, comments, or
+    // text) is an external reference that the materialized parser may reject
+    // if its asset disappears.
+    !rewriteScripts(html, () => '').includes(id)
   ).map(([id]) => id));
   html = rewriteScripts(html, ({ whole, openTag, source }) => {
     const src = attribute(openTag, 'src')?.value;

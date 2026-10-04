@@ -919,6 +919,7 @@ async function captureMaterializedDocument(cdp) {
   // the executable document to content-addressed asset IDs so identical source
   // material produces byte-identical sidecars across captures.
   const stableAssets = new Map();
+  const ambiguousAssetIds = new Set();
   for (const asset of materialized.assets) {
     const id = `pulp-materialized-asset-${asset.sha256}`;
     materialized.html = materialized.html.split(asset.url).join(id);
@@ -941,7 +942,8 @@ async function captureMaterializedDocument(cdp) {
         // Conflicting provenance for identical bytes is ambiguous. Preserve
         // the asset and require a later explicit capture to classify it.
         delete existing.vendor_kind;
-      } else if (!existing.vendor_kind && asset.vendor_kind) {
+        ambiguousAssetIds.add(id);
+      } else if (!ambiguousAssetIds.has(id) && !existing.vendor_kind && asset.vendor_kind) {
         existing.vendor_kind = asset.vendor_kind;
       }
     }
