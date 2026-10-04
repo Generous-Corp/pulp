@@ -5,6 +5,7 @@
 
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/js_engine.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #if PULP_HAS_DESIGN_IMPORT
 #include <pulp/view/design_sources.hpp>
 #endif
@@ -128,7 +129,13 @@ private:
 
     void process(const ScriptedUiPrewarmRequest& request) {
         PULP_TRACE_SCOPE_NAMED("js", "scripted_ui_prewarm");
-        std::size_t compiled = precompile_scripts(request.scripts, &cancel_);
+        // The editor evaluates each through WidgetBridge::load_script(), so
+        // compile exactly what that evaluates.
+        std::vector<std::string> loaded;
+        loaded.reserve(request.scripts.size());
+        for (const auto& script : request.scripts)
+            loaded.push_back(WidgetBridge::loaded_script_source(script));
+        std::size_t compiled = precompile_scripts(loaded, &cancel_);
         std::uint64_t verified = 0;
         std::uint64_t rejected = 0;
 #if PULP_HAS_DESIGN_IMPORT

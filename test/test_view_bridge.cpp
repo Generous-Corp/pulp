@@ -783,7 +783,8 @@ TEST_CASE("Editor prewarm: an instantiated plug-in's editor scripts are requeste
     CHECK(format::request_editor_prewarm(viewed));
     REQUIRE(view::wait_for_scripted_ui_prewarm(std::chrono::seconds(20)));
     CHECK(view::scripted_ui_prewarm_stats().scripts_compiled == before.scripts_compiled + 1);
-    CHECK(view::script_bytecode_cached(std::string(viewed.editor_prewarm().scripts[0])));
+    CHECK(view::script_bytecode_cached(
+        view::WidgetBridge::loaded_script_source(std::string(viewed.editor_prewarm().scripts[0]))));
     format::detail::reset_editor_prewarm_requests_for_tests();
     view::clear_script_bytecode_cache();
 }

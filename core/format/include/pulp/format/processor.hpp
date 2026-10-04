@@ -519,9 +519,10 @@ public:
     virtual bool has_editor() const { return true; }
 
     /// What a scripted editor evaluates every time it opens and that does not
-    /// depend on the instance: the whole scripts its ScriptedUiSession runs
-    /// (a bundled UI runtime, a design script) and the inputs it passes to
-    /// `__pulpRuntimeImport__(text, 'materialized-browser')`, byte-identical.
+    /// depend on the instance: the text of the scripts it loads through
+    /// `WidgetBridge::load_script()` (its ScriptedUiSession's script file, a
+    /// design or help script loaded after the mount) and the inputs it passes
+    /// to `__pulpRuntimeImport__(text, 'materialized-browser')`, byte-identical.
     ///
     /// When a host instantiates the plug-in, the format adapter hands this to
     /// a background worker that compiles the scripts and verifies the

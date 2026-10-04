@@ -636,8 +636,22 @@ TEST_CASE("prewarm_scripted_ui prepares a materialized document before the edito
     CHECK(after.documents_verified == before.documents_verified + 1);
     CHECK(after.documents_rejected == before.documents_rejected);
     CHECK(after.scripts_compiled == before.scripts_compiled + 2);  // runtime + inline
-    CHECK(script_bytecode_cached(runtime));
+    // Compiled as WidgetBridge::load_script() evaluates it, so a realm that
+    // loads the runtime reads the prewarmed bytecode instead of compiling.
+    CHECK(script_bytecode_cached(WidgetBridge::loaded_script_source(runtime)));
+    CHECK_FALSE(script_bytecode_cached(runtime));
     CHECK(materialized_document_cache_stats().verifies == 1);
+    {
+        ScriptEngine engine(JsEngineType::quickjs);
+        View root;
+        StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        const auto before_load = script_bytecode_cache_stats();
+        bridge.load_script(runtime);
+        const auto after_load = script_bytecode_cache_stats();
+        CHECK(after_load.compiles == before_load.compiles);
+        CHECK(after_load.hits == before_load.hits + 1);
+    }
 
     const auto first_open = import_in_fresh_realm(doc);
     CHECK(first_open.compiles == 0);

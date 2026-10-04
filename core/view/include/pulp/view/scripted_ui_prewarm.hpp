@@ -25,10 +25,12 @@
 namespace pulp::view {
 
 struct ScriptedUiPrewarmRequest {
-    /// Whole scripts the editor evaluates with `evaluate_script()` (a bundled
-    /// UI runtime, a large design or prelude script), byte-identical to what
-    /// it will evaluate. Sources under the bytecode cache's size floor are
-    /// ignored.
+    /// Scripts the editor loads through `WidgetBridge::load_script()` (a
+    /// ScriptedUiSession's script file, a design or help script the processor
+    /// loads after the mount), byte-identical to the text it passes there; the
+    /// prewarm compiles `WidgetBridge::loaded_script_source()` of each, which
+    /// is what load_script() evaluates. Sources under the bytecode cache's size
+    /// floor are ignored.
     std::vector<std::string> scripts;
     /// Inputs the editor passes to `__pulpRuntimeImport__(text,
     /// 'materialized-browser')`, byte-identical. Each is decoded and verified
