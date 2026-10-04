@@ -2097,16 +2097,21 @@ class UnreachedChangedTest(unittest.TestCase):
     base record's hash: the key said unchanged about something that changed."""
 
     def tree(self, root: Path, sampled: list[str], record_hashes: dict[str, str | None],
-             problems: list | None = None) -> tuple:
+             problems: list | None = None, job: dict | None = None) -> tuple:
         result, build, record, code = (root / n for n in ("result", "build", "record", "code"))
         for directory in (result, build / "test", record, code / "tools/ci"):
             directory.mkdir(parents=True)
-        for artifact in ("a", "b", "c", "blind"):
+        for artifact in ("a", "b", "c", "blind", "mod.so", "deep.so"):
             (build / "test" / artifact).write_bytes(f"bytes of {artifact}".encode())
+        # a loads mod.so, which loads deep.so.
+        (result / "executable-keys.json").write_text(json.dumps({"executables": {
+            "test/a": {"kind": "executable", "spawns": ["test/mod.so"]},
+            "test/mod.so": {"kind": "module", "spawns": ["test/deep.so"]},
+            "test/deep.so": {"kind": "module", "spawns": []}}}), encoding="utf-8")
         (result / "selection.json").write_text(json.dumps({
             "would_skip": ["test/a", "test/b", "test/blind", "test/c"], "sampled_executables": sampled}),
             encoding="utf-8")
-        (record / "job.json").write_text(json.dumps({"problems": problems}), encoding="utf-8")
+        (record / "job.json").write_text(json.dumps(job or {"problems": problems}), encoding="utf-8")
         (record / "identity.json").write_text(json.dumps({"executables": {
             f"<build>/{artifact}": {"sha256": digest} for artifact, digest in record_hashes.items()}}),
             encoding="utf-8")
@@ -2122,14 +2127,18 @@ class UnreachedChangedTest(unittest.TestCase):
     def sha(text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()
 
-    def measure(self, sampled, hashes, scope, derived=None, blind_text=None, problems=None):
+    def full(self, sampled, hashes, scope, derived=None, blind_text=None, problems=None, job=None):
         with tempfile.TemporaryDirectory() as directory:
-            result, build, binding, code = self.tree(Path(directory), sampled, hashes, problems or [])
+            result, build, binding, code = self.tree(Path(directory), sampled, hashes, problems or [], job)
             if blind_text is not None:
                 (code / runner.KEY_BLIND_EXECUTABLES).write_text(blind_text, encoding="utf-8")
             return runner.unreached_changed(result, build, binding,
                                             derived or {"status": "derived", "base_record_run_id": "7"},
                                             scope)
+
+    def measure(self, *args, **kwargs):
+        out = self.full(*args, **kwargs)
+        return out["unreached_changed"], out["unreached_compared"]
 
     def test_changed_bytes_are_named_and_key_blind_ones_are_not(self) -> None:
         hashes = {"test/a": self.sha("bytes of a"), "test/b": self.sha("old bytes of b"),
@@ -2146,6 +2155,29 @@ class UnreachedChangedTest(unittest.TestCase):
         # Bounded: only what the sample built is compared.
         self.assertEqual(self.measure(["test/b"], hashes, "sampled"), (["test/b"], 1))
         self.assertEqual(self.measure(["test/a"], hashes, "sampled"), ([], 1))
+
+    def test_the_modules_an_executable_loads_are_in_scope(self) -> None:
+        same = {"test/a": self.sha("bytes of a")}
+        # A changed module, reached transitively, is reported for its loader.
+        out = self.full([], {**same, "test/deep.so": self.sha("old deep")}, "all")
+        self.assertEqual((out["unreached_changed"], out["unreached_compared"]), (["test/deep.so"], 2))
+        # mod.so has no hash: it is unchecked, and does not null the field.
+        self.assertEqual(out["unreached_unchecked_modules"], ["test/mod.so"])
+        # In a bounded run, only a sampled executable brings its modules.
+        out = self.full(["test/b"], {"test/b": self.sha("bytes of b"), "test/deep.so": self.sha("old")},
+                        "sampled")
+        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]), ([], []))
+        # Only an unhashed module in scope: nothing compared, so null, but still named.
+        out = self.full([], {"test/c": None}, "all")
+        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]),
+                         (None, ["test/deep.so", "test/mod.so"]))
+
+    def test_identity_usable_decides_before_the_problem_lines(self) -> None:
+        hashes = {"test/b": self.sha("old bytes of b")}
+        self.assertEqual(self.measure([], hashes, "all", job={"identity": {"usable": False}}), (None, 0))
+        self.assertEqual(self.measure([], hashes, "all", job={
+            "identity": {"usable": True}, "problems": ["executable identity unavailable: stale"]}),
+            (["test/b"], 1))
 
     def test_no_information_is_null_never_an_empty_list(self) -> None:
         # No in-scope artifact has a recorded hash.
@@ -2166,7 +2198,9 @@ class UnreachedChangedTest(unittest.TestCase):
     def test_each_mode_measures_its_own_scope(self) -> None:
         calls = []
         with mock.patch.object(runner, "unreached_changed",
-                               side_effect=lambda *a: calls.append(a[4]) or (["test/x"], 1)):
+                               side_effect=lambda *a: calls.append(a[4]) or {
+                                   "unreached_changed": ["test/x"], "unreached_compared": 1,
+                                   "unreached_unchecked_modules": []}):
             _, _, receipt = KeyedFullTest.run_full(KeyedFullTest())
         self.assertEqual(calls, ["all"])
         derived = receipt["executable_reuse"]["derived"]
@@ -2316,7 +2350,7 @@ class SelectedLegPipelineTest(unittest.TestCase):
                          {"mode": "keyed_bounded_shadow", "bound": bound,
                           # No record was picked, so no bytes could be compared.
                           "derived": {"status": "derived", "would_skip_count": 3, "unreached_changed": None,
-                                      "unreached_compared": 0},
+                                      "unreached_compared": 0, "unreached_unchecked_modules": None},
                           # No selection was written beside the receipt to measure against.
                           "would_skip_tests": None, "false_skip_count": None, "false_skips": None,
                           "sampled_failures": None})
@@ -2330,7 +2364,7 @@ class SelectedLegPipelineTest(unittest.TestCase):
                  "executable-keys.json": {"executables": {"test/n": {"registrations": ["neighbor"]}}}}
         scopes = []
         with mock.patch.object(runner, "unreached_changed",
-                               side_effect=lambda *a: scopes.append(a[4]) or (None, 0)):
+                               side_effect=lambda *a: scopes.append(a[4]) or {}):
             _, _, measured = self.run_pipeline(reuse=bound, derived_files=files,
                                                failures={"full tests": ["neighbor"]})
         self.assertEqual(measured["executable_reuse"]["false_skips"], ["neighbor"])
