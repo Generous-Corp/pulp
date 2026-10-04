@@ -934,6 +934,16 @@ async function captureMaterializedDocument(cdp) {
         sha256: asset.sha256,
         ...(asset.vendor_kind ? { vendor_kind: asset.vendor_kind } : {}),
       });
+    } else {
+      const existing = stableAssets.get(id);
+      if (existing.vendor_kind && asset.vendor_kind &&
+          existing.vendor_kind !== asset.vendor_kind) {
+        // Conflicting provenance for identical bytes is ambiguous. Preserve
+        // the asset and require a later explicit capture to classify it.
+        delete existing.vendor_kind;
+      } else if (!existing.vendor_kind && asset.vendor_kind) {
+        existing.vendor_kind = asset.vendor_kind;
+      }
     }
   }
   materialized.assets = [...stableAssets.values()];
