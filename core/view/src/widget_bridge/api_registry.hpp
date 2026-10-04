@@ -19,6 +19,10 @@ namespace pulp::view {
 
 struct BridgeApiContext {
     ScriptEngine& engine;
+    std::atomic<std::uint64_t>* bridge_call_count;
+
+    explicit BridgeApiContext(ScriptEngine& e)
+        : engine(e), bridge_call_count(e.bridge_call_counter()) {}
 };
 
 // Every JS->C++ native is registered through this one call, so a span wrapped
@@ -29,6 +33,11 @@ struct BridgeApiContext {
 // indirection.
 template <typename Fn>
 void register_bridge_function(BridgeApiContext& context, std::string_view name, Fn&& fn) {
+    auto* counter = context.bridge_call_count;
+    auto count_call = [counter] {
+        if (counter != nullptr)
+            counter->fetch_add(1, std::memory_order_relaxed);
+    };
 #if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED
     if constexpr (std::is_convertible_v<Fn&&, choc::javascript::Context::NativeFunction>) {
         choc::javascript::Context::NativeFunction inner(std::forward<Fn>(fn));
@@ -36,8 +45,9 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
         context.engine.register_function(
             std::string(name),
             choc::javascript::Context::NativeFunction(
-                [inner = std::move(inner), span = std::move(span)](
+                [inner = std::move(inner), span = std::move(span), count_call](
                     choc::javascript::ArgumentList args) {
+                    count_call();
                     PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
                     return inner(args);
                 }));
@@ -47,8 +57,9 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
         std::string span(name);
         context.engine.register_function(
             std::string(name),
-            NativeFunction([inner = std::move(inner), span = std::move(span)](
+            NativeFunction([inner = std::move(inner), span = std::move(span), count_call](
                                const choc::value::Value* args, size_t num_args) {
+                count_call();
                 PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
                 return inner(args, num_args);
             }));
@@ -57,7 +68,27 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
         context.engine.register_function(std::string(name), std::forward<Fn>(fn));
     }
 #else
-    context.engine.register_function(std::string(name), std::forward<Fn>(fn));
+    if constexpr (std::is_convertible_v<Fn&&, choc::javascript::Context::NativeFunction>) {
+        choc::javascript::Context::NativeFunction inner(std::forward<Fn>(fn));
+        context.engine.register_function(
+            std::string(name),
+            choc::javascript::Context::NativeFunction(
+                [inner = std::move(inner), count_call](choc::javascript::ArgumentList args) {
+                    count_call();
+                    return inner(args);
+                }));
+    } else if constexpr (std::is_convertible_v<Fn&&, NativeFunction>) {
+        NativeFunction inner(std::forward<Fn>(fn));
+        context.engine.register_function(
+            std::string(name),
+            NativeFunction([inner = std::move(inner), count_call](const choc::value::Value* args,
+                                                                  size_t num_args) {
+                count_call();
+                return inner(args, num_args);
+            }));
+    } else {
+        context.engine.register_function(std::string(name), std::forward<Fn>(fn));
+    }
 #endif
 }
 

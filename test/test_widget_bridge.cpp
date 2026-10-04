@@ -1,5 +1,36 @@
 #include "widget_bridge_test_support.hpp"
 
+TEST_CASE("WidgetBridge counts native calls used by imported UI mount and steps",
+          "[view][bridge][wp0]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.reset_bridge_call_count();
+    bridge.load_script("createLabel('imported-label', 10, 10, 100, 20);");
+    const auto mount_calls = bridge.bridge_call_count();
+    REQUIRE(mount_calls > 0);
+
+    bridge.reset_bridge_call_count();
+    bridge.load_script("setText('imported-label', 'step');");
+    REQUIRE(bridge.bridge_call_count() > 0);
+}
+
+TEST_CASE("WidgetBridge counter ignores pure JavaScript work",
+          "[view][bridge][wp0][negative-control]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.reset_bridge_call_count();
+    engine.evaluate("globalThis.__wp0PureJs = (21 + 21);");
+    REQUIRE(bridge.bridge_call_count() == 0);
+}
+
 TEST_CASE("WidgetBridge creates knob from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;

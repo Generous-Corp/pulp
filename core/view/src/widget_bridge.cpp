@@ -507,6 +507,7 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
       granted_capabilities_(granted_capabilities), gpu_surface_(gpu_surface),
       widgets_(owned_widgets_),
       callback_alive_(std::make_shared<BridgeCallbackState>(&root_)) {
+    engine_.set_bridge_call_counter(&bridge_call_count_);
     callback_alive_->track_engine(engine.liveness_token());
     if (detail::widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
@@ -601,6 +602,8 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
 }
 
 WidgetBridge::~WidgetBridge() {
+    if (engine_.bridge_call_counter() == &bridge_call_count_)
+        engine_.set_bridge_call_counter(nullptr);
     release_document_navigation_focus();
     unregister_global_dispatch();
     if (callback_alive_) {
