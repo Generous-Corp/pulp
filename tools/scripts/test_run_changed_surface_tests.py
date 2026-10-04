@@ -2055,6 +2055,10 @@ class KeyedFullTest(unittest.TestCase):
         # and a2 failing in the full run is a false skip; b1 ran in the sample.
         self.assertEqual((reuse["would_skip_tests"], reuse["false_skip_count"], reuse["false_skips"]),
                          (["a1", "a2"], 1, ["a2"]))
+        # b1 belongs to the sampled test/b: the negative control caught it.
+        self.assertEqual(reuse["sampled_failures"], ["b1"])
+        _, _, quiet = self.run_full(failing=("a2",))
+        self.assertEqual(quiet["executable_reuse"]["sampled_failures"], [])
         self.assertEqual((receipt["selected_tests_digest"], receipt["selected_logical_count"],
                           receipt["selected_build_targets_digest"], receipt["selected_build_target_count"]),
                          ("", 0, None, 0))
@@ -2076,7 +2080,9 @@ class KeyedFullTest(unittest.TestCase):
         code, calls, receipt = self.run_full(derived_ok=False)
         self.assertEqual(code, 0)
         self.assertEqual(len(calls), 4)  # derive, build, sentinel, test
-        self.assertEqual(receipt["executable_reuse"]["derived"], {"status": "error: base refused"})
+        # The three unreached fields are present even when nothing was derived.
+        self.assertEqual(receipt["executable_reuse"]["derived"],
+                         {"status": "error: base refused", **runner.UNKNOWN_UNREACHED})
         self.assertIsNone(receipt["executable_reuse"]["false_skip_count"])
         self.assertEqual(receipt["full_returncode"], 0)
 
@@ -2086,6 +2092,126 @@ class KeyedFullTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)  # derive, build
         self.assertIsNone(receipt["full_returncode"])
         self.assertIsNone(receipt["executable_reuse"]["false_skip_count"])
+
+
+class UnreachedChangedTest(unittest.TestCase):
+    """A would-skip executable whose rebuilt bytes differ from the picked
+    base record's hash: the key said unchanged about something that changed."""
+
+    def tree(self, root: Path, sampled: list[str], record_hashes: dict[str, str | None],
+             problems: list | None = None, job: dict | None = None) -> tuple:
+        result, build, record, code = (root / n for n in ("result", "build", "record", "code"))
+        for directory in (result, build / "test", record, code / "tools/ci"):
+            directory.mkdir(parents=True)
+        for artifact in ("a", "b", "c", "blind", "mod.so", "deep.so"):
+            (build / "test" / artifact).write_bytes(f"bytes of {artifact}".encode())
+        # a loads mod.so, which loads deep.so.
+        (result / "executable-keys.json").write_text(json.dumps({"executables": {
+            "test/a": {"kind": "executable", "spawns": ["test/mod.so"]},
+            "test/mod.so": {"kind": "module", "spawns": ["test/deep.so"]},
+            "test/deep.so": {"kind": "module", "spawns": []}}}), encoding="utf-8")
+        (result / "selection.json").write_text(json.dumps({
+            "would_skip": ["test/a", "test/b", "test/blind", "test/c"], "sampled_executables": sampled}),
+            encoding="utf-8")
+        (record / "job.json").write_text(json.dumps(job or {"problems": problems}), encoding="utf-8")
+        (record / "identity.json").write_text(json.dumps({"executables": {
+            f"<build>/{artifact}": {"sha256": digest} for artifact, digest in record_hashes.items()}}),
+            encoding="utf-8")
+        # The ratchet's shape: artifact -> why its bytes are not keyed.
+        (code / runner.KEY_BLIND_EXECUTABLES).write_text(json.dumps(
+            {"schema": "pulp-key-blind/v1", "executables": {"test/blind": {"explained": "ld order"}}}),
+            encoding="utf-8")
+        binding = {"candidates": [{"run_id": "7", "record_sha256": "9" * 64, "record_path": str(record),
+                                   "commit": "a" * 40}], "derivation_code_dir": str(code)}
+        return result, build, binding, code
+
+    @staticmethod
+    def sha(text: str) -> str:
+        return hashlib.sha256(text.encode()).hexdigest()
+
+    def full(self, sampled, hashes, scope, derived=None, blind_text=None, problems=None, job=None):
+        with tempfile.TemporaryDirectory() as directory:
+            result, build, binding, code = self.tree(Path(directory), sampled, hashes, problems or [], job)
+            if blind_text is not None:
+                (code / runner.KEY_BLIND_EXECUTABLES).write_text(blind_text, encoding="utf-8")
+            return runner.unreached_changed(result, build, binding,
+                                            derived or {"status": "derived", "base_record_run_id": "7"},
+                                            scope)
+
+    def measure(self, *args, **kwargs):
+        out = self.full(*args, **kwargs)
+        return out["unreached_changed"], out["unreached_compared"]
+
+    def test_changed_bytes_are_named_and_key_blind_ones_are_not(self) -> None:
+        hashes = {"test/a": self.sha("bytes of a"), "test/b": self.sha("old bytes of b"),
+                  "test/blind": self.sha("old bytes of blind")}
+        self.assertEqual(self.measure([], hashes, "all"), (["test/b"], 2))  # a and b compared
+        # Control: unlisted, the key-blind executable's changed bytes are reported.
+        self.assertEqual(self.measure([], hashes, "all",
+                                      blind_text='{"schema": "pulp-key-blind/v1", "executables": {}}'),
+                         (["test/b", "test/blind"], 3))
+        # A list the runner cannot read compares nothing rather than everything.
+        self.assertEqual(self.measure([], hashes, "all", blind_text="{"), (None, 0))
+        self.assertEqual(self.measure([], hashes, "all", blind_text='{"schema": "other", "executables": {}}'),
+                         (None, 0))
+        # Bounded: only what the sample built is compared.
+        self.assertEqual(self.measure(["test/b"], hashes, "sampled"), (["test/b"], 1))
+        self.assertEqual(self.measure(["test/a"], hashes, "sampled"), ([], 1))
+
+    def test_a_changed_closure_artifact_names_the_executable_that_loads_it(self) -> None:
+        same = {"test/a": self.sha("bytes of a"), "test/mod.so": self.sha("bytes of mod.so")}
+        # deep.so, loaded by mod.so, loaded by a, changed: a is reported.
+        out = self.full([], {**same, "test/deep.so": self.sha("old deep")}, "all")
+        self.assertEqual((out["unreached_changed"], out["unreached_compared"], out["unreached_unchecked_modules"]),
+                         (["test/a"], 3, []))
+        # Control: an unchanged closure leaves a out.
+        out = self.full([], {**same, "test/deep.so": self.sha("bytes of deep.so")}, "all")
+        self.assertEqual(out["unreached_changed"], [])
+        # A closure artifact with no hash is unchecked, and does not null the field.
+        out = self.full([], same, "all")
+        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]), ([], ["test/deep.so"]))
+        # Only unhashed artifacts in scope: nothing compared, so null, still named.
+        out = self.full([], {"test/c": None}, "all")
+        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]),
+                         (None, ["test/deep.so", "test/mod.so"]))
+        # In a bounded run, only a sampled executable brings its closure.
+        out = self.full(["test/b"], {"test/b": self.sha("bytes of b"), "test/deep.so": self.sha("old")},
+                        "sampled")
+        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]), ([], []))
+
+    def test_identity_usable_decides_before_the_problem_lines(self) -> None:
+        hashes = {"test/b": self.sha("old bytes of b")}
+        self.assertEqual(self.measure([], hashes, "all", job={"identity": {"usable": False}}), (None, 0))
+        self.assertEqual(self.measure([], hashes, "all", job={
+            "identity": {"usable": True}, "problems": ["executable identity unavailable: stale"]}),
+            (["test/b"], 1))
+
+    def test_no_information_is_null_never_an_empty_list(self) -> None:
+        # No in-scope artifact has a recorded hash.
+        self.assertEqual(self.measure([], {"test/c": None}, "all"), (None, 0))
+        self.assertEqual(self.measure(["test/c"], {"test/a": self.sha("bytes of a")}, "sampled"), (None, 0))
+        # Nothing was picked: the first candidate keyed, from another toolchain.
+        self.assertEqual(self.measure([], {"test/a": self.sha("x")}, "all",
+                                      {"status": "derived", "base_record_run_id": None}), (None, 0))
+        self.assertEqual(self.measure([], {"test/a": self.sha("x")}, "all", {"status": "error: x"}), (None, 0))
+        # A record whose identity the recorder could not write is not evidence.
+        hashes = {"test/b": self.sha("old bytes of b")}
+        self.assertEqual(self.measure([], hashes, "all", problems=["link maps absent"]), (["test/b"], 1))
+        self.assertEqual(self.measure([], hashes, "all", problems=["executable identity unavailable: x"]),
+                         (None, 0))
+        # One hashed executable is enough to measure; the unhashed ones are skipped.
+        self.assertEqual(self.measure([], {"test/a": self.sha("bytes of a"), "test/c": None}, "all"), ([], 1))
+
+    def test_each_mode_measures_its_own_scope(self) -> None:
+        calls = []
+        with mock.patch.object(runner, "unreached_changed",
+                               side_effect=lambda *a: calls.append(a[4]) or {
+                                   "unreached_changed": ["test/x"], "unreached_compared": 1,
+                                   "unreached_unchecked_modules": []}):
+            _, _, receipt = KeyedFullTest.run_full(KeyedFullTest())
+        self.assertEqual(calls, ["all"])
+        derived = receipt["executable_reuse"]["derived"]
+        self.assertEqual((derived["unreached_changed"], derived["unreached_compared"]), (["test/x"], 1))
 
 
 class SelectedLegPipelineTest(unittest.TestCase):
@@ -2179,6 +2305,8 @@ class SelectedLegPipelineTest(unittest.TestCase):
             if reuse is not None:
                 receipt["executable_reuse"] = reuse
             def derived(binding, head, build_dir, result_dir, *, base_sha):
+                if derived_files == "error":
+                    return {"status": "error: base refused"}
                 result_dir.mkdir(parents=True, exist_ok=True)
                 for name, doc in (derived_files or {}).items():
                     (result_dir / name).write_text(json.dumps(doc), encoding="utf-8")
@@ -2229,9 +2357,12 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertEqual(result["comparison_verdict"], "matched_pass")
         self.assertEqual(result["executable_reuse"],
                          {"mode": "keyed_bounded_shadow", "bound": bound,
-                          "derived": {"status": "derived", "would_skip_count": 3},
+                          # No record was picked, so no bytes could be compared.
+                          "derived": {"status": "derived", "would_skip_count": 3, "unreached_changed": None,
+                                      "unreached_compared": 0, "unreached_unchecked_modules": None},
                           # No selection was written beside the receipt to measure against.
-                          "would_skip_tests": None, "false_skip_count": None, "false_skips": None})
+                          "would_skip_tests": None, "false_skip_count": None, "false_skips": None,
+                          "sampled_failures": None})
         self.assertEqual(len(self.derive_calls), 1)
         self.assertEqual(self.derive_calls[0].args[1], "b" * 40)  # the receipt's head
         self.assertEqual(self.derive_calls[0].kwargs["base_sha"], "a" * 40)
@@ -2240,9 +2371,18 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertEqual(self.derive_calls, [])
         files = {"selection.json": {"would_skip": ["test/n"], "sampled_executables": []},
                  "executable-keys.json": {"executables": {"test/n": {"registrations": ["neighbor"]}}}}
-        _, _, measured = self.run_pipeline(reuse=bound, derived_files=files,
-                                           failures={"full tests": ["neighbor"]})
+        scopes = []
+        with mock.patch.object(runner, "unreached_changed",
+                               side_effect=lambda *a: scopes.append(a[4]) or {}):
+            _, _, measured = self.run_pipeline(reuse=bound, derived_files=files,
+                                               failures={"full tests": ["neighbor"]})
         self.assertEqual(measured["executable_reuse"]["false_skips"], ["neighbor"])
+        self.assertEqual(scopes, ["sampled"])  # a bounded run built only the sample
+        # Nothing derived: the result still carries every field, as unknown.
+        _, _, failed = self.run_pipeline(reuse=bound, derived_files="error")
+        reuse = failed["executable_reuse"]
+        self.assertEqual({k: reuse[k] for k in runner.UNMEASURED_SKIPS}, runner.UNMEASURED_SKIPS)
+        self.assertEqual(reuse["derived"], {"status": "error: base refused", **runner.UNKNOWN_UNREACHED})
 
     LANE_REDS = ({"lane-red": "2026-10-17"}, "f" * 64)
 

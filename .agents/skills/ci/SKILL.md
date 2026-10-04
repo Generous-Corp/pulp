@@ -7284,6 +7284,15 @@ that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
 instead of hand-editing `tools/shipyard.toml`; the helper owns the pin
 edit and worktree-safety checks.
 
+`shipyard pin bump` verifies by running the installer, which installs the
+new release into `~/.local/bin` on the host you run it on. Pass
+`--skip-verify` when the hosts are meant to reach the release through their
+own fleet rollout, or the host you bumped from stops being evidence that the
+rollout worked; check the release instead from a downloaded copy (its
+`checksums.sha256` entry, `codesign -dv`, `--help` surface). A clean-HOME
+`tools/install-shipyard.sh` needs `SHIPYARD_GITHUB_TOKEN`: anonymously the
+release lookup hits GitHub's 60-requests-an-hour limit and fails with 403.
+
 The two tools cover the same target matrix (mac local + GitHub-hosted
 Linux/Windows; legacy SSH targets only when explicitly requested) and accept
 the same `--base` flag for develop branches. Shipyard adds evidence-gated
