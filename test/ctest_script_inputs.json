@@ -1469,6 +1469,18 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-group-core-gpu-audio-private": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_neural_model_manifest.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-group-core-platform": {
    "data": "none",
    "inputs": [],
