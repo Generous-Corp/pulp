@@ -3,6 +3,7 @@
 #include <pulp/view/pending_damage.hpp>
 #include <pulp/view/view.hpp>
 #include <algorithm>
+#include <cstdint>
 #include <set>
 #include <string>
 #include <memory>
@@ -44,6 +45,16 @@ struct WindowOptions {
     float min_height = 0;  ///< Minimum window height (0 = no minimum)
     bool resizable = true;
     bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
+
+    /// The window's own background, 0xRRGGBB. It is what the window shows
+    /// wherever no frame of the tree has landed yet: the window's backing
+    /// colour, the content layer's colour before the first GPU present (and
+    /// after a resize empties the drawable), the fill under the tree, and the
+    /// letterbox bars around a pinned design viewport. A standalone editor
+    /// sets it from `ViewBridge::editor_background_rgb()` so the app opens on
+    /// the editor's own colour, the same contract a plug-in editor host
+    /// follows. The default is `kEditorHostClearRgb` (plugin_view_host.hpp).
+    std::uint32_t background_rgb = 0x1E1E2E;
 
     /// When true, the window is created and the run loop drives the bridge
     /// per-vsync as usual, but the window

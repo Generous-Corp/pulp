@@ -191,6 +191,20 @@ older view-first open it filled the whole window for the length of the mount.
   enough: the backing layer (seeded before the view can join a window), the
   frame fill under the tree, and the letterbox bars around a pinned viewport
   (visible after the UI is up when the host's aspect differs).
+- The standalone app window follows the same contract through
+  `WindowOptions::background_rgb`: `make_standalone_window_options()` takes
+  `bridge.editor_background_rgb()` (no default, so a caller cannot drop it),
+  and both macOS window hosts paint it as the NSWindow's backgroundColor, the
+  content layer's colour (GPU host) and the fill under the tree. Before this
+  the GPU standalone window kept AppKit's default (white in light mode) and
+  the framework navy layer. Gate: `test_window_host_first_frame_macos.mm`
+  (hidden windows, both hosts, window + layer + back-buffer frame, with an
+  undeclared control). A host app that builds its own `WindowOptions` for an
+  editor must set it too.
+- The pinned Skia's Graphite error colour (`sk_error`) is RED
+  (`half4(1,0,0,1)`), not magenta: a magenta image in a Pulp frame is not a
+  Graphite paint-key failure. Prove where a colour came from by reading back
+  presented drawables and the host's own window, not by its hue.
 - Do not paint a poster/snapshot of the UI instead — not a default-state
   poster (wrong knob positions, band counts and spectrum for the user's
   session, then a jump to the real ones: a different flash, not none), and not

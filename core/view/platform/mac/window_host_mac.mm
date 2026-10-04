@@ -238,6 +238,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         self.autoresizesSubviews = YES;
         self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         _deferredClickAlive = std::make_shared<std::atomic<bool>>(true);
+        _backgroundRGB = pulp::view::mac_host::kHostClearRgb;
     }
     return self;
 }
@@ -1407,9 +1408,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
 
+    const uint32_t background = self.backgroundRGB;
     canvas.set_fill_color(pulp::canvas::Color::rgba8(
-        pulp::view::mac_host::kHostClearR, pulp::view::mac_host::kHostClearG,
-        pulp::view::mac_host::kHostClearB));
+        (background >> 16) & 0xff, (background >> 8) & 0xff, background & 0xff));
     canvas.fill_rect(0, 0,
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
@@ -1532,6 +1533,16 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // stays presented until the next display-link tick produces a new one.
 - (BOOL)wantsUpdateLayer {
     return YES;
+}
+
+// The backing layer shows this colour until the first Metal frame lands and
+// whenever a resize empties the drawable, so it follows the window's declared
+// background rather than staying at the framework default seeded in -init.
+- (void)setBackgroundRGB:(uint32_t)rgb {
+    [super setBackgroundRGB:rgb];
+    CGColorRef color = pulp::view::mac_host::cg_color_from_rgb(rgb);
+    _metalLayer.backgroundColor = color;
+    CGColorRelease(color);
 }
 
 - (void)updateLayer {
@@ -1858,11 +1869,13 @@ public:
             // so any compositing race / partial-paint window shows dark, not
             // white. Belt-and-suspenders alongside PulpView isOpaque=YES.
             // CPU-host-specific: the GPU host clears via its Metal frame.
-            [window_ setBackgroundColor:pulp::view::mac_host::ns_host_clear_color()];
+            [window_ setBackgroundColor:pulp::view::mac_host::ns_color_from_rgb(
+                                            options.background_rgb)];
 
             options_initially_hidden_ = options.initially_hidden;
 
             view_ = [[PulpView alloc] initWithFrame:frame];
+            view_.backgroundRGB = options.background_rgb;
             view_.rootView = &root_;
             view_.frameClock = &frame_clock_;
             view_.framePump = &frame_pump_;
@@ -2133,9 +2146,15 @@ public:
             window_ = create_configured_window(options);
 
             options_initially_hidden_ = options.initially_hidden;
+            background_rgb_ = options.background_rgb;
+            // The window's own colour shows wherever the Metal layer has not
+            // composited yet (and in AppKit's own repaints of the frame); the
+            // platform default is white in light mode, never the app's colour.
+            [window_ setBackgroundColor:mac_host::ns_color_from_rgb(background_rgb_)];
 
             // Create CAMetalLayer-backed view
             metal_view_ = [[PulpMetalView alloc] initWithFrame:frame];
+            metal_view_.backgroundRGB = background_rgb_;
             metal_view_.rootView = &root_;
             metal_view_.frameClock = &frame_clock_;
             metal_view_.repaintBlock = ^{
@@ -2690,6 +2709,8 @@ private:
     id key_monitor_ = nil;                                       // NSEvent app key monitor
     std::function<bool(const pulp::view::KeyEvent&)> app_key_handler_;
     bool options_initially_hidden_ = false;
+    // WindowOptions::background_rgb: the fill under the tree and the letterbox bars.
+    uint32_t background_rgb_ = mac_host::kHostClearRgb;
     bool foreground_role_adopted_ = false;
     std::vector<WindowOptions::MenuCommand> menu_commands_;
 
@@ -3033,7 +3054,8 @@ private:
         }
 
         canvas.set_fill_color(canvas::Color::rgba8(
-            mac_host::kHostClearR, mac_host::kHostClearG, mac_host::kHostClearB));
+            (background_rgb_ >> 16) & 0xff, (background_rgb_ >> 8) & 0xff,
+            background_rgb_ & 0xff));
         canvas.fill_rect(0, 0, width_, height_);
 
         if (has_viewport) {

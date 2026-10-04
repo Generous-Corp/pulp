@@ -414,6 +414,18 @@ inline CGColorRef cg_host_clear_color() {
     return color;
 }
 
+// AppKit spelling of an arbitrary 0xRRGGBB background (a window's declared
+// background, WindowOptions::background_rgb), in sRGB like the CGColor below.
+inline NSColor* ns_color_from_rgb(std::uint32_t rgb) {
+    return [NSColor colorWithSRGBRed:((rgb >> 16) & 0xff) / 255.0
+                               green:((rgb >> 8) & 0xff) / 255.0
+                                blue:(rgb & 0xff) / 255.0
+                               alpha:1.0];
+}
+
+inline constexpr std::uint32_t kHostClearRgb =
+    (std::uint32_t(kHostClearR) << 16) | (std::uint32_t(kHostClearG) << 8) | kHostClearB;
+
 // Core Graphics spelling of an arbitrary 0xRRGGBB background (a plug-in's
 // declared editor background). Same ownership rule as cg_host_clear_color().
 inline CGColorRef cg_color_from_rgb(std::uint32_t rgb) {

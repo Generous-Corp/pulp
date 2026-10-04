@@ -146,6 +146,10 @@ if(APPLE AND NOT PULP_IOS)
     pulp_add_test_suite(pulp-test-plugin-view-first-frame-macos GROUP pulp-test-group-view-host-mac
         SOURCES test_plugin_view_host_first_frame_macos.mm
         LIBRARIES pulp::view "-framework AppKit")
+    # The same contract for standalone app windows (WindowOptions::background_rgb).
+    pulp_add_test_suite(pulp-test-window-host-first-frame-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_window_host_first_frame_macos.mm
+        LIBRARIES pulp::view "-framework AppKit")
 endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
