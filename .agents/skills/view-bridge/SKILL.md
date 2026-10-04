@@ -2827,19 +2827,31 @@ visibly move, and must not become an automation source. One contract, the one
 `Knob::set_modulated_value` / `Fader::set_modulated_value` (bridge:
 `setModulatedValue(id, v | null)`) implement:
 
-- **The base stays the user's and stays editable.** The base pointer/thumb, the
-  value text and every gesture (`on_change`, begin/end) report the base, so a
-  drag starts from it and host automation records only the user's moves.
-- **The played value is drawn on top** (token `knob.modulation`): an arc or
-  segment from the base to the played value plus a marker at the played value.
-  Base marker + moving modulated marker is the whole visual language.
+- **The base stays the user's and stays editable.** `value()` and every
+  gesture (`on_change`, begin/end) report the base, so a drag starts from it
+  and host automation records only the user's moves.
+- **ONE indicator, at the value playing.** Two selections on one control (a
+  base needle and arc plus a second arc and needle for the played value) read
+  as two controls. While modulated, the control's single pointer and value arc
+  (a fader's single thumb and fill) sit at the value PLAYING, in the
+  modulation colour (token `knob.modulation`); the base is a quiet tick on the
+  ring or track. The value text prints the played value, and the base while
+  the user drags it (the drag moves the tick). Optionally a faint band on the
+  ring shows base ± depth. Gate it: count the value arcs and pointers a
+  modulated control paints and require one of each, with a negative control
+  that draws two and must fail (`[single-indicator]` in
+  `test/test_widget_bounded_repaint.cpp`).
 - **Modulation never writes a host lane.** It offsets around the base, and the
   base is whatever the host's automation is playing, so the control shows both
   at once. Send the modulator's *coordinate* to the editor, not a value, and
   apply it to the base the control shows, or an automated base and the LFO's
   swing drift apart.
-- **Cost: one bounded repaint per frame, no layout, no commit.** The marker
-  repaints the control's own box. In a scripted UI update an SVG path's `d`
+- **Cost: one bounded repaint per frame, no layout, no commit.** The
+  indicator repaints the control's own box. A paint setter that re-applies the
+  value a view already has (background, border, radius, a bridge
+  `setTextColor` of the same colour) is free; a real change of one is an
+  unmarked paint change and costs a whole-surface repaint, so restyle only on
+  a state change, never per frame. In a scripted UI update an SVG path's `d`
   directly (`setSvgPath`) or a canvas, never React state; `SvgPathWidget::set_path`
   repaints the union of the old and new path extents and skips an unchanged
   string, and a redrawn `CanvasWidget` repaints its own box. A label whose text
