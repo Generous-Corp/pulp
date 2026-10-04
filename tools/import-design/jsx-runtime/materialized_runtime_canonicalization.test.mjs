@@ -133,3 +133,15 @@ test('preserves vendor assets referenced outside script tags', () => {
   assert.equal(result.assets.length, 1);
   assert.match(result.html, /href="react"/);
 });
+
+test('preserves vendor assets in unquoted and CSS references', () => {
+  const react = '/** @license React react.development.js */';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<img src=react><script src="react"></script>' +
+      '<style>.x{background:url(react)}</style>',
+    assets: [vendorAsset('react', react, 'react')],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /src=react/);
+  assert.match(result.html, /url\(react\)/);
+});
