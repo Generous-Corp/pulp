@@ -403,6 +403,10 @@ REVIEWED_SCANNERS = {
     "tools/scripts/raw_this_async_check.py": "walks core/ only",
     "tools/scripts/sample_region_compat_baseline.py": "walks CMake and build trees",
     "tools/scripts/skills_doc_check.py": "walks .agents/skills",
+    "tools/scripts/test_run_changed_surface_tests.py":
+        "its one tree walk is git grep over CMake files for raw downloads, and CMake "
+        "changes are test-topology paths that already run the native gate; its other "
+        "tools/ paths are fixtures",
     "tools/deps/audit.py":
         "walks only a dependency's fetched source tree (external/ or the FetchContent "
         "cache) for its offline-fetch contract; it names tools/ only for its own manifest",
