@@ -303,6 +303,8 @@ if(APPLE)
         target_sources(pulp-view-core PRIVATE
             platform/mac/app_menu_mac.mm
             platform/mac/window_host_mac.mm
+            platform/mac/window_host_mac_lifecycle.mm
+            platform/mac/window_host_mac_metal_view.mm
             platform/mac/window_host_mac_capture.mm
             platform/mac/window_host_mac_geometry.mm
             platform/mac/window_host_mac_open_documents.mm

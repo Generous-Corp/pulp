@@ -20,6 +20,8 @@
 
 #include "app_menu_mac.hpp"
 #include "window_host_mac_capture.h"
+#include "window_host_mac_lifecycle.h"
+#include "window_host_mac_metal_view.h"
 #include "window_host_mac_internal.hpp"
 #include "window_host_mac_open_documents.h"
 #include "window_host_mac_view.h"
@@ -56,136 +58,11 @@
 #import <Metal/Metal.h>
 #endif
 
-// ── App menu helper ──────────────────────────────────────────────────────────
-
-static std::mutex& cocoa_dispatcher_liveness_mutex() {
-    static std::mutex mutex;
-    return mutex;
-}
-
-static std::vector<std::weak_ptr<std::atomic<bool>>>& cocoa_dispatcher_liveness_tokens() {
-    static std::vector<std::weak_ptr<std::atomic<bool>>> tokens;
-    return tokens;
-}
-
-static void register_cocoa_dispatcher_liveness(
-    const std::shared_ptr<std::atomic<bool>>& alive) {
-    auto& mutex = cocoa_dispatcher_liveness_mutex();
-    auto& tokens = cocoa_dispatcher_liveness_tokens();
-    std::lock_guard lock(mutex);
-    tokens.erase(std::remove_if(tokens.begin(), tokens.end(),
-                     [](const auto& token) { return token.expired(); }),
-                 tokens.end());
-    tokens.push_back(alive);
-}
-
-static void mark_cocoa_dispatchers_stopping() {
-    auto& mutex = cocoa_dispatcher_liveness_mutex();
-    auto& tokens = cocoa_dispatcher_liveness_tokens();
-    std::lock_guard lock(mutex);
-    tokens.erase(std::remove_if(tokens.begin(), tokens.end(),
-                     [](const auto& token) {
-                         auto alive = token.lock();
-                         if (!alive)
-                             return true;
-                         alive->store(false, std::memory_order_release);
-                         return false;
-                     }),
-                 tokens.end());
-}
-
-static void post_cocoa_stop_event() {
-    NSEvent* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
-                                        location:NSZeroPoint
-                                   modifierFlags:0
-                                       timestamp:0
-                                    windowNumber:0
-                                         context:nil
-                                         subtype:0
-                                           data1:0
-                                           data2:0];
-    [NSApp postEvent:event atStart:NO];
-}
-
-static void request_cocoa_app_stop() {
-    mark_cocoa_dispatchers_stopping();
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [NSApp stop:nil];
-        post_cocoa_stop_event();
-    });
-}
-
-static void request_hidden_cocoa_window_close(NSWindow* window) {
-    mark_cocoa_dispatchers_stopping();
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (window != nil)
-            [window close];
-        [NSApp stop:nil];
-        post_cocoa_stop_event();
-    });
-}
-
-static void request_cocoa_window_close_deferred(NSWindow* window, bool initially_hidden) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-      if (initially_hidden) {
-          mark_cocoa_dispatchers_stopping();
-          if (window != nil)
-              [window close];
-          [NSApp stop:nil];
-          post_cocoa_stop_event();
-          return;
-      }
-      if (window != nil) {
-          [window performClose:nil];
-      } else {
-          mark_cocoa_dispatchers_stopping();
-          [NSApp stop:nil];
-          post_cocoa_stop_event();
-      }
-    });
-}
-
 // Window setup, geometry, event, and gesture helpers live in
 // window_host_mac_geometry.mm; use them via pulp::view::mac_geometry.
 using namespace pulp::view::mac_geometry;
 
 extern "C" void pulp_mac_text_input_client_category_anchor();
-
-static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backend(
-    std::shared_ptr<std::atomic<bool>> alive) {
-    return {
-        [alive](pulp::events::Task task) -> bool {
-            if (!task) return false;
-            if (!alive || !alive->load(std::memory_order_acquire)) return false;
-            auto* heap_task = new pulp::events::Task(std::move(task));
-            dispatch_async(dispatch_get_main_queue(), ^{
-                std::unique_ptr<pulp::events::Task> owned(heap_task);
-                if (*owned) (*owned)();
-            });
-            return true;
-        },
-        [alive]() -> bool {
-            if (!alive || !alive->load(std::memory_order_acquire)) return false;
-            // Explicit -> bool: `-[NSThread isMainThread]` returns ObjC `BOOL`,
-            // which is `bool` on arm64 but `signed char` on x86_64. Without the
-            // explicit return type the two `return`s deduce different types and
-            // this lambda fails to compile on Intel (universal/x86_64 builds)
-            // while compiling fine on Apple Silicon.
-            return [NSThread isMainThread];
-        },
-    };
-}
-
-static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_return) {
-    if (!ready_to_return)
-        return;
-    while (!ready_to_return()) {
-        @autoreleasepool {
-            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
-                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-        }
-    }
-}
 
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
 
@@ -1457,251 +1334,6 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 
 @end
 
-// ── PulpMetalView: CAMetalLayer-backed NSView (GPU rendering path) ───────────
-
-#ifdef PULP_HAS_SKIA
-
-@interface PulpMetalView : PulpView
-@property (nonatomic, readonly) CAMetalLayer* metalLayer;
-@property (nonatomic, copy) dispatch_block_t repaintBlock;
-// Fires when the backing scale (DPI) changes WITHOUT a frame-size change — a
-// display move/hotplug at the same logical size — which does not go through
-// windowDidResize. The host recreates the GPU surfaces at the new physical size.
-@property (nonatomic, copy) dispatch_block_t backingChangedBlock;
-@property (nonatomic) BOOL pulpLiveResizeActive;
-@property (nonatomic) NSUInteger resizeCoverGeneration;
-- (void)releaseResizeCoverAfterPresent;
-// C++ render state is managed by MacGpuWindowHost, not the view
-@end
-
-@implementation PulpMetalView
-
-- (instancetype)initWithFrame:(NSRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        self.hostOwnsRootLayout = YES;
-        self.wantsLayer = YES;
-
-        CAMetalLayer* layer = [CAMetalLayer layer];
-        layer.device = MTLCreateSystemDefaultDevice();
-        layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-        layer.framebufferOnly = NO;
-        CGFloat scale = self.window ? self.window.backingScaleFactor
-                                    : [NSScreen mainScreen].backingScaleFactor;
-        layer.contentsScale = scale;
-        CGSize backing = NSMakeSize(frame.size.width * scale, frame.size.height * scale);
-        layer.drawableSize = backing;
-
-        // Declare the layer opaque and seed its background to
-        // the standalone-app's base dark fill (matches paint_scene RGB
-        // 30,30,46 = 0x1E1E2E). Without this, AppKit auto-clears the
-        // layer to its default `backgroundColor` (clear/white-equivalent
-        // through the window) every time `setNeedsDisplay:YES` fires —
-        // which any hover / mouse event triggers — and the user sees an
-        // opaque-white flash in the canvas region between when AppKit
-        // invalidates and when the next display-link tick produces a
-        // Metal frame. The "live paints white but headless paints dark"
-        // symptom comes from this gap, not from the canvas command list.
-        //
-        // BGRA8Unorm at full opacity, sRGB encoded as the pixel format
-        // expects (0x1E/255 ≈ 0.118, etc).
-        layer.opaque = YES;
-        layer.backgroundColor = pulp::view::mac_host::cg_host_clear_color();
-
-        // Keep a settled drawable at native scale. During a live expansion,
-        // setFrameSize: temporarily selects Resize gravity only until the host
-        // synchronously presents the exact new-size GPU frame. That one-frame
-        // cover avoids exposing background strips while drawable acquisition
-        // waits for vsync, without restoring the old whole-gesture zoom.
-        // Non-flipped NSView layer: max-Y is visually the top, so TopLeft is
-        // the upper-left corner where our (0,0)-origin UI begins.
-        layer.contentsGravity = kCAGravityTopLeft;
-
-        self.layer = layer;
-        _metalLayer = layer;
-    }
-    return self;
-}
-
-// `wantsUpdateLayer = YES` tells AppKit to use the
-// layer-based drawing path (calls `-updateLayer` instead of
-// `-drawRect:`) and, critically, NOT to auto-clear the backing layer
-// to opaque background between updates. Combined with `layer.opaque
-// = YES` above, this makes setNeedsDisplay-triggered invalidations a
-// no-op for the layer's own contents — the most-recent Metal frame
-// stays presented until the next display-link tick produces a new one.
-- (BOOL)wantsUpdateLayer {
-    return YES;
-}
-
-- (void)updateLayer {
-    // No-op: Metal frames are produced by MacGpuWindowHost::render_frame
-    // off the display link callback, NOT inside AppKit's update cycle.
-    // We just need this method to exist so AppKit honors
-    // wantsUpdateLayer and skips its own paint pipeline.
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-    (void)dirtyRect;
-}
-
-- (void)setNeedsDisplay:(BOOL)needsDisplay {
-    [super setNeedsDisplay:needsDisplay];
-    if (needsDisplay && self.repaintBlock) self.repaintBlock();
-}
-
-- (void)setFrameSize:(NSSize)newSize {
-    const NSSize oldSize = self.frame.size;
-    self.resizeCoverGeneration += 1;
-    const BOOL expandingLiveResize =
-        (self.inLiveResize || self.pulpLiveResizeActive) &&
-        (newSize.width > oldSize.width || newSize.height > oldSize.height);
-    const BOOL unchangedLiveResize =
-        (self.inLiveResize || self.pulpLiveResizeActive) &&
-        newSize.width == oldSize.width && newSize.height == oldSize.height;
-    // AppKit commits the layer bounds before windowDidResize can acquire and
-    // paint the matching Metal drawable. Cover that sub-frame expansion gap
-    // with the retained drawable; handle_resize restores TopLeft immediately
-    // after the exact-size frame has presented.
-    if (expandingLiveResize) {
-        self.metalLayer.contentsGravity = kCAGravityResize;
-    } else if (!unchangedLiveResize) {
-        // AppKit commonly follows an expansion with a redundant same-size
-        // setFrameSize:. Preserve the cover for that callback; treating it as
-        // a contraction releases the cover before the queued drawable lands.
-        self.metalLayer.contentsGravity = kCAGravityTopLeft;
-    }
-    [super setFrameSize:newSize];
-    CGFloat scale = self.window ? self.window.backingScaleFactor
-                                : [NSScreen mainScreen].backingScaleFactor;
-    self.metalLayer.contentsScale = scale;
-    self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
-}
-
-- (void)viewWillStartLiveResize {
-    [super viewWillStartLiveResize];
-    self.pulpLiveResizeActive = YES;
-}
-
-- (void)viewDidEndLiveResize {
-    [super viewDidEndLiveResize];
-    self.pulpLiveResizeActive = NO;
-    [self releaseResizeCoverAfterPresent];
-}
-
-- (void)releaseResizeCoverAfterPresent {
-    const NSUInteger generation = self.resizeCoverGeneration;
-    PulpMetalView* view = self;
-    // GpuSurface::end_frame queues the drawable; it does not mean Core
-    // Animation has displayed it. Keep the retained-frame cover through the
-    // next compositor opportunity. A newer resize increments the generation,
-    // invalidating this release so a stale callback cannot expose the edge.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 64 * NSEC_PER_MSEC),
-                   dispatch_get_main_queue(), ^{
-        if (view.resizeCoverGeneration == generation)
-            view.metalLayer.contentsGravity = kCAGravityTopLeft;
-    });
-}
-
-- (void)viewDidChangeBackingProperties {
-    [super viewDidChangeBackingProperties];
-    CGFloat scale = self.window ? self.window.backingScaleFactor
-                                : [NSScreen mainScreen].backingScaleFactor;
-    self.metalLayer.contentsScale = scale;
-    CGSize backing = CGSizeMake(self.bounds.size.width * scale, self.bounds.size.height * scale);
-    self.metalLayer.drawableSize = backing;
-    // A pure backing-scale change does not trigger windowDidResize, so the host
-    // must be told to recreate its GPU surfaces (and the retained partial-repaint
-    // scene) at the new physical size — otherwise the fixed-size scene desyncs
-    // from the resized drawable.
-    if (self.backingChangedBlock) self.backingChangedBlock();
-}
-
-@end
-
-#endif // PULP_HAS_SKIA
-
-// ── PulpWindowDelegate ───────────────────────────────────────────────────────
-
-@interface PulpWindowDelegate : NSObject <NSWindowDelegate>
-@property (nonatomic, copy) void (^onClose)(void);
-@property (nonatomic, copy) void (^onResize)(float, float);
-/// Real-time aspect-lock snap during user drag.
-/// macOS `setContentAspectRatio:` is unreliable in practice (it does
-/// not engage during edge-drag on every monitor configuration, and is
-/// bypassed entirely by the green zoom button / programmatic resize).
-/// Implementing `windowWillResize:toSize:` constrains every proposed
-/// resize before AppKit commits it, so the live drag is locked to the
-/// design aspect regardless of drag handle or zoom path. When 0, no
-/// constraint is applied.
-@property (nonatomic, assign) CGFloat aspectRatio;
-/// Explicit window role for the close policy. A SECONDARY
-/// window (the floating inspector) only orders itself out on close and never
-/// stops the app; a PRIMARY window (the main canvas, the default) stops the
-/// app on close regardless of whatever secondary windows remain visible. This
-/// replaces the previous visible-window-count heuristic, which left the app
-/// running with only the inspector after the main window closed.
-@property (nonatomic, assign) BOOL isSecondaryWindow;
-@end
-
-@implementation PulpWindowDelegate
-
-- (BOOL)windowShouldClose:(NSWindow*)sender {
-    if (self.onClose) self.onClose();
-    [sender orderOut:nil];
-    // Role-based close policy (replaces the visible-count
-    // heuristic). A secondary window (e.g. the floating inspector) closing only
-    // orders itself out and leaves the main window + app running. A primary
-    // window (the main canvas) closing stops the app regardless of any
-    // secondary windows still visible.
-    if (!self.isSecondaryWindow) request_cocoa_app_stop();
-    return YES;
-}
-
-- (void)windowDidResize:(NSNotification*)notification {
-    if (self.onResize) {
-        NSWindow* window = notification.object;
-        NSSize size = window.contentView.bounds.size;
-        self.onResize(static_cast<float>(size.width), static_cast<float>(size.height));
-    }
-}
-
-- (NSSize)windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize {
-    // No-op when aspect-lock isn't requested (the scroll-mode showcase and
-    // every non-design-viewport window take this path — resize freely).
-    if (self.aspectRatio <= 0) return frameSize;
-
-    // Convert frame size → content size (NSWindow gives us frame; we
-    // want to constrain the *content* aspect, since the design viewport
-    // and our paint math are in content coordinates).
-    NSRect frameRect  = NSMakeRect(0, 0, frameSize.width, frameSize.height);
-    NSRect contentRect = [sender contentRectForFrameRect:frameRect];
-    CGFloat targetW = contentRect.size.width;
-    CGFloat targetH = contentRect.size.height;
-    if (targetW <= 0 || targetH <= 0) return frameSize;
-
-    NSSize currentContent = sender.contentView.bounds.size;
-    CGFloat dw = std::fabs(targetW - currentContent.width);
-    CGFloat dh = std::fabs(targetH - currentContent.height);
-
-    // Snap to aspect by picking the dominant drag axis: whichever
-    // dimension changed more from the current size drives the other.
-    // This lets the user grow OR shrink by dragging any edge or
-    // corner; the perpendicular dimension follows proportionally.
-    if (dw >= dh) {
-        targetH = targetW / self.aspectRatio;
-    } else {
-        targetW = targetH * self.aspectRatio;
-    }
-
-    // Convert back content → frame so AppKit gets a frame size.
-    NSRect newContent = NSMakeRect(0, 0, targetW, targetH);
-    NSRect newFrame   = [sender frameRectForContentRect:newContent];
-    return newFrame.size;
-}
-
-@end
-
 // configure_window_type and the child-view geometry helpers
 // (child_view_frame_in_host, attach_child_view_to_host,
 // set_child_view_bounds_in_host, detach_child_view_from_host) were
@@ -1995,7 +1627,7 @@ public:
     void invalidate_input_state() override { [view_ clearInteractionState]; }
     void request_close() override {
         if (options_initially_hidden_ && window_) {
-            request_hidden_cocoa_window_close(window_);
+            pulp::view::mac_lifecycle::request_hidden_cocoa_window_close(window_);
             return;
         }
         request_app_close(window_);
@@ -2006,7 +1638,7 @@ public:
     }
 
     void request_close_deferred() override {
-        request_cocoa_window_close_deferred(window_, options_initially_hidden_);
+        pulp::view::mac_lifecycle::request_cocoa_window_close_deferred(window_, options_initially_hidden_);
     }
 
     void set_close_callback(std::function<void()> cb) override {
@@ -2061,22 +1693,22 @@ public:
             // Must precede [NSApp run] — see the header for why.
             mac_open_documents::install_app_delegate();
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
-            register_cocoa_dispatcher_liveness(dispatcher_alive);
+            pulp::view::mac_lifecycle::register_cocoa_dispatcher_liveness(dispatcher_alive);
             auto dispatcher_token =
                 pulp::events::MainThreadDispatcher::register_backend(
-                    make_cocoa_main_thread_backend(dispatcher_alive));
+                    pulp::view::mac_lifecycle::make_cocoa_main_thread_backend(dispatcher_alive));
             // See header for initially_hidden.
             if (options_initially_hidden_) {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
                 mac_menu::install_application_menu(
-                    menu_commands_, [] { request_cocoa_app_stop(); });
+                    menu_commands_, [] { pulp::view::mac_lifecycle::request_cocoa_app_stop(); });
                 show();
                 [NSApp activateIgnoringOtherApps:YES];
             }
             [NSApp run];
-            pump_cocoa_main_thread_until(ready_to_return);
+            pulp::view::mac_lifecycle::pump_cocoa_main_thread_until(ready_to_return);
             dispatcher_alive->store(false, std::memory_order_release);
             pulp::events::MainThreadDispatcher::unregister_backend(dispatcher_token);
         }
@@ -2228,7 +1860,7 @@ public:
         foreground_role_adopted_ = true;
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         mac_menu::install_application_menu(
-            menu_commands_, [] { request_cocoa_app_stop(); });
+            menu_commands_, [] { pulp::view::mac_lifecycle::request_cocoa_app_stop(); });
     }
 
     void show() override {
@@ -2437,7 +2069,7 @@ public:
 
     void request_close() override {
         if (options_initially_hidden_ && window_) {
-            request_hidden_cocoa_window_close(window_);
+            pulp::view::mac_lifecycle::request_hidden_cocoa_window_close(window_);
             return;
         }
         request_app_close(window_);
@@ -2448,7 +2080,7 @@ public:
     }
 
     void request_close_deferred() override {
-        request_cocoa_window_close_deferred(window_, options_initially_hidden_);
+        pulp::view::mac_lifecycle::request_cocoa_window_close_deferred(window_, options_initially_hidden_);
     }
 
     void set_close_callback(std::function<void()> cb) override {
@@ -2532,10 +2164,10 @@ public:
             // Must precede [NSApp run] — see the header for why.
             mac_open_documents::install_app_delegate();
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
-            register_cocoa_dispatcher_liveness(dispatcher_alive);
+            pulp::view::mac_lifecycle::register_cocoa_dispatcher_liveness(dispatcher_alive);
             auto dispatcher_token =
                 pulp::events::MainThreadDispatcher::register_backend(
-                    make_cocoa_main_thread_backend(dispatcher_alive));
+                    pulp::view::mac_lifecycle::make_cocoa_main_thread_backend(dispatcher_alive));
             // When initially_hidden is set,
             // skip Dock icon, focus stealing, and the show() call. Window
             // is created and the run loop still drives the bridge; it just
@@ -2564,7 +2196,7 @@ public:
                 [NSApp activateIgnoringOtherApps:YES];
             }
             [NSApp run];
-            pump_cocoa_main_thread_until(ready_to_return);
+            pulp::view::mac_lifecycle::pump_cocoa_main_thread_until(ready_to_return);
             dispatcher_alive->store(false, std::memory_order_release);
             pulp::events::MainThreadDispatcher::unregister_backend(dispatcher_token);
         }
