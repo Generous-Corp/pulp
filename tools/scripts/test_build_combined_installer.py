@@ -247,6 +247,7 @@ class CombinedInstallerTest(unittest.TestCase):
         grouped_apps: list[tuple[str, str, str]] | None = None,
         product_titles: list[tuple[str, str]] | None = None,
         scripted_apps: set[str] | None = None,
+        scripted_plugins: set[tuple[str, str]] | None = None,
         architectures: str | None = None,
         d15_fixture: str | None = None,
         expect_success: bool = True,
@@ -414,6 +415,13 @@ class CombinedInstallerTest(unittest.TestCase):
                     (macos / evidence_name).write_text("{}\n")
                 plugin_bundles.append(bundle)
                 args.extend(("--plugin", kind, str(bundle)))
+                if (plugin_name, kind) in (scripted_plugins or set()):
+                    scripts = tmp / f"{plugin_name}-{kind}-scripts"
+                    scripts.mkdir()
+                    hook = scripts / "postinstall"
+                    hook.write_text("#!/bin/bash\nexit 0\n")
+                    hook.chmod(0o755)
+                    args.extend(("--plugin-scripts", kind, plugin_name, str(scripts)))
             for title, app_name in apps or []:
                 bundle = tmp / f"{app_name}.app"
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
@@ -700,6 +708,24 @@ class CombinedInstallerTest(unittest.TestCase):
 
         self.assertNotIn("--scripts", self._last_pkgbuild_argv.splitlines())
         self.assertIn('require-scripts="false"', xml)
+
+    def test_plugin_scripts_attach_only_to_the_selected_format(self) -> None:
+        self._run_installer(
+            [("Forge Modular", "au"), ("Forge Modular", "vst3")],
+            scripted_plugins={("Forge Modular", "au")},
+        )
+
+        # Each pkgbuild invocation is framed by BEGIN in the capture. The AU
+        # component carries the registrar-refresh hook; the VST3 component does
+        # not, so selecting only VST3 never kills an unrelated AU registrar.
+        invocations = self._last_pkgbuild_argv.split("BEGIN\n")[1:]
+        plugin_invocations = [
+            invocation for invocation in invocations
+            if "--component" in invocation
+        ]
+        self.assertEqual(len(plugin_invocations), 2)
+        self.assertIn("--scripts", plugin_invocations[0])
+        self.assertNotIn("--scripts", plugin_invocations[1])
 
     def test_intel_installer_declares_x86_64_host_support(self) -> None:
         xml, _ = self._run_installer([], [("Fixture", "Fixture")],
