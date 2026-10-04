@@ -585,6 +585,13 @@ hold an older pin only for a documented incompatibility with an owner and exit
 condition. Never replace the tag with a moving branch or `latest` URL: exact
 pins keep checkouts reproducible and let the fleet prove binary parity.
 
+`pulp pr` and `pulp status` treat the pin as a floor within its major: an
+installed Shipyard at or above the pin under the same major passes, so the
+fleet's rollout of every release does not trip the guard between pin bumps; a
+release below the pin, or under another major, is a pin mismatch. The pin is
+the oldest release the repository's `.shipyard/config.toml` parses under, so a
+change that needs a newer Shipyard raises the pin in the same PR.
+
 The current v0.269.1 pin parses `executable_reuse` in a target's
 `changed_surface_selection`. Shipyard reads that table with
 `deny_unknown_fields`, so a host on an older release cannot parse a policy that

@@ -256,6 +256,65 @@ switch, preset load) clean, measure what the callback containing it costs.
   or precomputing it in `prepare()`, never by widening the allowance for work
   that could be staged.
 
+## Glitch hunt: one render, audio and trace on one timeline
+
+The fastest loop found for "it clicks / drops out / sounds staticky" in a
+processor, in this order:
+
+1. **Stamp the timeline.** Emit one span per host block from `process()`:
+   `PULP_TRACE_SCOPE_NAMED_ARGS("dsp", "process", "stream_pos", pos, "frames", n)`
+   with `pos` the stream sample of the block's first frame (a member counter
+   reset in `prepare()`). It compiles to nothing in a shipping SDK. Without
+   `stream_pos` there is no sample <-> time mapping and no tool can make one.
+   Add a span or instant around the suspect work (a renderer swap, a design
+   handoff) so it shows up nested in the block.
+2. **Render the scenario under a session** in a test built against a
+   tracing-enabled SDK (verify with `nm <binary> | grep -c perfetto` -- a
+   shipping SDK links zero and `Tracing::start` returns false):
+   `pulp::runtime::Tracing::start({"dsp","state"}, "<flow>.pftrace", 256*1024)`,
+   render, `Tracing::stop()`, and write the output WAV beside the trace.
+3. **One command** joins them:
+   `python3 tools/audio/glitch_trace.py --wav <flow>.wav --trace <flow>.pftrace`
+   -> every click (whitened-residual spike) and dropout (5 ms level gap) with its
+   sample, the block that rendered it, that block's wall time against its
+   deadline, and the slices nested in it; plus block-time p50/p99/max and
+   deadline misses for the whole render.
+4. **Prove the detector with the defect restored** (an env-var plant) before
+   trusting a clean run -- a reference-free detector that sees nothing may be
+   looking at the wrong window. Spectr's Latency-switch cut read clean until
+   the scored window was opened 10 ms BEFORE the event: a spike detector with
+   a 4 ms neighbourhood cannot score the first 4 ms of its own window, which
+   is exactly where a cut lands.
+
+Gotchas that cost real time:
+
+- **An offline render cannot hear a dropped buffer.** A clean WAV with a
+  block past its deadline is a live glitch; read the block-time line, not just
+  the event list. And a real-time-paced render (audio on its own thread,
+  sleeping to each block's deadline, UI edits from another thread) is the only
+  harness that reproduces worker-timing effects -- build one before concluding
+  "cannot reproduce".
+- **Vary the host's callback size.** Hosts split buffers at automation and loop
+  points; render with random per-callback lengths too, not only fixed blocks.
+- **Compare against an unedited render of the same material.** Drum hits score
+  like clicks; the edit's score minus the untouched render's score in the same
+  window is the number that means something.
+- **Low buffers are a burst problem, not an average one.** At 32 samples the
+  deadline is 0.667 ms at 48 kHz and 0.333 ms at 96 kHz; a processor whose
+  p50 is 20 us can still miss it every hop, because work that runs once per
+  analysis hop (an FFT, a capture/average over bins) lands whole in the one
+  callback that crosses the hop. Measure per-callback thread CPU (not wall
+  time -- the machine's load is not the processor) at 16/32/64 samples and
+  44.1/48/96 kHz, read max and p99 against the deadline, then attribute the
+  burst with `dsp` spans around each per-hop stage. Gate it with a planted
+  burst of about the size you are guarding against as the negative control;
+  a plant ten times too big proves nothing about the margin.
+- **Work a value's only reader needs belongs at that reader.** A per-bin
+  transcendental computed every hop for a value read only on a rare event (a
+  freeze latch) is a per-hop burst for nothing: keep the raw input and derive
+  at the event, which is bit-identical (`FreezeHold` takes its increment's
+  argument at the latch, and counts zero `trig` on capturing hops).
+
 ## Switching between realisations with different latency — warm, then fade
 
 A processor that offers two realisations of one effect (linear-phase vs

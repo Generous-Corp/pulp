@@ -82,6 +82,44 @@ def corpus(tests: list[dict], **pair_kw) -> rpr.Corpus:
     return rpr.Corpus([group(), head()], [pair(**pair_kw)], tests={"g1": tests})
 
 
+class KeyBlindTests(unittest.TestCase):
+    @staticmethod
+    def pair(pr, unreached, content_keyed=True):
+        return {"pr": pr, "group_run_id": f"g{pr}", "source_key": {
+            "content_keyed": content_keyed,
+            "cmake-codemodel-recorded": {"unreached_changed_binaries": list(unreached)}}}
+
+    def test_the_list_grows_from_content_keyed_misses_only(self):
+        doc, added = rpr.key_blind_update([self.pair(1, ["test/a"]), self.pair(2, ["test/b"], content_keyed=False),
+                                           self.pair(3, ["test/a", "test/c"])], None)
+        self.assertEqual(added, ["test/a", "test/c"])
+        self.assertEqual(doc["executables"]["test/a"]["example"], {"pr": 1, "group_run_id": "g1"})
+        self.assertNotIn("test/b", doc["executables"])          # v1 records: the blunt rules still apply there
+
+    def test_the_list_never_shrinks_and_keeps_its_explanations(self):
+        existing = {"schema": rpr.KEY_BLIND_SCHEMA, "executables": {
+            "test/old": {"example": {"pr": 9, "group_run_id": "g9"}, "explained": "linker stub order"}}}
+        doc, added = rpr.key_blind_update([self.pair(4, [])], existing)
+        self.assertEqual(added, [])
+        self.assertEqual(doc["executables"]["test/old"]["explained"], "linker stub order")
+        with self.assertRaises(ValueError):
+            rpr.key_blind_update([], {"schema": "other"})
+
+    def test_the_cli_fails_on_a_new_entry_unless_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "c"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [dict(pair(), source_key={
+                "content_keyed": True, "cmake-codemodel-recorded": {"unreached_changed_binaries": ["test/x"]}})])
+            listed = Path(tmp) / "list.json"
+            argv = ["key-blind", "--corpus", str(corpus), "--list", str(listed)]
+            self.assertEqual(rpr.main(argv), 1)
+            self.assertFalse(listed.exists())
+            self.assertEqual(rpr.main(argv + ["--write"]), 0)
+            self.assertIn("test/x", json.loads(listed.read_text())["executables"])
+            self.assertEqual(rpr.main(argv), 0)                 # nothing new the second time
+
+
 class ScenarioTests(unittest.TestCase):
     def test_every_scenario_scores_its_stated_verdict(self):
         results = rpr.run_scenarios(SCENARIOS)
@@ -1086,8 +1124,16 @@ class RecordedGraphTests(unittest.TestCase):
                 json.dump(rec, fh)
         result = rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
                                           {}, None, mock.Mock(), legacy, legacy_propagation)
-        keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"]
+        self.last_source_key = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]
+        keys = self.last_source_key["cmake-codemodel-recorded"]
         return result, keys
+
+    def test_annotate_marks_which_pairs_are_content_keyed(self):
+        v1, v2 = "pulp-codemodel-digest/v1", "pulp-codemodel-digest/v2"
+        self.annotate_v2(("docs/a.md",), v2, v2)
+        self.assertIs(self.last_source_key["content_keyed"], True)
+        self.annotate_v2(("docs/b.md", "docs/c.md"), v1, v2)
+        self.assertIs(self.last_source_key["content_keyed"], False)
 
     def test_content_keyed_pairs_propagate_only_along_link_edges(self):
         v1, v2 = "pulp-codemodel-digest/v1", "pulp-codemodel-digest/v2"

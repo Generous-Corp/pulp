@@ -1543,6 +1543,7 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                     recorded[variant]["rebuilt_identical_binaries"] = len((both - changed) & set(recorded[variant]["rebuilt"]))
             pair["source_key"]["strict-data-recorded"] = recorded["strict-data"]
             pair["source_key"]["cmake-codemodel-recorded"] = recorded["cmake-codemodel"]
+            pair["source_key"]["content_keyed"] = v2
             pair["source_key"]["manifest-data-recorded"] = recorded["manifest-data"]
             if "output-key" in recorded:
                 pair["source_key"]["output-key-recorded"] = recorded["output-key"]

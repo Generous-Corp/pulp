@@ -1,0 +1,40 @@
+{
+ "schema": "pulp-key-blind/v1",
+ "executables": {
+  "test/pulp-test-group-core-standalone": {
+   "example": {
+    "pr": 9426,
+    "group_run_id": "37162725839"
+   },
+   "explained": "Apple ld orders the ObjC selector stubs (__TEXT,__objc_stubs) nondeterministically: relinking identical objects gives different bytes; -Wl,-objc_stubs_small makes the link deterministic"
+  },
+  "test/pulp-test-settings-sections": {
+   "example": {
+    "pr": 9423,
+    "group_run_id": "37161489904"
+   },
+   "explained": "Apple ld orders the ObjC selector stubs (__TEXT,__objc_stubs) nondeterministically: relinking identical objects gives different bytes; -Wl,-objc_stubs_small makes the link deterministic"
+  },
+  "test/pulp-test-standalone-recording": {
+   "example": {
+    "pr": 9426,
+    "group_run_id": "37162725839"
+   },
+   "explained": "Apple ld orders the ObjC selector stubs (__TEXT,__objc_stubs) nondeterministically: relinking identical objects gives different bytes; -Wl,-objc_stubs_small makes the link deterministic"
+  },
+  "test/pulp-test-standalone-rt": {
+   "example": {
+    "pr": 9432,
+    "group_run_id": "37163259552"
+   },
+   "explained": "Apple ld orders the ObjC selector stubs (__TEXT,__objc_stubs) nondeterministically: relinking identical objects gives different bytes; -Wl,-objc_stubs_small makes the link deterministic"
+  },
+  "test/pulp-test-timeline-phase1-examples": {
+   "example": {
+    "pr": 9423,
+    "group_run_id": "37161489904"
+   },
+   "explained": "Apple ld orders the ObjC selector stubs (__TEXT,__objc_stubs) nondeterministically: relinking identical objects gives different bytes; -Wl,-objc_stubs_small makes the link deterministic"
+  }
+ }
+}
