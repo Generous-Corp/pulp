@@ -1566,3 +1566,5 @@ if(Python3_Interpreter_FOUND)
         LABELS "cmake;ci"
         TIMEOUT 60)
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/tool_script_selftests.cmake")
