@@ -520,8 +520,64 @@ void StateStore::set_normalized_rt(ParamID id, float normalized) {
 }
 
 std::size_t StateStore::pump_listeners() {
-    if (!registry_) return 0;
-    return registry_->drain_main_listeners();
+    const std::size_t drained = registry_ ? registry_->drain_main_listeners() : 0;
+    service_modulation_watchers();
+    return drained;
+}
+
+void StateStore::set_display_modulation(ParamID id, float plain_value) noexcept {
+    auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end()) return;
+    values_[it->second].set_display_modulation(plain_value);
+}
+
+void StateStore::clear_display_modulation(ParamID id) noexcept {
+    auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end()) return;
+    values_[it->second].clear_display_modulation();
+}
+
+std::optional<float> StateStore::displayed_modulation(ParamID id) const noexcept {
+    auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end()) return std::nullopt;
+    const auto& value = values_[it->second];
+    const auto& range = params_[it->second].range;
+    const float published = value.display_modulation();
+    if (std::isfinite(published))
+        return range.normalize(std::clamp(published, range.min, range.max));
+    const float offset = value.get_mod_offset();
+    if (offset == 0.0f || !std::isfinite(offset)) return std::nullopt;
+    return range.normalize(std::clamp(value.get_modulated(), range.min, range.max));
+}
+
+StateStore::ModulationWatch StateStore::watch_modulation(
+    ParamID id, std::function<void(std::optional<float>)> on_change) {
+    auto& watchers = *modulation_watchers_;
+    ModulationWatchers::Entry entry;
+    entry.id = watchers.next_id++;
+    entry.param = id;
+    entry.on_change = std::move(on_change);
+    entry.last = displayed_modulation(id);
+    if (entry.last && entry.on_change) entry.on_change(entry.last);
+    const auto token = entry.id;
+    watchers.entries.push_back(std::move(entry));
+    return ModulationWatch(modulation_watchers_, token);
+}
+
+void StateStore::service_modulation_watchers() {
+    // Iterate by index over a snapshot of ids: a callback may unwatch (drop
+    // its own token) or watch something new.
+    auto& entries = modulation_watchers_->entries;
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        const auto now = displayed_modulation(entries[i].param);
+        const auto& last = entries[i].last;
+        const bool same = (!now && !last)
+            || (now && last && std::abs(*now - *last) < 1.0e-5f);
+        if (same) continue;
+        entries[i].last = now;
+        auto callback = entries[i].on_change;  // survives the entry being erased
+        if (callback) callback(now);
+    }
 }
 
 std::size_t StateStore::reconcile_restore_listeners() {

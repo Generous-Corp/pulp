@@ -2796,6 +2796,30 @@ promise-driven modulation read, build info, the rAF hydrate, a passive effect,
 a tracing badge) became zero; ~250 ms of a warm open, and a non-default
 session (48 bands, a boosted band) mounts showing it.
 
+### 7b. Bind once: automation and playback for free, modulation display by default for host modulation
+
+A control bound to a parameter needs no other code for the host's part of
+its life. `bind_parameter(widget, store, id)` (C++), `bindWidgetToParam(id,
+name)` (a scripted editor) and AutoUi (which now binds through
+`bind_parameter`) all give:
+
+- **Gestures and recording** -- a drag is one host gesture; a toggle, button,
+  combo or stepper change is one complete gesture -- so Write/Latch/Touch
+  record it.
+- **Playback animation** -- the store's changes (automation, preset load)
+  move the control on the editor's UI tick (`StateStore::pump_listeners()`).
+- **Host modulation, shown by default** -- a CLAP host's parameter modulation
+  (the adapter's mod offset) is drawn on a bound Knob or Fader as its played
+  value; nothing is drawn when nothing modulates the parameter. It arrives
+  through the host, so no plugin code is involved.
+
+What is opt-in is the plugin's OWN modulation: a plugin that runs internal
+LFOs publishes what they play with `StateStore::set_display_modulation(id,
+plain)` (real-time safe, display only, never a host write; a published value
+wins over the host offset; `clear_display_modulation` ends it). Modulation
+menus, routing and override prompts are the plugin's own UI -- Pulp imposes
+none. A plugin that never publishes shows no internal-modulation UI.
+
 ### 8. Modulated controls: draw the played value, never write it
 
 A control a modulator moves (an internal LFO on a knob, a fader, a slider) must

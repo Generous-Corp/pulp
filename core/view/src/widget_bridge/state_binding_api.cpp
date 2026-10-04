@@ -333,10 +333,22 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
     // matched so an unbindable target neither claims a repaint nor churns.
     b.last_applied = target;
     bool matched = true;
+    // A bound Knob or Fader also draws the parameter's modulated value: a
+    // host's CLAP modulation, or the plugin's own published one. Both
+    // setters are value-gated and repaint only the control's box.
+    const auto show_modulation = [&](auto* control) {
+        if (!b.value_channel.empty()) return;
+        if (const auto played = store_.displayed_modulation(b.param_id))
+            control->set_modulated_value(*played);
+        else
+            control->clear_modulated_value();
+    };
     if (auto* k = dynamic_cast<Knob*>(w)) {
         k->set_value(target);
+        show_modulation(k);
     } else if (auto* f = dynamic_cast<Fader*>(w)) {
         f->set_value(target);
+        show_modulation(f);
     } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
         // RangeSlider works in real units [min,max]; treat the transformed
         // [0,1] value as a fraction of its own range so a non-normalized slider
@@ -356,9 +368,10 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
         st->set_value_silent(stepper_plain_value(
             target, st->minimum(), st->maximum(), st->step()));
     } else if (auto* p = dynamic_cast<ProgressBar*>(w)) {
-        // ProgressBar::set_progress does NOT self-repaint; the caller schedules
-        // one when `changed`.
+        // ProgressBar::set_progress does NOT self-repaint, so the binding
+        // repaints the bar's own box when the value moved.
         p->set_progress(target);
+        if (changed) p->request_repaint_self();
     } else {
         matched = false;
     }

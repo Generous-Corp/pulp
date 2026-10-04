@@ -4,6 +4,7 @@
 // pulp-motion-bench harness output.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
@@ -1496,4 +1497,30 @@ TEST_CASE("Native message dispatch adds no whole-surface damage when the work ma
         bridge.dispatch_native_message("moveNeedleAndRecolour", "tick", payload, "t", "test");
     });
     CHECK(mixed.full_damage);
+}
+
+TEST_CASE("bindWidgetToParam shows host modulation on a scripted knob with no other code",
+          "[view][bridge][parameter-binding][modulation]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    store.add_parameter({.id = 11, .name = "Drive", .unit = "", .range = {0.0f, 1.0f, 0.5f}});
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createKnob('drive', ''); bindWidgetToParam('drive', 'Drive');",
+                       "bind-once");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("drive"));
+    REQUIRE(knob != nullptr);
+    bridge.service_frame_callbacks();
+    REQUIRE_FALSE(knob->has_modulated_value());   // nothing modulates it
+
+    store.set_mod_offset(11, 0.25f);               // a CLAP host's modulation
+    bridge.service_frame_callbacks();
+    REQUIRE(knob->has_modulated_value());
+    REQUIRE(knob->modulated_display_value() == Catch::Approx(0.75f));
+    REQUIRE(knob->value() == Catch::Approx(0.5f)); // the base is untouched
+
+    store.set_mod_offset(11, 0.0f);
+    bridge.service_frame_callbacks();
+    REQUIRE_FALSE(knob->has_modulated_value());
 }

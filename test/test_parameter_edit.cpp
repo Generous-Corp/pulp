@@ -212,3 +212,128 @@ TEST_CASE("bind_parameter reflects host automation playback back to the widget",
     store.set_normalized(1, 0.75f);
     REQUIRE_THAT(knob.value(), WithinAbs(0.75f, 1e-4f));
 }
+
+// ── Bind once: automation, playback and modulated display ───────────────────
+
+TEST_CASE("A bound knob records a host gesture and follows playback with no other code",
+          "[view][parameter-binding]") {
+    state::StateStore store;
+    populate(store);
+    GestureLog log;
+    log.attach(store);
+    view::Knob knob;
+    knob.set_bounds({0, 0, 40, 40});
+    auto binding = view::bind_parameter(knob, store, 1);
+
+    // A drag is one recorded gesture with the value written inside it.
+    knob.simulate_drag({20, 30}, {20, 10});
+    REQUIRE(log.begins == std::vector<state::ParamID>{1});
+    REQUIRE(log.ends == std::vector<state::ParamID>{1});
+    REQUIRE(store.get_value(1) > 0.0f);
+
+    // Playback moves the knob.
+    store.set_value(1, -9.0f);
+    store.pump_listeners();
+    REQUIRE_THAT(knob.value(), WithinAbs(store.get_normalized(1), 1e-5f));
+}
+
+TEST_CASE("Bound discrete controls record one gesture per change and follow playback",
+          "[view][parameter-binding]") {
+    state::StateStore store;
+    populate(store);
+    GestureLog log;
+    log.attach(store);
+
+    view::Toggle toggle;
+    auto tb = view::bind_parameter(toggle, store, 3);
+    REQUIRE(toggle.on_toggle);
+    toggle.on_toggle(true);
+    REQUIRE(log.begins == std::vector<state::ParamID>{3});
+    REQUIRE(log.ends == std::vector<state::ParamID>{3});
+    REQUIRE(store.get_value(3) == 1.0f);
+    store.set_value(3, 0.0f);
+    store.pump_listeners();
+    REQUIRE_FALSE(toggle.is_on());
+
+    view::ToggleButton button;
+    auto bb = view::bind_parameter(button, store, 3);
+    REQUIRE(button.on_toggle);
+    button.on_toggle(true);
+    REQUIRE(log.begins.size() == 2);
+    REQUIRE(log.ends.size() == 2);
+    store.set_value(3, 0.0f);
+    store.pump_listeners();
+    REQUIRE_FALSE(button.is_on());
+}
+
+TEST_CASE("Host modulation of a bound knob draws its played value with no plugin code",
+          "[view][parameter-binding][modulation]") {
+    // A CLAP host's parameter modulation reaches the store as the mod offset
+    // (the adapter's CLAP_EVENT_PARAM_MOD path); the bound knob shows it.
+    state::StateStore store;
+    populate(store);
+    GestureLog log;
+    log.attach(store);
+    view::Knob knob;
+    auto binding = view::bind_parameter(knob, store, 1);
+    REQUIRE_FALSE(knob.has_modulated_value());   // nothing modulates it yet
+
+    store.set_mod_offset(1, 6.0f);               // what the CLAP adapter writes
+    store.pump_listeners();
+    REQUIRE(knob.has_modulated_value());
+    REQUIRE_THAT(knob.modulated_display_value(), WithinAbs((6.0f + 12.0f) / 24.0f, 1e-5f));
+    // Display only: the base, the store value and the host lane are untouched.
+    REQUIRE_THAT(knob.value(), WithinAbs(0.5f, 1e-5f));
+    REQUIRE(store.get_value(1) == 0.0f);
+    REQUIRE(log.begins.empty());
+
+    store.set_mod_offset(1, 0.0f);
+    store.pump_listeners();
+    REQUIRE_FALSE(knob.has_modulated_value());
+}
+
+TEST_CASE("A plugin's own modulation shows only when it publishes one",
+          "[view][parameter-binding][modulation]") {
+    state::StateStore store;
+    populate(store);
+    GestureLog log;
+    log.attach(store);
+    view::Fader fader;
+    auto binding = view::bind_parameter(fader, store, 2);
+
+    // Negative: a plugin that never opts in shows no modulation UI at all.
+    for (int i = 0; i < 3; ++i) store.pump_listeners();
+    REQUIRE_FALSE(fader.has_modulated_value());
+
+    // Opt in: the plugin publishes what its internal LFO plays (plain units).
+    store.set_display_modulation(2, 6.0f);
+    store.pump_listeners();
+    REQUIRE(fader.has_modulated_value());
+    REQUIRE_THAT(fader.modulated_display_value(), WithinAbs(0.75f, 1e-5f));
+    REQUIRE(store.get_value(2) == 0.0f);         // never a write
+    REQUIRE(log.begins.empty());                 // never a host gesture
+
+    // A published value wins over a host offset; clearing hands back to it.
+    store.set_mod_offset(2, -6.0f);
+    store.pump_listeners();
+    REQUIRE_THAT(fader.modulated_display_value(), WithinAbs(0.75f, 1e-5f));
+    store.clear_display_modulation(2);
+    store.pump_listeners();
+    REQUIRE_THAT(fader.modulated_display_value(), WithinAbs(0.25f, 1e-5f));
+}
+
+TEST_CASE("Dropping the binding stops the modulated display",
+          "[view][parameter-binding][modulation]") {
+    state::StateStore store;
+    populate(store);
+    view::Knob knob;
+    {
+        auto binding = view::bind_parameter(knob, store, 1);
+        store.set_mod_offset(1, 3.0f);
+        store.pump_listeners();
+        REQUIRE(knob.has_modulated_value());
+    }
+    store.set_mod_offset(1, -3.0f);
+    store.pump_listeners();   // the watch is gone: no callback into the knob
+    REQUIRE_THAT(knob.modulated_display_value(), WithinAbs((3.0f + 12.0f) / 24.0f, 1e-5f));
+}

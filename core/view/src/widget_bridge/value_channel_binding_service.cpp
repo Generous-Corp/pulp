@@ -265,6 +265,7 @@ void WidgetBridge::service_param_bindings() {
         }
     });
 
+    const DamageLedger ledger = damage_ledger();
     bool any_changed = false;
     for (std::size_t i = 0; i < param_bindings_.size(); ++i) {
         auto& binding = param_bindings_[i];
@@ -335,7 +336,9 @@ void WidgetBridge::service_param_bindings() {
                                        snapshot.publish_seq);
         if (changed) any_changed = true;
     }
-    if (any_changed) request_repaint();
+    // Bound widgets repaint their own boxes; a whole-surface request only
+    // for a change that did not mark itself (see request_repaint_after).
+    if (any_changed) request_repaint_after(ledger);
     service_shader_value_bindings();
 }
 
