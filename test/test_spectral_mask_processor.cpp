@@ -342,8 +342,10 @@ TEST_CASE("SpectralMaskProcessor pass-through pre-mask stage is bit-identical",
     const auto actual = render(staged, input, {64, 7, 511});
 
     REQUIRE(actual == expected);
-    // One call per analysis frame: frames complete at kFftSize + f * kHopSize.
-    REQUIRE(stage.calls == (8192 - kFftSize) / kHopSize + 1);
+    // One call per analysis frame. The frame grid starts kFftSize - kHopSize
+    // before the stream (full-overlap stream start), so frames complete at
+    // kHopSize + f * kHopSize.
+    REQUIRE(stage.calls == 8192 / kHopSize);
     REQUIRE(stage.last_channels == 1);
     REQUIRE(stage.last_bins == kFftSize / 2 + 1);
 

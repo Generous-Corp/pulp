@@ -7501,6 +7501,23 @@ graduation rested on the allowlist; the goal is 0. Shipyard
 recomputes the rule from the receipt's named sets and reports `matched_fail`,
 never `matched_pass`.
 
+A ctest "Not Run" test (a missing executable, a failed fixture dependency) is in
+ctest's FAILED list and exit code, but its JUnit row is `notrun` with a
+`<skipped>` child, the same shape as a real skip; the set builder counts it as
+failed unless the skip message starts with `SKIP_` (SKIP_RETURN_CODE,
+SKIP_REGULAR_EXPRESSION). `allowlisted_selected_failure_count` reports the
+in-selection failures that are themselves lane reds. Allowlist expiries stay
+within 28 days. `changed-surface-runner-selftest` runs the runner's own
+tests; until it was registered they ran only locally.
+
+**A proof run or canary PR must stay unarmed (or draft) until the lane's result
+receipt exists.** Shipyard cancels an in-flight lane run once its PR merges
+(`cancellation_proof.cause: already_merged`), so an armed proof PR whose
+required checks go green first loses its full leg and never records a verdict.
+The canary's bot PR is unmergeable by construction: draft, plus a do-not-merge
+label. Arm a proof PR only after `result-*.json` lands, if the change should
+merge at all.
+
 The scratch base is provisioned like the head before it configures: `setup.sh
 --deps-only` links `external/` from the shared source cache with git limited to
 local objects. A worktree never inherits the untracked SDK links, and a base

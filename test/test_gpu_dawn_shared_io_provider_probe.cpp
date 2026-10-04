@@ -209,6 +209,10 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
               << ",\"wait_any_unsupported\":" << stats.wait_any_unsupported
               << ",\"wait_any_max_futures\":" << stats.wait_any_max_futures
               << ",\"wait_any_max_timeout_ns\":" << stats.wait_any_max_timeout_ns
+              << ",\"service_calls\":" << stats.service_calls
+              << ",\"service_wall_ns\":" << stats.service_wall_ns
+              << ",\"wait_any_wall_ns\":" << stats.wait_any_wall_ns
+              << ",\"wait_any_max_wall_ns\":" << stats.wait_any_max_wall_ns
               << ",\"fault_injections\":" << stats.fault_injections << ",\"hardware_model\":\""
               << json_escape(hardware_model()) << "\""
               << ",\"os\":\"" << json_escape(have_system_info ? system_info.sysname : "unknown")
@@ -631,6 +635,11 @@ int main(int argc, char** argv) {
             std::max(stats.wait_any_max_futures, accumulated_stats.wait_any_max_futures);
         stats.wait_any_max_timeout_ns =
             std::max(stats.wait_any_max_timeout_ns, accumulated_stats.wait_any_max_timeout_ns);
+        stats.service_calls += accumulated_stats.service_calls;
+        stats.service_wall_ns += accumulated_stats.service_wall_ns;
+        stats.wait_any_wall_ns += accumulated_stats.wait_any_wall_ns;
+        stats.wait_any_max_wall_ns =
+            std::max(stats.wait_any_max_wall_ns, accumulated_stats.wait_any_max_wall_ns);
         stats.fault_injections += accumulated_stats.fault_injections;
     }
     if (completion_policy != DawnSharedIoProvider::CompletionPolicy::ProcessEvents &&

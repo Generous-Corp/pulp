@@ -120,6 +120,12 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         std::uint64_t wait_any_unsupported = 0;
         std::uint64_t wait_any_max_futures = 0;
         std::uint64_t wait_any_max_timeout_ns = 0;
+        // Host-side timing for the serialized completion dispatcher. These
+        // values describe the wait/service machinery, never GPU execution.
+        std::uint64_t service_calls = 0;
+        std::uint64_t service_wall_ns = 0;
+        std::uint64_t wait_any_wall_ns = 0;
+        std::uint64_t wait_any_max_wall_ns = 0;
         std::uint64_t timestamp_submissions = 0;
         std::uint64_t timestamp_samples = 0;
         std::uint64_t timestamp_failures = 0;

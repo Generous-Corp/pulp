@@ -539,7 +539,14 @@ struct DawnSharedIoProvider::Impl {
             stats.wait_any_max_futures =
                 std::max(stats.wait_any_max_futures, static_cast<std::uint64_t>(wait_count));
             stats.wait_any_max_timeout_ns = std::max(stats.wait_any_max_timeout_ns, timeout_ns);
+            const auto wait_started = std::chrono::steady_clock::now();
             const auto status = invoke_wait_any(wait_count, timeout_ns);
+            const auto wait_elapsed =
+                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now() - wait_started)
+                                               .count());
+            stats.wait_any_wall_ns += wait_elapsed;
+            stats.wait_any_max_wall_ns = std::max(stats.wait_any_max_wall_ns, wait_elapsed);
             if (status == wgpu::WaitStatus::TimedOut) {
                 ++stats.wait_any_timeouts;
             } else if (status == wgpu::WaitStatus::Error) {
@@ -1552,20 +1559,13 @@ bool DawnSharedIoProvider::prepare_convolution_program(
             plan->window = pipeline(kernels[1].c_str());
             plan->ola = pipeline(kernels[2].c_str());
             plan->output = pipeline(kernels[3].c_str());
-            // Mutable history + OLA + norm, followed by immutable window/floor.
-            const auto n = spec.fft_size, h = spec.spectral_hop;
+            // Mutable history + OLA + norm, followed by the immutable window.
+            const auto n = spec.fft_size;
             const auto window =
                 signal::WindowFunction::generate(n, signal::WindowFunction::Type::hann);
             const auto window_offset = 3u * n * spec.channels + 2u * n;
-            std::vector<float> initial(window_offset + n + 1u, 0.0f);
+            std::vector<float> initial(window_offset + n, 0.0f);
             std::copy(window.begin(), window.end(), initial.begin() + window_offset);
-            double steady = 0;
-            for (int j = -int(n / h) - 1; j <= int(n / h) + 1; ++j) {
-                const int index = int(n) - j * int(h) - int(n / 2);
-                if (index >= 0 && index < int(n))
-                    steady += double(window[index]) * window[index];
-            }
-            initial.back() = std::max(float(steady) * 0.25f, 1e-9f);
             plan->spectral_state = make_buffer(initial.size() * sizeof(float), storage);
             if (!plan->append || !plan->window || !plan->ola || !plan->output ||
                 !plan->spectral_state)
@@ -2306,6 +2306,8 @@ void DawnSharedIoProvider::poll() noexcept {
 void DawnSharedIoProvider::service_until(std::uint64_t deadline_ns) noexcept {
     if (!impl_)
         return;
+    const auto service_started = std::chrono::steady_clock::now();
+    ++impl_->stats.service_calls;
     const auto now = std::chrono::steady_clock::now();
     const auto max_ns = static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
     const auto deadline =
@@ -2332,6 +2334,10 @@ void DawnSharedIoProvider::service_until(std::uint64_t deadline_ns) noexcept {
         }
         impl_->refresh(*slot, false);
     }
+    impl_->stats.service_wall_ns +=
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now() - service_started)
+                                       .count());
 }
 
 bool DawnSharedIoProvider::drain() noexcept {
