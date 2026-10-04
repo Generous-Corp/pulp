@@ -103,8 +103,21 @@ void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
 }
 
 void SharedIoConvolutionSession::close_trace_generation() noexcept {
+    last_closed_trace_records_.clear();
+    if (trace_recorder_) {
+        try {
+            last_closed_trace_records_.reserve(SharedIoTraceRecorder::capacity);
+            (void)drain_trace_records(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+                                      [&](const SharedIoTraceRecord& record) {
+                                          last_closed_trace_records_.push_back(record);
+                                      });
+        } catch (...) {
+            last_closed_trace_records_.clear();
+        }
+    }
     drain_trace_until_empty();
     last_closed_trace_stats_ = trace_recorder_ ? trace_recorder_->stats() : SharedIoTraceStats{};
+    last_closed_trace_telemetry_ = trace_telemetry_.snapshot();
     pipeline_.set_trace(nullptr);
     trace_recorder_.reset();
     trace_slots_.clear();
@@ -156,6 +169,7 @@ void SharedIoConvolutionSession::trace_terminal(SharedIoSlotLedger::SlotToken to
     record.set(SharedIoTraceStage::RetirementObserved, trace_now_ns());
     record.gpu_elapsed_ns = gpu_elapsed_ns;
     record.gpu_elapsed_available = gpu_elapsed_available;
+    record.high_water_in_flight = plan_.telemetry().high_water_in_flight;
     record.gpu_terminal = disposition;
     record.gpu_reason = record.reason = reason;
     switch (disposition) {
@@ -215,6 +229,7 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
         return false;
     }
     config_ = config;
+    provider_starved_ = 0;
     if (config_.trace.enabled && config_.trace.engine_id == 0) {
         config_.trace.engine_id = next_shared_io_trace_engine_id();
         if (config_.trace.engine_id == 0)
@@ -371,8 +386,11 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
             }
         } admission{pipeline_};
         auto input = plan_.acquire_input(pending_ingress_->stamp().sequence, 0);
-        if (!input)
+        if (!input) {
+            if (plan_.available_slots() == 0)
+                ++provider_starved_;
             return true; // retain the bridge lease until a physical slot retires.
+        }
         const auto submit = SharedIoComputePlan::SubmitToken{input->token, 0};
         trace_admit(input->token);
         trace_stage(input->token, SharedIoTraceStage::EncodeBegin);

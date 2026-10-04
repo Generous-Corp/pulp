@@ -1,4 +1,5 @@
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/gpu_convolver_trial_config.hpp"
 #include "support/audio_test_signals.hpp"
 
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -82,6 +83,7 @@ struct Record {
 };
 
 int run(Config config) {
+    const auto run_identity = nanoseconds(Clock::now().time_since_epoch());
     constexpr std::uint32_t sample_rate = 48000;
     constexpr std::uint32_t channels = 2;
     constexpr std::size_t ir_frames = 257;
@@ -101,6 +103,8 @@ int run(Config config) {
 
     GpuConvolver node(channels, config.frames, sample_rate, ir, config.lead);
     if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
+        !node.configure_trace({.enabled = true, .capture_admissions = true,
+                                .capture_callback_timing = false, .success_stride = 1}) ||
         !node.prepare() || !pulp::gpu_audio::detail::realtime_gpu_node_path(&node).active()) {
         std::cout << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\","
                      "\"status\":\"unavailable\",\"reason\":\"shared_provider_not_active\"}\n";
@@ -144,7 +148,24 @@ int run(Config config) {
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
     const auto transport_stats = transport.stats();
+    const auto delivery_stats = transport.delivery_snapshot();
     transport.release();
+
+    std::vector<pulp::gpu_audio::detail::SharedIoTraceRecord> trace_records;
+    (void)pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, trace_records);
+    std::uint64_t high_water_in_flight = 0;
+    std::uint64_t retired_success = 0;
+    std::uint64_t retired_failure = 0;
+    std::uint64_t late_completions = 0;
+    for (const auto& record : trace_records) {
+        high_water_in_flight = std::max(high_water_in_flight, record.high_water_in_flight);
+        if (record.gpu_terminal == pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::CompletedAccepted)
+            ++retired_success;
+        else if (record.gpu_terminal != pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None)
+            ++retired_failure;
+        if (record.gpu_terminal == pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::LateRejected)
+            ++late_completions;
+    }
 
     if (config.corrupt_output)
         output[0][static_cast<std::size_t>(config.warmup + config.lead) * config.frames] += 1.0f;
@@ -227,6 +248,16 @@ int run(Config config) {
                // delivery count. Keep the legacy key and expose the meaning.
                << ",\"provider_slots\":" << GpuConvolver::kSharedIoSlots
                << ",\"configured_provider_slots\":" << GpuConvolver::kSharedIoSlots
+               << ",\"declared_slots\":" << GpuConvolver::kSharedIoSlots
+               << ",\"declared_lead_blocks\":" << config.lead
+               << ",\"high_water_in_flight\":" << high_water_in_flight
+               << ",\"retired_success\":" << retired_success
+               << ",\"retired_failure\":" << retired_failure
+               << ",\"terminal_records\":" << (retired_success + retired_failure)
+               << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
+               << ",\"miss_blocks\":" << transport_stats.miss_blocks
+               << ",\"late_completions\":" << late_completions
+               << ",\"run_identity\":\"" << run_identity << "\""
                << ",\"logical_pipeline_capacity\":" << std::max(8u, config.lead + 2u)
                << ",\"warmup_blocks\":" << config.warmup << ",\"measured_blocks\":" << config.blocks
                << ",\"total_callbacks\":" << total_blocks

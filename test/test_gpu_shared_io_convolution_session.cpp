@@ -283,6 +283,11 @@ TEST_CASE("shared convolution session trace captures admission and terminal iden
     const auto record = callback(fixture.session, a, output);
     REQUIRE(record.valid());
     REQUIRE(fixture.session.service(10).submitted == 1);
+    const auto diagnostics = fixture.session.provider_diagnostics();
+    CHECK(diagnostics.configured_slots == 2);
+    CHECK(diagnostics.high_water_in_flight > 0);
+    CHECK(diagnostics.retired_success == 1);
+    CHECK(diagnostics.retired_failure == 0);
     const auto drained = fixture.session.drain_trace();
     CHECK(drained.records_drained >= 1);
     CHECK(fixture.session.trace_stats().admissions_enqueued >= 1);

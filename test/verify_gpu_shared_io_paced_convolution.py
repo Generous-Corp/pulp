@@ -29,6 +29,14 @@ def main():
             assert receipt["negative_control"] == negative
             assert receipt["oracle_failed_blocks"] == int(negative)
             assert receipt["produced_blocks_before_stop"] > 0
+            assert receipt["run_identity"]
+            assert receipt["declared_slots"] == receipt["provider_slots"] > 0
+            assert receipt["declared_lead_blocks"] == receipt["lead_blocks"] == 2
+            assert 0 < receipt["high_water_in_flight"] <= receipt["declared_slots"]
+            assert receipt["terminal_records"] == receipt["retired_success"] + receipt["retired_failure"]
+            assert receipt["retired_success"] > 0
+            assert receipt["fallback_blocks"] >= receipt["miss_blocks"]
+            assert receipt["late_completions"] >= 0
             with (directory / "blocks.csv").open() as stream:
                 records = list(csv.DictReader(stream))
             assert len(records) == receipt["total_callbacks"] == 26

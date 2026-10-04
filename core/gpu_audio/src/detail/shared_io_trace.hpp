@@ -101,6 +101,9 @@ struct SharedIoTraceRecord {
     std::uint64_t callback_start_ns = 0;
     std::uint64_t callback_end_ns = 0;
     std::uint64_t result_visible_ns = 0;
+    // Snapshot of the compute plan's maximum simultaneous admissions at the
+    // terminal boundary. This is diagnostic metadata only.
+    std::uint64_t high_water_in_flight = 0;
     bool callback_timing_available = false;
     // These spans are supplied by the host-only campaign seam. They remain
     // unavailable for the ordinary diagnostic recorder until the benchmark
