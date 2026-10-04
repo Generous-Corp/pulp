@@ -41,6 +41,16 @@
     return YES;
 }
 
+// The backing layer shows this colour until the first Metal frame lands and
+// whenever a resize empties the drawable, so it follows the window's declared
+// background rather than staying at the framework default seeded in -init.
+- (void)setBackgroundRGB:(uint32_t)rgb {
+    [super setBackgroundRGB:rgb];
+    CGColorRef color = pulp::view::mac_host::cg_color_from_rgb(rgb);
+    _metalLayer.backgroundColor = color;
+    CGColorRelease(color);
+}
+
 - (void)updateLayer {
     // Metal frames are produced by MacGpuWindowHost::render_frame from its
     // display-link callback; AppKit must not paint over the retained layer.
