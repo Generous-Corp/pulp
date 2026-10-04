@@ -278,7 +278,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/freeze_hold.hpp",
-        "fingerprint": "sha256:fa95ab7c526f24022d61ff4e28058700ba5f3e0087f0cb83e2bc1c57dd4643f4",
+        "fingerprint": "sha256:b21def407d140f2a6c2040444d8db02a74e53ff07a794e0a28fa079f1d2af8c7",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
