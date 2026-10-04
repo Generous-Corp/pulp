@@ -77,6 +77,12 @@ Kotlin (Android UI)          C++ (Pulp core)
 | `core/platform/src/android/jni_bridge.cpp` | JNI_OnLoad, class caching, exception guards |
 | `tools/build-skia-android.sh` | Skia Graphite + Dawn arm64 build script |
 
+The Android Skia builder reads the shared `tools/deps/manifest.json` provider
+lock by default. It checks out the pinned Skia revision, verifies the Dawn
+revision after `git-sync-deps`, and copies the `skunicode` module headers;
+never treat a mutable `chrome/m153` branch checkout or an old `SkUnicode.h`
+artifact as a valid Android build.
+
 ### Branch & Worktree
 
 Android work lives on `feature/android-targeting`, typically in a worktree at `../pulp-android`:
