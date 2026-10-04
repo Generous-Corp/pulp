@@ -144,7 +144,14 @@ export function canonicalizeMaterializedRuntimeDocument(document) {
   const removableIds = new Set([...removable].filter(([id, kind]) =>
     (kind !== 'babel' || babelCount > 0) &&
     (references.get(id)?.length ?? 0) > 0 &&
-    references.get(id).every(Boolean)).map(([id]) => id));
+    references.get(id).every(Boolean) &&
+    // Keep assets referenced by non-script markup. Those references may be
+    // validated by the materialized-document parser even when the script is
+    // removable. Script bodies are covered by the all-empty check above.
+    !new RegExp(`<(?!(?:script)\\b)[^>]+(?:src|href)\\s*=\\s*["']${
+      id.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')
+    }["']`, 'i').test(html)
+  ).map(([id]) => id));
   html = rewriteScripts(html, ({ whole, openTag, source }) => {
     const src = attribute(openTag, 'src')?.value;
     // Require every exact reference to be empty. Query strings, path variants,
