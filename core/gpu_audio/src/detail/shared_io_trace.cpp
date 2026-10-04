@@ -265,11 +265,18 @@ void emit_record([[maybe_unused]] const SharedIoTraceConfig& config,
         return;
     }
     if (r.kind == SharedIoTraceKind::Delivery) {
-        PULP_TRACE_INSTANT_ARGS("gpu", "gpu.audio.delivery", "schema", 2, "engine_id",
-                                config.engine_id, "generation", r.generation, "sequence",
-                                r.sequence, "output_eligible", true, "delivery",
-                                shared_io_delivery_name(r.delivery), "delivery_reason",
-                                shared_io_fallback_reason_name(r.delivery_reason));
+        PULP_TRACE_INSTANT_ARGS(
+            "gpu", "gpu.audio.delivery", "schema", 2, "engine_id", config.engine_id, "generation",
+            r.generation, "sequence", r.sequence, "output_eligible", true, "delivery",
+            shared_io_delivery_name(r.delivery), "delivery_reason",
+            shared_io_fallback_reason_name(r.delivery_reason), "delivery_decision_ns",
+            r.callback_timing_available ? static_cast<std::int64_t>(r.callback_end_ns) : -1,
+            "callback_start_ns",
+            r.callback_timing_available ? static_cast<std::int64_t>(r.callback_start_ns) : -1,
+            "callback_end_ns",
+            r.callback_timing_available ? static_cast<std::int64_t>(r.callback_end_ns) : -1,
+            "result_visible_ns",
+            r.callback_timing_available ? static_cast<std::int64_t>(r.result_visible_ns) : -1);
         return;
     }
     if (r.kind == SharedIoTraceKind::Recovery) {
@@ -288,6 +295,18 @@ void emit_record([[maybe_unused]] const SharedIoTraceConfig& config,
         "gpu_work_admitted", r.gpu_work_admitted, "output_eligible", r.output_eligible,
         "callback_ingress_ns",
         r.callback_ingress_ns ? static_cast<std::int64_t>(r.callback_ingress_ns) : -1,
+        "admission_timestamp_ns",
+        r.has(S::Scheduled)
+            ? static_cast<std::int64_t>(r.cpu_ns[static_cast<std::size_t>(S::Scheduled)])
+            : -1,
+        "terminal_ns",
+        r.has(S::CompletionObserved)
+            ? static_cast<std::int64_t>(r.cpu_ns[static_cast<std::size_t>(S::CompletionObserved)])
+            : -1,
+        "retirement_ns",
+        r.has(S::RetirementObserved)
+            ? static_cast<std::int64_t>(r.cpu_ns[static_cast<std::size_t>(S::RetirementObserved)])
+            : -1,
         "ingress_to_worker_ns",
         r.callback_ingress_ns && r.has(S::WorkerEntry) && r.cpu_ns[1] >= r.callback_ingress_ns
             ? static_cast<std::int64_t>(r.cpu_ns[1] - r.callback_ingress_ns)
