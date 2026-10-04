@@ -99,3 +99,11 @@ digest changes, if browser-only payloads survive, or if the negative control is
 not rejected. CTest registers it as
 `pulp-materialized-runtime-conformance` when the locked Node dependencies are
 available.
+
+Browser vendor removal is opt-in metadata. A capture adapter that owns a
+React, ReactDOM, or Babel payload must mark the corresponding empty script
+reference with `data-pulp-vendor="react"`, `"react-dom"`, or `"babel"`; the
+sidecar copies that role into `asset.vendor_kind`. The canonicalizer refuses
+unknown roles, authored script bodies, mixed references, and marker-only
+content. Older sidecars without this metadata remain loadable and retain their
+assets until an adapter re-captures them with the explicit role.
