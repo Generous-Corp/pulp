@@ -2162,22 +2162,22 @@ class UnreachedChangedTest(unittest.TestCase):
         same = {"test/a": self.sha("bytes of a"), "test/mod.so": self.sha("bytes of mod.so")}
         # deep.so, loaded by mod.so, loaded by a, changed: a is reported.
         out = self.full([], {**same, "test/deep.so": self.sha("old deep")}, "all")
-        self.assertEqual((out["unreached_changed"], out["unreached_compared"], out["unchecked_modules"]),
+        self.assertEqual((out["unreached_changed"], out["unreached_compared"], out["unreached_unchecked_modules"]),
                          (["test/a"], 3, []))
         # Control: an unchanged closure leaves a out.
         out = self.full([], {**same, "test/deep.so": self.sha("bytes of deep.so")}, "all")
         self.assertEqual(out["unreached_changed"], [])
         # A closure artifact with no hash is unchecked, and does not null the field.
         out = self.full([], same, "all")
-        self.assertEqual((out["unreached_changed"], out["unchecked_modules"]), ([], ["test/deep.so"]))
+        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]), ([], ["test/deep.so"]))
         # Only unhashed artifacts in scope: nothing compared, so null, still named.
         out = self.full([], {"test/c": None}, "all")
-        self.assertEqual((out["unreached_changed"], out["unchecked_modules"]),
+        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]),
                          (None, ["test/deep.so", "test/mod.so"]))
         # In a bounded run, only a sampled executable brings its closure.
         out = self.full(["test/b"], {"test/b": self.sha("bytes of b"), "test/deep.so": self.sha("old")},
                         "sampled")
-        self.assertEqual((out["unreached_changed"], out["unchecked_modules"]), ([], []))
+        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]), ([], []))
 
     def test_identity_usable_decides_before_the_problem_lines(self) -> None:
         hashes = {"test/b": self.sha("old bytes of b")}
@@ -2207,7 +2207,7 @@ class UnreachedChangedTest(unittest.TestCase):
         with mock.patch.object(runner, "unreached_changed",
                                side_effect=lambda *a: calls.append(a[4]) or {
                                    "unreached_changed": ["test/x"], "unreached_compared": 1,
-                                   "unchecked_modules": []}):
+                                   "unreached_unchecked_modules": []}):
             _, _, receipt = KeyedFullTest.run_full(KeyedFullTest())
         self.assertEqual(calls, ["all"])
         derived = receipt["executable_reuse"]["derived"]
@@ -2359,7 +2359,7 @@ class SelectedLegPipelineTest(unittest.TestCase):
                          {"mode": "keyed_bounded_shadow", "bound": bound,
                           # No record was picked, so no bytes could be compared.
                           "derived": {"status": "derived", "would_skip_count": 3, "unreached_changed": None,
-                                      "unreached_compared": 0, "unchecked_modules": None},
+                                      "unreached_compared": 0, "unreached_unchecked_modules": None},
                           # No selection was written beside the receipt to measure against.
                           "would_skip_tests": None, "false_skip_count": None, "false_skips": None,
                           "sampled_failures": None})

@@ -1104,7 +1104,7 @@ KEY_BLIND_EXECUTABLES = "tools/ci/key_blind_executables.json"
 
 KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
 # The shape a result always carries, so an absent field never reads as "none".
-UNKNOWN_UNREACHED = {"unreached_changed": None, "unreached_compared": 0, "unchecked_modules": None}
+UNKNOWN_UNREACHED = {"unreached_changed": None, "unreached_compared": 0, "unreached_unchecked_modules": None}
 
 
 def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any],
@@ -1117,7 +1117,7 @@ def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any]
     `scope` is "all" when every would-skip was built (a keyed full run) and
     "sampled" when only the sample was. The record hashes the executables
     registered ctests run, which every would-skip is; a closure artifact it
-    has no hash for is listed in `unchecked_modules`, and a would-skip
+    has no hash for is listed in `unreached_unchecked_modules`, and a would-skip
     without one is skipped. `unreached_changed` is None, never an empty
     list, when nothing can be compared: no record was picked (bytes from
     another toolchain always differ), the record's identity is unusable, or
@@ -1187,7 +1187,7 @@ def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any]
             changed.append(artifact)
     compared = sum(1 for verdict in verdicts.values() if verdict is not None)
     return {"unreached_changed": changed if compared else None, "unreached_compared": compared,
-            "unchecked_modules": sorted(unchecked)}
+            "unreached_unchecked_modules": sorted(unchecked)}
 
 
 def lane_red_allowlist(
