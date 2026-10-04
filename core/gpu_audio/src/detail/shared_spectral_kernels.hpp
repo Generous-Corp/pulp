@@ -5,6 +5,9 @@
 namespace pulp::gpu_audio::detail {
 // All mutable spectral history is queue-ordered device storage. Metadata lives
 // in the imported slot and remains immutable until its physical retirement.
+// Metadata words: input write offset, frame-active flag, OLA write offset,
+// output-active flag, output read offset, and the count of leading frame
+// samples that fall before the stream (skipped by the overlap-add).
 inline std::array<std::string, 4> shared_spectral_kernels(unsigned n, unsigned h, unsigned c) {
     const auto common = "const N:u32=" + std::to_string(n) + "u; const H:u32=" + std::to_string(h) +
                         "u; const C:u32=" + std::to_string(c) + R"WGSL(u;
@@ -34,7 +37,8 @@ fn slot_word(i:u32)->u32 { return bitcast<u32>(input[META+i]); }
             common + R"WGSL(
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3<u32>) {
  let k=id.x; if(k>=N*C || slot_word(1u)==0u){return;}
- let ch=k/N; let i=k%N; let index=(slot_word(2u)+i)%(2u*N); let w=state[WINDOW+i];
+ let ch=k/N; let i=k%N; if(i<slot_word(5u)){return;}
+ let index=(slot_word(2u)+i)%(2u*N); let w=state[WINDOW+i];
  state[OLA+ch*2u*N+index]+=data[2u*k]*w;
  if(ch==0u){state[NORM+index]+=w*w;}
 })WGSL",
@@ -42,8 +46,7 @@ fn slot_word(i:u32)->u32 { return bitcast<u32>(input[META+i]); }
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3<u32>) {
  let i=id.x; if(i>=H){return;}
  if(slot_word(3u)==0u){for(var ch=0u; ch<C; ch++){data[ch*H+i]=0.0;} return;}
- let index=(slot_word(4u)+i)%(2u*N); var norm=state[NORM+index];
- if(slot_word(5u)!=0u){norm=max(norm,state[WINDOW+N]);}
+ let index=(slot_word(4u)+i)%(2u*N); let norm=state[NORM+index];
  for(var ch=0u; ch<C; ch++){
    let at=OLA+ch*2u*N+index; var value=0.0;
    if(norm>1e-9){value=state[at]/norm;}

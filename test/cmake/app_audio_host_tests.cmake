@@ -542,6 +542,12 @@ pulp_add_test_suite(pulp-test-modal-analysis GROUP pulp-test-group-app-audio-sup
 add_executable(pulp-test-latency-contract test_latency_contract.cpp)
 target_link_libraries(pulp-test-latency-contract PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-latency-contract)
+# Stream-start fidelity of the STFT/WOLA engine: the first samples after
+# prepare()/reset() must come back at full strength, delayed by the reported
+# latency. Rendered through RenderScenario, so it shares the audio test support.
+add_executable(pulp-test-spectral-stream-start test_spectral_frame_engine_stream_start.cpp)
+target_link_libraries(pulp-test-spectral-stream-start PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-spectral-stream-start)
 
 pulp_add_test_suite(pulp-test-oversampling-latency-contract
     GROUP pulp-test-group-app-audio-support

@@ -178,14 +178,21 @@ bool GpuSpectralMaskSession::submit_impl(std::span<const float> input, std::uint
     std::memcpy(lease->bytes.data(), input.data(), input.size_bytes());
     impl_->report.cpu_input_bytes += input.size_bytes();
     const auto q = impl_->submitted, n = std::uint64_t(impl_->n), h = std::uint64_t(impl_->h);
-    const bool frame = q >= n / h - 1, output = q >= n / h + 1;
-    const std::uint32_t metadata[6] = {
-        std::uint32_t((q % (n / h)) * h),
-        frame ? 1u : 0u,
-        frame ? std::uint32_t(((q - (n / h - 1)) % (2 * n / h)) * h) : 0u,
-        output ? 1u : 0u,
-        output ? std::uint32_t(((q - (n / h + 1)) % (2 * n / h)) * h) : 0u,
-        output && q - (n / h + 1) < n / h ? 1u : 0u};
+    // Same frame grid as signal::SpectralFrameEngine with full-overlap stream
+    // start: hop q completes the frame starting at (q - (n/h - 1)) * h, so the
+    // first n/h - 1 frames begin before the stream over implicit silence and
+    // the first real sample is covered by every overlapping window. Their
+    // pre-stream samples are skipped rather than accumulated.
+    const auto per = n / h;
+    const bool output = q >= per + 1;
+    const std::uint64_t pre_stream = q + 1 < per ? (per - 1 - q) * h : 0u;
+    const std::uint32_t metadata[6] = {std::uint32_t((q % per) * h),
+                                       1u,
+                                       std::uint32_t(((q + per + 1) % (2 * per)) * h),
+                                       output ? 1u : 0u,
+                                       output ? std::uint32_t(((q - (per + 1)) % (2 * per)) * h)
+                                              : 0u,
+                                       std::uint32_t(pre_stream)};
     std::memcpy(lease->bytes.data() + std::size_t(impl_->n) * impl_->channels * 2 * sizeof(float),
                 metadata, sizeof(metadata));
     if (impl_->per_hop_gains) {

@@ -195,6 +195,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/spectral_frame_engine.hpp",
+        "fingerprint": "sha256:3d371041810892c7a9f5a3e132e0efa0c22a7bcc961fc82a78b0f644599e665e",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The shared STFT analysis and weighted overlap-add engine under the spectral "
+            "mask, delay-matrix and pitch/time processors. It is plumbing those capabilities "
+            "compose, not a behavior an agent selects on its own: its frame grid, "
+            "full-overlap stream start and fixed fft_size + hop latency are promises the "
+            "capabilities built on it inherit."
+        ),
+    },
+    {
         "include": "pulp/signal/reverse_buffer.hpp",
         "fingerprint": "sha256:cf64121f3ebd0bf931a60baf60860c8562c3d0dd7c4b2c866da07c38e72e5db8",
         "disposition": "infrastructure",
@@ -443,7 +456,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/realtime_pitch_time_geometry.hpp", "sha256:ffdb4ca7daa0ba17d53f78cf42eab0759c084cb2df4f0aa10bcf6be3e355fab0"),
+            ("pulp/signal/realtime_pitch_time_geometry.hpp", "sha256:236b802fc225c39fc7ffc40d7861db34bf3ba21952033a7d831dbdbafed2a3c8"),
             ("pulp/signal/realtime_pitch_time_processor.hpp", "sha256:519987d3e9742d2be9fcab3289808ed58b8f1fe5e245e92885c900726ad15809"),
             ("pulp/signal/spectral_envelope_shifter.hpp", "sha256:7b5faef1b77c5bf406357f58c8988c5fc4d2e769ec5882d17f053f672f24fe42"),
         ]

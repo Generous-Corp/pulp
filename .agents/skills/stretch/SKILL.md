@@ -297,6 +297,16 @@ INVISIBLE to peak/RMS/clip/AM metrics — output can sit at ~0.8 full-scale and 
 
 ## Gotchas
 
+- `RealtimePitchTimeProcessor` sets
+  `SpectralFrameEngineConfig::full_overlap_stream_start = false`. Its stretched
+  frame map and `input_priming_samples()` assume analysis frame k covers input
+  `[k * hop, k * hop + fft_size)`; the engine's default full-overlap grid starts
+  before the stream (`first_frame_start() < 0`) and would shift every frame
+  ordinal. Flipping it is a stream-contract change, not a one-line fix: the
+  frame map, finalize limits and the stream-contract tests all key on the
+  anchored grid, and its first `fft_size - hop` output samples keep the tapered
+  start.
+
 - Don't trust harmonic-clarity (peak/valley) or autocorr-f0-on-drums — both misled
   during tuning. Use centroid + peak-Hz-vs-source + wobble + the ear.
 - Keep integer types explicit around frame counts on Windows. MSVC's `long` is
