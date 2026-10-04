@@ -1024,6 +1024,10 @@ besides its sources. Its `fields` are the reuse key and are digested:
 - `build_env`, environment read while compiling (`CCACHE_*` settings,
   `SOURCE_DATE_EPOCH`, `ZERO_AR_DATE`, `PULP_OFFLINE_BUILD`).
 
+`effective` holds absolute paths, such as the compiler and sysroot, so a gate
+VM record and an m3 record have different digests even when their clang is
+identical. Each host's records match only that host's records, by design.
+
 Two parts are recorded but never keyed. `configure_env` holds the live
 values of the variables CMake reads at configure time (`CC`, `CXXFLAGS`,
 `SDKROOT`, ...), which can differ from those the directory was configured
@@ -1050,6 +1054,17 @@ For a reader that selects records by JSON pointer:
 - `/link_members/usable` and `/object_deps/usable` are booleans. An absent or
   null summary means the file was not written.
 - `/problems` is empty exactly when nothing in the record is incomplete.
+
+A test executable's hash depends only on its inputs because every test
+executable and module is linked with `-Wl,-objc_stubs_small`
+(`tools/cmake/PulpTestSuite.cmake`, behind `check_linker_flag`). Without it,
+Apple's linker laid out the ObjC selector stubs (`__TEXT,__objc_stubs`)
+differently from one link of identical objects to the next, so binaries
+pulling in SDL3 changed bytes with no input change. The
+`test-link-determinism` ctest relinks `pulp-test-standalone-rt` twelve times
+and fails on more than one hash. It skips only when the configure found the
+linker without the flag, and then names that linker. Shipped products are
+linked unchanged.
 
 The record hashes every registered test executable, not only those the job
 ran, so a fast-tier pull-request head's hashes are there for the merge

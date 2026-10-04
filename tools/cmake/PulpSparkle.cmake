@@ -11,6 +11,12 @@
 #       [VERSION 2.10.0 SHA256 <hash>] # override the pinned distribution
 #       [DIST_DIR <dir>])              # use an already-extracted distribution
 #
+# Offline and pre-supplied distributions: DIST_DIR, or the cache variable
+# PULP_SPARKLE_DIST_DIR, names an extracted distribution; the cache variable
+# PULP_SPARKLE_ARCHIVE names a local release archive, verified against the same
+# pinned SHA-256 before it is extracted. With FETCHCONTENT_FULLY_DISCONNECTED ON
+# and none of these, configure refuses rather than reaching the network.
+#
 # Call it AFTER the app target exists (pulp_add_plugin(... FORMATS Standalone)
 # or pulp_add_app()). Only ever pass the standalone .app target: Sparkle updates
 # the app that contains it, and a plug-in bundle has no business carrying an
@@ -48,11 +54,18 @@
 set(PULP_SPARKLE_DEFAULT_VERSION "2.10.0")
 set(PULP_SPARKLE_DEFAULT_SHA256
     "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c")
+set(PULP_SPARKLE_DIST_DIR "" CACHE PATH
+    "Extracted Sparkle distribution to use instead of downloading one")
+set(PULP_SPARKLE_ARCHIVE "" CACHE FILEPATH
+    "Local Sparkle release archive to verify and extract instead of downloading one")
 
 # Resolve (download + verify + extract) a Sparkle distribution and return the
 # directory that contains Sparkle.framework and bin/.
 function(pulp_resolve_sparkle_distribution out_dir)
     cmake_parse_arguments(ARG "" "VERSION;SHA256;DIST_DIR" "" ${ARGN})
+    if(NOT ARG_DIST_DIR AND PULP_SPARKLE_DIST_DIR)
+        set(ARG_DIST_DIR "${PULP_SPARKLE_DIST_DIR}")
+    endif()
     if(ARG_DIST_DIR)
         if(NOT EXISTS "${ARG_DIST_DIR}/Sparkle.framework")
             message(FATAL_ERROR
@@ -77,6 +90,20 @@ function(pulp_resolve_sparkle_distribution out_dir)
     set(_stamp "${_root}/.extracted-${_sha256}")
     if(NOT EXISTS "${_stamp}")
         file(MAKE_DIRECTORY "${_root}")
+        if(NOT EXISTS "${_archive}" AND PULP_SPARKLE_ARCHIVE)
+            if(NOT EXISTS "${PULP_SPARKLE_ARCHIVE}")
+                message(FATAL_ERROR
+                    "pulp_add_sparkle: PULP_SPARKLE_ARCHIVE does not exist: ${PULP_SPARKLE_ARCHIVE}")
+            endif()
+            file(COPY_FILE "${PULP_SPARKLE_ARCHIVE}" "${_archive}")
+        endif()
+        if(NOT EXISTS "${_archive}" AND FETCHCONTENT_FULLY_DISCONNECTED)
+            message(FATAL_ERROR
+                "pulp_add_sparkle: FETCHCONTENT_FULLY_DISCONNECTED is ON, so Sparkle "
+                "${_version} will not be downloaded. Pass DIST_DIR, or set "
+                "PULP_SPARKLE_DIST_DIR to an extracted distribution or "
+                "PULP_SPARKLE_ARCHIVE to its release archive")
+        endif()
         if(NOT EXISTS "${_archive}")
             message(STATUS "Pulp: downloading Sparkle ${_version}")
             file(DOWNLOAD
@@ -95,8 +122,8 @@ function(pulp_resolve_sparkle_distribution out_dir)
             if(NOT _have STREQUAL _sha256)
                 file(REMOVE "${_archive}")
                 message(FATAL_ERROR
-                    "pulp_add_sparkle: cached ${_archive} does not match the pinned "
-                    "SHA-256; removed it, re-run configure")
+                    "pulp_add_sparkle: ${_archive} (cached, or copied from "
+                    "PULP_SPARKLE_ARCHIVE) does not match the pinned SHA-256; removed it")
             endif()
         endif()
         file(REMOVE_RECURSE "${_root}/dist")

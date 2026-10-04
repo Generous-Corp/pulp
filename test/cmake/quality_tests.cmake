@@ -698,6 +698,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # Pure parts of the test-link determinism check (command extraction,
+        # the configure's decision file, the loud skip).
+        add_test(NAME link-determinism-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_link_determinism.py")
+        set_tests_properties(link-determinism-selftest PROPERTIES TIMEOUT 120)
         # Per-object header dependencies from the Ninja log, for the reuse record.
         add_test(NAME object-deps-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_object_deps.py")
@@ -1226,6 +1231,13 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
+        # The lane runner's own contract: base provisioning and configure-shape
+        # comparison, the selected-leg pipeline through every build state, and
+        # the per-test failure-set verdict. The runner drives a POSIX lane.
+        if(UNIX)
+            add_test(NAME changed-surface-runner-selftest COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_run_changed_surface_tests.py")
+        endif()
         # Every tools/**/test_*.py runs somewhere, or is on the shrinking baseline.
         add_test(NAME unregistered-tests-check COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/unregistered_tests_check.py")
@@ -1559,3 +1571,5 @@ if(Python3_Interpreter_FOUND)
         LABELS "cmake;ci"
         TIMEOUT 60)
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/tool_script_selftests.cmake")

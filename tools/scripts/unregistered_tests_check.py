@@ -107,6 +107,10 @@ def check(repo: Path, min_covered: int = MIN_COVERED) -> list[str]:
     for path in sorted(allowed - set(missing)):
         state = "is now invoked" if path in present else "no longer exists"
         problems.append(f"{path}: {state}; remove it from {BASELINE}")
+    # A note says why a baselined file cannot run in CI; one for a file that
+    # is no longer baselined describes nothing.
+    for path in sorted(set(baseline.get("notes") or {}) - allowed):
+        problems.append(f"{path}: has a note but is not baselined; remove the note from {BASELINE}")
     print(f"test-registration: {covered} invoked, {len(missing)} not invoked "
           f"({len(allowed)} baselined)", file=sys.stderr)
     return problems
@@ -120,12 +124,17 @@ def main(argv: list[str] | None = None) -> int:
     repo = args.repo_root.resolve()
     if args.write_baseline:
         missing, _ = uncovered(repo)
+        try:
+            notes = json.loads((repo / BASELINE).read_text(encoding="utf-8")).get("notes") or {}
+        except (OSError, json.JSONDecodeError):
+            notes = {}
         (repo / BASELINE).write_text(json.dumps({
             "reason": "test files that predate the registration guard and that no ctest, "
                       "source-selftest, workflow or CMake invokes; register or delete each, "
                       "then remove it here",
             "legacy": "tools/local-ci/ is the legacy local CI path scheduled for removal; "
                       "its test files stay baselined until it is deleted, not registered",
+            "notes": {path: note for path, note in sorted(notes.items()) if path in missing},
             "unregistered": missing,
         }, indent=2) + "\n", encoding="utf-8")
         print(f"test-registration: wrote {len(missing)} baselined files to {BASELINE}")
