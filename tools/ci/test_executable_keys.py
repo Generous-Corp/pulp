@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -16,8 +17,12 @@ sys.path.insert(0, str(HERE))
 import executable_keys as ek  # noqa: E402
 
 V2 = "pulp-codemodel-digest/v2"
-TOOLCHAIN = {"os": "Darwin", "arch": "arm64", "sdk_version": "26.4", "sdk_build": "25E236",
-             "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)"}
+# A record's toolchain identity (reuse_record.toolchain_identity's fields)
+# and the key the gate's job carries for it.
+IDENTITY = {"compiler_id": "AppleClang", "compiler_version": "21.0.0.21000111",
+            "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)", "target": "arm64-apple-darwin26.4.0",
+            "sdk_version": "26.4", "sdk_build": "25E236", "deployment_target": "13.4", "env": {"CC": "unset"}}
+TOOLCHAIN = {"os": "Darwin", "arch": "arm64", **{k: v for k, v in IDENTITY.items() if k != "target"}}
 EXE, OTHER, MOD = "test/pulp-test-a", "test/pulp-test-b", "test/plug.so"
 # Enough declared readers that the data scan proves it saw something.
 KNOWN_READERS = {f"pulp-test-k{i}": {"data": "declared", "inputs": [f"test/fixtures/k{i}"],
@@ -68,8 +73,9 @@ class Fixture:
                      obj("liba", "core/unpulled.cpp"): [],
                      obj("plug", "plug/plug.cpp"): []}
         self.stale: list[str] = []
-        self.record_fields = {**TOOLCHAIN, "os_version": "26.4", "os_build": "25E246"}
-        self.job_extra: dict = {}
+        self.record_fields = {"os": "Darwin", "arch": "arm64", "os_version": "26.4", "os_build": "25E246"}
+        self.job_extra: dict = {"platform": "darwin-arm64",
+                                "toolchain": {"complete": True, "missing": [], "fields": dict(IDENTITY)}}
 
     def targets(self) -> dict:
         def t(kind, art, deps=()):
@@ -156,7 +162,7 @@ class KeyTests(unittest.TestCase):
         self.assertFalse(self.equal(keys, EXE))
         self.assertTrue(self.equal(keys, OTHER))
         self.fx.head_targets["pulp-test-a"]["digest"] = self.fx.base_targets["pulp-test-a"]["digest"]
-        other = {**TOOLCHAIN, "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)"}
+        other = {**TOOLCHAIN, "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)"}
         self.assertNotEqual(ek.key_of("d", TOOLCHAIN, ["p"], {"p": "1"}), ek.key_of("d", other, ["p"], {"p": "1"}))
 
     def test_a_linked_library_whose_flags_moved_changes_the_key(self):
@@ -177,8 +183,10 @@ class KeyTests(unittest.TestCase):
 
     def test_a_record_from_another_toolchain_keys_nothing(self):
         head = self.head(**{"docs/readme.md": "new\n"})
-        for field, value in (("clang", "Apple clang version 21.0.0 (clang-2100.3.34.2)"), ("sdk_build", "26A425"),
-                             ("sdk_version", "27.0"), ("arch", "x86_64"), ("os", "Linux")):
+        for field, value in (("compiler", "Apple clang version 21.0.0 (clang-2100.3.34.2)"),
+                             ("compiler_version", "21.0.0.21000334"), ("sdk_build", "26A425"), ("sdk_version", "27.0"),
+                             ("deployment_target", "14.0"), ("env", {"CC": "/opt/homebrew/bin/clang"}),
+                             ("arch", "x86_64"), ("os", "Linux")):
             keys = self.fx.keys(head, toolchain={**TOOLCHAIN, field: value})
             self.assertEqual({e["always_run"] for e in keys.values()}, {"base_other_toolchain"}, field)
             self.assertEqual({e["base_key"] for e in keys.values()}, {None})
@@ -197,27 +205,44 @@ class KeyTests(unittest.TestCase):
 
     def test_a_record_from_another_platform_or_an_incomplete_probe_keys_nothing(self):
         head = self.head(**{"docs/readme.md": "new\n"})
-        for extra in ({"platform": "linux-x86_64"}, {"toolchain": {"complete": False, "missing": ["sdk_build"]}}):
+        complete = dict(self.fx.job_extra)
+        for extra in ({**complete, "platform": "linux-x86_64"},
+                      {**complete, "toolchain": {**complete["toolchain"], "complete": False, "missing": ["sdk_build"]}},
+                      {"platform": "darwin-arm64"}):                       # a record from before the identity block
             self.fx.job_extra = extra
             self.assertEqual({e["always_run"] for e in self.fx.keys(head).values()}, {"toolchain_unknown"}, extra)
-        # Control: the same record saying darwin and complete keys.
-        self.fx.job_extra = {"platform": "darwin-arm64", "toolchain": {"complete": True, "missing": []}}
+        # Control: the same record, darwin and complete, keys.
+        self.fx.job_extra = complete
         self.assertEqual({e["always_run"] for e in self.fx.keys(head).values()}, {None})
 
-    def test_an_absent_probe_field_reads_unknown(self):
+    def test_an_absent_fingerprint_field_reads_unknown(self):
         head = self.head(**{"docs/readme.md": "new\n"})
-        self.fx.record_fields = {k: v for k, v in self.fx.record_fields.items() if k != "sdk_version"}
+        self.fx.record_fields = {k: v for k, v in self.fx.record_fields.items() if k != "arch"}
         self.assertEqual({e["always_run"] for e in self.fx.keys(head).values()}, {"toolchain_unknown"})
 
-    def test_the_os_version_alone_does_not_change_the_toolchain(self):
-        self.assertEqual(ek.toolchain_of({**TOOLCHAIN, "os_version": "27.0", "os_build": "26A428"}), TOOLCHAIN)
+    def test_the_os_version_and_the_printed_triple_do_not_change_the_key(self):
+        job = {"platform": "darwin-arm64", "runner_image": {"fields": {"os": "Darwin", "arch": "arm64", "os_version": "27.0"}},
+               "toolchain": {"complete": True, "fields": {**IDENTITY, "target": "arm64-apple-darwin27.0.0"}}}
+        self.assertEqual(ek.toolchain_key(job), TOOLCHAIN)
 
     def test_an_unprobed_toolchain_keys_nothing(self):
         head = self.head(**{"docs/readme.md": "new\n"})
-        self.assertIsNone(ek.toolchain_of({**TOOLCHAIN, "sdk_version": "unknown"}))
-        self.assertIsNone(ek.toolchain_of({k: v for k, v in TOOLCHAIN.items() if k != "sdk_build"}))
         keys = self.fx.keys(head, toolchain=None)
         self.assertEqual({e["always_run"] for e in keys.values()}, {"toolchain_unknown"})
+
+    def test_the_lane_computes_its_toolchain_with_the_record_s_own_functions(self):
+        import reuse_record
+        calls = []
+
+        def identity(build_dir, env, fields):
+            calls.append(build_dir)
+            return {"complete": True, "missing": [], "fields": dict(IDENTITY)}
+        with mock.patch.object(reuse_record, "runner_image",
+                               return_value={"fields": {"os": "Darwin", "arch": "arm64"}}), \
+                mock.patch.object(reuse_record, "toolchain_identity", identity), \
+                mock.patch.object(reuse_record, "platform_id", return_value="darwin-arm64"):
+            self.assertEqual(ek.probe_toolchain(Path("/b")), TOOLCHAIN)
+        self.assertEqual(calls, [Path("/b")])          # the compiler comes from the configured build
 
     def test_a_base_that_is_not_an_ancestor_of_head_keys_nothing(self):
         head = self.head(**{"docs/readme.md": "new\n"})
@@ -286,7 +311,7 @@ class KeyTests(unittest.TestCase):
         keys = self.fx.keys(self.head())
         self.assertEqual(keys[OTHER]["always_run"], "data_unknown")
         self.assertIsNone(keys[EXE]["always_run"])
-        self.assertIsNone(keys[MOD]["always_run"])          # a module reads nothing on its own
+        self.assertIsNone(keys[MOD]["always_run"])          # scanned, and the scan found no reads
         self.fx.scan["executables_scanned"].append("pulp-test-b")
         for entry in KNOWN_READERS.values():
             entry["detected_sources"] = []                  # a blind scan
@@ -295,6 +320,39 @@ class KeyTests(unittest.TestCase):
         finally:
             for entry in KNOWN_READERS.values():
                 entry["detected_sources"] = ["test/k.cpp"]
+
+    def test_a_module_the_scans_cannot_vouch_for_always_runs(self):
+        self.fx.scan["executables_scanned"].remove("plug.so")
+        self.assertEqual(self.fx.keys(self.head())[MOD]["always_run"], "data_unknown")
+        self.fx.scan["executables_scanned"].append("plug.so")
+        self.fx.scan["executables"]["plug.so"] = {"data": "undeclared", "inputs": [], "detected_sources": ["plug/plug.cpp"]}
+        self.assertEqual(self.fx.keys(self.head())[MOD]["always_run"], "data_undeclared")
+
+    def test_the_lane_keys_the_compiler_cmake_chose_not_the_one_on_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+
+            def compiler(path: Path, line: str) -> Path:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("#!/bin/sh\n"
+                                f'case "$1" in -print-target-triple) echo arm64-apple-darwin99.0.0 ;; '
+                                f'*) echo "{line}" ;; esac\n')
+                path.chmod(0o755)
+                return path
+            chosen = compiler(tmp / "toolchain" / "c++", "CMake-chosen clang 1.0")
+            compiler(tmp / "path" / "clang", "PATH clang 9.9")
+            build = tmp / "build"
+            (build / "CMakeFiles" / "3.30.0").mkdir(parents=True)
+            (build / "CMakeFiles" / "3.30.0" / "CMakeCXXCompiler.cmake").write_text(
+                f'set(CMAKE_CXX_COMPILER "{chosen}")\nset(CMAKE_CXX_COMPILER_ID "AppleClang")\n'
+                'set(CMAKE_CXX_COMPILER_VERSION "1.0.0")\n')
+            (build / "CMakeCache.txt").write_text("CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n")
+            with mock.patch.dict(os.environ, {"PATH": f"{tmp / 'path'}:{os.environ.get('PATH', '')}"}):
+                key = ek.probe_toolchain(build)
+            if key is None:
+                self.skipTest("this host's SDK could not be read, so the identity is incomplete")
+            self.assertEqual(key["compiler"], "CMake-chosen clang 1.0")
+            self.assertNotIn("target", key)
 
     def test_an_undeclared_spawn_always_runs(self):
         self.fx.scan["executables"]["pulp-test-a"] = {"spawns": "undeclared", "data": "none"}
@@ -330,6 +388,13 @@ class ManifestTests(unittest.TestCase):
             doc = json.loads(out.read_text())
             self.assertNotEqual(doc["producer"]["base_record_sha256"], first)
             self.assertEqual(doc["reasons"], {"toolchain_unknown": 3})
+
+    def test_registrations_match_the_build_dir_as_a_string(self):
+        # The host re-deriving a manifest holds copies, not the build tree:
+        # the configure's path need not exist there.
+        ctest = {"tests": [{"name": "t", "command": ["/nowhere/build/test/x"], "properties": []},
+                           {"name": "u", "command": ["/elsewhere/test/y"], "properties": []}]}
+        self.assertEqual(list(ek.registrations(ctest, Path("/nowhere/build/"))), ["test/x"])
 
     def test_every_key_code_path_exists(self):
         repo = HERE.parents[1]
