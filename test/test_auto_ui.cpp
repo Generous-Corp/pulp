@@ -760,12 +760,14 @@ TEST_CASE("AutoUi sync ignores unmatched widget identifiers",
 
 namespace {
 Knob* auto_ui_knob(View& view, std::string_view name) {
-    if (auto* k = dynamic_cast<Knob*>(&view); k && view.id() == name) return k;
+    if (auto* k = dynamic_cast<Knob*>(&view); k && view.id() == name)
+        return k;
     for (std::size_t i = 0; i < view.child_count(); ++i)
-        if (auto* k = auto_ui_knob(*view.child_at(i), name)) return k;
+        if (auto* k = auto_ui_knob(*view.child_at(i), name))
+            return k;
     return nullptr;
 }
-}  // namespace
+} // namespace
 
 TEST_CASE("AutoUi knobs follow automation and show host modulation with no plugin code",
           "[view][auto-ui][parameter-binding][modulation]") {

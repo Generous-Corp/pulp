@@ -158,7 +158,9 @@ public:
     // message handler). Whatever that frame changes marks its own damage; a
     // frame that marks nothing repaints in full, as an unbounded one always
     // has.
-    void request_frame() { schedule_repaint(); }
+    void request_frame() {
+        schedule_repaint();
+    }
 
     // True when the pending repaint covers the whole surface. Defaults true
     // (the first frame is always full) and after any no-arg mark_dirty();

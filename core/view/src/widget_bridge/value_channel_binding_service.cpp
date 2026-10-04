@@ -338,7 +338,8 @@ void WidgetBridge::service_param_bindings() {
     }
     // Bound widgets repaint their own boxes; a whole-surface request only
     // for a change that did not mark itself (see request_repaint_after).
-    if (any_changed) request_repaint_after(ledger);
+    if (any_changed)
+        request_repaint_after(ledger);
     service_shader_value_bindings();
 }
 

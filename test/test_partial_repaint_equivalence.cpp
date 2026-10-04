@@ -19,10 +19,10 @@
 //
 // Tag: [view][partial-render][issue-6262]
 
-#include <catch2/catch_test_macros.hpp>
 #include <algorithm>
-#include <utility>
+#include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <utility>
 
 #include <pulp/view/repaint_damage.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -253,7 +253,7 @@ TEST_CASE("producer maps a repaint under a scrolled container through the scroll
     const auto r = request_through_producer(*root, *iptr, Rect{0, 0, 40, 40});
     REQUIRE_FALSE(r.full);
     REQUIRE(r.bounds.x == 10);
-    REQUIRE(r.bounds.y == -30);   // item (10, 10) scrolled up by 40
+    REQUIRE(r.bounds.y == -30); // item (10, 10) scrolled up by 40
     REQUIRE(r.bounds.width == 40);
 }
 
@@ -282,8 +282,10 @@ TEST_CASE("producer maps a repaint under a rotated ancestor to the rotated box",
         const float px = cx - 50.0f, py = cy - 50.0f;
         const float x = 50.0f + 50.0f + std::cos(rad) * px - std::sin(rad) * py;
         const float y = 50.0f + 50.0f + std::sin(rad) * px + std::cos(rad) * py;
-        x0 = std::min(x0, x); y0 = std::min(y0, y);
-        x1 = std::max(x1, x); y1 = std::max(y1, y);
+        x0 = std::min(x0, x);
+        y0 = std::min(y0, y);
+        x1 = std::max(x1, x);
+        y1 = std::max(y1, y);
     }
     // Covers the rotated box (the producer pads a pixel; the snap may add one).
     REQUIRE(r.bounds.x <= x0);

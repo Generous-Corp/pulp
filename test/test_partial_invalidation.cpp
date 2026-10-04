@@ -6,8 +6,8 @@
 // full-repaint escalations (no-arg repaint, render transform, empty rect), and
 // that a bounded update is a small fraction of the full surface.
 
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/ui_components.hpp>

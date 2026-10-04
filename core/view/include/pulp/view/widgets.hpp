@@ -159,8 +159,7 @@ class Label : public View, public SelectableText {
         // the paint's business), plus room for anti-aliasing. A live readout
         // or a modulated value label then repaints itself, not the editor.
         const float box_w = local_bounds().width;
-        const float overhang =
-            std::max(0.0f, std::max(ink_before, intrinsic_width()) - box_w);
+        const float overhang = std::max(0.0f, std::max(ink_before, intrinsic_width()) - box_w);
         const float halo = 4.0f;
         request_repaint(Rect{-overhang - halo, -halo, box_w + 2.0f * (overhang + halo),
                              local_bounds().height + 2.0f * halo});

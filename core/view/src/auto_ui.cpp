@@ -1,14 +1,14 @@
-#include <pulp/view/auto_ui.hpp>
-#include <pulp/view/parameter_binding.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/widgets.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <sstream>
-#include <iomanip>
 #include <functional>
+#include <iomanip>
+#include <pulp/view/auto_ui.hpp>
+#include <pulp/view/parameter_binding.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
+#include <sstream>
 #include <vector>
 
 namespace pulp::view {
@@ -183,27 +183,27 @@ private:
 /// a real host resize.
 class AutoUiRoot final : public View {
 public:
-    /// The editor's parameter bindings (bind_parameter): host gestures,
-    /// automation playback and modulated display for every control, living as
-    /// long as the editor.
-    std::vector<ParameterBinding> bindings;
-    /// Keeps each control's value row reading the parameter as automation
-    /// moves it.
-    state::ListenerToken value_rows;
+  /// The editor's parameter bindings (bind_parameter): host gestures,
+  /// automation playback and modulated display for every control, living as
+  /// long as the editor.
+  std::vector<ParameterBinding> bindings;
+  /// Keeps each control's value row reading the parameter as automation
+  /// moves it.
+  state::ListenerToken value_rows;
 
-    void layout_children() override {
-        const auto size = local_bounds();
-        const bool needs_convergence =
-            !has_settled_layout_ || size.width != settled_width_ ||
-            size.height != settled_height_;
+  void layout_children() override {
+      const auto size = local_bounds();
+      const bool needs_convergence =
+          !has_settled_layout_ || size.width != settled_width_ || size.height != settled_height_;
 
-        View::layout_children();
-        if (needs_convergence) View::layout_children();
+      View::layout_children();
+      if (needs_convergence)
+          View::layout_children();
 
-        has_settled_layout_ = true;
-        settled_width_ = size.width;
-        settled_height_ = size.height;
-    }
+      has_settled_layout_ = true;
+      settled_width_ = size.width;
+      settled_height_ = size.height;
+  }
 
 private:
     bool has_settled_layout_ = false;
@@ -418,12 +418,13 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
     root_raw->value_rows = store.add_listener(
         [root_raw, &store](state::ParamID changed, float) {
             const auto* info = store.info(changed);
-            if (info == nullptr) return;
+            if (info == nullptr)
+                return;
             std::function<void(View&)> visit = [&](View& view) {
                 if (view.id() == value_label_id(changed)) {
                     if (auto* label = dynamic_cast<Label*>(&view))
-                        label->set_text(format_parameter_value(
-                            *info, store.get_normalized(changed)));
+                        label->set_text(
+                            format_parameter_value(*info, store.get_normalized(changed)));
                     return;
                 }
                 for (std::size_t i = 0; i < view.child_count(); ++i)
@@ -511,14 +512,18 @@ void AutoUi::sync(View& root, state::StateStore& store) {
                 const auto played = store.displayed_modulation(param.id);
                 if (auto* knob = dynamic_cast<Knob*>(&view)) {
                     knob->set_value(norm);
-                    if (played) knob->set_modulated_value(*played);
-                    else knob->clear_modulated_value();
+                    if (played)
+                        knob->set_modulated_value(*played);
+                    else
+                        knob->clear_modulated_value();
                 } else if (auto* toggle = dynamic_cast<Toggle*>(&view)) {
                     toggle->set_on(norm > 0.5f);
                 } else if (auto* fader = dynamic_cast<Fader*>(&view)) {
                     fader->set_value(norm);
-                    if (played) fader->set_modulated_value(*played);
-                    else fader->clear_modulated_value();
+                    if (played)
+                        fader->set_modulated_value(*played);
+                    else
+                        fader->clear_modulated_value();
                 }
             } else if (view.id() == value_label_id(param.id)) {
                 if (auto* label = dynamic_cast<Label*>(&view))

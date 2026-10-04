@@ -1000,7 +1000,8 @@ void WidgetBridge::request_frame() {
     // invalidator) is the only thing that knows how to wake its host.
     ++repaint_request_generation_;
     if (!default_repaint_callback_) {
-        if (repaint_callback_) repaint_callback_();
+        if (repaint_callback_)
+            repaint_callback_();
         return;
     }
     PULP_TRACE_SCOPE_NAMED("render", "repaint_frame_only");
@@ -1012,7 +1013,8 @@ void WidgetBridge::request_repaint_after(const DamageLedger& ledger) {
     // the repaint. It changed nothing at all (a handler that only queued a
     // requestAnimationFrame): ask for a frame and let that frame mark what it
     // draws. Anything else keeps the whole-surface request.
-    if (ledger.self_damaged(root_)) return;
+    if (ledger.self_damaged(root_))
+        return;
     if (ledger.untouched(root_)) {
         request_frame();
         return;
@@ -1026,9 +1028,9 @@ WidgetBridge::DamageLedger WidgetBridge::damage_ledger() const {
 }
 
 bool WidgetBridge::DamageLedger::untouched(const View& root) const {
-    return View::damage_request_count() == damage_requests
-        && View::unmarked_paint_mutation_count() == unmarked_mutations
-        && root.tree_layout_generation() == layout_generation;
+    return View::damage_request_count() == damage_requests &&
+           View::unmarked_paint_mutation_count() == unmarked_mutations &&
+           root.tree_layout_generation() == layout_generation;
 }
 
 bool WidgetBridge::DamageLedger::self_damaged(const View& root) const {
@@ -1036,9 +1038,9 @@ bool WidgetBridge::DamageLedger::self_damaged(const View& root) const {
     // mark scheduled one), changed nothing it did not mark, and moved no
     // geometry. Then a blanket whole-surface request adds nothing but area:
     // a knob's played-value marker repaints the knob, not the editor.
-    return View::damage_request_count() != damage_requests
-        && View::unmarked_paint_mutation_count() == unmarked_mutations
-        && root.tree_layout_generation() == layout_generation;
+    return View::damage_request_count() != damage_requests &&
+           View::unmarked_paint_mutation_count() == unmarked_mutations &&
+           root.tree_layout_generation() == layout_generation;
 }
 
 void WidgetBridge::load_script(const std::string& code,
@@ -1238,8 +1240,10 @@ void WidgetBridge::poll_async_results() {
     // already scheduled their repaint; anything else keeps the whole-surface
     // request it always had.
     if (!pending.empty() || had_pending_frames) {
-        if (flushed && pending.empty()) request_repaint_after(ledger);
-        else request_repaint();
+        if (flushed && pending.empty())
+            request_repaint_after(ledger);
+        else
+            request_repaint();
     }
 }
 

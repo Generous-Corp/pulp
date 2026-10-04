@@ -1,20 +1,20 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/state_migration.hpp>
-#include <optional>
-#include <functional>
-#include <utility>
-#include <algorithm>
-#include <array>
-#include <vector>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <span>
+#include <utility>
+#include <vector>
 
 namespace pulp::events { class EventLoop; }
 
@@ -163,8 +163,8 @@ public:
     /// Call @p on_change on the main thread, from pump_listeners(), whenever
     /// displayed_modulation(@p id) changes (nullopt when it stops). The watch
     /// lasts as long as the returned token. Main thread only.
-    [[nodiscard]] ModulationWatch watch_modulation(
-        ParamID id, std::function<void(std::optional<float>)> on_change);
+    [[nodiscard]] ModulationWatch
+    watch_modulation(ParamID id, std::function<void(std::optional<float>)> on_change);
 
     /// Read a parameter's value mapped to [0, 1] (lock-free).
     float get_normalized(ParamID id) const;
@@ -553,7 +553,8 @@ private:
     // thread. Empty for the overwhelmingly common no-trigger store.
     std::vector<std::size_t> trigger_indices_;
     std::shared_ptr<detail::ListenerRegistry> registry_;
-public:
+
+  public:
     struct ModulationWatchers {
         struct Entry {
             std::uint64_t id = 0;
@@ -566,7 +567,7 @@ public:
     };
     /// RAII handle for watch_modulation(). Move-only; dropping it unwatches.
     class ModulationWatch {
-    public:
+      public:
         ModulationWatch() = default;
         ModulationWatch(std::weak_ptr<ModulationWatchers> owner, std::uint64_t id) noexcept
             : owner_(std::move(owner)), id_(id) {}
@@ -582,9 +583,12 @@ public:
         }
         ModulationWatch(const ModulationWatch&) = delete;
         ModulationWatch& operator=(const ModulationWatch&) = delete;
-        ~ModulationWatch() { reset(); }
+        ~ModulationWatch() {
+            reset();
+        }
         void reset() noexcept {
-            if (id_ == 0) return;
+            if (id_ == 0)
+                return;
             if (auto owner = owner_.lock()) {
                 auto& e = owner->entries;
                 e.erase(std::remove_if(e.begin(), e.end(),
@@ -593,13 +597,16 @@ public:
             }
             id_ = 0;
         }
-        explicit operator bool() const noexcept { return id_ != 0; }
+        explicit operator bool() const noexcept {
+            return id_ != 0;
+        }
 
-    private:
+      private:
         std::weak_ptr<ModulationWatchers> owner_;
         std::uint64_t id_ = 0;
     };
-private:
+
+  private:
     std::shared_ptr<ModulationWatchers> modulation_watchers_ =
         std::make_shared<ModulationWatchers>();
     void service_modulation_watchers();

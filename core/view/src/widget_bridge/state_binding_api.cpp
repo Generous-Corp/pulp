@@ -337,7 +337,8 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
     // host's CLAP modulation, or the plugin's own published one. Both
     // setters are value-gated and repaint only the control's box.
     const auto show_modulation = [&](auto* control) {
-        if (!b.value_channel.empty()) return;
+        if (!b.value_channel.empty())
+            return;
         if (const auto played = store_.displayed_modulation(b.param_id))
             control->set_modulated_value(*played);
         else
@@ -371,7 +372,8 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
         // ProgressBar::set_progress does NOT self-repaint, so the binding
         // repaints the bar's own box when the value moved.
         p->set_progress(target);
-        if (changed) p->request_repaint_self();
+        if (changed)
+            p->request_repaint_self();
     } else {
         matched = false;
     }

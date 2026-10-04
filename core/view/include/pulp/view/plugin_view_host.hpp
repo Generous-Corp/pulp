@@ -213,7 +213,9 @@ public:
     /// A frame without damage (see WindowHost::request_frame()). A host that
     /// paints from repaint() needs nothing more; a recorder can tell it apart
     /// from a whole-surface request by overriding it.
-    virtual void request_frame() { repaint(); }
+    virtual void request_frame() {
+        repaint();
+    }
     bool pending_repaint_is_full() const { return damage_.is_full(); }
     bool has_pending_dirty_bounds() const { return damage_.has_bounds(); }
     Rect pending_dirty_bounds() const { return damage_.bounds(); }

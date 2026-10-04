@@ -2496,7 +2496,8 @@ void View::request_repaint(const Rect& local_dirty) {
             request_repaint();
             return;
         }
-        if (v->has_render_transform()) mapped = v->map_rect_through_own_transform(mapped);
+        if (v->has_render_transform())
+            mapped = v->map_rect_through_own_transform(mapped);
         mapped.x += v->bounds_.x;
         mapped.y += v->bounds_.y;
         if (const View* parent = v->parent();
@@ -2506,15 +2507,15 @@ void View::request_repaint(const Rect& local_dirty) {
             mapped.y += offset.y;
         }
     }
-    if (!std::isfinite(mapped.x) || !std::isfinite(mapped.y) ||
-        !std::isfinite(mapped.width) || !std::isfinite(mapped.height)) {
+    if (!std::isfinite(mapped.x) || !std::isfinite(mapped.y) || !std::isfinite(mapped.width) ||
+        !std::isfinite(mapped.height)) {
         request_repaint();
         return;
     }
     const Rect root_rect = mapped;
-    PULP_TRACE_SCOPE_NAMED_ARGS("render", "view_repaint_bounded",
-                                "w", static_cast<int64_t>(std::ceil(root_rect.width)),
-                                "h", static_cast<int64_t>(std::ceil(root_rect.height)));
+    PULP_TRACE_SCOPE_NAMED_ARGS("render", "view_repaint_bounded", "w",
+                                static_cast<int64_t>(std::ceil(root_rect.width)), "h",
+                                static_cast<int64_t>(std::ceil(root_rect.height)));
     if (window_host_) {
         window_host_->mark_dirty(root_rect);
     } else {
@@ -2530,8 +2531,8 @@ Rect View::map_rect_through_own_transform(const Rect& local) const {
                                  {local.x + local.width, local.y},
                                  {local.x, local.y + local.height},
                                  {local.x + local.width, local.y + local.height}};
-    const bool scalar = scale_ != 1.0f || rotation_deg_ != 0.0f ||
-                        translate_x_ != 0.0f || translate_y_ != 0.0f;
+    const bool scalar =
+        scale_ != 1.0f || rotation_deg_ != 0.0f || translate_x_ != 0.0f || translate_y_ != 0.0f;
     const float sox = bounds_.width * origin_x_;
     const float soy = bounds_.height * origin_y_;
     const float mox = origin_explicit_ ? sox : 0.0f;
@@ -2552,8 +2553,10 @@ Rect View::map_rect_through_own_transform(const Rect& local) const {
             x = sox + translate_x_ + cs * px - sn * py;
             y = soy + translate_y_ + sn * px + cs * py;
         }
-        x0 = std::min(x0, x); y0 = std::min(y0, y);
-        x1 = std::max(x1, x); y1 = std::max(y1, y);
+        x0 = std::min(x0, x);
+        y0 = std::min(y0, y);
+        x1 = std::max(x1, x);
+        y1 = std::max(y1, y);
     }
     // One pixel more on every side: a scaled or rotated edge anti-aliases
     // into the pixel past its exact bound.

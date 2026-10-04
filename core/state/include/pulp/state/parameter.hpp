@@ -1,17 +1,17 @@
 #pragma once
 
-#include <string>
+#include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
-#include <cstdint>
-#include <cmath>
-#include <limits>
-#include <algorithm>
-#include <cctype>
 
 namespace pulp::state {
 
@@ -685,8 +685,7 @@ public:
         display_mod_.store(plain, std::memory_order_relaxed);
     }
     void clear_display_modulation() noexcept {
-        display_mod_.store(std::numeric_limits<float>::quiet_NaN(),
-                           std::memory_order_relaxed);
+        display_mod_.store(std::numeric_limits<float>::quiet_NaN(), std::memory_order_relaxed);
     }
     float display_modulation() const noexcept {
         return display_mod_.load(std::memory_order_relaxed);

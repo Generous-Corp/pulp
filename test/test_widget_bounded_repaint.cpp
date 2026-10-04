@@ -463,12 +463,16 @@ TEST_CASE("A redrawn CanvasWidget requests a repaint of its own box only",
 namespace {
 
 struct DamageHost final : public PluginViewHost {
-    NativeViewHandle native_handle() override { return {}; }
+    NativeViewHandle native_handle() override {
+        return {};
+    }
     void attach_to_parent(NativeViewHandle) override {}
     void detach() override {}
     void repaint() override {}
     void set_size(std::uint32_t, std::uint32_t) override {}
-    Size get_size() const override { return {}; }
+    Size get_size() const override {
+        return {};
+    }
 };
 
 // A 1000 x 1000 root holding `wrapper` holding a 20 x 20 knob at (100, 100).
@@ -490,10 +494,12 @@ struct TransformRig {
         root->add_child(std::move(w));
         root->set_plugin_view_host(&host);
     }
-    ~TransformRig() { root->set_plugin_view_host(nullptr); }
+    ~TransformRig() {
+        root->set_plugin_view_host(nullptr);
+    }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("A bounded repaint under a scaled ancestor maps through the scale",
           "[view][widgets][partial-repaint][transform]") {
@@ -511,7 +517,7 @@ TEST_CASE("A bounded repaint under a scaled ancestor maps through the scale",
     CHECK(b.x + b.width >= 60.0f);
     CHECK(b.y + b.height >= 60.0f);
     CHECK(b.width < 30.0f);
-    CHECK(b.x > 40.0f);  // not the unscaled (100, 100) position
+    CHECK(b.x > 40.0f); // not the unscaled (100, 100) position
 }
 
 TEST_CASE("A bounded repaint under a pixel-spreading filter stays whole-surface",

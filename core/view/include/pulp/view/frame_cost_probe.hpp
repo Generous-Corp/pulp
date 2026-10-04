@@ -204,7 +204,9 @@ class FrameCostProbe {
         int full = 0, bounded = 0, frames_only = 0;
         // A frame asked for without damage (View::request_frame()) is not a
         // repaint request: whatever that frame changes marks its own.
-        void request_frame() override { ++frames_only; }
+        void request_frame() override {
+            ++frames_only;
+        }
         bool have = false;
         Rect uni{};
         NativeViewHandle native_handle() override {

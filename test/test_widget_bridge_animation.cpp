@@ -3,28 +3,28 @@
 // (Element.animate(...) / KeyframeEffect), motion provenance, and the
 // pulp-motion-bench harness output.
 
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <numbers>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/frame_cost_probe.hpp>
-#include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/modal.hpp>
-#include <pulp/view/text_editor.hpp>
-#include <pulp/view/widget_bridge.hpp>
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/theme.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
-#include <chrono>
-#include <filesystem>
-#include <fstream>
-#include <numbers>
+#include <pulp/view/svg_path_widget.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pulp/view/theme.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <thread>
 
 using namespace pulp::view;
@@ -1462,7 +1462,8 @@ TEST_CASE("Native message dispatch adds no whole-surface damage when the work ma
             setSvgPath('needle', 'M 5 5 L ' + (10 + __step) + ' 20');
             setBackground('box', __step % 2 ? '#202020' : '#303030');
         };
-    )", "dispatch-damage");
+    )",
+                       "dispatch-damage");
     root.layout_children();
     // Positive control on the rig: the needle has a size, so its path paints.
     auto* needle = dynamic_cast<SvgPathWidget*>(bridge.widget("needle"));
@@ -1471,9 +1472,8 @@ TEST_CASE("Native message dispatch adds no whole-surface damage when the work ma
 
     FrameCostProbe probe(root, {400, 300});
     const auto payload = choc::value::createObject("Tick");
-    const auto& own = probe.measure([&] {
-        bridge.dispatch_native_message("moveNeedle", "tick", payload, "t", "test");
-    });
+    const auto& own = probe.measure(
+        [&] { bridge.dispatch_native_message("moveNeedle", "tick", payload, "t", "test"); });
     CHECK(own.repaint_requests > 0);
     CHECK_FALSE(own.full_damage);
     REQUIRE(own.has_bounds);
@@ -1483,10 +1483,10 @@ TEST_CASE("Native message dispatch adds no whole-surface damage when the work ma
     // A handler that changes nothing (it only queues a frame callback) asks
     // for a frame, not for damage: that frame marks what it draws.
     bridge.load_script("globalThis.queueOnly = function(type, payload, id) {"
-                       " requestAnimationFrame(function() {}); };", "dispatch-queue");
-    const auto& quiet = probe.measure([&] {
-        bridge.dispatch_native_message("queueOnly", "tick", payload, "t", "test");
-    });
+                       " requestAnimationFrame(function() {}); };",
+                       "dispatch-queue");
+    const auto& quiet = probe.measure(
+        [&] { bridge.dispatch_native_message("queueOnly", "tick", payload, "t", "test"); });
     CHECK_FALSE(quiet.full_damage);
     CHECK(quiet.repaint_requests == 0);
     CHECK(quiet.frame_requests >= 1);
@@ -1512,9 +1512,9 @@ TEST_CASE("bindWidgetToParam shows host modulation on a scripted knob with no ot
     auto* knob = dynamic_cast<Knob*>(bridge.widget("drive"));
     REQUIRE(knob != nullptr);
     bridge.service_frame_callbacks();
-    REQUIRE_FALSE(knob->has_modulated_value());   // nothing modulates it
+    REQUIRE_FALSE(knob->has_modulated_value()); // nothing modulates it
 
-    store.set_mod_offset(11, 0.25f);               // a CLAP host's modulation
+    store.set_mod_offset(11, 0.25f); // a CLAP host's modulation
     bridge.service_frame_callbacks();
     REQUIRE(knob->has_modulated_value());
     REQUIRE(knob->modulated_display_value() == Catch::Approx(0.75f));

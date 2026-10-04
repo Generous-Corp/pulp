@@ -268,7 +268,10 @@ public:
     // back-include of widgets.hpp; the int matches LabelAlign's enum
     // order: 0 = left, 1 = center, 2 = right.
 
-    void set_inheritable_text_color(Color c) { inh_text_color_ = c; invalidate_subtree_caches_up(); }
+    void set_inheritable_text_color(Color c) {
+        inh_text_color_ = c;
+        invalidate_subtree_caches_up();
+    }
     void clear_inheritable_text_color() { inh_text_color_.reset(); }
     /// Walks own value, then parent chain. nullopt if no ancestor set it.
     std::optional<Color> inheritable_text_color() const;
@@ -769,7 +772,10 @@ public:
     /// with `@pulp/react`. Pulp's transform model is currently 2D-affine, so
     /// this behaves as a paint-time no-op.
     bool backface_visible() const { return backface_visible_; }
-    void set_backface_visible(bool v) { backface_visible_ = v; invalidate_subtree_caches_up(); }
+    void set_backface_visible(bool v) {
+        backface_visible_ = v;
+        invalidate_subtree_caches_up();
+    }
 
     /// GPU-host capability signal.
     /// A view that is rendered through the Skia/Dawn/Yoga scripted-UI path —
@@ -1085,7 +1091,10 @@ public:
     // Opacity is applied by the live compositing layer, outside any cached
     // recording, so it stales no cache -- but it is a paint change nobody
     // marked, which a batched repaint decision has to see.
-    void set_opacity(float o) { opacity_ = std::clamp(o, 0.0f, 1.0f); note_unmarked_paint_mutation(); }
+    void set_opacity(float o) {
+        opacity_ = std::clamp(o, 0.0f, 1.0f);
+        note_unmarked_paint_mutation();
+    }
     float opacity() const { return opacity_; }
 
     /// Background color (optional — if set, painted before children)
@@ -1123,7 +1132,10 @@ public:
     /// without an API break. Accepted CSS keywords: `repeat`, `repeat-x`,
     /// `repeat-y`, `no-repeat`, `space`, `round`. Unknown / empty = `repeat`
     /// (CSS initial value).
-    void set_background_repeat(std::string kw) { background_repeat_ = std::move(kw); invalidate_subtree_caches_up(); }
+    void set_background_repeat(std::string kw) {
+        background_repeat_ = std::move(kw);
+        invalidate_subtree_caches_up();
+    }
     const std::string& background_repeat() const { return background_repeat_; }
 
     /// Border (optional — painted on top of background)
@@ -1229,10 +1241,22 @@ public:
     /// View::BorderStyle for the line-style enum since CSS keyword sets are
     /// identical. Skia inflates the box by `outline_offset_ + outline_width_ /
     /// 2` and strokes; CG falls through for dashed/dotted same as border-style.
-    void set_outline_color(Color c) { outline_color_ = c; invalidate_subtree_caches_up(); }
-    void set_outline_offset(float px) { outline_offset_ = px; invalidate_subtree_caches_up(); }
-    void set_outline_style(BorderStyle s) { outline_style_ = s; invalidate_subtree_caches_up(); }
-    void set_outline_width(float px) { outline_width_ = px; invalidate_subtree_caches_up(); }
+    void set_outline_color(Color c) {
+        outline_color_ = c;
+        invalidate_subtree_caches_up();
+    }
+    void set_outline_offset(float px) {
+        outline_offset_ = px;
+        invalidate_subtree_caches_up();
+    }
+    void set_outline_style(BorderStyle s) {
+        outline_style_ = s;
+        invalidate_subtree_caches_up();
+    }
+    void set_outline_width(float px) {
+        outline_width_ = px;
+        invalidate_subtree_caches_up();
+    }
     Color outline_color() const { return outline_color_; }
     float outline_offset() const { return outline_offset_; }
     BorderStyle outline_style() const { return outline_style_; }
@@ -1729,7 +1753,10 @@ public:
     bool has_right() const { return has_right_; }
     bool has_bottom() const { return has_bottom_; }
     bool has_left() const { return has_left_; }
-    void set_z_index(int z) { z_index_ = z; invalidate_subtree_caches_up(); }
+    void set_z_index(int z) {
+        z_index_ = z;
+        invalidate_subtree_caches_up();
+    }
     int z_index() const { return z_index_; }
 
     /// Children stably sorted by z_index() ascending — paint order (higher-z on top); hit_test walks it reversed. Exposed for tests.

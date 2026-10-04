@@ -35,12 +35,12 @@
 ///
 /// UI-thread only.
 
+#include <optional>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/design_frame_view.hpp> // DesignStepper
+#include <pulp/view/ui_components.hpp>     // ComboBox
 #include <pulp/view/widgets.hpp>
-#include <pulp/view/ui_components.hpp>       // ComboBox
-#include <pulp/view/design_frame_view.hpp>   // DesignStepper
-#include <optional>
 #include <utility>
 
 namespace pulp::view {
@@ -71,15 +71,16 @@ namespace detail {
 /// StateStore::pump_listeners() (the editor's UI tick), so it costs a few
 /// relaxed loads per frame and a bounded repaint only when the value moves.
 template <typename Control>
-state::StateStore::ModulationWatch watch_modulated_display(Control& control,
-                                                           state::StateStore& store,
-                                                           state::ParamID id) {
+state::StateStore::ModulationWatch
+watch_modulated_display(Control& control, state::StateStore& store, state::ParamID id) {
     return store.watch_modulation(id, [&control](std::optional<float> played) {
-        if (played) control.set_modulated_value(*played);
-        else control.clear_modulated_value();
+        if (played)
+            control.set_modulated_value(*played);
+        else
+            control.clear_modulated_value();
     });
 }
-}  // namespace detail
+} // namespace detail
 
 /// Knob ↔ parameter (normalized).
 [[nodiscard]] inline ParameterBinding
@@ -88,14 +89,14 @@ bind_parameter(Knob& knob, state::StateStore& store, state::ParamID id) {
     knob.on_gesture_begin = [&store, id] { store.begin_gesture(id); };
     knob.on_change = [&store, id](float v) { store.set_normalized(id, v); };
     knob.on_gesture_end = [&store, id] { store.end_gesture(id); };
-    return ParameterBinding(
-        store.add_listener(
-            [&knob, &store, id](state::ParamID changed, float) {
-                if (changed == id) knob.set_value(store.get_normalized(id));
-            },
-            state::ListenerThread::Main,
-            state::ListenerRestoreBehavior::Reconcile),
-        detail::watch_modulated_display(knob, store, id));
+    return ParameterBinding(store.add_listener(
+                                [&knob, &store, id](state::ParamID changed, float) {
+                                    if (changed == id)
+                                        knob.set_value(store.get_normalized(id));
+                                },
+                                state::ListenerThread::Main,
+                                state::ListenerRestoreBehavior::Reconcile),
+                            detail::watch_modulated_display(knob, store, id));
 }
 
 /// Fader ↔ parameter (normalized).
@@ -105,14 +106,14 @@ bind_parameter(Fader& fader, state::StateStore& store, state::ParamID id) {
     fader.on_gesture_begin = [&store, id] { store.begin_gesture(id); };
     fader.on_change = [&store, id](float v) { store.set_normalized(id, v); };
     fader.on_gesture_end = [&store, id] { store.end_gesture(id); };
-    return ParameterBinding(
-        store.add_listener(
-            [&fader, &store, id](state::ParamID changed, float) {
-                if (changed == id) fader.set_value(store.get_normalized(id));
-            },
-            state::ListenerThread::Main,
-            state::ListenerRestoreBehavior::Reconcile),
-        detail::watch_modulated_display(fader, store, id));
+    return ParameterBinding(store.add_listener(
+                                [&fader, &store, id](state::ParamID changed, float) {
+                                    if (changed == id)
+                                        fader.set_value(store.get_normalized(id));
+                                },
+                                state::ListenerThread::Main,
+                                state::ListenerRestoreBehavior::Reconcile),
+                            detail::watch_modulated_display(fader, store, id));
 }
 
 /// XY pad ↔ two parameters (normalized). A single drag drives both.
