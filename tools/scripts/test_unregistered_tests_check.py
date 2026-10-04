@@ -76,6 +76,19 @@ class UnregisteredTestsCheckTest(unittest.TestCase):
             f"tools/x/test_gone.py: no longer exists; remove it from {guard.BASELINE}",
         ])
 
+    def test_notes_cover_only_baselined_files_and_survive_a_rewrite(self) -> None:
+        repo = self.repo()
+        repo.write("tools/x/test_orphan.py", "")
+        repo.write(guard.BASELINE, json.dumps({"reason": "r", "unregistered": ["tools/x/test_orphan.py"],
+                                               "notes": {"tools/x/test_orphan.py": "needs a device",
+                                                         "tools/x/test_entry.py": "stale"}}))
+        self.assertEqual(guard.check(repo.root, min_covered=1), [
+            f"tools/x/test_entry.py: has a note but is not baselined; remove the note from {guard.BASELINE}"])
+        self.assertEqual(guard.main(["--repo-root", str(repo.root), "--write-baseline"]), 0)
+        rewritten = json.loads((repo.root / guard.BASELINE).read_text(encoding="utf-8"))
+        self.assertEqual(rewritten["notes"], {"tools/x/test_orphan.py": "needs a device"})
+        self.assertEqual(guard.check(repo.root, min_covered=1), [])
+
     def test_a_blind_instrument_fails_rather_than_passes(self) -> None:
         repo = self.repo()
         problems = guard.check(repo.root, min_covered=5)
