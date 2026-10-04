@@ -114,6 +114,11 @@ class Label : public View, public SelectableText {
         const bool probe_height = has_explicit_width && single_line_simple &&
                                   !has_explicit_height && !baseline_aligned;
         const float height_before = probe_height ? intrinsic_height() : 0.0f;
+        // The ink a fixed-box, single-line Label paints can run past its box
+        // when the copy is wider than the box; measured before the copy
+        // changes so the repaint below covers the old text's ink too.
+        const float ink_before =
+            has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
         text_ = std::move(text);
         // The text IS the accessible name for a label — the two-arg ctor set it
         // and set_text() did not, so every Label built by the JS bridge
@@ -145,7 +150,20 @@ class Label : public View, public SelectableText {
         // the capability unmeasured until the repaint records the new run.
         selection_layout_ = {};
         selection_layout_pending_ = {};
-        request_repaint();
+        if (!text_geometry_is_fixed) {
+            request_repaint();
+            return;
+        }
+        // Nothing moved: repaint this Label's box, widened by however far
+        // the old or new copy overhangs it (either side: the alignment is
+        // the paint's business), plus room for anti-aliasing. A live readout
+        // or a modulated value label then repaints itself, not the editor.
+        const float box_w = local_bounds().width;
+        const float overhang =
+            std::max(0.0f, std::max(ink_before, intrinsic_width()) - box_w);
+        const float halo = 4.0f;
+        request_repaint(Rect{-overhang - halo, -halo, box_w + 2.0f * (overhang + halo),
+                             local_bounds().height + 2.0f * halo});
     }
     const std::string& text() const { return text_; }
 

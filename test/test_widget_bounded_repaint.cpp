@@ -539,3 +539,30 @@ TEST_CASE("A paint-only setter is counted as an unmarked paint mutation",
     CHECK(View::damage_request_count() == marks + 1);
     CHECK(View::unmarked_paint_mutation_count() == unmarked);
 }
+
+TEST_CASE("A fixed-box Label repaints its own box when its copy changes",
+          "[view][widgets][partial-repaint][label]") {
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 400, 300});
+    auto owned = std::make_unique<Label>("32 BANDS");
+    auto* label = owned.get();
+    owned->flex().preferred_width = 80;
+    owned->flex().preferred_height = 16;
+    root->add_child(std::move(owned));
+    root->layout_children();
+    const auto lb = label->local_bounds();
+    REQUIRE(lb.width == 80.0f);
+
+    const auto d = damage_of(*root, [&] { label->set_text("64 BANDS"); });
+    REQUIRE_FALSE(d.full);
+    CHECK(d.bounds.width >= lb.width);
+    CHECK(d.bounds.width < 200.0f);
+
+    // A label whose width follows its copy moves its siblings: whole surface.
+    auto free_owned = std::make_unique<Label>("x");
+    auto* free_label = free_owned.get();
+    root->add_child(std::move(free_owned));
+    root->layout_children();
+    const auto d2 = damage_of(*root, [&] { free_label->set_text("a much longer string"); });
+    CHECK(d2.full);
+}
