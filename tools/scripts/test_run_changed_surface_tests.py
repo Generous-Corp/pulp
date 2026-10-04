@@ -1580,9 +1580,13 @@ class ExecutableReuseTest(unittest.TestCase):
 
     RECORD_SHA = "9" * 64
 
-    def binding(self, build: Path, code: Path) -> dict:
-        return {"base_record_run_id": "123", "base_record_sha256": self.RECORD_SHA,
-                "base_record_path": "/host/store/record", "base_sha": "a" * 40,
+    OTHER_SHA = "7" * 64
+    CANDIDATES = [{"run_id": "77", "record_sha256": "7" * 64, "record_path": "/store/c0", "commit": "c" * 40},
+                  {"run_id": "123", "record_sha256": "9" * 64, "record_path": "/store/c1", "commit": "a" * 40}]
+
+    def binding(self, build: Path, code: Path, candidates: list | None = None) -> dict:
+        return {"candidates": copy.deepcopy(self.CANDIDATES if candidates is None else candidates),
+                "rules_digest": "6" * 64,
                 "derivation_code_dir": str(code), "derivation_code_sha256": "8" * 64,
                 "sample_seed": "seed", "sample_percent": 5, "build_dir": str(build)}
 
@@ -1596,9 +1600,10 @@ class ExecutableReuseTest(unittest.TestCase):
             (code / rel).write_text("", encoding="utf-8")
         return build, code
 
-    def fake(self, build: Path, record_sha: str | None = None):
+    def fake(self, build: Path, record_sha: str | None = None, pick: dict | None | str = "default"):
         calls: list[tuple[list[str], dict]] = []
-        record_sha = record_sha or self.RECORD_SHA
+        pick = {"index": 1, "digest": self.RECORD_SHA} if pick == "default" else pick
+        digests = {"/store/c0": self.OTHER_SHA, "/store/c1": self.RECORD_SHA}
 
         def run(argv, **kwargs):
             calls.append((list(argv), kwargs))
@@ -1610,11 +1615,13 @@ class ExecutableReuseTest(unittest.TestCase):
             elif argv[0] == "ctest":
                 out = json.dumps({"tests": [{"name": "t"}]})
             elif argv[2] == "-c":
-                out = json.dumps({"arch": "arm64"})
+                out = json.dumps({"toolchain": {"arch": "arm64"}, "pick": pick})
             else:
                 target = Path(argv[argv.index("--out") + 1])
                 if target.name == "executable-keys.json":
-                    target.write_text(json.dumps({"producer": {"base_record_sha256": record_sha},
+                    used = argv[argv.index("--base-record") + 1] if "--base-record" in argv else None
+                    sha = record_sha or digests.get(used)
+                    target.write_text(json.dumps({"producer": {"base_record_sha256": sha},
                                                   "reasons": {"keyed": 1}}), encoding="utf-8")
                 elif target.name == "selection.json":
                     target.write_text(json.dumps({"would_skip": ["a", "b"], "sampled_executables": ["a"]}),
@@ -1628,12 +1635,19 @@ class ExecutableReuseTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             good = self.binding(Path(directory), Path(directory))
             runner.validate_executable_reuse_binding(good)
+            runner.validate_executable_reuse_binding({**good, "candidates": []})
             receipt = {**selection_receipt(), "executable_reuse": good}
             self.assertEqual(runner.decode_selection_receipt(*encode_receipt(receipt))[4], receipt)
+            candidate = good["candidates"][0]
             for bad in ({**good, "extra": "x"}, {**good, "sample_percent": 0}, {**good, "sample_percent": 101},
                         {**good, "sample_percent": 5.0}, {**good, "sample_percent": True},
-                        {**good, "base_record_sha256": "X" * 64}, {**good, "base_sha": "a"},
-                        {**good, "sample_seed": ""}, {k: v for k, v in good.items() if k != "build_dir"}):
+                        {**good, "rules_digest": "X" * 64}, {**good, "sample_seed": ""},
+                        {k: v for k, v in good.items() if k != "build_dir"},
+                        {**good, "candidates": [candidate] * 9}, {**good, "candidates": "x"},
+                        {**good, "candidates": [{**candidate, "extra": 1}]},
+                        {**good, "candidates": [{**candidate, "record_sha256": "X" * 64}]},
+                        {**good, "candidates": [{**candidate, "commit": "c"}]},
+                        {**good, "candidates": [{**candidate, "run_id": ""}]}):
                 with self.subTest(bad=bad), self.assertRaises(runner.SelectionExecutionError):
                     runner.validate_executable_reuse_binding(bad)
             with self.assertRaisesRegex(runner.SelectionExecutionError, "unexpected schema"):
@@ -1657,7 +1671,16 @@ class ExecutableReuseTest(unittest.TestCase):
                 self.assertEqual(kwargs["cwd"], str(code))
             keys = next(a for a, _ in python if a[2] == str(code / "tools/ci/executable_keys.py"))
             self.assertEqual(keys[keys.index("--build-dir") + 1], str(build))
-            self.assertEqual(keys[keys.index("--base-record") + 1], "/host/store/record")
+            # The second candidate is the one on the lane's toolchain.
+            pick = next(a for a, _ in python if a[2] == "-c")
+            self.assertEqual(pick[4], str(build))
+            self.assertEqual(json.loads(pick[5]), ["/store/c0", "/store/c1"])
+            self.assertEqual(keys[keys.index("--base-record") + 1], "/store/c1")
+            self.assertEqual(keys[keys.index("--base-sha") + 1], "a" * 40)
+            self.assertEqual(keys[keys.index("--base-record-run-id") + 1], "123")
+            self.assertEqual((derived["base_record_run_id"], derived["base_record_sha256"]),
+                             ("123", self.RECORD_SHA))
+            self.assertTrue(all(kw["env"]["PULP_BUILD_CLASS"] == "background" for _, kw in python))
             self.assertEqual(keys[keys.index("--toolchain-json") + 1], str(result / "toolchain.json"))
             selection = next(a for a, _ in python if a[2] == str(code / "tools/ci/executable_selection.py"))
             self.assertEqual(selection[selection.index("--seed") + 1], "seed")
@@ -1676,9 +1699,13 @@ class ExecutableReuseTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build, code = self.tree(Path(directory))
             result = Path(directory) / "result"
-            probes = []
-            for body in ("def probe_toolchain(build_dir):\n    return {'build': str(build_dir)}\n",
-                         "def probe_toolchain():\n    return {'build': None}\n"):
+            probes, statuses = [], []
+            load = ("def load_record(path):\n"
+                    "    return ({'toolchain': {'build': %r}} if path.name == 'c1' else {'toolchain': {}}, "
+                    "'digest-' + path.name)\n")
+            for body in ("def probe_toolchain(build_dir):\n    return {'build': str(build_dir)}\n"
+                         + load % str(build),
+                         "def probe_toolchain():\n    return {'build': None}\n" + load % None):
                 (code / "tools/ci/executable_keys.py").write_text(body, encoding="utf-8")
                 run, calls = self.fake(build)
 
@@ -1688,9 +1715,37 @@ class ExecutableReuseTest(unittest.TestCase):
                     return run(argv, **kwargs)
                 derived = runner.derive_executable_reuse(
                     self.binding(build, code), "b" * 40, build, result, real_probe)
-                self.assertEqual(derived["status"], "derived", derived)
+                statuses.append(derived["status"])
                 probes.append(json.loads((result / "toolchain.json").read_text(encoding="utf-8")))
             self.assertEqual(probes, [{"build": str(build)}, {"build": None}])
+            # Each copy picked the candidate whose record matches its own probe
+            # (c1) and reported that record's digest, which is not the bound one.
+            self.assertEqual(statuses, ["error: candidate record 123 is not the one Shipyard bound"] * 2)
+
+    def test_with_no_candidate_on_the_lane_toolchain_the_first_one_explains(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build, code = self.tree(Path(directory))
+            result = Path(directory) / "result"
+            run, calls = self.fake(build, pick=None)
+            derived = runner.derive_executable_reuse(self.binding(build, code), "b" * 40, build, result, run)
+            self.assertEqual(derived["status"], "derived", derived)
+            keys = next(a for a, _ in calls if len(a) > 2 and a[2].endswith("executable_keys.py"))
+            self.assertEqual(keys[keys.index("--base-record") + 1], "/store/c0")
+            self.assertEqual((derived["base_record_run_id"], derived["base_record_sha256"]), (None, None))
+            # A picked record whose digest moved since Shipyard bound it refuses.
+            run, _ = self.fake(build, pick={"index": 1, "digest": "0" * 64})
+            self.assertIn("is not the one Shipyard bound", runner.derive_executable_reuse(
+                self.binding(build, code), "b" * 40, build, result, run)["status"])
+            # No candidates: keyed against nothing, from the receipt's base.
+            run, calls = self.fake(build, pick=None)
+            derived = runner.derive_executable_reuse(self.binding(build, code, []), "b" * 40, build, result,
+                                                     run, base_sha="d" * 40)
+            self.assertEqual(derived["status"], "derived", derived)
+            keys = next(a for a, _ in calls if len(a) > 2 and a[2].endswith("executable_keys.py"))
+            self.assertNotIn("--base-record", keys)
+            self.assertEqual(keys[keys.index("--base-sha") + 1], "d" * 40)
+            self.assertIn("no base commit", runner.derive_executable_reuse(
+                self.binding(build, code, []), "b" * 40, build, result, run)["status"])
 
     def test_a_failed_derivation_is_recorded_never_raised(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1720,8 +1775,8 @@ class KeyedFullTest(unittest.TestCase):
     """A full plan with a bound executable reuse: the configured stages run
     unchanged and the derived selection is measured against their result."""
 
-    BINDING = {"base_record_run_id": "1", "base_record_sha256": "9" * 64, "base_record_path": "/r",
-               "base_sha": "a" * 40, "derivation_code_dir": "/code", "derivation_code_sha256": "8" * 64,
+    BINDING = {"candidates": [{"run_id": "1", "record_sha256": "9" * 64, "record_path": "/r", "commit": "a" * 40}],
+               "rules_digest": "6" * 64, "derivation_code_dir": "/code", "derivation_code_sha256": "8" * 64,
                "sample_seed": "s", "sample_percent": 5, "build_dir": "/b"}
 
     def receipt(self) -> dict:
@@ -1763,7 +1818,8 @@ class KeyedFullTest(unittest.TestCase):
             build, results = Path(directory) / "build", Path(directory) / "results"
             build.mkdir()
 
-            def derive(binding, head, build_dir, result_dir):
+            def derive(binding, head, build_dir, result_dir, *, base_sha):
+                self.assertEqual(base_sha, "a" * 40)  # the receipt's base, when no candidate keys
                 calls.append("derive")
                 if not derived_ok:
                     return {"status": "error: base refused"}
@@ -1929,7 +1985,7 @@ class SelectedLegPipelineTest(unittest.TestCase):
             receipt = selection_receipt(["smoke", "core"], ["tool"])
             if reuse is not None:
                 receipt["executable_reuse"] = reuse
-            def derived(binding, head, build_dir, result_dir):
+            def derived(binding, head, build_dir, result_dir, *, base_sha):
                 result_dir.mkdir(parents=True, exist_ok=True)
                 for name, doc in (derived_files or {}).items():
                     (result_dir / name).write_text(json.dumps(doc), encoding="utf-8")
@@ -1985,6 +2041,7 @@ class SelectedLegPipelineTest(unittest.TestCase):
                           "would_skip_tests": None, "false_skip_count": None, "false_skips": None})
         self.assertEqual(len(self.derive_calls), 1)
         self.assertEqual(self.derive_calls[0].args[1], "b" * 40)  # the receipt's head
+        self.assertEqual(self.derive_calls[0].kwargs["base_sha"], "a" * 40)
         _, _, plain = self.run_pipeline()
         self.assertNotIn("executable_reuse", plain)
         self.assertEqual(self.derive_calls, [])

@@ -362,16 +362,19 @@ def validate_build_configuration(build_dir: Path, policy: dict[str, Any]) -> Non
 # echoes them verbatim; Shipyard re-derives from the files it copies out and
 # refuses a difference.
 EXECUTABLE_REUSE_BINDING = {
-    "base_record_run_id": str,
-    "base_record_sha256": str,
-    "base_record_path": str,
-    "base_sha": str,
+    "candidates": list,
+    "rules_digest": str,
     "derivation_code_dir": str,
     "derivation_code_sha256": str,
     "sample_seed": str,
     "sample_percent": int,
     "build_dir": str,
 }
+# Base-record candidates, newest first. Shipyard filters them by platform and
+# merge rules; the toolchain rule needs this head's configure, so the runner
+# applies it and uses the first candidate built by the lane's toolchain.
+EXECUTABLE_REUSE_CANDIDATE = {"run_id": str, "record_sha256": str, "record_path": str, "commit": str}
+MAX_REUSE_CANDIDATES = 8
 # Run from Shipyard's extracted base copies, never from the checkout.
 DERIVATION_SCRIPTS = {
     "codemodel": "tools/ci/codemodel_digest.py",
@@ -387,11 +390,18 @@ def validate_executable_reuse_binding(binding: Any) -> None:
         value = binding[key]
         if not isinstance(value, kind) or isinstance(value, bool) or value == "":
             raise SelectionExecutionError(f"selection receipt executable_reuse.{key} is invalid")
-    for key in ("base_record_sha256", "derivation_code_sha256"):
+    for key in ("rules_digest", "derivation_code_sha256"):
         if not re.fullmatch(r"[0-9a-f]{64}", binding[key]):
             raise SelectionExecutionError(f"selection receipt executable_reuse.{key} is invalid")
-    if not re.fullmatch(r"[0-9a-fA-F]{40}", binding["base_sha"]):
-        raise SelectionExecutionError("selection receipt executable_reuse.base_sha is invalid")
+    candidates = binding["candidates"]
+    if len(candidates) > MAX_REUSE_CANDIDATES:
+        raise SelectionExecutionError("selection receipt executable_reuse.candidates is too long")
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or set(candidate) != set(EXECUTABLE_REUSE_CANDIDATE) or any(
+                not isinstance(candidate[k], t) or not candidate[k] for k, t in EXECUTABLE_REUSE_CANDIDATE.items()) \
+                or not re.fullmatch(r"[0-9a-f]{64}", candidate["record_sha256"]) \
+                or not re.fullmatch(r"[0-9a-fA-F]{40}", candidate["commit"]):
+            raise SelectionExecutionError("selection receipt executable_reuse.candidates is invalid")
     if not 1 <= binding["sample_percent"] <= 100:
         raise SelectionExecutionError("selection receipt executable_reuse.sample_percent is invalid")
 
@@ -405,21 +415,41 @@ def _sha256_file(path: Path) -> str:
 
 
 def derive_executable_reuse(
-    binding: dict[str, Any], head_sha: str, build_dir: Path, result_dir: Path, runner=subprocess.run
+    binding: dict[str, Any], head_sha: str, build_dir: Path, result_dir: Path, runner=subprocess.run,
+    *, base_sha: str = "",
 ) -> dict[str, Any]:
     """Derive the executable-keyed selection for the configured head and
     record it beside the result receipt. Shadow only: the stages run
     unchanged, so a failure here is recorded as the status and never raised.
     """
     try:
-        return {"status": "derived", **_derive(binding, head_sha, build_dir, result_dir, runner)}
+        return {"status": "derived", **_derive(binding, head_sha, base_sha, build_dir, result_dir, runner)}
     except DerivationError as error:
         return {"status": f"error: {error}"}
     except (OSError, ValueError, subprocess.SubprocessError, SelectionExecutionError) as error:
         return {"status": f"error: {type(error).__name__}: {error}"}
 
 
-def _derive(binding, head_sha, build_dir, result_dir, runner) -> dict[str, Any]:
+# Runs from the derivation dir with the base's key code: the lane's toolchain
+# for this configured build, and the first candidate record built by it.
+PICK_SCRIPT = """
+import inspect, json, sys
+from pathlib import Path
+sys.path.insert(0, 'tools/ci')
+import executable_keys as k
+probe = k.probe_toolchain
+lane = probe(Path(sys.argv[1])) if inspect.signature(probe).parameters else probe()
+pick = None
+for index, path in enumerate(json.loads(sys.argv[2])):
+    record, digest = k.load_record(Path(path))
+    if lane is not None and record is not None and record.get('toolchain') == lane:
+        pick = {'index': index, 'digest': digest}
+        break
+print(json.dumps({'toolchain': lane, 'pick': pick}, sort_keys=True))
+"""
+
+
+def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[str, Any]:
     if Path(binding["build_dir"]).resolve() != build_dir.resolve():
         raise DerivationError("the bound build directory is not this lane's")
     code = Path(binding["derivation_code_dir"])
@@ -451,35 +481,39 @@ def _derive(binding, head_sha, build_dir, result_dir, runner) -> dict[str, Any]:
     python = [sys.executable, "-I"]
 
     def step(argv: list[str], what: str) -> str:
-        done = runner(python + argv, capture_output=True, text=True, shell=False, cwd=str(code))
+        done = runner(python + argv, capture_output=True, text=True, shell=False, cwd=str(code),
+                      env={**os.environ, **STAGE_ENV})
         if done.returncode != 0:
             raise DerivationError(f"{what} exited {done.returncode}: {done.stderr.strip()[-300:]}")
         return done.stdout
 
-    # The key code's own probe, for this configured build: it reads the
-    # compiler the build directory recorded. An older base copy takes no
-    # argument.
-    probe = ("import inspect, json, sys; from pathlib import Path; sys.path.insert(0, 'tools/ci'); "
-             "import executable_keys as k; f = k.probe_toolchain; "
-             "print(json.dumps(f(Path(sys.argv[1])) if inspect.signature(f).parameters else f(), "
-             "sort_keys=True))")
-    toolchain = step(["-c", probe, binding["build_dir"]], "toolchain probe").strip()
-    if not toolchain or json.loads(toolchain) is None:
-        raise DerivationError("the toolchain probe is incomplete")
-    files["toolchain.json"].write_text(toolchain + "\n", encoding="utf-8")
+    # The key code's own probe reads the compiler this build directory
+    # recorded; an older base copy takes no argument.
+    candidates = binding["candidates"]
+    picked = json.loads(step(["-c", PICK_SCRIPT, binding["build_dir"],
+                              json.dumps([c["record_path"] for c in candidates])], "toolchain pick"))
+    files["toolchain.json"].write_text(json.dumps(picked["toolchain"], sort_keys=True) + "\n", encoding="utf-8")
+    pick = candidates[picked["pick"]["index"]] if picked["pick"] is not None else None
+    if pick is not None and picked["pick"]["digest"] != pick["record_sha256"]:
+        raise DerivationError(f"candidate record {pick['run_id']} is not the one Shipyard bound")
+    # With no candidate on this toolchain the first one still keys, so every
+    # executable carries base_other_toolchain and the reason names a record.
+    used = pick or (candidates[0] if candidates else None)
     bound_build = binding["build_dir"]
     step([str(scripts["codemodel"]), "--build-dir", bound_build, "--source-root", str(REPO_ROOT),
           "--ctest-json", str(files["ctest-listing.json"]), "--out", str(files["codemodel-digest.json"])],
          "codemodel digest")
-    step([str(scripts["keys"]), "--source-root", str(REPO_ROOT), "--base-sha", binding["base_sha"],
-          "--head-sha", head_sha, "--base-record", binding["base_record_path"],
-          "--base-record-run-id", binding["base_record_run_id"],
+    if used is None and not base_sha:
+        raise DerivationError("no base commit to key against")
+    step([str(scripts["keys"]), "--source-root", str(REPO_ROOT),
+          "--base-sha", used["commit"] if used else base_sha, "--head-sha", head_sha,
+          *(["--base-record", used["record_path"], "--base-record-run-id", used["run_id"]] if used else []),
           "--head-codemodel", str(files["codemodel-digest.json"]),
           "--ctest-json", str(files["ctest-listing.json"]), "--build-dir", bound_build,
           "--toolchain-json", str(files["toolchain.json"]), "--out", str(files["executable-keys.json"])],
          "key manifest")
     manifest = json.loads(files["executable-keys.json"].read_text(encoding="utf-8"))
-    if (manifest.get("producer") or {}).get("base_record_sha256") != binding["base_record_sha256"]:
+    if (manifest.get("producer") or {}).get("base_record_sha256") != (used or {}).get("record_sha256"):
         raise DerivationError("the base record is not the one Shipyard bound")
     step([str(scripts["selection"]), "--manifest", str(files["executable-keys.json"]),
           "--head-codemodel", str(files["codemodel-digest.json"]),
@@ -488,6 +522,9 @@ def _derive(binding, head_sha, build_dir, result_dir, runner) -> dict[str, Any]:
          "selection")
     selection = json.loads(files["selection.json"].read_text(encoding="utf-8"))
     return {
+        # The candidate the lane's toolchain picked, or null when none matched.
+        "base_record_run_id": pick["run_id"] if pick else None,
+        "base_record_sha256": pick["record_sha256"] if pick else None,
         "cmake_cache_sha256": _sha256_file(build_dir / "CMakeCache.txt"),
         "ctest_listing_sha256": _sha256_file(files["ctest-listing.json"]),
         "toolchain_sha256": _sha256_file(files["toolchain.json"]),
@@ -1288,7 +1325,8 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
         raise SelectionExecutionError("a keyed full run requires an absolute result receipt directory")
     result_dir = Path(result_dir_value)
     binding = receipt["executable_reuse"]
-    derived = derive_executable_reuse(binding, receipt["head_sha"], build_dir, result_dir)
+    derived = derive_executable_reuse(binding, receipt["head_sha"], build_dir, result_dir,
+                                      base_sha=receipt["base_sha"])
     args._changed_surface_full_authority_started = True
     env = {**os.environ, **STAGE_ENV}
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
@@ -1384,7 +1422,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
         executable_reuse = {"mode": "keyed_bounded_shadow", "bound": binding,
                             "derived": derive_executable_reuse(
             binding, selection_receipt["head_sha"], build_dir,
-            Path(os.environ["SHIPYARD_CHANGED_SURFACE_RESULT_DIR"]))}
+            Path(os.environ["SHIPYARD_CHANGED_SURFACE_RESULT_DIR"]), base_sha=selection_receipt["base_sha"])}
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
         selected_file = write_private_selection(Path(directory), selected_payload)
         snapshot_identity = selected_file.stat()
