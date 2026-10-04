@@ -1103,26 +1103,27 @@ KEY_BLIND_EXECUTABLES = "tools/ci/key_blind_executables.json"
 
 
 KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
+# The shape a result always carries, so an absent field never reads as "none".
+UNKNOWN_UNREACHED = {"unreached_changed": None, "unreached_compared": 0, "unchecked_modules": None}
 
 
 def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any],
                       derived: dict[str, Any], scope: str) -> dict[str, Any]:
-    """Would-skip executables, and the modules they load, whose bytes this
-    run built differ from the picked base record's hash for the same
-    artifact: a key that said "unchanged" about something that changed.
+    """Would-skip executables whose bytes, or the bytes of anything in their
+    spawn closure (the tools they run and the modules they load), differ
+    from the picked base record's hash for the same artifact: a key that
+    said "unchanged" about something that changed.
 
     `scope` is "all" when every would-skip was built (a keyed full run) and
-    "sampled" when only the sample was. Each in-scope executable brings the
-    modules in its spawn closure. The record hashes the executables
-    registered ctests run, which every would-skip is, and the modules the
-    link maps name; a closure module it has no hash for is listed in
-    `unreached_unchecked_modules`, and an executable without one is skipped.
-    `unreached_changed` is None, never an empty list, when nothing can be
-    compared: no record was picked (bytes from another toolchain always
-    differ), the record's identity is unusable, or no artifact in scope has a
-    hash. `unreached_compared` counts the artifacts compared, so "none
-    changed" over one artifact reads as that."""
-    unknown = {"unreached_changed": None, "unreached_compared": 0, "unreached_unchecked_modules": None}
+    "sampled" when only the sample was. The record hashes the executables
+    registered ctests run, which every would-skip is; a closure artifact it
+    has no hash for is listed in `unchecked_modules`, and a would-skip
+    without one is skipped. `unreached_changed` is None, never an empty
+    list, when nothing can be compared: no record was picked (bytes from
+    another toolchain always differ), the record's identity is unusable, or
+    no artifact in scope has a hash. `unreached_compared` counts the
+    artifacts compared, so "none changed" over one artifact reads as that."""
+    unknown = UNKNOWN_UNREACHED
     if derived.get("status") != "derived" or derived.get("base_record_run_id") is None:
         return unknown
     record = next((c for c in binding["candidates"] if c["run_id"] == derived["base_record_run_id"]), None)
@@ -1155,31 +1156,38 @@ def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any]
     roots = set(selection.get("would_skip") or [])
     if scope == "sampled":
         roots &= set(selection.get("sampled_executables") or [])
-    modules = set()
-    for artifact in roots:
-        stack, seen = list((executables.get(artifact) or {}).get("spawns") or []), set()
+    recorded = identity.get("executables") or {}
+    verdicts: dict[str, bool | None] = {}
+
+    def differs(artifact: str) -> bool | None:
+        """Whether the built artifact differs from its record hash; None
+        when either side is missing."""
+        if artifact not in verdicts:
+            expected = (recorded.get(f"<build>/{artifact}") or {}).get("sha256")
+            built = build_dir / artifact
+            verdicts[artifact] = (None if not expected or not built.is_file()
+                                  else hashlib.sha256(built.read_bytes()).hexdigest() != expected)
+        return verdicts[artifact]
+
+    changed, unchecked = [], set()
+    for artifact in sorted(roots - blind):
+        closure, stack = set(), list((executables.get(artifact) or {}).get("spawns") or [])
         while stack:
             member = stack.pop()
-            if member in seen:
-                continue
-            seen.add(member)
-            if (executables.get(member) or {}).get("kind") == "module":
-                modules.add(member)
-            stack.extend((executables.get(member) or {}).get("spawns") or [])
-    recorded = identity.get("executables") or {}
-    compared, changed, unchecked = 0, [], []
-    for artifact in sorted((roots | modules) - blind):
-        expected = (recorded.get(f"<build>/{artifact}") or {}).get("sha256")
-        built = build_dir / artifact
-        if not expected or not built.is_file():
-            if artifact in modules:
-                unchecked.append(artifact)
-            continue
-        compared += 1
-        if hashlib.sha256(built.read_bytes()).hexdigest() != expected:
+            if member not in closure:
+                closure.add(member)
+                stack.extend((executables.get(member) or {}).get("spawns") or [])
+        hit = differs(artifact) is True
+        for member in sorted(closure - blind):
+            verdict = differs(member)
+            if verdict is None:
+                unchecked.add(member)
+            hit = hit or verdict is True
+        if hit:
             changed.append(artifact)
+    compared = sum(1 for verdict in verdicts.values() if verdict is not None)
     return {"unreached_changed": changed if compared else None, "unreached_compared": compared,
-            "unreached_unchecked_modules": unchecked}
+            "unchecked_modules": sorted(unchecked)}
 
 
 def lane_red_allowlist(
@@ -1469,8 +1477,8 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
                 lane_reuse_record.record(build_dir, REPO_ROOT, [("full", recorded, attempts, True)],
                                          started_epoch)
         measured = false_skips(result_dir, junit) if derived["status"] == "derived" else None
-        if build_result == 0 and derived["status"] == "derived":
-            derived.update(unreached_changed(result_dir, build_dir, binding, derived, "all"))
+        derived.update(unreached_changed(result_dir, build_dir, binding, derived, "all")
+                       if build_result == 0 and derived["status"] == "derived" else UNKNOWN_UNREACHED)
         try:
             inventory_names = [t.get("name") for t in ctest_payload(build_dir)["tests"]]
         except SelectionExecutionError:
@@ -1743,6 +1751,9 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                 executable_reuse["derived"].update(unreached_changed(
                     Path(result_dir), build_dir, executable_reuse["bound"], executable_reuse["derived"],
                     "sampled"))
+            elif executable_reuse:
+                executable_reuse.update(UNMEASURED_SKIPS)
+                executable_reuse["derived"].update(UNKNOWN_UNREACHED)
             eligible = compare_full and (
                 verdict == "matched_pass"
                 or (verdict == "matched_fail" and allowlist is not None

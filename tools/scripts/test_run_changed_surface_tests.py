@@ -2080,7 +2080,9 @@ class KeyedFullTest(unittest.TestCase):
         code, calls, receipt = self.run_full(derived_ok=False)
         self.assertEqual(code, 0)
         self.assertEqual(len(calls), 4)  # derive, build, sentinel, test
-        self.assertEqual(receipt["executable_reuse"]["derived"], {"status": "error: base refused"})
+        # The three unreached fields are present even when nothing was derived.
+        self.assertEqual(receipt["executable_reuse"]["derived"],
+                         {"status": "error: base refused", **runner.UNKNOWN_UNREACHED})
         self.assertIsNone(receipt["executable_reuse"]["false_skip_count"])
         self.assertEqual(receipt["full_returncode"], 0)
 
@@ -2156,21 +2158,26 @@ class UnreachedChangedTest(unittest.TestCase):
         self.assertEqual(self.measure(["test/b"], hashes, "sampled"), (["test/b"], 1))
         self.assertEqual(self.measure(["test/a"], hashes, "sampled"), ([], 1))
 
-    def test_the_modules_an_executable_loads_are_in_scope(self) -> None:
-        same = {"test/a": self.sha("bytes of a")}
-        # A changed module, reached transitively, is reported for its loader.
+    def test_a_changed_closure_artifact_names_the_executable_that_loads_it(self) -> None:
+        same = {"test/a": self.sha("bytes of a"), "test/mod.so": self.sha("bytes of mod.so")}
+        # deep.so, loaded by mod.so, loaded by a, changed: a is reported.
         out = self.full([], {**same, "test/deep.so": self.sha("old deep")}, "all")
-        self.assertEqual((out["unreached_changed"], out["unreached_compared"]), (["test/deep.so"], 2))
-        # mod.so has no hash: it is unchecked, and does not null the field.
-        self.assertEqual(out["unreached_unchecked_modules"], ["test/mod.so"])
-        # In a bounded run, only a sampled executable brings its modules.
+        self.assertEqual((out["unreached_changed"], out["unreached_compared"], out["unchecked_modules"]),
+                         (["test/a"], 3, []))
+        # Control: an unchanged closure leaves a out.
+        out = self.full([], {**same, "test/deep.so": self.sha("bytes of deep.so")}, "all")
+        self.assertEqual(out["unreached_changed"], [])
+        # A closure artifact with no hash is unchecked, and does not null the field.
+        out = self.full([], same, "all")
+        self.assertEqual((out["unreached_changed"], out["unchecked_modules"]), ([], ["test/deep.so"]))
+        # Only unhashed artifacts in scope: nothing compared, so null, still named.
+        out = self.full([], {"test/c": None}, "all")
+        self.assertEqual((out["unreached_changed"], out["unchecked_modules"]),
+                         (None, ["test/deep.so", "test/mod.so"]))
+        # In a bounded run, only a sampled executable brings its closure.
         out = self.full(["test/b"], {"test/b": self.sha("bytes of b"), "test/deep.so": self.sha("old")},
                         "sampled")
-        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]), ([], []))
-        # Only an unhashed module in scope: nothing compared, so null, but still named.
-        out = self.full([], {"test/c": None}, "all")
-        self.assertEqual((out["unreached_changed"], out["unreached_unchecked_modules"]),
-                         (None, ["test/deep.so", "test/mod.so"]))
+        self.assertEqual((out["unreached_changed"], out["unchecked_modules"]), ([], []))
 
     def test_identity_usable_decides_before_the_problem_lines(self) -> None:
         hashes = {"test/b": self.sha("old bytes of b")}
@@ -2200,7 +2207,7 @@ class UnreachedChangedTest(unittest.TestCase):
         with mock.patch.object(runner, "unreached_changed",
                                side_effect=lambda *a: calls.append(a[4]) or {
                                    "unreached_changed": ["test/x"], "unreached_compared": 1,
-                                   "unreached_unchecked_modules": []}):
+                                   "unchecked_modules": []}):
             _, _, receipt = KeyedFullTest.run_full(KeyedFullTest())
         self.assertEqual(calls, ["all"])
         derived = receipt["executable_reuse"]["derived"]
@@ -2298,6 +2305,8 @@ class SelectedLegPipelineTest(unittest.TestCase):
             if reuse is not None:
                 receipt["executable_reuse"] = reuse
             def derived(binding, head, build_dir, result_dir, *, base_sha):
+                if derived_files == "error":
+                    return {"status": "error: base refused"}
                 result_dir.mkdir(parents=True, exist_ok=True)
                 for name, doc in (derived_files or {}).items():
                     (result_dir / name).write_text(json.dumps(doc), encoding="utf-8")
@@ -2350,7 +2359,7 @@ class SelectedLegPipelineTest(unittest.TestCase):
                          {"mode": "keyed_bounded_shadow", "bound": bound,
                           # No record was picked, so no bytes could be compared.
                           "derived": {"status": "derived", "would_skip_count": 3, "unreached_changed": None,
-                                      "unreached_compared": 0, "unreached_unchecked_modules": None},
+                                      "unreached_compared": 0, "unchecked_modules": None},
                           # No selection was written beside the receipt to measure against.
                           "would_skip_tests": None, "false_skip_count": None, "false_skips": None,
                           "sampled_failures": None})
@@ -2369,6 +2378,11 @@ class SelectedLegPipelineTest(unittest.TestCase):
                                                failures={"full tests": ["neighbor"]})
         self.assertEqual(measured["executable_reuse"]["false_skips"], ["neighbor"])
         self.assertEqual(scopes, ["sampled"])  # a bounded run built only the sample
+        # Nothing derived: the result still carries every field, as unknown.
+        _, _, failed = self.run_pipeline(reuse=bound, derived_files="error")
+        reuse = failed["executable_reuse"]
+        self.assertEqual({k: reuse[k] for k in runner.UNMEASURED_SKIPS}, runner.UNMEASURED_SKIPS)
+        self.assertEqual(reuse["derived"], {"status": "error: base refused", **runner.UNKNOWN_UNREACHED})
 
     LANE_REDS = ({"lane-red": "2026-10-17"}, "f" * 64)
 
