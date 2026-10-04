@@ -2272,6 +2272,7 @@
   "pulp-test-dsl-processor",
   "pulp-test-dsp-runtime-no-alloc",
   "pulp-test-edit-history",
+  "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
