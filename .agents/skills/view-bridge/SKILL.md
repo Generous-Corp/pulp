@@ -2808,15 +2808,31 @@ name)` (a scripted editor) and AutoUi (which now binds through
   record it.
 - **Playback animation** -- the store's changes (automation, preset load)
   move the control on the editor's UI tick (`StateStore::pump_listeners()`).
+- **Every control** -- Knob, Fader, RangeSlider, XYPad (two parameters, one
+  drag), Toggle, Checkbox, ToggleButton, ComboBox and DesignStepper. Playback
+  moves the control silently: it opens no gesture and writes nothing back
+  (`[bind-all]` in `test/test_parameter_edit.cpp` holds every control to
+  this, one table row each).
 - **Host modulation, shown by default** -- a CLAP host's parameter modulation
-  (the adapter's mod offset) is drawn on a bound Knob or Fader as its played
-  value; nothing is drawn when nothing modulates the parameter. It arrives
-  through the host, so no plugin code is involved.
+  (the adapter's mod offset) moves a bound continuous control's one indicator
+  (Knob, Fader, RangeSlider, each XYPad axis) to the value playing; nothing
+  changes when nothing modulates the parameter. It arrives through the host,
+  so no plugin code is involved. A discrete control shows its base: a stepped
+  parameter has no position between states for a modulator to show.
+- **Scripted UIs that draw their own controls** (an SVG knob in React) get
+  the same in one subscription: `onParamChanged(name, p => ...)` delivers
+  `p.normalized` (the base) and `p.playing` (the value playing, normalized,
+  `null` when nothing modulates), and fires when either moves. Draw the one
+  indicator at `p.playing ?? p.normalized` and the base tick at
+  `p.normalized`.
 
 What is opt-in is the plugin's OWN modulation: a plugin that runs internal
 LFOs publishes what they play with `StateStore::set_display_modulation(id,
 plain)` (real-time safe, display only, never a host write; a published value
-wins over the host offset; `clear_display_modulation` ends it). Modulation
+wins over the host offset; `clear_display_modulation` ends it). Every bound
+control and every `onParamChanged` subscriber then shows it with no further
+editor code, so a plugin's own modulation publication is one call per
+modulated parameter per block, not a custom message and painter. Modulation
 menus, routing and override prompts are the plugin's own UI -- Pulp imposes
 none. A plugin that never publishes shows no internal-modulation UI.
 

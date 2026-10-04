@@ -1348,6 +1348,15 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
     auto thumb_color = active && has_accent_color_
         ? canvas::Color::rgba8(248, 248, 248) // token-lint:allow -- Chromium accented-range keyline material
         : theme_thumb;
+    // One thumb: while modulated, the fill and thumb sit at the value
+    // playing in the modulation colour; the base is a tick (below).
+    auto keyline_color = thumb_color;
+    if (has_modulated_) {
+        const auto modulation =
+            resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
+        fill_color = modulation;
+        thumb_color = modulation;
+    }
 
     // Track thickness — typical HTML range visuals sit in 4..6px.
     float track_thick = std::min(track_thickness_,
@@ -1356,9 +1365,8 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
 
     // Normalized position along the track, taking the (possibly-collapsed)
     // [min,max] range and the skew curve into account.
-    float lo = min_;
-    float hi = std::max(min_, max_);
-    float t = value_to_position_();
+    const float base_t = value_to_position_();
+    float t = has_modulated_ ? (skew_ == 1.0f ? modulated_ : std::pow(modulated_, skew_)) : base_t;
 
     // Background track.
     canvas.set_fill_color(track_color);
@@ -1390,7 +1398,7 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
     // border), so draw it only for an enabled accented range. A disabled
     // range remains the neutral unoutlined home-screen control.
     if (active && has_accent_color_) {
-        canvas.set_stroke_color(thumb_color);
+        canvas.set_stroke_color(keyline_color);
         canvas.set_line_width(1.0f);
         if (horiz) {
             float ty = (b.height - track_thick) * 0.5f;
@@ -1430,6 +1438,24 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
                                  hy - thumb_major * 0.5f,
                                  thumb_minor, thumb_major,
                                  thumb_minor * 0.5f);
+    }
+
+    // The base a modulator moves this slider around: a quiet tick across the
+    // track, on top of the thumb so it stays visible under it.
+    if (has_modulated_) {
+        canvas.set_stroke_color(theme_thumb);
+        canvas.set_line_cap(canvas::LineCap::round);
+        canvas.set_line_width(1.5f);
+        const float half = track_thick * 0.5f + 3.0f;
+        if (horiz) {
+            const float usable = std::max(0.0f, b.width - thumb_major);
+            const float bx = thumb_major * 0.5f + base_t * usable;
+            canvas.stroke_line(bx, b.height * 0.5f - half, bx, b.height * 0.5f + half);
+        } else {
+            const float usable = std::max(0.0f, b.height - thumb_major);
+            const float by = thumb_major * 0.5f + (1.0f - base_t) * usable;
+            canvas.stroke_line(b.width * 0.5f - half, by, b.width * 0.5f + half, by);
+        }
     }
 }
 

@@ -1856,6 +1856,35 @@ public:
     }
     float value() const { return value_; }
 
+    /// Display-only played value while a modulator moves this parameter
+    /// around value() (same contract as Knob::set_modulated_value): never
+    /// fires on_change, never writes a parameter, repaints the slider's own
+    /// box. `normalized` is a fraction of [min, max]. One thumb: the thumb
+    /// and fill sit at the value playing in the modulation colour (token
+    /// `knob.modulation`); the base is a quiet tick across the track.
+    void set_modulated_value(float normalized) {
+        const float v =
+            std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : value_to_position_();
+        if (has_modulated_ && v == modulated_)
+            return;
+        has_modulated_ = true;
+        modulated_ = v;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    void clear_modulated_value() {
+        if (!has_modulated_)
+            return;
+        has_modulated_ = false;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    bool has_modulated_value() const {
+        return has_modulated_;
+    }
+    /// The played fraction of [min, max] while one is set.
+    float modulated_display_value() const {
+        return modulated_;
+    }
+
     // Scroll-wheel adjusts the value (hover + wheel), scaled to the range.
     bool wants_wheel_value() const override { return true; }
     void on_wheel(float delta_y) override {
@@ -1949,6 +1978,9 @@ private:
     float max_ = 1.0f;
     float step_ = 0.0f;
     float value_ = 0.0f;
+    bool has_modulated_ = false;
+    float modulated_ = 0.0f;
+    static constexpr float kModulatedMarkerHalo = 2.0f;
     float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
     Orientation orientation_ = Orientation::horizontal;
     bool dragging_ = false;
@@ -2423,6 +2455,35 @@ public:
     float x_value() const { return x_; }
     float y_value() const { return y_; }
 
+    /// Display-only played position on either axis while a modulator moves
+    /// that parameter around the base (same contract as
+    /// Knob::set_modulated_value): never fires on_change, never writes a
+    /// parameter, repaints the pad's own box. One puck: it sits at the
+    /// position playing (an unmodulated axis keeps its base) in the
+    /// modulation colour (token `knob.modulation`); the base is a small ring.
+    void set_modulated_x(float normalized) {
+        set_modulated_axis(has_mod_x_, mod_x_, x_, normalized);
+    }
+    void set_modulated_y(float normalized) {
+        set_modulated_axis(has_mod_y_, mod_y_, y_, normalized);
+    }
+    void clear_modulated_x() {
+        clear_modulated_axis(has_mod_x_);
+    }
+    void clear_modulated_y() {
+        clear_modulated_axis(has_mod_y_);
+    }
+    bool has_modulated_value() const {
+        return has_mod_x_ || has_mod_y_;
+    }
+    /// The played position on each axis while one is set, else the base.
+    float modulated_display_x() const {
+        return has_mod_x_ ? mod_x_ : x_;
+    }
+    float modulated_display_y() const {
+        return has_mod_y_ ? mod_y_ : y_;
+    }
+
     void set_x_label(std::string l) { x_label_ = std::move(l); }
     void set_y_label(std::string l) { y_label_ = std::move(l); }
 
@@ -2441,7 +2502,24 @@ public:
 
 private:
     void update_from_pos(Point pos);
+    void set_modulated_axis(bool& has, float& slot, float base, float normalized) {
+        const float v = std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : base;
+        if (has && v == slot)
+            return;
+        has = true;
+        slot = v;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    void clear_modulated_axis(bool& has) {
+        if (!has)
+            return;
+        has = false;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    static constexpr float kModulatedMarkerHalo = 2.0f;
     float x_ = 0.5f, y_ = 0.5f;
+    bool has_mod_x_ = false, has_mod_y_ = false;
+    float mod_x_ = 0.0f, mod_y_ = 0.0f;
     std::string x_label_, y_label_;
     bool dragging_ = false;
 };

@@ -8,9 +8,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cmath>
+#include <functional>
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/parameter_binding.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <vector>
 
@@ -32,6 +36,7 @@ void populate(state::StateStore& s) {
     s.add_parameter({.id = 1, .name = "X", .unit = "", .range = {-12.0f, 12.0f, 0.0f, 0.0f}});
     s.add_parameter({.id = 2, .name = "Y", .unit = "", .range = {-12.0f, 12.0f, 0.0f, 0.0f}});
     s.add_parameter({.id = 3, .name = "Toggle", .unit = "", .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+    s.add_parameter({.id = 4, .name = "Choice", .unit = "", .range = {0.0f, 3.0f, 0.0f, 1.0f}});
 }
 
 } // namespace
@@ -337,4 +342,176 @@ TEST_CASE("Dropping the binding stops the modulated display",
     store.set_mod_offset(1, -3.0f);
     store.pump_listeners(); // the watch is gone: no callback into the knob
     REQUIRE_THAT(knob.modulated_display_value(), WithinAbs((3.0f + 12.0f) / 24.0f, 1e-5f));
+}
+
+// ── Every bound control: record, play back, show host modulation ────────────
+
+TEST_CASE("Every bound control records the user's change and follows playback without a gesture",
+          "[view][parameter-binding][bind-all]") {
+    // One table over every control bind_parameter accepts. For each: a user
+    // change is a recorded gesture (begin + end on the parameter, value
+    // written inside it); host playback moves the control and opens NO
+    // gesture (playback must never look like a user edit to the host).
+    struct Case {
+        const char* name;
+        state::ParamID id;
+        std::function<view::ParameterBinding(state::StateStore&)> bind;
+        std::function<void()> user_edit;
+        float playback_value;
+        std::function<bool(state::StateStore&)> follows;
+    };
+    view::Knob knob;
+    knob.set_bounds({0, 0, 40, 40});
+    view::Fader fader;
+    fader.set_bounds({0, 0, 24, 120});
+    view::RangeSlider range;
+    range.set_bounds({0, 0, 200, 24});
+    // A stepped slider: playback of an off-step value must not be quantised
+    // and written back (the echo a silent sync exists to prevent).
+    range.set_step(0.25f);
+    view::XYPad pad;
+    pad.set_bounds({0, 0, 200, 200});
+    view::Toggle toggle;
+    toggle.set_bounds({0, 0, 48, 24});
+    view::Checkbox box;
+    box.set_bounds({0, 0, 24, 24});
+    view::ToggleButton button;
+    button.set_bounds({0, 0, 80, 40});
+    view::ComboBox combo;
+    combo.set_items({"Sine", "Saw", "Square", "Noise"});
+    view::DesignStepper stepper({"1/4", "1/8", "1/16", "1/32"}, 0);
+
+    const auto near = [](float a, float b) { return std::abs(a - b) < 1e-4f; };
+    std::vector<Case> cases;
+    cases.push_back({"knob", 1, [&](auto& st) { return view::bind_parameter(knob, st, 1); },
+                     [&] { knob.simulate_drag({20, 30}, {20, 10}); }, -6.0f,
+                     [&](auto& st) { return near(knob.value(), st.get_normalized(1)); }});
+    cases.push_back({"fader", 2, [&](auto& st) { return view::bind_parameter(fader, st, 2); },
+                     [&] { fader.simulate_drag({12, 100}, {12, 20}); }, -9.0f,
+                     [&](auto& st) { return near(fader.value(), st.get_normalized(2)); }});
+    cases.push_back({"range slider", 1,
+                     [&](auto& st) { return view::bind_parameter(range, st, 1); },
+                     [&] {
+                         view::MouseEvent down;
+                         down.position = {10, 12};
+                         down.is_down = true;
+                         range.on_mouse_event(down);
+                         range.on_mouse_drag({190, 12});
+                         view::MouseEvent up = down;
+                         up.position = {190, 12};
+                         up.is_down = false;
+                         range.on_mouse_event(up);
+                     },
+                     -3.0f,
+                     [&](auto&) {
+                         return near(range.value(), 0.5f); /* its nearest step */
+                     }});
+    cases.push_back({"toggle", 3, [&](auto& st) { return view::bind_parameter(toggle, st, 3); },
+                     [&] { toggle.simulate_click({24, 12}); }, 0.0f,
+                     [&](auto&) { return !toggle.is_on(); }});
+    cases.push_back({"checkbox", 3, [&](auto& st) { return view::bind_parameter(box, st, 3); },
+                     [&] { box.simulate_click({12, 12}); }, 0.0f,
+                     [&](auto&) { return !box.is_checked(); }});
+    cases.push_back(
+        {"toggle button", 3, [&](auto& st) { return view::bind_parameter(button, st, 3); },
+         [&] { button.simulate_click({40, 20}); }, 0.0f, [&](auto&) { return !button.is_on(); }});
+    cases.push_back({"combo box", 4, [&](auto& st) { return view::bind_parameter(combo, st, 4); },
+                     [&] {
+                         REQUIRE(combo.on_change);
+                         combo.on_change(2);
+                     },
+                     3.0f, [&](auto&) { return combo.selected() == 3; }});
+    cases.push_back({"stepper", 4, [&](auto& st) { return view::bind_parameter(stepper, st, 4); },
+                     [&] {
+                         REQUIRE(stepper.on_select);
+                         stepper.on_select(1);
+                     },
+                     2.0f, [&](auto&) { return stepper.selected() == 2; }});
+
+    for (auto& c : cases) {
+        INFO(c.name);
+        state::StateStore store;
+        populate(store);
+        GestureLog log;
+        log.attach(store);
+        auto binding = c.bind(store);
+        const float before = store.get_value(c.id);
+
+        c.user_edit();
+        CHECK(log.begins == std::vector<state::ParamID>{c.id});
+        CHECK(log.ends == std::vector<state::ParamID>{c.id});
+        CHECK(store.get_value(c.id) != before);
+
+        store.set_value(c.id, c.playback_value); // host automation playback
+        store.pump_listeners();
+        CHECK(c.follows(store));
+        CHECK(store.get_value(c.id) == c.playback_value); // no echo write
+        CHECK(log.begins.size() == 1);                    // playback opened no gesture
+        CHECK(log.ends.size() == 1);
+    }
+
+    // The XY pad: one drag records both axes; playback moves the puck.
+    state::StateStore store;
+    populate(store);
+    GestureLog log;
+    log.attach(store);
+    auto binding = view::bind_parameter(pad, store, 1, 2);
+    pad.simulate_drag({20, 180}, {180, 20}, 8);
+    CHECK(log.begins.size() == 2);
+    CHECK(log.ends.size() == 2);
+    store.set_value(1, -12.0f);
+    store.set_value(2, 12.0f);
+    store.pump_listeners();
+    CHECK(near(pad.x_value(), 0.0f));
+    CHECK(near(pad.y_value(), 1.0f));
+    CHECK(log.begins.size() == 2);
+}
+
+TEST_CASE("Host modulation of a bound range slider or XY pad moves its one indicator",
+          "[view][parameter-binding][modulation][bind-all]") {
+    state::StateStore store;
+    populate(store);
+    GestureLog log;
+    log.attach(store);
+    view::RangeSlider range;
+    view::XYPad pad;
+    auto rb = view::bind_parameter(range, store, 1);
+    auto pb = view::bind_parameter(pad, store, 2, 3);
+
+    // Negative: nothing modulates either parameter, nothing is shown.
+    store.pump_listeners();
+    REQUIRE_FALSE(range.has_modulated_value());
+    REQUIRE_FALSE(pad.has_modulated_value());
+
+    // The CLAP adapter's mod offset reaches both with no plugin code.
+    store.set_mod_offset(1, 6.0f);
+    store.set_mod_offset(2, -6.0f);
+    store.pump_listeners();
+    REQUIRE(range.has_modulated_value());
+    CHECK_THAT(range.modulated_display_value(), WithinAbs(0.75f, 1e-5f));
+    REQUIRE(pad.has_modulated_value());
+    CHECK_THAT(pad.modulated_display_x(), WithinAbs(0.25f, 1e-5f));
+    CHECK_THAT(pad.modulated_display_y(), WithinAbs(pad.y_value(), 1e-5f)); // unmodulated axis
+    CHECK(store.get_value(1) == 0.0f);
+    CHECK(log.begins.empty());
+
+    store.set_mod_offset(1, 0.0f);
+    store.set_mod_offset(2, 0.0f);
+    store.pump_listeners();
+    CHECK_FALSE(range.has_modulated_value());
+    CHECK_FALSE(pad.has_modulated_value());
+}
+
+TEST_CASE("A discrete bound control shows its base under host modulation",
+          "[view][parameter-binding][modulation][bind-all]") {
+    // A stepped parameter has no position between states for a modulator to
+    // move it to: the binding keeps showing the state the user set.
+    state::StateStore store;
+    populate(store);
+    view::ComboBox combo;
+    combo.set_items({"Sine", "Saw", "Square", "Noise"});
+    auto binding = view::bind_parameter(combo, store, 4);
+    store.set_mod_offset(4, 2.0f);
+    store.pump_listeners();
+    CHECK(combo.selected() == 0);
 }

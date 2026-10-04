@@ -13,11 +13,14 @@
 ///   - widget value changes → `store.set_normalized(id, …)`;
 ///   - store changes (automation playback, preset load) → the widget's
 ///     displayed value, so the control moves while the host plays it back;
-///   - for a Knob or Fader, the parameter's modulated value as the control's
-///     played-value marker: a host's CLAP modulation by default, and the
-///     plugin's own modulation when it publishes one
-///     (StateStore::set_display_modulation). Nothing is drawn when nothing
-///     modulates the parameter. Modulation never writes a host lane.
+///   - for a continuous control (Knob, Fader, RangeSlider, XYPad), the
+///     parameter's modulated value as the control's one indicator: a host's
+///     CLAP modulation by default, and the plugin's own modulation when it
+///     publishes one (StateStore::set_display_modulation). Nothing changes
+///     when nothing modulates the parameter. Modulation never writes a host
+///     lane. A discrete control (toggle, button, checkbox, combo, stepper)
+///     shows its base: a stepped parameter has no position between states
+///     for a modulator to move it to.
 ///
 /// Bind once, get automation and playback animation for free. Showing a
 /// plugin's INTERNAL modulation is opt-in (the plugin publishes it); any
@@ -53,6 +56,11 @@ public:
     explicit ParameterBinding(state::ListenerToken token) : token_(std::move(token)) {}
     ParameterBinding(state::ListenerToken token, state::StateStore::ModulationWatch watch)
         : token_(std::move(token)), watch_(std::move(watch)) {}
+    /// A two-parameter control (XY pad): one watch per axis.
+    ParameterBinding(state::ListenerToken token, state::StateStore::ModulationWatch watch,
+                     state::StateStore::ModulationWatch second_watch)
+        : token_(std::move(token)), watch_(std::move(watch)),
+          second_watch_(std::move(second_watch)) {}
     ParameterBinding(ParameterBinding&&) noexcept = default;
     ParameterBinding& operator=(ParameterBinding&&) noexcept = default;
     ParameterBinding(const ParameterBinding&) = delete;
@@ -61,6 +69,7 @@ public:
 private:
     state::ListenerToken token_;
     state::StateStore::ModulationWatch watch_;
+    state::StateStore::ModulationWatch second_watch_;
 };
 
 namespace detail {
@@ -131,28 +140,49 @@ bind_parameter(XYPad& pad, state::StateStore& store, state::ParamID x_id, state:
         store.end_gesture(x_id);
         store.end_gesture(y_id);
     };
+    pad.set_x(store.get_normalized(x_id));
+    pad.set_y(store.get_normalized(y_id));
     return ParameterBinding(store.add_listener(
-        [&pad, &store, x_id, y_id](state::ParamID changed, float) {
-            if (changed == x_id) pad.set_x(store.get_normalized(x_id));
-            if (changed == y_id) pad.set_y(store.get_normalized(y_id));
-        },
-        state::ListenerThread::Main,
-        state::ListenerRestoreBehavior::Reconcile));
+                                [&pad, &store, x_id, y_id](state::ParamID changed, float) {
+                                    if (changed == x_id)
+                                        pad.set_x(store.get_normalized(x_id));
+                                    if (changed == y_id)
+                                        pad.set_y(store.get_normalized(y_id));
+                                },
+                                state::ListenerThread::Main,
+                                state::ListenerRestoreBehavior::Reconcile),
+                            store.watch_modulation(x_id,
+                                                   [&pad](std::optional<float> played) {
+                                                       if (played)
+                                                           pad.set_modulated_x(*played);
+                                                       else
+                                                           pad.clear_modulated_x();
+                                                   }),
+                            store.watch_modulation(y_id, [&pad](std::optional<float> played) {
+                                if (played)
+                                    pad.set_modulated_y(*played);
+                                else
+                                    pad.clear_modulated_y();
+                            }));
 }
 
 /// Range slider ↔ parameter (normalized).
 [[nodiscard]] inline ParameterBinding
 bind_parameter(RangeSlider& slider, state::StateStore& store, state::ParamID id) {
-    slider.set_value(store.get_normalized(id));
+    // Synced FROM the parameter without notifying, so playback never echoes
+    // a write back into the store.
+    slider.set_value(store.get_normalized(id), Notify::none);
     slider.on_gesture_begin = [&store, id] { store.begin_gesture(id); };
     slider.on_change = [&store, id](float v) { store.set_normalized(id, v); };
     slider.on_gesture_end = [&store, id] { store.end_gesture(id); };
     return ParameterBinding(store.add_listener(
-        [&slider, &store, id](state::ParamID changed, float) {
-            if (changed == id) slider.set_value(store.get_normalized(id));
-        },
-        state::ListenerThread::Main,
-        state::ListenerRestoreBehavior::Reconcile));
+                                [&slider, &store, id](state::ParamID changed, float) {
+                                    if (changed == id)
+                                        slider.set_value(store.get_normalized(id), Notify::none);
+                                },
+                                state::ListenerThread::Main,
+                                state::ListenerRestoreBehavior::Reconcile),
+                            detail::watch_modulated_display(slider, store, id));
 }
 
 /// ComboBox ↔ stepped/index parameter. A selection is a one-shot gesture so

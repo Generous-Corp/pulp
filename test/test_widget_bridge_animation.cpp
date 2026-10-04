@@ -1542,3 +1542,39 @@ TEST_CASE("bindWidgetToParam shows host modulation on a scripted knob with no ot
     bridge.service_frame_callbacks();
     REQUIRE_FALSE(knob->has_modulated_value());
 }
+
+TEST_CASE("onParamChanged hands a scripted UI the value playing in one field",
+          "[view][bridge][parameter-binding][modulation][bind-all]") {
+    // A UI that draws its own control (an SVG knob in React) subscribes once
+    // and draws its one indicator from `playing`: a host's modulation by
+    // default, the plugin's own published modulation when it opts in, null
+    // when nothing modulates the parameter.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    store.add_parameter({.id = 12, .name = "Mix", .unit = "", .range = {0.0f, 1.0f, 0.5f}});
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("globalThis.__seen = [];"
+                       "onParamChanged('Mix', function(p) {"
+                       "  __seen.push(p.playing === null ? 'none' : p.playing.toFixed(2)); });",
+                       "playing-field");
+    const auto seen = [&] {
+        return engine.evaluate("__seen.join(',')").getWithDefault<std::string>("");
+    };
+    bridge.service_frame_callbacks();
+    CHECK(seen().empty()); // negative: nothing modulates, nothing is reported
+
+    store.set_mod_offset(12, 0.25f); // a CLAP host
+    bridge.service_frame_callbacks();
+    CHECK(seen() == "0.75");
+
+    store.set_display_modulation(12, 0.1f); // the plugin's own LFO wins
+    bridge.service_frame_callbacks();
+    CHECK(seen() == "0.75,0.10");
+
+    store.clear_display_modulation(12);
+    store.set_mod_offset(12, 0.0f);
+    bridge.service_frame_callbacks();
+    CHECK(seen() == "0.75,0.10,none");
+}

@@ -662,13 +662,18 @@ void XYPad::paint(canvas::Canvas& canvas) {
         canvas.stroke_line(0, gy, b.width, gy);
     }
 
-    // Crosshair position — inset by dot radius so it doesn't clip at edges
+    // Crosshair position — inset by dot radius so it doesn't clip at edges.
+    // One puck: at the position playing while a modulator moves either axis.
     float dot_r = 4.0f;
-    float cx = dot_r + x_ * (b.width - 2.0f * dot_r);
-    float cy = dot_r + (1.0f - y_) * (b.height - 2.0f * dot_r);
+    const auto at_x = [&](float v) { return dot_r + v * (b.width - 2.0f * dot_r); };
+    const auto at_y = [&](float v) { return dot_r + (1.0f - v) * (b.height - 2.0f * dot_r); };
+    float cx = at_x(modulated_display_x());
+    float cy = at_y(modulated_display_y());
 
-    // Crosshair lines (accent)
-    auto hair_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
+    // Crosshair lines (accent; the modulation colour while modulated)
+    auto hair_color = has_modulated_value()
+                          ? resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255))
+                          : resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
     canvas.set_stroke_color(hair_color);
     canvas.set_line_width(1.0f);
     canvas.stroke_line(cx, 0, cx, b.height);
@@ -677,6 +682,14 @@ void XYPad::paint(canvas::Canvas& canvas) {
     // Thumb dot — teal/accent, matching the Figma XY pad (was a white dot).
     canvas.set_fill_color(hair_color);
     canvas.fill_circle(cx, cy, dot_r);
+
+    // The base a modulator moves the puck around: a small quiet ring.
+    if (has_modulated_value()) {
+        canvas.set_stroke_color(
+            resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220)));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_circle(at_x(x_), at_y(y_), dot_r - 1.0f);
+    }
 
     // Labels
     auto text_color = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 150));
