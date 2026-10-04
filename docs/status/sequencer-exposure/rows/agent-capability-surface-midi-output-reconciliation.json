@@ -26,8 +26,7 @@
     {
       "path": "tools/scripts/agent_capability_manifest.py",
       "needles": [
-        "SURFACE_INVENTORY_VERSION = 125"
-        "SURFACE_INVENTORY_VERSION = 119"
+        "SURFACE_INVENTORY_VERSION = 120"
       ]
     }
   ],
