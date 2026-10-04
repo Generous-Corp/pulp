@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261004-audio-glitch-trace-watch",
+  "created_at": "2026-10-04T17:51:33Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Adds tools/audio/glitch_trace.py (a reference-free click/dropout detector that joins a rendered WAV to its Perfetto per-block slices) and its selftest, a tools.yaml registry entry and the regenerated CLAUDE.md tools digest. Offline analysis tooling only: no design-import, Chromium, rendering or packaging authority moves, and nothing in a shipped artifact changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-freeze-hold",
+    "python3 tools/audio/test_glitch_trace.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
