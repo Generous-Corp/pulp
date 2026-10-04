@@ -1119,7 +1119,11 @@ def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any]
     try:
         selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
         identity = json.loads((Path(record["record_path"]) / "identity.json").read_text(encoding="utf-8"))
+        job = json.loads((Path(record["record_path"]) / "job.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return None
+    # The recorder writes an empty identity when it could not hash, and says so.
+    if any("executable identity unavailable" in str(p) for p in job.get("problems") or []):
         return None
     blind_path = Path(binding["derivation_code_dir"]) / KEY_BLIND_EXECUTABLES
     try:

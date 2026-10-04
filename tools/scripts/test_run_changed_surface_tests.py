@@ -2096,7 +2096,8 @@ class UnreachedChangedTest(unittest.TestCase):
     """A would-skip executable whose rebuilt bytes differ from the picked
     base record's hash: the key said unchanged about something that changed."""
 
-    def tree(self, root: Path, sampled: list[str], record_hashes: dict[str, str | None]) -> tuple:
+    def tree(self, root: Path, sampled: list[str], record_hashes: dict[str, str | None],
+             problems: list | None = None) -> tuple:
         result, build, record, code = (root / n for n in ("result", "build", "record", "code"))
         for directory in (result, build / "test", record, code / "tools/ci"):
             directory.mkdir(parents=True)
@@ -2105,6 +2106,7 @@ class UnreachedChangedTest(unittest.TestCase):
         (result / "selection.json").write_text(json.dumps({
             "would_skip": ["test/a", "test/b", "test/blind", "test/c"], "sampled_executables": sampled}),
             encoding="utf-8")
+        (record / "job.json").write_text(json.dumps({"problems": problems}), encoding="utf-8")
         (record / "identity.json").write_text(json.dumps({"executables": {
             f"<build>/{artifact}": {"sha256": digest} for artifact, digest in record_hashes.items()}}),
             encoding="utf-8")
@@ -2120,9 +2122,9 @@ class UnreachedChangedTest(unittest.TestCase):
     def sha(text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()
 
-    def measure(self, sampled, hashes, scope, derived=None, blind_text=None):
+    def measure(self, sampled, hashes, scope, derived=None, blind_text=None, problems=None):
         with tempfile.TemporaryDirectory() as directory:
-            result, build, binding, code = self.tree(Path(directory), sampled, hashes)
+            result, build, binding, code = self.tree(Path(directory), sampled, hashes, problems or [])
             if blind_text is not None:
                 (code / runner.KEY_BLIND_EXECUTABLES).write_text(blind_text, encoding="utf-8")
             return runner.unreached_changed(result, build, binding,
@@ -2150,6 +2152,12 @@ class UnreachedChangedTest(unittest.TestCase):
         self.assertIsNone(self.measure([], {"test/a": self.sha("x")}, "all",
                                        {"status": "derived", "base_record_run_id": None}))
         self.assertIsNone(self.measure([], {"test/a": self.sha("x")}, "all", {"status": "error: x"}))
+        # A record whose identity the recorder could not write is not evidence.
+        hashes = {"test/b": self.sha("old bytes of b")}
+        self.assertEqual(self.measure([], hashes, "all", problems=["link maps absent"]), ["test/b"])
+        self.assertIsNone(self.measure([], hashes, "all", problems=["executable identity unavailable: x"]))
+        # One hashed executable is enough to measure; the unhashed ones are skipped.
+        self.assertEqual(self.measure([], {"test/a": self.sha("bytes of a"), "test/c": None}, "all"), [])
 
     def test_each_mode_measures_its_own_scope(self) -> None:
         calls = []
