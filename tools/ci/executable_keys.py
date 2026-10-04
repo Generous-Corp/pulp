@@ -398,16 +398,18 @@ def key_of(digest: str | dict, toolchain: dict | None, paths: Iterable[str], blo
 
 def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[dict]]:
     """artifact (relative to the build dir) -> the ctest registrations that
-    run it."""
+    run it. `build_dir` is the path the configure used, matched as a string
+    against the inventory's commands: the same inputs give the same answer
+    on the runner and on a host that only holds copies of them."""
     out: dict[str, list[dict]] = {}
     if not ctest or build_dir is None:
         return out
-    root = os.path.realpath(build_dir)
+    root = os.path.normpath(str(build_dir))
     for test in ctest.get("tests") or []:
         cmd = test.get("command") or []
         if not cmd:
             continue
-        real = os.path.realpath(cmd[0])
+        real = os.path.normpath(cmd[0])
         if not real.startswith(root + os.sep):
             continue
         props = {p.get("name"): p.get("value") for p in test.get("properties") or []}

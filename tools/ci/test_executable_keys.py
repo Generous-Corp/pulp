@@ -389,6 +389,13 @@ class ManifestTests(unittest.TestCase):
             self.assertNotEqual(doc["producer"]["base_record_sha256"], first)
             self.assertEqual(doc["reasons"], {"toolchain_unknown": 3})
 
+    def test_registrations_match_the_build_dir_as_a_string(self):
+        # The host re-deriving a manifest holds copies, not the build tree:
+        # the configure's path need not exist there.
+        ctest = {"tests": [{"name": "t", "command": ["/nowhere/build/test/x"], "properties": []},
+                           {"name": "u", "command": ["/elsewhere/test/y"], "properties": []}]}
+        self.assertEqual(list(ek.registrations(ctest, Path("/nowhere/build/"))), ["test/x"])
+
     def test_every_key_code_path_exists(self):
         repo = HERE.parents[1]
         self.assertEqual([p for p in ek.KEY_CODE_PATHS if not (repo / p).is_file()], [])
