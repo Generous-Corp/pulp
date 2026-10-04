@@ -21,7 +21,7 @@ def main() -> None:
         "named_consumer": None,
     }
     audit = receipt["metadata_audit"]
-    assert audit["origin_main"] == "5ea08fd82495687c8e23c85de1a7d4ff429809a8"
+    assert audit["origin_main"] == "3dd81fc3fc64a77559229dc87e5836f8c92ee570"
     assert audit["magenta_artifact_available"] is False
     assert audit["forge_catalog_rows"] == 0
     assert audit["sustained_magenta_generation_claimed"] is False
