@@ -592,7 +592,16 @@ release below the pin, or under another major, is a pin mismatch. The pin is
 the oldest release the repository's `.shipyard/config.toml` parses under, so a
 change that needs a newer Shipyard raises the pin in the same PR.
 
-The current v0.262.0 pin brings the pin up to the commands Pulp's workflows
+The current v0.269.1 pin parses `executable_reuse` in a target's
+`changed_surface_selection`. Shipyard reads that table with
+`deny_unknown_fields`, so a host on an older release cannot parse a policy that
+declares it and plans the full suite on every PR: the pin and the lane hosts
+reach v0.269.1 before Pulp's policy declares the table. It also carries keyed
+shadow runs and their host re-derivation (`shipyard reuse rederive`,
+`rederive-sweep`). Its `shipyard changelog regenerate` renders CHANGELOG.md
+byte-identically to v0.262.0 for the same tag graph.
+
+The earlier v0.262.0 pin brought the pin up to the commands Pulp's workflows
 and scripts already invoke (`shipyard landing`, `shipyard landability`, `shipyard
 pr --target`, none of which v0.143.0 had), and the changed-surface planner the
 bounded mac lane depends on: merge-base planning for a head behind its recorded
