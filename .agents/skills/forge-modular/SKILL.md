@@ -224,6 +224,24 @@ reached OpenSSL `BIO_new_ex` with invalid state and crashed Python with
 `EXC_BAD_ACCESS`. Keep the crash boundary out of the app process and preserve
 the packaged-helper tests under a minimal Finder-style `PATH`.
 
+## The patch language's local names must be unique, not just numbered
+
+`patch_lang.render()` names each module from its model slug and numbers a
+repeat. Appending the count alone collided: a second VCO became `vco2`, the
+name a VCO2 already has, and the parser refused its own output ("'vco2' is
+declared twice"), so a library patch with two VCOs and a VCO2 silently stopped
+round-tripping. Every name is now checked against the names already given, and
+a slug ending in a digit is numbered after an underscore (`vco2_2`). Keep that
+check if the naming changes again.
+
+`test_patch_lang.py` reads `tools/rack/fixtures/patch-lang/inventory.json`, a
+checked-in slice of the inventory covering every module it, the module
+docstring and `docs/contracts/patch-language-v1.md` declare, so it runs in CI
+with no Rack or Forge data. A new example that declares another module must
+add that module's ports and panel there, or the test fails on the example. The
+round trip over the installed example patches still runs against the live
+inventory where they exist and is a printed SKIP elsewhere.
+
 ## Reading the patch gate's trace
 
 - `out0=...` is the **instantaneous** voltage at the end of the run. The

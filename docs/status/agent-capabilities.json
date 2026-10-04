@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 69,
+  "manifest_revision": 70,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -13831,6 +13831,33 @@
               "latency_samples()",
               "draw_count()",
               "process_edge(bool trigger_edge)"
+            ],
+            "enums": []
+          }
+        ],
+        "processing_switch_crossfade.hpp": [
+          {
+            "class": "ProcessingSwitchPlan",
+            "qualified_name": "pulp::signal::ProcessingSwitchPlan",
+            "template": null,
+            "methods": [
+              "total_samples()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "ProcessingSwitchCrossfadeT",
+            "qualified_name": "pulp::signal::ProcessingSwitchCrossfadeT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "begin(const ProcessingSwitchPlan& plan)",
+              "cancel()",
+              "active()",
+              "finished()",
+              "warming()",
+              "position()",
+              "plan()",
+              "mix(SampleType* const* output, const SampleType* const* incoming, int channels, int num_samples)"
             ],
             "enums": []
           }

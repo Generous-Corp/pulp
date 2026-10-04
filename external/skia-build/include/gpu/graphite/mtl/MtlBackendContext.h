@@ -10,10 +10,13 @@
 
 #include "include/gpu/graphite/Context.h"
 #include "include/ports/SkCFObject.h"
-#include "include/private/base/SkAPI.h"
+#include "include/private/SkAPI.h"
 
 #import <CoreFoundation/CoreFoundation.h>
 #include <memory>
+
+class SkContext;
+struct SkContextOptions;
 
 namespace skgpu::graphite {
 
@@ -30,5 +33,13 @@ SK_API std::unique_ptr<Context> MakeMetal(const MtlBackendContext&, const Contex
 } // namespace ContextFactory
 
 } // namespace skgpu::graphite
+
+namespace SkContexts {
+
+// Creates a context wrapping a Graphite GPU backend using Metal
+std::unique_ptr<SkContext> MakeGraphite(const skgpu::graphite::MtlBackendContext& mtlContext,
+                              const SkContextOptions& options);
+
+}  // namespace SkContexts
 
 #endif // skgpu_graphite_MtlBackendContext_DEFINED

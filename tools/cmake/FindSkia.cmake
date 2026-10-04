@@ -325,6 +325,29 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     # Collect ALL static libraries in the lib dir
     file(GLOB _skia_all_libs "${_skia_lib_dir}/*.a" "${_skia_lib_dir}/*.lib")
 
+    # Skia's Android GN output also contains optional Chromium allocator-shim
+    # archives. They require linker --wrap hooks for host allocation symbols
+    # and are not part of Pulp's Android provider ABI; omit them from the
+    # staged Android link while retaining the Skia/Dawn archives themselves.
+    # `libraw_ptr.a` is the corresponding standalone Chromium raw_ptr archive;
+    # it references PartitionAlloc internals that are not shipped in this
+    # provider, so linking it would turn Skia's optional raw_ptr references
+    # into a large set of Android undefined symbols.
+    if(ANDROID)
+        set(_skia_kept_libs "")
+        foreach(_lib IN LISTS _skia_all_libs)
+            get_filename_component(_lib_name "${_lib}" NAME)
+            if(_lib_name MATCHES "^liballocator_(base|core|shim)\\.a$"
+                    OR _lib_name STREQUAL "libraw_ptr.a"
+                    OR (_lib_name MATCHES "^libdawn_proc.*\\.a$"
+                        AND NOT _lib_name STREQUAL "libdawn_proc_compat.a"))
+                continue()
+            endif()
+            list(APPEND _skia_kept_libs "${_lib}")
+        endforeach()
+        set(_skia_all_libs ${_skia_kept_libs})
+    endif()
+
     # The wasm slice's libskottie.a has ~360 UNDEFINED skjson::* symbols and the
     # zip packages no libjsonreader.a / libskresources.a to satisfy them, so
     # linking skottie (and its libsksg.a dependency) is a hard link failure.
@@ -363,7 +386,8 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
         # Linux. MSVC's linker reports the three missing support symbols at
         # final consumer link time, so include the no-PartitionAlloc shim.
         set(_pulp_skia_needs_raw_ptr_compat TRUE)
-    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_NM AND EXISTS "${SKIA_LIBRARY}")
+    elseif((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR ANDROID) AND
+            CMAKE_NM AND EXISTS "${SKIA_LIBRARY}")
         execute_process(
             COMMAND "${CMAKE_NM}" -uC "${SKIA_LIBRARY}"
             RESULT_VARIABLE _pulp_skia_nm_undefined_rc
@@ -414,7 +438,7 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
             list(APPEND _pulp_skia_support_libraries pulp-skia-chromium-raw-ptr-compat)
         else()
             message(WARNING
-                "Skia: Linux archive references Chromium raw_ptr support symbols, "
+                "Skia archive references Chromium raw_ptr support symbols, "
                 "but Pulp's compatibility source was not found. Installed SDKs "
                 "should ship src/pulp/canvas/skia_chromium_raw_ptr_compat.cpp.")
         endif()

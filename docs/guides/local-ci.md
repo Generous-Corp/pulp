@@ -1046,7 +1046,16 @@ HEAD. `dirty` records whether `git status --porcelain` was non-empty, since
 a dirty lane record did not test its commit. The gate and the lane compute
 all of this with the same code.
 
-Those hashes depend only on the executable's inputs because every test
+For a reader that selects records by JSON pointer:
+- `/platform` is the host.
+- `/toolchain/digest` and `/toolchain/complete` are the toolchain key.
+- `/dirty` is lane runs only.
+- `/suites/full` is present when a full suite was recorded.
+- `/link_members/usable` and `/object_deps/usable` are booleans. An absent or
+  null summary means the file was not written.
+- `/problems` is empty exactly when nothing in the record is incomplete.
+
+A test executable's hash depends only on its inputs because every test
 executable and module is linked with `-Wl,-objc_stubs_small`
 (`tools/cmake/PulpTestSuite.cmake`, behind `check_linker_flag`). Without it,
 Apple's linker laid out the ObjC selector stubs (`__TEXT,__objc_stubs`)
@@ -1060,7 +1069,14 @@ linked unchanged.
 The record hashes every registered test executable, not only those the job
 ran, so a fast-tier pull-request head's hashes are there for the merge
 group's **binary-identity shadow**, which reads the head's reuse record when
-the head issued no receipt (annotation field `source: reuse-record`). The
+the head issued no receipt (annotation field `source: reuse-record`). With
+`--link-members` it also hashes every module the build linked (link members'
+`kind: module`), because a test runs the modules it loads. Those modules go
+into the same identity.json `/executables` map, keyed by `<build>/`-relative
+real path and marked `"kind": "module"`. An entry with `sha256` null and an
+`error` has no hash. After a failed build only the executables that ran are
+hashed, and no modules. job.json `/identity/usable` is true when the map
+hashed anything. The
 macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
 (`tools/cmake/PulpLinkMaps.cmake`): every link runs through
 `tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
