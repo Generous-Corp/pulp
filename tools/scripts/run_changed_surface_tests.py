@@ -1109,10 +1109,12 @@ UNKNOWN_UNREACHED = {"unreached_changed": None, "unreached_compared": 0, "unreac
 
 def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any],
                       derived: dict[str, Any], scope: str) -> dict[str, Any]:
-    """Would-skip executables whose bytes, or the bytes of anything in their
-    spawn closure (the tools they run and the modules they load), differ
-    from the picked base record's hash for the same artifact: a key that
-    said "unchanged" about something that changed.
+    """The artifacts in scope whose bytes this run built differ from the
+    picked base record's hash for the same artifact: a key that said
+    "unchanged" about something that changed. In scope are the would-skip
+    executables and everything in their spawn closure (the tools they run
+    and the modules they load); the changed artifact itself is listed, not
+    the executable that reaches it, since that is what the key missed.
 
     `scope` is "all" when every would-skip was built (a keyed full run) and
     "sampled" when only the sample was. The record hashes the executables
@@ -1169,7 +1171,7 @@ def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any]
                                   else hashlib.sha256(built.read_bytes()).hexdigest() != expected)
         return verdicts[artifact]
 
-    changed, unchecked = [], set()
+    changed, unchecked = set(), set()
     for artifact in sorted(roots - blind):
         closure, stack = set(), list((executables.get(artifact) or {}).get("spawns") or [])
         while stack:
@@ -1177,16 +1179,16 @@ def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any]
             if member not in closure:
                 closure.add(member)
                 stack.extend((executables.get(member) or {}).get("spawns") or [])
-        hit = differs(artifact) is True
+        if differs(artifact) is True:
+            changed.add(artifact)
         for member in sorted(closure - blind):
             verdict = differs(member)
             if verdict is None:
                 unchecked.add(member)
-            hit = hit or verdict is True
-        if hit:
-            changed.append(artifact)
+            elif verdict:
+                changed.add(member)
     compared = sum(1 for verdict in verdicts.values() if verdict is not None)
-    return {"unreached_changed": changed if compared else None, "unreached_compared": compared,
+    return {"unreached_changed": sorted(changed) if compared else None, "unreached_compared": compared,
             "unreached_unchecked_modules": sorted(unchecked)}
 
 
