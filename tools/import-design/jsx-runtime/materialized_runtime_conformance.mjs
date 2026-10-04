@@ -23,6 +23,7 @@ if (!Number.isInteger(runs) || runs < 2) {
 const jsonOutput = args.includes('--json');
 
 const asset = (id, source, vendor_kind) => ({
+const asset = (id, source) => ({
   id,
   mime_type: 'text/javascript',
   byte_length: Buffer.byteLength(source),
@@ -46,6 +47,8 @@ function fixture() {
     assets: [asset('react', react, 'react'),
       asset('react-dom', reactDom, 'react-dom'), asset('babel', babel, 'babel'),
       asset('app', 'globalThis.keepMe = true;')],
+    assets: [asset('react', react), asset('react-dom', reactDom),
+      asset('babel', babel), asset('app', 'globalThis.keepMe = true;')],
   };
 }
 
