@@ -36,7 +36,7 @@ jobs:
             build-mode: none
             runner: ubuntu-latest
           - language: rust
-            build-mode: autobuild
+            build-mode: none
             runner: ubuntu-latest
           - language: swift
             build-mode: autobuild
