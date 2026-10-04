@@ -846,11 +846,35 @@ async function captureMaterializedDocument(cdp) {
     // asset text. A vendor must be an empty script reference in the captured
     // executable document and match the complete, known signature.
     const asset = materialized.assets[index];
-    const escapedUrl = asset.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const emptyScript = new RegExp(
-      `<script\\b[^>]*(?:^|\\s)src\\s*=\\s*(?:["']${escapedUrl}["']|${escapedUrl})[^>]*>\\s*</script>`, "i"
-    ).test(materialized.html);
-    if (emptyScript && asset.mime_type === "text/javascript") {
+    const scriptRefs = [];
+    const lowerHtml = materialized.html.toLowerCase();
+    let cursor = 0;
+    while (cursor < materialized.html.length) {
+      const start = lowerHtml.indexOf("<script", cursor);
+      if (start < 0) break;
+      let openEnd = start + 7;
+      let quote = "";
+      for (; openEnd < materialized.html.length; ++openEnd) {
+        const ch = materialized.html[openEnd];
+        if (quote) { if (ch === quote) quote = ""; }
+        else if (ch === "\"" || ch === "'") quote = ch;
+        else if (ch === ">") break;
+      }
+      if (openEnd >= materialized.html.length) break;
+      const openTag = materialized.html.slice(start, openEnd + 1);
+      const srcMatch = openTag.match(/(?:^|\\s)src\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/i);
+      const close = lowerHtml.indexOf("</script", openEnd + 1);
+      if (srcMatch && close >= 0) {
+        const src = srcMatch[1] ?? srcMatch[2] ?? srcMatch[3] ?? "";
+        if (src === asset.url) {
+          scriptRefs.push(materialized.html.slice(openEnd + 1, close).trim() === "");
+        }
+      }
+      cursor = close >= 0 ? close + 8 : openEnd + 1;
+    }
+    const emptyScript = scriptRefs.length > 0 && scriptRefs.every(Boolean);
+    const javascriptMime = /^(?:text|application)\/javascript(?:\s*;|$)/i.test(asset.mime_type);
+    if (emptyScript && javascriptMime) {
       const source = Buffer.from(dataBase64, "base64").toString("utf8");
       if (source.includes("@license React") &&
           source.includes("react-dom.development.js")) {
