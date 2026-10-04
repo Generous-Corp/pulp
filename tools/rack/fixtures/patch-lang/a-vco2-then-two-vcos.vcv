@@ -1,0 +1,72 @@
+{
+ "modules": [
+  {
+   "id": 21,
+   "plugin": "Fixture",
+   "model": "VCO2",
+   "params": [
+    {
+     "id": 0,
+     "value": -0.5
+    }
+   ],
+   "pos": [
+    0,
+    0
+   ]
+  },
+  {
+   "id": 22,
+   "plugin": "ForgeModular",
+   "model": "VCO",
+   "params": [
+    {
+     "id": 0,
+     "value": 2.0
+    }
+   ],
+   "pos": [
+    0,
+    0
+   ]
+  },
+  {
+   "id": 23,
+   "plugin": "ForgeModular",
+   "model": "VCO",
+   "params": [
+    {
+     "id": 0,
+     "value": 0.75
+    }
+   ],
+   "pos": [
+    0,
+    0
+   ]
+  }
+ ],
+ "cables": [
+  {
+   "id": 1,
+   "outputModuleId": 21,
+   "outputId": 0,
+   "inputModuleId": 22,
+   "inputId": 0
+  },
+  {
+   "id": 2,
+   "outputModuleId": 22,
+   "outputId": 1,
+   "inputModuleId": 23,
+   "inputId": 1
+  },
+  {
+   "id": 3,
+   "outputModuleId": 23,
+   "outputId": 2,
+   "inputModuleId": 21,
+   "inputId": 0
+  }
+ ]
+}

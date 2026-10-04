@@ -155,6 +155,8 @@ function(_pulp_apply_view_mac_objc_suffix target)
     set(_pulp_view_objc_srcs
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/app_menu_mac.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/window_host_mac_capture.mm"
+        "${_PULP_VIEW_PLATFORM_MAC_DIR}/window_host_mac_lifecycle.mm"
+        "${_PULP_VIEW_PLATFORM_MAC_DIR}/window_host_mac_metal_view.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/window_host_mac_geometry.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/window_host_mac_open_documents.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/window_host_mac_text_input.mm"

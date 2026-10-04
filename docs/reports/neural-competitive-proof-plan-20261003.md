@@ -5,6 +5,22 @@ audio path outperforms an audited real-time engine or service. It is a proof
 plan, not a performance claim. A fast synthetic fixture, a GPU execution
 counter, or a model that merely produces plausible audio is insufficient.
 
+## Current source boundary
+
+The source snapshot for this plan is `origin/main` at
+`e260a88701eb85d1a22e11952826f98a4a36671c`. It includes the private CPU
+neural lifecycle facade, manifest/installed-asset admission, serialized NAM/TCN
+CPU bridge, and the tools-only `tools/validation/mlx_worker_harness.py` probe
+through merged neural packages ([PR 9332](https://github.com/Generous-Corp/pulp/pull/9332),
+[PR 9331](https://github.com/Generous-Corp/pulp/pull/9331),
+[PR 9412](https://github.com/Generous-Corp/pulp/pull/9412), and
+[PR 9415](https://github.com/Generous-Corp/pulp/pull/9415)). The MLX probe is
+default-off synthetic scheduling evidence; it is not wired into a plugin build
+and is not a shipped product/provider. The processor facade still executes CPU
+and records non-CPU requests as fallback or unavailable, so every MLX, Dawn,
+competitive, and Phase 3 gate below remains open until its declared receipt
+exists.
+
 ## Comparison contract
 
 Every comparison must use the same serialized weights, tensor precision,
@@ -97,10 +113,12 @@ quality metric is within the predeclared tolerance.
 * **CPU:** the allocation-free callback path is the portability oracle. It must
   remain buildable on every Pulp CI OS and is the fallback for every optional
   accelerator.
-* **MLX:** work is owned by a prepared worker thread. The receipt must prove
-  MLX execution, CPU shadow parity, unified-memory residency, stream/queue
-  behavior, and the cost of a second instance. A CPU result from an MLX-
-  requested configuration is a classified fallback, never a GPU win.
+* **MLX:** the landed worker probe is only a synthetic thread-ownership and
+  scheduling instrument. A product lane still requires work owned by a prepared
+  worker thread plus proof of MLX execution, CPU shadow parity, unified-memory
+  residency, stream/queue behavior, and the cost of a second instance. A CPU
+  result from an MLX-requested configuration is a classified fallback, never a
+  GPU win.
 * **Dawn:** GPU work must show provider execution and useful block/batch
   parallelism. Moving serial sample-by-sample work to Dawn is not a win. The
   receipt must include ordered delivery, fixed latency/lead, slot retirement,
@@ -157,12 +175,14 @@ the performance claim open.
 
 The first campaign should use the in-tree micro TCN only as a feasibility
 instrument, then a matched serialized CPU NAM/TCN artifact as the first
-competitive workload. Run the same block-parallel model through MLX and Dawn
-where available. Produce one machine-readable receipt plus a Perfetto trace for
-one 32-frame and one 128-frame case, then repeat the winning case at two
-instances. This decides whether acceleration helps the persistent node before
-investing in larger SSM, Magenta, or generative models; it cannot establish a
-general engine ranking until the real-model ladder is complete.
+competitive workload. The landed MLX worker probe may be used to validate
+thread/watchdog instrumentation, but it cannot substitute for the named-model
+campaign. Run the same block-parallel model through MLX and Dawn where
+available. Produce one machine-readable receipt plus a Perfetto trace for one
+32-frame and one 128-frame case, then repeat the winning case at two instances.
+This decides whether acceleration helps the persistent node before investing in
+larger SSM, Magenta, or generative models; it cannot establish a general engine
+ranking until the real-model ladder is complete.
 
 The campaign's output is a versioned JSON receipt plus raw timing samples,
 audio-quality report, and (when tracing is enabled) a Perfetto trace. The
