@@ -1,12 +1,16 @@
-#include <pulp/format/view_bridge.hpp>
+#include <chrono>
 #include <optional>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_ui.hpp>
+#include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/exceptions.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
-#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widget_bridge.hpp>
 
 namespace pulp::format {
 namespace {
@@ -316,6 +320,41 @@ bool ViewBridge::rebuild_primary_view() {
     width_ = size_hints_.preferred_width;
     height_ = size_hints_.preferred_height;
     return true;
+}
+
+bool ViewBridge::prepare_first_frame(view::PluginViewHost& host) {
+    // View-first keeps the previous order exactly: the display link paints the
+    // first frame once the host shows the view.
+    if (!view_raw_ || !options_.content_first_open)
+        return false;
+    PULP_TRACE_SCOPE_NAMED("render", "editor_first_frame");
+    {
+        if (auto* session = scripted_ui(); session && session->document_load_pending()) {
+            std::string load_error;
+            // Reports through the session's loaded callback either way; a
+            // failure leaves the root to the processor's fail-closed path.
+            if (!session->complete_pending_load(&load_error)) {
+                runtime::log_error("Editor document failed to load: {}", load_error);
+            }
+        }
+        // The idle pump is what the display link runs per frame: store
+        // listeners, a pending state restore, and the session's frame
+        // callbacks (timers, requestAnimationFrame, settle rounds).
+        PULP_TRACE_SCOPE_NAMED("render", "editor_first_frame_settle");
+        const auto pump = make_editor_idle_pump(*this);
+        const auto started = std::chrono::steady_clock::now();
+        for (int round = 0; round < kFirstFrameSettleRounds; ++round) {
+            auto* session = scripted_ui();
+            if (!session || !session->settling())
+                break;
+            if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                          started)
+                    .count() >= kFirstFrameSettleBudgetMs)
+                break;
+            pump();
+        }
+    }
+    return host.present_first_frame();
 }
 
 view::ScriptedUiSession* ViewBridge::scripted_ui() {

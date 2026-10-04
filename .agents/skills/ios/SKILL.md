@@ -814,6 +814,13 @@ without depending on platform APIs. Keep these invariants:
 
 ### Embeddable iOS GPU *plugin* host (`IOSGpuPluginViewHost`) — distinct from the window host
 
+The iOS AU v3 controller calls `ViewBridge::prepare_first_frame(*_viewHost)`
+once its host is attached, so the document mounts before the first frame
+(content-first, `view-bridge` "Editor open"). The iOS host does not override
+`PluginViewHost::present_first_frame()`: it only marks itself dirty, and its
+display link's first frame is the mounted document. Presenting with the Core
+Animation transaction, as the macOS GPU host does, is not implemented here.
+
 `core/view/platform/ios/plugin_view_host_ios.mm` is the AUv3 plugin embed
 host (vs `IOSGpuWindowHost` for standalone). Two things to know (2026-05
 GPU-plugin-view-host work):

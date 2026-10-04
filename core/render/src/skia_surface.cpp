@@ -288,6 +288,15 @@ public:
         return canvas_.get();
     }
 
+    bool wait_for_submitted_work() override {
+        if (!context_)
+            return false;
+        PULP_TRACE_SCOPE_NAMED("render", "first_frame_gpu_wait");
+        context_->submit(skgpu::graphite::SyncToCpu::kYes);
+        context_->checkAsyncWorkCompletion();
+        return true;
+    }
+
     FrameOutcome end_frame() override {
         // Graphite recording snap + insert + submit — the GPU-submit stage of
         // the frame pipeline.

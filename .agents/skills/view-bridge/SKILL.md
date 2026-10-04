@@ -53,35 +53,69 @@ virtuals: additive callbacks such as `process_f64(...)` belong after the
 existing f32 process surface, and descriptor fields added for new capabilities
 should be appended when positional aggregate initializer compatibility matters.
 
-## Editor open: return the sized view first, mount the document after
+## Editor open: content-first — the host's first image is the mounted document
 
-**Rule: never do heavy work inside the host's view-creation call.** A plug-in
-host creates the editor view synchronously (`uiViewForAudioUnit:`,
-`IPlugView::attached`, `clap_plugin_gui::create`/`set_parent`, AUv3
-`requestViewController`) and shows nothing of the editor until that call
-returns. Logic opens a header-only plug-in window for the whole call. A
-scripted editor that compiles its runtime, imports a captured document and
-mounts React inside that call makes the user stare at an empty window for
-seconds. Return a correctly sized root first; mount the document after.
+**Rule: the first thing a host composites of an editor is the settled document
+at the host's size — never the empty editor.** A host shows its plug-in window
+as soon as it has the view. If that view has not drawn its document yet the
+user watches the window open on an empty frame: the window's own open
+animation plays over it (it looks *small*), it settles at the right size still
+*empty*, and only then does the UI draw — three stages, every open. That was
+Pulp's view-first open (the document mounted on the editor's second idle tick),
+measured out of process (AUHostingService, Spectr, 3 rounds x 3 opens): an
+empty-background image before the UI on 9 of 9 preferred-size opens, 8–10
+non-UI images per open with the window animation, ~200–450 ms of empty editor.
 
-What Pulp does for you (default, every hosted format):
+What Pulp does for you (every hosted format, nothing to opt into):
 
-- `ViewBridge::Options::hosted_editor()` — the one Options every AU v2, AUv3,
-  VST3, CLAP and AAX adapter builds from — sets `defer_document_load`.
-  `ViewBridge::open()` then holds `view::ScopedDeferredDocumentLoad` around
-  `create_view()` and the default scripted editor.
-- `ScriptedUiSession::load_deferrable()` inside that guard verifies the script
-  is readable, returns true, and evaluates the document from the session's
-  **second** idle poll: the first tick presents the empty, sized editor, the
-  second mounts. Outside the guard (standalone, tests, harnesses) it is
-  `load()`. The default scripted editor (`PULP_UI_SCRIPT_PATH`) already uses
-  it and falls back to AutoUi *inside* the returned root if the deferred
-  document fails.
-- The first load of a session evaluates on the live realm only — no probe
-  realm (`probe_realm_evaluations() == 0`); reloads still probe.
+- `ViewBridge::Options::hosted_editor()` sets `defer_document_load` **and**
+  `content_first_open`. `open()` is still cheap: it holds
+  `view::ScopedDeferredDocumentLoad` around `create_view()`, so
+  `load_deferrable()` returns at once and the host gets the editor's size
+  without the document.
+- Every adapter then calls `ViewBridge::prepare_first_frame(host)` once its
+  host exists, the GPU surface is bound and `notify_attached()` has run (AU v2:
+  right before the factory returns the view; VST3 `attached()`; CLAP
+  `set_parent()`; mac and iOS AU v3 once the deferred host attaches; AAX). It
+  evaluates the deferred document now, serves its settle rounds
+  (`ScriptedUiSession::settling()`, at most 8 rounds / 120 ms), and asks the
+  host to present that frame (`PluginViewHost::present_first_frame()`).
+- The macOS GPU host paints into its CAMetalLayer with no window, presenting
+  this one frame **with its Core Animation transaction** after the GPU has
+  finished it (`SkiaSurface::wait_for_submitted_work()`), then one flush
+  commits the layer geometry and its first contents together. Out of process
+  the view arrives already holding the frame; in a window that is already on
+  screen (VST3/CLAP/AU v3 attach) there is no vsync of backing colour. A plain
+  asynchronous present lost that race (an empty-colour image on most in-window
+  opens; repro: the hidden `[composite]` case below). A view with no window yet
+  needs it too: out of process, AUHostingService inserts the AU v2 view right
+  after the factory returns, and a plain present showed the backing colour on
+  about one open in twelve. Until the display link paints
+  its first frame, a host resize (a restored or minimum size, a container
+  settling) is presented the same way, right inside `set_size()`, window or
+  not (a new drawable size empties the layer); otherwise the content-first frame shows stretched into the new
+  bounds, or only the backing colour when the drawable size changed, for a
+  vsync. Deferring that present to the end of the run-loop turn is not enough:
+  AUHostingService commits its container's intermediate sizes before the turn
+  ends (about one open in twenty-five showed the backing colour).
+- Hosts that only paint from the platform's display pass (CPU host, Windows,
+  Linux) mark themselves dirty; their first paint is already the document
+  because it mounted before they got the view.
+- `PULP_EDITOR_OPEN=view-first` in the host's environment restores the old
+  order exactly (`prepare_first_frame()` becomes a no-op). It cannot reach
+  AUHostingService, so an out-of-process A/B needs two builds.
+
+The cost moved, it did not vanish: the host's view-creation call now includes
+the mount. Spectr, M5 Max, in process (traced): warm factory ~150 ms (mount
+~125, first frame ~15) and the UI is on screen with the view; cold ~390–640 ms.
+Warm time-to-UI improved (view-first: UI ~250–300 ms after the call); cold is
+roughly level in process and ~100–200 ms later out of process, because the
+host's own window setup no longer overlaps the mount. Keep cutting the mount
+(see "Editor-open cost of a materialized document" in `import-design` and the
+`trace-analysis` editor-open recipe), do not go back to view-first.
 
 What a processor that builds its own `ScriptedUiSession` in `create_view()`
-must do:
+must do (unchanged):
 
 ```cpp
 session->set_document_loaded_callback([this](bool ok, const std::string& err) {
@@ -92,43 +126,53 @@ if (!session->load_deferrable(&error)) { /* unreadable script: fail now */ }
 // Do NOT read session->bridge() here — it is null until the document mounts.
 ```
 
-- Plain `load()` still evaluates immediately inside the guard (callers may
-  read `bridge()` next), and logs a one-time warning naming
-  `load_deferrable()` when it blocks the host for 50 ms or more. That warning
-  is the tell that an editor opens slowly.
-- Never destroy the session from inside its own document-loaded callback (it
-  runs inside the session's load); mark it and retire it after the call
+- The callback now runs inside the host's view-creation call (from
+  `prepare_first_frame()`), after `on_view_opened()`. Never destroy the
+  session from inside its own callback; mark it and retire it after the call
   returns.
+- Plain `load()` still evaluates immediately inside the guard and logs a
+  one-time warning when it blocks 50 ms or more; prefer `load_deferrable()` so
+  the mount runs after the host and GPU surface exist.
 - Keep the editor's size a compile-time / `view_size()` answer, never
   something the document computes — the host sizes its window from the view
   `create_view()` returns.
 - Downstream code that kept its own deferral for older SDKs keys its removal
   on `PULP_VIEW_HAS_DEFERRED_DOCUMENT_LOAD`.
 
-Gate: the `[editor-open]` cases in `test/test_view_bridge.cpp` assert by state
-(not wall time) that a hosted `open()` evaluates nothing, the document mounts
-on the second idle tick, failures report from the tick, and a missing script
-still fails inside `open()`. Copy that shape for a plug-in's own editor:
-assert `document_load_pending()` / `bridge() == nullptr` after `create_view()`
-inside a `ScopedDeferredDocumentLoad`, then pump the session and assert the
-mounted tree. Measure wall time with the `trace-analysis` editor-open recipe;
-track it, do not gate on it.
+Gates: `[content-first]` in `test/test_view_bridge.cpp` (the document is
+mounted when the host is asked for its first frame; a commit two frames after
+the mount is in that frame; `view-first` presents nothing out of turn; the env
+switch) and in `test_plugin_view_host_first_frame_macos.mm` (the GPU host
+paints with no window and the layer holds contents; a resize before the
+display link's first frame re-presents at the new size; the hidden `[composite]`
+case opens six times into an on-screen window and fails on any image that
+shows only the backing colour — run it explicitly, it needs a window server).
+The `[editor-open]` cases still pin that `open()` itself evaluates nothing.
 
-Worked example (Spectr, AU v2, M5 Max, traced build): the view-creation call
-went from 1.4–2.1 s to 12–20 ms, and the full document drew at ~0.5 s warm /
-~0.9 s cold once the costs below were also removed (see `import-design`,
-"Editor-open cost of a materialized document").
+Measure the stages a user sees from the **host window**, not from the
+plug-in's presents: read back every distinct image of the host's own window
+(a process may read its own windows) from the moment it asks for the editor,
+with a loud backdrop (magenta), and count the images before the settled UI
+that are neither the host's backdrop nor already the UI. Keep AppKit's window
+animation in one run and turn it off in another
+(`NSWindowAnimationBehaviorNone`): with it, a correct open still yields
+smaller-than-final images — of the UI, scaled — so classify those by block
+means against the settled image, not as "wrong size". The probes used for the
+numbers above (in process via `pulp::host::PluginSlot` for VST3/CLAP/AU v2,
+and out of process via `AUAudioUnit` + `kAudioComponentInstantiation_LoadOutOfProcess`)
+are in the Spectr evidence for this change.
 
 ### The first frame must already look like the plug-in
 
-View-first opening means the DAW **shows** the editor for a while before the
-document draws: first the host view's backing layer (until the first Metal
-frame), then every frame painted over an empty tree (until the document
-mounts, ~0.5–1 s for a materialized document, several seconds on a loaded
-host). Whatever colour fills those is the first impression of the plug-in. It
-used to be the framework default navy (`kEditorHostClearRgb`, 0x1E1E2E, which
-is also `Theme::dark()`'s `bg.primary`) for every plug-in — a dark editor
-flashed blue-grey on every open.
+With a content-first open the document is the first frame, so the backing
+colour is what remains on screen only when there is no document frame yet:
+before the first present (no frame at all, e.g. the GPU surface failed and the
+CPU host waits for its display pass), when the document failed to mount, in
+the letterbox bars around a pinned viewport, and for an AU v3 controller view
+before its deferred host attaches. It used to be the framework default navy
+(`kEditorHostClearRgb`, 0x1E1E2E, also `Theme::dark()`'s `bg.primary`) for
+every plug-in — a dark editor flashed blue-grey on every open — and under the
+older view-first open it filled the whole window for the length of the mount.
 
 - Declare the editor's own background:
   `std::optional<std::uint32_t> editor_background() const override` returning
@@ -147,11 +191,16 @@ flashed blue-grey on every open.
   enough: the backing layer (seeded before the view can join a window), the
   frame fill under the tree, and the letterbox bars around a pinned viewport
   (visible after the UI is up when the host's aspect differs).
-- Do not paint a poster/snapshot of the UI instead: a default-state poster
-  shows the wrong knob positions, band counts and spectrum for the user's
-  session and then jumps to the real ones — a different flash, not none. The
-  honest pre-document frame is the plug-in's own background plus any chrome
-  the editor already draws in its final place (e.g. a native resize grip).
+- Do not paint a poster/snapshot of the UI instead — not a default-state
+  poster (wrong knob positions, band counts and spectrum for the user's
+  session, then a jump to the real ones: a different flash, not none), and not
+  the last frame of the previous open either: an analyzer or meter, a
+  parameter the host automated while the editor was closed, a preset load or a
+  host resize all make it stale, and the instance can be reopened at another
+  size or scale. A snapshot can be proven current only by mounting the
+  document, which is the cost it was meant to hide. The honest frame when the
+  document is not there is the plug-in's own background plus any chrome the
+  editor already draws in its final place (e.g. a native resize grip).
 - An SDK older than this API: shim from the plug-in — paint the root's
   background (`View::set_background_color`) and recolour the host view's
   backing layer in `on_view_opened()` (AU v2 attaches before it returns the
@@ -194,8 +243,10 @@ yet" cannot pass as a dark background. What only this path shows:
     idle work until its paint half: AppKit's own display pass runs before the
     main queue drains again and would otherwise draw it first.
   - **Commit layer geometry before presenting at a new size.** The GPU host
-    calls `[CATransaction flush]` before the first frame and before any frame
-    whose size or scale changed. A resize changes the CAMetalLayer's bounds in
+    calls `[CATransaction flush]` before any display-link frame whose size or
+    scale changed. (The content-first frame instead commits its geometry and
+    its contents in the same transaction — see "Editor open" above; flushing
+    the geometry first there commits an empty layer ahead of the frame.) A resize changes the CAMetalLayer's bounds in
     the implicit transaction, which the run loop commits only when it sleeps;
     a drawable presented before that commit is scaled into the old bounds and
     cropped by the host (OOP: the full-size-looking layout, cropped).
@@ -209,6 +260,14 @@ yet" cannot pass as a dark background. What only this path shows:
 - `-uiViewForAudioUnit:withSize:` is no size negotiation: AUHostingService
   passed 800x600 on every open while its window was 792x516. The AU v2 view is
   still created at the preferred size and follows the container afterwards.
+  With a content-first open the frame inside the factory is therefore at the
+  preferred size, and a host that then shrinks the view gets a fresh frame at
+  the new size presented with that resize (the GPU host re-presents any resize
+  that lands before its display link's first frame).
+- Host window animation: AppKit zooms a newly ordered-in window from slightly
+  smaller than its final size over ~100 ms. Whatever the editor shows during
+  it reads as "small first": an empty frame there is the "small, then empty,
+  then UI" report; the document frame there is just the window opening.
 - Edge-anchored chrome can sit a pixel or two off and a black 1-px host edge
   can show for a frame while the remote content and the host converge on one
   size; classify that separately from an off-brand colour.

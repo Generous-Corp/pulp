@@ -2400,6 +2400,65 @@ public:
         needs_repaint_.store(true, std::memory_order_relaxed);
     }
 
+    // Content-first open: paint and present the mounted tree into the
+    // CAMetalLayer now, inside the host's view-creation call, so the first
+    // image the window server composites for this view is that frame.
+    //
+    // An ordinary present loses a race: the drawable presents asynchronously
+    // once the GPU finishes it, while the view's insertion (and any geometry
+    // flush) reaches the window server with the next Core Animation commit,
+    // which can land first and show the backing colour for a vsync. A host
+    // whose window is on screen when it attaches (VST3 attached(), CLAP
+    // set_parent(), AU v3) lost it on most opens, and out of process
+    // AUHostingService, which inserts the AU v2 view right after the factory
+    // returns, on about one open in twelve. So the frame is presented WITH the
+    // transaction: the GPU work is finished first, and one flush commits the
+    // layer's geometry and its first contents together, window or not.
+    // Skipped once the display link has painted.
+    bool present_first_frame() override {
+        needs_repaint_.store(true, std::memory_order_relaxed);
+        if (frame_ok_count_ > 0)
+            return false;
+        only_first_frame_presented_ = present_with_transaction();
+        return only_first_frame_presented_;
+    }
+
+    // Present one frame with the Core Animation transaction that carries this
+    // view's pending geometry (see present_first_frame).
+    bool present_with_transaction() {
+        CAMetalLayer* layer = metal_view_.metalLayer;
+        // The flush below commits this geometry with the frame; flushing it
+        // first would commit an empty (or stale, rescaled) layer ahead of it.
+        committed_size_ = size_;
+        committed_scale_ = layer.contentsScale;
+        layer.presentsWithTransaction = YES;
+        sync_before_present_ = true;
+        const bool presented = render_frame();
+        sync_before_present_ = false;
+        [CATransaction flush];
+        layer.presentsWithTransaction = NO;
+        return presented;
+    }
+
+    // A host that sizes the editor right after the content-first frame (a
+    // restored or minimum size, a container settling) would otherwise show
+    // that frame stretched into the new bounds -- or, when the drawable size
+    // changes under it, only the backing colour -- until the display link's
+    // first frame. Until the link has painted, a resize is presented right
+    // here, with the transaction that carries it. Deferring it to the end of
+    // the run-loop turn is not enough out of process: AUHostingService commits
+    // the container's intermediate sizes before the turn ends, and about one
+    // open in twenty-five showed the backing colour. Nor is skipping a view
+    // that has no window yet: the new drawable size empties the layer, which a
+    // host that resizes its container before showing it then composites.
+    void present_resize_before_first_link_frame() {
+        if (!only_first_frame_presented_)
+            return;
+        if (size_.width == 0 || size_.height == 0)
+            return;
+        present_with_transaction();
+    }
+
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
         @autoreleasepool {
@@ -2417,6 +2476,7 @@ public:
             }
         }
         needs_repaint_.store(true, std::memory_order_relaxed);
+        present_resize_before_first_link_frame();
     }
 
     Size get_size() const override { return size_; }
@@ -2585,6 +2645,10 @@ private:
     // the first present commits the view's insertion too.
     Size committed_size_{0, 0};
     CGFloat committed_scale_ = 0.0;
+    bool sync_before_present_ = false;
+    // True from the content-first frame until the display link paints: the
+    // only frames on screen are ones this host presented with a transaction.
+    bool only_first_frame_presented_ = false;
 
     // FIRST-PAINT SIZE matters: the (width,height) this surface is created at
     // becomes the first painted frame's size. In an out-of-process plugin host
@@ -2832,6 +2896,8 @@ private:
         }
 
         skia_surface_->end_frame();
+        if (sync_before_present_)
+            skia_surface_->wait_for_submitted_work();
         gpu_surface_->end_frame();
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
@@ -2983,6 +3049,7 @@ private:
         if (tick.continuous) {
             needs_repaint_.store(true, std::memory_order_relaxed);
         }
+        only_first_frame_presented_ = false;
         render_frame();
         render_dispatch_queued_.store(false, std::memory_order_release);
     }

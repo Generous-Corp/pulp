@@ -196,6 +196,15 @@ public:
     /// `GpuFramesInFlight` in `gpu_render_time.hpp`), or -1 when the surface
     /// does not track it. Diagnostic only; nothing waits on it.
     virtual int gpu_frames_in_flight() const { return -1; }
+
+    /// Block until the GPU has finished the work this surface submitted. A
+    /// host that must hand the compositor a finished drawable (a first frame
+    /// presented with its Core Animation transaction) calls it between
+    /// `end_frame()` and the present. Returns false when the surface cannot
+    /// wait (no GPU context); never call it per frame.
+    virtual bool wait_for_submitted_work() {
+        return false;
+    }
 };
 
 } // namespace pulp::render

@@ -285,6 +285,14 @@ public:
     // the host frame loop.
     void service_frame_callbacks();
 
+    // Host frames a mounted runtime document still asked for to settle its
+    // commits (`__pulpRuntimeSettle__`). Each service_frame_callbacks() pass
+    // consumes one. Zero once the document has settled, or for a document that
+    // never asked.
+    int pending_runtime_settle_rounds() const noexcept {
+        return pending_runtime_settle_rounds_;
+    }
+
     // ── Declarative native→widget bindings (params / meters) ──────────────
     //
     // A binding is registered ONCE from JS via `bindWidgetToParam(widgetId,

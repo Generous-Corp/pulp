@@ -762,12 +762,19 @@ Build the host's `PluginViewHost::Options` with
 `editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
 by field: it carries the plug-in's declared background
 (`ViewBridge::editor_background_rgb()`), which the host paints on its backing
-layer and under the empty tree until the view-first document mounts. A
+layer and under the tree whenever there is no document frame. A
 hand-built Options silently drops it and this format opens on the framework
 navy while the others open on the plug-in's colour (`view-bridge`, "The first
 frame must already look like the plug-in"). AU v2 matters most here: Logic composites the
 returned NSView's layer the moment `uiViewForAudioUnit:` returns, before any
-frame, so the seeded layer colour is literally the first thing users see.
+display-link frame. That is why the factory calls
+`ViewBridge::prepare_first_frame(*host)` right after `notify_attached()` and
+before returning: the document mounts and its first frame is presented into
+the not-yet-windowed CAMetalLayer, so the returned view already holds the UI
+(out of process, AUHostingService sends it on arrival). The factory call now
+costs the mount (Spectr: ~150 ms warm, ~400–650 ms cold); keep it on the
+critical path rather than returning an empty view, which showed "small, then
+empty, then UI" in Logic (`view-bridge`, "Editor open").
 
 ### The Cocoa view MUST pin the design viewport, or a Logic resize CLIPS
 

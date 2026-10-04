@@ -495,46 +495,74 @@ Fingerprints and what they mean:
 
 ### First-frame colour recipe: what did the editor show before its UI?
 
-A view-first editor presents frames before its document mounts. Time that gap
-from the trace and prove what those frames showed from the pixels — the trace
-alone cannot tell a correct background from a framework default.
+A content-first editor (the default for every hosted format; see `view-bridge`,
+"Editor open") mounts its document inside the host's view-creation call and
+presents it as frame 0. A view-first editor (`PULP_EDITOR_OPEN=view-first`, or
+an SDK that predates content-first) presents frames before its document mounts.
+Prove which happened from the trace, and what those frames showed from the
+pixels — the trace alone cannot tell a correct background from a framework
+default.
 
 1. **Trace**: the macOS plug-in GPU host emits one `plugin_editor_frame`
    (`render`) span per presented frame with args `frame` (restarts at 0 for
    each host, so every open begins at a frame-0 span), `background_rgb` (the
    colour painted under the tree), `root_children`, and `width`/`height` (the
-   logical size the frame was laid out at). Pair them with
-   `scripted_ui_document_load`:
+   logical size the frame was laid out at). A content-first open wraps the
+   mount, its settle rounds and frame 0 in one `editor_first_frame` (`render`)
+   span inside the view-creation call; its `scripted_ui_document_load`
+   therefore starts BEFORE frame 0. Pair each document load with the nearest
+   frame 0, not the next one:
 
 ```sql
 with frames as (
   select ts, dur, extract_arg(arg_set_id, 'debug.frame') as frame,
-         extract_arg(arg_set_id, 'debug.background_rgb') as bg
+         extract_arg(arg_set_id, 'debug.root_children') as kids,
+         extract_arg(arg_set_id, 'debug.width') as w,
+         extract_arg(arg_set_id, 'debug.height') as h
   from slice where name = 'plugin_editor_frame'
 ), opens as (
-  select ts as open_ts, bg, row_number() over (order by ts) as n,
+  select ts as open_ts, row_number() over (order by ts) as n,
          lead(ts) over (order by ts) as next_open
   from frames where frame = 0
+), dl as (
+  select ts as doc_start, ts + dur as doc_end, dur as doc_dur
+  from slice where name = 'scripted_ui_document_load'
 ), docs as (
-  select o.n, min(d.ts + d.dur) as doc_end
-  from slice d join opens o
-    on d.ts >= o.open_ts and (o.next_open is null or d.ts < o.next_open)
-  where d.name = 'scripted_ui_document_load' group by o.n
+  select * from (select dl.*, o.n, row_number() over (partition by dl.doc_start
+                 order by abs(o.open_ts - dl.doc_start)) as rk
+                 from dl cross join opens o) where rk = 1
 )
-select o.n as open, printf('#%06X', o.bg) as pre_document_colour,
-       (select count(*) from frames f where f.ts >= o.open_ts and f.ts < d.doc_end)
-         as frames_before_document,
-       round(((select min(f.ts + f.dur) from frames f where f.ts >= d.doc_end
-               and (o.next_open is null or f.ts < o.next_open)) - o.open_ts) / 1e6, 1)
-         as first_document_frame_ms
+select o.n as open,
+       (select count(*) from frames f where f.ts >= o.open_ts and f.ts < d.doc_end
+          and (o.next_open is null or f.ts < o.next_open)) as frames_before_document,
+       round((d.doc_start - o.open_ts) / 1e6, 1) as doc_start_rel_frame0_ms,
+       round(d.doc_dur / 1e6, 1) as doc_load_ms,
+       (select printf('%dx%d kids=%d', f.w, f.h, f.kids) from frames f
+          where f.ts >= o.open_ts order by f.ts limit 1) as frame0
 from opens o join docs d using (n) order by o.n;
 ```
 
-   `pre_document_colour` reading `#1E1E2E` (`kEditorHostClearRgb`) means the
-   plug-in declared no `editor_background()` and its root theme is the default
-   dark one; every frame in `frames_before_document` showed that colour. Do
-   not use `root_children > 0` as "document mounted": chrome a processor adds
-   in `create_view()` (a resize grip) counts too.
+   Content-first reads `frames_before_document = 0`, a negative
+   `doc_start_rel_frame0_ms` and a frame 0 that already holds the document's
+   children. View-first reads 1+ frames before the document with frame 0 at
+   the chrome-only child count (Spectr: `kids=1`, its resize grip, vs 5 once
+   mounted). In view-first, `background_rgb` reading `#1E1E2E`
+   (`kEditorHostClearRgb`) means the plug-in declared no `editor_background()`
+   and its root theme is the default dark one; every frame in
+   `frames_before_document` showed that colour. Do not use `root_children > 0`
+   alone as "document mounted": chrome a processor adds in `create_view()`
+   counts too.
+
+   Break `editor_first_frame` down with its children (`depth <= +3`, `> 2 ms`):
+   `scripted_ui_document_load` → `scripted_ui_live_realm` → `script_compile`
+   (cold) or `script_bytecode_read` (warm) + `script_execute`, the plug-in's
+   own bind span, then frame 0's `plugin_editor_frame` with `gpu_submit` and
+   `first_frame_gpu_wait` (the GPU finishing frame 0 before it is presented with
+   its transaction). Measured, Spectr AU v2 in process: warm ~140–210 ms
+   (document ~125, frame 0 ~15–35); cold ~390–640 ms, where a cold `gpu_submit`
+   swung from 23 to 325 ms between runs on a loaded host — read cold numbers
+   as a distribution, alternate variants, and repeat.
+
 2. **Pixels**: read back every presented drawable in the host process (swizzle
    `-[CAMetalDrawable present]` / `-[MTLCommandBuffer presentDrawable:]`, blit
    the texture into a shared `MTLBuffer`) — never a screenshot, which needs
@@ -568,7 +596,16 @@ from opens o join docs d using (n) order by o.n;
    `test_plugin_view_host_first_frame_macos.mm` ("a host resize queued during
    the mount lands before the next frame"); the rules it pins are in the
    `view-bridge` skill.
-4. **Keep the display awake** for any off-screen probe:
+4. **Count the stages a user sees from the host window**, not from the
+   presents: read back every distinct image of the host's own window from the
+   moment it asks for the editor (magenta backdrop), and count the images
+   before the settled UI that are neither that backdrop nor already the UI.
+   Run once with AppKit's window animation and once without
+   (`NSWindowAnimationBehaviorNone`); with it, smaller-than-final images are
+   expected, so classify them by block means against the settled image (the UI
+   being zoomed in is one stage; the empty background being zoomed in is the
+   "small, then empty, then UI" report). Target: 0 non-UI images per open.
+5. **Keep the display awake** for any off-screen probe:
    `caffeinate -u -d -i <probe>`. A sleeping display stops the display link,
    so every variant presents zero frames and the run reads as a broken build.
 

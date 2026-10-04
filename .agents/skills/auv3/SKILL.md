@@ -1300,12 +1300,18 @@ Build the host's `PluginViewHost::Options` with
 `editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
 by field: it carries the plug-in's declared background
 (`ViewBridge::editor_background_rgb()`), which the host paints on its backing
-layer and under the empty tree until the view-first document mounts. A
+layer and under the tree whenever there is no document frame. A
 hand-built Options silently drops it and this format opens on the framework
 navy while the others open on the plug-in's colour (`view-bridge`, "The first
 frame must already look like the plug-in"). Both view controllers keep the bridge-less preview/fallback
 path on default Options; only the bridged path goes through the helper, and it
-passes the controller's real host size back in as `size`.
+passes the controller's real host size back in as `size`. Once the deferred
+host attaches (mac `-createViewHostIfReady`, iOS view load), both controllers
+call `ViewBridge::prepare_first_frame(*_viewHost)`: the document mounts and its
+first frame is presented at that settled size with its Core Animation
+transaction, so the host never composites the empty editor (`view-bridge`,
+"Editor open"). The controller's own view is still empty until the deferred
+attach; that wait is the size negotiation, not the document.
 
 ### Headless automation must not create fallback AUv3 UI
 

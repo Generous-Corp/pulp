@@ -509,10 +509,18 @@ Build the host's `PluginViewHost::Options` with
 `editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
 by field: it carries the plug-in's declared background
 (`ViewBridge::editor_background_rgb()`), which the host paints on its backing
-layer and under the empty tree until the view-first document mounts. A
+layer and under the tree whenever there is no document frame. A
 hand-built Options silently drops it and this format opens on the framework
 navy while the others open on the plug-in's colour (`view-bridge`, "The first
 frame must already look like the plug-in").
+
+`gui_set_parent()` calls `ViewBridge::prepare_first_frame(*editor_host)` after
+attaching and `notify_attached()`: the document mounts inside the call and its
+first frame is presented with its Core Animation transaction, so a host whose
+window is already on screen (most CLAP hosts call `set_parent` then `show` on
+a visible window) never composites the empty editor or a vsync of the backing
+colour (`view-bridge`, "Editor open"). `gui_create()` stays cheap: it only
+builds the host and its size.
 
 ### ARA companion factory
 

@@ -483,6 +483,7 @@ namespace {
 class DeferredScriptEditorProcessor final : public StubProcessor {
 public:
     std::filesystem::path script_path;
+    bool enable_runtime_import = false;
     int loaded_callbacks = 0;
     bool last_loaded = false;
 
@@ -498,7 +499,8 @@ public:
             *root, state(),
             view::ScriptedUiOptions{.script_path = script_path,
                                     .enable_hot_reload = false,
-                                    .enable_theme_reload = false});
+                                    .enable_theme_reload = false,
+                                    .enable_runtime_import = enable_runtime_import});
         session->set_document_loaded_callback(
             [this](bool loaded, const std::string&) {
                 ++loaded_callbacks;
@@ -659,6 +661,173 @@ TEST_CASE("Editor background falls back to the root theme, then the host default
     // A throwing override never fails the open; it falls through.
     declared.throw_on_background = true;
     CHECK(format::resolve_editor_background(declared, &root) == 0x203040);
+}
+
+namespace {
+
+// A host that records what the editor held when it was asked for its first
+// frame: content-first means that frame is the mounted document.
+class FirstFrameRecordingHost final : public view::PluginViewHost {
+  public:
+    std::function<void()> on_first_frame;
+    int first_frame_requests = 0;
+
+    view::NativeViewHandle native_handle() override {
+        return nullptr;
+    }
+    void attach_to_parent(view::NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t w, uint32_t h) override {
+        size_ = {w, h};
+    }
+    Size get_size() const override {
+        return size_;
+    }
+    bool present_first_frame() override {
+        ++first_frame_requests;
+        if (on_first_frame)
+            on_first_frame();
+        return true;
+    }
+
+  private:
+    Size size_{480, 320};
+};
+
+} // namespace
+
+TEST_CASE("Editor open: hosted editors open content-first unless PULP_EDITOR_OPEN=view-first",
+          "[view_bridge][scripted-ui][editor-open][content-first]") {
+    const char* saved = std::getenv("PULP_EDITOR_OPEN");
+    const std::string saved_value = saved ? saved : "";
+    unsetenv("PULP_EDITOR_OPEN");
+    CHECK(format::ViewBridge::Options::hosted_editor().content_first_open);
+    CHECK(format::ViewBridge::Options::hosted_editor().defer_document_load);
+    setenv("PULP_EDITOR_OPEN", "view-first", 1);
+    CHECK_FALSE(format::ViewBridge::Options::hosted_editor().content_first_open);
+    setenv("PULP_EDITOR_OPEN", "content-first", 1);
+    CHECK(format::ViewBridge::Options::hosted_editor().content_first_open);
+    // Standalone and harness bridges never ask a host to present anything.
+    CHECK_FALSE(format::ViewBridge::Options{}.content_first_open);
+    if (saved)
+        setenv("PULP_EDITOR_OPEN", saved_value.c_str(), 1);
+    else
+        unsetenv("PULP_EDITOR_OPEN");
+}
+
+TEST_CASE("Editor open: content-first mounts the document before the host's first frame",
+          "[view_bridge][scripted-ui][editor-open][content-first]") {
+    state::StateStore store;
+    DeferredScriptEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.script_path =
+        write_editor_script("pulp-editor-content-first", "createLabel('status', 'mounted', '');\n");
+
+    auto options = format::ViewBridge::Options::hosted_editor();
+    options.content_first_open = true;
+    format::ViewBridge bridge(p, store, options);
+    REQUIRE(bridge.open());
+    // open() itself is still cheap: the host gets its size without the document.
+    REQUIRE(p.session->document_load_pending());
+    CHECK(p.loaded_callbacks == 0);
+
+    FirstFrameRecordingHost host;
+    bool mounted_at_first_frame = false;
+    host.on_first_frame = [&] {
+        mounted_at_first_frame = !p.session->document_load_pending() &&
+                                 p.session->bridge() != nullptr &&
+                                 p.session->bridge()->widget("status") != nullptr;
+    };
+    CHECK(bridge.prepare_first_frame(host));
+    CHECK(host.first_frame_requests == 1);
+    CHECK(mounted_at_first_frame);
+    CHECK(p.loaded_callbacks == 1);
+    CHECK(p.last_loaded);
+    // Mounted once, on the live realm only, and the idle ticks that follow do
+    // not mount it again.
+    CHECK(p.session->probe_realm_evaluations() == 0);
+    auto pump = format::make_editor_idle_pump(bridge);
+    pump();
+    pump();
+    CHECK(p.loaded_callbacks == 1);
+
+    std::filesystem::remove_all(p.script_path.parent_path());
+}
+
+TEST_CASE("Editor open: content-first serves the document's settle rounds before the first frame",
+          "[view_bridge][scripted-ui][editor-open][content-first]") {
+    state::StateStore store;
+    DeferredScriptEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.enable_runtime_import = true;
+    // A document whose last commit lands two frames after the mount, the way
+    // a React root finishes in an effect: the load itself drains the first
+    // animation frame, which asks the host to settle and schedules the commit
+    // on the next one. Only the host's frames can deliver it.
+    p.script_path = write_editor_script(
+        "pulp-editor-content-first-settle",
+        "createLabel('status', 'mounted', '');\n"
+        "if (typeof __pulpRuntimeSettle__ !== 'function') createLabel('no-settle-api', '', '');\n"
+        "requestAnimationFrame(function () {\n"
+        "  if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(3);\n"
+        "  requestAnimationFrame(function () { createLabel('late', 'settled', ''); });\n"
+        "});\n");
+
+    auto options = format::ViewBridge::Options::hosted_editor();
+    options.content_first_open = true;
+    format::ViewBridge bridge(p, store, options);
+    REQUIRE(bridge.open());
+
+    FirstFrameRecordingHost host;
+    bool late_at_first_frame = false;
+    bool settling_at_first_frame = true;
+    host.on_first_frame = [&] {
+        auto* wb = p.session->bridge();
+        late_at_first_frame = wb != nullptr && wb->widget("late") != nullptr;
+        settling_at_first_frame = p.session->settling();
+    };
+    REQUIRE(bridge.prepare_first_frame(host));
+    REQUIRE(p.session->bridge() != nullptr);
+    if (p.session->bridge()->widget("no-settle-api") != nullptr)
+        SKIP("this build has no runtime-import settle API");
+    // The commit queued for the next frame is in the first frame, and nothing
+    // was left to settle when the host painted it.
+    CHECK(late_at_first_frame);
+    CHECK_FALSE(settling_at_first_frame);
+
+    std::filesystem::remove_all(p.script_path.parent_path());
+}
+
+TEST_CASE("Editor open: view-first leaves the document to the idle tick",
+          "[view_bridge][scripted-ui][editor-open][content-first]") {
+    state::StateStore store;
+    DeferredScriptEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.script_path =
+        write_editor_script("pulp-editor-view-first", "createLabel('status', 'mounted', '');\n");
+
+    auto options = format::ViewBridge::Options::hosted_editor();
+    options.content_first_open = false;
+    format::ViewBridge bridge(p, store, options);
+    REQUIRE(bridge.open());
+    FirstFrameRecordingHost host;
+    // Nothing is mounted or presented out of turn: the display link paints the
+    // empty editor first, as before.
+    CHECK_FALSE(bridge.prepare_first_frame(host));
+    CHECK(host.first_frame_requests == 0);
+    CHECK(p.session->document_load_pending());
+    CHECK(p.loaded_callbacks == 0);
+    // ... and the idle tick still mounts it, on the second tick as before.
+    auto pump = format::make_editor_idle_pump(bridge);
+    pump();
+    pump();
+    CHECK(p.loaded_callbacks == 1);
+
+    std::filesystem::remove_all(p.script_path.parent_path());
 }
 
 TEST_CASE("Editor open: standalone and harness bridges keep the synchronous load",
