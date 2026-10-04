@@ -39,7 +39,11 @@ static int setenv(const char* k, const char* v, int overwrite) {
     return _putenv_s(k, v);
 }
 #else
+#include <pwd.h>
 #include <unistd.h>
+#endif
+#if defined(__APPLE__)
+#include <os/log.h>
 #endif
 #include <chrono>
 #include <cstring>
@@ -126,8 +130,15 @@ void ensure_initialized() {
 // Applied as environment variables so every reader below sees one source.
 void apply_trace_autostart_file() {
     if (const char* p = std::getenv("PULP_TRACE_PATH"); p && *p) return;
-    const char* home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0') return;
+    // An XPC service (AUHostingService) may run without HOME in its
+    // environment; the account database still knows the home directory.
+    std::string home;
+    if (const char* h = std::getenv("HOME"); h && *h) home = h;
+#if !defined(_WIN32)
+    if (home.empty())
+        if (const passwd* pw = getpwuid(getuid()); pw && pw->pw_dir) home = pw->pw_dir;
+#endif
+    if (home.empty()) return;
     std::ifstream in(std::filesystem::path(home) / ".config" / "pulp" / "trace-autostart");
     if (!in) return;
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -138,11 +149,26 @@ void apply_trace_autostart_file() {
 #else
     const char* process = "pulp";
 #endif
-    const auto out = detail::trace_autostart_output_path(config.path, process ? process : "",
-                                                         static_cast<long>(getpid()));
+    std::string temp_dir;
+#if defined(__APPLE__)
+    char buf[1024] = {};
+    if (confstr(_CS_DARWIN_USER_TEMP_DIR, buf, sizeof buf) > 0) temp_dir = buf;
+#endif
+    if (temp_dir.empty()) {
+        std::error_code tmp_ec;
+        temp_dir = std::filesystem::temp_directory_path(tmp_ec).string();
+    }
+    const long pid = static_cast<long>(getpid());
+    auto out = detail::trace_autostart_output_path(
+        detail::trace_autostart_expand(config.path, temp_dir), process ? process : "", pid);
     std::error_code ec;
     std::filesystem::create_directories(std::filesystem::path(out).parent_path(), ec);
+    if (ec)  // a sandboxed service can write only its own temporary directory
+        out = detail::trace_autostart_output_path(temp_dir + "/", process ? process : "", pid);
     ::setenv("PULP_TRACE_PATH", out.c_str(), 1);
+#if defined(__APPLE__)
+    os_log(OS_LOG_DEFAULT, "pulp-trace autostart path=%{public}s", out.c_str());
+#endif
     if (!config.seconds.empty()) ::setenv("PULP_TRACE_SECONDS", config.seconds.c_str(), 0);
     if (!config.ring_kb.empty()) ::setenv("PULP_TRACE_RING_KB", config.ring_kb.c_str(), 0);
     log_info("Tracing: ~/.config/pulp/trace-autostart -> {}", out);

@@ -80,7 +80,11 @@ inline std::optional<std::uint32_t> parse_autostart_ring_kb(const char* raw) {
 /// and PULP_TRACE_RING_KB (anything else, blank lines and `#` comments are
 /// ignored). A PULP_TRACE_PATH ending in `/` is a directory: each process
 /// writes `<process>-<pid>.pftrace` into it, so a host and its out-of-process
-/// service never overwrite one another. Delete the file to stop recording.
+/// service never overwrite one another. A leading `$TMPDIR` is the process's
+/// own temporary directory, the one place a sandboxed service can write; a
+/// directory the process cannot create falls back to it as well. The chosen
+/// path is logged (os_log on Apple: `log show --predicate 'eventMessage
+/// CONTAINS "pulp-trace"'`). Delete the file to stop recording.
 struct TraceAutostartConfig {
     std::string path;
     std::string seconds;
@@ -108,6 +112,17 @@ inline TraceAutostartConfig parse_trace_autostart(std::string_view text) {
         else if (key == "PULP_TRACE_RING_KB") config.ring_kb = value;
     }
     return config;
+}
+
+/// Expand a leading `$TMPDIR` in an autostart path to `temp_dir` (the
+/// process's own temporary directory: a sandboxed service such as
+/// AUHostingService can write there and nowhere else under the user's home).
+inline std::string trace_autostart_expand(const std::string& path, const std::string& temp_dir) {
+    constexpr std::string_view token = "$TMPDIR";
+    if (path.compare(0, token.size(), token) != 0) return path;
+    std::string base = temp_dir;
+    if (!base.empty() && base.back() == '/') base.pop_back();
+    return base + path.substr(token.size());
 }
 
 /// The file a process writes for `path`: `path` itself, or, for a directory

@@ -248,6 +248,7 @@ TEST_CASE("an out-of-range ring-size override is refused at both ends",
 // nothing from a shell or launchctl setenv). Parsed config-independently so
 // the default OFF build checks it.
 using pulp::runtime::detail::parse_trace_autostart;
+using pulp::runtime::detail::trace_autostart_expand;
 using pulp::runtime::detail::trace_autostart_output_path;
 
 TEST_CASE("the trace autostart file is read as KEY=VALUE lines", "[tracing]") {
@@ -281,4 +282,15 @@ TEST_CASE("a trace autostart directory gives each process its own file", "[traci
     CHECK(trace_autostart_output_path("/t/", "", 7) == "/t/pulp-7.pftrace");
     // A file path is used as given.
     CHECK(trace_autostart_output_path("/t/run.pftrace", "x", 7) == "/t/run.pftrace");
+}
+
+TEST_CASE("a trace autostart path may name the process's own temporary directory",
+          "[tracing]") {
+    // A sandboxed service writes only its own temporary directory.
+    CHECK(trace_autostart_expand("$TMPDIR/", "/var/folders/x/T/AUHostingService/")
+          == "/var/folders/x/T/AUHostingService/");
+    CHECK(trace_autostart_expand("$TMPDIR/traces/", "/tmp") == "/tmp/traces/");
+    CHECK(trace_autostart_expand("/abs/path/", "/tmp") == "/abs/path/");
+    CHECK(trace_autostart_output_path(trace_autostart_expand("$TMPDIR/", "/t/"), "svc", 3)
+          == "/t/svc-3.pftrace");
 }
