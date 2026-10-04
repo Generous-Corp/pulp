@@ -256,32 +256,49 @@ switch, preset load) clean, measure what the callback containing it costs.
   or precomputing it in `prepare()`, never by widening the allowance for work
   that could be staged.
 
-## Switching between realisations with different latency — warm, then fade
+## Glitch hunt: one render, audio and trace on one timeline
 
-A processor that offers two realisations of one effect (linear-phase vs
-minimum-phase, quality vs low-latency, CPU vs GPU) and swaps the object at a
-block boundary is heard twice: the fresh realisation emits its own latency of
-silence (213 ms for an 8192/2048 WOLA at 48 kHz) and a partial response for its
-impulse length, and the old one stops mid-waveform. A fade alone cannot fix it
-— fading into a realisation that is still emitting silence is a fade into a
-dropout. Use `pulp::signal::ProcessingSwitchCrossfade`
-(`core/signal/include/pulp/signal/processing_switch_crossfade.hpp`): run BOTH
-realisations on the same input for `plan_processing_switch(latency, history,
-rate, fade_s)` — latency plus the incoming impulse/FIR length (zero when the
-realisation primes its own stream start) — hearing only the old one, then an
-EqualPower `TransitionMixer` fade. The content still moves by the latency
-difference (that IS the latency change; the host re-aligns it); the switch no
-longer drops out or steps.
+The fastest loop found for "it clicks / drops out / sounds staticky" in a
+processor, in this order:
 
-- **One shared source per block.** If the realisations pull from a stateful
-  wet source (a freeze/hold, a looper), run it ONCE per block and replay that
-  block to both; letting each realisation pull advances the source twice.
-- **The warm phase doubles the cost** for its length. Count it with the
-  transition-cost gate above like any other transition.
-- **Gate it with a dropout AND a click measure, and a cut as the negative
-  control**: short-window RMS against the steady level (a cut into the slower
-  realisation fails here) and a whitened-residual spike (a cut into the faster
-  one fails here). `test/test_crossfade.cpp` §5 is the reference fixture.
+1. **Stamp the timeline.** Emit one span per host block from `process()`:
+   `PULP_TRACE_SCOPE_NAMED_ARGS("dsp", "process", "stream_pos", pos, "frames", n)`
+   with `pos` the stream sample of the block's first frame (a member counter
+   reset in `prepare()`). It compiles to nothing in a shipping SDK. Without
+   `stream_pos` there is no sample <-> time mapping and no tool can make one.
+   Add a span or instant around the suspect work (a renderer swap, a design
+   handoff) so it shows up nested in the block.
+2. **Render the scenario under a session** in a test built against a
+   tracing-enabled SDK (verify with `nm <binary> | grep -c perfetto` -- a
+   shipping SDK links zero and `Tracing::start` returns false):
+   `pulp::runtime::Tracing::start({"dsp","state"}, "<flow>.pftrace", 256*1024)`,
+   render, `Tracing::stop()`, and write the output WAV beside the trace.
+3. **One command** joins them:
+   `python3 tools/audio/glitch_trace.py --wav <flow>.wav --trace <flow>.pftrace`
+   -> every click (whitened-residual spike) and dropout (5 ms level gap) with its
+   sample, the block that rendered it, that block's wall time against its
+   deadline, and the slices nested in it; plus block-time p50/p99/max and
+   deadline misses for the whole render.
+4. **Prove the detector with the defect restored** (an env-var plant) before
+   trusting a clean run -- a reference-free detector that sees nothing may be
+   looking at the wrong window. Spectr's Latency-switch cut read clean until
+   the scored window was opened 10 ms BEFORE the event: a spike detector with
+   a 4 ms neighbourhood cannot score the first 4 ms of its own window, which
+   is exactly where a cut lands.
+
+Gotchas that cost real time:
+
+- **An offline render cannot hear a dropped buffer.** A clean WAV with a
+  block past its deadline is a live glitch; read the block-time line, not just
+  the event list. And a real-time-paced render (audio on its own thread,
+  sleeping to each block's deadline, UI edits from another thread) is the only
+  harness that reproduces worker-timing effects -- build one before concluding
+  "cannot reproduce".
+- **Vary the host's callback size.** Hosts split buffers at automation and loop
+  points; render with random per-callback lengths too, not only fixed blocks.
+- **Compare against an unedited render of the same material.** Drum hits score
+  like clicks; the edit's score minus the untouched render's score in the same
+  window is the number that means something.
 
 ## Copy-this patterns
 

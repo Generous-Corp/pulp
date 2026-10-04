@@ -37,6 +37,23 @@ tools:
   install: pulp tool install audio-quality-lab
   skill: audio-harness
   docs: guides/audio-quality-lab.md
+- name: audio-glitch-trace
+  path: tools/audio/glitch_trace.py
+  category: audio
+  use_when: A render clicks or drops out and you need the sample, the host block that rendered it, and the
+    work inside that block -- or per-block time against the deadline -- from one command.
+  invocation: python3 tools/audio/glitch_trace.py --wav <out.wav> --trace <out.pftrace>
+  inputs: A rendered WAV and the Perfetto trace captured during the same render, whose per-block `process`
+    slices carry `stream_pos` and `frames` args (the trace is optional; without it only the WAV is scored).
+  outputs: Clicks (whitened-residual spikes, dB over the local residual) and dropouts (5 ms windows below the
+    preceding level), each joined to its block's wall time, deadline and nested slices; block-time p50/p99/max
+    and deadline misses. Exit 1 when it finds events.
+  cannot_see: Reference-free, so a transient the material carries (a drum hit) also scores; read it against
+    an unedited render of the same material. An offline render cannot drop a buffer, so a deadline miss is
+    reported as the block that WOULD drop one at that buffer size, not as audio damage.
+  availability: always
+  skill: audio-harness
+  docs: guides/audio-inspector.md
 - name: audio-render
   path: tools/cli/cmd_audio.cpp
   category: audio
