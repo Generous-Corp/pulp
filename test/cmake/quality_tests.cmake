@@ -36,6 +36,10 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
 
+    # The importer, UI compiler and SDK are extractable packages.  Keep their
+    # dependency seam executable in every configured tree, including trees
+    # without a JavaScript toolchain; the self-test plants a private include
+    # and proves the same instrument fails closed.
     add_test(NAME vellum-boundary-lint
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_boundary_lint.py")
