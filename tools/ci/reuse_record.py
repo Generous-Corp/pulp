@@ -17,9 +17,10 @@ in the neutral record the replay harness reads:
                      runner_image, output_key, commit_bound (the test's executable
                      embeds a build identity, by label or declaration; null
                      without a codemodel)
-    identity.json    per registered test executable (whatever this job
-                     ran, so a fast-tier head's hashes can be compared with a
-                     merge group's): sha256 (the same digest
+    identity.json    every executable a registered ctest runs (whatever this
+                     job ran, so a fast-tier head's hashes can be compared
+                     with a merge group's), plus every module the build linked
+                     (link-members' `kind: module`, with --link-members): sha256 (the same digest
                      `protected_merge_receipt.artifact_identity` puts in a
                      receipt) and the runtime closure it loads (transitive
                      Mach-O dylib/framework linkage, a script's interpreter),
@@ -344,6 +345,60 @@ def _roots(build_dir: Path, source_root: Path) -> list[tuple[str, str]]:
                   key=lambda r: (-len(r[0]), r[1] != "<build>"))
 
 
+def _artifact_entry(real: str, digest: str, roots: list[tuple[str, str]],
+                    closure_files: dict[str, str | None], sha) -> dict:
+    """One /executables entry: its sha256 and the runtime closure it loads."""
+    members, system_images = [], 0
+    for member in runtime_closure(Path(real)):
+        if member.startswith("system:"):
+            system_images += 1  # the dyld shared cache: named by runner_image
+            continue
+        if member.startswith("unresolved:"):
+            members.append(member)
+            continue
+        mkey = _normalise(member, roots)
+        try:
+            closure_files[mkey] = sha(member)
+        except OSError:
+            closure_files[mkey] = None
+        members.append(mkey)
+    rows = [f"{m}\t{closure_files.get(m) or ''}" for m in members]
+    return {"sha256": digest, "closure": members, "system_images": system_images,
+            "closure_digest": hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()}
+
+
+def add_modules(identity: dict, modules: list[str], build_dir: Path, source_root: Path) -> int:
+    """Hash every linked module (a `<build>/` key from link members) into the
+    identity's /executables map, in the shape its executables have: a module a
+    test loads is as much part of what the test runs as its executable.
+    A module that cannot be read gets sha256 null and an error. Returns how
+    many were added."""
+    import protected_merge_receipt as pmr
+
+    build_dir = build_dir.resolve()
+    roots = _roots(build_dir, source_root)
+    hashes: dict[str, str] = {}
+
+    def sha(path: str) -> str:
+        if path not in hashes:
+            hashes[path] = pmr._sha256_file(Path(path))
+        return hashes[path]
+
+    added = 0
+    for key in sorted(modules):
+        if key in identity["executables"] or not key.startswith("<build>/"):
+            continue
+        real = os.path.realpath(build_dir / key.removeprefix("<build>/"))
+        try:
+            entry = _artifact_entry(real, sha(real), roots, identity["closure_files"], sha)
+        except OSError as exc:
+            entry = {"sha256": None, "error": f"module unreadable: {exc}"}
+        entry["kind"] = "module"
+        identity["executables"][_normalise(real, roots)] = entry
+        added += 1
+    return added
+
+
 def executable_identity(build_dir: Path, source_root: Path, tests: list[dict],
                         seed: dict[str, str]) -> tuple[dict, dict[str, str]]:
     """Identity of every executable the given inventory entries name.
@@ -391,27 +446,7 @@ def executable_identity(build_dir: Path, source_root: Path, tests: list[dict],
         by_test[name] = by_command0[cmd[0]] = key
         if key in executables:
             continue
-        members, system_images = [], 0
-        for member in runtime_closure(Path(real)):
-            if member.startswith("system:"):
-                system_images += 1  # the dyld shared cache: named by runner_image
-                continue
-            if member.startswith("unresolved:"):
-                members.append(member)
-                continue
-            mkey = _normalise(member, roots)
-            try:
-                closure_files[mkey] = sha(member)
-            except OSError:
-                closure_files[mkey] = None
-            members.append(mkey)
-        rows = [f"{m}\t{closure_files.get(m) or ''}" for m in members]
-        executables[key] = {
-            "sha256": hashes[real],
-            "closure": members,
-            "system_images": system_images,
-            "closure_digest": hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest(),
-        }
+        executables[key] = _artifact_entry(real, hashes[real], roots, closure_files, sha)
     doc = {"schema": SCHEMA, "executables": executables, "closure_files": closure_files,
            "unresolved_executables": errors}
     return doc, by_test
@@ -791,6 +826,7 @@ def cmd_write(a: argparse.Namespace) -> int:
     # this job ran: a fast-tier head's hashes are what a merge group's
     # binary-identity comparison needs.
     every = a.identity_scope == "all" and a.build_outcome in (None, "success")
+    identity_ok = True
     if build_dir and (ran or every):
         try:
             seed = {}
@@ -801,6 +837,7 @@ def cmd_write(a: argparse.Namespace) -> int:
                                         listing)
             identity, by_test = executable_identity(build_dir, source_root or build_dir, inventory, seed)
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
+            identity_ok = False
             problems.append(f"executable identity unavailable: {exc}")
     keys: dict[str, str | None] = {}
     if a.test_keys and Path(a.test_keys).is_file():
@@ -864,11 +901,18 @@ def cmd_write(a: argparse.Namespace) -> int:
             fh.write(json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n")
 
     link_members = None
+    modules_added = 0
     if a.link_members and build_dir:
         import link_members as lm
 
         try:
             doc = lm.collect(build_dir)
+            if every and identity_ok:
+                modules_added = add_modules(identity, [k for k, r in doc["executables"].items()
+                                                       if r.get("kind") == "module"],
+                                            build_dir, source_root or build_dir)
+                identity_path.write_text(json.dumps(identity, sort_keys=True, separators=(",", ":")),
+                                         encoding="utf-8")
             name = f"link-members-{ctx['merge_sha'] or 'unknown'}.json"
             (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
             kinds = [rec.get("kind", "executable") for rec in doc["executables"].values()]
@@ -938,7 +982,11 @@ def cmd_write(a: argparse.Namespace) -> int:
         "steps": dict(c.split("=", 1) for c in a.context if "=" in c),
         "no_suite_reason": a.no_suite_reason, "suites": summary,
         "script_inputs_blob": script_inputs_blob,
-        "identity": {"executables": len(identity["executables"]),
+        # One boolean for a pointer reader: identity.json can be compared. An
+        # empty map is never usable; it means the listing found nothing to hash.
+        "identity": {"usable": identity_ok and bool(identity["executables"]),
+                     "modules": modules_added,
+                     "executables": len(identity["executables"]),
                      "closure_files": len(identity["closure_files"]),
                      "unresolved_executables": identity["unresolved_executables"],
                      "output_keys": sum(1 for r in records if r["output_key"])},
