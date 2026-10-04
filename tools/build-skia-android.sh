@@ -216,13 +216,38 @@ SKIA_GN_ARGS
         skottie \
         sksg
 
-    # Dawn's Android build is a CMake graph nested below the GN output. The
-    # top-level libdawn_combined.a is an intentionally empty compatibility
-    # archive when Dawn's monolithic option is disabled; stage the real Dawn
-    # component archives as well so FindSkia can link the WebGPU symbols.
+    # Dawn's Android build is a CMake graph nested below the GN output. Its
+    # default component graph leaves the top-level libdawn_combined.a empty;
+    # build Dawn's supported monolithic archive so FindSkia gets one complete,
+    # source-matched provider instead of a fragile component-library order.
     if [ -d "$SKIA_SRC/$BUILD_DIR/cmake_dawn" ]; then
-        find "$SKIA_SRC/$BUILD_DIR/cmake_dawn" -name "*.a" -type f \
-            -exec cp {} "$SKIA_SRC/$BUILD_DIR/" \;
+        cmake -S "$SKIA_SRC/third_party/externals/dawn" \
+            -B "$SKIA_SRC/$BUILD_DIR/cmake_dawn" \
+            -DDAWN_BUILD_MONOLITHIC_LIBRARY=STATIC
+        cmake --build "$SKIA_SRC/$BUILD_DIR/cmake_dawn" --target webgpu_dawn
+        cp "$SKIA_SRC/$BUILD_DIR/cmake_dawn/src/dawn/native/libwebgpu_dawn.a" \
+            "$SKIA_SRC/$BUILD_DIR/libdawn_combined.a"
+        # The native archive does not contain Dawn's generated proc-table
+        # entrypoints (dawnProcSetProcs/dawnProcGetVersion). Keep that small
+        # archive beside the monolithic provider so FindSkia's linker group
+        # resolves the same pinned Dawn ABI used by Pulp's native callers.
+        # Dawn's monolithic archive already defines every wgpu* entrypoint,
+        # though, so retain only the proc-table state/version symbols from
+        # libdawn_proc.a. Localizing its duplicate wgpu* symbols keeps this
+        # provider linkable without silently selecting two Dawn implementations.
+        DAWN_PROC_ARCHIVE="$SKIA_SRC/$BUILD_DIR/cmake_dawn/src/dawn/libdawn_proc.a"
+        DAWN_PROC_COMPAT="$SKIA_SRC/$BUILD_DIR/libdawn_proc_compat.a"
+        DAWN_NM="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name llvm-nm -print -quit)"
+        DAWN_OBJCOPY="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name llvm-objcopy -print -quit)"
+        if [ -z "$DAWN_NM" ] || [ -z "$DAWN_OBJCOPY" ]; then
+            echo "Error: Android NDK llvm-nm/llvm-objcopy are required to stage Dawn proc support" >&2
+            exit 1
+        fi
+        cp "$DAWN_PROC_ARCHIVE" "$DAWN_PROC_COMPAT"
+        while IFS= read -r symbol; do
+            "$DAWN_OBJCOPY" --localize-symbol="$symbol" "$DAWN_PROC_COMPAT"
+        done < <("$DAWN_NM" -g --defined-only "$DAWN_PROC_COMPAT" |
+            awk '$3 ~ /^wgpu/ { print $3 }' | sort -u)
     fi
 
     echo "Copying ${ABI} libraries to $SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release/..."

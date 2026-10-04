@@ -39,9 +39,27 @@ class AndroidSkiaBuilderPinTests(unittest.TestCase):
         self.assertLess(dawn_check, build_loop)
         self.assertIn("for mod in skparagraph skshaper skunicode svg skottie sksg", script)
         self.assertIn('cmp -s "$SKUNICODE_HEADER"', script)
-        self.assertIn('find "$SKIA_SRC/$BUILD_DIR/cmake_dawn" -name "*.a"', script)
+        self.assertIn("-DDAWN_BUILD_MONOLITHIC_LIBRARY=STATIC", script)
+        self.assertIn('cmake --build "$SKIA_SRC/$BUILD_DIR/cmake_dawn" --target webgpu_dawn', script)
+        self.assertIn('cmake_dawn/src/dawn/libdawn_proc.a', script)
+        self.assertIn('--localize-symbol="$symbol"', script)
         self.assertIn('grep -q \'src/core/SkUTF.h\'', script)
         self.assertIn('ACTUAL_DAWN_COMMIT" != "$DAWN_EXPECTED_COMMIT"', script)
+
+    def test_android_findskia_drops_unusable_chromium_allocator_archives(self) -> None:
+        findskia = (ROOT / "tools/cmake/FindSkia.cmake").read_text(encoding="utf-8")
+        self.assertIn('_lib_name STREQUAL "libraw_ptr.a"', findskia)
+        self.assertIn('NOT _lib_name STREQUAL "libdawn_proc_compat.a"', findskia)
+        self.assertIn('_lib_name MATCHES "^libdawn_proc.*\\\\.a$"', findskia)
+        self.assertIn("CMAKE_SYSTEM_NAME STREQUAL \"Linux\" OR ANDROID", findskia)
+        self.assertIn("defined(__ANDROID__)", (ROOT / "core/canvas/src/skia_chromium_raw_ptr_compat.cpp").read_text(encoding="utf-8"))
+        view_cmake = (ROOT / "core/view/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("elseif(ANDROID)", view_cmake)
+        self.assertIn(
+            "target_sources(pulp-view-core PRIVATE src/screenshot_skia.cpp)",
+            view_cmake,
+        )
+        self.assertIn("OR (ANDROID AND PULP_HAS_SKIA)", view_cmake)
 
 
 if __name__ == "__main__":

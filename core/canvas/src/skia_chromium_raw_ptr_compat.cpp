@@ -1,7 +1,7 @@
 #include <cstdint>
 #include <limits>
 
-#if (defined(__linux__) || defined(_WIN32)) && UINTPTR_MAX > 0xffffffffULL
+#if (defined(__linux__) || defined(__ANDROID__) || defined(_WIN32)) && UINTPTR_MAX > 0xffffffffULL
 
 // Skia m151+ Linux and Windows prebuilts can reference Chromium BackupRefPtr and
 // PartitionAlloc support symbols even though the standalone bundle does not
