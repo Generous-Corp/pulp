@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
 
 import build_dir_lock
 import changed_surface_inventory as inventory
+import lane_reuse_record
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1074,9 +1075,15 @@ def run_full_fallback(
     full_result = full_build_result if full_build_result is not None else 0
     full_seconds = 0.0
     if full_build_result in (None, 0):
+        reuse_out = lane_reuse_record.record_dir()
+        junit = lane_reuse_record.junit_path(reuse_out, "full") if reuse_out else None
+        started_epoch = int(time.time())
         full_started = time.monotonic()
-        full_result = subprocess.run(execution_argv(build_dir), shell=False).returncode
+        full_result = subprocess.run(execution_argv(build_dir, junit=junit), shell=False).returncode
         full_seconds = time.monotonic() - full_started
+        if reuse_out is not None and junit is not None:
+            attempts = lane_reuse_record.keep_last_test_log(build_dir, reuse_out, "full")
+            lane_reuse_record.record(build_dir, REPO_ROOT, [("full", junit, attempts, True)], started_epoch)
     write_fallback_result_receipt(
         args,
         error,
@@ -1208,6 +1215,10 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             )
             verification_seconds += time.monotonic() - deferred_verification_started
         selected_seconds = 0.0
+        reuse_out = lane_reuse_record.record_dir()
+        legs_started = int(time.time())
+        selected_attempts: Path | None = None
+        full_attempts: Path | None = None
         if selected_build_result in (None, 0):
             selected_started = time.monotonic()
             selected_result = subprocess.run(
@@ -1215,6 +1226,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                 shell=False,
             ).returncode
             selected_seconds = time.monotonic() - selected_started
+            if reuse_out is not None:
+                selected_attempts = lane_reuse_record.keep_last_test_log(build_dir, reuse_out, "pr-affected")
         else:
             selected_result = selected_build_result
         full_build_result: int | None = None
@@ -1265,6 +1278,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     shell=False,
                 ).returncode
                 full_seconds = time.monotonic() - full_started
+                if reuse_out is not None:
+                    full_attempts = lane_reuse_record.keep_last_test_log(build_dir, reuse_out, "full")
             else:
                 full_result = full_build_result
         elif selection_receipt["schema_version"] == 2 and selected_result == 0:
@@ -1279,6 +1294,15 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             or selected_file.read_bytes() != selected_payload
         ):
             raise SelectionExecutionError("private selected-tests snapshot changed during execution")
+        # Before the private directory holding the JUnit reports is removed.
+        lane_reuse_record.record_legs(
+            build_dir,
+            source_root,
+            [("pr-affected", Path(directory) / "selected-junit.xml", selected_attempts),
+             ("full", Path(directory) / "full-junit.xml", full_attempts)],
+            "success" if selected_build_result in (None, 0) and full_build_result in (None, 0) else "failure",
+            legs_started,
+        )
         result_dir = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
         if result_dir:
             selected_failures = junit_failures(Path(directory) / "selected-junit.xml")

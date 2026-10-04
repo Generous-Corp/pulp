@@ -574,6 +574,21 @@ summary/watch commands.
 > now an anti-pattern (cancels queued runs but registers `failure` on
 > required checks).
 
+## The local mac lane builds with Ninja so its reuse record is usable
+
+The macOS lane writes a reuse record every run (`reuse_record = true`,
+`tools/ci/lane_reuse_record.py`; see docs/guides/local-ci.md). The record's
+per-object dependencies come from Ninja's `.ninja_deps`; the Makefiles
+generator keeps nothing equivalent, so a Makefiles lane records
+"object deps unavailable" and every executable reads as unrecorded, which
+reuses nothing. Before the pin, 27 of 30 lane build directories on m3 were
+Makefiles because the configure passed no `-G` and the daemon's environment
+decided. `tools/ci/require_build_generator.sh build Ninja` runs before the
+configure and removes a directory on another generator (CMake will not switch
+in place), so the first lane run on an old worktree is a cold build. A record
+that failed to write never changes the lane's verdict; read the run log's last
+`=== reuse-record: ... ===` line to know whether one exists.
+
 ## Performance lanes report; they never gate
 
 `dsp-throughput-bench.yml` (weekly + `workflow_dispatch`) is the model for any
