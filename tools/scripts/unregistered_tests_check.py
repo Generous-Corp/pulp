@@ -124,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
             "reason": "test files that predate the registration guard and that no ctest, "
                       "source-selftest, workflow or CMake invokes; register or delete each, "
                       "then remove it here",
+            "legacy": "tools/local-ci/ is the legacy local CI path scheduled for removal; "
+                      "its test files stay baselined until it is deleted, not registered",
             "unregistered": missing,
         }, indent=2) + "\n", encoding="utf-8")
         print(f"test-registration: wrote {len(missing)} baselined files to {BASELINE}")
