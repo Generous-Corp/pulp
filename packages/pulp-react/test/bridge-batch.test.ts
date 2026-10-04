@@ -37,4 +37,25 @@ describe('commit-scoped bridge setter batching', () => {
         endBridgeBatch();
         expect(observed).toBe(1);
     });
+
+    it('does not coalesce unknown or ordered setters', () => {
+        const calls: unknown[][] = [];
+        beginBridgeBatch();
+        const setPreset = (...args: unknown[]) => { calls.push(args); };
+        expect(queueBridgeCall('setPreset', setPreset, ['button-1', 'A'])).toBe(false);
+        expect(queueBridgeCall('setPreset', setPreset, ['button-1', 'B'])).toBe(false);
+        setPreset('button-1', 'A');
+        setPreset('button-1', 'B');
+        endBridgeBatch();
+        expect(calls).toEqual([['button-1', 'A'], ['button-1', 'B']]);
+    });
+
+    it('drains later calls before surfacing a flush error', () => {
+        const calls: string[] = [];
+        beginBridgeBatch();
+        queueBridgeCall('setWidth', () => { calls.push('first'); throw new Error('boom'); }, ['a', 1]);
+        queueBridgeCall('setHeight', () => { calls.push('second'); }, ['b', 2]);
+        expect(() => endBridgeBatch()).toThrow('boom');
+        expect(calls).toEqual(['first', 'second']);
+    });
 });

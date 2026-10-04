@@ -6,14 +6,10 @@ function assetText(asset) {
   return Buffer.from(asset.data_base64, 'base64').toString('utf8');
 }
 function nativeVendorKind(asset) {
-  const text = assetText(asset);
-  if (text.includes('@license React') && text.includes('react.development.js'))
-    return 'react';
-  if (text.includes('@license React') && text.includes('react-dom.development.js'))
-    return 'react-dom';
-  if (text.length > 1_000_000 && text.slice(0, 1000).includes('.Babel=') &&
-      text.includes('transform')) return 'babel';
-  return '';
+  // Vendor classification is an explicit capture/schema fact. Content-only
+  // marker matching can delete authored assets that happen to contain a
+  // license string or Babel-like text.
+  return typeof asset?.vendor_kind === 'string' ? asset.vendor_kind : '';
 }
 
 function tagEnd(html, start) {
@@ -137,6 +133,8 @@ export function canonicalizeMaterializedRuntimeDocument(document) {
     kind !== 'babel' || babelCount > 0).map(([id]) => id));
   html = rewriteScripts(html, ({ whole, openTag, source }) => {
     const src = attribute(openTag, 'src')?.value;
+    // Require an exact, empty script reference. Query strings, path variants,
+    // and authored script bodies are not vendor references.
     return source === '' && src !== undefined && removableIds.has(src) ? '' : whole;
   });
 

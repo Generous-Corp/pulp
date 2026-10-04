@@ -22,12 +22,13 @@ if (!Number.isInteger(runs) || runs < 2) {
 }
 const jsonOutput = args.includes('--json');
 
-const asset = (id, source) => ({
+const asset = (id, source, vendor_kind) => ({
   id,
   mime_type: 'text/javascript',
   byte_length: Buffer.byteLength(source),
   data_base64: Buffer.from(source).toString('base64'),
   sha256: '0'.repeat(64),
+  ...(vendor_kind ? { vendor_kind } : {}),
 });
 
 function fixture() {
@@ -42,8 +43,9 @@ function fixture() {
       '<script src="app"></script></head><body>' +
       '<script type="text/babel">globalThis.node = <button>OK</button>;</script>' +
       '</body>',
-    assets: [asset('react', react), asset('react-dom', reactDom),
-      asset('babel', babel), asset('app', 'globalThis.keepMe = true;')],
+    assets: [asset('react', react, 'react'),
+      asset('react-dom', reactDom, 'react-dom'), asset('babel', babel, 'babel'),
+      asset('app', 'globalThis.keepMe = true;')],
   };
 }
 

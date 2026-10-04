@@ -841,6 +841,29 @@ async function captureMaterializedDocument(cdp) {
       throw new Error(`materialized blob ${index} length changed during capture`);
     }
     materialized.assets[index].sha256 = sha256(bytes);
+    // Record vendor classification as capture metadata. The canonicalizer
+    // consumes this explicit role; it never guesses from arbitrary authored
+    // asset text. A vendor must be an empty script reference in the captured
+    // executable document and match the complete, known signature.
+    const asset = materialized.assets[index];
+    const escapedUrl = asset.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const emptyScript = new RegExp(
+      `<script\\b[^>]*\\bsrc=["']${escapedUrl}["'][^>]*>\\s*</script>`, "i"
+    ).test(materialized.html);
+    if (emptyScript && asset.mime_type === "text/javascript") {
+      const source = Buffer.from(dataBase64, "base64").toString("utf8");
+      if (source.includes("@license React") &&
+          source.includes("react-dom.development.js")) {
+        asset.vendor_kind = "react-dom";
+      } else if (source.includes("@license React") &&
+          source.includes("react.development.js")) {
+        asset.vendor_kind = "react";
+      } else if (source.length > 1_000_000 &&
+                 source.slice(0, 1000).includes(".Babel=") &&
+                 source.includes("transform")) {
+        asset.vendor_kind = "babel";
+      }
+    }
   }
 
   // Blob URLs are realm-scoped and typically contain a fresh UUID on every
@@ -861,6 +884,7 @@ async function captureMaterializedDocument(cdp) {
         byte_length: asset.byte_length,
         data_base64: asset.data_base64,
         sha256: asset.sha256,
+        ...(asset.vendor_kind ? { vendor_kind: asset.vendor_kind } : {}),
       });
     }
   }
