@@ -8665,6 +8665,7 @@
     "tools/cmake/PulpTestSuite.cmake",
     "tools/deps/audit.py",
     "tools/import-validation/check_agent_panel_invariants.py",
+    "tools/import/test_project_import_ir_schema.py",
     "tools/rack/test_generate_safety.py",
     "tools/scene3d/verify_renderer_probe_route_inventory_contract.py",
     "tools/scripts/agent_capability_manifest.py",

@@ -429,6 +429,8 @@ REVIEWED_SCANNERS = {
         "walks core, inspect, ship, tools/cli, examples, apple",
     "tools/scripts/mac_objc_source_list_guard.py": "globs core/*/platform/mac",
     "tools/scripts/web_timeline_source_closure_check.py": "walks core/*/src",
+    "tools/import/test_project_import_ir_schema.py":
+        "globs only its own fixtures under tools/import/fixtures",
     "tools/scripts/test_wide_non_native.py":
         "this file; wide_non_native.HARD_NATIVE keeps any change to it native",
 }
