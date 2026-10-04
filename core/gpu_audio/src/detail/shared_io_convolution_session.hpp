@@ -139,19 +139,14 @@ class SharedIoConvolutionSession {
     }
     ProviderDiagnostics provider_diagnostics() const noexcept {
         const auto& plan = plan_.telemetry();
-        const auto trace = trace_recorder_ ? trace_telemetry_.snapshot()
-                                           : last_closed_trace_telemetry_;
+        const auto trace =
+            trace_recorder_ ? trace_telemetry_.snapshot() : last_closed_trace_telemetry_;
         const auto identity = trace_recorder_ ? trace_recorder_->config() : trace_template_;
-        return {config_.slots,
-                static_cast<std::uint32_t>(plan_.available_slots()),
-                provider_starved_,
-                plan.high_water_in_flight,
-                trace.retired_success,
-                trace.retired_failure,
-                plan.late_completions,
-                identity.engine_id,
-                identity.generation,
-                fenced()};
+        return {config_.slots,         static_cast<std::uint32_t>(plan_.available_slots()),
+                provider_starved_,     plan.high_water_in_flight,
+                trace.retired_success, trace.retired_failure,
+                plan.late_completions, identity.engine_id,
+                identity.generation,   fenced()};
     }
     SharedIoTelemetrySnapshot trace_telemetry() const noexcept {
         return trace_telemetry_.snapshot();

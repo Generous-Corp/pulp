@@ -135,8 +135,7 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
     if (!convolver.shared_io_ || !convolver.shared_io_->session)
         return false;
     try {
-        if (convolver.shared_io_->session->prepared() &&
-            !convolver.shared_io_->session->release())
+        if (convolver.shared_io_->session->prepared() && !convolver.shared_io_->session->release())
             return false;
         records = convolver.shared_io_->session->take_last_closed_trace_records();
         return !records.empty();

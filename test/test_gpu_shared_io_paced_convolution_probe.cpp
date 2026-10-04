@@ -1,5 +1,5 @@
-#include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
+#include "detail/realtime_gpu_audio_path.hpp"
 #include "support/audio_test_signals.hpp"
 
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -15,9 +15,9 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <unordered_set>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -104,8 +104,10 @@ int run(Config config) {
 
     GpuConvolver node(channels, config.frames, sample_rate, ir, config.lead);
     if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
-        !node.configure_trace({.enabled = true, .capture_admissions = true,
-                                .capture_callback_timing = false, .success_stride = 1}) ||
+        !node.configure_trace({.enabled = true,
+                               .capture_admissions = true,
+                               .capture_callback_timing = false,
+                               .success_stride = 1}) ||
         !node.prepare() || !pulp::gpu_audio::detail::realtime_gpu_node_path(&node).active()) {
         std::cout << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\","
                      "\"status\":\"unavailable\",\"reason\":\"shared_provider_not_active\"}\n";
@@ -154,9 +156,8 @@ int run(Config config) {
 
     std::vector<pulp::gpu_audio::detail::SharedIoTraceRecord> trace_records;
     (void)pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, trace_records);
-    const auto trace_stats = trace_records.empty()
-                                  ? pulp::gpu_audio::detail::SharedIoTraceRecord{}
-                                  : trace_records.front();
+    const auto trace_stats = trace_records.empty() ? pulp::gpu_audio::detail::SharedIoTraceRecord{}
+                                                   : trace_records.front();
     std::uint64_t high_water_in_flight = 0;
     std::uint64_t retired_success = 0;
     std::uint64_t retired_failure = 0;
@@ -167,21 +168,22 @@ int run(Config config) {
     for (const auto& record : trace_records) {
         if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal)
             ++terminal_record_count;
-        const bool authenticated = record.valid() &&
-                                   record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
-                                   record.gpu_work_admitted &&
-                                   record.admission_identity_matched &&
-                                   record.gpu_terminal !=
-                                       pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None &&
-                                   terminal_sequences.insert(record.sequence).second;
+        const bool authenticated =
+            record.valid() && record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
+            record.gpu_work_admitted && record.admission_identity_matched &&
+            record.gpu_terminal != pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None &&
+            terminal_sequences.insert(record.sequence).second;
         if (authenticated)
             ++authenticated_terminal_records;
         high_water_in_flight = std::max(high_water_in_flight, record.high_water_in_flight);
-        if (record.gpu_terminal == pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::CompletedAccepted)
+        if (record.gpu_terminal ==
+            pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::CompletedAccepted)
             ++retired_success;
-        else if (record.gpu_terminal != pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None)
+        else if (record.gpu_terminal !=
+                 pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None)
             ++retired_failure;
-        if (record.gpu_terminal == pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::LateRejected)
+        if (record.gpu_terminal ==
+            pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::LateRejected)
             ++late_completions;
     }
 
@@ -250,17 +252,17 @@ int run(Config config) {
         return 2;
 
     const bool correct = oracle_failed_blocks == 0;
-    const bool gpu_progress = authenticated_terminal_records > 0 && high_water_in_flight > 0 &&
-                              retired_success > 0 &&
-                              authenticated_terminal_records == terminal_record_count &&
-                              terminal_record_count == retired_success + retired_failure &&
-                              terminal_record_count == trace_stats.admissions_enqueued &&
-                              trace_stats.admissions_dropped == 0 && trace_stats.trace_dropped == 0 &&
-                              trace_stats.admissions_attempted ==
-                                  trace_stats.admissions_enqueued + trace_stats.admissions_dropped &&
-                              trace_stats.trace_attempted ==
-                                  trace_stats.trace_enqueued + trace_stats.trace_dropped +
-                                      trace_stats.trace_sampled_out + trace_stats.trace_invalid;
+    const bool gpu_progress =
+        authenticated_terminal_records > 0 && high_water_in_flight > 0 && retired_success > 0 &&
+        authenticated_terminal_records == terminal_record_count &&
+        terminal_record_count == retired_success + retired_failure &&
+        terminal_record_count == trace_stats.admissions_enqueued &&
+        trace_stats.admissions_dropped == 0 && trace_stats.trace_dropped == 0 &&
+        trace_stats.admissions_attempted ==
+            trace_stats.admissions_enqueued + trace_stats.admissions_dropped &&
+        trace_stats.trace_attempted == trace_stats.trace_enqueued + trace_stats.trace_dropped +
+                                           trace_stats.trace_sampled_out +
+                                           trace_stats.trace_invalid;
     const auto emit = [&](std::ostream& stream) {
         stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\""
                << (correct && gpu_progress ? "completed" : "failed")
@@ -295,8 +297,8 @@ int run(Config config) {
                << ",\"gpu_receipt_authenticated\":" << (gpu_progress ? "true" : "false")
                << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
                << ",\"miss_blocks\":" << transport_stats.miss_blocks
-               << ",\"late_completions\":" << late_completions
-               << ",\"run_identity\":\"" << run_identity << "\""
+               << ",\"late_completions\":" << late_completions << ",\"run_identity\":\""
+               << run_identity << "\""
                << ",\"logical_pipeline_capacity\":" << std::max(8u, config.lead + 2u)
                << ",\"warmup_blocks\":" << config.warmup << ",\"measured_blocks\":" << config.blocks
                << ",\"total_callbacks\":" << total_blocks

@@ -119,11 +119,11 @@ void SharedIoConvolutionSession::close_trace_generation() noexcept {
                     break;
             }
             for (;;) {
-                const auto drained = drain_trace_records(
-                    static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-                    [&](const SharedIoTraceRecord& record) {
-                        last_closed_trace_records_.push_back(record);
-                    });
+                const auto drained =
+                    drain_trace_records(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+                                        [&](const SharedIoTraceRecord& record) {
+                                            last_closed_trace_records_.push_back(record);
+                                        });
                 if (drained < SharedIoTraceRecorder::capacity)
                     break;
             }
