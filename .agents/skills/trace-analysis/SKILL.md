@@ -557,7 +557,7 @@ from opens o join docs d using (n) order by o.n;
    `scripted_ui_document_load` → `scripted_ui_live_realm` → `script_compile`
    (cold) or `script_bytecode_read` (warm) + `script_execute`, the plug-in's
    own bind span, then frame 0's `plugin_editor_frame` with `gpu_submit` and
-   `gpu_wait_submitted` (the GPU finishing frame 0 before it is presented with
+   `first_frame_gpu_wait` (the GPU finishing frame 0 before it is presented with
    its transaction). Measured, Spectr AU v2 in process: warm ~140–210 ms
    (document ~125, frame 0 ~15–35); cold ~390–640 ms, where a cold `gpu_submit`
    swung from 23 to 325 ms between runs on a loaded host — read cold numbers
