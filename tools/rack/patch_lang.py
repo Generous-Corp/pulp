@@ -474,8 +474,11 @@ def render(doc: dict, inv: dict) -> str:
         lines += [f"# {request}", ""]
 
     # Names a person would choose: the model slug, lowercased, numbered only
-    # when it repeats. `vco`, `vco2` reads; `module_7` does not.
-    local_of, used = {}, {}
+    # when it repeats. `vco`, `vco2` reads; `module_7` does not. A number can
+    # land on another module's slug (a second VCO and a VCO2 are both `vco2`),
+    # so every name is checked against the names already given, and a slug
+    # that ends in a digit is numbered after an underscore (`vco2_2`).
+    local_of, taken = {}, set()
     for m in doc.get("modules", []):
         base = re.sub(r"[^a-z0-9]", "", str(m.get("model", "m")).lower()) or "m"
         # A local name is an identifier, and plenty of module slugs are not:
@@ -483,8 +486,12 @@ def render(doc: dict, inv: dict) -> str:
         # refused to read — a round trip that only looked like one.
         if base[0].isdigit():
             base = "m" + base
-        used[base] = used.get(base, 0) + 1
-        local_of[m["id"]] = base if used[base] == 1 else f"{base}{used[base]}"
+        name, count = base, 1
+        while name in taken:
+            count += 1
+            name = f"{base}_{count}" if base[-1].isdigit() else f"{base}{count}"
+        taken.add(name)
+        local_of[m["id"]] = name
 
     width = max((len(v) for v in local_of.values()), default=1)
     for m in doc.get("modules", []):
