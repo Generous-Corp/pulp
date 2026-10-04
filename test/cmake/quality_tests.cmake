@@ -28,6 +28,19 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    # The importer, UI compiler and SDK are extractable packages.  Keep their
+    # dependency seam executable in every configured tree, including trees
+    # without a JavaScript toolchain; the self-test plants a private include
+    # and proves the same instrument fails closed.
+    add_test(NAME vellum-boundary-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_boundary_lint.py")
+    add_test(NAME vellum-boundary-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_boundary_lint.py")
+    set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")
