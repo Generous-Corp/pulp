@@ -50,14 +50,14 @@
 namespace pulp::view {
 
 class FrameCostProbe {
-public:
+  public:
     struct Frame {
-        double ms = 0.0;               ///< wall time of the frame's work
-        bool full_damage = false;      ///< some request repainted the whole surface
-        bool has_bounds = false;       ///< bounded damage was requested
-        Rect damage{};                 ///< union of the bounded requests
-        int repaint_requests = 0;      ///< repaint() calls the frame caused
-        std::uint64_t layout_passes = 0;  ///< layout_children() calls the frame ran
+        double ms = 0.0;                 ///< wall time of the frame's work
+        bool full_damage = false;        ///< some request repainted the whole surface
+        bool has_bounds = false;         ///< bounded damage was requested
+        Rect damage{};                   ///< union of the bounded requests
+        int repaint_requests = 0;        ///< repaint() calls the frame caused
+        std::uint64_t layout_passes = 0; ///< layout_children() calls the frame ran
     };
 
     struct Summary {
@@ -98,13 +98,14 @@ public:
         root.layout_children_if_needed();
         recorder_.prime();
     }
-    ~FrameCostProbe() { root_.set_plugin_view_host(previous_); }
+    ~FrameCostProbe() {
+        root_.set_plugin_view_host(previous_);
+    }
     FrameCostProbe(const FrameCostProbe&) = delete;
     FrameCostProbe& operator=(const FrameCostProbe&) = delete;
 
     /// Run one frame's work and record what it cost.
-    template <typename Fn>
-    const Frame& measure(Fn&& frame) {
+    template <typename Fn> const Frame& measure(Fn&& frame) {
         recorder_.reset();
         const auto layouts = View::layout_pass_count();
         const auto t0 = std::chrono::steady_clock::now();
@@ -121,13 +122,18 @@ public:
         return frames_.back();
     }
 
-    const std::vector<Frame>& frames() const { return frames_; }
-    void clear() { frames_.clear(); }
+    const std::vector<Frame>& frames() const {
+        return frames_;
+    }
+    void clear() {
+        frames_.clear();
+    }
 
     Summary summary() const {
         Summary s;
         s.frames = static_cast<int>(frames_.size());
-        if (frames_.empty()) return s;
+        if (frames_.empty())
+            return s;
         std::vector<double> ms;
         ms.reserve(frames_.size());
         double area = 0.0;
@@ -135,9 +141,12 @@ public:
         bool have_union = false;
         for (const auto& f : frames_) {
             ms.push_back(f.ms);
-            if (f.full_damage) ++s.full_damage_frames;
-            if (f.layout_passes > 0) ++s.layout_frames;
-            if (f.repaint_requests > 0) ++s.painted_frames;
+            if (f.full_damage)
+                ++s.full_damage_frames;
+            if (f.layout_passes > 0)
+                ++s.layout_frames;
+            if (f.repaint_requests > 0)
+                ++s.painted_frames;
             if (f.has_bounds) {
                 area += static_cast<double>(f.damage.width) * f.damage.height;
                 ++area_frames;
@@ -158,27 +167,29 @@ public:
                                           const Summary* baseline = nullptr) {
         std::vector<std::string> breaches;
         if (s.painted_frames < budget.min_painted_frames)
-            breaches.push_back("positive control: only " + std::to_string(s.painted_frames)
-                               + " frames painted (need " + std::to_string(budget.min_painted_frames)
-                               + "); the run measured nothing");
+            breaches.push_back("positive control: only " + std::to_string(s.painted_frames) +
+                               " frames painted (need " +
+                               std::to_string(budget.min_painted_frames) +
+                               "); the run measured nothing");
         if (s.full_damage_frames > budget.max_full_damage_frames)
-            breaches.push_back(std::to_string(s.full_damage_frames) + "/" + std::to_string(s.frames)
-                               + " frames requested a whole-surface repaint");
+            breaches.push_back(std::to_string(s.full_damage_frames) + "/" +
+                               std::to_string(s.frames) +
+                               " frames requested a whole-surface repaint");
         if (s.layout_frames > budget.max_layout_frames)
-            breaches.push_back(std::to_string(s.layout_frames) + "/" + std::to_string(s.frames)
-                               + " frames ran a layout pass");
+            breaches.push_back(std::to_string(s.layout_frames) + "/" + std::to_string(s.frames) +
+                               " frames ran a layout pass");
         if (s.mean_damage_area > budget.max_mean_damage_area)
-            breaches.push_back("mean bounded damage " + std::to_string(s.mean_damage_area)
-                               + " px2 exceeds " + std::to_string(budget.max_mean_damage_area));
+            breaches.push_back("mean bounded damage " + std::to_string(s.mean_damage_area) +
+                               " px2 exceeds " + std::to_string(budget.max_mean_damage_area));
         const double grown = baseline ? s.p95_ms - baseline->p95_ms : s.p95_ms;
         if (grown > budget.max_p95_ms)
-            breaches.push_back(std::string(baseline ? "p95 grew " : "p95 ")
-                               + std::to_string(grown) + " ms (budget "
-                               + std::to_string(budget.max_p95_ms) + " ms)");
+            breaches.push_back(std::string(baseline ? "p95 grew " : "p95 ") +
+                               std::to_string(grown) + " ms (budget " +
+                               std::to_string(budget.max_p95_ms) + " ms)");
         return breaches;
     }
 
-private:
+  private:
     static Rect unite(const Rect& a, const Rect& b) {
         const float x0 = std::min(a.x, b.x), y0 = std::min(a.y, b.y);
         return {x0, y0, std::max(a.x + a.width, b.x + b.width) - x0,
@@ -186,12 +197,14 @@ private:
     }
 
     class Recorder final : public PluginViewHost {
-    public:
+      public:
         explicit Recorder(Size size) : size_(size) {}
         int full = 0, bounded = 0;
         bool have = false;
         Rect uni{};
-        NativeViewHandle native_handle() override { return {}; }
+        NativeViewHandle native_handle() override {
+            return {};
+        }
         void attach_to_parent(NativeViewHandle) override {}
         void detach() override {}
         // Every request ends in exactly one repaint() call, so taking the
@@ -207,8 +220,12 @@ private:
                 ++full;
             }
         }
-        void set_size(std::uint32_t w, std::uint32_t h) override { size_ = {w, h}; }
-        Size get_size() const override { return size_; }
+        void set_size(std::uint32_t w, std::uint32_t h) override {
+            size_ = {w, h};
+        }
+        Size get_size() const override {
+            return size_;
+        }
         void prime() {
             damage_.clear();
             reset();
@@ -219,7 +236,7 @@ private:
             uni = {};
         }
 
-    private:
+      private:
         Size size_;
     };
 
@@ -229,4 +246,4 @@ private:
     std::vector<Frame> frames_;
 };
 
-}  // namespace pulp::view
+} // namespace pulp::view

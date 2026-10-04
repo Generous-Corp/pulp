@@ -639,7 +639,8 @@ void parse_path(const std::string& data, std::vector<SvgPathSegment>& out) {
 }  // namespace
 
 void SvgPathWidget::set_path(std::string data) {
-    if (data == path_data_) return;
+    if (data == path_data_)
+        return;
     const Rect before = paint_extent();
     path_data_ = std::move(data);
     reparse();
@@ -650,17 +651,26 @@ Rect SvgPathWidget::paint_extent() const {
     if (segments_.empty() || (!has_fill_ && !(has_stroke_ && stroke_width_ > 0)))
         return {};
     const auto b = local_bounds();
-    if (b.width <= 0 || b.height <= 0) return {};
+    if (b.width <= 0 || b.height <= 0)
+        return {};
     float min_x = std::numeric_limits<float>::max(), min_y = min_x;
     float max_x = std::numeric_limits<float>::lowest(), max_y = max_x;
     for (const auto& seg : segments_) {
         int points = 0;
         switch (seg.op) {
         case SvgPathSegment::Op::move_to:
-        case SvgPathSegment::Op::line_to:  points = 1; break;
-        case SvgPathSegment::Op::quad_to:  points = 2; break;
-        case SvgPathSegment::Op::cubic_to: points = 3; break;
-        case SvgPathSegment::Op::close_path: points = 0; break;
+        case SvgPathSegment::Op::line_to:
+            points = 1;
+            break;
+        case SvgPathSegment::Op::quad_to:
+            points = 2;
+            break;
+        case SvgPathSegment::Op::cubic_to:
+            points = 3;
+            break;
+        case SvgPathSegment::Op::close_path:
+            points = 0;
+            break;
         }
         // A Bezier lies inside the hull of its control points, so the box of
         // every point bounds the curve.
@@ -671,7 +681,8 @@ Rect SvgPathWidget::paint_extent() const {
             max_y = std::max(max_y, seg.p[2 * i + 1]);
         }
     }
-    if (!(min_x <= max_x) || !(min_y <= max_y)) return {};
+    if (!(min_x <= max_x) || !(min_y <= max_y))
+        return {};
     // The same mapping paint() applies.
     const float vw = viewbox_w_ > 0 ? viewbox_w_ : b.width;
     const float vh = viewbox_h_ > 0 ? viewbox_h_ : b.height;
@@ -697,14 +708,14 @@ void SvgPathWidget::repaint_extent_change(const Rect& before) {
     const Rect after = paint_extent();
     const bool had = before.width > 0 && before.height > 0;
     const bool has = after.width > 0 && after.height > 0;
-    if (!had && !has) return;  // nothing was drawn and nothing will be
+    if (!had && !has)
+        return; // nothing was drawn and nothing will be
     if (!had || !has) {
         request_repaint(had ? before : after);
         return;
     }
     const float x0 = std::min(before.x, after.x), y0 = std::min(before.y, after.y);
-    request_repaint(Rect{x0, y0,
-                         std::max(before.x + before.width, after.x + after.width) - x0,
+    request_repaint(Rect{x0, y0, std::max(before.x + before.width, after.x + after.width) - x0,
                          std::max(before.y + before.height, after.y + after.height) - y0});
 }
 

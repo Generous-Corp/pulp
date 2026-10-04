@@ -1179,19 +1179,25 @@ public:
     // offset (a proportional pull, a clamp, a stepped target).
     void set_modulated_value(float normalized) {
         const float v = std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : value_;
-        if (has_modulated_ && v == modulated_) return;
+        if (has_modulated_ && v == modulated_)
+            return;
         has_modulated_ = true;
         modulated_ = v;
         request_repaint_self(kModulatedMarkerHalo);
     }
     void clear_modulated_value() {
-        if (!has_modulated_) return;
+        if (!has_modulated_)
+            return;
         has_modulated_ = false;
         request_repaint_self(kModulatedMarkerHalo);
     }
-    bool has_modulated_value() const { return has_modulated_; }
+    bool has_modulated_value() const {
+        return has_modulated_;
+    }
     /// The played value while one is set, else value().
-    float modulated_display_value() const { return has_modulated_ ? modulated_ : value_; }
+    float modulated_display_value() const {
+        return has_modulated_ ? modulated_ : value_;
+    }
 
     // The modulation range is [value+lo, value+hi] clipped to [0,1], sorted so
     // the returned .first ≤ .second regardless of which end is which. Exposes the
@@ -1227,51 +1233,52 @@ public:
     bool is_gesture_active() const override { return gesture_active_ || mod_drag_ring_ >= 0; }
 
 private:
-    /// Covers the played-value dot and arc caps painted on the rim.
-    static constexpr float kModulatedMarkerHalo = 6.0f;
-    void paint_modulated_marker(canvas::Canvas& canvas, float cx, float cy, float ring_r,
-                                float arc_w);
-    bool has_modulated_ = false;   ///< a played value is being displayed
-    float modulated_ = 0.0f;       ///< played value, normalized (display only)
-    std::vector<ModulationRing> mod_rings_;
-    float mod_phase_ = 0.0f;       ///< live source value in [-1,1] (indicator)
-    int mod_drag_ring_ = -1;       ///< ring whose handle is being dragged (-1 none)
-    bool mod_drag_is_high_ = true; ///< dragging the high (vs low) handle
-    float mod_drag_last_angle_ = 0.0f;  ///< continuous (unwrapped) drag angle; the
-                                        ///< bottom gap is a hard wall — see on_mouse_drag
-    /// The knob's position in its range, normalized to [0,1]. Mirrors
-    /// `core_.normalized()`; the two are kept in lockstep by store_normalized().
-    float value_ = 0.0f;
-    SliderCore core_;              ///< range, interval, curve, default, drag law
-    float default_value_ = 0.5f;   ///< the reset target, in normalized units
-    std::string label_;
-    std::function<std::string(float)> format_;
-    ValueAnimation hover_glow_{0.0f};
-    float drag_start_y_ = 0;
-    float drag_start_proportion_ = 0;   ///< travel proportion when the drag began
-    float drag_last_y_ = 0;             ///< previous tick (velocity-mode integration)
-    bool gesture_active_ = false;
+  /// Covers the played-value dot and arc caps painted on the rim.
+  static constexpr float kModulatedMarkerHalo = 6.0f;
+  void paint_modulated_marker(canvas::Canvas& canvas, float cx, float cy, float ring_r,
+                              float arc_w);
+  bool has_modulated_ = false; ///< a played value is being displayed
+  float modulated_ = 0.0f;     ///< played value, normalized (display only)
+  std::vector<ModulationRing> mod_rings_;
+  float mod_phase_ = 0.0f;           ///< live source value in [-1,1] (indicator)
+  int mod_drag_ring_ = -1;           ///< ring whose handle is being dragged (-1 none)
+  bool mod_drag_is_high_ = true;     ///< dragging the high (vs low) handle
+  float mod_drag_last_angle_ = 0.0f; ///< continuous (unwrapped) drag angle; the
+                                     ///< bottom gap is a hard wall — see on_mouse_drag
+  /// The knob's position in its range, normalized to [0,1]. Mirrors
+  /// `core_.normalized()`; the two are kept in lockstep by store_normalized().
+  float value_ = 0.0f;
+  SliderCore core_;            ///< range, interval, curve, default, drag law
+  float default_value_ = 0.5f; ///< the reset target, in normalized units
+  std::string label_;
+  std::function<std::string(float)> format_;
+  ValueAnimation hover_glow_{0.0f};
+  float drag_start_y_ = 0;
+  float drag_start_proportion_ = 0; ///< travel proportion when the drag began
+  float drag_last_y_ = 0;           ///< previous tick (velocity-mode integration)
+  bool gesture_active_ = false;
 
-    /// The single place `value_` and `core_` are written. Clamps to [0,1], snaps
-    /// through the core's interval, repaints on a real change, and notifies per
-    /// the policy. Returns true if the stored value moved.
+  /// The single place `value_` and `core_` are written. Clamps to [0,1], snaps
+  /// through the core's interval, repaints on a real change, and notifies per
+  /// the policy. Returns true if the stored value moved.
 
-
-    bool store_normalized(float n, Notify notify) {
-        core_.set_normalized(std::clamp(n, 0.0f, 1.0f), Notify::none);
-        const float snapped = static_cast<float>(core_.normalized());
-        if (snapped == value_) return false;
-        value_ = snapped;
-        request_repaint_self();
-        if (notify == Notify::sync) {
-            if (on_change) on_change(value_);
-        } else if (notify == Notify::async && on_change) {
-            auto fn = on_change;
-            const float v = value_;
-            queue_async_notification([fn, v] { fn(v); });
-        }
-        return true;
-    }
+  bool store_normalized(float n, Notify notify) {
+      core_.set_normalized(std::clamp(n, 0.0f, 1.0f), Notify::none);
+      const float snapped = static_cast<float>(core_.normalized());
+      if (snapped == value_)
+          return false;
+      value_ = snapped;
+      request_repaint_self();
+      if (notify == Notify::sync) {
+          if (on_change)
+              on_change(value_);
+      } else if (notify == Notify::async && on_change) {
+          auto fn = on_change;
+          const float v = value_;
+          queue_async_notification([fn, v] { fn(v); });
+      }
+      return true;
+  }
     bool show_label_ = true;
     bool show_value_ = true;
     std::string widget_schema_;   // JSON declarative schema
@@ -1442,18 +1449,24 @@ public:
     /// the played value (token `knob.modulation`).
     void set_modulated_value(float normalized) {
         const float v = std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : value_;
-        if (has_modulated_ && v == modulated_) return;
+        if (has_modulated_ && v == modulated_)
+            return;
         has_modulated_ = true;
         modulated_ = v;
         request_repaint_self(kModulatedMarkerHalo);
     }
     void clear_modulated_value() {
-        if (!has_modulated_) return;
+        if (!has_modulated_)
+            return;
         has_modulated_ = false;
         request_repaint_self(kModulatedMarkerHalo);
     }
-    bool has_modulated_value() const { return has_modulated_; }
-    float modulated_display_value() const { return has_modulated_ ? modulated_ : value_; }
+    bool has_modulated_value() const {
+        return has_modulated_;
+    }
+    float modulated_display_value() const {
+        return has_modulated_ ? modulated_ : value_;
+    }
 
     // Scroll-wheel adjusts the value (hover + wheel).
     bool wants_wheel_value() const override { return true; }
@@ -1542,31 +1555,31 @@ public:
 
 
 private:
-    static constexpr float kModulatedMarkerHalo = 6.0f;
-    void paint_modulated_marker(canvas::Canvas& canvas);
-    bool has_modulated_ = false;
-    float modulated_ = 0.0f;
-    float value_ = 0.0f;
-    float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
-    Orientation orientation_ = Orientation::vertical;
-    // Ink & Signal faders use a slab/handle thumb by default (matches the Figma
-    // design language); callers can opt back to a circle per-widget.
-    ThumbShape thumb_shape_ = ThumbShape::rectangle;
-    float thumb_width_ = 0.0f;
-    float thumb_height_ = 0.0f;
-    float thumb_corner_radius_ = 0.0f;
-    bool has_skin_thumb_style_ = false;
-    ThumbShape pre_skin_thumb_shape_ = ThumbShape::rectangle;
-    float pre_skin_thumb_width_ = 0.0f;
-    float pre_skin_thumb_height_ = 0.0f;
-    float pre_skin_thumb_corner_radius_ = 0.0f;
-    std::string label_;
-    ValueAnimation hover_thumb_scale_{1.0f};
-    bool dragging_ = false;
-    std::string widget_schema_;
-    std::string lottie_json_;
-    float lottie_time_ = 0.0f;
-    WidgetRenderStyle render_style_ = WidgetRenderStyle::standard;
+  static constexpr float kModulatedMarkerHalo = 6.0f;
+  void paint_modulated_marker(canvas::Canvas& canvas);
+  bool has_modulated_ = false;
+  float modulated_ = 0.0f;
+  float value_ = 0.0f;
+  float skew_ = 1.0f; ///< 1 = linear; <1 = finer control at the low end
+  Orientation orientation_ = Orientation::vertical;
+  // Ink & Signal faders use a slab/handle thumb by default (matches the Figma
+  // design language); callers can opt back to a circle per-widget.
+  ThumbShape thumb_shape_ = ThumbShape::rectangle;
+  float thumb_width_ = 0.0f;
+  float thumb_height_ = 0.0f;
+  float thumb_corner_radius_ = 0.0f;
+  bool has_skin_thumb_style_ = false;
+  ThumbShape pre_skin_thumb_shape_ = ThumbShape::rectangle;
+  float pre_skin_thumb_width_ = 0.0f;
+  float pre_skin_thumb_height_ = 0.0f;
+  float pre_skin_thumb_corner_radius_ = 0.0f;
+  std::string label_;
+  ValueAnimation hover_thumb_scale_{1.0f};
+  bool dragging_ = false;
+  std::string widget_schema_;
+  std::string lottie_json_;
+  float lottie_time_ = 0.0f;
+  WidgetRenderStyle render_style_ = WidgetRenderStyle::standard;
 
 public:
     /// Sprite strip: designer-created filmstrip for fader appearance.

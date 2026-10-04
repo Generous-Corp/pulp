@@ -834,8 +834,8 @@ void Knob::paint(canvas::Canvas& canvas) {
     }
 }
 
-void Knob::paint_modulated_marker(canvas::Canvas& canvas, float cx, float cy,
-                                  float ring_r, float arc_w) {
+void Knob::paint_modulated_marker(canvas::Canvas& canvas, float cx, float cy, float ring_r,
+                                  float arc_w) {
     const float s = skew();
     const float played_pos = s == 1.0f ? modulated_ : std::pow(modulated_, s);
     const float base_a = start_angle + position_for_value() * (end_angle - start_angle);
@@ -869,12 +869,16 @@ void Fader::paint_modulated_marker(canvas::Canvas& canvas) {
     canvas.set_line_cap(canvas::LineCap::round);
     canvas.set_line_width(2.5f);
     if (std::abs(played - base) > 0.5f) {
-        if (vert) canvas.stroke_line(cross, base, cross, played);
-        else canvas.stroke_line(base, cross, played, cross);
+        if (vert)
+            canvas.stroke_line(cross, base, cross, played);
+        else
+            canvas.stroke_line(base, cross, played, cross);
     }
     const float half = std::min(cross * 0.8f, 8.0f);
-    if (vert) canvas.stroke_line(cross - half, played, cross + half, played);
-    else canvas.stroke_line(played, cross - half, played, cross + half);
+    if (vert)
+        canvas.stroke_line(cross - half, played, cross + half, played);
+    else
+        canvas.stroke_line(played, cross - half, played, cross + half);
 }
 
 void Fader::paint(canvas::Canvas& canvas) {
@@ -1187,7 +1191,8 @@ void Fader::paint(canvas::Canvas& canvas) {
         });
     }
 
-    if (has_modulated_) paint_modulated_marker(canvas);
+    if (has_modulated_)
+        paint_modulated_marker(canvas);
 
     // Label
     if (!label_.empty()) {

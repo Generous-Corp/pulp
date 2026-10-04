@@ -196,7 +196,7 @@ struct KnobRig {
     }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("Knob modulated value is display only and repaints its own box",
           "[view][widgets][partial-repaint][modulation]") {
@@ -296,7 +296,7 @@ TEST_CASE("SvgPathWidget paint extent covers a stroke and follows the viewBox",
     SvgPathWidget path;
     path.set_bounds({0, 0, 100, 100});
     path.clear_fill();
-    CHECK(path.paint_extent().width == 0.0f);   // no fill and no stroke: draws nothing
+    CHECK(path.paint_extent().width == 0.0f); // no fill and no stroke: draws nothing
     path.set_stroke_color(pulp::canvas::Color::rgba8(255, 255, 255));
     path.set_stroke_width(4.0f);
     path.set_path("M 40 50 L 60 50");
@@ -320,22 +320,26 @@ TEST_CASE("A rect-less repaint on a plug-in host marks the whole surface",
     // the whole surface: a partial-repaint host that clipped to the bounded
     // rect would leave the rect-less change unpainted.
     class Host final : public PluginViewHost {
-    public:
-        NativeViewHandle native_handle() override { return {}; }
+      public:
+        NativeViewHandle native_handle() override {
+            return {};
+        }
         void attach_to_parent(NativeViewHandle) override {}
         void detach() override {}
         void repaint() override {}
         void set_size(std::uint32_t, std::uint32_t) override {}
-        Size get_size() const override { return {}; }
+        Size get_size() const override {
+            return {};
+        }
     };
     KnobRig rig;
     Host host;
     rig.root->set_plugin_view_host(&host);
     host.clear_pending_dirty();
-    rig.knob->set_value(0.25f);              // bounded
+    rig.knob->set_value(0.25f); // bounded
     REQUIRE_FALSE(host.pending_repaint_is_full());
     REQUIRE(host.has_pending_dirty_bounds());
-    rig.knob->set_label("Cutoff");           // structural: rect-less
+    rig.knob->set_label("Cutoff"); // structural: rect-less
     CHECK(host.pending_repaint_is_full());
     rig.root->set_plugin_view_host(nullptr);
 }
@@ -359,7 +363,8 @@ TEST_CASE("FrameCostProbe holds an animated modulated knob to a bounded budget",
         });
     const auto summary = probe.summary();
     const auto breaches = FrameCostProbe::check(summary, budget);
-    for (const auto& line : breaches) UNSCOPED_INFO(line);
+    for (const auto& line : breaches)
+        UNSCOPED_INFO(line);
     CHECK(breaches.empty());
     CHECK(summary.painted_frames >= 50);
     CHECK(summary.full_damage_frames == 0);
@@ -396,7 +401,8 @@ TEST_CASE("FrameCostProbe reports a run that painted nothing as a breach",
           "[view][widgets][partial-repaint][frame-cost]") {
     KnobRig rig;
     FrameCostProbe probe(*rig.root, {400, 300});
-    for (int frame = 0; frame < 10; ++frame) probe.measure([] {});
+    for (int frame = 0; frame < 10; ++frame)
+        probe.measure([] {});
     FrameCostProbe::Budget budget;
     budget.min_painted_frames = 5;
     const auto breaches = FrameCostProbe::check(probe.summary(), budget);
@@ -404,8 +410,7 @@ TEST_CASE("FrameCostProbe reports a run that painted nothing as a breach",
     CHECK(breaches.front().find("positive control") != std::string::npos);
 }
 
-TEST_CASE("FrameCostProbe restores the root's previous host",
-          "[view][widgets][frame-cost]") {
+TEST_CASE("FrameCostProbe restores the root's previous host", "[view][widgets][frame-cost]") {
     KnobRig rig;
     REQUIRE(rig.root->plugin_view_host() == nullptr);
     {
@@ -440,7 +445,10 @@ TEST_CASE("A redrawn CanvasWidget requests a repaint of its own box only",
         canvas->clear_commands();
         CanvasDrawCmd cmd;
         cmd.type = CanvasDrawCmd::Type::fill_rect;
-        cmd.x = 10.0f; cmd.y = 10.0f; cmd.w = 50.0f; cmd.h = 20.0f;
+        cmd.x = 10.0f;
+        cmd.y = 10.0f;
+        cmd.w = 50.0f;
+        cmd.h = 20.0f;
         canvas->add_command(cmd);
     });
     REQUIRE_FALSE(d.full);

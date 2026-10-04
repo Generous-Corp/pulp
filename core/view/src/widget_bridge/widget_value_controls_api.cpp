@@ -58,22 +58,28 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
     // Display only: no on_change, no parameter write, a bounded repaint of
     // the control's own box (Knob::set_modulated_value). A non-number clears
     // it, so a script ends a modulation with setModulatedValue(id, null).
-    register_bridge_function(api, "setModulatedValue", [&self](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto it = self.widgets_.find(id);
-        if (it == self.widgets_.end()) return choc::value::Value();
-        const bool number = args.numArgs >= 2 && args[1]
-            && (args[1]->isFloat() || args[1]->isInt());
-        const auto value = static_cast<float>(args.get<double>(1, 0.0));
-        if (auto* knob = dynamic_cast<Knob*>(it->second.view)) {
-            if (number) knob->set_modulated_value(value);
-            else knob->clear_modulated_value();
-        } else if (auto* fader = dynamic_cast<Fader*>(it->second.view)) {
-            if (number) fader->set_modulated_value(value);
-            else fader->clear_modulated_value();
-        }
-        return choc::value::Value();
-    });
+    register_bridge_function(api, "setModulatedValue",
+                             [&self](choc::javascript::ArgumentList args) {
+                                 auto id = args.get<std::string>(0, "");
+                                 auto it = self.widgets_.find(id);
+                                 if (it == self.widgets_.end())
+                                     return choc::value::Value();
+                                 const bool number = args.numArgs >= 2 && args[1] &&
+                                                     (args[1]->isFloat() || args[1]->isInt());
+                                 const auto value = static_cast<float>(args.get<double>(1, 0.0));
+                                 if (auto* knob = dynamic_cast<Knob*>(it->second.view)) {
+                                     if (number)
+                                         knob->set_modulated_value(value);
+                                     else
+                                         knob->clear_modulated_value();
+                                 } else if (auto* fader = dynamic_cast<Fader*>(it->second.view)) {
+                                     if (number)
+                                         fader->set_modulated_value(value);
+                                     else
+                                         fader->clear_modulated_value();
+                                 }
+                                 return choc::value::Value();
+                             });
 
     // getValue(id) -> get widget value (normalized for Knob/Fader/Toggle,
     // raw for RangeSlider).
