@@ -268,7 +268,8 @@
 
     // Content-first: mount the document before the first frame, so the first
     // frame the host shows is the editor (ViewBridge::prepare_first_frame()).
-    if (_bridge && _viewHost) _bridge->prepare_first_frame(*_viewHost);
+    if (_bridge && _viewHost)
+        _bridge->prepare_first_frame(*_viewHost);
 }
 
 - (void)resizeEditorToViewBounds {

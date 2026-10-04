@@ -289,7 +289,8 @@ public:
     }
 
     bool wait_for_submitted_work() override {
-        if (!context_) return false;
+        if (!context_)
+            return false;
         PULP_TRACE_SCOPE_NAMED("gpu", "gpu_wait_submitted");
         context_->submit(skgpu::graphite::SyncToCpu::kYes);
         context_->checkAsyncWorkCompletion();

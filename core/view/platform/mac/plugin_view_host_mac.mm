@@ -2417,7 +2417,8 @@ public:
     // Skipped once the display link has painted.
     bool present_first_frame() override {
         needs_repaint_.store(true, std::memory_order_relaxed);
-        if (frame_ok_count_ > 0) return false;
+        if (frame_ok_count_ > 0)
+            return false;
         only_first_frame_presented_ = present_with_transaction();
         return only_first_frame_presented_;
     }
@@ -2451,8 +2452,10 @@ public:
     // that has no window yet: the new drawable size empties the layer, which a
     // host that resizes its container before showing it then composites.
     void present_resize_before_first_link_frame() {
-        if (!only_first_frame_presented_) return;
-        if (size_.width == 0 || size_.height == 0) return;
+        if (!only_first_frame_presented_)
+            return;
+        if (size_.width == 0 || size_.height == 0)
+            return;
         present_with_transaction();
     }
 
@@ -2893,7 +2896,8 @@ private:
         }
 
         skia_surface_->end_frame();
-        if (sync_before_present_) skia_surface_->wait_for_submitted_work();
+        if (sync_before_present_)
+            skia_surface_->wait_for_submitted_work();
         gpu_surface_->end_frame();
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),

@@ -1,16 +1,16 @@
-#include <pulp/format/view_bridge.hpp>
+#include <chrono>
 #include <optional>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_ui.hpp>
+#include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
-#include <chrono>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
-#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widget_bridge.hpp>
 
 namespace pulp::format {
 namespace {
@@ -325,7 +325,8 @@ bool ViewBridge::rebuild_primary_view() {
 bool ViewBridge::prepare_first_frame(view::PluginViewHost& host) {
     // View-first keeps the previous order exactly: the display link paints the
     // first frame once the host shows the view.
-    if (!view_raw_ || !options_.content_first_open) return false;
+    if (!view_raw_ || !options_.content_first_open)
+        return false;
     PULP_TRACE_SCOPE_NAMED("render", "editor_first_frame");
     {
         if (auto* session = scripted_ui(); session && session->document_load_pending()) {
@@ -344,10 +345,11 @@ bool ViewBridge::prepare_first_frame(view::PluginViewHost& host) {
         const auto started = std::chrono::steady_clock::now();
         for (int round = 0; round < kFirstFrameSettleRounds; ++round) {
             auto* session = scripted_ui();
-            if (!session || !session->settling()) break;
-            if (std::chrono::duration<double, std::milli>(
-                    std::chrono::steady_clock::now() - started).count()
-                >= kFirstFrameSettleBudgetMs)
+            if (!session || !session->settling())
+                break;
+            if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                          started)
+                    .count() >= kFirstFrameSettleBudgetMs)
                 break;
             pump();
         }

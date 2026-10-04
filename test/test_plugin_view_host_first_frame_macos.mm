@@ -167,7 +167,7 @@ TEST_CASE("GPU plug-in host: backing layer and first frame are the declared back
 namespace {
 
 class CountingRoot : public View {
-public:
+  public:
     int paints = 0;
     float last_w = 0, last_h = 0;
     void paint(pulp::canvas::Canvas&) override {
@@ -177,7 +177,7 @@ public:
     }
 };
 
-}  // namespace
+} // namespace
 
 #ifdef PULP_HAS_SKIA
 TEST_CASE("GPU plug-in host: present_first_frame paints the tree before the view has a window",
@@ -186,7 +186,8 @@ TEST_CASE("GPU plug-in host: present_first_frame paints the tree before the view
     CountingRoot root;
     auto host = PluginViewHost::create(root, options(true, kDeclared));
     REQUIRE(host);
-    if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
+    if (host->gpu_surface() == nullptr)
+        SKIP("no Dawn/Metal adapter in this process");
     NSView* view = (__bridge NSView*)host->native_handle();
     REQUIRE(view.window == nil);
 
@@ -210,7 +211,8 @@ TEST_CASE("GPU plug-in host: a resize before the display link paints re-presents
     CountingRoot root;
     auto host = PluginViewHost::create(root, options(true, kDeclared));
     REQUIRE(host);
-    if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
+    if (host->gpu_surface() == nullptr)
+        SKIP("no Dawn/Metal adapter in this process");
     // In a window that is never ordered in: the host treats the view as shown,
     // and nothing appears on screen.
     NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 64, 40)
@@ -425,7 +427,7 @@ TEST_CASE("GPU plug-in host: a host resize queued during the mount lands before 
 namespace {
 
 class SolidRoot : public View {
-public:
+  public:
     void paint(pulp::canvas::Canvas& c) override {
         c.set_fill_color(pulp::canvas::Color::hex(0x00C000));
         c.fill_rect(0, 0, bounds().width, bounds().height);
@@ -436,30 +438,38 @@ typedef CGImageRef (*WindowImageFn)(CGRect, CGWindowListOption, CGWindowID, CGWi
 
 // What the window server composites for `window` (a process may read its own
 // windows): the share of pixels in each colour class.
-struct Composite { double magenta = 0, background = 0, content = 0; };
+struct Composite {
+    double magenta = 0, background = 0, content = 0;
+};
 bool composite_of(NSWindow* window, Composite& out) {
     static auto fn = (WindowImageFn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
-    if (!fn) return false;
-    CGImageRef img = fn(CGRectNull, kCGWindowListOptionIncludingWindow,
-                        (CGWindowID)window.windowNumber,
-                        kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
-    if (!img) return false;
+    if (!fn)
+        return false;
+    CGImageRef img =
+        fn(CGRectNull, kCGWindowListOptionIncludingWindow, (CGWindowID)window.windowNumber,
+           kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
+    if (!img)
+        return false;
     size_t w = 0, h = 0;
     const auto px = srgb_pixels(img, w, h);
     CGImageRelease(img);
-    if (w == 0 || h == 0) return false;
+    if (w == 0 || h == 0)
+        return false;
     size_t m = 0, b = 0, c = 0;
     for (size_t i = 0; i + 3 < px.size(); i += 4) {
-        if (near_rgb(px[i], px[i + 1], px[i + 2], 0xFF00FF)) ++m;
-        else if (near_rgb(px[i], px[i + 1], px[i + 2], kDeclared)) ++b;
-        else if (px[i + 1] > 150 && px[i] < 60) ++c;
+        if (near_rgb(px[i], px[i + 1], px[i + 2], 0xFF00FF))
+            ++m;
+        else if (near_rgb(px[i], px[i + 1], px[i + 2], kDeclared))
+            ++b;
+        else if (px[i + 1] > 150 && px[i] < 60)
+            ++c;
     }
     const double n = double(w * h);
     out = {m / n, b / n, c / n};
     return true;
 }
 
-}  // namespace
+} // namespace
 
 // A host whose window is already on screen when it attaches the editor (VST3
 // attached(), CLAP set_parent(), AU v3): the first image the window server
@@ -467,8 +477,9 @@ bool composite_of(NSWindow* window, Composite& out) {
 // backing layer's colour for a vsync while the drawable is still in flight.
 // Hidden: it orders a borderless window in off every screen and reads it back,
 // which needs a window server; run it explicitly with "[composite]".
-TEST_CASE("GPU plug-in host: an in-window first frame composites as the frame, not the backing colour",
-          "[.][composite][content-first][macos][gpu]") {
+TEST_CASE(
+    "GPU plug-in host: an in-window first frame composites as the frame, not the backing colour",
+    "[.][composite][content-first][macos][gpu]") {
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     // Whether the backing colour wins the race shows up on some opens and not
@@ -481,11 +492,13 @@ TEST_CASE("GPU plug-in host: an in-window first frame composites as the frame, n
         o.size = {240, 160};
         auto host = PluginViewHost::create(root, o);
         REQUIRE(host);
-        if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
-        NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 240, 160)
-                                                       styleMask:NSWindowStyleMaskBorderless
-                                                         backing:NSBackingStoreBuffered
-                                                           defer:NO];
+        if (host->gpu_surface() == nullptr)
+            SKIP("no Dawn/Metal adapter in this process");
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 240, 160)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
         window.releasedWhenClosed = NO;
         window.animationBehavior = NSWindowAnimationBehaviorNone;
         window.backgroundColor = [NSColor colorWithSRGBRed:1 green:0 blue:1 alpha:1];
@@ -497,7 +510,8 @@ TEST_CASE("GPU plug-in host: an in-window first frame composites as the frame, n
         while ((!composite_of(window, before) || before.magenta < 0.99) &&
                std::chrono::steady_clock::now() - shown < std::chrono::seconds(2))
             spin_main(0.01);
-        if (before.magenta < 0.99) SKIP("no window server composite in this session");
+        if (before.magenta < 0.99)
+            SKIP("no window server composite in this session");
 
         host->attach_to_parent((__bridge void*)window.contentView);
         REQUIRE(host->present_first_frame());
@@ -506,8 +520,10 @@ TEST_CASE("GPU plug-in host: an in-window first frame composites as the frame, n
         while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(250)) {
             Composite c;
             if (composite_of(window, c)) {
-                if (c.background > 0.5) ++background_images;
-                if (c.content > 0.5) ++content_images;
+                if (c.background > 0.5)
+                    ++background_images;
+                if (c.content > 0.5)
+                    ++content_images;
             }
             spin_main(0.002);
         }

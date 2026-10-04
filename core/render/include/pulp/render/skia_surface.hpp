@@ -202,7 +202,9 @@ public:
     /// presented with its Core Animation transaction) calls it between
     /// `end_frame()` and the present. Returns false when the surface cannot
     /// wait (no GPU context); never call it per frame.
-    virtual bool wait_for_submitted_work() { return false; }
+    virtual bool wait_for_submitted_work() {
+        return false;
+    }
 };
 
 } // namespace pulp::render

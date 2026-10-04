@@ -462,7 +462,8 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // Content-first: present the mounted document now, at the settled host
     // size, rather than the backing colour until the deferred mount's tick
     // (ViewBridge::prepare_first_frame()).
-    if (_bridge && _viewHost) _bridge->prepare_first_frame(*_viewHost);
+    if (_bridge && _viewHost)
+        _bridge->prepare_first_frame(*_viewHost);
 }
 
 - (void)scheduleInitialSizeSync {

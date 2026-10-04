@@ -668,27 +668,34 @@ namespace {
 // A host that records what the editor held when it was asked for its first
 // frame: content-first means that frame is the mounted document.
 class FirstFrameRecordingHost final : public view::PluginViewHost {
-public:
+  public:
     std::function<void()> on_first_frame;
     int first_frame_requests = 0;
 
-    view::NativeViewHandle native_handle() override { return nullptr; }
+    view::NativeViewHandle native_handle() override {
+        return nullptr;
+    }
     void attach_to_parent(view::NativeViewHandle) override {}
     void detach() override {}
     void repaint() override {}
-    void set_size(uint32_t w, uint32_t h) override { size_ = {w, h}; }
-    Size get_size() const override { return size_; }
+    void set_size(uint32_t w, uint32_t h) override {
+        size_ = {w, h};
+    }
+    Size get_size() const override {
+        return size_;
+    }
     bool present_first_frame() override {
         ++first_frame_requests;
-        if (on_first_frame) on_first_frame();
+        if (on_first_frame)
+            on_first_frame();
         return true;
     }
 
-private:
+  private:
     Size size_{480, 320};
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("Editor open: hosted editors open content-first unless PULP_EDITOR_OPEN=view-first",
           "[view_bridge][scripted-ui][editor-open][content-first]") {
@@ -703,8 +710,10 @@ TEST_CASE("Editor open: hosted editors open content-first unless PULP_EDITOR_OPE
     CHECK(format::ViewBridge::Options::hosted_editor().content_first_open);
     // Standalone and harness bridges never ask a host to present anything.
     CHECK_FALSE(format::ViewBridge::Options{}.content_first_open);
-    if (saved) setenv("PULP_EDITOR_OPEN", saved_value.c_str(), 1);
-    else unsetenv("PULP_EDITOR_OPEN");
+    if (saved)
+        setenv("PULP_EDITOR_OPEN", saved_value.c_str(), 1);
+    else
+        unsetenv("PULP_EDITOR_OPEN");
 }
 
 TEST_CASE("Editor open: content-first mounts the document before the host's first frame",
@@ -713,8 +722,8 @@ TEST_CASE("Editor open: content-first mounts the document before the host's firs
     DeferredScriptEditorProcessor p;
     p.set_state_store(&store);
     p.define_parameters(store);
-    p.script_path = write_editor_script("pulp-editor-content-first",
-                                        "createLabel('status', 'mounted', '');\n");
+    p.script_path =
+        write_editor_script("pulp-editor-content-first", "createLabel('status', 'mounted', '');\n");
 
     auto options = format::ViewBridge::Options::hosted_editor();
     options.content_first_open = true;
@@ -798,8 +807,8 @@ TEST_CASE("Editor open: view-first leaves the document to the idle tick",
     DeferredScriptEditorProcessor p;
     p.set_state_store(&store);
     p.define_parameters(store);
-    p.script_path = write_editor_script("pulp-editor-view-first",
-                                        "createLabel('status', 'mounted', '');\n");
+    p.script_path =
+        write_editor_script("pulp-editor-view-first", "createLabel('status', 'mounted', '');\n");
 
     auto options = format::ViewBridge::Options::hosted_editor();
     options.content_first_open = false;
