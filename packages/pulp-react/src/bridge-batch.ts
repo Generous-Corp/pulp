@@ -38,6 +38,7 @@ export function endBridgeBatch(): void {
     byKey.clear();
     active = false;
     let firstError: unknown;
+    let hasError = false;
     for (const call of calls) {
         try {
             call.fn(...call.args);
@@ -45,15 +46,17 @@ export function endBridgeBatch(): void {
             // A failed setter must not strand later independent updates. The
             // first error remains observable after the queue is fully drained.
             firstError ??= error;
+            hasError = true;
         }
     }
-    if (firstError !== undefined) throw firstError;
+    if (hasError) throw firstError;
 }
 
 export function queueBridgeCall(name: string, fn: BridgeFn, args: unknown[]): boolean {
     if (!active || !COALESCEABLE_BRIDGE_SETTERS.has(name) ||
         typeof args[0] !== 'string') return false;
-    const key = `${name}\u0000${args[0]}`;
+    const slot = name === 'setFlex' ? args[1] : undefined;
+    const key = `${name}\u0000${args[0]}\u0000${String(slot ?? '')}`;
     const existing = byKey.get(key);
     if (existing === undefined) {
         byKey.set(key, pending.length);
