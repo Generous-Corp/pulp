@@ -87,11 +87,16 @@ What Pulp does for you (every hosted format, nothing to opt into):
   the view arrives already holding the frame; in a window that is already on
   screen (VST3/CLAP/AU v3 attach) there is no vsync of backing colour. A plain
   asynchronous present lost that race (an empty-colour image on most in-window
-  opens; repro: the hidden `[composite]` case below). Until the display link
-  paints its first frame, a host resize (a restored or minimum size, a
-  container settling) is presented the same way, at the new size, from inside
-  `set_size()`; otherwise the content-first frame shows stretched into the new
-  bounds for a vsync.
+  opens; repro: the hidden `[composite]` case below). A view that has no window
+  yet (AU v2's factory) needs neither: its plain present is the layer's
+  contents long before the layer is on screen. Until the display link paints
+  its first frame, a host resize of a windowed view (a restored or minimum
+  size, a container settling) is presented the same way, once per run-loop
+  turn at the final size, from an observer that runs just before Core
+  Animation commits that turn; otherwise the content-first frame shows
+  stretched into the new bounds for a vsync. Presenting each resize
+  synchronously instead rendered every transient size AUHostingService's
+  container passes through and slowed the out-of-process open.
 - Hosts that only paint from the platform's display pass (CPU host, Windows,
   Linux) mark themselves dirty; their first paint is already the document
   because it mounted before they got the view.
