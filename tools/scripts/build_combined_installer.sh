@@ -614,7 +614,16 @@ _unsigned_pkg="$STAGE/$NAME-$VERSION-unsigned.pkg"
 productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" \
   ${RESOURCE_ARGS:+--resources "$STAGE/resources"} \
   "$_unsigned_pkg" >/dev/null
-productsign --sign "$INST_ID" "$_unsigned_pkg" "$PKG" >/dev/null
+# Bind productsign to the exact keychain that the unattended doctor authorized.
+# A bare productsign can ignore the user search-list ordering in an SSH or GUI
+# session and fall through to a locked login keychain, producing
+# CSSMERR_CSP_NO_USER_INTERACTION even though the doctor probe passed.
+[[ -n "${PULP_SIGN_KEYCHAIN:-}" ]] || {
+  echo "[installer] ERROR: PULP_SIGN_KEYCHAIN is required for productsign" >&2
+  exit 1
+}
+productsign --sign "$INST_ID" --keychain "$PULP_SIGN_KEYCHAIN" \
+  "$_unsigned_pkg" "$PKG" >/dev/null
 rm -f "$_unsigned_pkg"
 if [[ "$NOTARIZE" == 1 ]]; then
   _notarized=0

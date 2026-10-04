@@ -146,6 +146,12 @@ signs it with `productsign`, which is authorized; the two produce an equivalent
 archive. Keep it that way — reintroducing `productbuild --sign` re-breaks every
 headless package build (guarded by
 `test_build_combined_installer.py::test_the_product_archive_is_signed_by_productsign_not_productbuild`).
+The combined-installer recipe must pass `--keychain "$PULP_SIGN_KEYCHAIN"` to
+`productsign` explicitly. Search-list order is not a sufficient binding in every
+SSH or GUI session: bare `productsign` can fall through to a locked login
+keychain even after the doctor probe succeeds. The package test asserts this
+explicit keychain argument so a future recipe change cannot silently reopen
+that prompt-capable path.
 An ACL is baked in at `security import` time, so widening the doctor's `-T` list
 only helps keychains created *after* the change; an existing keychain keeps its
 old ACL.
