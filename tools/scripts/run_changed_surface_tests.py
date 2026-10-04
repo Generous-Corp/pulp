@@ -360,7 +360,7 @@ EXECUTABLE_REUSE_BINDING = {
     "derivation_code_dir": str,
     "derivation_code_sha256": str,
     "sample_seed": str,
-    "sample_rate": (int, float),
+    "sample_percent": int,
     "build_dir": str,
 }
 # Run from Shipyard's extracted base copies, never from the checkout.
@@ -383,8 +383,8 @@ def validate_executable_reuse_binding(binding: Any) -> None:
             raise SelectionExecutionError(f"selection receipt executable_reuse.{key} is invalid")
     if not re.fullmatch(r"[0-9a-fA-F]{40}", binding["base_sha"]):
         raise SelectionExecutionError("selection receipt executable_reuse.base_sha is invalid")
-    if not 0 <= binding["sample_rate"] <= 1:
-        raise SelectionExecutionError("selection receipt executable_reuse.sample_rate is invalid")
+    if not 1 <= binding["sample_percent"] <= 100:
+        raise SelectionExecutionError("selection receipt executable_reuse.sample_percent is invalid")
 
 
 class DerivationError(Exception):
@@ -470,7 +470,7 @@ def _derive(binding, head_sha, build_dir, result_dir, runner) -> dict[str, Any]:
     step([str(scripts["selection"]), "--manifest", str(files["executable-keys.json"]),
           "--head-codemodel", str(files["codemodel-digest.json"]),
           "--ctest-json", str(files["ctest-listing.json"]), "--seed", binding["sample_seed"],
-          "--rate", repr(float(binding["sample_rate"])), "--out", str(files["selection.json"])],
+          "--percent", str(binding["sample_percent"]), "--out", str(files["selection.json"])],
          "selection")
     selection = json.loads(files["selection.json"].read_text(encoding="utf-8"))
     return {

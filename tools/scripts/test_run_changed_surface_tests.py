@@ -1583,7 +1583,7 @@ class ExecutableReuseTest(unittest.TestCase):
         return {"base_record_run_id": "123", "base_record_sha256": self.RECORD_SHA,
                 "base_record_path": "/host/store/record", "base_sha": "a" * 40,
                 "derivation_code_dir": str(code), "derivation_code_sha256": "8" * 64,
-                "sample_seed": "seed", "sample_rate": 0.05, "build_dir": str(build)}
+                "sample_seed": "seed", "sample_percent": 5, "build_dir": str(build)}
 
     def tree(self, root: Path) -> tuple[Path, Path]:
         build, code = root / "build", root / "code"
@@ -1629,7 +1629,8 @@ class ExecutableReuseTest(unittest.TestCase):
             runner.validate_executable_reuse_binding(good)
             receipt = {**selection_receipt(), "executable_reuse": good}
             self.assertEqual(runner.decode_selection_receipt(*encode_receipt(receipt))[4], receipt)
-            for bad in ({**good, "extra": "x"}, {**good, "sample_rate": 1.5}, {**good, "sample_rate": True},
+            for bad in ({**good, "extra": "x"}, {**good, "sample_percent": 0}, {**good, "sample_percent": 101},
+                        {**good, "sample_percent": 5.0}, {**good, "sample_percent": True},
                         {**good, "base_record_sha256": "X" * 64}, {**good, "base_sha": "a"},
                         {**good, "sample_seed": ""}, {k: v for k, v in good.items() if k != "build_dir"}):
                 with self.subTest(bad=bad), self.assertRaises(runner.SelectionExecutionError):
@@ -1659,6 +1660,7 @@ class ExecutableReuseTest(unittest.TestCase):
             self.assertEqual(keys[keys.index("--toolchain-json") + 1], str(result / "toolchain.json"))
             selection = next(a for a, _ in python if a[2] == str(code / "tools/ci/executable_selection.py"))
             self.assertEqual(selection[selection.index("--seed") + 1], "seed")
+            self.assertEqual(selection[selection.index("--percent") + 1], "5")
             for name, field in (("ctest-listing.json", "ctest_listing_sha256"),
                                 ("toolchain.json", "toolchain_sha256"),
                                 ("codemodel-digest.json", "codemodel_digest_sha256"),
