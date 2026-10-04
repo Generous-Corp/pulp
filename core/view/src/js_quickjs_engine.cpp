@@ -8,7 +8,11 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/js_engine.hpp>
+#include <atomic>
 #include <charconv>
+#include <chrono>
+#include <condition_variable>
+#include <optional>
 #include <cstdlib>
 #include <deque>
 #include <mutex>
@@ -410,32 +414,74 @@ public:
         return on;
     }
 
+    enum class Claim { hit, claimed, busy };
+
     // Copies the bytecode out under the lock, so a concurrent eviction never
-    // frees bytes a reader is still deserializing.
-    bool lookup(const std::string& source, std::vector<std::uint8_t>& out) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& entry : entries_) {
-            if (entry.source.size() == source.size() && entry.source == source) {
-                out = entry.bytecode;
-                ++stats_.hits;
-                return true;
+    // frees bytes a reader is still deserializing. A miss claims the source:
+    // the caller compiles it and must call finish() (or abandon()). When
+    // another thread already holds the claim for byte-identical source -- a
+    // background precompile started before the editor asked -- `wait` blocks
+    // until that compile lands instead of parsing the same script twice; that
+    // compile started earlier, so waiting never takes longer than compiling.
+    // Without `wait` (the precompiler itself) a held claim reports busy.
+    Claim lookup_or_claim(const std::string& source, std::vector<std::uint8_t>& out,
+                          bool wait) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        for (;;) {
+            if (const auto* entry = find_locked(source)) {
+                // Only an evaluation reading the bytecode is a hit; the
+                // precompiler finding its work done is not.
+                if (wait) {
+                    out = entry->bytecode;
+                    ++stats_.hits;
+                }
+                return Claim::hit;
+            }
+            if (!pending_locked(source)) {
+                pending_.push_back(&source);
+                return Claim::claimed;
+            }
+            if (!wait) return Claim::busy;
+            ++stats_.waits;
+            // Bounded: a claim holder that never finishes (it cannot; finish
+            // and abandon are RAII-guarded) must not wedge the UI thread.
+            if (!changed_.wait_for(lock, std::chrono::seconds(5),
+                                   [&] { return !pending_locked(source); })) {
+                return Claim::busy;
             }
         }
-        return false;
     }
 
-    void store(const std::string& source, const std::uint8_t* bytes, std::size_t size) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& entry : entries_)
-            if (entry.source == source) return;  // another realm stored it first
-        entries_.push_back({source, std::vector<std::uint8_t>(bytes, bytes + size)});
-        stats_.bytes += source.size() + size;
-        ++stats_.compiles;
-        while (!entries_.empty()
-               && (entries_.size() > kMaxCachedScripts || stats_.bytes > kMaxCachedBytes)) {
-            stats_.bytes -= entries_.front().source.size() + entries_.front().bytecode.size();
-            entries_.pop_front();
+    void finish(const std::string& source, const std::uint8_t* bytes, std::size_t size) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            release_locked(source);
+            if (bytes != nullptr && find_locked(source) == nullptr) {
+                entries_.push_back({source, std::vector<std::uint8_t>(bytes, bytes + size)});
+                stats_.bytes += source.size() + size;
+                ++stats_.compiles;
+                while (!entries_.empty()
+                       && (entries_.size() > kMaxCachedScripts
+                           || stats_.bytes > kMaxCachedBytes)) {
+                    stats_.bytes -=
+                        entries_.front().source.size() + entries_.front().bytecode.size();
+                    entries_.pop_front();
+                }
+            }
         }
+        changed_.notify_all();
+    }
+
+    void abandon(const std::string& source) { finish(source, nullptr, 0); }
+
+    bool contains(const std::string& source) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return find_locked(source) != nullptr;
+    }
+
+    void note_precompiled() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++stats_.precompiled;
     }
 
     void note_bypass() {
@@ -461,10 +507,65 @@ private:
         std::string source;
         std::vector<std::uint8_t> bytecode;
     };
+
+    const Entry* find_locked(const std::string& source) const {
+        for (const auto& entry : entries_)
+            if (entry.source.size() == source.size() && entry.source == source)
+                return &entry;
+        return nullptr;
+    }
+
+    // A claim is the claimer's own string, alive until it finishes.
+    bool pending_locked(const std::string& source) const {
+        for (const auto* claimed : pending_)
+            if (claimed->size() == source.size() && *claimed == source) return true;
+        return false;
+    }
+
+    void release_locked(const std::string& source) {
+        for (auto it = pending_.begin(); it != pending_.end(); ++it) {
+            if (*it == &source) {
+                pending_.erase(it);
+                return;
+            }
+        }
+    }
+
     std::mutex mutex_;
+    std::condition_variable changed_;
     std::deque<Entry> entries_;
+    std::vector<const std::string*> pending_;
     ScriptBytecodeCacheStats stats_;
 };
+
+// Releases a claim on every exit path, so a compile that throws or fails can
+// never leave a waiter blocked.
+class ClaimGuard {
+public:
+    ClaimGuard(ScriptBytecodeCache& cache, const std::string& source)
+        : cache_(cache), source_(source) {}
+    ~ClaimGuard() {
+        if (!done_) cache_.abandon(source_);
+    }
+    void finish(const std::uint8_t* bytes, std::size_t size) {
+        done_ = true;
+        cache_.finish(source_, bytes, size);
+    }
+    ClaimGuard(const ClaimGuard&) = delete;
+    ClaimGuard& operator=(const ClaimGuard&) = delete;
+
+private:
+    ScriptBytecodeCache& cache_;
+    const std::string& source_;
+    bool done_ = false;
+};
+
+// Compiles global code to bytecode in `ctx` and serializes it; returns the
+// exception value (caller owns it) when the source does not compile.
+qjs::JSValue compile_global_script(qjs::JSContext* ctx, const std::string& code) {
+    return qjs::JS_Eval(ctx, code.c_str(), code.size(), "",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+}
 
 } // namespace
 
@@ -474,6 +575,54 @@ ScriptBytecodeCacheStats script_bytecode_cache_stats() {
 
 void clear_script_bytecode_cache() {
     ScriptBytecodeCache::instance().clear();
+}
+
+std::size_t precompile_scripts(const std::vector<std::string>& sources,
+                               const std::atomic<bool>* cancel) {
+    auto& cache = ScriptBytecodeCache::instance();
+    if (!ScriptBytecodeCache::enabled()) return 0;
+    // A private runtime on the calling thread: it shares nothing with any
+    // editor realm, runs no script, and is freed before returning. Bytecode is
+    // runtime-independent (atoms serialize as strings), which is what lets an
+    // editor realm read what this one wrote.
+    std::optional<qjs::QuickJSContext> backend;
+    std::size_t compiled = 0;
+    for (const auto& code : sources) {
+        if (cancel && cancel->load(std::memory_order_relaxed)) break;
+        if (code.size() < kMinCacheableScriptBytes) continue;
+        std::vector<std::uint8_t> unused;
+        if (cache.lookup_or_claim(code, unused, /*wait=*/false)
+                != ScriptBytecodeCache::Claim::claimed) {
+            continue;  // already compiled, or another thread is compiling it
+        }
+        ClaimGuard guard(cache, code);
+        if (!backend) {
+            backend.emplace();
+            set_quickjs_stack_size(*backend, 1024 * 1024);
+        }
+        auto* ctx = backend->context;
+        if (!ctx) break;
+        PULP_TRACE_SCOPE_NAMED("js", "script_precompile");
+        auto function = compile_global_script(ctx, code);
+        if (qjs::JS_IsException(function)) {
+            // The editor's own evaluation reports the syntax error.
+            qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
+            continue;
+        }
+        std::size_t size = 0;
+        auto* bytes = qjs::JS_WriteObject(ctx, &size, function, qjs::JS_WRITE_OBJ_BYTECODE);
+        qjs::JS_FreeValue(ctx, function);
+        if (!bytes) continue;
+        guard.finish(bytes, size);
+        qjs::js_free(ctx, bytes);
+        cache.note_precompiled();
+        ++compiled;
+    }
+    return compiled;
+}
+
+bool script_bytecode_cached(const std::string& source) {
+    return ScriptBytecodeCache::instance().contains(source);
 }
 
 class QuickJsEngine final : public JsEngine {
@@ -512,7 +661,12 @@ public:
         auto* ctx = backend_->context;
         qjs::JSValue function = JS_UNDEFINED;
         std::vector<std::uint8_t> bytecode;
-        if (cache.lookup(code, bytecode)) {
+        auto claim = ScriptBytecodeCache::Claim::busy;
+        {
+            PULP_TRACE_SCOPE_NAMED("js", "script_bytecode_lookup");
+            claim = cache.lookup_or_claim(code, bytecode, /*wait=*/true);
+        }
+        if (claim == ScriptBytecodeCache::Claim::hit) {
             PULP_TRACE_SCOPE_NAMED("js", "script_bytecode_read");
             function = qjs::JS_ReadObject(ctx, bytecode.data(), bytecode.size(),
                                           qjs::JS_READ_OBJ_BYTECODE);
@@ -522,19 +676,19 @@ public:
             }
         }
         if (qjs::JS_IsUndefined(function)) {
+            std::optional<ClaimGuard> guard;
+            if (claim == ScriptBytecodeCache::Claim::claimed) guard.emplace(cache, code);
             PULP_TRACE_SCOPE_NAMED("js", "script_compile");
-            function = qjs::JS_Eval(ctx, code.c_str(), code.size(), "",
-                                    JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+            function = compile_global_script(ctx, code);
             if (qjs::JS_IsException(function)) {
                 // Surfaces the syntax error exactly as evaluate() would.
                 return backend_->takeValue(function).toChocValue();
             }
             std::size_t size = 0;
-            if (auto* bytes = qjs::JS_WriteObject(ctx, &size, function,
-                                                  qjs::JS_WRITE_OBJ_BYTECODE)) {
-                cache.store(code, bytes, size);
-                qjs::js_free(ctx, bytes);
-            }
+            auto* bytes = qjs::JS_WriteObject(ctx, &size, function,
+                                              qjs::JS_WRITE_OBJ_BYTECODE);
+            if (guard) guard->finish(bytes, size);
+            if (bytes) qjs::js_free(ctx, bytes);
         }
         PULP_TRACE_SCOPE_NAMED("js", "script_execute");
         // JS_EvalFunction takes ownership of the compiled function.

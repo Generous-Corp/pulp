@@ -146,6 +146,10 @@ if(APPLE AND NOT PULP_IOS)
     pulp_add_test_suite(pulp-test-plugin-view-first-frame-macos GROUP pulp-test-group-view-host-mac
         SOURCES test_plugin_view_host_first_frame_macos.mm
         LIBRARIES pulp::view "-framework AppKit")
+    # The same contract for standalone app windows (WindowOptions::background_rgb).
+    pulp_add_test_suite(pulp-test-window-host-first-frame-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_window_host_first_frame_macos.mm
+        LIBRARIES pulp::view "-framework AppKit")
 endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
@@ -587,3 +591,9 @@ pulp_add_test_suite(pulp-test-multi-plugin-coexistence GROUP pulp-test-group-vie
 # host is proven by the web-UI headless-Chrome pixel fixture.
 pulp_add_test_suite(pulp-test-window-host-web GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
+
+# The stage classifier behind tools/editor-open/editor_open_oop_probe.mm (what
+# a host window showed while an editor opened). Pure C++, every platform.
+pulp_add_test_suite(pulp-test-editor-open-stages
+    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../tools/editor-open
+    LABELS "view;editor-open;tools")

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261004-editor-script-prewarm-watch",
+  "created_at": "2026-10-04T17:30:26Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds a background prewarm of a scripted editor's caches (QuickJS bytecode compile and materialized-document verification) at plug-in instantiation, an in-flight wait in those two process-wide caches, the exact runtime-import payload/inline script sources factored into one helper the pipeline and the prewarm share, a trace-autostart file for traced builds, and an out-of-process editor-open probe. The imported document, its decode and SHA-256 verification, the evaluated sources and the rendered output are byte-for-byte unchanged; only when the work happens moves. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-editor-open-stages",
+    "ctest --test-dir build -R pulp-test-js-engine",
+    "ctest --test-dir build -R pulp-test-tracing-session",
+    "ctest --test-dir build -R pulp-test-view-bridge",
+    "ctest --test-dir build -R pulp-test-widget-bridge-runtime-import",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

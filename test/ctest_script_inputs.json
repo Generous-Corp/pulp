@@ -2087,18 +2087,8 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
-  "pulp-gpu-audio-coreaudio-workgroup-benchmark",
-  "pulp-gpu-audio-p4-matched-convolution-benchmark",
-  "pulp-gpu-audio-p4-raw-screening",
-  "pulp-gpu-dawn-shared-io-provider-probe",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
-  "pulp-gpu-same-device-paired-probe",
-  "pulp-gpu-same-device-storage-probe",
-  "pulp-gpu-shared-io-convolution-session-probe",
-  "pulp-gpu-shared-io-paced-convolution-probe",
-  "pulp-gpu-shared-io-private-convolution-probe",
-  "pulp-gpu-shared-spectral-probe",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -2209,6 +2199,7 @@
   "pulp-test-cli-shellout-pr",
   "pulp-test-cli-shellout-scan-projects",
   "pulp-test-cli-ship-shellout",
+  "pulp-test-cli-shipyard-pin",
   "pulp-test-cli-skew-banner",
   "pulp-test-cli-swap-pack",
   "pulp-test-cli-tartci-lease",
@@ -2281,6 +2272,7 @@
   "pulp-test-dsl-processor",
   "pulp-test-dsp-runtime-no-alloc",
   "pulp-test-edit-history",
+  "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
@@ -3283,6 +3275,7 @@
     "tools/scripts/skills_doc_check.py",
     "tools/scripts/test_changed_surface_script_families.py",
     "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_run_changed_surface_tests.py",
     "tools/scripts/test_wide_non_native.py",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
@@ -6378,50 +6371,6 @@
    ],
    "kind": "node"
   },
-  "pulp-gpu-audio-provider-identity": {
-   "entry": "tools/scripts/gpu_audio_provider_identity.py",
-   "inputs": [
-    "external/skia-build",
-    "tools/deps/manifest.json",
-    "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-shared-io-provider-identity": {
-   "entry": "tools/scripts/gpu_audio_provider_identity.py",
-   "inputs": [
-    "external/skia-build",
-    "tools/deps/manifest.json",
-    "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-shared-io-provider-lifecycle": {
-   "entry": "test/verify_gpu_dawn_shared_io_provider.py",
-   "inputs": [
-    "test/verify_gpu_dawn_shared_io_provider.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-vellum-d15-source": {
-   "entry": "test/test_gpu_dawn_vellum_d15_source.py",
-   "inputs": [
-    "core/gpu_audio/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
-    "test/cmake/render_gpu_surface_tests.cmake",
-    "test/test_gpu_dawn_vellum_d15_source.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-shared-io-paced-convolution-probe": {
-   "entry": "test/verify_gpu_shared_io_paced_convolution.py",
-   "inputs": [
-    "test/verify_gpu_shared_io_paced_convolution.py"
-   ],
-   "kind": "python"
-  },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
@@ -8835,44 +8784,11 @@
     "test/CMakeLists.txt",
     "test/cmake/quality_tests.cmake",
     "tools/ci/governed-build.sh",
-    "tools/ci/source_selftests.py",
-    "tools/ci/test_drift_fast.py",
-    "tools/ci/test_source_selftests.py",
+    "tools/ci/wide_non_native_reviewed_scanners.json",
     "tools/cli/cmd_pr.cpp",
     "tools/cmake/PulpTestSuite.cmake",
-    "tools/deps/audit.py",
-    "tools/import-validation/check_agent_panel_invariants.py",
-    "tools/import/test_project_import_ir_schema.py",
-    "tools/rack/test_generate_safety.py",
-    "tools/scene3d/verify_renderer_probe_route_inventory_contract.py",
     "tools/scripts/agent_capability_manifest.py",
-    "tools/scripts/changed_surface_script_families.py",
-    "tools/scripts/check_inspector_protocol_registry.py",
-    "tools/scripts/check_skip_not_pass.py",
-    "tools/scripts/consumption_census.py",
-    "tools/scripts/consumption_census_contract.py",
-    "tools/scripts/doxygen_installed_header_check.py",
-    "tools/scripts/gate_python_imports_check.py",
-    "tools/scripts/mac_objc_source_list_guard.py",
-    "tools/scripts/msvc_string_literal_guard.py",
-    "tools/scripts/raw_this_async_check.py",
-    "tools/scripts/sample_region_compat_baseline.py",
-    "tools/scripts/script_test_inputs.py",
-    "tools/scripts/skills_doc_check.py",
-    "tools/scripts/style_dedup_table.py",
-    "tools/scripts/test_agent_capability_installed_sdk.py",
-    "tools/scripts/test_build_combined_installer.py",
-    "tools/scripts/test_classify_changes.py",
-    "tools/scripts/test_configure_check_cache.py",
-    "tools/scripts/test_consumption_census.py",
-    "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
-    "tools/scripts/test_gpu_probe_acceptance.py",
-    "tools/scripts/test_gpu_test_resource_locks.py",
-    "tools/scripts/test_run_changed_surface_tests.py",
-    "tools/scripts/test_sdk_plist_templates_installed.py",
-    "tools/scripts/test_wide_non_native.py",
-    "tools/scripts/thread_assert_check.py",
-    "tools/scripts/web_timeline_source_closure_check.py"
+    "tools/scripts/test_wide_non_native.py"
    ],
    "kind": "python"
   },

@@ -5,6 +5,7 @@
 #include "clap_note_name.hpp"
 
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/mpe_expression.hpp>
@@ -245,6 +246,7 @@ bool clap_init(const clap_plugin_t* plugin) {
     if (!self->processor) return false;
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
+    request_editor_prewarm(*self->processor);
 
     if (self->host && self->host->get_extension) {
         self->host_params = static_cast<const clap_host_params_t*>(

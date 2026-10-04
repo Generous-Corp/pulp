@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20261004-standalone-first-frame-brand",
+  "kind": "change",
+  "created_at": "2026-10-04T18:30:32Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "retained-ui-kernel: WindowOptions (window_host.hpp) gains an additive background_rgb field defaulting to the existing framework colour, so every current caller behaves as before. It exists so the Pulp plug-in standalone adapter can open its window on Processor::editor_background(); that standalone/plug-in wiring is Pulp-only, and no API is removed and no authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-standalone-editor-chrome"
+  ],
+  "disposition": "pulp-only"
+}

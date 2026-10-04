@@ -1041,6 +1041,26 @@ void set_runtime_error(ClaudeRuntimeOptions& opts, const std::string& msg) {
     if (opts.error_out) *opts.error_out = msg;
 }
 
+// The exact source of each whole script the payload pipeline evaluates.
+// runtime_import_whole_scripts() hands the same strings to a prewarm, so a
+// change here changes both or neither.
+std::string runtime_import_payload_script(const ClaudeBundle& bundle, std::size_t idx) {
+    const auto& asset = bundle.assets[idx];
+    std::string source = "try {\n";
+    source.append(asset.data.begin(), asset.data.end());
+    source += "\n} catch(e) { globalThis.__pulpPayloadErr_" + std::to_string(idx) +
+        "__ = String(e && e.message ? e.message : e) + ' :: stack=' + (e && e.stack ? e.stack : '<no stack>'); }";
+    // Trailing `;void 0` so the payload's last expression doesn't
+    // produce a value the engine has to convert back to choc. (The
+    // CHOC QuickJS path can recurse on cyclical objects.)
+    source += "\n;void 0";
+    return source;
+}
+
+std::string runtime_import_inline_script(const std::string& inline_source) {
+    return inline_source + "\n;void 0";
+}
+
 // ── Shared Claude-bundle runtime-import shim + payload pipeline ─────────
 //
 // Both the offline harness (`parse_claude_html_with_runtime`) and the
@@ -1224,16 +1244,7 @@ void run_claude_bundle_payload_pipeline(ScriptEngine& engine,
 
     for (auto idx : bundle.javascript_indices) {
         if (idx >= bundle.assets.size()) continue;
-        const auto& asset = bundle.assets[idx];
-        std::string source(asset.data.begin(), asset.data.end());
-        std::string wrap_pre = "try {\n";
-        std::string wrap_post = "\n} catch(e) { globalThis.__pulpPayloadErr_" + std::to_string(idx) +
-            "__ = String(e && e.message ? e.message : e) + ' :: stack=' + (e && e.stack ? e.stack : '<no stack>'); }";
-        source = wrap_pre + source + wrap_post;
-        // Trailing `;void 0` so the payload's last expression doesn't
-        // produce a value the engine has to convert back to choc. (The
-        // CHOC QuickJS path can recurse on cyclical objects.)
-        source += "\n;void 0";
+        const std::string source = runtime_import_payload_script(bundle, idx);
         try {
             PULP_TRACE_SCOPE_NAMED("js", "runtime_import_payload_eval");
             // A whole script: a reopened editor reuses its compiled bytecode.
@@ -1329,7 +1340,7 @@ void run_claude_bundle_payload_pipeline(ScriptEngine& engine,
         if (s.kind != "javascript") continue;
         try {
             PULP_TRACE_SCOPE_NAMED("js", "runtime_import_inline_eval");
-            engine.evaluate_script(s.source + "\n;void 0");
+            engine.evaluate_script(runtime_import_inline_script(s.source));
         } catch (const std::exception& e) {
             report("inline JS script " + std::to_string(i)
                    + " threw: " + e.what());
@@ -1864,6 +1875,17 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
 //     globalThis.__pulpPayloadErr_<idx>__ / __pulpEvalErr__ slots and the
 //     WidgetBridge's normal error surface, not a DesignIR replacement).
 //
+std::vector<std::string> runtime_import_whole_scripts(const ClaudeBundle& bundle) {
+    std::vector<std::string> scripts;
+    for (auto idx : bundle.javascript_indices)
+        if (idx < bundle.assets.size())
+            scripts.push_back(runtime_import_payload_script(bundle, idx));
+    for (const auto& inline_script : extract_inline_template_scripts(bundle.template_html))
+        if (inline_script.kind == "javascript")
+            scripts.push_back(runtime_import_inline_script(inline_script.source));
+    return scripts;
+}
+
 void WidgetBridge::evaluate_claude_bundle_in_live_engine(const ClaudeBundle& bundle) {
     // The live-engine path differs from the offline harness in three
     // small ways: it uses a different navigator.userAgent, it must

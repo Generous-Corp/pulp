@@ -65,6 +65,7 @@
 #include <memory>
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/adapter_boundary.hpp>
+#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/au_factory_presets.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
@@ -405,6 +406,7 @@ struct ScopedAuV3HostWriting {
     }
     _bridge.processor->set_state_store(&_bridge.store);
     _bridge.processor->define_parameters(_bridge.store);
+    pulp::format::request_editor_prewarm(*_bridge.processor);
     {
         // Discover the plug-in's bundled factory presets. Empty for a plug-in
         // that ships none, and for any build not loaded from a bundle (a unit

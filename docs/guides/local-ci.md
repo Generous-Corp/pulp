@@ -6804,6 +6804,32 @@ lists no GitHub credentials, so nothing is uploaded.
 - Cost: writing a record on a Debug, examples-on tree takes about 20 s and
   7 MB, most of it hashing test binaries and projecting registrations.
 
+### Keyed shadow runs measure reuse against those records
+
+`[targets.mac.changed_surface_selection.executable_reuse]` turns a
+build-and-test plan on a `shadow_compare` host into a keyed shadow run
+(Shipyard's `docs/changed-surface-selection.md`, "Executable-keyed shadow
+runs"). It skips nothing: the configured build and full ctest run with their
+own verdict, and the result reports which tests reuse would have skipped and
+which of those failed.
+
+- `derivation_paths` is the key code's import closure plus the adapter.
+  Shipyard reads it only from the protected base and copies those files from
+  there, so a PR that edits any of them, or drops one from the list, runs the
+  full suite. A new import in that code must be added to the list in the same
+  change, or every keyed run fails to derive on the bare copy.
+- `base_record` says where a record's `job.json` states platform, toolchain,
+  completeness, cleanliness, the full suite and problems; Shipyard binds every
+  qualifying record (up to eight) and the adapter picks the one whose
+  toolchain matches its own configure.
+- After the run Shipyard re-runs `rederive` over the run's copied inputs and
+  writes `rederivation-<result sha256>.json` into the trial directory. A
+  mismatch is refused, and the second refusal on a host sets `PULP_REUSE_LIVE`
+  to `off`.
+- Shipyard binds a record by a digest over its files in byte order of their
+  relative paths; `tools/ci/executable_keys.py`'s `load_record` must digest
+  the same way or every derivation refuses its record.
+
 ## "Can this PR actually land?" — the two-detector wedge check
 
 `shipyard status` answers *"did my validation pass"*. It does not answer
