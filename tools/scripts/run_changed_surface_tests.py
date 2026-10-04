@@ -456,9 +456,14 @@ def _derive(binding, head_sha, build_dir, result_dir, runner) -> dict[str, Any]:
             raise DerivationError(f"{what} exited {done.returncode}: {done.stderr.strip()[-300:]}")
         return done.stdout
 
-    probe = ("import json, sys; sys.path.insert(0, 'tools/ci'); import executable_keys as k; "
-             "print(json.dumps(k.probe_toolchain(), sort_keys=True))")
-    toolchain = step(["-c", probe], "toolchain probe").strip()
+    # The key code's own probe, for this configured build: it reads the
+    # compiler the build directory recorded. An older base copy takes no
+    # argument.
+    probe = ("import inspect, json, sys; from pathlib import Path; sys.path.insert(0, 'tools/ci'); "
+             "import executable_keys as k; f = k.probe_toolchain; "
+             "print(json.dumps(f(Path(sys.argv[1])) if inspect.signature(f).parameters else f(), "
+             "sort_keys=True))")
+    toolchain = step(["-c", probe, binding["build_dir"]], "toolchain probe").strip()
     if not toolchain or json.loads(toolchain) is None:
         raise DerivationError("the toolchain probe is incomplete")
     files["toolchain.json"].write_text(toolchain + "\n", encoding="utf-8")
@@ -1026,7 +1031,7 @@ def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
     skipped = set(selection.get("would_skip") or []) - set(selection.get("sampled_executables") or [])
     tests = sorted({name for a in skipped for name in (executables.get(a) or {}).get("registrations") or []})
     caught = sorted(set(tests) & failed)
-    return {"would_skip_tests": len(tests), "false_skip_count": len(caught), "false_skips": caught}
+    return {"would_skip_tests": tests, "false_skip_count": len(caught), "false_skips": caught}
 
 
 def lane_red_allowlist(
@@ -1315,6 +1320,11 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
         "execution_payload_sha256": args.selection_receipt_sha256,
         "selected_execution_disposition": "keyed_full_shadow",
         "full_authoritative": True,
+        # The plan selected nothing; these match its empty selection.
+        "selected_tests_digest": "",
+        "selected_logical_count": 0,
+        "selected_build_targets_digest": None,
+        "selected_build_target_count": 0,
         # Every registration ran, so nothing here reads as a bounded selection.
         "selected_tests": inventory_names,
         "full_registration_count": len(inventory_names) if inventory_names is not None else None,

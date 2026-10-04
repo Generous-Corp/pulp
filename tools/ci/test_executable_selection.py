@@ -57,6 +57,58 @@ class SelectionTest(unittest.TestCase):
         # quiet is spawned only by same, which itself skips, so it may skip too.
         self.assertEqual(es.would_skip(manifest), ["test/quiet", "test/same"])
 
+    def test_an_equal_key_test_that_spawns_or_loads_a_changed_artifact_runs(self) -> None:
+        manifest, _, _ = fixture()
+        executables = manifest["executables"]
+        executables["test/tool"] = entry("t1", base="t0")
+        executables["test/same"]["spawns"] = ["test/tool"]
+        self.assertNotIn("test/same", es.would_skip(manifest))  # a changed tool
+        executables["test/tool"] = entry("t1")
+        executables["test/plug.so"]["base_key"] = "other"
+        executables["test/same"]["spawns"] = ["test/plug.so"]
+        self.assertNotIn("test/same", es.would_skip(manifest))  # a changed module
+        executables["test/same"]["spawns"] = ["test/unlisted"]
+        self.assertNotIn("test/same", es.would_skip(manifest))  # not in the manifest
+        executables["test/same"]["spawns"] = ["test/tool"]
+        executables["test/tool"]["spawns"] = ["test/deeper"]
+        executables["test/deeper"] = entry("d1", reason="environment")
+        self.assertNotIn("test/same", es.would_skip(manifest))  # transitively
+        executables["test/deeper"] = entry("d1")
+        self.assertIn("test/same", es.would_skip(manifest))  # control: all equal
+
+    def test_a_fixture_or_dependency_of_a_running_test_runs(self) -> None:
+        manifest, _, ctest = fixture()
+        executables = manifest["executables"]
+        props = {t["name"]: t.setdefault("properties", []) for t in ctest["tests"]}
+        self.assertIn("test/same", es.would_skip(manifest, ctest))  # control
+        props["same-a"].append({"name": "FIXTURES_SETUP", "value": ["db"]})
+        props["changed"].append({"name": "FIXTURES_REQUIRED", "value": ["db"]})
+        self.assertNotIn("test/same", es.would_skip(manifest, ctest))
+        props["changed"].pop()
+        props["env"].append({"name": "DEPENDS", "value": ["same-b"]})
+        self.assertNotIn("test/same", es.would_skip(manifest, ctest))
+        props["env"].pop()
+        # A test that only a skipped test needs does not keep anything running.
+        executables["test/other"] = entry("o1", regs=["other"])
+        ctest["tests"].append({"name": "other", "properties": [{"name": "DEPENDS", "value": ["same-a"]}]})
+        self.assertEqual(es.would_skip(manifest, ctest), ["test/other", "test/same"])
+
+    def test_a_sampled_test_keeps_its_fixture_running(self) -> None:
+        manifest, codemodel, ctest = fixture()
+        executables = manifest["executables"]
+        executables["test/setup"] = entry("s1", regs=["setup"])
+        ctest["tests"].append({"name": "setup", "properties": [{"name": "FIXTURES_SETUP", "value": ["f"]}]})
+        codemodel["targets"]["setup"] = {"artifacts": ["<build>/test/setup"]}
+        props = {t["name"]: t.setdefault("properties", []) for t in ctest["tests"]}
+        props["same-a"].append({"name": "FIXTURES_REQUIRED", "value": ["f"]})
+        seed = next(s for s in map(str, range(1000))
+                    if es.sample(["test/same", "test/setup"], s, 50) == ["test/same"])
+        selection = es.select(manifest, codemodel, ctest, seed, 50)
+        self.assertEqual(selection["would_skip"], ["test/same", "test/setup"])
+        self.assertEqual(selection["sampled_executables"], ["test/same"])
+        self.assertIn("setup", selection["tests"])
+        self.assertIn("setup", selection["build_targets"])
+
     def test_the_skipped_executables_tests_leave_the_selection(self) -> None:
         manifest, codemodel, ctest = fixture(40)
         selection = es.select(manifest, codemodel, ctest, "seed", 1)

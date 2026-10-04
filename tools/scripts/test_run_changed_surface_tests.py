@@ -1672,6 +1672,26 @@ class ExecutableReuseTest(unittest.TestCase):
                              hashlib.sha256((build / "CMakeCache.txt").read_bytes()).hexdigest())
             self.assertEqual((derived["would_skip_count"], derived["sampled_count"]), (2, 1))
 
+    def test_the_toolchain_probe_runs_the_base_copy_for_the_bound_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build, code = self.tree(Path(directory))
+            result = Path(directory) / "result"
+            probes = []
+            for body in ("def probe_toolchain(build_dir):\n    return {'build': str(build_dir)}\n",
+                         "def probe_toolchain():\n    return {'build': None}\n"):
+                (code / "tools/ci/executable_keys.py").write_text(body, encoding="utf-8")
+                run, calls = self.fake(build)
+
+                def real_probe(argv, **kwargs):
+                    if argv[2:3] == ["-c"]:
+                        return subprocess.run(argv, **kwargs)
+                    return run(argv, **kwargs)
+                derived = runner.derive_executable_reuse(
+                    self.binding(build, code), "b" * 40, build, result, real_probe)
+                self.assertEqual(derived["status"], "derived", derived)
+                probes.append(json.loads((result / "toolchain.json").read_text(encoding="utf-8")))
+            self.assertEqual(probes, [{"build": str(build)}, {"build": None}])
+
     def test_a_failed_derivation_is_recorded_never_raised(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build, code = self.tree(Path(directory))
@@ -1798,7 +1818,10 @@ class KeyedFullTest(unittest.TestCase):
         # test/b was sampled, so only test/a's two tests would have skipped,
         # and a2 failing in the full run is a false skip; b1 ran in the sample.
         self.assertEqual((reuse["would_skip_tests"], reuse["false_skip_count"], reuse["false_skips"]),
-                         (2, 1, ["a2"]))
+                         (["a1", "a2"], 1, ["a2"]))
+        self.assertEqual((receipt["selected_tests_digest"], receipt["selected_logical_count"],
+                          receipt["selected_build_targets_digest"], receipt["selected_build_target_count"]),
+                         ("", 0, None, 0))
 
     def test_a_failed_derivation_still_runs_the_full_suite(self) -> None:
         code, calls, receipt = self.run_full(derived_ok=False)
