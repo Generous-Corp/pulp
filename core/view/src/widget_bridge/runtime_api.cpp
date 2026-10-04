@@ -121,6 +121,8 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "var __pulpFrameTimestamp__ = __resolveFrameTimestamp__();void 0;");
         const auto frame_timestamp =
             self.engine_.evaluate("__pulpFrameTimestamp__").getWithDefault<double>(0.0);
+        const auto frame_timestamp = self.engine_.evaluate("__pulpFrameTimestamp__")
+                                          .getWithDefault<double>(0.0);
         // RAII guard so an exception in `__invokeFrame__` doesn't leave
         // stale ambient provenance behind, corrupting attribution for
         // every subsequent publish until something else clears it.
