@@ -15,6 +15,9 @@
 [project]
 name      = "pulp"
 type      = "cmake"
+# Names the host-local reuse-record store the macOS lane writes to
+# (`reuse_record = true` below); Shipyard requires an exact OWNER/REPO.
+repository = "Generous-Corp/pulp"
 # Shipyard governance profile. `solo` matches Pulp's single-maintainer
 # branch-protection posture (0 required approvals, self-merge on green).
 profile   = "solo"
@@ -190,7 +193,19 @@ test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --tes
 # targets inherit the default recipe but register a different platform-gated
 # CTest inventory, so they must not validate against the macOS cardinality.
 [validation.default.overrides.macos]
-configure = "tools/ci/build-dir-sentinel.sh guard build 'mkdir -p build/.cmake/api/v1/query && : > build/.cmake/api/v1/query/codemodel-v2 && ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"' && bash tools/ci/install_visual_python_deps.sh build"
+configure = "tools/ci/require_build_generator.sh build Ninja && tools/ci/build-dir-sentinel.sh guard build 'mkdir -p build/.cmake/api/v1/query && : > build/.cmake/api/v1/query/codemodel-v2 && ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPULP_RECORD_LINK_MAPS=ON -DPython3_EXECUTABLE=\"$ci_python\"' && bash tools/ci/install_visual_python_deps.sh build"
+# The lane builds with Ninja, as the hosted gate does: the reuse record reads
+# per-object dependencies from Ninja's log, and a directory left on another
+# generator is removed first (tools/ci/require_build_generator.sh), since
+# CMake will not switch generators in place.
+# Every macOS lane run, full or bounded, leaves a reuse record (link members,
+# object deps, codemodel, verdicts) in Shipyard's host-local store, which a
+# later plan on the same toolchain keys its executables against. Shipyard
+# exports SHIPYARD_REUSE_RECORD_DIR; tools/ci/lane_reuse_record.py writes it
+# here and run_changed_surface_tests.py writes it for a bounded plan. A failed
+# recording only warns: the run's verdict is ctest's.
+reuse_record = true
+test      = "PULP_BUILD_CLASS=background python3 tools/ci/build_dir_lock.py --build-dir build -- python3 tools/ci/lane_reuse_record.py test --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via

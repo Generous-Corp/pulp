@@ -2497,6 +2497,7 @@
   "pulp-test-osc-render-wav-cli",
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
+  "pulp-test-parametric-eq",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
   "pulp-test-playback-capture-engine",
@@ -3141,6 +3142,7 @@
     "test/test_runtime_utils.cpp",
     "tools/ci/build_dir_lock.py",
     "tools/ci/changed_surface_lane_reds.json",
+    "tools/ci/lane_reuse_record.py",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",
@@ -3191,6 +3193,7 @@
     "tools/ci/build_dir_lock.py",
     "tools/ci/changed_surface_lane_reds.json",
     "tools/ci/governed-build.sh",
+    "tools/ci/lane_reuse_record.py",
     "tools/cmake/PulpSparkle.cmake",
     "tools/cmake/PulpTestData.cmake",
     "tools/cmake/PulpWgpuUniversal.cmake",
@@ -3277,8 +3280,10 @@
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
+    "test/fixtures",
     "test/gpu_health_scene3d_acceptance.cpp",
     "test/mac_objc_coload_probe.cpp",
+    "test/support",
     "test/test_agent_capability_compile.cpp",
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
@@ -3289,6 +3294,7 @@
     "tools/ci/ios_gate_digest.py",
     "tools/ci/link_members.py",
     "tools/ci/object_deps.py",
+    "tools/ci/reuse_record.py",
     "tools/ci/source_selftests.json",
     "tools/ci/spawn_closure.py",
     "tools/ci/test_receipts_shadow.py",
@@ -3297,19 +3303,23 @@
     "tools/cmake/PulpDependencies.cmake",
     "tools/cmake/PulpFetchContent.cmake",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
     "tools/dsp_vocabulary.py",
     "tools/import-validation",
     "tools/scripts",
+    "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/changed_surface_shadow_plans.py",
     "tools/scripts/classify_changes.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/fixtures/wide_non_native_replay.json",
+    "tools/scripts/gate_common.py",
     "tools/scripts/generated_version_bump_check.py",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/resolve_classify_base.py",
     "tools/scripts/reuse_policy_replay.py",
     "tools/scripts/reuse_replay_collect.py",
+    "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_changed_surface_shadow_plans.py",
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_ios_compile_gate_legs.py",
@@ -4040,21 +4050,28 @@
     ".github/workflows/build.yml",
     "docs/status",
     "test/ctest_script_inputs.json",
+    "test/fixtures",
+    "test/support",
     "tools/ci/affected_tests_shadow.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/executable_keys.py",
     "tools/ci/link_members.py",
     "tools/ci/object_deps.py",
+    "tools/ci/reuse_record.py",
     "tools/ci/spawn_closure.py",
     "tools/ci/test_executable_keys.py",
     "tools/ci/test_receipts_shadow.py",
     "tools/cmake",
     "tools/cmake/PulpDependencies.cmake",
     "tools/cmake/PulpFetchContent.cmake",
+    "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
+    "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
-    "tools/scripts/protected_merge_receipt.py"
+    "tools/scripts/gate_common.py",
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
   },
@@ -5669,6 +5686,14 @@
    ],
    "kind": "python"
   },
+  "lane-reuse-record-selftest": {
+   "entry": "tools/ci/test_lane_reuse_record.py",
+   "inputs": [
+    "tools/ci/lane_reuse_record.py",
+    "tools/ci/test_lane_reuse_record.py"
+   ],
+   "kind": "python"
+  },
   "link-members-selftest": {
    "entry": "tools/ci/test_link_members.py",
    "inputs": [
@@ -5933,6 +5958,7 @@
     "tools/ci/cmake_registration_impact.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/install_visual_python_deps.sh",
+    "tools/ci/lane_reuse_record.py",
     "tools/ci/pr_head_affected_tests.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
@@ -7171,6 +7197,13 @@
    ],
    "kind": "python"
   },
+  "require-build-generator-selftest": {
+   "entry": "tools/ci/test_require_build_generator.py",
+   "inputs": [
+    "tools/ci/test_require_build_generator.py"
+   ],
+   "kind": "python"
+  },
   "retry-git-clone": {
    "entry": "test/test_retry_git_clone.sh",
    "inputs": [
@@ -7200,9 +7233,11 @@
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
+    "test/fixtures",
     "test/fixtures/timeline",
     "test/gpu_health_scene3d_acceptance.cpp",
     "test/mac_objc_coload_probe.cpp",
+    "test/support",
     "test/test_agent_capability_compile.cpp",
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
@@ -7213,6 +7248,7 @@
     "tools/ci/ios_gate_digest.py",
     "tools/ci/link_members.py",
     "tools/ci/object_deps.py",
+    "tools/ci/reuse_record.py",
     "tools/ci/source_selftests.json",
     "tools/ci/spawn_closure.py",
     "tools/ci/test_receipts_shadow.py",
@@ -7221,18 +7257,22 @@
     "tools/cmake/PulpDependencies.cmake",
     "tools/cmake/PulpFetchContent.cmake",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
     "tools/dsp_vocabulary.py",
     "tools/import-validation",
     "tools/scripts",
+    "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/fixtures/wide_non_native_replay.json",
+    "tools/scripts/gate_common.py",
     "tools/scripts/generated_version_bump_check.py",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/resolve_classify_base.py",
     "tools/scripts/reuse_policy_replay.py",
     "tools/scripts/reuse_replay_collect.py",
+    "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_ios_compile_gate_legs.py",
     "tools/scripts/test_prepush_gate_supervisor.py",
@@ -7995,6 +8035,33 @@
    "inputs": [
     "core/host/src/signal_graph.cpp",
     "tools/scripts/test_unbounded_wait_lint.py"
+   ],
+   "kind": "python"
+  },
+  "unregistered-tests-check": {
+   "entry": "tools/scripts/unregistered_tests_check.py",
+   "inputs": [
+    ".github/workflows",
+    "test/cmake",
+    "test/ctest_script_inputs.json",
+    "tools/ci/source_selftests.json",
+    "tools/cmake",
+    "tools/scripts/unregistered_tests_baseline.json",
+    "tools/scripts/unregistered_tests_check.py"
+   ],
+   "kind": "python"
+  },
+  "unregistered-tests-check-selftest": {
+   "entry": "tools/scripts/test_unregistered_tests_check.py",
+   "inputs": [
+    ".github/workflows",
+    "test/cmake",
+    "test/ctest_script_inputs.json",
+    "tools/ci/source_selftests.json",
+    "tools/cmake",
+    "tools/scripts/test_unregistered_tests_check.py",
+    "tools/scripts/unregistered_tests_baseline.json",
+    "tools/scripts/unregistered_tests_check.py"
    ],
    "kind": "python"
   },

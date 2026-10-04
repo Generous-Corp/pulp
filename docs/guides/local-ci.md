@@ -1015,25 +1015,32 @@ take the SDK version and build from `xcrun`, and from the SDK's own
 `SDKSettings.json` and `SystemVersion.plist` when `xcrun` cannot answer. The
 digest does not depend on which source answered, and `runner_image.probe`
 records why a probe failed. `toolchain` (`toolchain_identity()`) is what a compile depends on
-besides its sources: the compiler CMake's check recorded (id, version, its
-`--version` line, `-print-target-triple`), the SDK version and build, the
-deployment target, and an allow-listed environment (`TOOLCHAIN_ENV`). It has
-a digest. A value no probe found is left out rather than written as
-"unknown", both here and in `runner_image.fields`, and readers take an
-absent key as unknown. `missing` names the required keys that were absent
-(the SDK pair is required on macOS), and `complete` is false whenever
-`missing` is non-empty, in which case the record warns. A run outside GitHub
+besides its sources. Its `fields` are the reuse key and are digested:
+- the compiler CMake's check recorded (id, version, its `--version` line);
+- the SDK version and build;
+- `effective`, what configure made of the compiler and flags, read from
+  `CMakeCache.txt` (`CMAKE_<LANG>_COMPILER`, `_FLAGS`, linker flags,
+  sysroot, deployment target);
+- `build_env`, environment read while compiling (`CCACHE_*` settings,
+  `SOURCE_DATE_EPOCH`, `ZERO_AR_DATE`, `PULP_OFFLINE_BUILD`).
+
+Two parts are recorded but never keyed. `configure_env` holds the live
+values of the variables CMake reads at configure time (`CC`, `CXXFLAGS`,
+`SDKROOT`, ...), which can differ from those the directory was configured
+under. `diagnostic.target`, the compiler's `-print-target-triple`, names the
+host OS rather than the deployment target. Only the listed variables are
+ever read, because the record is uploaded and the environment holds secrets.
+Each is recorded as its value, as `unset`, or as `""` when set but empty.
+
+A value no probe found is left out rather than written as "unknown", both
+here and in `runner_image.fields`, and readers take an absent key as
+unknown. `missing` names the required keys that were absent (the SDK pair is
+required on macOS), and an incomplete identity warns. A run outside GitHub
 Actions (the local mac lane) passes `--run-kind lane --run-id <id>`. The id
 is required, and the commit, tree and parent come from `--source-root`'s
-HEAD, so the gate and the lane compute the same identity with the same
-code. Outcomes
-come from ctest's JUnit report and attempts from its `LastTest.log`, which the
-test step keeps as `LastTest.full.log` because any later ctest call in the
-build directory replaces it. An alias `macos` job that ran no suite uploads a
-record with no tests and the reason. It is history for scoring reuse policies
-offline and decides nothing; a job that should carry one and does not warns
-`reuse-record NOT written`. The proxy is jobs carrying the artifact ÷
-completed `macos` jobs.
+HEAD. `dirty` records whether `git status --porcelain` was non-empty, since
+a dirty lane record did not test its commit. The gate and the lane compute
+all of this with the same code.
 
 The record hashes every registered test executable, not only those the job
 ran, so a fast-tier pull-request head's hashes are there for the merge
@@ -6733,6 +6740,38 @@ every build; they catch real regressions and do not care about the optimizer.
 > "probably the box" — which is exactly how a real bug gets dismissed.
 
 ---
+
+## The Shipyard macOS lane writes its own reuse records
+
+Live test reuse keys each executable against an earlier build's reuse record,
+and that record must come from a run on the same toolchain, so the local mac
+lane keeps its own. `[validation.default.overrides.macos]` sets
+`reuse_record = true`; Shipyard then exports a fresh `SHIPYARD_REUSE_RECORD_DIR`
+to each run's stages and files it in its host-local store afterwards, only when
+a parsing `job.json` was written (Shipyard's
+`docs/changed-surface-selection.md`, "Host-local reuse records"). The lane
+lists no GitHub credentials, so nothing is uploaded.
+
+- The test stage runs ctest through `tools/ci/lane_reuse_record.py test`, which
+  adds `--output-junit` into the record, keeps ctest's `LastTest.log`, and calls
+  `tools/ci/reuse_record.py write --run-kind lane` with the run id taken from
+  the directory's name and the same `--link-members --object-deps --codemodel
+  --inventory` flags `build.yml` uses. A bounded changed-surface plan is
+  recorded by `run_changed_surface_tests.py`, including the full run it falls
+  back to when a plan is refused.
+- Recording never changes a verdict. The stage exits with ctest's status; a
+  recorder failure, or a record directory that cannot be written, is a
+  warning (the tests still run, and a bounded plan still writes its result
+  receipt); and Shipyard's run log ends with one
+  `=== reuse-record: ... ===` line saying whether a record was kept.
+- The lane configures with `-DPULP_RECORD_LINK_MAPS=ON` and with Ninja: the
+  record reads per-object dependencies from Ninja's dependency log, which the
+  Makefiles generator does not keep. `tools/ci/require_build_generator.sh`
+  removes a build directory left on another generator before configure, since
+  CMake will not switch in place; the first run on such a worktree is a cold
+  build.
+- Cost: writing a record on a Debug, examples-on tree takes about 20 s and
+  7 MB, most of it hashing test binaries and projecting registrations.
 
 ## "Can this PR actually land?" — the two-detector wedge check
 

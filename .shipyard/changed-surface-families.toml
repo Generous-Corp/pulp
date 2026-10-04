@@ -3504,6 +3504,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b6154c02e795"
+paths = ["tools/scripts/test_unregistered_tests_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "unregistered-tests-check-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-4013d3169ffe"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
@@ -3928,6 +3955,34 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "trace-span-category-lint",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-c7f26aca41ae"
+paths = ["tools/scripts/unregistered_tests_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "unregistered-tests-check",
+  "unregistered-tests-check-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4583,6 +4638,7 @@ paths = [
   "tools/scripts/test_tools_registry_check.py",
   "tools/scripts/test_trace_span_category_lint.py",
   "tools/scripts/test_unbounded_wait_lint.py",
+  "tools/scripts/test_unregistered_tests_check.py",
   "tools/scripts/test_validate_gpu_audio_trace_captures.py",
   "tools/scripts/test_validate_hosts.py",
   "tools/scripts/test_validate_registry_extra.py",
@@ -4621,6 +4677,7 @@ paths = [
   "tools/scripts/token_coverage_check.py",
   "tools/scripts/token_key_check.py",
   "tools/scripts/trace_span_category_lint.py",
+  "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
@@ -5050,6 +5107,7 @@ paths = [
   "tools/scripts/test_tools_registry_check.py",
   "tools/scripts/test_trace_span_category_lint.py",
   "tools/scripts/test_unbounded_wait_lint.py",
+  "tools/scripts/test_unregistered_tests_check.py",
   "tools/scripts/test_validate_gpu_audio_trace_captures.py",
   "tools/scripts/test_validate_hosts.py",
   "tools/scripts/test_validate_registry_extra.py",
@@ -5088,6 +5146,7 @@ paths = [
   "tools/scripts/token_coverage_check.py",
   "tools/scripts/token_key_check.py",
   "tools/scripts/trace_span_category_lint.py",
+  "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
