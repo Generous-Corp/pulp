@@ -319,6 +319,7 @@ OUT="$(SHIM_LOG="$LOG" SHIM_PARTITION_FAIL=1 PATH="$SHIMBIN:$PATH" \
        env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH \
        bash "$DOCTOR" --quiet 2>&1)" || RC=$?
 { [ "$RC" -eq 1 ] && grep -q "set-key-partition-list failed" <<<"$OUT" \
+  && grep -q 'set-key-partition-list.*productsign:,productbuild:' "$LOG" \
   && ! grep -q '^codesign ' "$LOG"; } \
   && ok "partition-list failure stops before codesign" \
   || bad "partition failure reached codesign (rc=$RC)"$'\n'"$OUT"$'\n'"$(cat "$LOG")"
