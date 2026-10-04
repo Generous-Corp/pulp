@@ -463,6 +463,7 @@
       "pulp/host/signal_graph.hpp",
       "pulp/host/signal_graph_connection.hpp",
       "pulp/host/signal_graph_execution_snapshot.hpp",
+      "pulp/host/signal_graph_execution_status.hpp",
       "pulp/host/signal_graph_executor_routing.hpp",
       "pulp/host/signal_graph_node.hpp",
       "pulp/host/signal_graph_prepared_topology_edit.hpp",
