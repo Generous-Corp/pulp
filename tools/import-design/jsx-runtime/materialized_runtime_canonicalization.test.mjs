@@ -123,3 +123,13 @@ test('ignores unknown vendor roles', () => {
   assert.equal(result.assets.length, 1);
   assert.match(result.html, /src="mystery"/);
 });
+
+test('preserves vendor assets referenced outside script tags', () => {
+  const react = '/** @license React react.development.js */';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<link rel="preload" href="react"><script src="react"></script>',
+    assets: [vendorAsset('react', react, 'react')],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /href="react"/);
+});
