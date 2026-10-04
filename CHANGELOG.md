@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09042"></a>
+## [0.904.2] - 2026-10-04
+
+- release/version bump ([#9442](https://github.com/Generous-Corp/pulp/pull/9442))
+- codex/wave2f refresh 20261004 ([#9441](https://github.com/Generous-Corp/pulp/pull/9441))
+- codex/signal graph lifecycle 20261003 ([#9440](https://github.com/Generous-Corp/pulp/pull/9440))
+- codex/wave2d importer residual 20261003 ([#9436](https://github.com/Generous-Corp/pulp/pull/9436))
+- codex/wave2a governed 20261003 ([#9435](https://github.com/Generous-Corp/pulp/pull/9435))
+- fix/script inputs spawn drift ownership ([#9432](https://github.com/Generous-Corp/pulp/pull/9432))
+- release/version bump ([#9437](https://github.com/Generous-Corp/pulp/pull/9437))
+- feat/reuse record toolchain lane ([#9423](https://github.com/Generous-Corp/pulp/pull/9423))
+- codex/planning pointer neural 20261003 ([#9433](https://github.com/Generous-Corp/pulp/pull/9433))
+- ci/read audit fail on findings ([#9434](https://github.com/Generous-Corp/pulp/pull/9434))
+- ci/executable keys ([#9430](https://github.com/Generous-Corp/pulp/pull/9430))
+
 <a id="v09041"></a>
 ## [0.904.1] - 2026-10-03
 
@@ -9648,6 +9663,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.904.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.2
 [0.904.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.1
 [0.904.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.904.0
 [0.903.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.903.0
