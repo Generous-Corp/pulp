@@ -677,3 +677,16 @@ counters or an empty trace cannot substitute for actual records.
 
 See `docs/guides/gpu-audio-wavenet-trace.md` for the capture contract and current
 physical NAM measurement boundaries.
+
+## Traces from an out-of-process host, and prewarm proof
+
+A traced build reads `~/.config/pulp/trace-autostart` when `PULP_TRACE_PATH`
+is not in its environment (AUHostingService inherits none). A
+`PULP_TRACE_PATH` ending in `/` writes one file per process,
+`<process>-<pid>.pftrace`, so a host and its service never overwrite each
+other — load the service's file, not the host's, for the editor's spans. The
+background prewarm runs on its own thread, so key on the thread when proving
+it: `script_precompile` / `scripted_ui_prewarm` on the worker, and only
+`script_bytecode_read` (no `script_compile`) for the same script inside
+`editor_first_frame` on the main thread. Join `slice` → `thread_track` →
+`thread` (stable `utid`) rather than assuming one track per process.
