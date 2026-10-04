@@ -35,6 +35,31 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME mlx-named-model-harness-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
+
+    add_test(NAME vellum-boundary-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_boundary_lint.py")
+    add_test(NAME vellum-boundary-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_boundary_lint.py")
+    set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
+    # Keep one checked-in, license-free source fixture on the same instrument
+    # as the importer output gate. The companion unittest plants every lint
+    # class and must turn red, so a vacuous clean fixture cannot make this gate
+    # appear healthy.
+    add_test(NAME pulp-ui-clean-output-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/clean_output_lint.py"
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/fixtures/clean")
+    add_test(NAME pulp-ui-clean-output-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/test_clean_output_lint.py")
+    set_tests_properties(pulp-ui-clean-output-lint
+        pulp-ui-clean-output-lint-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")

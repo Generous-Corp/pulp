@@ -131,6 +131,7 @@ NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
 VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
 VELLUM_BOUNDARY="$ROOT/tools/scripts/vellum_boundary_lint.py"
+CLEAN_OUTPUT_LINT="$ROOT/tools/ui-build/lint/clean_output_lint.py"
 CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -243,6 +244,18 @@ if [ -f "$VELLUM_BOUNDARY" ]; then
     echo "" >&2
     echo "▸ Vellum extractable-package boundary" >&2
     if ! "$PYTHON" "$VELLUM_BOUNDARY"; then
+        fail=1
+    fi
+fi
+
+# ── 0e. clean-output source fixture ────────────────────────────────────────
+# Exercise the reusable importer-output lint in the cheap gate. The full
+# planted-control unittest is registered with CTest; this gate keeps a stable
+# clean fixture from silently disappearing or becoming malformed.
+if [ -f "$CLEAN_OUTPUT_LINT" ] && [ -d "$ROOT/tools/ui-build/lint/fixtures/clean" ]; then
+    echo "" >&2
+    echo "▸ clean-output source fixture" >&2
+    if ! "$PYTHON" "$CLEAN_OUTPUT_LINT" "$ROOT/tools/ui-build/lint/fixtures/clean"; then
         fail=1
     fi
 fi
