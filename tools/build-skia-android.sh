@@ -25,7 +25,25 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PULP_ROOT="$(dirname "$SCRIPT_DIR")"
 SKIA_SRC="$PULP_ROOT/external/skia-src"
 SKIA_OUTPUT="$PULP_ROOT/external/skia-build"
-SKIA_BRANCH="${SKIA_BRANCH:-chrome/m153}"
+MANIFEST="$PULP_ROOT/tools/deps/manifest.json"
+
+# Android must consume the same immutable Skia/Dawn provider pair as the
+# desktop builder. Environment overrides remain useful for development, but
+# the manifest is the default authority and every build is checked against it.
+read_manifest_pin() {
+    python3 - "$MANIFEST" "$1" <<'PY'
+import json
+import sys
+
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+skia = next(item for item in manifest["dependencies"] if item["name"] == "Skia")
+print(skia["determinism"][sys.argv[2]])
+PY
+}
+
+SKIA_BRANCH="${SKIA_BRANCH:-$(read_manifest_pin skia_branch)}"
+SKIA_EXPECTED_COMMIT="${SKIA_EXPECTED_COMMIT:-$(read_manifest_pin skia_commit)}"
+DAWN_EXPECTED_COMMIT="${DAWN_EXPECTED_COMMIT:-$(read_manifest_pin built_dawn)}"
 
 # ── ABI selection ────────────────────────────────────────────────────────
 ABI_ARG="${1:-arm64}"
@@ -55,6 +73,8 @@ fi
 
 echo "=== Pulp Skia Android Builder ==="
 echo "Skia branch: $SKIA_BRANCH"
+echo "Skia commit: $SKIA_EXPECTED_COMMIT"
+echo "Dawn commit: $DAWN_EXPECTED_COMMIT"
 echo "NDK: $ANDROID_NDK_HOME"
 echo "ABIs: ${ABIS[*]}"
 echo ""
@@ -62,17 +82,48 @@ echo ""
 # ── Step 1: Get Skia source ──────────────────────────────────────────────
 if [ ! -d "$SKIA_SRC/.git" ]; then
     echo "Cloning Skia..."
-    git clone --depth 1 --branch "$SKIA_BRANCH" https://skia.googlesource.com/skia.git "$SKIA_SRC"
+    git clone --no-checkout https://skia.googlesource.com/skia.git "$SKIA_SRC"
 else
-    echo "Skia source exists, syncing to $SKIA_BRANCH..."
-    git -C "$SKIA_SRC" fetch --depth 1 origin "$SKIA_BRANCH"
-    git -C "$SKIA_SRC" checkout FETCH_HEAD
+    echo "Skia source exists, refreshing origin..."
+    git -C "$SKIA_SRC" remote set-url origin https://skia.googlesource.com/skia.git
+fi
+
+echo "Fetching pinned Skia revision..."
+git -C "$SKIA_SRC" fetch --depth 1 origin "$SKIA_EXPECTED_COMMIT"
+git -C "$SKIA_SRC" checkout --detach "$SKIA_EXPECTED_COMMIT"
+ACTUAL_SKIA_COMMIT="$(git -C "$SKIA_SRC" rev-parse HEAD)"
+if [ "$ACTUAL_SKIA_COMMIT" != "$SKIA_EXPECTED_COMMIT" ]; then
+    echo "Error: checked out Skia $ACTUAL_SKIA_COMMIT, expected $SKIA_EXPECTED_COMMIT" >&2
+    exit 1
+fi
+
+# The generated public header must resolve against the same source tree. This
+# catches stale m149/m151 artifacts before an expensive Android configure.
+SKUNICODE_HEADER="$SKIA_SRC/modules/skunicode/include/SkUnicode.h"
+if grep -q 'src/base/SkUTF.h' "$SKUNICODE_HEADER"; then
+    echo "Error: pinned Skia still references removed src/base/SkUTF.h" >&2
+    exit 1
+fi
+if ! grep -q 'src/core/SkUTF.h' "$SKUNICODE_HEADER"; then
+    echo "Error: unexpected SkUnicode.h provenance in pinned Skia checkout" >&2
+    exit 1
 fi
 
 # ── Step 2: Sync dependencies ────────────────────────────────────────────
 echo "Syncing Skia dependencies..."
 cd "$SKIA_SRC"
 python3 tools/git-sync-deps
+
+DAWN_SRC="$SKIA_SRC/third_party/externals/dawn"
+if [ ! -d "$DAWN_SRC/.git" ]; then
+    echo "Error: Dawn checkout missing after git-sync-deps" >&2
+    exit 1
+fi
+ACTUAL_DAWN_COMMIT="$(git -C "$DAWN_SRC" rev-parse HEAD)"
+if [ "$ACTUAL_DAWN_COMMIT" != "$DAWN_EXPECTED_COMMIT" ]; then
+    echo "Error: Dawn checkout $ACTUAL_DAWN_COMMIT does not match manifest pin $DAWN_EXPECTED_COMMIT" >&2
+    exit 1
+fi
 
 # ── Step 3-5: Configure, build, and stage each requested ABI ──────────────
 for ABI in "${ABIS[@]}"; do
