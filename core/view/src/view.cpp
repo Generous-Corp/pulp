@@ -379,6 +379,13 @@ void View::set_subtree_cached(bool v) {
 }
 
 void View::invalidate_subtree_caches_up() {
+    // A paint mutation that is not, by itself, a repaint request: whoever
+    // owes the host a repaint for it must not assume someone else marked it.
+    unmarked_paint_mutation_count_.fetch_add(1, std::memory_order_relaxed);
+    stale_subtree_caches_up();
+}
+
+void View::stale_subtree_caches_up() {
     // Fast path: nobody caches anywhere → nothing to invalidate. One relaxed
     // load, no tree walk.
     if (subtree_cache_enabled_count().load(std::memory_order_relaxed) == 0)
@@ -682,6 +689,8 @@ View* View::focus_prev(View& root, View* current) {
 
 std::atomic<std::uint64_t> View::layout_generation_{1};
 std::atomic<std::uint64_t> View::layout_pass_count_{0};
+std::atomic<std::uint64_t> View::damage_request_count_{0};
+std::atomic<std::uint64_t> View::unmarked_paint_mutation_count_{0};
 
 std::uint64_t View::tree_layout_generation() const noexcept {
     auto* root = this;
@@ -2400,12 +2409,13 @@ float View::scalar_value() const {
 
 void View::request_repaint() {
     PULP_TRACE_SCOPE_NAMED("render", "view_repaint_request");
+    damage_request_count_.fetch_add(1, std::memory_order_relaxed);
     // A repaint request is the canonical "my content changed" signal, so it is
     // also where the subtree scene cache stales: clear this view and every
     // cached ancestor (their recordings include this view). Cheap no-op when no
     // view anywhere caches. Covers widget mutations, set_theme(), and JS-bridge
     // setters, all of which funnel through here.
-    invalidate_subtree_caches_up();
+    stale_subtree_caches_up();
     // set_window_host / set_plugin_view_host propagate to children on
     // add_child, so any attached view sees its own host pointer and we
     // never need to walk the parent chain. No host attached: silent
@@ -2449,7 +2459,7 @@ void View::request_repaint(const Rect& local_dirty) {
     // above). Done here too because the bounded-success path below calls
     // mark_dirty() directly rather than request_repaint(), so it would not
     // otherwise reach the invalidation.
-    invalidate_subtree_caches_up();
+    stale_subtree_caches_up();
     // Bounded invalidation needs a host that can accumulate a sub-region.
     // Both hosts can now: WindowHost via mark_dirty(Rect), PluginViewHost via
     // mark_dirty_region(Rect) (both back onto PendingDamage). With no host at
@@ -2462,38 +2472,84 @@ void View::request_repaint(const Rect& local_dirty) {
         request_repaint();
         return;
     }
-    // Map local_dirty (this view's local space) to root/window space by summing
-    // each ancestor's origin (paint applies canvas.translate(bounds_.x,
-    // bounds_.y) descending the tree). The plain offset only holds when nothing
-    // on the chain moves or spreads this view's pixels past that mapping, so
-    // conservatively escalate to a full repaint when:
-    //   - the view or an ancestor carries a render transform (affine), or
-    //   - the view or an ancestor carries a pixel-spreading filter (blur), or
-    //   - an ancestor translates its children's paint (a scrolled ScrollView),
-    //     which the offset walk cannot model.
-    // Escalating never under-invalidates; it only forgoes the optimization.
-    float off_x = 0.0f, off_y = 0.0f;
+    // Map local_dirty (this view's local space) to root/window space the way
+    // paint does going down the tree: each view's own render transforms
+    // (mapped exactly, as the axis-aligned bounds of the transformed rect),
+    // then its bounds origin, then the parent's per-child paint offset (a
+    // scrolled ScrollView's -scroll, a sticky child's pin). Only a
+    // pixel-spreading filter on the chain escalates to a full repaint: its
+    // output reaches past any mapped box. Mapping instead of escalating is
+    // what keeps a control under a design-viewport scale -- or inside a
+    // scroller -- from repainting the whole surface on every value tick.
+    Rect mapped = local_dirty;
+    damage_request_count_.fetch_add(1, std::memory_order_relaxed);
     for (const View* v = this; v; v = v->parent()) {
-        if (v->has_render_transform() || v->has_filter_effect()) {
+        if (v->has_filter_effect()) {
             request_repaint();
             return;
         }
-        // Child-paint offsets (scroll) come from ancestors, not from this view
-        // painting itself; a container's own offset does not move its own box.
-        if (v != this && v->applies_child_paint_offset()) {
-            request_repaint();
-            return;
+        if (v->has_render_transform()) mapped = v->map_rect_through_own_transform(mapped);
+        mapped.x += v->bounds_.x;
+        mapped.y += v->bounds_.y;
+        if (const View* parent = v->parent();
+            parent != nullptr && parent->applies_child_paint_offset()) {
+            const Point offset = parent->child_paint_offset(*v);
+            mapped.x += offset.x;
+            mapped.y += offset.y;
         }
-        off_x += v->bounds_.x;
-        off_y += v->bounds_.y;
     }
-    const Rect root_rect{off_x + local_dirty.x, off_y + local_dirty.y,
-                         local_dirty.width, local_dirty.height};
+    if (!std::isfinite(mapped.x) || !std::isfinite(mapped.y) ||
+        !std::isfinite(mapped.width) || !std::isfinite(mapped.height)) {
+        request_repaint();
+        return;
+    }
+    const Rect root_rect = mapped;
+    PULP_TRACE_SCOPE_NAMED_ARGS("render", "view_repaint_bounded",
+                                "w", static_cast<int64_t>(std::ceil(root_rect.width)),
+                                "h", static_cast<int64_t>(std::ceil(root_rect.height)));
     if (window_host_) {
         window_host_->mark_dirty(root_rect);
     } else {
         plugin_view_host_->mark_dirty_region(root_rect);
     }
+}
+
+Rect View::map_rect_through_own_transform(const Rect& local) const {
+    // Paint applies the scalar transform first and the affine matrix second
+    // (apply_canvas_transforms), so a point in this view's painted space maps
+    // to its box space as scalar(matrix(p)).
+    const float corners[4][2] = {{local.x, local.y},
+                                 {local.x + local.width, local.y},
+                                 {local.x, local.y + local.height},
+                                 {local.x + local.width, local.y + local.height}};
+    const bool scalar = scale_ != 1.0f || rotation_deg_ != 0.0f ||
+                        translate_x_ != 0.0f || translate_y_ != 0.0f;
+    const float sox = bounds_.width * origin_x_;
+    const float soy = bounds_.height * origin_y_;
+    const float mox = origin_explicit_ ? sox : 0.0f;
+    const float moy = origin_explicit_ ? soy : 0.0f;
+    const float radians = rotation_deg_ * 3.14159265f / 180.0f;
+    const float cs = std::cos(radians), sn = std::sin(radians);
+    float x0 = std::numeric_limits<float>::max(), y0 = x0;
+    float x1 = std::numeric_limits<float>::lowest(), y1 = x1;
+    for (const auto& c : corners) {
+        float x = c[0], y = c[1];
+        if (has_transform_matrix_) {
+            const float px = x - mox, py = y - moy;
+            x = mox + transform_matrix_a_ * px + transform_matrix_c_ * py + transform_matrix_e_;
+            y = moy + transform_matrix_b_ * px + transform_matrix_d_ * py + transform_matrix_f_;
+        }
+        if (scalar) {
+            const float px = (x - sox) * scale_, py = (y - soy) * scale_;
+            x = sox + translate_x_ + cs * px - sn * py;
+            y = soy + translate_y_ + sn * px + cs * py;
+        }
+        x0 = std::min(x0, x); y0 = std::min(y0, y);
+        x1 = std::max(x1, x); y1 = std::max(y1, y);
+    }
+    // One pixel more on every side: a scaled or rotated edge anti-aliases
+    // into the pixel past its exact bound.
+    return {x0 - 1.0f, y0 - 1.0f, (x1 - x0) + 2.0f, (y1 - y0) + 2.0f};
 }
 
 bool View::start_file_drag(const FileDragRequest& request) {

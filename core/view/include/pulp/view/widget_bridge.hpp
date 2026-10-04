@@ -382,6 +382,17 @@ public:
     // but never schedule a second paint.
     void set_repaint_callback(std::function<void()> cb);
 
+    /// What the tree had marked when a batch of script work started, so the
+    /// bridge can tell whether that work already asked for exactly the
+    /// repaints it needs (see View::damage_request_count()).
+    struct DamageLedger {
+        std::uint64_t damage_requests = 0;
+        std::uint64_t unmarked_mutations = 0;
+        std::uint64_t layout_generation = 0;
+        bool self_damaged(const View& root) const;
+    };
+    DamageLedger damage_ledger() const;
+
     // Override the AI CLI command used by the design tool chat.
     void set_ai_cli_command(std::string cmd);
 

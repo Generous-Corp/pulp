@@ -7,6 +7,7 @@
 // that a bounded update is a small fraction of the full surface.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -144,20 +145,26 @@ TEST_CASE("no-arg request_repaint (e.g. theme change) forces a full repaint",
     REQUIRE(host.pending_repaint_is_full());
 }
 
-TEST_CASE("a render transform on the view or an ancestor falls back to full repaint",
+TEST_CASE("a render transform on an ancestor maps the bounded rect through it",
           "[view][partial-render]") {
     TestWindowHost host;
     View* meter = nullptr;
     auto root = make_root_with(meter, {0, 0, 400, 300}, {10, 20, 30, 120});
-    // A transform anywhere on the ancestor chain makes the plain offset mapping
-    // wrong, so bounded invalidation must escalate to full.
+    // The transform moves where the meter paints; the bounded rect must follow
+    // it (and stay bounded) rather than target the untransformed position.
     root->set_translate(5.0f, 0.0f);
     root->set_window_host(&host);
     host.clear_pending_dirty();
 
     meter->request_repaint(meter->local_bounds());
 
-    REQUIRE(host.pending_repaint_is_full());
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    const auto b = host.pending_dirty_bounds();
+    // (10, 20, 30, 120) + (5, 0), padded one pixel each side for anti-aliasing.
+    CHECK(b.x == Catch::Approx(14.0f));
+    CHECK(b.y == Catch::Approx(19.0f));
+    CHECK(b.width == Catch::Approx(32.0f));
+    CHECK(b.height == Catch::Approx(122.0f));
 }
 
 TEST_CASE("an empty dirty rect escalates to a full repaint", "[view][partial-render]") {
@@ -186,11 +193,12 @@ TEST_CASE("a full mark this frame is sticky against a later bounded mark",
     REQUIRE(host.pending_repaint_is_full());  // never shrinks a full repaint
 }
 
-TEST_CASE("a scrolled ScrollView ancestor escalates a child to full repaint",
+TEST_CASE("a scrolled ScrollView ancestor maps a child's bounded rect through the scroll",
           "[view][partial-render]") {
-    // ScrollView::paint_all translates children by (-scroll_x, -scroll_y), so a
+    // ScrollView paints its children translated by (-scroll_x, -scroll_y), so a
     // scrolled sub-view no longer sits at a plain bounds offset. The bounded
-    // path must escalate to full rather than target the unscrolled root rect.
+    // path maps through child_paint_offset() rather than target the unscrolled
+    // root rect.
     TestWindowHost host;
     auto scroll = std::make_unique<ScrollView>();
     scroll->set_bounds({0, 0, 400, 300});
@@ -213,7 +221,13 @@ TEST_CASE("a scrolled ScrollView ancestor escalates a child to full repaint",
 
     host.clear_pending_dirty();
     meter->request_repaint(meter->local_bounds());
-    REQUIRE(host.pending_repaint_is_full());  // escalated: never the wrong rect
+    // Mapped through the scroll: the rect the child paints at, never the
+    // unscrolled one.
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    const auto b = host.pending_dirty_bounds();
+    CHECK(b.x == Catch::Approx(10.0f));
+    CHECK(b.y == Catch::Approx(-20.0f));
+    CHECK(b.height == Catch::Approx(120.0f));
 }
 
 TEST_CASE("a pixel-spreading filter on an ancestor escalates to full repaint",

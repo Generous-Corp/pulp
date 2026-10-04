@@ -457,3 +457,85 @@ TEST_CASE("A redrawn CanvasWidget requests a repaint of its own box only",
     CHECK(d.bounds.width <= cb.width + 4.0f);
     CHECK(d.bounds.height <= cb.height + 4.0f);
 }
+
+// ── Bounded repaint maps through transforms and scroll offsets ──────────────
+
+namespace {
+
+struct DamageHost final : public PluginViewHost {
+    NativeViewHandle native_handle() override { return {}; }
+    void attach_to_parent(NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(std::uint32_t, std::uint32_t) override {}
+    Size get_size() const override { return {}; }
+};
+
+// A 1000 x 1000 root holding `wrapper` holding a 20 x 20 knob at (100, 100).
+struct TransformRig {
+    std::unique_ptr<View> root = std::make_unique<View>();
+    View* wrapper = nullptr;
+    Knob* knob = nullptr;
+    DamageHost host;
+    TransformRig() {
+        // Bounds set directly and no layout pass: the mapping is the subject.
+        root->set_bounds({0, 0, 1000, 1000});
+        auto w = std::make_unique<View>();
+        wrapper = w.get();
+        w->set_bounds({0, 0, 1000, 1000});
+        auto k = std::make_unique<Knob>();
+        knob = k.get();
+        k->set_bounds({100, 100, 20, 20});
+        w->add_child(std::move(k));
+        root->add_child(std::move(w));
+        root->set_plugin_view_host(&host);
+    }
+    ~TransformRig() { root->set_plugin_view_host(nullptr); }
+};
+
+}  // namespace
+
+TEST_CASE("A bounded repaint under a scaled ancestor maps through the scale",
+          "[view][widgets][partial-repaint][transform]") {
+    TransformRig rig;
+    // A design-viewport style scale on the wrapper, about its top-left.
+    rig.wrapper->set_transform_matrix(0.5f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f);
+    rig.host.clear_pending_dirty();
+    rig.knob->set_value(0.9f);
+    REQUIRE_FALSE(rig.host.pending_repaint_is_full());
+    REQUIRE(rig.host.has_pending_dirty_bounds());
+    const auto b = rig.host.pending_dirty_bounds();
+    // The knob paints at (100, 100) x 0.5 = (50, 50), 10 x 10, plus its halo.
+    CHECK(b.x <= 50.0f);
+    CHECK(b.y <= 50.0f);
+    CHECK(b.x + b.width >= 60.0f);
+    CHECK(b.y + b.height >= 60.0f);
+    CHECK(b.width < 30.0f);
+    CHECK(b.x > 40.0f);  // not the unscaled (100, 100) position
+}
+
+TEST_CASE("A bounded repaint under a pixel-spreading filter stays whole-surface",
+          "[view][widgets][partial-repaint][transform]") {
+    TransformRig rig;
+    rig.wrapper->set_filter_blur(4.0f);
+    rig.host.clear_pending_dirty();
+    rig.knob->set_value(0.9f);
+    CHECK(rig.host.pending_repaint_is_full());
+}
+
+TEST_CASE("A paint-only setter is counted as an unmarked paint mutation",
+          "[view][widgets][partial-repaint]") {
+    // The script bridge skips its blanket whole-surface request only when the
+    // work left no unmarked paint change; a setter that changes paint without
+    // requesting a repaint must therefore be visible to that count.
+    View v;
+    const auto before = View::unmarked_paint_mutation_count();
+    v.set_opacity(0.5f);
+    v.set_background_color(pulp::canvas::Color::rgba8(10, 20, 30));
+    CHECK(View::unmarked_paint_mutation_count() >= before + 2);
+    const auto marks = View::damage_request_count();
+    const auto unmarked = View::unmarked_paint_mutation_count();
+    v.request_repaint();
+    CHECK(View::damage_request_count() == marks + 1);
+    CHECK(View::unmarked_paint_mutation_count() == unmarked);
+}
