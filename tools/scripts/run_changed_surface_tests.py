@@ -1002,9 +1002,10 @@ def clear_build_sentinel(build_dir: Path) -> int:
     ).returncode
 
 
-# The configured [validation.default] build and test stages, which a keyed
-# full run execs in place of those stages. The test stage's build_dir_lock.py
-# prefix is dropped because the runner holds that lock for the whole run;
+# The macOS lane's configured build and test stages, which a keyed full run
+# execs in place of those stages. The test stage's build_dir_lock.py prefix is
+# dropped because the runner holds that lock for the whole run, and its
+# lane_reuse_record.py wrapper because the runner records the suite itself;
 # test_keyed_full_execs_the_configured_stages compares these to the config.
 STAGE_ENV = {"PULP_BUILD_CLASS": "background"}
 STAGE_TEST_FLAGS = ("--output-on-failure", "--repeat", "until-pass:2", "--exclude-regex",
@@ -1337,7 +1338,11 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
     args._changed_surface_full_authority_started = True
     env = {**os.environ, **STAGE_ENV}
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
-        junit = Path(directory) / "full-junit.xml"
+        # The suite's report goes into the reuse record when Shipyard asked
+        # for one, as the configured test stage's wrapper would put it.
+        reuse_out = lane_reuse_record.record_dir()
+        recorded = lane_reuse_record.junit_path(reuse_out, "full") if reuse_out is not None else None
+        junit = recorded or Path(directory) / "full-junit.xml"
         build_started = time.monotonic()
         build_result = subprocess.run(build_argv(build_dir), shell=False, env=env).returncode
         if build_result == 0:
@@ -1347,8 +1352,13 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
         test_seconds: float | None = None
         if build_result == 0:
             test_started = time.monotonic()
+            started_epoch = int(time.time())
             test_result = subprocess.run(stage_test_argv(build_dir, junit), shell=False, env=env).returncode
             test_seconds = time.monotonic() - test_started
+            if recorded is not None:
+                attempts = lane_reuse_record.keep_last_test_log(build_dir, reuse_out, "full")
+                lane_reuse_record.record(build_dir, REPO_ROOT, [("full", recorded, attempts, True)],
+                                         started_epoch)
         measured = false_skips(result_dir, junit) if derived["status"] == "derived" else None
         try:
             inventory_names = [t.get("name") for t in ctest_payload(build_dir)["tests"]]

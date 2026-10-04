@@ -1913,7 +1913,11 @@ class KeyedFullTest(unittest.TestCase):
 
     def test_keyed_full_execs_the_configured_stages(self) -> None:
         config = tomllib.loads((runner.REPO_ROOT / ".shipyard/config.toml").read_text(encoding="utf-8"))
-        stages = config["validation"]["default"]
+        default = config["validation"]["default"]
+        macos = default["overrides"]["macos"]
+        # The mac lane runs the macOS override, which keeps the default build.
+        self.assertNotIn("build", macos)
+        stages = {"build": default["build"], "test": macos["test"]}
         build, clear = (shlex.split(part) for part in stages["build"].split("&&"))
         env = {k: v for k, v in runner.STAGE_ENV.items()}
         self.assertEqual(build[0], "PULP_BUILD_CLASS=background")
@@ -1925,11 +1929,16 @@ class KeyedFullTest(unittest.TestCase):
         test = shlex.split(stages["test"])
         lock = ["PULP_BUILD_CLASS=background", "python3", "tools/ci/build_dir_lock.py", "--build-dir", "build", "--"]
         self.assertEqual(test[:len(lock)], lock)  # the runner already holds this lock
-        self.assertEqual(test[len(lock):], relative(runner.stage_test_argv(Path("build"))))
+        record = ["python3", "tools/ci/lane_reuse_record.py", "test", "--build-dir", "build", "--"]
+        inner = test[len(lock):]
+        self.assertEqual(inner[:len(record)], record)  # the runner records the suite itself
+        self.assertEqual(inner[len(record):], relative(runner.stage_test_argv(Path("build"))))
         self.assertEqual(runner.stage_test_argv(Path("build"), Path("/j"))[-2:], ["--output-junit", "/j"])
 
-    def run_full(self, derived_ok: bool = True, build_rc: int = 0, failing: tuple = ()) -> tuple:
+    def run_full(self, derived_ok: bool = True, build_rc: int = 0, failing: tuple = (),
+                 record: bool = False) -> tuple:
         calls: list = []
+        self.recorded: list = []
         with tempfile.TemporaryDirectory() as directory:
             build, results = Path(directory) / "build", Path(directory) / "results"
             build.mkdir()
@@ -1959,7 +1968,16 @@ class KeyedFullTest(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0)
 
             args = mock.Mock(selection_receipt_sha256="0" * 64)
-            with (mock.patch.dict(os.environ, {"SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results)}),
+            env = {"SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results)}
+            store = Path(directory) / "store"
+            if record:
+                env["SHIPYARD_REUSE_RECORD_DIR"] = str(store)
+
+            def recorder(build_dir, source_root, suites, not_before, build_outcome="success"):
+                self.recorded.append((suites, Path(suites[0][1]).is_file()))
+                return 0
+            with (mock.patch.dict(os.environ, env),
+                  mock.patch.object(runner.lane_reuse_record, "record", side_effect=recorder),
                   mock.patch.object(runner, "derive_executable_reuse", side_effect=derive),
                   mock.patch.object(runner.subprocess, "run", side_effect=execute),
                   mock.patch.object(runner, "ctest_payload", return_value={"tests": [{"name": "a1"}, {"name": "b1"}]})):
@@ -1994,6 +2012,19 @@ class KeyedFullTest(unittest.TestCase):
         self.assertEqual((receipt["selected_tests_digest"], receipt["selected_logical_count"],
                           receipt["selected_build_targets_digest"], receipt["selected_build_target_count"]),
                          ("", 0, None, 0))
+
+    def test_the_full_suite_is_written_into_the_reuse_record(self) -> None:
+        code, calls, receipt = self.run_full(failing=("a2",), record=True)
+        self.assertEqual(code, 8)
+        junit = calls[-1][0][calls[-1][0].index("--output-junit") + 1]
+        self.assertTrue(junit.endswith("store/suites/full/ctest.junit.xml"), junit)
+        [(suites, existed)] = self.recorded
+        self.assertEqual([(name, str(path), repeat) for name, path, _, repeat in suites],
+                         [("full", junit, True)])
+        self.assertTrue(existed)
+        self.assertEqual(receipt["executable_reuse"]["false_skips"], ["a2"])  # read from the record's report
+        self.run_full()
+        self.assertEqual(self.recorded, [])  # no record asked for, none written
 
     def test_a_failed_derivation_still_runs_the_full_suite(self) -> None:
         code, calls, receipt = self.run_full(derived_ok=False)
