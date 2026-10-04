@@ -290,6 +290,18 @@ narrow rather than widening it to any `default` line. The shell-out assertion in
 `test_cli_shellout_pr.cpp` reads the checkout's real config, so it moves with
 `.shipyard/config.toml`: making `mac` default again fails that test on purpose.
 
+### The Shipyard pin is a floor, checked in two CLIs
+
+`pulp pr`'s Shipyard guard and `pulp status`'s `[pin mismatch]` both live
+twice: in C++ (`shipyard_pin_accepts` in `tools/cli/cli_sdk.cpp`, used by
+`cmd_pr.cpp` and `cmd_misc.cpp`) and in Rust (`pin_accepts` in
+`experimental/pulp-rs/src/cmd/pr.rs`, used by `pr.rs` and `orchestrate.rs`).
+Change the rule in both, with both tests (`pulp-test-cli-shipyard-pin` and
+`the_pin_is_a_floor_within_its_major`). The rule: installed at or above the
+pin within the same major passes; anything that does not parse as
+`[v]MAJOR.MINOR.PATCH` must equal the pin exactly. An exact-equality check
+breaks `pulp pr` on every host each time the fleet rolls out a release.
+
 ### A CLI shell-out suite's build edge lives in `tools/cli/CMakeLists.txt`
 
 `add_subdirectory(test)` runs before `add_subdirectory(tools/cli)`, so a

@@ -98,6 +98,12 @@ bool is_valid_pr_workflow(const std::string& workflow);
 std::string normalize_pr_workflow(std::string workflow);
 PrWorkflowSelection resolve_pr_workflow(const std::string& cli_override = {});
 std::string read_pinned_shipyard_version(const fs::path& root);
+
+// Whether an installed Shipyard satisfies the pin. The pin is a floor: any
+// release at or above it within the same major passes; one below it, or
+// under another major, does not. A version that does not parse as
+// `[v]MAJOR.MINOR.PATCH` must equal the pin exactly.
+bool shipyard_pin_accepts(const std::string& pinned, const std::string& installed);
 // Names of `[targets.<name>]` tables in `.shipyard/config.toml` that set
 // `default = false`: Shipyard does not run them on a plain `shipyard pr`.
 std::vector<std::string> read_opt_in_shipyard_targets(const fs::path& root);
