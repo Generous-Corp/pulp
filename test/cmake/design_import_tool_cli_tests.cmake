@@ -130,6 +130,13 @@ if(_PULP_NODE_FOR_TESTS)
         set_tests_properties(pulp-materialized-runtime-node-dependencies PROPERTIES
             TIMEOUT 60
             LABELS "parser-import;browser-capture;node")
+        add_test(NAME pulp-materialized-runtime-conformance
+                 COMMAND ${_PULP_NODE_FOR_TESTS}
+                         ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs
+                         --json)
+        set_tests_properties(pulp-materialized-runtime-conformance PROPERTIES
+            TIMEOUT 30
+            LABELS "parser-import;browser-capture;node;conformance")
     endif()
 endif()
 

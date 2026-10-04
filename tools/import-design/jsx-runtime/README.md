@@ -83,3 +83,19 @@ Per Codex high-reasoning consult (2026-05-17):
 > settling complexity. Embedded esbuild-wasm/sucrase is the right long-term
 > answer if "no Node required" becomes a product requirement, but it's not
 > the smallest first PR.
+
+## Canonicalization conformance probe
+
+The reusable WP-0 probe runs a representative messy materialized document through
+canonicalization repeatedly, reports a content digest and median elapsed time,
+and exercises a planted vendor-tag negative control:
+
+```bash
+node materialized_runtime_conformance.mjs --json
+```
+
+The probe fails if repeated outputs differ byte-for-byte, if the pinned fixture
+digest changes, if browser-only payloads survive, or if the negative control is
+not rejected. CTest registers it as
+`pulp-materialized-runtime-conformance` when the locked Node dependencies are
+available.
