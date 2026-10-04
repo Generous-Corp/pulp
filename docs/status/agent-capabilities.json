@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 68,
+  "manifest_revision": 69,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -14572,6 +14572,7 @@
               "process(const SampleType* const* in, SampleType* const* out, int num_samples, Fn&& on_frames)",
               "reset()",
               "latency_samples()",
+              "first_frame_start()",
               "fft_size()",
               "analysis_hop()",
               "num_bins()",

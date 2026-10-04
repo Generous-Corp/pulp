@@ -173,6 +173,9 @@ TEST_CASE("Spectral morph keeps DC and Nyquist real through frame synthesis",
     config.fft_size = fft_size;
     config.analysis_hop = 64;
     config.max_synthesis_hop = 64;
+    // Synthesis is driven directly at stream position 0, so the frame grid is
+    // anchored there rather than starting before the stream.
+    config.full_overlap_stream_start = false;
     pulp::signal::SpectralFrameEngine engine;
     engine.prepare(config);
     engine.synthesize_frame(op, 64);

@@ -1559,20 +1559,13 @@ bool DawnSharedIoProvider::prepare_convolution_program(
             plan->window = pipeline(kernels[1].c_str());
             plan->ola = pipeline(kernels[2].c_str());
             plan->output = pipeline(kernels[3].c_str());
-            // Mutable history + OLA + norm, followed by immutable window/floor.
-            const auto n = spec.fft_size, h = spec.spectral_hop;
+            // Mutable history + OLA + norm, followed by the immutable window.
+            const auto n = spec.fft_size;
             const auto window =
                 signal::WindowFunction::generate(n, signal::WindowFunction::Type::hann);
             const auto window_offset = 3u * n * spec.channels + 2u * n;
-            std::vector<float> initial(window_offset + n + 1u, 0.0f);
+            std::vector<float> initial(window_offset + n, 0.0f);
             std::copy(window.begin(), window.end(), initial.begin() + window_offset);
-            double steady = 0;
-            for (int j = -int(n / h) - 1; j <= int(n / h) + 1; ++j) {
-                const int index = int(n) - j * int(h) - int(n / 2);
-                if (index >= 0 && index < int(n))
-                    steady += double(window[index]) * window[index];
-            }
-            initial.back() = std::max(float(steady) * 0.25f, 1e-9f);
             plan->spectral_state = make_buffer(initial.size() * sizeof(float), storage);
             if (!plan->append || !plan->window || !plan->ola || !plan->output ||
                 !plan->spectral_state)
