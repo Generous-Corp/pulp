@@ -9,7 +9,8 @@ function nativeVendorKind(asset) {
   // Vendor classification is an explicit capture/schema fact. Content-only
   // marker matching can delete authored assets that happen to contain a
   // license string or Babel-like text.
-  return typeof asset?.vendor_kind === 'string' ? asset.vendor_kind : '';
+  const kind = asset?.vendor_kind;
+  return kind === 'react' || kind === 'react-dom' || kind === 'babel' ? kind : '';
 }
 
 function tagEnd(html, start) {
@@ -129,13 +130,25 @@ export function canonicalizeMaterializedRuntimeDocument(document) {
   // Babel is removable only after every JSX script has become ordinary JS.
   // React/ReactDOM are always redundant because the wrapper installs and
   // preserves the host reconciler before runtime import.
-  const removableIds = new Set([...removable].filter(([, kind]) =>
-    kind !== 'babel' || babelCount > 0).map(([id]) => id));
+  const references = new Map();
+  rewriteScripts(html, ({ whole, openTag, source }) => {
+    const src = attribute(openTag, 'src')?.value;
+    if (src !== undefined) {
+      const list = references.get(src) || [];
+      list.push(source.trim() === '');
+      references.set(src, list);
+    }
+    return whole;
+  });
+  const removableIds = new Set([...removable].filter(([id, kind]) =>
+    (kind !== 'babel' || babelCount > 0) &&
+    (references.get(id)?.length ?? 0) > 0 &&
+    references.get(id).every(Boolean)).map(([id]) => id));
   html = rewriteScripts(html, ({ whole, openTag, source }) => {
     const src = attribute(openTag, 'src')?.value;
-    // Require an exact, empty script reference. Query strings, path variants,
-    // and authored script bodies are not vendor references.
-    return source === '' && src !== undefined && removableIds.has(src) ? '' : whole;
+    // Require every exact reference to be empty. Query strings, path variants,
+    // whitespace bodies, and authored script bodies are not vendor references.
+    return source.trim() === '' && src !== undefined && removableIds.has(src) ? '' : whole;
   });
 
   return {

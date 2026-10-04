@@ -58,4 +58,26 @@ describe('commit-scoped bridge setter batching', () => {
         expect(() => endBridgeBatch()).toThrow('boom');
         expect(calls).toEqual(['first', 'second']);
     });
+
+    it('reports an undefined flush error after draining', () => {
+        const calls: string[] = [];
+        beginBridgeBatch();
+        queueBridgeCall('setWidth', () => { calls.push('first'); throw undefined; }, ['a', 1]);
+        queueBridgeCall('setHeight', () => { calls.push('second'); }, ['b', 2]);
+        expect(() => endBridgeBatch()).toThrow();
+        expect(calls).toEqual(['first', 'second']);
+    });
+
+    it('keeps independent flex properties for one widget', () => {
+        const calls: unknown[][] = [];
+        const setFlex = (...args: unknown[]) => { calls.push(args); };
+        beginBridgeBatch();
+        queueBridgeCall('setFlex', setFlex, ['button-1', 'paddingLeft', 4]);
+        queueBridgeCall('setFlex', setFlex, ['button-1', 'paddingRight', 8]);
+        endBridgeBatch();
+        expect(calls).toEqual([
+            ['button-1', 'paddingLeft', 4],
+            ['button-1', 'paddingRight', 8],
+        ]);
+    });
 });
