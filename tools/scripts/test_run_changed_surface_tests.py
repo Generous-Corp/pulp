@@ -1369,8 +1369,10 @@ class BaseInventoryTest(unittest.TestCase):
         # Every other dependency fetch goes through FetchContent, which the
         # base configure disconnects. A new file(DOWNLOAD) needs its own guard:
         # the universal WebGPU slice is refused by base_projection, and Sparkle
-        # (a hash-pinned release for a standalone app's updater) downloads only
-        # for a target that calls pulp_add_sparkle(), which nothing in-tree does.
+        # (a hash-pinned release for a standalone app's updater) refuses to
+        # download under FETCHCONTENT_FULLY_DISCONNECTED; its behavior is
+        # exercised by the cmake-pulp-add-sparkle fixture. No in-tree target
+        # calls pulp_add_sparkle() without a DIST_DIR either.
         listed = subprocess.run(["git", "-C", str(runner.REPO_ROOT), "grep", "-l", "file(DOWNLOAD",
                                  "--", "*.cmake", "*CMakeLists.txt"],
                                 capture_output=True, text=True)
@@ -1386,14 +1388,26 @@ class BaseInventoryTest(unittest.TestCase):
         self.assertIn('if(NOT (_want_arm64 AND _want_x86_64))', guard)
         sparkle = (runner.REPO_ROOT / "tools/cmake/PulpSparkle.cmake").read_text()
         self.assertIn("EXPECTED_HASH SHA256=${_sha256}", sparkle)
+        refusal = sparkle.find('if(NOT EXISTS "${_archive}" AND FETCHCONTENT_FULLY_DISCONNECTED)')
+        self.assertNotEqual(refusal, -1, "PulpSparkle.cmake lost its disconnected refusal")
+        self.assertLess(refusal, sparkle.index("file(DOWNLOAD"),
+                        "the disconnected refusal must run before the download")
+        fixture = (runner.REPO_ROOT / "test/cmake/test_pulp_add_sparkle.cmake").read_text()
+        for case in ("disconnected_refused", "disconnected_dist_dir_ok", "disconnected_archive_ok"):
+            self.assertIn(f"_fixture({case}", fixture)
         callers = subprocess.run(
             ["git", "-C", str(runner.REPO_ROOT), "grep", "-l", "pulp_add_sparkle(", "--",
              "*.cmake", "*CMakeLists.txt", ":!tools/cmake/PulpSparkle.cmake",
              ":!tools/cmake/PulpInstallRules.cmake"],
             capture_output=True, text=True).stdout.split()
         self.assertIn("test/cmake/test_pulp_add_sparkle.cmake", callers)  # control: the scan sees calls
+        # The pulp_add_sparkle fixture is a `cmake -P` script: its calls run in
+        # throwaway sub-configures, never inside the base configure.
+        fixture_path = "test/cmake/test_pulp_add_sparkle.cmake"
+        smoke = (runner.REPO_ROOT / "test/cmake/cmake_smoke_tests.cmake").read_text()
+        self.assertIn("-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_sparkle.cmake", smoke)
         downloading = []
-        for path in callers:
+        for path in (p for p in callers if p != fixture_path):
             text = "\n".join(line for line in (runner.REPO_ROOT / path).read_text(
                 encoding="utf-8").splitlines() if not line.lstrip().startswith("#"))
             for start in [m.end() for m in re.finditer(r"pulp_add_sparkle\(", text)]:
@@ -1402,9 +1416,9 @@ class BaseInventoryTest(unittest.TestCase):
                     downloading.append(path)
         self.assertEqual(
             downloading, [],
-            "an in-tree target now calls pulp_add_sparkle(), so a disconnected base "
-            "configure would download Sparkle: make base_projection refuse that "
-            "configuration (as it does a universal build) before listing it here")
+            "an in-tree target now calls pulp_add_sparkle() without DIST_DIR, so the "
+            "disconnected base configure refuses: pre-supply PULP_SPARKLE_DIST_DIR or "
+            "PULP_SPARKLE_ARCHIVE to it, or make base_projection refuse that configuration")
 
     def test_a_base_that_is_not_the_checkouts_merge_base_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

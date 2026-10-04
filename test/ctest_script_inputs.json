@@ -3184,6 +3184,7 @@
    "entry": "tools/scripts/test_run_changed_surface_tests.py",
    "inputs": [
     "docs/status",
+    "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/test_pulp_add_sparkle.cmake",
     "test/fixtures",
     "test/support",
