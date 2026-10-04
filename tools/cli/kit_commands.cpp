@@ -11,8 +11,8 @@
 #include "json_writer.hpp"
 #include "kit_json_helpers.hpp"
 #include "kit_manifest_validation.hpp"
-#include "kit_profile_verification.hpp"
 #include "kit_policy.hpp"
+#include "kit_profile_verification.hpp"
 #include "package_registry.hpp"
 #include "pulp_version_gen.h"
 
@@ -2009,9 +2009,9 @@ int cmd_publish(const std::vector<std::string>& args) {
         validate_publish_policy(result, manifest);
         if (!registry_manifest_path.empty()) {
             if (!fs::exists(registry_manifest_path)) {
-                result.issues.push_back({"error", "missing-registry-manifest",
-                                         "registry manifest path does not exist: "
-                                             + registry_manifest_path.string()});
+                result.issues.push_back(
+                    {"error", "missing-registry-manifest",
+                     "registry manifest path does not exist: " + registry_manifest_path.string()});
             } else {
                 auto registry_manifest = parse_manifest_json(registry_manifest_path);
                 validate_registry_manifest(result, registry_manifest,
