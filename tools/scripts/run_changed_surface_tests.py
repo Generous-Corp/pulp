@@ -100,7 +100,7 @@ def decode_selection_receipt(
         receipt = json.loads(payload)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise SelectionExecutionError("selection receipt is not valid UTF-8 JSON") from error
-    required = {
+    identity = {
         "schema_version",
         "repository",
         "pull_request",
@@ -112,13 +112,22 @@ def decode_selection_receipt(
         "selection_receipt_digest",
         "validation_contract_digest",
         "workflow_digest",
-        "selected_tests_digest",
-        "selected_tests",
     }
+    full = isinstance(receipt, dict) and "disposition" in receipt
+    if full:
+        # A full plan selects nothing: the runner runs the configured stages
+        # and derives the executable-keyed selection beside them.
+        if set(receipt) != identity | {"disposition", "executable_reuse"} \
+                or receipt["disposition"] != "full" or receipt["schema_version"] != 2:
+            raise SelectionExecutionError("full selection receipt has an unexpected schema")
+        validate_executable_reuse_binding(receipt["executable_reuse"])
+    required = identity | {"selected_tests_digest", "selected_tests"}
     if isinstance(receipt, dict) and receipt.get("schema_version") == 2:
         required.update({"selected_build_targets_digest", "selected_build_targets"})
-    if not isinstance(receipt, dict) or set(receipt) != required:
+    if not full and (not isinstance(receipt, dict) or set(receipt) - {"executable_reuse"} != required):
         raise SelectionExecutionError("selection receipt has an unexpected schema")
+    if not full and "executable_reuse" in receipt:
+        validate_executable_reuse_binding(receipt["executable_reuse"])
     if receipt["schema_version"] not in (1, 2):
         raise SelectionExecutionError("selection receipt schema version is unsupported")
     if not isinstance(receipt["pull_request"], int) or receipt["pull_request"] <= 0:
@@ -136,12 +145,14 @@ def decode_selection_receipt(
         "selection_receipt_digest",
         "validation_contract_digest",
         "workflow_digest",
-        "selected_tests_digest",
+        *(() if full else ("selected_tests_digest",)),
     ):
         if not isinstance(receipt[key], str) or not re.fullmatch(
             r"[0-9a-f]{64}", receipt[key]
         ):
             raise SelectionExecutionError(f"selection receipt {key} is invalid")
+    if full:
+        return [], b"", [], b"", receipt
     selected_tests = receipt["selected_tests"]
     if not isinstance(selected_tests, list) or not all(
         isinstance(name, str) for name in selected_tests
@@ -345,6 +356,186 @@ def validate_build_configuration(build_dir: Path, policy: dict[str, Any]) -> Non
         raise SelectionExecutionError(
             "live CMake configuration differs from selector policy: " + "; ".join(mismatches)
         )
+
+
+# The inputs Shipyard binds for the executable-keyed selection before any
+# stage runs. The runner derives the selection from them after configure and
+# echoes them verbatim; Shipyard re-derives from the files it copies out and
+# refuses a difference.
+EXECUTABLE_REUSE_BINDING = {
+    "candidates": list,
+    "rules_digest": str,
+    "derivation_code_dir": str,
+    "derivation_code_sha256": str,
+    "sample_seed": str,
+    "sample_percent": int,
+    "build_dir": str,
+}
+# Base-record candidates, newest first. Shipyard filters them by platform and
+# merge rules; the toolchain rule needs this head's configure, so the runner
+# applies it and uses the first candidate built by the lane's toolchain.
+EXECUTABLE_REUSE_CANDIDATE = {"run_id": str, "record_sha256": str, "record_path": str, "commit": str}
+MAX_REUSE_CANDIDATES = 8
+# Run from Shipyard's extracted base copies, never from the checkout.
+DERIVATION_SCRIPTS = {
+    "codemodel": "tools/ci/codemodel_digest.py",
+    "keys": "tools/ci/executable_keys.py",
+    "selection": "tools/ci/executable_selection.py",
+}
+
+
+def validate_executable_reuse_binding(binding: Any) -> None:
+    if not isinstance(binding, dict) or set(binding) != set(EXECUTABLE_REUSE_BINDING):
+        raise SelectionExecutionError("selection receipt executable_reuse has an unexpected schema")
+    for key, kind in EXECUTABLE_REUSE_BINDING.items():
+        value = binding[key]
+        if not isinstance(value, kind) or isinstance(value, bool) or value == "":
+            raise SelectionExecutionError(f"selection receipt executable_reuse.{key} is invalid")
+    for key in ("rules_digest", "derivation_code_sha256"):
+        if not re.fullmatch(r"[0-9a-f]{64}", binding[key]):
+            raise SelectionExecutionError(f"selection receipt executable_reuse.{key} is invalid")
+    candidates = binding["candidates"]
+    if len(candidates) > MAX_REUSE_CANDIDATES:
+        raise SelectionExecutionError("selection receipt executable_reuse.candidates is too long")
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or set(candidate) != set(EXECUTABLE_REUSE_CANDIDATE) or any(
+                not isinstance(candidate[k], t) or not candidate[k] for k, t in EXECUTABLE_REUSE_CANDIDATE.items()) \
+                or not re.fullmatch(r"[0-9a-f]{64}", candidate["record_sha256"]) \
+                or not re.fullmatch(r"[0-9a-fA-F]{40}", candidate["commit"]):
+            raise SelectionExecutionError("selection receipt executable_reuse.candidates is invalid")
+    if not 1 <= binding["sample_percent"] <= 100:
+        raise SelectionExecutionError("selection receipt executable_reuse.sample_percent is invalid")
+
+
+class DerivationError(Exception):
+    pass
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def derive_executable_reuse(
+    binding: dict[str, Any], head_sha: str, build_dir: Path, result_dir: Path, runner=subprocess.run,
+    *, base_sha: str = "",
+) -> dict[str, Any]:
+    """Derive the executable-keyed selection for the configured head and
+    record it beside the result receipt. Shadow only: the stages run
+    unchanged, so a failure here is recorded as the status and never raised.
+    """
+    try:
+        return {"status": "derived", **_derive(binding, head_sha, base_sha, build_dir, result_dir, runner)}
+    except DerivationError as error:
+        return {"status": f"error: {error}"}
+    except (OSError, ValueError, subprocess.SubprocessError, SelectionExecutionError) as error:
+        return {"status": f"error: {type(error).__name__}: {error}"}
+
+
+# Runs from the derivation dir with the base's key code: the lane's toolchain
+# for this configured build, and the first candidate record built by it.
+PICK_SCRIPT = """
+import inspect, json, sys
+from pathlib import Path
+sys.path.insert(0, 'tools/ci')
+import executable_keys as k
+probe = k.probe_toolchain
+lane = probe(Path(sys.argv[1])) if inspect.signature(probe).parameters else probe()
+pick = None
+for index, path in enumerate(json.loads(sys.argv[2])):
+    record, digest = k.load_record(Path(path))
+    if lane is not None and record is not None and record.get('toolchain') == lane:
+        pick = {'index': index, 'digest': digest}
+        break
+print(json.dumps({'toolchain': lane, 'pick': pick}, sort_keys=True))
+"""
+
+
+def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[str, Any]:
+    if Path(binding["build_dir"]).resolve() != build_dir.resolve():
+        raise DerivationError("the bound build directory is not this lane's")
+    code = Path(binding["derivation_code_dir"])
+    scripts = {k: code / v for k, v in DERIVATION_SCRIPTS.items()}
+    absent = [str(p) for p in scripts.values() if not p.is_file()]
+    if absent:
+        raise DerivationError(f"derivation code is missing {absent[0]}")
+    # A resumed or prepared build directory may hold a reply from another
+    # configure: drop it and reconfigure, so the codemodel read is this tree's.
+    api = build_dir / ".cmake" / "api" / "v1"
+    shutil.rmtree(api / "reply", ignore_errors=True)
+    (api / "query").mkdir(parents=True, exist_ok=True)
+    (api / "query" / "codemodel-v2").touch()
+    reconfigure = runner([str(REPO_ROOT / "tools" / "ci" / "governed-build.sh"), "cmake", str(build_dir)],
+                         capture_output=True, text=True, shell=False)
+    if reconfigure.returncode != 0:
+        raise DerivationError(f"reconfigure exited {reconfigure.returncode}")
+    if not (api / "reply").is_dir():
+        raise DerivationError("reconfigure wrote no codemodel reply")
+    result_dir.mkdir(parents=True, exist_ok=True)
+    files = {name: result_dir / name for name in (
+        "ctest-listing.json", "toolchain.json", "codemodel-digest.json", "executable-keys.json",
+        "selection.json")}
+    listing = runner(["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
+                     capture_output=True, text=True, shell=False)
+    if listing.returncode != 0:
+        raise DerivationError(f"ctest listing exited {listing.returncode}")
+    files["ctest-listing.json"].write_text(listing.stdout, encoding="utf-8")
+    python = [sys.executable, "-I"]
+
+    def step(argv: list[str], what: str) -> str:
+        done = runner(python + argv, capture_output=True, text=True, shell=False, cwd=str(code),
+                      env={**os.environ, **STAGE_ENV})
+        if done.returncode != 0:
+            raise DerivationError(f"{what} exited {done.returncode}: {done.stderr.strip()[-300:]}")
+        return done.stdout
+
+    # The key code's own probe reads the compiler this build directory
+    # recorded; an older base copy takes no argument.
+    candidates = binding["candidates"]
+    picked = json.loads(step(["-c", PICK_SCRIPT, binding["build_dir"],
+                              json.dumps([c["record_path"] for c in candidates])], "toolchain pick"))
+    files["toolchain.json"].write_text(json.dumps(picked["toolchain"], sort_keys=True) + "\n", encoding="utf-8")
+    pick = candidates[picked["pick"]["index"]] if picked["pick"] is not None else None
+    if pick is not None and picked["pick"]["digest"] != pick["record_sha256"]:
+        raise DerivationError(f"candidate record {pick['run_id']} is not the one Shipyard bound")
+    # With no candidate on this toolchain the first one still keys, so every
+    # executable carries base_other_toolchain and the reason names a record.
+    used = pick or (candidates[0] if candidates else None)
+    bound_build = binding["build_dir"]
+    step([str(scripts["codemodel"]), "--build-dir", bound_build, "--source-root", str(REPO_ROOT),
+          "--ctest-json", str(files["ctest-listing.json"]), "--out", str(files["codemodel-digest.json"])],
+         "codemodel digest")
+    if used is None and not base_sha:
+        raise DerivationError("no base commit to key against")
+    step([str(scripts["keys"]), "--source-root", str(REPO_ROOT),
+          "--base-sha", used["commit"] if used else base_sha, "--head-sha", head_sha,
+          *(["--base-record", used["record_path"], "--base-record-run-id", used["run_id"]] if used else []),
+          "--head-codemodel", str(files["codemodel-digest.json"]),
+          "--ctest-json", str(files["ctest-listing.json"]), "--build-dir", bound_build,
+          "--toolchain-json", str(files["toolchain.json"]), "--out", str(files["executable-keys.json"])],
+         "key manifest")
+    manifest = json.loads(files["executable-keys.json"].read_text(encoding="utf-8"))
+    if (manifest.get("producer") or {}).get("base_record_sha256") != (used or {}).get("record_sha256"):
+        raise DerivationError("the base record is not the one Shipyard bound")
+    step([str(scripts["selection"]), "--manifest", str(files["executable-keys.json"]),
+          "--head-codemodel", str(files["codemodel-digest.json"]),
+          "--ctest-json", str(files["ctest-listing.json"]), "--seed", binding["sample_seed"],
+          "--percent", str(binding["sample_percent"]), "--out", str(files["selection.json"])],
+         "selection")
+    selection = json.loads(files["selection.json"].read_text(encoding="utf-8"))
+    return {
+        # The candidate the lane's toolchain picked, or null when none matched.
+        "base_record_run_id": pick["run_id"] if pick else None,
+        "base_record_sha256": pick["record_sha256"] if pick else None,
+        "cmake_cache_sha256": _sha256_file(build_dir / "CMakeCache.txt"),
+        "ctest_listing_sha256": _sha256_file(files["ctest-listing.json"]),
+        "toolchain_sha256": _sha256_file(files["toolchain.json"]),
+        "codemodel_digest_sha256": _sha256_file(files["codemodel-digest.json"]),
+        "key_manifest_sha256": _sha256_file(files["executable-keys.json"]),
+        "selection_sha256": _sha256_file(files["selection.json"]),
+        "would_skip_count": len(selection["would_skip"]),
+        "sampled_count": len(selection["sampled_executables"]),
+        "reasons": manifest.get("reasons"),
+    }
 
 
 def ctest_json(build_dir: Path, selected_file: Path | None = None) -> list[dict[str, Any]]:
@@ -811,6 +1002,22 @@ def clear_build_sentinel(build_dir: Path) -> int:
     ).returncode
 
 
+# The macOS lane's configured build and test stages, which a keyed full run
+# execs in place of those stages. The test stage's build_dir_lock.py prefix is
+# dropped because the runner holds that lock for the whole run, and its
+# lane_reuse_record.py wrapper because the runner records the suite itself;
+# test_keyed_full_execs_the_configured_stages compares these to the config.
+STAGE_ENV = {"PULP_BUILD_CLASS": "background"}
+STAGE_TEST_FLAGS = ("--output-on-failure", "--repeat", "until-pass:2", "--exclude-regex",
+                    EXCLUDE_NAME, "--label-exclude", EXCLUDE_LABEL)
+
+
+def stage_test_argv(build_dir: Path, junit: Path | None = None) -> list[str]:
+    command = [str(REPO_ROOT / "tools" / "ci" / "governed-build.sh"), "ctest", "--test-dir",
+               str(build_dir), *STAGE_TEST_FLAGS]
+    return command + (["--output-junit", str(junit)] if junit is not None else [])
+
+
 def failure_coverage(selected_result: int, full_result: int | None) -> str:
     if full_result is None:
         return "not_compared"
@@ -831,20 +1038,156 @@ def failure_coverage(selected_result: int, full_result: int | None) -> str:
 LANE_RED_ALLOWLIST = "tools/ci/changed_surface_lane_reds.json"
 
 
+def _junit_case_failed(case: Any) -> bool:
+    """Whether ctest counts this case as failed. A "Not Run" test (a missing
+    executable, a failed fixture dependency) is in ctest's FAILED list and exit
+    code but its JUnit row is `notrun` with a <skipped> child, the same shape as
+    a real skip; only the message tells them apart, and a real skip's message
+    (SKIP_RETURN_CODE, SKIP_REGULAR_EXPRESSION) starts with SKIP_. A disabled
+    test is `disabled` and not failed."""
+    status = case.get("status")
+    if status == "fail" or case.find("failure") is not None:
+        return True
+    if status == "notrun":
+        skipped = case.find("skipped")
+        return not (skipped is not None and skipped.get("message", "").startswith("SKIP_"))
+    return False
+
+
 def junit_failures(path: Path) -> set[str] | None:
-    """Names of the tests a ctest --output-junit report records as failed, or
-    None when the report is absent or unreadable."""
+    """Names of the tests a ctest --output-junit report records as failed
+    (including Not Run), or None when the report is absent or unreadable."""
     import xml.etree.ElementTree as ElementTree
 
     try:
         root = ElementTree.parse(path).getroot()
     except (OSError, ElementTree.ParseError):
         return None
-    return {
-        case.get("name", "")
-        for case in root.iter("testcase")
-        if case.get("status") == "fail" or case.find("failure") is not None
-    }
+    return {case.get("name", "") for case in root.iter("testcase") if _junit_case_failed(case)}
+
+
+UNMEASURED_SKIPS = {"would_skip_tests": None, "false_skip_count": None, "false_skips": None,
+                    "sampled_failures": None}
+
+
+def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
+    """The tests the derived selection would have skipped (registrations of
+    would-skip executables it did not sample) and which of them the full run
+    failed; and which tests of the sampled would-skips failed, the negative
+    control's catch. None when there is no derived selection or no full
+    report."""
+    try:
+        selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
+        manifest = json.loads((result_dir / "executable-keys.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    failed = junit_failures(full_junit)
+    if failed is None:
+        return None
+    executables = manifest.get("executables") or {}
+    sampled = set(selection.get("sampled_executables") or [])
+    skipped = set(selection.get("would_skip") or []) - sampled
+
+    def registered(artifacts: set[str]) -> set[str]:
+        return {name for a in artifacts for name in (executables.get(a) or {}).get("registrations") or []}
+    tests = sorted(registered(skipped))
+    caught = sorted(set(tests) & failed)
+    return {"would_skip_tests": tests, "false_skip_count": len(caught), "false_skips": caught,
+            "sampled_failures": sorted(registered(sampled) & failed)}
+
+
+# Executables whose key ignores what decides their bytes; a hash difference
+# there is expected and says nothing about the key. Read from the base's
+# extracted copy, so a change cannot list itself to hide a difference.
+KEY_BLIND_EXECUTABLES = "tools/ci/key_blind_executables.json"
+
+
+KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
+# The shape a result always carries, so an absent field never reads as "none".
+UNKNOWN_UNREACHED = {"unreached_changed": None, "unreached_compared": 0, "unreached_unchecked_modules": None}
+
+
+def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any],
+                      derived: dict[str, Any], scope: str) -> dict[str, Any]:
+    """Would-skip executables whose bytes, or the bytes of anything in their
+    spawn closure (the tools they run and the modules they load), differ
+    from the picked base record's hash for the same artifact: a key that
+    said "unchanged" about something that changed.
+
+    `scope` is "all" when every would-skip was built (a keyed full run) and
+    "sampled" when only the sample was. The record hashes the executables
+    registered ctests run, which every would-skip is; a closure artifact it
+    has no hash for is listed in `unreached_unchecked_modules`, and a would-skip
+    without one is skipped. `unreached_changed` is None, never an empty
+    list, when nothing can be compared: no record was picked (bytes from
+    another toolchain always differ), the record's identity is unusable, or
+    no artifact in scope has a hash. `unreached_compared` counts the
+    artifacts compared, so "none changed" over one artifact reads as that."""
+    unknown = UNKNOWN_UNREACHED
+    if derived.get("status") != "derived" or derived.get("base_record_run_id") is None:
+        return unknown
+    record = next((c for c in binding["candidates"] if c["run_id"] == derived["base_record_run_id"]), None)
+    if record is None:
+        return unknown
+    try:
+        selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
+        manifest = json.loads((result_dir / "executable-keys.json").read_text(encoding="utf-8"))
+        identity = json.loads((Path(record["record_path"]) / "identity.json").read_text(encoding="utf-8"))
+        job = json.loads((Path(record["record_path"]) / "job.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return unknown
+    # The recorder writes an empty identity when it could not hash, and says
+    # so: as `identity.usable`, or in older records as a problem line.
+    usable = job["identity"].get("usable") if isinstance(job.get("identity"), dict) else None
+    if usable is False or (usable is None and any(
+            "executable identity unavailable" in str(p) for p in job.get("problems") or [])):
+        return unknown
+    blind_path = Path(binding["derivation_code_dir"]) / KEY_BLIND_EXECUTABLES
+    try:
+        listing = json.loads(blind_path.read_text(encoding="utf-8"))
+        if listing.get("schema") != KEY_BLIND_SCHEMA:
+            return unknown
+        blind = set(listing.get("executables") or {})
+    except FileNotFoundError:
+        blind = set()
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return unknown
+    executables = manifest.get("executables") or {}
+    roots = set(selection.get("would_skip") or [])
+    if scope == "sampled":
+        roots &= set(selection.get("sampled_executables") or [])
+    recorded = identity.get("executables") or {}
+    verdicts: dict[str, bool | None] = {}
+
+    def differs(artifact: str) -> bool | None:
+        """Whether the built artifact differs from its record hash; None
+        when either side is missing."""
+        if artifact not in verdicts:
+            expected = (recorded.get(f"<build>/{artifact}") or {}).get("sha256")
+            built = build_dir / artifact
+            verdicts[artifact] = (None if not expected or not built.is_file()
+                                  else hashlib.sha256(built.read_bytes()).hexdigest() != expected)
+        return verdicts[artifact]
+
+    changed, unchecked = [], set()
+    for artifact in sorted(roots - blind):
+        closure, stack = set(), list((executables.get(artifact) or {}).get("spawns") or [])
+        while stack:
+            member = stack.pop()
+            if member not in closure:
+                closure.add(member)
+                stack.extend((executables.get(member) or {}).get("spawns") or [])
+        hit = differs(artifact) is True
+        for member in sorted(closure - blind):
+            verdict = differs(member)
+            if verdict is None:
+                unchecked.add(member)
+            hit = hit or verdict is True
+        if hit:
+            changed.append(artifact)
+    compared = sum(1 for verdict in verdicts.values() if verdict is not None)
+    return {"unreached_changed": changed if compared else None, "unreached_compared": compared,
+            "unreached_unchecked_modules": sorted(unchecked)}
 
 
 def lane_red_allowlist(
@@ -1097,6 +1440,81 @@ def run_full_fallback(
     return full_result
 
 
+def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str, Any]) -> int:
+    """A full plan with a bound executable-reuse: derive the selection, then
+    run exactly the configured build and test stages, so the verdict is the
+    full suite's. The derivation is shadow only and cannot change it."""
+
+    result_dir_value = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
+    if not result_dir_value or not Path(result_dir_value).is_absolute():
+        raise SelectionExecutionError("a keyed full run requires an absolute result receipt directory")
+    result_dir = Path(result_dir_value)
+    binding = receipt["executable_reuse"]
+    derived = derive_executable_reuse(binding, receipt["head_sha"], build_dir, result_dir,
+                                      base_sha=receipt["base_sha"])
+    args._changed_surface_full_authority_started = True
+    env = {**os.environ, **STAGE_ENV}
+    with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
+        # The suite's report goes into the reuse record when Shipyard asked
+        # for one, as the configured test stage's wrapper would put it.
+        reuse_out = lane_reuse_record.record_dir()
+        recorded = lane_reuse_record.junit_path(reuse_out, "full") if reuse_out is not None else None
+        junit = recorded or Path(directory) / "full-junit.xml"
+        build_started = time.monotonic()
+        build_result = subprocess.run(build_argv(build_dir), shell=False, env=env).returncode
+        if build_result == 0:
+            build_result = clear_build_sentinel(build_dir)
+        build_seconds = time.monotonic() - build_started
+        test_result: int | None = None
+        test_seconds: float | None = None
+        if build_result == 0:
+            test_started = time.monotonic()
+            started_epoch = int(time.time())
+            test_result = subprocess.run(stage_test_argv(build_dir, junit), shell=False, env=env).returncode
+            test_seconds = time.monotonic() - test_started
+            if recorded is not None:
+                attempts = lane_reuse_record.keep_last_test_log(build_dir, reuse_out, "full")
+                lane_reuse_record.record(build_dir, REPO_ROOT, [("full", recorded, attempts, True)],
+                                         started_epoch)
+        measured = false_skips(result_dir, junit) if derived["status"] == "derived" else None
+        derived.update(unreached_changed(result_dir, build_dir, binding, derived, "all")
+                       if build_result == 0 and derived["status"] == "derived" else UNKNOWN_UNREACHED)
+        try:
+            inventory_names = [t.get("name") for t in ctest_payload(build_dir)["tests"]]
+        except SelectionExecutionError:
+            inventory_names = None
+    returncode = build_result if build_result != 0 else test_result
+    write_result_receipt(result_dir, {
+        "schema_version": 2,
+        "recorded_at_unix_ns": time.time_ns(),
+        **{key: receipt[key] for key in (
+            "repository", "pull_request", "target", "base_sha", "head_sha", "tree_sha",
+            "policy_digest", "selection_receipt_digest", "validation_contract_digest",
+            "workflow_digest")},
+        "execution_payload_sha256": args.selection_receipt_sha256,
+        "selected_execution_disposition": "keyed_full_shadow",
+        "full_authoritative": True,
+        # The plan selected nothing; these match its empty selection.
+        "selected_tests_digest": "",
+        "selected_logical_count": 0,
+        "selected_build_targets_digest": None,
+        "selected_build_target_count": 0,
+        # Every registration ran, so nothing here reads as a bounded selection.
+        "selected_tests": inventory_names,
+        "full_registration_count": len(inventory_names) if inventory_names is not None else None,
+        "full_build_returncode": build_result,
+        "full_build_duration_seconds": build_seconds,
+        "full_returncode": test_result,
+        "full_duration_seconds": test_seconds,
+        "comparison_verdict": "keyed_full_shadow",
+        "failure_coverage": "not_compared",
+        "graduation_eligible": False,
+        "executable_reuse": {"mode": "keyed_full_shadow", "bound": binding, "derived": derived,
+                             **(measured or UNMEASURED_SKIPS)},
+    })
+    return returncode
+
+
 def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     """Verify and execute one selection while the build tree is exclusive."""
 
@@ -1127,10 +1545,19 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     # Only selection-layer failures may fall back to the ordinary full stage.
     # Checkout identity, build-source provenance, and live build configuration
     # remain hard prerequisites for accepting any execution result.
+    if selection_receipt.get("disposition") == "full":
+        return run_keyed_full(args, build_dir, selection_receipt)
     args._changed_surface_fallback_safe = True
     require_ctest_version()
     base = base_projection(selection_receipt["base_sha"], policy, build_dir)
     compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
+    executable_reuse = None
+    binding = selection_receipt.get("executable_reuse")
+    if binding is not None and os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR"):
+        executable_reuse = {"mode": "keyed_bounded_shadow", "bound": binding,
+                            "derived": derive_executable_reuse(
+            binding, selection_receipt["head_sha"], build_dir,
+            Path(os.environ["SHIPYARD_CHANGED_SURFACE_RESULT_DIR"]), base_sha=selection_receipt["base_sha"])}
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
         selected_file = write_private_selection(Path(directory), selected_payload)
         snapshot_identity = selected_file.stat()
@@ -1314,6 +1741,19 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             outside = sorted(full_failures - set(selected_names)) if full_failures is not None else None
             absorbed = (len(set(outside or []) & set(allowlist[0]))
                         if allowlist is not None else None)
+            # In-selection failures that are themselves lane reds: a matched_fail
+            # resting on these proved less than one resting on new failures.
+            absorbed_selected = (len((selected_failures or set()) & set(allowlist[0]))
+                                 if allowlist is not None else None)
+            if executable_reuse and executable_reuse["derived"]["status"] == "derived":
+                executable_reuse.update(false_skips(Path(result_dir), Path(directory) / "full-junit.xml")
+                                        or UNMEASURED_SKIPS)
+                executable_reuse["derived"].update(unreached_changed(
+                    Path(result_dir), build_dir, executable_reuse["bound"], executable_reuse["derived"],
+                    "sampled"))
+            elif executable_reuse:
+                executable_reuse.update(UNMEASURED_SKIPS)
+                executable_reuse["derived"].update(UNKNOWN_UNREACHED)
             eligible = compare_full and (
                 verdict == "matched_pass"
                 or (verdict == "matched_fail" and allowlist is not None
@@ -1330,6 +1770,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "head_sha": selection_receipt["head_sha"],
                     "tree_sha": selection_receipt["tree_sha"],
                     "execution_payload_sha256": args.selection_receipt_sha256,
+                    **({"executable_reuse": executable_reuse} if executable_reuse else {}),
                     "policy_digest": selection_receipt["policy_digest"],
                     "selection_receipt_digest": selection_receipt[
                         "selection_receipt_digest"
@@ -1385,6 +1826,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "lane_red_allowlist_expires": allowlist[0] if allowlist else None,
                     # How much of a matched_fail rested on the allowlist.
                     "allowlisted_failure_count": absorbed,
+                    "allowlisted_selected_failure_count": absorbed_selected,
                     "lane_red_allowlist_sha256": allowlist[1] if allowlist else None,
                 },
             )

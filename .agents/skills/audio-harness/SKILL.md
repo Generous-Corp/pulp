@@ -256,6 +256,33 @@ switch, preset load) clean, measure what the callback containing it costs.
   or precomputing it in `prepare()`, never by widening the allowance for work
   that could be staged.
 
+## Switching between realisations with different latency — warm, then fade
+
+A processor that offers two realisations of one effect (linear-phase vs
+minimum-phase, quality vs low-latency, CPU vs GPU) and swaps the object at a
+block boundary is heard twice: the fresh realisation emits its own latency of
+silence (213 ms for an 8192/2048 WOLA at 48 kHz) and a partial response for its
+impulse length, and the old one stops mid-waveform. A fade alone cannot fix it
+— fading into a realisation that is still emitting silence is a fade into a
+dropout. Use `pulp::signal::ProcessingSwitchCrossfade`
+(`core/signal/include/pulp/signal/processing_switch_crossfade.hpp`): run BOTH
+realisations on the same input for `plan_processing_switch(latency, history,
+rate, fade_s)` — latency plus the incoming impulse/FIR length (zero when the
+realisation primes its own stream start) — hearing only the old one, then an
+EqualPower `TransitionMixer` fade. The content still moves by the latency
+difference (that IS the latency change; the host re-aligns it); the switch no
+longer drops out or steps.
+
+- **One shared source per block.** If the realisations pull from a stateful
+  wet source (a freeze/hold, a looper), run it ONCE per block and replay that
+  block to both; letting each realisation pull advances the source twice.
+- **The warm phase doubles the cost** for its length. Count it with the
+  transition-cost gate above like any other transition.
+- **Gate it with a dropout AND a click measure, and a cut as the negative
+  control**: short-window RMS against the steady level (a cut into the slower
+  realisation fails here) and a whitened-residual spike (a cut into the faster
+  one fails here). `test/test_crossfade.cpp` §5 is the reference fixture.
+
 ## Copy-this patterns
 
 Describe / debug a render (the "no sound" workflow):
@@ -1313,6 +1340,28 @@ disagreement is still reported as *that*.
 against `SpectralFrameEngine` (true latency `fft_size + analysis_hop` = 2560),
 not just against a delay line, and a companion case deliberately misreports by
 one analysis hop to confirm the catch. Copy that shape when covering real DSP.
+
+**A latency contract can pass while the stream start is wrong.** The
+`SpectralFrameEngine` latency dogfood above passed at -137 dB on a noise
+stimulus while the engine was swallowing the first `fft_size - hop` samples
+after every prepare()/reset() — a contract proves *where* the audio is, not that
+the head of the stream survived. That defect shipped: the first ~85 ms of every playback start or
+seek through `SpectralFrameEngine` were tapered (impulse at sample 0 → -300 dB,
+1024 → -24.8 dB, 2048 → -3.5 dB at FFT 8192 / hop 2048) because the first
+frames ended at sample `fft_size - 1` and the startup normalisation floor
+attenuated the partial overlap. The engine now starts its frame grid at
+`first_frame_start()` (the last hop multiple above `-fft_size`, implicit
+silence before 0), so sample 0 has full overlap and the reported latency is
+unchanged; `spectral_ola_window_energy()` states the coverage at any position
+without running audio. Prove stream starts with *positioned* stimuli — impulses
+at 0, 13, 512, 1024, 2048, 6000 and a kick at 0, after prepare AND after reset —
+nulled against the input delayed by the reported latency
+(`test/test_spectral_frame_engine_stream_start.cpp`). Do not prime the engine
+with silence app-side any more: it is redundant, and it now emits real frames,
+so it costs FFTs on the audio thread's reset. A split-API caller that maps frame
+ordinals to time itself (`RealtimePitchTimeProcessor`) opts out with
+`SpectralFrameEngineConfig::full_overlap_stream_start = false` and keeps the
+tapered start.
 
 ## Proving an SOS cascade executor
 

@@ -239,20 +239,16 @@ target_link_libraries(pulp-test-standalone-rt PRIVATE
 target_compile_definitions(pulp-test-standalone-rt PRIVATE
     $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 catch_discover_tests(pulp-test-standalone-rt)
-# Test executables whose bytes differ between links of identical objects:
-# Apple's linker orders their ObjC selector stubs (__TEXT,__objc_stubs)
-# nondeterministically, so no input key can stand for their bytes. Until
-# their links are deterministic they are commit-bound, so every reuse plan
-# runs their tests. Declared here, after every manifest that defines them.
-foreach(_pulp_version_bound IN ITEMS pulp-test-standalone-rt pulp-test-standalone-recording
-        pulp-test-group-core-standalone pulp-test-settings-sections pulp-test-timeline-phase1-examples)
-    # A renamed target must not drop out silently: its tests would then be
-    # reused while its bytes change.
-    if(NOT TARGET ${_pulp_version_bound})
-        message(FATAL_ERROR "commit-bound stopgap names ${_pulp_version_bound}, which is not a target")
-    endif()
-    _pulp_declare_commit_bound(${_pulp_version_bound})
-endforeach()
+# Relinks pulp-test-standalone-rt from its own link line and requires one hash:
+# its ObjC selector stubs once made two links of identical objects differ.
+# Skips (77) only when the configure found the linker without the
+# deterministic stub option, naming that linker.
+if(APPLE AND CMAKE_GENERATOR MATCHES "Ninja" AND Python3_Interpreter_FOUND)
+    add_test(NAME test-link-determinism COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_link_determinism.py"
+        --build-dir "${CMAKE_BINARY_DIR}" --target pulp-test-standalone-rt)
+    set_tests_properties(test-link-determinism PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+endif()
 pulp_add_test_suite(pulp-test-audio-inspector-demo-processor GROUP pulp-test-group-cap-format
     SOURCES test_audio_inspector_demo_processor.cpp
     LIBRARIES pulp::format pulp::audio pulp::midi)

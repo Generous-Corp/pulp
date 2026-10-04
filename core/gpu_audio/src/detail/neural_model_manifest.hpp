@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <choc/text/choc_JSON.h>
 
@@ -55,6 +56,15 @@ struct NeuralInstalledAsset {
     std::filesystem::path path{};
     std::string_view sha256{};
     std::uint64_t size_bytes = 0;
+    std::string_view role{};
+};
+
+struct NeuralModelAssetRecord {
+    std::string asset_id;
+    std::string role;
+    std::string sha256;
+    std::uint64_t size_bytes = 0;
+    std::filesystem::path path;
 };
 
 enum class NeuralModelManifestError : std::uint8_t {
@@ -101,6 +111,7 @@ struct NeuralModelManifestRecord {
     std::uint64_t state_bytes = 0;
     std::uint32_t state_schema_version = 0;
     bool redistributable = false;
+    std::vector<NeuralModelAssetRecord> tensor_layout;
 
     [[nodiscard]] NeuralModelManifest view() const noexcept {
         return {.model_id = model_id,
@@ -173,13 +184,16 @@ inline bool read_bool(const choc::value::ValueView& object, const char* key, boo
 
 } // namespace manifest_store_detail
 
+constexpr bool is_sha256(std::string_view hash) noexcept;
+
 /// Persist an execution manifest next to an installed model.  The write is
 /// staged and renamed so a reader observes either the old complete sidecar or
 /// the new complete sidecar, never a partial JSON document.  This is a
 /// control-thread operation and must not be called from process().
 inline bool write_neural_model_manifest(const std::filesystem::path& sidecar_path,
                                         const NeuralModelManifest& manifest, std::string& error,
-                                        NeuralModelUse use = NeuralModelUse::Shipped) {
+                                        NeuralModelUse use = NeuralModelUse::Shipped,
+                                        std::span<const NeuralInstalledAsset> tensor_layout = {}) {
     error.clear();
     if (sidecar_path.empty()) {
         error = "empty neural manifest sidecar path";
@@ -217,6 +231,26 @@ inline bool write_neural_model_manifest(const std::filesystem::path& sidecar_pat
     object.addMember("state_schema_version", choc::value::createInt64(static_cast<std::int64_t>(
                                                  manifest.state_schema_version)));
     object.addMember("redistributable", choc::value::createBool(manifest.redistributable));
+    if (!tensor_layout.empty()) {
+        auto assets = choc::value::createEmptyArray();
+        for (const auto& asset : tensor_layout) {
+            if (asset.size_bytes >
+                static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+                error = "neural tensor layout size exceeds JSON integer range";
+                return false;
+            }
+            auto item = choc::value::createObject("");
+            manifest_store_detail::add_string(item, "asset_id", asset.asset_id);
+            manifest_store_detail::add_string(item, "role",
+                                              asset.role.empty() ? asset.asset_id : asset.role);
+            manifest_store_detail::add_string(item, "sha256", asset.sha256);
+            manifest_store_detail::add_string(item, "path", asset.path.string());
+            item.addMember("size_bytes",
+                           choc::value::createInt64(static_cast<std::int64_t>(asset.size_bytes)));
+            assets.addArrayElement(item);
+        }
+        object.addMember("tensor_layout", assets);
+    }
 
     const auto temporary = sidecar_path.string() + ".tmp";
     std::error_code ec;
@@ -267,7 +301,8 @@ inline bool write_neural_model_manifest(const std::filesystem::path& sidecar_pat
 /// strict.
 inline bool read_neural_model_manifest(const std::filesystem::path& sidecar_path,
                                        NeuralModelManifestRecord& record, std::string& error,
-                                       NeuralModelUse use = NeuralModelUse::Shipped) {
+                                       NeuralModelUse use = NeuralModelUse::Shipped,
+                                       bool require_complete_layout = false) {
     error.clear();
     std::ifstream input(sidecar_path);
     if (!input.is_open()) {
@@ -317,6 +352,46 @@ inline bool read_neural_model_manifest(const std::filesystem::path& sidecar_path
         !validate_neural_model_manifest(parsed.view(), use).accepted()) {
         error = "invalid neural model manifest metadata";
         return false;
+    }
+    if (root.hasObjectMember("tensor_layout")) {
+        const auto assets = root["tensor_layout"];
+        if (!assets.isArray() || assets.size() == 0) {
+            error = "invalid neural tensor layout";
+            return false;
+        }
+        parsed.tensor_layout.reserve(assets.size());
+        for (std::size_t i = 0; i < assets.size(); ++i) {
+            const auto item = assets[static_cast<std::uint32_t>(i)];
+            NeuralModelAssetRecord asset;
+            asset.asset_id = manifest_store_detail::read_string(item, "asset_id");
+            asset.role = manifest_store_detail::read_string(item, "role");
+            asset.sha256 = manifest_store_detail::read_string(item, "sha256");
+            asset.path = manifest_store_detail::read_string(item, "path");
+            if (!manifest_store_detail::read_u64(item, "size_bytes", asset.size_bytes) ||
+                asset.asset_id.empty() || asset.role.empty() || asset.path.empty() ||
+                !is_sha256(asset.sha256) || asset.size_bytes == 0) {
+                error = "invalid neural tensor layout";
+                return false;
+            }
+            parsed.tensor_layout.push_back(std::move(asset));
+        }
+    } else if (require_complete_layout) {
+        error = "neural manifest is missing tensor layout";
+        return false;
+    }
+    if (require_complete_layout) {
+        bool primary_found = false;
+        for (const auto& asset : parsed.tensor_layout) {
+            if (asset.asset_id == parsed.artifact_id) {
+                primary_found = asset.sha256 == parsed.artifact_sha256 &&
+                                asset.size_bytes == parsed.artifact_size_bytes;
+                break;
+            }
+        }
+        if (!primary_found) {
+            error = "neural tensor layout does not describe the primary artifact";
+            return false;
+        }
     }
     record = std::move(parsed);
     return true;
@@ -415,6 +490,44 @@ inline bool verify_neural_installed_assets(std::span<const NeuralInstalledAsset>
         }
     }
     return true;
+}
+
+/// Complete the private installer handoff after runtime::install_model has
+/// downloaded and recorded a ModelStore entry. Every tensor asset must be
+/// present and verified before the sidecar is published. This keeps generic
+/// ModelStore metadata unchanged while giving neural consumers a durable,
+/// fail-closed execution layout.
+inline bool write_neural_model_install_manifest(const std::filesystem::path& install_metadata_path,
+                                                const NeuralModelManifest& manifest,
+                                                std::span<const NeuralInstalledAsset> tensor_layout,
+                                                std::string& error,
+                                                NeuralModelUse use = NeuralModelUse::Shipped) {
+    error.clear();
+    const auto sidecar = neural_model_manifest_sidecar_path(install_metadata_path);
+    if (sidecar.empty()) {
+        error = "empty ModelStore install metadata path";
+        return false;
+    }
+    if (tensor_layout.empty()) {
+        error = "neural installer supplied no tensor layout";
+        return false;
+    }
+    if (!verify_neural_installed_assets(tensor_layout, error))
+        return false;
+
+    bool primary_found = false;
+    for (const auto& asset : tensor_layout) {
+        if (asset.asset_id == manifest.artifact_id) {
+            primary_found = asset.sha256 == manifest.artifact_sha256 &&
+                            asset.size_bytes == manifest.artifact_size_bytes;
+            break;
+        }
+    }
+    if (!primary_found) {
+        error = "neural installer tensor layout does not match the primary artifact";
+        return false;
+    }
+    return write_neural_model_manifest(sidecar, manifest, error, use, tensor_layout);
 }
 
 /// Verify the primary artifact represented by a manifest. Additional bundle

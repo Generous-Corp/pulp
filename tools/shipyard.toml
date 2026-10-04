@@ -55,7 +55,19 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.262.0 (current pin) — catches the pin up with commands Pulp's workflows
+# v0.269.1 (current pin): parses `executable_reuse` in a target's
+#   `changed_surface_selection`. Shipyard reads that table with
+#   `deny_unknown_fields`, so a host on an older release cannot parse a policy
+#   that declares it and falls back to the full suite on every PR; the pin and
+#   the lane hosts must reach this release before the policy declares it. It
+#   also carries keyed shadow runs, host re-derivation before merge readiness
+#   (`shipyard reuse rederive` / `rederive-sweep`), the trial state
+#   `keyed_shadow_recorded`, auto-merge arming that a repository can
+#   require a reviewer to approve per head (off unless configured), and a
+#   sandbox daemon guardian that is kickstarted rather than left pending by
+#   launchd.
+#
+# v0.262.0 (earlier pin): catches the pin up with commands Pulp's workflows
 #   and scripts already invoke (`shipyard landing`, `shipyard landability`,
 #   `shipyard pr --target`), and carries the changed-surface work the bounded
 #   mac lane depends on: a head behind its recorded base is planned at its
@@ -173,7 +185,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.262.0"
+version = "v0.269.1"
 
 # Release repository. tools/install-shipyard.sh reads only `version` and runs
 # the upstream installer at refs/tags/{version}/install.sh, which resolves the

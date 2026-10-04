@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 116,
+  "inventory_version": 118,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,15 +42,15 @@
     }
   ],
   "counts": {
-    "public_headers": 501,
-    "reviewed_headers": 221,
-    "legacy_unreviewed_headers": 280,
+    "public_headers": 502,
+    "reviewed_headers": 223,
+    "legacy_unreviewed_headers": 279,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 120,
       "capability_support": 44,
-      "infrastructure": 55,
-      "legacy_unreviewed": 280,
+      "infrastructure": 57,
+      "legacy_unreviewed": 279,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -85,9 +85,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 269,
-        "reviewed_headers": 122,
-        "legacy_unreviewed_headers": 147,
+        "public_headers": 270,
+        "reviewed_headers": 124,
+        "legacy_unreviewed_headers": 146,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -4017,6 +4017,15 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/processing_switch_crossfade.hpp",
+      "fingerprint": "sha256:8b34df01f4ebcdc418f040b2e58a203c3b274867c916648954bfb31fa06287fe",
+      "include": "pulp/signal/processing_switch_crossfade.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The sample schedule for switching a processor between two realisations of differing latency (warm the incoming one unheard, then a TransitionMixer EqualPower fade). It is plumbing a processor composes around the realisations it owns, not a behavior an agent selects on its own."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/processor_chain.hpp",
       "fingerprint": "sha256:a3b3fb80e8b5eea64ecb1fca94ff8972a2f1da7c364de16d214f2e73914b2b4f",
       "include": "pulp/signal/processor_chain.hpp",
@@ -4036,7 +4045,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/realtime_pitch_time_geometry.hpp",
-      "fingerprint": "sha256:ffdb4ca7daa0ba17d53f78cf42eab0759c084cb2df4f0aa10bcf6be3e355fab0",
+      "fingerprint": "sha256:236b802fc225c39fc7ffc40d7861db34bf3ba21952033a7d831dbdbafed2a3c8",
       "include": "pulp/signal/realtime_pitch_time_geometry.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -4347,11 +4356,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_frame_engine.hpp",
-      "fingerprint": "sha256:96ccee16ef6cf63730e4dbaf0c386a1210e9e37ee038b416c39ddd14eb649a68",
+      "fingerprint": "sha256:3d371041810892c7a9f5a3e132e0efa0c22a7bcc961fc82a78b0f644599e665e",
       "include": "pulp/signal/spectral_frame_engine.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "The shared STFT analysis and weighted overlap-add engine under the spectral mask, delay-matrix and pitch/time processors. It is plumbing those capabilities compose, not a behavior an agent selects on its own: its frame grid, full-overlap stream start and fixed fft_size + hop latency are promises the capabilities built on it inherit."
     },
     {
       "domain": "signal",

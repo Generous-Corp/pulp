@@ -505,6 +505,12 @@ writes `SUFeedURL`, `SUPublicEDKey` and the optional keys into the app's
 `Info.plist` template, so they survive regeneration and combine with
 `pulp_declare_standalone_document_type()` in either order.
 
+Offline configures: `DIST_DIR`, or the cache variable `PULP_SPARKLE_DIST_DIR`,
+names an extracted distribution, and `PULP_SPARKLE_ARCHIVE` names a local copy
+of the release archive, which is verified against the same pinned SHA-256 before
+it is extracted. With `FETCHCONTENT_FULLY_DISCONNECTED` ON and none of these,
+configure stops with an error instead of downloading.
+
 `FEED_URL` must be `https://`, or `http://127.0.0.1:<port>/…` for a local practice feed served from loopback (Sparkle 2 refuses `file://` feeds at run time), and
 `PUBLIC_ED_KEY` must be the public half of the key pair. The private key never
 belongs in a build file: keep it outside the repository and pass it to

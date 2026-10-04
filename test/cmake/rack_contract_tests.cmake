@@ -144,3 +144,5 @@ if(Python3_Interpreter_FOUND)
         LABELS "rack;contract"
         TIMEOUT 60)
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/rack_tool_selftests.cmake")

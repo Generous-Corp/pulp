@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """What the patch language must guarantee.
 
-The headline property is ROUND TRIP: every patch on this machine rendered to
-text and parsed back must be the same patch, compared on port INDICES, not on
-port names. Names are what the text carries; indices are what Rack wires. A
+The headline property is ROUND TRIP: a patch rendered to text and parsed back
+must be the same patch, compared on port INDICES, not on port names. Names are what the text carries; indices are what Rack wires. A
 comparison by name passes while the cable moves, which is the failure this file
 exists to prevent — an early version of this test compared names, reported
 123/139, and was hiding exactly that.
@@ -62,7 +61,12 @@ def signature(doc, inv):
     return sorted(mods), sorted(cables)
 
 
-inv = P.inventory()
+# The checked-in inventory: port names and panels for every module this file,
+# the module docstring and the contract doc declare, so the language is checked
+# the same way on a host with no Rack, no plugins and no Forge data.
+FIXTURES = os.path.join(HERE, "fixtures", "patch-lang")
+with open(os.path.join(FIXTURES, "inventory.json"), encoding="utf-8") as _source:
+    inv = json.load(_source)
 
 # ---------------------------------------------------------------- the grammar
 
@@ -160,16 +164,11 @@ else:
 
 # ------------------------------------------------------------- the round trip
 
-d = os.path.expanduser("~/Library/Application Support/Forge Modular/"
-                       "examples/forge-modular/patches")
-files = sorted(glob.glob(d + "/*.vcv"))
-if not files:
-    print("  SKIP   no patches on this machine to round-trip "
-          "(this is a skip, not a pass)")
-else:
+def round_trip(paths, against):
+    """(same, diff, first failure) over the patches at `paths`."""
     same = diff = 0
     first_bad = None
-    for f in files:
+    for f in paths:
         try:
             orig = json.load(open(f))
         except Exception:                                   # noqa: BLE001
@@ -177,18 +176,39 @@ else:
         if not orig.get("modules"):
             continue
         try:
-            back = L.parse(L.render(orig, inv), inv)
+            back = L.parse(L.render(orig, against), against)
         except Exception as e:                              # noqa: BLE001
             diff += 1
             first_bad = first_bad or (os.path.basename(f), str(e)[:120])
             continue
-        if signature(orig, inv) == signature(back, inv):
+        if signature(orig, against) == signature(back, against):
             same += 1
         else:
             diff += 1
             first_bad = first_bad or (os.path.basename(f), "port indices differ")
+    return same, diff, first_bad
+
+
+# Rendered names must stay unique when a numbered name lands on another
+# module's slug: a second VCO is `vco2`, and so is a VCO2. Both orders.
+fixtures = sorted(glob.glob(os.path.join(FIXTURES, "*.vcv")))
+same, diff, first_bad = round_trip(fixtures, inv)
+if len(fixtures) >= 2 and diff == 0 and same == len(fixtures):
+    ok(f"the {same} checked-in patches round-trip, port-index exact")
+else:
+    wrong(f"{diff} of {len(fixtures)} checked-in patches do not round-trip; first: {first_bad}")
+
+# The installed examples, against the installed modules, where there are any.
+d = os.path.expanduser("~/Library/Application Support/Forge Modular/"
+                       "examples/forge-modular/patches")
+files = sorted(glob.glob(d + "/*.vcv"))
+if not files:
+    print("  SKIP   no installed example patches to round-trip "
+          "(this is a skip, not a pass)")
+else:
+    same, diff, first_bad = round_trip(files, P.inventory())
     if diff == 0 and same > 0:
-        ok(f"all {same} patches on this machine round-trip, port-index exact")
+        ok(f"all {same} installed patches round-trip, port-index exact")
     else:
         wrong(f"{diff} of {same + diff} patches do not round-trip; "
               f"first: {first_bad}")

@@ -7308,6 +7308,15 @@ that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
 instead of hand-editing `tools/shipyard.toml`; the helper owns the pin
 edit and worktree-safety checks.
 
+`shipyard pin bump` verifies by running the installer, which installs the
+new release into `~/.local/bin` on the host you run it on. Pass
+`--skip-verify` when the hosts are meant to reach the release through their
+own fleet rollout, or the host you bumped from stops being evidence that the
+rollout worked; check the release instead from a downloaded copy (its
+`checksums.sha256` entry, `codesign -dv`, `--help` surface). A clean-HOME
+`tools/install-shipyard.sh` needs `SHIPYARD_GITHUB_TOKEN`: anonymously the
+release lookup hits GitHub's 60-requests-an-hour limit and fails with 403.
+
 The two tools cover the same target matrix (mac local + GitHub-hosted
 Linux/Windows; legacy SSH targets only when explicitly requested) and accept
 the same `--base` flag for develop branches. Shipyard adds evidence-gated
@@ -7524,6 +7533,23 @@ re-confirming the red. `allowlisted_failure_count` reports how much of a
 graduation rested on the allowlist; the goal is 0. Shipyard
 recomputes the rule from the receipt's named sets and reports `matched_fail`,
 never `matched_pass`.
+
+A ctest "Not Run" test (a missing executable, a failed fixture dependency) is in
+ctest's FAILED list and exit code, but its JUnit row is `notrun` with a
+`<skipped>` child, the same shape as a real skip; the set builder counts it as
+failed unless the skip message starts with `SKIP_` (SKIP_RETURN_CODE,
+SKIP_REGULAR_EXPRESSION). `allowlisted_selected_failure_count` reports the
+in-selection failures that are themselves lane reds. Allowlist expiries stay
+within 28 days. `changed-surface-runner-selftest` runs the runner's own
+tests; until it was registered they ran only locally.
+
+**A proof run or canary PR must stay unarmed (or draft) until the lane's result
+receipt exists.** Shipyard cancels an in-flight lane run once its PR merges
+(`cancellation_proof.cause: already_merged`), so an armed proof PR whose
+required checks go green first loses its full leg and never records a verdict.
+The canary's bot PR is unmergeable by construction: draft, plus a do-not-merge
+label. Arm a proof PR only after `result-*.json` lands, if the change should
+merge at all.
 
 The scratch base is provisioned like the head before it configures: `setup.sh
 --deps-only` links `external/` from the shared source cache with git limited to

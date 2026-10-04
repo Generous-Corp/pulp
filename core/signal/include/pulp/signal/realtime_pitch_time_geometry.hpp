@@ -135,6 +135,10 @@ PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
     candidate.engine_config = {fft_size, analysis_hop, config.channels,
                                std::max(config.max_block, analysis_hop),
                                static_cast<int>(synthesis_hop)};
+    // The processor maps analysis frame k to input time k * analysis_hop for
+    // its stretched-output frame map and its priming contract, so it keeps the
+    // frame grid anchored at the first input sample.
+    candidate.engine_config.full_overlap_stream_start = false;
     if (config.mode == PitchTimeMode::time_stretch) {
         // A causal driver cannot publish final output until the spectral
         // analysis window has advanced through its priming span. Once primed,
