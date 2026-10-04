@@ -271,6 +271,50 @@ Where an uninstrumented subsystem's cost still shows up: inside whatever
 That tells you a frame was expensive; it cannot tell you which work inside it
 was responsible.
 
+## Per-frame cost of an animated UI, in one command
+
+For "is this animation cheap?" -- a modulated knob, a meter, a plot an LFO
+moves -- the answer is per frame and per stage, split by scenario, and it has a
+helper. Capture with your own frame span around each frame's work (or use the
+host's `frame` / `plugin_editor_frame`) and a scenario span around each run,
+then:
+
+```bash
+tools/scripts/trace_frame_cost.py --trace cap.pftrace --frame modctl_frame \
+    --group modctl_scenario --labels idle,knobs,morph,bands \
+    --baseline idle --max-p95-ms 1.5 --max-layout-frames 0     # exit 1 on breach
+```
+
+It prints frame p50/p95/max, each stage's p95 by SELF time (so a js span
+wrapping canvas work is not counted twice), whole-surface repaint requests per
+frame and the frames that ran a layout pass; `--json` for a machine. It exits 2
+when the frame span never fired or the ring wrapped, never reporting an empty
+table as a pass. The SQL is `pulp_frame_stage_cost` in the trace-sql stdlib.
+
+What to read, in order:
+1. **Frames that ran layout** -- a value tick that writes a size or a React
+   commit shows here first; it should be 0 for a modulated control.
+2. **Frame p95 over the baseline** -- the cost the animation adds.
+3. **`repaint/f`** -- whole-surface requests per frame. A frame-drive with
+   zero bounded damage usually means the bridge's own repaint request
+   (`repaint_request` → `view_repaint_request`) or a bounded request escalated
+   by `View::request_repaint(Rect)` (render transform, filter or scroll on an
+   ancestor -- a design-viewport scale is one). Find who asked:
+   `SELECT p.name, a.display_value, COUNT(*) FROM slice s JOIN slice p ON
+   s.parent_id = p.id LEFT JOIN args a ON a.arg_set_id = p.arg_set_id WHERE
+   s.name = 'view_repaint_request' GROUP BY 1, 2 ORDER BY 3 DESC` -- the
+   `js_native` parent's `debug.fn` names the bridge call (`setSvgPath`, ...).
+
+Pair the trace with the headless count gate (`FrameCostProbe`, view-bridge
+skill, checklist item 8) and its negative control. Getting a traced build:
+`pulp sdk install --local --profile trace` or a downstream's own trace-SDK
+script; verify it by symbol count before trusting an empty capture
+(`nm lib/libpulp-perfetto.a | grep -c " T "` in the thousands, `nm
+lib/libpulp-view-core.a | grep -ci perfetto` non-zero), and note that a
+`PULP_TRACE_SCOPE_NAMED` with a category Pulp does not define
+(`core/runtime/include/pulp/runtime/trace.hpp`) only fails to COMPILE in a
+traced build -- a release SDK hides it.
+
 ## The investigation protocol
 
 ### 1. Keep a chain-of-evidence scratchpad

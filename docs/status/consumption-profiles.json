@@ -1263,6 +1263,7 @@
       "pulp/view/file_chooser.hpp",
       "pulp/view/file_drop_zone.hpp",
       "pulp/view/frame_clock.hpp",
+      "pulp/view/frame_cost_probe.hpp",
       "pulp/view/gap_widgets.hpp",
       "pulp/view/geometry.hpp",
       "pulp/view/gesture.hpp",

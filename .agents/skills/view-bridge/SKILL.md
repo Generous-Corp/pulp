@@ -2796,6 +2796,44 @@ promise-driven modulation read, build info, the rAF hydrate, a passive effect,
 a tracing badge) became zero; ~250 ms of a warm open, and a non-default
 session (48 bands, a boosted band) mounts showing it.
 
+### 8. Modulated controls: draw the played value, never write it
+
+A control a modulator moves (an internal LFO on a knob, a fader, a slider) must
+visibly move, and must not become an automation source. One contract, the one
+`Knob::set_modulated_value` / `Fader::set_modulated_value` (bridge:
+`setModulatedValue(id, v | null)`) implement:
+
+- **The base stays the user's and stays editable.** The base pointer/thumb, the
+  value text and every gesture (`on_change`, begin/end) report the base, so a
+  drag starts from it and host automation records only the user's moves.
+- **The played value is drawn on top** (token `knob.modulation`): an arc or
+  segment from the base to the played value plus a marker at the played value.
+  Base marker + moving modulated marker is the whole visual language.
+- **Modulation never writes a host lane.** It offsets around the base, and the
+  base is whatever the host's automation is playing, so the control shows both
+  at once. Send the modulator's *coordinate* to the editor, not a value, and
+  apply it to the base the control shows, or an automated base and the LFO's
+  swing drift apart.
+- **Cost: one bounded repaint per frame, no layout, no commit.** The marker
+  repaints the control's own box. In a scripted UI update an SVG path's `d`
+  directly (`setSvgPath`) or a canvas, never React state; `SvgPathWidget::set_path`
+  repaints the union of the old and new path extents and skips an unchanged
+  string, and a redrawn `CanvasWidget` repaints its own box. A label whose text
+  a modulator steps (a band count) is painted through `textContent`, never by
+  notifying a component that owns the toolbar.
+
+Gate it with `pulp/view/frame_cost_probe.hpp`: `FrameCostProbe` attaches a
+recording plug-in host to the root and records, per frame, the damage requested
+(bounded rect or whole surface), the layout passes run and the wall time;
+`FrameCostProbe::check()` holds that to a `Budget`, optionally relative to an
+unmodulated baseline. Pair it with a negative control that forces a whole-tree
+invalidation per frame and must fail, and a positive control (frames painted),
+or a probe that cannot see damage passes every budget
+(`test/test_widget_bounded_repaint.cpp`). Damage is counted per request, so a
+host that clips to bounded damage would paint exactly what the probe reports;
+the macOS plug-in host still repaints in full, so on that host the win is the
+avoided layout and commit, and the bound is what a partial-repaint host uses.
+
 ## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
 
 `PluginViewHost::PresentPolicy::nonblocking` prefers Mailbox, then Immediate.

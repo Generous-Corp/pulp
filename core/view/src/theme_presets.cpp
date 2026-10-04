@@ -54,6 +54,10 @@ Theme derive_theme(const SemanticColors& sc) {
     t.colors["knob.arc"]    = sc.primary;
     t.colors["knob.arc.bg"] = sc.muted;
     t.colors["knob.thumb"]  = sc.foreground;
+    // The played value a modulator moves a knob or fader to
+    // (Knob::set_modulated_value): a hue apart from the value arc, so the
+    // base and the modulated value never read as one mark.
+    t.colors["knob.modulation"] = shift_hue(sc.primary, 70.0f);
 
     // Slider tokens
     t.colors["slider.track"] = sc.muted;

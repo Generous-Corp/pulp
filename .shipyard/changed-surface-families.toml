@@ -3838,6 +3838,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-5030faa01de9"
+paths = ["tools/scripts/test_trace_frame_cost.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "trace-frame-cost-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-2bfd1cb2bdad"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
@@ -5068,6 +5095,7 @@ paths = [
   "tools/scripts/test_tart_home_resolution.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
   "tools/scripts/test_tools_registry_check.py",
+  "tools/scripts/test_trace_frame_cost.py",
   "tools/scripts/test_trace_span_category_lint.py",
   "tools/scripts/test_unbounded_wait_lint.py",
   "tools/scripts/test_unregistered_tests_check.py",
@@ -5554,6 +5582,7 @@ paths = [
   "tools/scripts/test_tart_home_resolution.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
   "tools/scripts/test_tools_registry_check.py",
+  "tools/scripts/test_trace_frame_cost.py",
   "tools/scripts/test_trace_span_category_lint.py",
   "tools/scripts/test_unbounded_wait_lint.py",
   "tools/scripts/test_unregistered_tests_check.py",

@@ -8626,6 +8626,14 @@
    ],
    "kind": "python"
   },
+  "trace-frame-cost-selftest": {
+   "entry": "tools/scripts/test_trace_frame_cost.py",
+   "inputs": [
+    "test/fixtures/perfetto-gpu/render-only.pftrace",
+    "tools/scripts/test_trace_frame_cost.py"
+   ],
+   "kind": "python"
+  },
   "trace-span-category-lint": {
    "entry": "tools/scripts/trace_span_category_lint.py",
    "inputs": [
