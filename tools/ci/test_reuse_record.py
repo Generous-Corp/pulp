@@ -572,6 +572,67 @@ class CliTests(unittest.TestCase):
         self.assertEqual([l for l in proc.stdout.splitlines()
                           if "::warning" in l and "toolchain identity incomplete" not in l], [])
 
+    def module_build(self, tmp: str, write_module: bool = True) -> Path:
+        build = Path(tmp) / "build"
+        (build / "link-members").mkdir(parents=True)
+        (build / "CTestTestfile.cmake").write_text('add_test(t "/bin/echo")\n')
+        (build / "link-members" / "m.objects").write_text(
+            f"# Cwd: {build}\n# Path: {build}/m.so\n# Object files:\n[  1] p.o\n# Sections:\n")
+        (build / "link-members" / "m.args").write_text("c++\n-bundle\n")
+        if write_module:
+            (build / "m.so").write_bytes(b"MODULE")
+        return build
+
+    def write_with(self, tmp: str, build: Path) -> tuple[subprocess.CompletedProcess, dict, dict]:
+        env = {**os.environ, "GITHUB_EVENT_NAME": "push", "GITHUB_SHA": "abc"}
+        proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir", f"{tmp}/out",
+                               "--build-dir", str(build), "--link-members"],
+                              capture_output=True, text=True, timeout=60, env=env)
+        job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+        identity = json.loads((Path(tmp) / "out" / "identity.json").read_text())
+        return proc, job, identity
+
+    def test_a_linked_module_is_hashed_beside_the_executables(self) -> None:
+        # A module a test loads is part of what it runs: a key-blind module
+        # must be as visible as a key-blind executable.
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, job, identity = self.write_with(tmp, self.module_build(tmp))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        entry = identity["executables"]["<build>/m.so"]
+        self.assertEqual((entry["kind"], entry["sha256"]), ("module", hashlib.sha256(b"MODULE").hexdigest()))
+        self.assertIn("closure_digest", entry)
+        self.assertEqual((job["identity"]["usable"], job["identity"]["modules"]), (True, 1))
+
+    def test_an_unreadable_module_has_no_hash_and_says_why(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _, job, identity = self.write_with(tmp, self.module_build(tmp, write_module=False))
+        entry = identity["executables"]["<build>/m.so"]
+        self.assertIsNone(entry["sha256"])
+        self.assertIn("module unreadable", entry["error"])
+
+    def test_identity_that_hashed_nothing_is_unusable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            build.mkdir()
+            _, job, identity = self.write_with(tmp, build)
+        self.assertEqual(identity["executables"], {})
+        self.assertIs(job["identity"]["usable"], False)
+
+    def test_identity_that_failed_is_unusable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = self.module_build(tmp)
+            env = {**os.environ, "GITHUB_EVENT_NAME": "push", "GITHUB_SHA": "abc"}
+            # A seed file that is not JSON makes the identity step raise.
+            (Path(tmp) / "seed.json").write_text("{not json")
+            proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir",
+                                   f"{tmp}/out", "--build-dir", str(build), "--link-members",
+                                   "--identity-json", f"{tmp}/seed.json"],
+                                  capture_output=True, text=True, timeout=60, env=env)
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+        self.assertIn("executable identity unavailable", proc.stdout)
+        self.assertEqual((job["identity"]["usable"], job["identity"]["modules"]), (False, 0))
+
     def test_object_deps_are_recorded_and_a_missing_ninja_log_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             build = Path(tmp) / "build"

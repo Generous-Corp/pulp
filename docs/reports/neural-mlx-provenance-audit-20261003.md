@@ -1,50 +1,71 @@
 # MLX receipt provenance audit
 
-Date: 2026-10-03
-Audit ref: `origin/main` at `5ea08fd82495687c8e23c85de1a7d4ff429809a8`
-Audit worktree: `codex/mlx-receipt-audit-20261002`
+Date: 2026-10-03 (refreshed 2026-10-04)
+Audit ref: `origin/main` at `e260a88701eb85d1a22e11952826f98a4a36671c`
+Audit worktree: fresh checkout from current `origin/main`
+
+The original audit below was performed against `5ea08fd82495687c8e23c85de1a7d4ff429809a8`.
+That snapshot is historical. This refresh reconciles the receipts with the
+merged neural packages and the current source tree.
 
 ## Findings
 
-The audited `origin/main` ref contains the execution and packaging receipts, but
-not every path those receipts describe:
+The current `origin/main` ref contains the execution and packaging receipts and
+the private implementation/test paths that were previously branch-local:
 
-| Path | In audited `origin/main` | Finding |
+| Path | In current `origin/main` | Finding |
 |---|---:|---|
 | `docs/reports/neural-mlx-execution-receipt-20261002.md` | yes | landed documentation receipt |
 | `docs/reports/neural-mlx-packaging-control-receipt-20261002.md` | yes | landed documentation receipt |
-| `docs/reports/neural-mlx-worker-receipt-20261002.md` | no | feature-lineage design receipt; related link corrected to the landed execution receipt |
-| `tools/validation/mlx_worker_harness.py` | no | feature-lineage-only harness; execution receipt says it is not shipped |
-| `core/gpu_audio/src/detail/neural_processor.hpp` | no | feature-lineage source reference, not a landed public implementation |
-| `core/gpu_audio/src/detail/neural_model_manifest.hpp` | no | feature-lineage source reference |
-| `test/test_neural_model_manifest.cpp` | no | feature-lineage test reference |
+| `docs/reports/neural-mlx-worker-receipt-20261002.md` | yes | landed design receipt; it still records a CPU-only seam and open MLX gates |
+| `tools/validation/mlx_worker_harness.py` | yes | landed tools-only synthetic probe; default-off and not a shipped product path |
+| `core/gpu_audio/src/detail/neural_processor.hpp` | yes | landed private CPU-only lifecycle facade; non-CPU preferences still fall back or remain unexecutable |
+| `core/gpu_audio/src/detail/neural_model_manifest.hpp` | yes | landed private control-plane manifest and installed-asset admission helper |
+| `test/test_neural_model_manifest.cpp` | yes | landed private manifest/admission tests |
+| `core/gpu_audio/src/detail/nam_tcn_artifact.hpp` | yes | landed private serialized NAM/TCN CPU bridge; no MLX or public ABI claim |
+| `test/test_nam_tcn_adapter.cpp` | yes | landed private NAM/TCN bridge tests |
 
-The `planning` submodule pointer also differs: feature lineage points at
-`787f9f8eef42bf2ba1a76c79d2796efceccb95c4`, while `origin/main` points at
-`ea04f9eab039bb6c7550cb2e7225acdf6c56087c`. The audit worktree leaves that
+The paths above landed through the neural follow-up/integration and package
+merges ([PR 9332](https://github.com/Generous-Corp/pulp/pull/9332),
+[PR 9331](https://github.com/Generous-Corp/pulp/pull/9331),
+[PR 9412](https://github.com/Generous-Corp/pulp/pull/9412), and
+[PR 9415](https://github.com/Generous-Corp/pulp/pull/9415)). Landing private
+sources and tests does not make an MLX provider or a shipped neural product.
+
+The current `origin/main` `planning` gitlink is
+`9986b6a383e981277f71b297be216fba750b4567`. The audit checkout leaves that
 submodule uninitialized, so no planning claim was treated as locally verified.
+The planning-pointer updates are merged in
+[PR 9459](https://github.com/Generous-Corp/pulp/pull/9459) and
+[PR 9466](https://github.com/Generous-Corp/pulp/pull/9466); they do not close
+the MLX product gate.
 
-Receipt bodies contain no Git commit IDs presented as implementation evidence.
-The long hexadecimal strings in the execution receipt are MLX wheel SHA-256
-hashes, not commits. All receipts retain the blocked/product-gate language and
-explicitly classify synthetic timing as non-product evidence.
+The execution receipt's long hexadecimal strings are MLX wheel SHA-256 digests,
+not Git commits. Separately, the landed neural admission helper calls
+`pulp::runtime::sha256_file_hex` to hash installed artifact bytes and compare
+them with the recorded manifest digest; that helper is content verification,
+not source provenance. The receipts contain no Git commit presented as model or
+provider execution evidence. All receipts retain the blocked/product-gate
+language and explicitly classify synthetic timing as non-product evidence.
 
 ## Correction and limits
 
-The packaging receipt now links to the landed execution receipt and identifies
-the worker design receipt as feature-lineage-only. The execution receipt names
-the harness as feature-lineage-only and says it is not shipped. The worker
-receipt labels its source references as absent from the audited ref. These are
-documentation/provenance corrections only; no public ABI, provider selection, or
-GPU capability claim is added.
+The packaging receipt links to the landed execution receipt and identifies the
+worker design receipt as a design/measurement record. The execution receipt now
+describes the harness as landed tools-only synthetic evidence, while stating
+that it is not wired into a plugin build or shipped as a product. The worker
+receipt's CPU-only decision remains correct for the landed facade. These are
+documentation/provenance corrections only; no public ABI, provider selection,
+or GPU capability claim is added.
 
 ## Checks
 
 - `git cat-file -e origin/main:<path>` checked every receipt, harness, source,
-  and test path in the table.
+  and test path in the table at `e260a88701eb85d1a22e11952826f98a4a36671c`.
 - `git ls-tree origin/main planning` checked the submodule pointer.
 - `git diff --check` is required before commit.
 
-Next gate: land the private harness and any named-model adapter together with
-their source/test paths, then rerun this audit against the new `origin/main`
-before making any product or Phase 3 claim.
+Next gate: adapt the landed private harness to a named model and the existing
+Pulp paced transport, add CPU-oracle/fallback/thermal/residency evidence, and
+rerun this audit against the resulting `origin/main` before making any product
+or Phase 3 claim.

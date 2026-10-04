@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 118,
+  "inventory_version": 119,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 501,
-    "reviewed_headers": 222,
+    "public_headers": 502,
+    "reviewed_headers": 223,
     "legacy_unreviewed_headers": 279,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 120,
       "capability_support": 44,
-      "infrastructure": 56,
+      "infrastructure": 57,
       "legacy_unreviewed": 279,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 269,
-        "reviewed_headers": 123,
+        "public_headers": 270,
+        "reviewed_headers": 124,
         "legacy_unreviewed_headers": 146,
         "unsupported_headers": 2
       },
@@ -4014,6 +4014,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/processing_switch_crossfade.hpp",
+      "fingerprint": "sha256:8b34df01f4ebcdc418f040b2e58a203c3b274867c916648954bfb31fa06287fe",
+      "include": "pulp/signal/processing_switch_crossfade.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The sample schedule for switching a processor between two realisations of differing latency (warm the incoming one unheard, then a TransitionMixer EqualPower fade). It is plumbing a processor composes around the realisations it owns, not a behavior an agent selects on its own."
     },
     {
       "domain": "signal",

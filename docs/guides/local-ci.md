@@ -1060,7 +1060,14 @@ linked unchanged.
 The record hashes every registered test executable, not only those the job
 ran, so a fast-tier pull-request head's hashes are there for the merge
 group's **binary-identity shadow**, which reads the head's reuse record when
-the head issued no receipt (annotation field `source: reuse-record`). The
+the head issued no receipt (annotation field `source: reuse-record`). With
+`--link-members` it also hashes every module the build linked (link members'
+`kind: module`), because a test runs the modules it loads. Those modules go
+into the same identity.json `/executables` map, keyed by `<build>/`-relative
+real path and marked `"kind": "module"`. An entry with `sha256` null and an
+`error` has no hash. After a failed build only the executables that ran are
+hashed, and no modules. job.json `/identity/usable` is true when the map
+hashed anything. The
 macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
 (`tools/cmake/PulpLinkMaps.cmake`): every link runs through
 `tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the

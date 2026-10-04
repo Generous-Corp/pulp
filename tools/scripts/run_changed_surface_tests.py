@@ -1066,10 +1066,16 @@ def junit_failures(path: Path) -> set[str] | None:
     return {case.get("name", "") for case in root.iter("testcase") if _junit_case_failed(case)}
 
 
+UNMEASURED_SKIPS = {"would_skip_tests": None, "false_skip_count": None, "false_skips": None,
+                    "sampled_failures": None}
+
+
 def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
     """The tests the derived selection would have skipped (registrations of
     would-skip executables it did not sample) and which of them the full run
-    failed, or None when there is no derived selection or no full report."""
+    failed; and which tests of the sampled would-skips failed, the negative
+    control's catch. None when there is no derived selection or no full
+    report."""
     try:
         selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
         manifest = json.loads((result_dir / "executable-keys.json").read_text(encoding="utf-8"))
@@ -1079,10 +1085,109 @@ def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
     if failed is None:
         return None
     executables = manifest.get("executables") or {}
-    skipped = set(selection.get("would_skip") or []) - set(selection.get("sampled_executables") or [])
-    tests = sorted({name for a in skipped for name in (executables.get(a) or {}).get("registrations") or []})
+    sampled = set(selection.get("sampled_executables") or [])
+    skipped = set(selection.get("would_skip") or []) - sampled
+
+    def registered(artifacts: set[str]) -> set[str]:
+        return {name for a in artifacts for name in (executables.get(a) or {}).get("registrations") or []}
+    tests = sorted(registered(skipped))
     caught = sorted(set(tests) & failed)
-    return {"would_skip_tests": tests, "false_skip_count": len(caught), "false_skips": caught}
+    return {"would_skip_tests": tests, "false_skip_count": len(caught), "false_skips": caught,
+            "sampled_failures": sorted(registered(sampled) & failed)}
+
+
+# Executables whose key ignores what decides their bytes; a hash difference
+# there is expected and says nothing about the key. Read from the base's
+# extracted copy, so a change cannot list itself to hide a difference.
+KEY_BLIND_EXECUTABLES = "tools/ci/key_blind_executables.json"
+
+
+KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
+# The shape a result always carries, so an absent field never reads as "none".
+UNKNOWN_UNREACHED = {"unreached_changed": None, "unreached_compared": 0, "unreached_unchecked_modules": None}
+
+
+def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any],
+                      derived: dict[str, Any], scope: str) -> dict[str, Any]:
+    """Would-skip executables whose bytes, or the bytes of anything in their
+    spawn closure (the tools they run and the modules they load), differ
+    from the picked base record's hash for the same artifact: a key that
+    said "unchanged" about something that changed.
+
+    `scope` is "all" when every would-skip was built (a keyed full run) and
+    "sampled" when only the sample was. The record hashes the executables
+    registered ctests run, which every would-skip is; a closure artifact it
+    has no hash for is listed in `unreached_unchecked_modules`, and a would-skip
+    without one is skipped. `unreached_changed` is None, never an empty
+    list, when nothing can be compared: no record was picked (bytes from
+    another toolchain always differ), the record's identity is unusable, or
+    no artifact in scope has a hash. `unreached_compared` counts the
+    artifacts compared, so "none changed" over one artifact reads as that."""
+    unknown = UNKNOWN_UNREACHED
+    if derived.get("status") != "derived" or derived.get("base_record_run_id") is None:
+        return unknown
+    record = next((c for c in binding["candidates"] if c["run_id"] == derived["base_record_run_id"]), None)
+    if record is None:
+        return unknown
+    try:
+        selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
+        manifest = json.loads((result_dir / "executable-keys.json").read_text(encoding="utf-8"))
+        identity = json.loads((Path(record["record_path"]) / "identity.json").read_text(encoding="utf-8"))
+        job = json.loads((Path(record["record_path"]) / "job.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return unknown
+    # The recorder writes an empty identity when it could not hash, and says
+    # so: as `identity.usable`, or in older records as a problem line.
+    usable = job["identity"].get("usable") if isinstance(job.get("identity"), dict) else None
+    if usable is False or (usable is None and any(
+            "executable identity unavailable" in str(p) for p in job.get("problems") or [])):
+        return unknown
+    blind_path = Path(binding["derivation_code_dir"]) / KEY_BLIND_EXECUTABLES
+    try:
+        listing = json.loads(blind_path.read_text(encoding="utf-8"))
+        if listing.get("schema") != KEY_BLIND_SCHEMA:
+            return unknown
+        blind = set(listing.get("executables") or {})
+    except FileNotFoundError:
+        blind = set()
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return unknown
+    executables = manifest.get("executables") or {}
+    roots = set(selection.get("would_skip") or [])
+    if scope == "sampled":
+        roots &= set(selection.get("sampled_executables") or [])
+    recorded = identity.get("executables") or {}
+    verdicts: dict[str, bool | None] = {}
+
+    def differs(artifact: str) -> bool | None:
+        """Whether the built artifact differs from its record hash; None
+        when either side is missing."""
+        if artifact not in verdicts:
+            expected = (recorded.get(f"<build>/{artifact}") or {}).get("sha256")
+            built = build_dir / artifact
+            verdicts[artifact] = (None if not expected or not built.is_file()
+                                  else hashlib.sha256(built.read_bytes()).hexdigest() != expected)
+        return verdicts[artifact]
+
+    changed, unchecked = [], set()
+    for artifact in sorted(roots - blind):
+        closure, stack = set(), list((executables.get(artifact) or {}).get("spawns") or [])
+        while stack:
+            member = stack.pop()
+            if member not in closure:
+                closure.add(member)
+                stack.extend((executables.get(member) or {}).get("spawns") or [])
+        hit = differs(artifact) is True
+        for member in sorted(closure - blind):
+            verdict = differs(member)
+            if verdict is None:
+                unchecked.add(member)
+            hit = hit or verdict is True
+        if hit:
+            changed.append(artifact)
+    compared = sum(1 for verdict in verdicts.values() if verdict is not None)
+    return {"unreached_changed": changed if compared else None, "unreached_compared": compared,
+            "unreached_unchecked_modules": sorted(unchecked)}
 
 
 def lane_red_allowlist(
@@ -1372,6 +1477,8 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
                 lane_reuse_record.record(build_dir, REPO_ROOT, [("full", recorded, attempts, True)],
                                          started_epoch)
         measured = false_skips(result_dir, junit) if derived["status"] == "derived" else None
+        derived.update(unreached_changed(result_dir, build_dir, binding, derived, "all")
+                       if build_result == 0 and derived["status"] == "derived" else UNKNOWN_UNREACHED)
         try:
             inventory_names = [t.get("name") for t in ctest_payload(build_dir)["tests"]]
         except SelectionExecutionError:
@@ -1403,8 +1510,7 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
         "failure_coverage": "not_compared",
         "graduation_eligible": False,
         "executable_reuse": {"mode": "keyed_full_shadow", "bound": binding, "derived": derived,
-                             **(measured or {"would_skip_tests": None, "false_skip_count": None,
-                                             "false_skips": None})},
+                             **(measured or UNMEASURED_SKIPS)},
     })
     return returncode
 
@@ -1641,8 +1747,13 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                                  if allowlist is not None else None)
             if executable_reuse and executable_reuse["derived"]["status"] == "derived":
                 executable_reuse.update(false_skips(Path(result_dir), Path(directory) / "full-junit.xml")
-                                        or {"would_skip_tests": None, "false_skip_count": None,
-                                            "false_skips": None})
+                                        or UNMEASURED_SKIPS)
+                executable_reuse["derived"].update(unreached_changed(
+                    Path(result_dir), build_dir, executable_reuse["bound"], executable_reuse["derived"],
+                    "sampled"))
+            elif executable_reuse:
+                executable_reuse.update(UNMEASURED_SKIPS)
+                executable_reuse["derived"].update(UNKNOWN_UNREACHED)
             eligible = compare_full and (
                 verdict == "matched_pass"
                 or (verdict == "matched_fail" and allowlist is not None
