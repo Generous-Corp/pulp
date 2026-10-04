@@ -92,12 +92,12 @@ What Pulp does for you (every hosted format, nothing to opt into):
   after the factory returns, and a plain present showed the backing colour on
   about one open in twelve. Until the display link paints
   its first frame, a host resize of a windowed view (a restored or minimum
-  size, a container settling) is presented the same way, once per run-loop
-  turn at the final size, from an observer that runs just before Core
-  Animation commits that turn; otherwise the content-first frame shows
-  stretched into the new bounds for a vsync. Presenting each resize
-  synchronously instead rendered every transient size AUHostingService's
-  container passes through and slowed the out-of-process open.
+  size, a container settling) is presented the same way, right inside
+  `set_size()`; otherwise the content-first frame shows stretched into the new
+  bounds, or only the backing colour when the drawable size changed, for a
+  vsync. Deferring that present to the end of the run-loop turn is not enough:
+  AUHostingService commits its container's intermediate sizes before the turn
+  ends (about one open in twenty-five showed the backing colour).
 - Hosts that only paint from the platform's display pass (CPU host, Windows,
   Linux) mark themselves dirty; their first paint is already the document
   because it mounted before they got the view.

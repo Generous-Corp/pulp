@@ -2345,7 +2345,6 @@ public:
         // queued on the main thread becomes a no-op before we free anything
         // (mirrors the #2502 deferred-click token).
         alive_->store(false, std::memory_order_release);
-        release_resize_present_observer();
         root_.set_plugin_view_host(nullptr);
         // Drop held motion rather than delivering it: the drag target may
         // already be unmounted, and a teardown is not a frame.
@@ -2442,33 +2441,19 @@ public:
 
     // A host that sizes the editor right after the content-first frame (a
     // restored or minimum size, a container settling) would otherwise show
-    // that frame stretched into the new bounds until the display link's first
-    // frame. Until the link has painted, the new size is presented with the
-    // transaction that commits it: once, at the final size, from a run-loop
-    // observer that runs just before Core Animation commits the run loop's
-    // implicit transaction, so a burst of resizes in one turn costs one frame.
-    // A view with no window is not on screen; the link paints it on arrival.
-    void schedule_resize_present() {
-        if (resize_present_observer_) return;
-        auto alive = alive_;
-        resize_present_observer_ = CFRunLoopObserverCreateWithHandler(
-            kCFAllocatorDefault, kCFRunLoopBeforeWaiting | kCFRunLoopExit,
-            /*repeats=*/false, /*order: before Core Animation's commit*/ 1999000,
-            ^(CFRunLoopObserverRef, CFRunLoopActivity) {
-                if (!alive->load(std::memory_order_acquire)) return;
-                release_resize_present_observer();
-                if (only_first_frame_presented_ && metal_view_.window)
-                    present_with_transaction();
-            });
-        CFRunLoopAddObserver(CFRunLoopGetMain(), resize_present_observer_,
-                             kCFRunLoopCommonModes);
-    }
-
-    void release_resize_present_observer() {
-        if (!resize_present_observer_) return;
-        CFRunLoopObserverInvalidate(resize_present_observer_);
-        CFRelease(resize_present_observer_);
-        resize_present_observer_ = nullptr;
+    // that frame stretched into the new bounds -- or, when the drawable size
+    // changes under it, only the backing colour -- until the display link's
+    // first frame. Until the link has painted, a resize of a view that is in a
+    // window is presented right here, with the transaction that carries it.
+    // Deferring it to the end of the run-loop turn is not enough out of
+    // process: AUHostingService commits the container's intermediate sizes
+    // before the turn ends, and about one open in twenty-five showed the
+    // backing colour. A view with no window is not on screen; the link paints
+    // it when it arrives.
+    void present_resize_before_first_link_frame() {
+        if (!only_first_frame_presented_ || !metal_view_.window) return;
+        if (size_.width == 0 || size_.height == 0) return;
+        present_with_transaction();
     }
 
     void set_size(uint32_t width, uint32_t height) override {
@@ -2488,9 +2473,7 @@ public:
             }
         }
         needs_repaint_.store(true, std::memory_order_relaxed);
-        // See schedule_resize_present().
-        if (only_first_frame_presented_ && width > 0 && height > 0)
-            schedule_resize_present();
+        present_resize_before_first_link_frame();
     }
 
     Size get_size() const override { return size_; }
@@ -2663,7 +2646,6 @@ private:
     // True from the content-first frame until the display link paints: the
     // only frames on screen are ones this host presented with a transaction.
     bool only_first_frame_presented_ = false;
-    CFRunLoopObserverRef resize_present_observer_ = nullptr;
 
     // FIRST-PAINT SIZE matters: the (width,height) this surface is created at
     // becomes the first painted frame's size. In an out-of-process plugin host
