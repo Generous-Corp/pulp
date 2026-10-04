@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <pulp/format/processor.hpp>
@@ -1873,11 +1874,17 @@ std::vector<NodeId> processing_order_for(const std::vector<GraphNode>& nodes,
         if (c.feedback) continue;
         in_degree[c.dest_node]++;
     }
-    std::queue<NodeId> queue;
-    for (auto& [id, deg] : in_degree) if (deg == 0) queue.push(id);
+    // A graph can have multiple ready nodes at every fan-out/fan-in boundary.
+    // Do not let unordered_map iteration or connection insertion order choose
+    // the runtime plan: NodeId is the compact execution identity, so using it
+    // as the ready-queue key gives equivalent graphs one canonical order.
+    std::priority_queue<NodeId, std::vector<NodeId>, std::greater<NodeId>> queue;
+    for (const auto& [id, deg] : in_degree)
+        if (deg == 0)
+            queue.push(id);
     std::vector<NodeId> order;
     while (!queue.empty()) {
-        auto current = queue.front();
+        auto current = queue.top();
         queue.pop();
         order.push_back(current);
         for (const auto& c : connections) {
