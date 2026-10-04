@@ -1571,15 +1571,6 @@ class FailureSetTest(unittest.TestCase):
             broken.write_text("<testsuite>", encoding="utf-8")
             self.assertIsNone(runner.junit_failures(broken))
 
-    def test_each_legs_report_is_copied_for_the_reuse_record(self) -> None:
-        with tempfile.TemporaryDirectory() as private, tempfile.TemporaryDirectory() as record:
-            (Path(private) / "full-junit.xml").write_text("<testsuite/>", encoding="utf-8")
-            self.assertEqual(runner.copy_junit_reports(Path(private), None), [])
-            self.assertEqual(runner.copy_junit_reports(Path(private), record), ["full-junit.xml"])
-            self.assertEqual((Path(record) / "full-junit.xml").read_text(encoding="utf-8"),
-                             "<testsuite/>")
-            self.assertFalse((Path(record) / "selected-junit.xml").exists())
-
     def test_two_failing_legs_without_sets_stay_unproven(self) -> None:
         self.assertEqual(runner.comparison_verdict(8, 8), "failure_overlap_unproven")
         self.assertEqual(runner.comparison_verdict(8, 8, ({"a"}, set(), {"a"})),

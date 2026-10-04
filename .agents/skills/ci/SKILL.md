@@ -7481,9 +7481,7 @@ ctest's FAILED list and exit code, but its JUnit row is `notrun` with a
 failed unless the skip message starts with `SKIP_` (SKIP_RETURN_CODE,
 SKIP_REGULAR_EXPRESSION). `allowlisted_selected_failure_count` reports the
 in-selection failures that are themselves lane reds. Allowlist expiries stay
-within 28 days. The runner copies both legs' JUnit reports into
-`$SHIPYARD_REUSE_RECORD_DIR` when it is set, since a bounded run replaces the
-ordinary test stage. `changed-surface-runner-selftest` runs the runner's own
+within 28 days. `changed-surface-runner-selftest` runs the runner's own
 tests; until it was registered they ran only locally.
 
 **A proof run or canary PR must stay unarmed (or draft) until the lane's result

@@ -858,22 +858,6 @@ def junit_failures(path: Path) -> set[str] | None:
     return {case.get("name", "") for case in root.iter("testcase") if _junit_case_failed(case)}
 
 
-def copy_junit_reports(private_dir: Path, record_dir: str | None) -> list[str]:
-    """Copy each leg's JUnit report into the reuse record's directory before the
-    private directory goes away; a bounded run replaces the ordinary test stage,
-    so these are the only per-test results it leaves. Best effort: a missing
-    report is simply not copied."""
-    if not record_dir:
-        return []
-    copied = []
-    for name in ("selected-junit.xml", "full-junit.xml"):
-        source = private_dir / name
-        if source.is_file():
-            shutil.copyfile(source, Path(record_dir) / name)
-            copied.append(name)
-    return copied
-
-
 def lane_red_allowlist(
     base_sha: str, repo_root: Path = REPO_ROOT, today: str | None = None
 ) -> tuple[dict[str, str], str] | None:
@@ -1307,7 +1291,6 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             or selected_file.read_bytes() != selected_payload
         ):
             raise SelectionExecutionError("private selected-tests snapshot changed during execution")
-        copy_junit_reports(Path(directory), os.environ.get("SHIPYARD_REUSE_RECORD_DIR"))
         result_dir = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
         if result_dir:
             selected_failures = junit_failures(Path(directory) / "selected-junit.xml")
