@@ -459,6 +459,21 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             ek.main(["x", "--build-dir", "/b"])                     # keys still need their inputs
 
+    def test_a_cold_build_dir_still_states_the_platform(self):
+        # The planner binds a candidate set by platform before the lane has
+        # configured anything; a cold lane must still answer.
+        import contextlib
+        import io
+        import reuse_record
+        for build in (Path(self.id()) / "never-configured", None):
+            out = io.StringIO()
+            argv = ["x", "--print-toolchain"] + (["--build-dir", str(build)] if build else [])
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(ek.main(argv), 0, build)
+            printed = json.loads(out.getvalue())
+            self.assertEqual(printed["platform"], reuse_record.platform_id())
+            self.assertFalse((printed["toolchain"] or {}).get("complete", False))
+
     def test_every_key_code_path_exists(self):
         repo = HERE.parents[1]
         self.assertEqual([p for p in ek.KEY_CODE_PATHS if not (repo / p).is_file()], [])
