@@ -4347,7 +4347,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_frame_engine.hpp",
-      "fingerprint": "sha256:1a24ca1136afdf3dd1d953f54c297f0ffeaa94c966d55d6f8296251d56eea01e",
+      "fingerprint": "sha256:3d371041810892c7a9f5a3e132e0efa0c22a7bcc961fc82a78b0f644599e665e",
       "include": "pulp/signal/spectral_frame_engine.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

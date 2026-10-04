@@ -52,7 +52,7 @@ struct StreamStartConfig {
 StreamStartConfig g_stream_start;
 
 class StreamStartIdentityProcessor : public pulp::format::Processor {
-public:
+  public:
     pulp::format::PluginDescriptor descriptor() const override {
         return {
             .name = "SpectralStreamStart",
@@ -91,19 +91,20 @@ public:
         }
     }
 
-    int latency_samples() const override { return engine_.latency_samples(); }
+    int latency_samples() const override {
+        return engine_.latency_samples();
+    }
 
     void process(pulp::audio::BufferView<float>& out,
-                 const pulp::audio::BufferView<const float>& in,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
         const float* ip = in.channel_ptr(0);
         float* op = out.channel_ptr(0);
         engine_.process(&ip, &op, static_cast<int>(out.num_samples()),
                         [](std::complex<float>* const*, int) {});
     }
 
-private:
+  private:
     pulp::signal::SpectralFrameEngine engine_;
 };
 
@@ -140,7 +141,8 @@ pulp::audio::Buffer<float> delayed(const pulp::audio::Buffer<float>& input, int 
 double peak_dbfs(const pulp::audio::Buffer<float>& buffer, std::size_t from, std::size_t to) {
     const float* data = buffer.view().channel_ptr(0);
     float peak = 0.0f;
-    for (std::size_t i = from; i < to; ++i) peak = std::max(peak, std::abs(data[i]));
+    for (std::size_t i = from; i < to; ++i)
+        peak = std::max(peak, std::abs(data[i]));
     return 20.0 * std::log10(std::max(static_cast<double>(peak), 1e-15));
 }
 
@@ -159,8 +161,7 @@ std::vector<StreamStartCase> stream_start_cases(int frames) {
     return cases;
 }
 
-void require_stream_start_nulls(EngineGeometry geometry, bool reset_after_noise,
-                                int block_size) {
+void require_stream_start_nulls(EngineGeometry geometry, bool reset_after_noise, int block_size) {
     g_stream_start = {geometry, reset_after_noise};
     const int latency = geometry.fft_size + geometry.hop;
     // Room for the latest stimulus, the delay, and one more window of output.
@@ -182,11 +183,9 @@ void require_stream_start_nulls(EngineGeometry geometry, bool reset_after_noise,
         // The delayed onset itself, for the failure message: what an attack
         // that was swallowed reads as.
         const auto at = static_cast<std::size_t>(c.onset + latency);
-        INFO("fft=" << geometry.fft_size << " hop=" << geometry.hop
-                    << " block=" << block_size << " reset=" << reset_after_noise
-                    << " case=" << c.label << " onset peak="
-                    << peak_dbfs(result.output, at, at + 1) << " dBFS; "
-                    << check.message);
+        INFO("fft=" << geometry.fft_size << " hop=" << geometry.hop << " block=" << block_size
+                    << " reset=" << reset_after_noise << " case=" << c.label << " onset peak="
+                    << peak_dbfs(result.output, at, at + 1) << " dBFS; " << check.message);
         REQUIRE(check.passed);
     }
 }
@@ -240,8 +239,8 @@ TEST_CASE("SpectralFrameEngine stream-start coverage equals steady-state coverag
         // Negative control: a grid that starts at the first sample, as a frame
         // engine without the pre-stream frames would, leaves sample 0 covered
         // only by the zero-valued edge of one window.
-        REQUIRE(pulp::signal::spectral_ola_window_energy(
-                    window.data(), g.fft_size, g.hop, 0, 0) < 1e-12);
+        REQUIRE(pulp::signal::spectral_ola_window_energy(window.data(), g.fft_size, g.hop, 0, 0) <
+                1e-12);
     }
 }
 
@@ -265,7 +264,8 @@ TEST_CASE("SpectralMaskProcessor at unity mask passes the stream start untouched
 
     const int frames = 2048 + latency + 8192;
     for (int pass = 0; pass < 2; ++pass) {
-        if (pass == 1) processor.reset();
+        if (pass == 1)
+            processor.reset();
         auto input = make_impulse(1, frames, 1.0f, 1024);
         pulp::audio::Buffer<float> output(1, static_cast<std::size_t>(frames));
         const float* in = input.view().channel_ptr(0);

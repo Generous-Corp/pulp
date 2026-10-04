@@ -322,8 +322,7 @@ TEST_CASE("SpectralFrameEngine frame cadence and bin count",
     engine.prepare(config);
     REQUIRE(engine.first_frame_start() == 0);
     frames = 0;
-    engine.analyze(in_ptr.data(), 10240,
-                   [&](std::complex<float>* const*, int) { ++frames; });
+    engine.analyze(in_ptr.data(), 10240, [&](std::complex<float>* const*, int) { ++frames; });
     REQUIRE(frames == 37);
 }
 

@@ -94,9 +94,11 @@ inline bool is_valid_spectral_frame_geometry(int fft_size, int analysis_hop) noe
 /// Stream position of the first analysis frame after prepare()/reset(). With
 /// full overlap this is the largest multiple of `analysis_hop` that lies above
 /// -fft_size, so every frame that overlaps input sample 0 exists.
-inline constexpr std::int64_t spectral_frame_engine_first_frame_start(
-    int fft_size, int analysis_hop, bool full_overlap_stream_start) noexcept {
-    if (!full_overlap_stream_start || fft_size <= 0 || analysis_hop <= 0) return 0;
+inline constexpr std::int64_t
+spectral_frame_engine_first_frame_start(int fft_size, int analysis_hop,
+                                        bool full_overlap_stream_start) noexcept {
+    if (!full_overlap_stream_start || fft_size <= 0 || analysis_hop <= 0)
+        return 0;
     return -static_cast<std::int64_t>((fft_size - 1) / analysis_hop) * analysis_hop;
 }
 
@@ -114,8 +116,7 @@ inline double spectral_ola_window_energy(const SampleType* window, int fft_size,
         std::max(first_frame_start, position - static_cast<std::int64_t>(fft_size) + 1);
     const std::int64_t first_k = (lowest - first_frame_start + hop - 1) / hop;
     double sum = 0.0;
-    for (std::int64_t start = first_frame_start + first_k * hop; start <= position;
-         start += hop) {
+    for (std::int64_t start = first_frame_start + first_k * hop; start <= position; start += hop) {
         const auto w = static_cast<double>(window[static_cast<std::size_t>(position - start)]);
         sum += w * w;
     }
@@ -273,7 +274,9 @@ public:
     /// 0 without full-overlap stream start, otherwise in (-fft_size, 0] and a
     /// multiple of analysis_hop. Frame k analyses input
     /// [first_frame_start() + k * hop, ... + fft_size), silence before 0.
-    std::int64_t first_frame_start() const { return first_frame_start_; }
+    std::int64_t first_frame_start() const {
+        return first_frame_start_;
+    }
 
     int fft_size() const { return config_.fft_size; }
     int analysis_hop() const { return config_.analysis_hop; }
@@ -365,9 +368,8 @@ public:
         // Pre-stream samples of a frame that starts before position 0 are
         // never read, so they are never written: the ring slots they would
         // alias stay clean for the real stream.
-        const int skip = synth_pos_ < 0
-            ? static_cast<int>(std::min<std::int64_t>(-synth_pos_, n))
-            : 0;
+        const int skip =
+            synth_pos_ < 0 ? static_cast<int>(std::min<std::int64_t>(-synth_pos_, n)) : 0;
         for (int ch = 0; ch < config_.channels; ++ch) {
             for (int k = 0; k < num_bins_; ++k) {
                 freq_buf_[static_cast<size_t>(k)] = frames[ch][k];
