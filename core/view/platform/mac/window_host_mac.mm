@@ -1285,9 +1285,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
 
-    const uint32_t background = self.backgroundRGB;
-    canvas.set_fill_color(pulp::canvas::Color::rgba8(
-        (background >> 16) & 0xff, (background >> 8) & 0xff, background & 0xff));
+    canvas.set_fill_color(pulp::canvas::Color::hex(self.backgroundRGB));
     canvas.fill_rect(0, 0,
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
@@ -1483,16 +1481,11 @@ public:
             // create_configured_window; identical for the GPU host.
             window_ = create_configured_window(options);
 
-            // NSWindow's default backgroundColor is
-            // [NSColor windowBackgroundColor] which is white in macOS
-            // light-mode. AppKit composites this beneath the contentView
-            // on dirty-rect repaints, even when the contentView is opaque.
-            // Set the window backgroundColor to match PulpView's clear color
-            // so any compositing race / partial-paint window shows dark, not
-            // white. Belt-and-suspenders alongside PulpView isOpaque=YES.
-            // CPU-host-specific: the GPU host clears via its Metal frame.
-            [window_ setBackgroundColor:pulp::view::mac_host::ns_color_from_rgb(
-                                            options.background_rgb)];
+            // AppKit composites the window's backgroundColor (white in light
+            // mode by default) beneath the content on dirty-rect repaints, so
+            // it is the window's declared background (WindowOptions), as is
+            // the view's fill; both hosts do this.
+            [window_ setBackgroundColor:pulp::view::mac_host::ns_color_from_rgb(options.background_rgb)];
 
             options_initially_hidden_ = options.initially_hidden;
 
@@ -1768,10 +1761,7 @@ public:
             window_ = create_configured_window(options);
 
             options_initially_hidden_ = options.initially_hidden;
-            background_rgb_ = options.background_rgb;
-            // The window's own colour shows wherever the Metal layer has not
-            // composited yet (and in AppKit's own repaints of the frame); the
-            // platform default is white in light mode, never the app's colour.
+            background_rgb_ = options.background_rgb;  // see MacWindowHost
             [window_ setBackgroundColor:mac_host::ns_color_from_rgb(background_rgb_)];
 
             // Create CAMetalLayer-backed view
@@ -2331,8 +2321,7 @@ private:
     id key_monitor_ = nil;                                       // NSEvent app key monitor
     std::function<bool(const pulp::view::KeyEvent&)> app_key_handler_;
     bool options_initially_hidden_ = false;
-    // WindowOptions::background_rgb: the fill under the tree and the letterbox bars.
-    uint32_t background_rgb_ = mac_host::kHostClearRgb;
+    uint32_t background_rgb_ = mac_host::kHostClearRgb;  // WindowOptions::background_rgb
     bool foreground_role_adopted_ = false;
     std::vector<WindowOptions::MenuCommand> menu_commands_;
 
@@ -2675,9 +2664,7 @@ private:
             canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
         }
 
-        canvas.set_fill_color(canvas::Color::rgba8(
-            (background_rgb_ >> 16) & 0xff, (background_rgb_ >> 8) & 0xff,
-            background_rgb_ & 0xff));
+        canvas.set_fill_color(canvas::Color::hex(background_rgb_));
         canvas.fill_rect(0, 0, width_, height_);
 
         if (has_viewport) {
