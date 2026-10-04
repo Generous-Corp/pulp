@@ -13,7 +13,6 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <numeric>
 #include <sstream>
 #include <string>
@@ -97,8 +96,15 @@ BootstrapInterval paired_bootstrap(const std::vector<double>& candidate,
     for (std::size_t replicate = 0; replicate < 10000; ++replicate) {
         double sum = 0.0;
         for (std::size_t sample = 0; sample < bootstrap_samples; ++sample) {
-            state = state * 6364136223846793005ULL + 1442695040888963407ULL;
-            sum += deltas[static_cast<std::size_t>(state % bootstrap_samples)];
+            // SplitMix64 mixes the high and low bits before indexing.  The
+            // low bits of an LCG cycle deterministically for power-of-two
+            // counts and can otherwise produce an invalid zero-width CI.
+            state += 0x9e3779b97f4a7c15ULL;
+            auto mixed = state;
+            mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebULL;
+            mixed ^= mixed >> 31;
+            sum += deltas[static_cast<std::size_t>(mixed % bootstrap_samples)];
         }
         replicates.push_back(sum / static_cast<double>(bootstrap_samples));
     }
@@ -467,27 +473,32 @@ std::string run_detailed_cell(const HostCase host, std::size_t blocks, std::size
     const auto oracle_stats = summarize_samples(steady_oracle);
     const auto bootstrap = paired_bootstrap(steady_model, steady_oracle);
     const auto engine_commit = std::getenv("PULP_BENCHMARK_ENGINE_COMMIT");
+    const auto commit = engine_commit ? std::string(engine_commit) : std::string();
+    const auto valid_commit =
+        commit.size() == 40 && commit.find_first_not_of("0123456789abcdef") == std::string::npos;
     std::ostringstream receipt;
-    receipt << "{\"sample_rate\":" << host.sample_rate << ",\"frames\":" << host.frames
-            << ",\"channels\":" << Channels << ",\"kernel\":" << KernelSize
-            << ",\"blocks_per_repeat\":" << blocks << ",\"cold_repeats\":" << repeats
-            << ",\"steady_repeats\":" << repeats << ",\"deadline_ns\":"
+    receipt << "{\"host_sample_rate_metadata\":" << host.sample_rate
+            << ",\"frames\":" << host.frames << ",\"channels\":" << Channels
+            << ",\"kernel\":" << KernelSize << ",\"blocks_per_repeat\":" << blocks
+            << ",\"cold_repeats\":" << repeats << ",\"steady_repeats\":" << repeats
+            << ",\"deadline_ns\":"
             << json_number(1.0e9 * static_cast<double>(host.frames) /
                            static_cast<double>(host.sample_rate))
             << ",\"deadline_misses\":" << deadline_misses << ",\"allocations\":" << allocations
-            << ",\"locks\":0,\"blocking_calls\":0,\"fallbacks\":0,\"late_results\":0"
+            << ",\"locks\":null,\"blocking_calls\":null,\"fallbacks\":null,\"late_results\":null"
+            << ",\"counter_status\":\"unavailable_no_explicit_event_counters\""
             << ",\"lock_probe\":\""
 #if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
             << "pthread_interposition_trap"
 #else
             << "not_interposed"
 #endif
-            << "\",\"model\":{\"id\":\"benchmark.micro-tcn\",\"weights_sha256\":\"embedded-"
-               "benchmark-weights\",\"provider\":\"cpu\"}"
+            << "\",\"model\":{\"id\":\"benchmark.micro-tcn\",\"weights_sha256\":null,"
+               "\"weights_source\":\"embedded-benchmark-weights\",\"provider\":\"cpu\"}"
             << ",\"cpu_oracle\":{\"id\":\"independent-depthwise-relu\",\"max_abs_error\":"
             << json_number(max_abs_error) << ",\"model_checksum\":" << json_number(model_checksum)
             << ",\"oracle_checksum\":" << json_number(oracle_checksum) << "}"
-            << ",\"engine_commit\":\"" << (engine_commit ? engine_commit : "unknown") << "\""
+            << ",\"engine_commit\":" << (valid_commit ? "\"" + commit + "\"" : "null")
             << ",\"cold\":{\"p50_ns\":" << json_number(cold_stats.p50)
             << ",\"p95_ns\":" << json_number(cold_stats.p95)
             << ",\"p99_ns\":" << json_number(cold_stats.p99)
@@ -532,6 +543,19 @@ void emit_detailed_receipt_if_requested() {
     std::ostringstream receipt;
     receipt << "{\"schema_version\":\"pulp.neural.streaming-benchmark.v1\","
             << "\"campaign\":\"synthetic-micro-tcn-feasibility\","
+            << "\"timing_domain\":\"unpaced_inline_cpu_inference_wall_ns\","
+            << "\"cold_definition\":\"fresh_model_in_same_process_after_one_discarded_block_and_"
+               "reset\","
+            << "\"steady_definition\":\"reused_model_reset_then_one_warmup_block_per_repeat\","
+            << "\"bootstrap_method\":\"splitmix64_paired_mean_delta_evenly_spaced_subset\","
+            << "\"competitive_gates_complete\":false,"
+            << "\"missing_gates\":[\"paced_delivery\",\"independent_process_cold_starts\","
+               "\"five_warmup_blocks\",\"alternating_baseline_candidate_order\","
+               "\"per_run_and_fixed_window_statistics\",\"percentile_delta_bootstrap\","
+               "\"timer_noise_floor\",\"explicit_portable_safety_counters\","
+               "\"planted_campaign_controls\",\"named_serialized_model\","
+               "\"model_and_corpus_sha256\",\"host_toolchain_power_provenance\","
+               "\"two_instances\",\"full_cartesian_host_matrix\"],"
             << "\"blocks_per_repeat\":" << blocks << ",\"repeats\":" << repeats << ",\"cells\":[";
     bool first = true;
     for (const auto host : host_matrix) {
@@ -558,6 +582,11 @@ void emit_detailed_receipt_if_requested() {
 
 TEST_CASE("streaming CPU matrix is callback-safe and allocation-free",
           "[gpu_audio][streaming_model][benchmark][rt_safety]") {
+    const auto varied_bootstrap = paired_bootstrap({0.0, 1.0, 2.0, 3.0}, {0.0, 0.0, 0.0, 0.0});
+    REQUIRE(varied_bootstrap.lower < varied_bootstrap.upper);
+    const auto constant_bootstrap = paired_bootstrap({1.0, 1.0, 1.0, 1.0}, {0.0, 0.0, 0.0, 0.0});
+    REQUIRE(constant_bootstrap.lower == 1.0);
+    REQUIRE(constant_bootstrap.upper == 1.0);
     constexpr HostCase host_matrix[] = {{44100, 32}, {48000, 64}, {96000, 128}};
     for (const auto host : host_matrix) {
         run_cpu_receipt<1, 3>(host);
