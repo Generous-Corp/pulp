@@ -494,7 +494,7 @@ class Collector:
                     "digest_schema": None if model is None else model.get("schema"),
                     "generated_headers": None if model is None else model.get("generated_headers"),
                     "declared_commit_bound": declared, "deps": recorded_deps(deps_doc)}
-        return self._cached(f"record-v6/{run_id}.json.gz", fetch)
+        return self._cached(f"record-v7/{run_id}.json.gz", fetch)
 
     def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
         """The per-target codemodel digests a run recorded, or None."""
