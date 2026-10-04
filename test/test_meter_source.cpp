@@ -1202,6 +1202,33 @@ TEST_CASE("ValueChannelSet resolves declared channels by exact name",
     CHECK(channels.infos()[3].shape == ValueChannelShape::events);
 }
 
+TEST_CASE("ValueChannelSet indexed lookup keeps exact-shape controls isolated",
+          "[view][value-channel][binding]") {
+    ValueChannelSet channels;
+    auto* scalar = channels.declare_scalar("shared", "", 0.0f);
+    auto* meter = channels.declare_meter("meter", "", 0.0f);
+    auto* vector = channels.declare_vector("scope", "", 0.0f);
+    auto* events = channels.declare_events("events");
+    REQUIRE(scalar != nullptr);
+    REQUIRE(meter != nullptr);
+    REQUIRE(vector != nullptr);
+    REQUIRE(events != nullptr);
+
+    // Positive controls exercise each cached shape index after declarations
+    // have finished, which is the same lookup used by native frame bindings.
+    CHECK(channels.scalar("shared") == scalar);
+    CHECK(channels.meter("meter") == meter);
+    CHECK(channels.vector("scope") == vector);
+    CHECK(channels.events("events") == events);
+
+    // Negative controls must remain misses: a wrong shape or a near-name can
+    // never fall through to another cached index and bind the wrong signal.
+    CHECK(channels.meter("shared") == nullptr);
+    CHECK(channels.vector("meter") == nullptr);
+    CHECK(channels.events("scope") == nullptr);
+    CHECK(channels.scalar("shared_") == nullptr);
+}
+
 TEST_CASE("ValueChannelSet refuses declarations that would break lookup",
           "[view][value-channel]") {
     ValueChannelSet channels;

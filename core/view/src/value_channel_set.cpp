@@ -37,6 +37,22 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
     if (clash != infos_.end()) return fail(DeclareError::duplicate_name);
 
     infos_.push_back(ValueChannelInfo{std::move(name), std::move(unit), shape, neutral});
+    const auto index = infos_.size() - 1;
+    const auto& key = infos_.back().name;
+    switch (shape) {
+    case ValueChannelShape::scalar:
+        scalar_indices_.emplace(key, index);
+        break;
+    case ValueChannelShape::meter:
+        meter_indices_.emplace(key, index);
+        break;
+    case ValueChannelShape::vector:
+        vector_indices_.emplace(key, index);
+        break;
+    case ValueChannelShape::events:
+        event_indices_.emplace(key, index);
+        break;
+    }
     entries_.push_back(std::make_unique<Entry>());
     if (!telemetry_control_)
         telemetry_control_ = detail::make_value_channel_telemetry_control();
@@ -90,12 +106,21 @@ EventSource* ValueChannelSet::declare_events(std::string name, std::string unit,
 
 std::ptrdiff_t ValueChannelSet::index_of(std::string_view name,
                                          ValueChannelShape shape) const {
-    for (std::size_t i = 0; i < infos_.size(); ++i) {
-        // Exact match, deliberately — see the header on why a lookup key is not
-        // canonicalized. A shape mismatch is a miss rather than a wrong-typed
-        // hit, so binding a scope to a meter fails at bind time.
-        if (infos_[i].name == name && infos_[i].shape == shape)
-            return static_cast<std::ptrdiff_t>(i);
+    const auto lookup = [&](const auto& indices) -> std::ptrdiff_t {
+        const auto it = indices.find(name);
+        return it == indices.end() ? -1 : static_cast<std::ptrdiff_t>(it->second);
+    };
+    // Exact match remains deliberate: a shape mismatch is a miss rather than
+    // a wrong-typed hit, so a binding can never silently read another source.
+    switch (shape) {
+    case ValueChannelShape::scalar:
+        return lookup(scalar_indices_);
+    case ValueChannelShape::meter:
+        return lookup(meter_indices_);
+    case ValueChannelShape::vector:
+        return lookup(vector_indices_);
+    case ValueChannelShape::events:
+        return lookup(event_indices_);
     }
     return -1;
 }
