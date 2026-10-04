@@ -18,11 +18,11 @@
 /// NativeImport* binding descriptors / context) still lives directly in this
 /// umbrella; it has not been split out yet.
 
-#include <pulp/view/design_ir.hpp>
-#include <pulp/view/design_tokens.hpp>
-#include <pulp/view/design_sources.hpp>
-#include <pulp/view/design_shortcuts.hpp>
 #include <pulp/view/design_codegen.hpp>
+#include <pulp/view/design_ir.hpp>
+#include <pulp/view/design_shortcuts.hpp>
+#include <pulp/view/design_sources.hpp>
+#include <pulp/view/design_tokens.hpp>
 #include <pulp/view/design_update.hpp>
 
 #include <filesystem>
