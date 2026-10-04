@@ -117,6 +117,8 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
         // ordinary runtimes retain browser-compatible callback semantics.
         self.engine_.evaluate(
             "var __pulpFrameTimestamp__ = __resolveFrameTimestamp__();void 0;");
+        const auto frame_timestamp = self.engine_.evaluate("__pulpFrameTimestamp__")
+                                          .getWithDefault<double>(0.0);
         // RAII guard so an exception in `__invokeFrame__` doesn't leave
         // stale ambient provenance behind, corrupting attribution for
         // every subsequent publish until something else clears it.
@@ -132,9 +134,13 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
                 p.source_id = self.active_script_id_ + ":" + std::to_string(id);
                 motion::set_ambient_provenance(std::move(p));
             }
-            std::string call = "__invokeFrame__(" + std::to_string(id)
-                + ",__pulpFrameTimestamp__);void 0;";
-            self.engine_.evaluate(call);
+            // Invoke the already-compiled callback directly. Building a fresh
+            // source string for every rAF callback forces the JS engine through
+            // its parser/compiler on the hottest editor path. Resolve the
+            // timestamp once per service pass above, then pass its numeric value
+            // through ScriptEngine::invoke so the callback body is the only JS
+            // work that runs here.
+            self.engine_.invoke("__invokeFrame__", id, frame_timestamp);
             // guard's dtor runs on normal and exception paths.
         }
         return choc::value::Value();
