@@ -1015,25 +1015,32 @@ take the SDK version and build from `xcrun`, and from the SDK's own
 `SDKSettings.json` and `SystemVersion.plist` when `xcrun` cannot answer. The
 digest does not depend on which source answered, and `runner_image.probe`
 records why a probe failed. `toolchain` (`toolchain_identity()`) is what a compile depends on
-besides its sources: the compiler CMake's check recorded (id, version, its
-`--version` line, `-print-target-triple`), the SDK version and build, the
-deployment target, and an allow-listed environment (`TOOLCHAIN_ENV`). It has
-a digest. A value no probe found is left out rather than written as
-"unknown", both here and in `runner_image.fields`, and readers take an
-absent key as unknown. `missing` names the required keys that were absent
-(the SDK pair is required on macOS), and `complete` is false whenever
-`missing` is non-empty, in which case the record warns. A run outside GitHub
+besides its sources. Its `fields` are the reuse key and are digested:
+- the compiler CMake's check recorded (id, version, its `--version` line);
+- the SDK version and build;
+- `effective`, what configure made of the compiler and flags, read from
+  `CMakeCache.txt` (`CMAKE_<LANG>_COMPILER`, `_FLAGS`, linker flags,
+  sysroot, deployment target);
+- `build_env`, environment read while compiling (`CCACHE_*` settings,
+  `SOURCE_DATE_EPOCH`, `ZERO_AR_DATE`, `PULP_OFFLINE_BUILD`).
+
+Two parts are recorded but never keyed. `configure_env` holds the live
+values of the variables CMake reads at configure time (`CC`, `CXXFLAGS`,
+`SDKROOT`, ...), which can differ from those the directory was configured
+under. `diagnostic.target`, the compiler's `-print-target-triple`, names the
+host OS rather than the deployment target. Only the listed variables are
+ever read, because the record is uploaded and the environment holds secrets.
+Each is recorded as its value, as `unset`, or as `""` when set but empty.
+
+A value no probe found is left out rather than written as "unknown", both
+here and in `runner_image.fields`, and readers take an absent key as
+unknown. `missing` names the required keys that were absent (the SDK pair is
+required on macOS), and an incomplete identity warns. A run outside GitHub
 Actions (the local mac lane) passes `--run-kind lane --run-id <id>`. The id
 is required, and the commit, tree and parent come from `--source-root`'s
-HEAD, so the gate and the lane compute the same identity with the same
-code. Outcomes
-come from ctest's JUnit report and attempts from its `LastTest.log`, which the
-test step keeps as `LastTest.full.log` because any later ctest call in the
-build directory replaces it. An alias `macos` job that ran no suite uploads a
-record with no tests and the reason. It is history for scoring reuse policies
-offline and decides nothing; a job that should carry one and does not warns
-`reuse-record NOT written`. The proxy is jobs carrying the artifact ÷
-completed `macos` jobs.
+HEAD. `dirty` records whether `git status --porcelain` was non-empty, since
+a dirty lane record did not test its commit. The gate and the lane compute
+all of this with the same code.
 
 The record hashes every registered test executable, not only those the job
 ran, so a fast-tier pull-request head's hashes are there for the merge
