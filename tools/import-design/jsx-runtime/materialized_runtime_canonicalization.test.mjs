@@ -83,3 +83,32 @@ test('does not classify authored marker collisions as browser vendors', () => {
   assert.equal(result.assets.length, 1);
   assert.match(result.html, /src="app\.js\?v=1"/);
 });
+
+test('preserves a vendor asset when another reference has authored code', () => {
+  const react = '/** @license React react.development.js */';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script src="react"></script><script src="react">globalThis.keep = 1;</script>',
+    assets: [vendorAsset('react', react, 'react')],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /globalThis\.keep/);
+});
+
+test('accepts whitespace-only empty vendor script bodies', () => {
+  const react = '/** @license React react.development.js */';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script src="react"> \n </script>',
+    assets: [vendorAsset('react', react, 'react')],
+  });
+  assert.equal(result.assets.length, 0);
+  assert.doesNotMatch(result.html, /src="react"/);
+});
+
+test('ignores unknown vendor roles', () => {
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script src="mystery"></script>',
+    assets: [vendorAsset('mystery', 'globalThis.keep = true;', 'maybe-react')],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /src="mystery"/);
+});

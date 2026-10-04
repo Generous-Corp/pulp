@@ -848,7 +848,7 @@ async function captureMaterializedDocument(cdp) {
     const asset = materialized.assets[index];
     const escapedUrl = asset.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const emptyScript = new RegExp(
-      `<script\\b[^>]*\\bsrc=["']${escapedUrl}["'][^>]*>\\s*</script>`, "i"
+      `<script\\b[^>]*(?:^|\\s)src\\s*=\\s*(?:["']${escapedUrl}["']|${escapedUrl})[^>]*>\\s*</script>`, "i"
     ).test(materialized.html);
     if (emptyScript && asset.mime_type === "text/javascript") {
       const source = Buffer.from(dataBase64, "base64").toString("utf8");
