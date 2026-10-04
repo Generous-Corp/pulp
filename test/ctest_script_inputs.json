@@ -3182,6 +3182,29 @@
    ],
    "kind": "python"
   },
+  "changed-surface-runner-selftest": {
+   "entry": "tools/scripts/test_run_changed_surface_tests.py",
+   "inputs": [
+    "docs/status",
+    "test/cmake/cmake_smoke_tests.cmake",
+    "test/cmake/test_pulp_add_sparkle.cmake",
+    "test/fixtures",
+    "test/support",
+    "tools/ci/build_dir_lock.py",
+    "tools/ci/changed_surface_lane_reds.json",
+    "tools/ci/governed-build.sh",
+    "tools/ci/lane_reuse_record.py",
+    "tools/cmake/PulpSparkle.cmake",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/cmake/PulpWgpuUniversal.cmake",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/test_run_changed_surface_tests.py"
+   ],
+   "kind": "python"
+  },
   "changed-surface-script-families-drift": {
    "entry": "tools/scripts/changed_surface_script_families.py",
    "inputs": [
@@ -8217,6 +8240,7 @@
     "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
     "tools/scripts/test_gpu_probe_acceptance.py",
     "tools/scripts/test_gpu_test_resource_locks.py",
+    "tools/scripts/test_run_changed_surface_tests.py",
     "tools/scripts/test_sdk_plist_templates_installed.py",
     "tools/scripts/test_wide_non_native.py",
     "tools/scripts/thread_assert_check.py",
