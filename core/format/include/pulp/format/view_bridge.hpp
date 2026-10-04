@@ -456,6 +456,11 @@ bool negotiate_preferred_size(ViewBridge& bridge,
     return false;
 }
 
+/// The scheduler pulp-format-view installs for request_editor_prewarm() (see
+/// editor_prewarm.hpp): copies the processor's EditorPrewarm and queues it on
+/// view::prewarm_scripted_ui()'s background worker.
+void view_editor_prewarm_scheduler(const Processor::EditorPrewarm& request);
+
 } // namespace detail
 
 } // namespace pulp::format
