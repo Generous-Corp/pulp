@@ -519,13 +519,14 @@ TEST_CASE("GPU audio trace overflow is counted without blocking the producer",
           "[gpu_audio][trace]") {
     SharedIoTraceRecorder recorder(config(1));
     std::uint64_t accepted = 0;
-    for (std::uint64_t sequence = 0; sequence < 300; ++sequence)
+    constexpr std::uint64_t attempted = SharedIoTraceRecorder::capacity + 44;
+    for (std::uint64_t sequence = 0; sequence < attempted; ++sequence)
         accepted += recorder.publish_worker(record(sequence)) ? 1 : 0;
     const auto stats = recorder.stats();
-    REQUIRE(stats.attempted == 300);
+    REQUIRE(stats.attempted == attempted);
     REQUIRE(stats.enqueued == accepted);
     REQUIRE(stats.dropped > 0);
-    REQUIRE(stats.dropped + stats.enqueued == 300);
+    REQUIRE(stats.dropped + stats.enqueued == attempted);
 }
 
 TEST_CASE("GPU audio trace preserves SPSC record identity under concurrency",
@@ -719,14 +720,15 @@ TEST_CASE("diagnostic overflow never refuses physical session submissions", "[gp
     fixture.prepare();
     const std::array<float, 2> input{1.f, 2.f};
     std::array<float, 2> output{};
-    for (std::uint64_t sequence = 0; sequence < 400; ++sequence) {
+    constexpr std::uint64_t submissions = SharedIoTraceRecorder::capacity + 44;
+    for (std::uint64_t sequence = 0; sequence < submissions; ++sequence) {
         auto callback = fixture.session.begin_callback(input);
         fixture.session.consume_output(callback, output);
         REQUIRE(fixture.session.service(0).submitted == 1);
         fixture.provider->complete_sequence(sequence);
         REQUIRE(fixture.session.service(0).completions == 1);
     }
-    REQUIRE(fixture.provider->submits == 400);
+    REQUIRE(fixture.provider->submits == submissions);
     REQUIRE(fixture.session.trace_stats().dropped > 0);
     REQUIRE(fixture.session.trace_stats().admissions_dropped > 0);
     REQUIRE(fixture.session.trace_stats().invalid == 0);

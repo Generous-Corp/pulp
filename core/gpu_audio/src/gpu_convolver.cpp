@@ -132,14 +132,13 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
             return false;
         }
     }
-    if (!convolver.shared_io_ || !convolver.shared_io_->session ||
-        !convolver.shared_io_->session->trace_recording_enabled())
+    if (!convolver.shared_io_ || !convolver.shared_io_->session)
         return false;
     try {
-        convolver.shared_io_->session->drain_trace_records(
-            static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-            [&](const SharedIoTraceRecord& record) { records.push_back(record); });
-        return true;
+        if (convolver.shared_io_->session->prepared() && !convolver.shared_io_->session->release())
+            return false;
+        records = convolver.shared_io_->session->take_last_closed_trace_records();
+        return !records.empty();
     } catch (...) {
         records.clear();
         return false;
@@ -149,6 +148,7 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
     return false;
 #endif
 }
+
 } // namespace detail
 
 GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
@@ -408,7 +408,7 @@ std::uint32_t GpuConvolver::service_realtime_shared_io(void* self, std::uint64_t
     // A configured private trial owns the authenticated trace queue until its
     // quiescent accessor drains it. The ordinary runtime path drains here;
     // never race a second diagnostic consumer against this SPSC queue.
-    if (!convolver->trial_configured_)
+    if (!convolver->trial_configured_ && !convolver->trial_enable_trace_)
         (void)convolver->shared_io_->session->drain_trace();
     return static_cast<std::uint32_t>(
         std::min<std::size_t>(result.terminal_records,
