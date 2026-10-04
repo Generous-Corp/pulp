@@ -104,15 +104,33 @@ void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
 
 void SharedIoConvolutionSession::close_trace_generation() noexcept {
     last_closed_trace_records_.clear();
+    last_closed_trace_admissions_.clear();
     if (trace_recorder_) {
         try {
             last_closed_trace_records_.reserve(SharedIoTraceRecorder::capacity);
+            last_closed_trace_admissions_.reserve(SharedIoTraceRecorder::capacity);
+            (void)trace_recorder_->drain_admissions(
+                static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+                [&](const SharedIoTraceAdmission& admission) {
+                    last_closed_trace_admissions_.push_back(admission);
+                });
             (void)drain_trace_records(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
                                       [&](const SharedIoTraceRecord& record) {
                                           last_closed_trace_records_.push_back(record);
                                       });
+            for (auto& record : last_closed_trace_records_) {
+                record.admission_identity_matched =
+                    record.kind == SharedIoTraceKind::Terminal &&
+                    std::any_of(last_closed_trace_admissions_.begin(),
+                                last_closed_trace_admissions_.end(),
+                                [&](const SharedIoTraceAdmission& admission) {
+                                    return admission.generation == record.generation &&
+                                           admission.sequence == record.sequence;
+                                });
+            }
         } catch (...) {
             last_closed_trace_records_.clear();
+            last_closed_trace_admissions_.clear();
         }
     }
     drain_trace_until_empty();

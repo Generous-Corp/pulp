@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <unordered_set>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -157,7 +158,21 @@ int run(Config config) {
     std::uint64_t retired_success = 0;
     std::uint64_t retired_failure = 0;
     std::uint64_t late_completions = 0;
+    std::uint64_t authenticated_terminal_records = 0;
+    std::uint64_t terminal_record_count = 0;
+    std::unordered_set<std::uint64_t> terminal_sequences;
     for (const auto& record : trace_records) {
+        if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal)
+            ++terminal_record_count;
+        const bool authenticated = record.valid() &&
+                                   record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
+                                   record.gpu_work_admitted &&
+                                   record.admission_identity_matched &&
+                                   record.gpu_terminal !=
+                                       pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None &&
+                                   terminal_sequences.insert(record.sequence).second;
+        if (authenticated)
+            ++authenticated_terminal_records;
         high_water_in_flight = std::max(high_water_in_flight, record.high_water_in_flight);
         if (record.gpu_terminal == pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::CompletedAccepted)
             ++retired_success;
@@ -232,7 +247,10 @@ int run(Config config) {
         return 2;
 
     const bool correct = oracle_failed_blocks == 0;
-    const bool gpu_progress = transport_stats.produced_blocks > 0;
+    const bool gpu_progress = authenticated_terminal_records > 0 && high_water_in_flight > 0 &&
+                              retired_success > 0 &&
+                              authenticated_terminal_records == terminal_record_count &&
+                              terminal_record_count == retired_success + retired_failure;
     const auto emit = [&](std::ostream& stream) {
         stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\""
                << (correct && gpu_progress ? "completed" : "failed")
@@ -254,6 +272,9 @@ int run(Config config) {
                << ",\"retired_success\":" << retired_success
                << ",\"retired_failure\":" << retired_failure
                << ",\"terminal_records\":" << (retired_success + retired_failure)
+               << ",\"authenticated_terminal_records\":" << authenticated_terminal_records
+               << ",\"terminal_record_count\":" << terminal_record_count
+               << ",\"gpu_receipt_authenticated\":" << (gpu_progress ? "true" : "false")
                << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
                << ",\"miss_blocks\":" << transport_stats.miss_blocks
                << ",\"late_completions\":" << late_completions

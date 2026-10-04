@@ -93,6 +93,9 @@ struct SharedIoTraceRecord {
     SharedIoGpuTerminalDisposition gpu_terminal = SharedIoGpuTerminalDisposition::None;
     SharedIoDeliveryDisposition delivery = SharedIoDeliveryDisposition::None;
     bool gpu_work_admitted = false;
+    // Set only after the closed-generation seam matches every terminal to an
+    // admission with the same generation and stream sequence.
+    bool admission_identity_matched = false;
     bool output_eligible = false;
     std::uint64_t gpu_elapsed_ns = 0;
     bool gpu_elapsed_available = false;

@@ -296,6 +296,30 @@ TEST_CASE("shared convolution session trace captures admission and terminal iden
     CHECK(fixture.session.last_closed_trace_stats().drained >= 1);
 }
 
+TEST_CASE("shared convolution session closes only matched admission identities",
+          "[gpu_audio][shared_io][trace][identity]") {
+    Fixture fixture;
+    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    fixture.provider = owner.get();
+    auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
+    REQUIRE(fixture.session.prepare(
+        {std::move(owner), std::move(program)},
+        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+         .slots = 2,
+         .sample_rate = 48'000,
+         .trace = {.success_stride = 1, .capture_admissions = true, .enabled = true}}));
+
+    std::array<float, 2> output{};
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(10).submitted == 1);
+    REQUIRE(fixture.session.release());
+    const auto records = fixture.session.take_last_closed_trace_records();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().admission_identity_matched);
+    CHECK(records.front().gpu_work_admitted);
+    CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::CompletedAccepted);
+}
+
 TEST_CASE("shared convolution session preserves fixed planar channel layout in complex slots",
           "[gpu_audio][shared_io][session]") {
     Fixture fixture;

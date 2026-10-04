@@ -35,6 +35,8 @@ def main():
             assert 0 < receipt["high_water_in_flight"] <= receipt["declared_slots"]
             assert receipt["terminal_records"] == receipt["retired_success"] + receipt["retired_failure"]
             assert receipt["retired_success"] > 0
+            assert receipt["authenticated_terminal_records"] == receipt["terminal_records"]
+            assert receipt["gpu_receipt_authenticated"] is True
             assert receipt["fallback_blocks"] >= receipt["miss_blocks"]
             assert receipt["late_completions"] >= 0
             with (directory / "blocks.csv").open() as stream:

@@ -165,6 +165,9 @@ class SharedIoConvolutionSession {
     std::vector<SharedIoTraceRecord> take_last_closed_trace_records() noexcept {
         return std::exchange(last_closed_trace_records_, {});
     }
+    std::vector<SharedIoTraceAdmission> take_last_closed_trace_admissions() noexcept {
+        return std::exchange(last_closed_trace_admissions_, {});
+    }
     bool trace_recording_enabled() const noexcept {
         return trace_recorder_ != nullptr && trace_recorder_->enabled();
     }
@@ -216,6 +219,7 @@ class SharedIoConvolutionSession {
     SharedIoTraceConfig trace_template_{};
     SharedIoTraceStats last_closed_trace_stats_{};
     std::vector<SharedIoTraceRecord> last_closed_trace_records_;
+    std::vector<SharedIoTraceAdmission> last_closed_trace_admissions_;
     std::uint64_t provider_starved_ = 0;
     std::optional<SharedIoConvolutionPipeline::Lease> pending_ingress_;
     std::vector<float> terminal_;

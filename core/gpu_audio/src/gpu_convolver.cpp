@@ -135,14 +135,11 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
     if (!convolver.shared_io_ || !convolver.shared_io_->session)
         return false;
     try {
-        if (!convolver.shared_io_->session->trace_recording_enabled()) {
-            records = convolver.shared_io_->session->take_last_closed_trace_records();
-            return !records.empty();
-        }
-        convolver.shared_io_->session->drain_trace_records(
-            static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-            [&](const SharedIoTraceRecord& record) { records.push_back(record); });
-        return true;
+        if (convolver.shared_io_->session->prepared() &&
+            !convolver.shared_io_->session->release())
+            return false;
+        records = convolver.shared_io_->session->take_last_closed_trace_records();
+        return !records.empty();
     } catch (...) {
         records.clear();
         return false;
@@ -152,6 +149,7 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
     return false;
 #endif
 }
+
 } // namespace detail
 
 GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
