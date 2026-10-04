@@ -99,7 +99,7 @@ def decode_selection_receipt(
         receipt = json.loads(payload)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise SelectionExecutionError("selection receipt is not valid UTF-8 JSON") from error
-    required = {
+    identity = {
         "schema_version",
         "repository",
         "pull_request",
@@ -111,14 +111,21 @@ def decode_selection_receipt(
         "selection_receipt_digest",
         "validation_contract_digest",
         "workflow_digest",
-        "selected_tests_digest",
-        "selected_tests",
     }
+    full = isinstance(receipt, dict) and "disposition" in receipt
+    if full:
+        # A full plan selects nothing: the runner runs the configured stages
+        # and derives the executable-keyed selection beside them.
+        if set(receipt) != identity | {"disposition", "executable_reuse"} \
+                or receipt["disposition"] != "full" or receipt["schema_version"] != 2:
+            raise SelectionExecutionError("full selection receipt has an unexpected schema")
+        validate_executable_reuse_binding(receipt["executable_reuse"])
+    required = identity | {"selected_tests_digest", "selected_tests"}
     if isinstance(receipt, dict) and receipt.get("schema_version") == 2:
         required.update({"selected_build_targets_digest", "selected_build_targets"})
-    if not isinstance(receipt, dict) or set(receipt) - {"executable_reuse"} != required:
+    if not full and (not isinstance(receipt, dict) or set(receipt) - {"executable_reuse"} != required):
         raise SelectionExecutionError("selection receipt has an unexpected schema")
-    if "executable_reuse" in receipt:
+    if not full and "executable_reuse" in receipt:
         validate_executable_reuse_binding(receipt["executable_reuse"])
     if receipt["schema_version"] not in (1, 2):
         raise SelectionExecutionError("selection receipt schema version is unsupported")
@@ -137,12 +144,14 @@ def decode_selection_receipt(
         "selection_receipt_digest",
         "validation_contract_digest",
         "workflow_digest",
-        "selected_tests_digest",
+        *(() if full else ("selected_tests_digest",)),
     ):
         if not isinstance(receipt[key], str) or not re.fullmatch(
             r"[0-9a-f]{64}", receipt[key]
         ):
             raise SelectionExecutionError(f"selection receipt {key} is invalid")
+    if full:
+        return [], b"", [], b"", receipt
     selected_tests = receipt["selected_tests"]
     if not isinstance(selected_tests, list) or not all(
         isinstance(name, str) for name in selected_tests
@@ -950,6 +959,21 @@ def clear_build_sentinel(build_dir: Path) -> int:
     ).returncode
 
 
+# The configured [validation.default] build and test stages, which a keyed
+# full run execs in place of those stages. The test stage's build_dir_lock.py
+# prefix is dropped because the runner holds that lock for the whole run;
+# test_keyed_full_execs_the_configured_stages compares these to the config.
+STAGE_ENV = {"PULP_BUILD_CLASS": "background"}
+STAGE_TEST_FLAGS = ("--output-on-failure", "--repeat", "until-pass:2", "--exclude-regex",
+                    EXCLUDE_NAME, "--label-exclude", EXCLUDE_LABEL)
+
+
+def stage_test_argv(build_dir: Path, junit: Path | None = None) -> list[str]:
+    command = [str(REPO_ROOT / "tools" / "ci" / "governed-build.sh"), "ctest", "--test-dir",
+               str(build_dir), *STAGE_TEST_FLAGS]
+    return command + (["--output-junit", str(junit)] if junit is not None else [])
+
+
 def failure_coverage(selected_result: int, full_result: int | None) -> str:
     if full_result is None:
         return "not_compared"
@@ -984,6 +1008,25 @@ def junit_failures(path: Path) -> set[str] | None:
         for case in root.iter("testcase")
         if case.get("status") == "fail" or case.find("failure") is not None
     }
+
+
+def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
+    """The tests the derived selection would have skipped (registrations of
+    would-skip executables it did not sample) and which of them the full run
+    failed, or None when there is no derived selection or no full report."""
+    try:
+        selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
+        manifest = json.loads((result_dir / "executable-keys.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    failed = junit_failures(full_junit)
+    if failed is None:
+        return None
+    executables = manifest.get("executables") or {}
+    skipped = set(selection.get("would_skip") or []) - set(selection.get("sampled_executables") or [])
+    tests = sorted({name for a in skipped for name in (executables.get(a) or {}).get("registrations") or []})
+    caught = sorted(set(tests) & failed)
+    return {"would_skip_tests": len(tests), "false_skip_count": len(caught), "false_skips": caught}
 
 
 def lane_red_allowlist(
@@ -1230,6 +1273,65 @@ def run_full_fallback(
     return full_result
 
 
+def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str, Any]) -> int:
+    """A full plan with a bound executable-reuse: derive the selection, then
+    run exactly the configured build and test stages, so the verdict is the
+    full suite's. The derivation is shadow only and cannot change it."""
+
+    result_dir_value = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
+    if not result_dir_value or not Path(result_dir_value).is_absolute():
+        raise SelectionExecutionError("a keyed full run requires an absolute result receipt directory")
+    result_dir = Path(result_dir_value)
+    binding = receipt["executable_reuse"]
+    derived = derive_executable_reuse(binding, receipt["head_sha"], build_dir, result_dir)
+    args._changed_surface_full_authority_started = True
+    env = {**os.environ, **STAGE_ENV}
+    with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
+        junit = Path(directory) / "full-junit.xml"
+        build_started = time.monotonic()
+        build_result = subprocess.run(build_argv(build_dir), shell=False, env=env).returncode
+        if build_result == 0:
+            build_result = clear_build_sentinel(build_dir)
+        build_seconds = time.monotonic() - build_started
+        test_result: int | None = None
+        test_seconds: float | None = None
+        if build_result == 0:
+            test_started = time.monotonic()
+            test_result = subprocess.run(stage_test_argv(build_dir, junit), shell=False, env=env).returncode
+            test_seconds = time.monotonic() - test_started
+        measured = false_skips(result_dir, junit) if derived["status"] == "derived" else None
+        try:
+            inventory_names = [t.get("name") for t in ctest_payload(build_dir)["tests"]]
+        except SelectionExecutionError:
+            inventory_names = None
+    returncode = build_result if build_result != 0 else test_result
+    write_result_receipt(result_dir, {
+        "schema_version": 2,
+        "recorded_at_unix_ns": time.time_ns(),
+        **{key: receipt[key] for key in (
+            "repository", "pull_request", "target", "base_sha", "head_sha", "tree_sha",
+            "policy_digest", "selection_receipt_digest", "validation_contract_digest",
+            "workflow_digest")},
+        "execution_payload_sha256": args.selection_receipt_sha256,
+        "selected_execution_disposition": "keyed_full_shadow",
+        "full_authoritative": True,
+        # Every registration ran, so nothing here reads as a bounded selection.
+        "selected_tests": inventory_names,
+        "full_registration_count": len(inventory_names) if inventory_names is not None else None,
+        "full_build_returncode": build_result,
+        "full_build_duration_seconds": build_seconds,
+        "full_returncode": test_result,
+        "full_duration_seconds": test_seconds,
+        "comparison_verdict": "keyed_full_shadow",
+        "failure_coverage": "not_compared",
+        "graduation_eligible": False,
+        "executable_reuse": {"mode": "keyed_full_shadow", "bound": binding, "derived": derived,
+                             **(measured or {"would_skip_tests": None, "false_skip_count": None,
+                                             "false_skips": None})},
+    })
+    return returncode
+
+
 def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     """Verify and execute one selection while the build tree is exclusive."""
 
@@ -1260,6 +1362,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     # Only selection-layer failures may fall back to the ordinary full stage.
     # Checkout identity, build-source provenance, and live build configuration
     # remain hard prerequisites for accepting any execution result.
+    if selection_receipt.get("disposition") == "full":
+        return run_keyed_full(args, build_dir, selection_receipt)
     args._changed_surface_fallback_safe = True
     require_ctest_version()
     base = base_projection(selection_receipt["base_sha"], policy, build_dir)
@@ -1267,7 +1371,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     executable_reuse = None
     binding = selection_receipt.get("executable_reuse")
     if binding is not None and os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR"):
-        executable_reuse = {"bound": binding, "derived": derive_executable_reuse(
+        executable_reuse = {"mode": "keyed_bounded_shadow", "bound": binding,
+                            "derived": derive_executable_reuse(
             binding, selection_receipt["head_sha"], build_dir,
             Path(os.environ["SHIPYARD_CHANGED_SURFACE_RESULT_DIR"]))}
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
@@ -1436,6 +1541,10 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             outside = sorted(full_failures - set(selected_names)) if full_failures is not None else None
             absorbed = (len(set(outside or []) & set(allowlist[0]))
                         if allowlist is not None else None)
+            if executable_reuse and executable_reuse["derived"]["status"] == "derived":
+                executable_reuse.update(false_skips(Path(result_dir), Path(directory) / "full-junit.xml")
+                                        or {"would_skip_tests": None, "false_skip_count": None,
+                                            "false_skips": None})
             eligible = compare_full and (
                 verdict == "matched_pass"
                 or (verdict == "matched_fail" and allowlist is not None

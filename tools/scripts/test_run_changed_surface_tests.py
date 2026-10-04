@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -1695,6 +1696,126 @@ class ExecutableReuseTest(unittest.TestCase):
                 "error: reconfigure exited 1")
 
 
+class KeyedFullTest(unittest.TestCase):
+    """A full plan with a bound executable reuse: the configured stages run
+    unchanged and the derived selection is measured against their result."""
+
+    BINDING = {"base_record_run_id": "1", "base_record_sha256": "9" * 64, "base_record_path": "/r",
+               "base_sha": "a" * 40, "derivation_code_dir": "/code", "derivation_code_sha256": "8" * 64,
+               "sample_seed": "s", "sample_percent": 5, "build_dir": "/b"}
+
+    def receipt(self) -> dict:
+        receipt = {k: v for k, v in selection_receipt(["x"], ["t"]).items() if not k.startswith("selected_")}
+        return {**receipt, "disposition": "full", "executable_reuse": dict(self.BINDING)}
+
+    def test_a_full_receipt_carries_no_selection_and_requires_the_binding(self) -> None:
+        receipt = self.receipt()
+        names, literal, targets, _, decoded = runner.decode_selection_receipt(*encode_receipt(receipt))
+        self.assertEqual((names, literal, targets, decoded), ([], b"", [], receipt))
+        bounded = selection_receipt(["x"], ["t"])
+        for bad in ({**receipt, "selected_tests": ["x"]}, {**receipt, "disposition": "bounded"},
+                    {k: v for k, v in receipt.items() if k != "executable_reuse"},
+                    {**receipt, "schema_version": 1}, {**bounded, "disposition": "full"},
+                    {**receipt, "executable_reuse": {**self.BINDING, "sample_percent": 0}}):
+            with self.subTest(bad=bad), self.assertRaises(runner.SelectionExecutionError):
+                runner.decode_selection_receipt(*encode_receipt(bad))
+
+    def test_keyed_full_execs_the_configured_stages(self) -> None:
+        config = tomllib.loads((runner.REPO_ROOT / ".shipyard/config.toml").read_text(encoding="utf-8"))
+        stages = config["validation"]["default"]
+        build, clear = (shlex.split(part) for part in stages["build"].split("&&"))
+        env = {k: v for k, v in runner.STAGE_ENV.items()}
+        self.assertEqual(build[0], "PULP_BUILD_CLASS=background")
+        self.assertEqual(env, {"PULP_BUILD_CLASS": "background"})
+        relative = lambda argv: [os.path.relpath(a, runner.REPO_ROOT) if a.startswith(  # noqa: E731
+            str(runner.REPO_ROOT)) else a for a in argv]
+        self.assertEqual(build[1:], relative(runner.build_argv(Path("build"))))
+        self.assertEqual(clear, ["tools/ci/build-dir-sentinel.sh", "clear", "build"])
+        test = shlex.split(stages["test"])
+        lock = ["PULP_BUILD_CLASS=background", "python3", "tools/ci/build_dir_lock.py", "--build-dir", "build", "--"]
+        self.assertEqual(test[:len(lock)], lock)  # the runner already holds this lock
+        self.assertEqual(test[len(lock):], relative(runner.stage_test_argv(Path("build"))))
+        self.assertEqual(runner.stage_test_argv(Path("build"), Path("/j"))[-2:], ["--output-junit", "/j"])
+
+    def run_full(self, derived_ok: bool = True, build_rc: int = 0, failing: tuple = ()) -> tuple:
+        calls: list = []
+        with tempfile.TemporaryDirectory() as directory:
+            build, results = Path(directory) / "build", Path(directory) / "results"
+            build.mkdir()
+
+            def derive(binding, head, build_dir, result_dir):
+                calls.append("derive")
+                if not derived_ok:
+                    return {"status": "error: base refused"}
+                result_dir.mkdir(parents=True, exist_ok=True)
+                (result_dir / "selection.json").write_text(json.dumps(
+                    {"would_skip": ["test/a", "test/b"], "sampled_executables": ["test/b"]}), encoding="utf-8")
+                (result_dir / "executable-keys.json").write_text(json.dumps({"executables": {
+                    "test/a": {"registrations": ["a1", "a2"]}, "test/b": {"registrations": ["b1"]}}}),
+                    encoding="utf-8")
+                return {"status": "derived"}
+
+            def execute(argv, **kwargs):
+                calls.append((list(argv), kwargs.get("env", {}).get("PULP_BUILD_CLASS")))
+                if "--build" in argv:
+                    return subprocess.CompletedProcess(argv, build_rc)
+                if "--output-junit" in argv:
+                    cases = "".join(f'<testcase name="{n}" status="fail"><failure/></testcase>' for n in failing)
+                    Path(argv[argv.index("--output-junit") + 1]).write_text(
+                        f"<testsuite>{cases}<testcase name=\"a1\" status=\"run\"/></testsuite>", encoding="utf-8")
+                    return subprocess.CompletedProcess(argv, 8 if failing else 0)
+                return subprocess.CompletedProcess(argv, 0)
+
+            args = mock.Mock(selection_receipt_sha256="0" * 64)
+            with (mock.patch.dict(os.environ, {"SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results)}),
+                  mock.patch.object(runner, "derive_executable_reuse", side_effect=derive),
+                  mock.patch.object(runner.subprocess, "run", side_effect=execute),
+                  mock.patch.object(runner, "ctest_payload", return_value={"tests": [{"name": "a1"}, {"name": "b1"}]})):
+                code = runner.run_keyed_full(args, build, self.receipt())
+            receipt = json.loads(sorted(results.glob("result-*.json"))[-1].read_text())
+            return code, calls, receipt
+
+    def test_derivation_precedes_the_configured_build_and_full_test(self) -> None:
+        code, calls, receipt = self.run_full(failing=("a2", "b1"))
+        self.assertEqual(code, 8)  # ctest's verdict
+        self.assertEqual(calls[0], "derive")
+        argvs = [c[0] for c in calls[1:]]
+        self.assertIn("--build", argvs[0])
+        self.assertTrue(argvs[1][0].endswith("build-dir-sentinel.sh"))
+        build_dir = Path(argvs[2][argvs[2].index("--test-dir") + 1])
+        self.assertEqual(argvs[2][:-2], runner.stage_test_argv(build_dir))
+        # As in the stage strings, the build class is set for the build and
+        # the tests, not for the sentinel clear.
+        self.assertEqual([c[1] for c in calls[1:]], ["background", None, "background"])
+        self.assertEqual(receipt["selected_execution_disposition"], "keyed_full_shadow")
+        self.assertEqual(receipt["comparison_verdict"], "keyed_full_shadow")
+        self.assertIs(receipt["full_authoritative"], True)
+        self.assertIs(receipt["graduation_eligible"], False)
+        self.assertEqual(receipt["selected_tests"], ["a1", "b1"])
+        reuse = receipt["executable_reuse"]
+        self.assertEqual(reuse["mode"], "keyed_full_shadow")
+        self.assertEqual(reuse["bound"], self.BINDING)
+        # test/b was sampled, so only test/a's two tests would have skipped,
+        # and a2 failing in the full run is a false skip; b1 ran in the sample.
+        self.assertEqual((reuse["would_skip_tests"], reuse["false_skip_count"], reuse["false_skips"]),
+                         (2, 1, ["a2"]))
+
+    def test_a_failed_derivation_still_runs_the_full_suite(self) -> None:
+        code, calls, receipt = self.run_full(derived_ok=False)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 4)  # derive, build, sentinel, test
+        self.assertEqual(receipt["executable_reuse"]["derived"], {"status": "error: base refused"})
+        self.assertIsNone(receipt["executable_reuse"]["false_skip_count"])
+        self.assertEqual(receipt["full_returncode"], 0)
+
+    def test_a_failed_build_is_the_verdict_and_skips_the_tests(self) -> None:
+        code, calls, receipt = self.run_full(build_rc=2)
+        self.assertEqual(code, 2)
+        self.assertEqual(len(calls), 2)  # derive, build
+        self.assertIsNone(receipt["full_returncode"])
+        self.assertIsNone(receipt["executable_reuse"]["false_skip_count"])
+
+
 class SelectedLegPipelineTest(unittest.TestCase):
     """Every gate of the selected leg, in the lane's order, across the three
     states a cold lane checkout passes through: configured only, selected
@@ -1731,7 +1852,8 @@ class SelectedLegPipelineTest(unittest.TestCase):
 
     def run_pipeline(self, late_registration: bool = False, failures: dict | None = None,
                      allowlist: tuple[list[str], str] | None = None,
-                     reuse: dict | None = None) -> tuple[int, list[str], dict]:
+                     reuse: dict | None = None,
+                     derived_files: dict | None = None) -> tuple[int, list[str], dict]:
         """`failures` maps "selected tests" / "full tests" to the names that leg
         fails; each leg writes them as ctest's JUnit report and exits 8."""
         failures = failures or {}
@@ -1784,7 +1906,12 @@ class SelectedLegPipelineTest(unittest.TestCase):
             receipt = selection_receipt(["smoke", "core"], ["tool"])
             if reuse is not None:
                 receipt["executable_reuse"] = reuse
-            derive = mock.Mock(return_value={"status": "derived", "would_skip_count": 3})
+            def derived(binding, head, build_dir, result_dir):
+                result_dir.mkdir(parents=True, exist_ok=True)
+                for name, doc in (derived_files or {}).items():
+                    (result_dir / name).write_text(json.dumps(doc), encoding="utf-8")
+                return {"status": "derived", "would_skip_count": 3}
+            derive = mock.Mock(side_effect=derived)
             (build / "config.toml").write_text("# mocked\n", encoding="utf-8")
             args = mock.Mock(config=build / "config.toml", selection_receipt_b64="e",
                              selection_receipt_sha256="0" * 64, target="mac")
@@ -1809,7 +1936,7 @@ class SelectedLegPipelineTest(unittest.TestCase):
             ):
                 code = runner.run_locked(args, build)
             self.derive_calls = derive.call_args_list
-            receipts = sorted(results.glob("*.json")) if results.is_dir() else []
+            receipts = sorted(results.glob("result-*.json")) if results.is_dir() else []
             receipt_doc = json.loads(receipts[-1].read_text()) if receipts else {}
             return code, steps, receipt_doc
 
@@ -1829,12 +1956,20 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertEqual(steps, ["selected build", "selected tests", "full build", "full tests"])
         self.assertEqual(result["comparison_verdict"], "matched_pass")
         self.assertEqual(result["executable_reuse"],
-                         {"bound": bound, "derived": {"status": "derived", "would_skip_count": 3}})
+                         {"mode": "keyed_bounded_shadow", "bound": bound,
+                          "derived": {"status": "derived", "would_skip_count": 3},
+                          # No selection was written beside the receipt to measure against.
+                          "would_skip_tests": None, "false_skip_count": None, "false_skips": None})
         self.assertEqual(len(self.derive_calls), 1)
         self.assertEqual(self.derive_calls[0].args[1], "b" * 40)  # the receipt's head
         _, _, plain = self.run_pipeline()
         self.assertNotIn("executable_reuse", plain)
         self.assertEqual(self.derive_calls, [])
+        files = {"selection.json": {"would_skip": ["test/n"], "sampled_executables": []},
+                 "executable-keys.json": {"executables": {"test/n": {"registrations": ["neighbor"]}}}}
+        _, _, measured = self.run_pipeline(reuse=bound, derived_files=files,
+                                           failures={"full tests": ["neighbor"]})
+        self.assertEqual(measured["executable_reuse"]["false_skips"], ["neighbor"])
 
     LANE_REDS = ({"lane-red": "2026-10-17"}, "f" * 64)
 
