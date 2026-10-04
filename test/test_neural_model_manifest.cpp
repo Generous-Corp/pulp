@@ -10,8 +10,9 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <vector>
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -255,7 +256,53 @@ TEST_CASE("neural admission verifies every installed asset byte count and hash",
     std::filesystem::remove_all(root);
 }
 
-#if defined(__unix__)
+TEST_CASE("neural installer persists a complete tensor layout only after verification",
+          "[gpu_audio][neural][manifest][installer]") {
+    const auto root = std::filesystem::temp_directory_path() / "pulp-neural-installer-layout";
+    std::filesystem::remove_all(root);
+    const auto metadata = root / "audio" / "models" / "demo.json";
+    const auto weights = root / "audio" / "models" / "demo" / "weights.bin";
+    const auto state = root / "audio" / "models" / "demo" / "state.bin";
+    std::filesystem::create_directories(weights.parent_path());
+    std::ofstream(weights, std::ios::binary) << std::string(128, 'w');
+    std::ofstream(state, std::ios::binary) << "state";
+    const auto weights_hash = pulp::runtime::sha256_file_hex(weights, 128);
+    const auto state_hash = pulp::runtime::sha256_file_hex(state, 5);
+    REQUIRE(weights_hash);
+    REQUIRE(state_hash);
+
+    auto manifest = valid_manifest();
+    manifest.model_id = "demo";
+    manifest.artifact_id = "weights";
+    manifest.artifact_sha256 = *weights_hash;
+    manifest.artifact_size_bytes = 128;
+    const std::array layout{
+        NeuralInstalledAsset{.asset_id = "weights",
+                             .path = weights,
+                             .sha256 = *weights_hash,
+                             .size_bytes = 128,
+                             .role = "weights"},
+        NeuralInstalledAsset{.asset_id = "state",
+                             .path = state,
+                             .sha256 = *state_hash,
+                             .size_bytes = 5,
+                             .role = "state"},
+    };
+    std::string error;
+    REQUIRE(write_neural_model_install_manifest(metadata, manifest, layout, error));
+    NeuralModelManifestRecord loaded;
+    REQUIRE(read_neural_model_manifest(neural_model_manifest_sidecar_path(metadata), loaded, error,
+                                       NeuralModelUse::Shipped, true));
+    REQUIRE(loaded.tensor_layout.size() == 2);
+    CHECK(loaded.tensor_layout[0].role == "weights");
+    CHECK(loaded.tensor_layout[1].role == "state");
+
+    REQUIRE_FALSE(write_neural_model_install_manifest(metadata, manifest, {}, error));
+    CHECK(error.find("no tensor layout") != std::string::npos);
+    std::filesystem::remove_all(root);
+}
+
+#if defined(__unix__) || defined(__APPLE__)
 TEST_CASE("installed neural manifest reloads in a fresh process before prepare",
           "[gpu_audio][neural][manifest][cold_reload]") {
     const auto root = std::filesystem::temp_directory_path() / "pulp-neural-cold-reload";
@@ -281,9 +328,21 @@ TEST_CASE("installed neural manifest reloads in a fresh process before prepare",
     manifest.artifact_id = "weights";
     manifest.artifact_sha256 = *weights_hash;
     manifest.artifact_size_bytes = 128;
-    const auto sidecar = neural_model_manifest_sidecar_path(metadata);
     std::string error;
-    REQUIRE(write_neural_model_manifest(sidecar, manifest, error));
+    const std::array layout{
+        NeuralInstalledAsset{.asset_id = "weights",
+                             .path = weights,
+                             .sha256 = *weights_hash,
+                             .size_bytes = 128,
+                             .role = "weights"},
+        NeuralInstalledAsset{.asset_id = "state",
+                             .path = state,
+                             .sha256 = *state_hash,
+                             .size_bytes = 5,
+                             .role = "state"},
+    };
+    REQUIRE(write_neural_model_install_manifest(metadata, manifest, layout, error));
+    const auto sidecar = neural_model_manifest_sidecar_path(metadata);
 
     const auto child = [&]() {
         const auto installed = pulp::runtime::read_installed_model("audio", "demo", home);
@@ -291,16 +350,16 @@ TEST_CASE("installed neural manifest reloads in a fresh process before prepare",
             return 11;
 
         NeuralModelManifestRecord loaded;
-        if (!read_neural_model_manifest(sidecar, loaded, error))
+        if (!read_neural_model_manifest(sidecar, loaded, error, NeuralModelUse::Shipped, true))
             return 12;
-        const std::array assets{
-            NeuralInstalledAsset{.asset_id = "weights",
-                                 .path = weights,
-                                 .sha256 = loaded.artifact_sha256,
-                                 .size_bytes = loaded.artifact_size_bytes},
-            NeuralInstalledAsset{
-                .asset_id = "state", .path = state, .sha256 = *state_hash, .size_bytes = 5},
-        };
+        std::vector<NeuralInstalledAsset> assets;
+        assets.reserve(loaded.tensor_layout.size());
+        for (const auto& asset : loaded.tensor_layout)
+            assets.push_back({.asset_id = asset.asset_id,
+                              .path = asset.path,
+                              .sha256 = asset.sha256,
+                              .size_bytes = asset.size_bytes,
+                              .role = asset.role});
         if (!verify_neural_installed_assets(assets, error))
             return 13;
 

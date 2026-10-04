@@ -649,6 +649,38 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
     }
 
 
+KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
+KEY_BLIND_VARIANT = "cmake-codemodel-recorded"
+
+
+def key_blind_update(pairs: Iterable[dict], existing: dict | None) -> tuple[dict, list[str]]:
+    """The key-blind list after one more corpus: every executable whose
+    recorded bytes changed between a PR head and its merge group while the
+    content-keyed source key did not rebuild it. Pure. The list only grows;
+    an entry keeps its `explained` note and loses nothing when it stops
+    appearing, because a mechanism that did not fire this week is not a
+    mechanism that was keyed. Returns the new list and the names it added."""
+    doc = {"schema": KEY_BLIND_SCHEMA, "executables": {}}
+    if existing:
+        if existing.get("schema") != KEY_BLIND_SCHEMA:
+            raise ValueError(f"key-blind list schema is not {KEY_BLIND_SCHEMA}")
+        doc["executables"] = {k: dict(v) for k, v in (existing.get("executables") or {}).items()}
+    added: list[str] = []
+    for pair in pairs:
+        keys = pair.get("source_key") or {}
+        if keys.get("content_keyed") is not True:
+            continue
+        for exe in (keys.get(KEY_BLIND_VARIANT) or {}).get("unreached_changed_binaries") or []:
+            entry = doc["executables"].get(exe)
+            if entry is None:
+                entry = doc["executables"][exe] = {"example": {"pr": pair.get("pr"),
+                                                                  "group_run_id": pair.get("group_run_id")},
+                                                   "explained": None}
+                added.append(exe)
+    doc["executables"] = dict(sorted(doc["executables"].items()))
+    return doc, sorted(added)
+
+
 def verdict_for(false_skips: list, scored: int, evaluable: int, min_sample: int) -> str:
     if false_skips:
         return "UNSAFE: false skips"
@@ -753,6 +785,10 @@ def main(argv: list[str]) -> int:
                    help="keep the root-CMakeLists and learned commit-bound rules even for content-keyed (v2) records")
     k.add_argument("--repository", default="Generous-Corp/pulp")
     k.add_argument("--token", default=None)
+    b = sub.add_parser("key-blind", help="grow the key-blind list from a corpus's content-keyed pairs")
+    b.add_argument("--corpus", required=True, type=Path)
+    b.add_argument("--list", type=Path, default=REPO_ROOT / "tools" / "ci" / "key_blind_executables.json")
+    b.add_argument("--write", action="store_true", help="write the grown list (default: report only)")
     s = sub.add_parser("score", help="score policies over a corpus or the scenario fixtures")
     group = s.add_mutually_exclusive_group(required=True)
     group.add_argument("--corpus", type=Path)
@@ -803,6 +839,16 @@ def main(argv: list[str]) -> int:
                                           a.legacy_propagation)
         print(json.dumps(result))
         return 0 if result["pairs_annotated"] else 1
+
+    if a.cmd == "key-blind":
+        existing = json.loads(a.list.read_text(encoding="utf-8")) if a.list.is_file() else None
+        doc, added = key_blind_update(Corpus.load(a.corpus).pairs, existing)
+        for exe in added:
+            print(f"key-blind: NEW {exe}")
+        print(f"key-blind: {len(doc['executables'])} listed, {len(added)} new")
+        if a.write:
+            a.list.write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8")
+        return 1 if added and not a.write else 0
 
     if a.scenarios:
         results = run_scenarios(a.scenarios)
