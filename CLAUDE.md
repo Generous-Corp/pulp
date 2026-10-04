@@ -390,15 +390,18 @@ Non-obvious things that cost real time when you don't know them:
 - **An offline render cannot hear a dropped buffer**: a DAW-only click at a transition is
   usually a per-callback cost spike; gate its operation counts (`audio-harness`).
 
-### Plugin editors open view-first
+### Plugin editors open content-first
 
-A host shows no editor until its view-creation call returns, so nothing heavy
-runs there: `ViewBridge` (via `Options::hosted_editor()`) defers a scripted
-document to the editor's second idle tick for every plug-in format. A
-processor that builds its own `ScriptedUiSession` in `create_view()` must load
-it with `load_deferrable()` and do post-load work in
-`set_document_loaded_callback()` — plain `load()` there blocks the host and
-logs a warning. Rules, gates and the measurement recipe: the
+A host shows no editor until its view-creation call returns, and then shows
+whatever the view holds — so `ViewBridge` (via `Options::hosted_editor()`)
+mounts a scripted document inside that call and presents it as the first frame:
+never an empty editor. The cost of that call is the host's own placeholder time
+(Logic's empty plug-in window), so keep the mount short: a processor that
+builds its own `ScriptedUiSession` in `create_view()` loads with
+`load_deferrable()`, does post-load work in `set_document_loaded_callback()`,
+and declares its scripts and documents in `Processor::editor_prewarm()` so the
+format adapter compiles and verifies them on a background worker when the host
+instantiates the plug-in. Rules, gates and the measurement recipe: the
 [`view-bridge`](.agents/skills/view-bridge/SKILL.md) skill ("Editor open") and
 `trace-analysis` ("Editor-open recipe").
 
@@ -1068,6 +1071,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Counts only records whose origin is `shadow_plan_step`. They never execute, so this measures selection, never executed bounded plans; a lane proxy must not divide by these. A head whose run uploaded nothing is counted as `missing_record`, so a low plans ÷ heads means the instrument is blind, not that plans were good.
 - Before any test-result reuse policy (receipt reuse across base drift, per-test or per-executable skips) goes live, or when changing one, its key, or a fail-closed rule — replay it over merge-queue history and read its false skips, which must be 0. → `tools/scripts/reuse_policy_replay.py collect`
   - ⚠ **Cannot see:** Replays with TODAY's classify_changes.py and today's required-context list, and reads required contexts as check-runs completed before the group, so an old head's eligibility is approximate. History records no runner image (null on both sides, so no image check applies), no recorded source keys (`source-keys` reconstructs tier-1a keys from git and ONE build graph, so pairs far from that graph's commit are approximate) and no exoneration verdicts (every final failure counts as real). A build-failed group is excluded from test scoring; `build_failures_skipped` lists the ones a build-skipping policy would have skipped. `collect` exits 1 when it finds no merge groups or no head pairs (a broken instrument, not an empty history).
+
+**editor-open** — measure what a host shows while a plug-in editor opens
+- A user reports an AU editor opening in stages in Logic (small/placeholder, then empty, then the UI) and you need the stages a host window actually showed out of process, and how long the host waited for the view. → `tools/editor-open/editor_open_oop_probe.sh`
+  - ⚠ **Cannot see:** Reads back the host's own window with CGWindowListCreateImage, which must run in the logged-in GUI session (hence --gui-session over ssh) and has read back only the host backdrop on a macOS 27 host while the editor was demonstrably drawing; a run whose every image is host-empty proves the instrument blind, not the editor. It sees what is composited, not why — pair it with a trace from the plug-in process (~/.config/pulp/trace-autostart in a traced build).
 
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`

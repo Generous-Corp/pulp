@@ -493,6 +493,70 @@ Fingerprints and what they mean:
 - `getLayoutBoxMetrics` counts are a symptom, not the cost; measure the
   commit (see `getLayoutRect` coalescing in view-bridge).
 
+### Getting a traced SDK, and proving it is one
+
+A plug-in or app only emits spans when it links a `PULP_TRACING=ON` SDK. Build
+one from the exact source you are measuring (a clean checkout at the release
+tag, or a committed branch — the build snapshots the commit, not the working
+tree):
+
+```bash
+git -C <pulp-checkout> checkout --detach v0.907.0     # or your committed branch
+cd <pulp-checkout> && PULP_BUILD_JOBS=4 caffeinate -u -d -i \
+  pulp sdk install --local --profile trace --print-path
+# -> ~/.pulp/sdk-dev/trace-v1/darwin-arm64/<source-sha>/<fingerprint>
+```
+
+On a busy host the governor refuses a full-width request ("could not acquire
+build capacity"); `PULP_BUILD_JOBS=4` asks for a share it can grant. Then prove
+it, by symbol count, not by the profile name:
+`nm <prefix>/lib/libpulp-perfetto.a | grep -c perfetto` (thousands) and
+`nm <prefix>/lib/libpulp-view-script.a | grep -c perfetto` (non-zero; a
+release SDK prints 0). Point the plug-in at it with
+`-DPulp_DIR=<prefix>/lib/cmake/Pulp`. A plug-in whose sources name a category
+the SDK does not declare (`PULP_TRACE_SCOPE_NAMED("audio", …)` — the list is
+the `perfetto::Category(...)` block in `pulp/runtime/trace.hpp`) compiles in a
+release build and fails only here, with
+`kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_<line>`; lint category
+literals against that header in the plug-in's own tests.
+
+### Editor open out of process (AUHostingService), with spans
+
+Logic runs AU v2 plug-ins in AUHostingService, which inherits no environment.
+With a traced build, write `~/.config/pulp/trace-autostart`:
+
+```
+PULP_TRACE_PATH=/Users/<me>/traces/oop/
+PULP_TRACE_SECONDS=11
+PULP_TRACE_RING_KB=262144
+```
+
+then drive opens with `tools/editor-open/editor_open_oop_probe.sh` (fresh
+instance per open; `--gui-session` over ssh) and read
+`/Users/<me>/traces/oop/AUHostingServiceXPC_arrow-<pid>.pftrace`. Keep the
+flush (`PULP_TRACE_SECONDS`) inside the probe's run: the service exits with its
+last client. Delete the file afterwards — every traced Pulp process records
+while it exists. The probe's "view controller N ms" is the host's placeholder
+time; the trace says what filled it. Order of work inside it:
+`spectr_editor_create`-style app spans (create_view), then `editor_first_frame`
+→ `scripted_ui_document_load` (→ `script_compile` | `script_bytecode_read`,
+`script_execute`, `runtime_import_verify`, the app's bind span) →
+`plugin_editor_frame` (`gpu_submit`, `first_frame_gpu_wait`). A cold
+`gpu_submit` or `first_frame_gpu_wait` of hundreds of ms on the first open of
+a newly built/installed binary is Metal compiling shaders for that binary;
+re-run in a new process before attributing it to the editor. Counted, not
+timed, the prewarm proof is `script_compile` with no `script_precompile` before
+it (not prewarmed) versus `script_precompile` on another thread and only
+`script_bytecode_read` inside the factory (prewarmed):
+
+```sql
+SELECT t.name AS thread, s.name, COUNT(*) n, ROUND(SUM(s.dur)/1e6,1) ms
+FROM slice s JOIN thread_track tt ON s.track_id = tt.id JOIN thread t USING (utid)
+WHERE s.name IN ('script_precompile','script_compile','script_bytecode_read',
+                 'runtime_import_verify','scripted_ui_prewarm')
+GROUP BY 1, 2 ORDER BY 1, 2;
+```
+
 ### First-frame colour recipe: what did the editor show before its UI?
 
 A content-first editor (the default for every hosted format; see `view-bridge`,
