@@ -216,6 +216,15 @@ SKIA_GN_ARGS
         skottie \
         sksg
 
+    # Dawn's Android build is a CMake graph nested below the GN output. The
+    # top-level libdawn_combined.a is an intentionally empty compatibility
+    # archive when Dawn's monolithic option is disabled; stage the real Dawn
+    # component archives as well so FindSkia can link the WebGPU symbols.
+    if [ -d "$SKIA_SRC/$BUILD_DIR/cmake_dawn" ]; then
+        find "$SKIA_SRC/$BUILD_DIR/cmake_dawn" -name "*.a" -type f \
+            -exec cp {} "$SKIA_SRC/$BUILD_DIR/" \;
+    fi
+
     echo "Copying ${ABI} libraries to $SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release/..."
     mkdir -p "$SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release"
 
