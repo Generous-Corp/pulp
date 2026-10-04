@@ -154,6 +154,9 @@ int run(Config config) {
 
     std::vector<pulp::gpu_audio::detail::SharedIoTraceRecord> trace_records;
     (void)pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, trace_records);
+    const auto trace_stats = trace_records.empty()
+                                  ? pulp::gpu_audio::detail::SharedIoTraceRecord{}
+                                  : trace_records.front();
     std::uint64_t high_water_in_flight = 0;
     std::uint64_t retired_success = 0;
     std::uint64_t retired_failure = 0;
@@ -250,7 +253,14 @@ int run(Config config) {
     const bool gpu_progress = authenticated_terminal_records > 0 && high_water_in_flight > 0 &&
                               retired_success > 0 &&
                               authenticated_terminal_records == terminal_record_count &&
-                              terminal_record_count == retired_success + retired_failure;
+                              terminal_record_count == retired_success + retired_failure &&
+                              terminal_record_count == trace_stats.admissions_enqueued &&
+                              trace_stats.admissions_dropped == 0 && trace_stats.trace_dropped == 0 &&
+                              trace_stats.admissions_attempted ==
+                                  trace_stats.admissions_enqueued + trace_stats.admissions_dropped &&
+                              trace_stats.trace_attempted ==
+                                  trace_stats.trace_enqueued + trace_stats.trace_dropped +
+                                      trace_stats.trace_sampled_out + trace_stats.trace_invalid;
     const auto emit = [&](std::ostream& stream) {
         stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\""
                << (correct && gpu_progress ? "completed" : "failed")
@@ -274,6 +284,14 @@ int run(Config config) {
                << ",\"terminal_records\":" << (retired_success + retired_failure)
                << ",\"authenticated_terminal_records\":" << authenticated_terminal_records
                << ",\"terminal_record_count\":" << terminal_record_count
+               << ",\"admissions_attempted\":" << trace_stats.admissions_attempted
+               << ",\"admissions_enqueued\":" << trace_stats.admissions_enqueued
+               << ",\"admissions_dropped\":" << trace_stats.admissions_dropped
+               << ",\"trace_attempted\":" << trace_stats.trace_attempted
+               << ",\"trace_enqueued\":" << trace_stats.trace_enqueued
+               << ",\"trace_dropped\":" << trace_stats.trace_dropped
+               << ",\"trace_sampled_out\":" << trace_stats.trace_sampled_out
+               << ",\"trace_invalid\":" << trace_stats.trace_invalid
                << ",\"gpu_receipt_authenticated\":" << (gpu_progress ? "true" : "false")
                << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
                << ",\"miss_blocks\":" << transport_stats.miss_blocks

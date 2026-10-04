@@ -96,6 +96,14 @@ struct SharedIoTraceRecord {
     // Set only after the closed-generation seam matches every terminal to an
     // admission with the same generation and stream sequence.
     bool admission_identity_matched = false;
+    std::uint64_t admissions_attempted = 0;
+    std::uint64_t admissions_enqueued = 0;
+    std::uint64_t admissions_dropped = 0;
+    std::uint64_t trace_attempted = 0;
+    std::uint64_t trace_enqueued = 0;
+    std::uint64_t trace_dropped = 0;
+    std::uint64_t trace_sampled_out = 0;
+    std::uint64_t trace_invalid = 0;
     bool output_eligible = false;
     std::uint64_t gpu_elapsed_ns = 0;
     bool gpu_elapsed_available = false;
@@ -188,7 +196,7 @@ static_assert(std::is_trivially_copyable_v<SharedIoTraceAdmission>);
 // for a new engine generation. Records cannot leak across a reset boundary.
 class SharedIoTraceRecorder {
   public:
-    static constexpr std::size_t capacity = 256;
+    static constexpr std::size_t capacity = 4096;
     explicit SharedIoTraceRecorder(const SharedIoTraceConfig& config) : config_(config) {}
     SharedIoTraceRecorder(const SharedIoTraceRecorder&) = delete;
     SharedIoTraceRecorder& operator=(const SharedIoTraceRecorder&) = delete;
