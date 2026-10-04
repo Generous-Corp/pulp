@@ -392,6 +392,10 @@ REVIEWED_SCANNERS = {
         "reads the configured ctest inventory, test/ctest_script_inputs.json and the "
         "tracked tree; changed-surface-script-families-drift runs in the native gate's "
         "full suite",
+    "tools/scripts/vellum_boundary_lint.py":
+        "checks only the declared extractable package manifests and public Pulp view "
+        "headers; its tools/ paths are the package roots under review and it runs in "
+        "the cheap gates boundary check",
     "tools/scripts/agent_capability_manifest.py":
         "reads core/*/include; its tools/scripts inputs route to the native "
         "build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS",
