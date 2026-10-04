@@ -550,6 +550,7 @@ public:
         const auto depth = static_cast<size_t>(config.max_capture_frames);
         capture_mag_.assign(channels * depth * bins, SampleType{0});
         latest_increment_.assign(bins, 0.0);
+        latest_increment_raw_.assign(bins, std::complex<double>{});
         prev_frame_.assign(channels * bins, std::complex<SampleType>{});
         held_mag_.assign(channels * bins, SampleType{0});
         held_phase_.assign(channels * bins, 0.0);
@@ -988,8 +989,6 @@ private:
         // phase of the channel SUM it is not destroyed where channels
         // cancel (anti-phase bins). The first frame after a history clear
         // has no predecessor and records the bin-centre increment.
-        double* increment = latest_increment_.data();
-        const double ha = static_cast<double>(config_.analysis_hop);
         if (weighted) {
             // Keep the raw increment vector per frame; its argument is taken
             // once, over the window, at the latch. A frame with no
@@ -1007,6 +1006,13 @@ private:
                 ring[k] = prev_valid_ ? std::complex<SampleType>(acc) : std::complex<SampleType>{};
             }
         } else {
+            // Only the increment vector is kept here; its argument is taken
+            // at the latch, the one place it is read. An atan2 per bin per
+            // hop (4097 for 8192 points) was the largest single cost of a
+            // capturing frame group, paid on every hop for a value only a
+            // latch consumes -- and the argument of the same vector later is
+            // the same number, so the hold is bit-identical.
+            std::complex<double>* raw = latest_increment_raw_.data();
             for (int k = 0; k < num_bins_; ++k) {
                 std::complex<double> acc(0.0, 0.0);
                 for (int ch = 0; ch < channels; ++ch) {
@@ -1015,8 +1021,9 @@ private:
                     acc += std::complex<double>(now) * std::conj(std::complex<double>(prev));
                     prev = now;
                 }
-                increment[k] = prev_valid_ ? rt::arg(acc) : two_pi_ * k / config_.fft_size * ha;
+                raw[k] = acc;
             }
+            latest_increment_valid_ = prev_valid_;
         }
         prev_valid_ = true;
         last_frames_ = frames; // valid only within process_group call
@@ -1153,9 +1160,14 @@ private:
             }
         } else {
         // Instantaneous frequency from the newest capture's increment
-        // (heterodyned phase increment over one analysis hop).
-        const double* increment = latest_increment_.data();
+        // (heterodyned phase increment over one analysis hop). The increment
+        // is the argument of the vector the newest capture kept.
+        double* increment = latest_increment_.data();
         const double ha = static_cast<double>(config_.analysis_hop);
+        const std::complex<double>* raw = latest_increment_raw_.data();
+        for (int k = 0; k < num_bins_; ++k)
+            increment[k] = latest_increment_valid_ ? rt::arg(raw[k])
+                                                   : two_pi_ * k / config_.fft_size * ha;
         for (int k = 0; k < num_bins_; ++k) {
             const double omega = two_pi_ * k / config_.fft_size;
             const double delta = princarg(increment[k] - omega * ha);
@@ -1449,6 +1461,11 @@ private:
 
     std::vector<SampleType> capture_mag_;          // channels * max depth * bins
     std::vector<double> latest_increment_;         // bins
+    // The newest capture's per-bin increment vector, sum_ch X_t conj(X_{t-1});
+    // its argument is taken at the latch. Invalid for a frame with no
+    // predecessor, which takes the bin-centre increment instead.
+    std::vector<std::complex<double>> latest_increment_raw_;  // bins
+    bool latest_increment_valid_ = false;
     std::vector<std::complex<SampleType>> prev_frame_; // channels * bins
     std::vector<SampleType> held_mag_;             // channels * bins
     // Mutable: with rotor synthesis the phasors are the state and these

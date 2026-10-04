@@ -95,6 +95,28 @@ prove the plugin has native double-precision DSP unless the descriptor opts into
 silence floor) so a test can't "pass" on a −39 dB ghost the way a lenient
 hand-written `> -50 dB` check did.
 
+## Tier 1b — the glitch timeline (click/dropout -> block -> work)
+
+For "it clicks", "it drops out", "it sounds staticky on X", render the
+scenario in a tracing-enabled build with per-block `process` spans stamped
+with `stream_pos`/`frames`, write the WAV beside the `.pftrace`, and run
+`python3 tools/audio/glitch_trace.py --wav out.wav --trace out.pftrace`. It
+names the sample, the block, the block's time against its deadline and the
+work nested in it. Full recipe and traps: the audio-harness skill, "Glitch
+hunt". Two things a headless scene misses unless you add them: worker timing
+(render real-time paced with UI edits from another thread) and host-split
+callbacks (random per-callback lengths).
+
+**A mode switch between realisations of different latency** (linear-phase vs
+minimum-phase, CPU vs GPU) is a dropout plus a click if the object is swapped
+at a block boundary -- the new one emits its own latency of silence. Run both
+on the same input, the new one unheard until its latency and impulse history
+are full, then fade at equal power; and handle
+two edges explicitly: a switch before the stream has rendered anything must be
+immediate (a host restoring state after prepare), and a host reset during the
+warm must complete the switch, not warm again (the reset silences the old
+realisation for its latency).
+
 ## Tier 2 — standalone AU host probe (adapter / host-interaction / threading bugs)
 
 When Tier 1 is green but the DAW still fails, load the **real component** and

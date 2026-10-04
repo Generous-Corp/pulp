@@ -1749,7 +1749,10 @@ fn write_shipyard_status(root: &Path, out: &mut impl Write) -> Result<()> {
     }
     if let Some(pinned) = pinned.as_ref() {
         write!(out, " pinned {pinned}").map_err(io_err)?;
-        if actual.as_ref().is_some_and(|a| a != pinned) {
+        if actual
+            .as_ref()
+            .is_some_and(|a| !super::pr::pin_accepts(pinned, a))
+        {
             write!(out, " [pin mismatch]").map_err(io_err)?;
         }
     }

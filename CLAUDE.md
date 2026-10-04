@@ -1042,6 +1042,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Run the deterministic visual layout snapshots. → `python3 -m tools.harness.visual.runner`
 
 **audio** — prove what the audio actually did
+- A render clicks or drops out and you need the sample, the host block that rendered it, and the work inside that block -- or per-block time against the deadline -- from one command. → `tools/audio/glitch_trace.py`
 - Decide whether a DSP change made a sound WORSE — and at which timestamp. *(needs install)* → `python -m quality_lab.cli compare`
 - Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`

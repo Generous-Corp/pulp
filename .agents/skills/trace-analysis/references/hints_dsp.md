@@ -94,6 +94,32 @@ WHERE node.category='dsp.node' AND node.dur>=0
 ORDER BY ms DESC;
 ```
 
+## Block time against the deadline, and the sample <-> time join
+
+A processor that stamps its per-block span with `stream_pos` and `frames`
+(`PULP_TRACE_SCOPE_NAMED_ARGS("dsp", "process", "stream_pos", pos, "frames", n)`)
+gives every block a deadline and a place in the rendered audio:
+
+```sql
+SELECT ts, dur,
+  EXTRACT_ARG(arg_set_id, 'debug.stream_pos') AS stream_pos,
+  EXTRACT_ARG(arg_set_id, 'debug.frames') AS frames,
+  dur / (1e9 * EXTRACT_ARG(arg_set_id, 'debug.frames') / 48000.0) AS load
+FROM slice WHERE name = 'process' AND dur >= 0 ORDER BY load DESC LIMIT 20;
+```
+
+`load > 1` is a block that would drop a buffer live at that buffer size. A
+glitch at WAV sample N belongs to the row with `stream_pos <= N < stream_pos +
+frames`; `tools/audio/glitch_trace.py` does that join, the detectors, and the
+p50/p99/max/miss summary in one command. A Chrome JSON trace puts the same
+args under `args.` instead of `debug.`; the tool reads both.
+
+Work on a CONTROL thread (a UI-thread filter redesign, a renderer build)
+appears between blocks, not nested in one: query it by name across the trace
+(`GROUP BY name`) and read count x mean -- Spectr's Tracking drag designed
+each mask twice (UI-thread publish and the audio path's restage, 91 + 73
+designs for one 1.5 s drag), which no block-time view shows.
+
 ## Traps
 
 - **Don't diagnose a live stutter from an offline trace.** Offline is

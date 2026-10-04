@@ -2158,12 +2158,16 @@ class UnreachedChangedTest(unittest.TestCase):
         self.assertEqual(self.measure(["test/b"], hashes, "sampled"), (["test/b"], 1))
         self.assertEqual(self.measure(["test/a"], hashes, "sampled"), ([], 1))
 
-    def test_a_changed_closure_artifact_names_the_executable_that_loads_it(self) -> None:
+    def test_a_changed_closure_artifact_names_the_artifact_not_its_spawner(self) -> None:
         same = {"test/a": self.sha("bytes of a"), "test/mod.so": self.sha("bytes of mod.so")}
-        # deep.so, loaded by mod.so, loaded by a, changed: a is reported.
+        # deep.so, loaded by mod.so, loaded by a, changed: deep.so is reported,
+        # and neither a nor mod.so, whose own bytes match.
         out = self.full([], {**same, "test/deep.so": self.sha("old deep")}, "all")
         self.assertEqual((out["unreached_changed"], out["unreached_compared"], out["unreached_unchecked_modules"]),
-                         (["test/a"], 3, []))
+                         (["test/deep.so"], 3, []))
+        # The executable itself is reported when its own bytes moved.
+        out = self.full([], {**same, "test/a": self.sha("old a"), "test/deep.so": self.sha("old deep")}, "all")
+        self.assertEqual(out["unreached_changed"], ["test/a", "test/deep.so"])
         # Control: an unchanged closure leaves a out.
         out = self.full([], {**same, "test/deep.so": self.sha("bytes of deep.so")}, "all")
         self.assertEqual(out["unreached_changed"], [])
