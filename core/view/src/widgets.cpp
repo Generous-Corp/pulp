@@ -853,8 +853,9 @@ void Knob::paint_modulated_marker(canvas::Canvas& canvas, float cx, float cy, fl
     const auto thumb = resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
     const float half = arc_w * 0.5f + 2.0f;
     const float c = std::cos(base_a), sn = std::sin(base_a);
-    canvas.set_stroke_color(canvas::Color::rgba(
-        thumb.r, thumb.g, thumb.b, 0.85f)); // token-lint:allow (alpha blend of resolved token)
+    // The tick is the resolved thumb token at 85 % alpha.
+    const auto tick = canvas::Color::rgba(thumb.r, thumb.g, thumb.b, 0.85f); // token-lint:allow
+    canvas.set_stroke_color(tick);
     canvas.set_line_cap(canvas::LineCap::round);
     canvas.set_line_width(std::max(1.5f, arc_w * 0.3f));
     canvas.stroke_line(cx + (ring_r - half) * c, cy + (ring_r - half) * sn,
@@ -873,8 +874,9 @@ void Fader::paint_modulated_marker(canvas::Canvas& canvas) {
     const float p = position_for_value();
     const float base = vert ? (1.0f - p) * length : p * length;
     const auto thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-    canvas.set_stroke_color(canvas::Color::rgba(
-        thumb.r, thumb.g, thumb.b, 0.85f)); // token-lint:allow (alpha blend of resolved token)
+    // The tick is the resolved thumb token at 85 % alpha.
+    const auto tick = canvas::Color::rgba(thumb.r, thumb.g, thumb.b, 0.85f); // token-lint:allow
+    canvas.set_stroke_color(tick);
     canvas.set_line_cap(canvas::LineCap::round);
     canvas.set_line_width(1.5f);
     const float half = std::min(cross * 0.8f, 6.0f);
