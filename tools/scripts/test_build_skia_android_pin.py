@@ -37,6 +37,8 @@ class AndroidSkiaBuilderPinTests(unittest.TestCase):
         build_loop = script.index('for ABI in')
         self.assertLess(source_check, dawn_check)
         self.assertLess(dawn_check, build_loop)
+        self.assertIn("for mod in skparagraph skshaper skunicode svg skottie sksg", script)
+        self.assertIn('cmp -s "$SKUNICODE_HEADER"', script)
         self.assertIn('grep -q \'src/core/SkUTF.h\'', script)
         self.assertIn('ACTUAL_DAWN_COMMIT" != "$DAWN_EXPECTED_COMMIT"', script)
 

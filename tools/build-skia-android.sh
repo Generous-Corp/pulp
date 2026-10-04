@@ -233,12 +233,16 @@ find include -name "*.h" | while read f; do
     cp "$f" "$SKIA_OUTPUT/$f"
 done
 # Copy module headers
-for mod in skparagraph skshaper svg skottie sksg; do
+for mod in skparagraph skshaper skunicode svg skottie sksg; do
     if [ -d "$SKIA_SRC/modules/$mod/include" ]; then
         mkdir -p "$SKIA_OUTPUT/modules/$mod/include"
         cp "$SKIA_SRC/modules/$mod/include/"*.h "$SKIA_OUTPUT/modules/$mod/include/" 2>/dev/null || true
     fi
 done
+if ! cmp -s "$SKUNICODE_HEADER" "$SKIA_OUTPUT/modules/skunicode/include/SkUnicode.h"; then
+    echo "Error: staged SkUnicode.h does not match the pinned Skia source" >&2
+    exit 1
+fi
 
 echo ""
 echo "=== Skia Android build complete ==="
