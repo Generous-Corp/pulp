@@ -21,6 +21,9 @@ objects its link pulled.
 
 What a key cannot see is made an always_run reason, never a guess:
 
+    inventory_unmatched
+                       the ctest inventory has tests but none run anything
+                       under the build dir (the two are spelled differently)
     base_unrecorded    no usable reuse record for the base commit, or its
                        commit is not an ancestor of head
     base_other_toolchain
@@ -30,6 +33,8 @@ What a key cannot see is made an always_run reason, never a guess:
     codemodel_unknown  no content-keyed codemodel digest for the target on
                        one side
     commit_bound       the executable embeds the commit
+    key_blind          its bytes have changed while its key did not (the
+                       replay's key-blind list)
     environment        a registration drives a shared host resource, or is
                        one of the always-run names (drift, lint, probes, ...)
     unrecorded         the base link, an object's dependency list, or a
@@ -66,6 +71,7 @@ runner can re-derive the selection and refuse a difference.
     executable_keys.py --source-root S --base-sha B --head-sha H \\
         --base-record DIR --base-record-run-id N --head-codemodel F \\
         --ctest-json J --build-dir D [--toolchain-json T] --out M
+    executable_keys.py --print-toolchain --build-dir D
 
 The replay (tools/scripts/reuse_replay_collect.py) imports the scan and
 input-matching helpers from here, so the lane and the replay share one
@@ -91,11 +97,17 @@ from spawn_closure import SpawnIndex  # noqa: E402
 from test_receipts_shadow import ALWAYS_RUN_NAME_RE  # noqa: E402
 
 SCHEMA = "pulp-executable-keys/v1"
+KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
 # The files whose base copy computes the keys and the selection over them;
 # touching any of them makes a plan select everything.
 KEY_CODE_PATHS = ("tools/ci/executable_keys.py", "tools/ci/link_members.py", "tools/ci/object_deps.py",
                   "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py",
-                  "tools/ci/executable_selection.py")
+                  "tools/ci/executable_selection.py", "tools/ci/key_blind_executables.json")
+# Executables whose recorded bytes changed while their content-keyed source
+# key did not, as the reuse replay measured them (reuse_policy_replay.py
+# key-blind). The list only grows: an entry always runs until the mechanism
+# behind it is keyed and the entry is removed by hand.
+KEY_BLIND_LIST = HERE / "key_blind_executables.json"
 SCRIPT_INPUTS_PATH = "test/ctest_script_inputs.json"
 CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
 # Files that pin third-party dependencies. A bump can change a dependency's
@@ -227,6 +239,17 @@ def show(root: Path, rev: str, path: str) -> str | None:
     return None if res.returncode else res.stdout.decode("utf-8", "replace")
 
 
+def record_digest_bytes(directory: Path) -> bytes:
+    """What `base_record_sha256` hashes, the contract a planner reproduces:
+    for every regular file under `directory` (recursively, symlinks
+    followed), in ascending order of the UTF-8 bytes of its POSIX path
+    relative to `directory`, that path, a NUL, the lowercase hex sha256 of
+    the file's bytes, and a newline."""
+    rows = sorted((f.relative_to(directory).as_posix().encode("utf-8"), f)
+                  for f in directory.rglob("*") if f.is_file())
+    return b"".join(rel + b"\0" + hashlib.sha256(f.read_bytes()).hexdigest().encode() + b"\n" for rel, f in rows)
+
+
 def _one(directory: Path, prefix: str) -> Path | None:
     found = sorted(directory.glob(f"{prefix}*.json"))
     return found[0] if len(found) == 1 else None
@@ -238,10 +261,7 @@ def load_record(directory: Path | None) -> tuple[dict | None, str | None]:
     when there is no record."""
     if directory is None or not directory.is_dir():
         return None, None
-    digest = hashlib.sha256()
-    for f in sorted(p for p in directory.rglob("*") if p.is_file()):
-        digest.update(f.relative_to(directory).as_posix().encode() + b"\0")
-        digest.update(hashlib.sha256(f.read_bytes()).hexdigest().encode() + b"\n")
+    digest = hashlib.sha256(record_digest_bytes(directory)).hexdigest()
 
     def read(path: Path | None) -> dict | None:
         try:
@@ -255,7 +275,7 @@ def load_record(directory: Path | None) -> tuple[dict | None, str | None]:
     toolchain = toolchain_key(job)
     return {"codemodel": read(_one(directory, "codemodel-")), "links": read(_one(directory, "link-members-")),
             "deps": read(_one(directory, "object-deps-")),
-            "image": image.get("digest"), "toolchain": toolchain}, digest.hexdigest()
+            "image": image.get("digest"), "toolchain": toolchain}, digest
 
 
 # The toolchain identity the reuse record computes (reuse_record.
@@ -284,14 +304,21 @@ def toolchain_key(job: dict) -> dict | None:
     return {"os": fields["os"], "arch": fields["arch"], **key}
 
 
-def probe_toolchain(build_dir: Path | None) -> dict | None:
-    """This host's toolchain identity for a configured build, computed by
-    the same functions that write it into the reuse record."""
+def host_identity(build_dir: Path | None) -> dict:
+    """This host's identity in the shape a reuse record's job.json carries it
+    (`platform`, `runner_image`, `toolchain`), computed by the same functions
+    that write the record, so a planner compares a probe with a stored record
+    field for field."""
     import reuse_record
     env = dict(os.environ)
     image = reuse_record.runner_image(env)
-    return toolchain_key({"platform": reuse_record.platform_id(), "runner_image": image,
-                          "toolchain": reuse_record.toolchain_identity(build_dir, env, image["fields"])})
+    return {"platform": reuse_record.platform_id(), "runner_image": image,
+            "toolchain": reuse_record.toolchain_identity(build_dir, env, image["fields"])}
+
+
+def probe_toolchain(build_dir: Path | None) -> dict | None:
+    """This host's toolchain key for a configured build."""
+    return toolchain_key(host_identity(build_dir))
 
 
 def content_keyed(codemodel: dict | None) -> bool:
@@ -397,6 +424,16 @@ def key_of(digest: str | dict, toolchain: dict | None, paths: Iterable[str], blo
 
 # -- the manifest ------------------------------------------------------------
 
+def load_key_blind(path: Path) -> frozenset[str]:
+    """The key-blind executables (relative to the build dir). A list that
+    cannot be read is an error, not an empty list: the code runs from the
+    base's copy, which always carries it."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if doc.get("schema") != KEY_BLIND_SCHEMA:
+        raise ValueError(f"{path}: schema is not {KEY_BLIND_SCHEMA}")
+    return frozenset(doc.get("executables") or {})
+
+
 def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[dict]]:
     """artifact (relative to the build dir) -> the ctest registrations that
     run it. `build_dir` is the path the configure used, matched as a string
@@ -405,7 +442,7 @@ def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[
     out: dict[str, list[dict]] = {}
     if not ctest or build_dir is None:
         return out
-    root = os.path.normpath(str(build_dir))
+    root = os.path.abspath(str(build_dir))
     for test in ctest.get("tests") or []:
         cmd = test.get("command") or []
         if not cmd:
@@ -423,7 +460,8 @@ def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[
 
 
 def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None, head_codemodel: dict | None,
-            ctest: dict | None, build_dir: Path | None, toolchain: dict | None) -> dict:
+            ctest: dict | None, build_dir: Path | None, toolchain: dict | None,
+            key_blind_path: Path | None = None) -> dict:
     """The key manifest's `executables` and a count per always_run reason.
     Pure over its inputs and the two git trees."""
     ancestor = subprocess.run(["git", "-C", str(source_root), "merge-base", "--is-ancestor", base_sha, head_sha],
@@ -445,6 +483,11 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
     data_scan, spawn_scan = spawn_scan_of(script_doc, "data"), spawn_scan_of(script_doc)
     spawns = SpawnIndex(head_targets)
     regs = registrations(ctest, build_dir)
+    # Commands that all miss the build dir mean the two were spelled
+    # differently (a relative path, /var vs /private/var), not that no test
+    # runs anything: keying then would skip nothing and say nothing.
+    unmatched = bool((ctest or {}).get("tests")) and not regs
+    key_blind = load_key_blind(KEY_BLIND_LIST if key_blind_path is None else key_blind_path)
     by_artifact = {a.removeprefix(BUILD): n for n, t in head_targets.items()
                    if t.get("type") in ("EXECUTABLE", "MODULE_LIBRARY") for a in t.get("artifacts") or []}
     out: dict[str, dict] = {}
@@ -461,6 +504,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
         dstate, dinputs = data_status(artifact, data_scan)
         sstate = spawn_status(artifact, spawn_scan)
         reason = (
+            "inventory_unmatched" if unmatched else
             "base_unrecorded" if record is None or sets is None or not ancestor else
             "toolchain_unknown" if not record.get("toolchain") or not toolchain else
             "base_other_toolchain" if record["toolchain"] != toolchain else
@@ -468,6 +512,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             "codemodel_unknown" if not keyed or not base_target.get("digest") or not target.get("digest")
             or any(not (base_targets.get(n) or {}).get("digest") for n in linked or ()) else
             "commit_bound" if target.get("commit_bound") or base_target.get("commit_bound") else
+            "key_blind" if artifact in key_blind else
             "environment" if any(environment_bound(t) or ALWAYS_RUN_NAME_RE.search(t["name"] or "")
                                  for t in tests) else
             "unrecorded" if paths is None else
@@ -482,8 +527,8 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
                       or {"undeclared": "spawns_undeclared", "unknown": "spawns_unknown"}.get(sstate))
         entry = {"kind": kind, "registrations": [t["name"] for t in tests], "always_run": reason,
                  "spawns": sorted(spawns.closure(artifact)), "head_key": None, "base_key": None}
-        if paths is not None and reason not in ("base_unrecorded", "toolchain_unknown", "base_other_toolchain",
-                                                "codemodel_unknown"):
+        if paths is not None and reason not in ("inventory_unmatched", "base_unrecorded", "toolchain_unknown",
+                                                "base_other_toolchain", "codemodel_unknown"):
             keyed_paths = paths | (data_paths(dinputs, base_tree, head_tree) if dstate == "declared" else set())
             digests = lambda side: {n: (side.get(n) or {}).get("digest", "absent") for n in sorted(linked)}  # noqa: E731
             entry["base_key"] = key_of(digests(base_targets), record["toolchain"], keyed_paths, base_tree)
@@ -506,8 +551,10 @@ def code_digest(source_root: Path, base_sha: str) -> str:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--source-root", required=True, type=Path)
-    ap.add_argument("--base-sha", required=True)
+    ap.add_argument("--print-toolchain", action="store_true",
+                    help="print this host's identity for --build-dir in job.json shape and exit")
+    ap.add_argument("--source-root", type=Path)
+    ap.add_argument("--base-sha")
     ap.add_argument("--head-sha", default="HEAD")
     ap.add_argument("--base-record", type=Path, help="the base reuse-record files, fetched by the planner")
     ap.add_argument("--base-record-run-id", default=None)
@@ -517,8 +564,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--toolchain-json", type=Path,
                     help="the head toolchain key ({os, arch} plus reuse_record.toolchain_identity's fields "
                          "without `target`); computed from --build-dir when absent")
-    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--out", type=Path)
     a = ap.parse_args(argv[1:])
+    if a.print_toolchain:
+        print(json.dumps(host_identity(a.build_dir), indent=1, sort_keys=True))
+        return 0
+    missing = [f"--{n.replace('_', '-')}" for n in ("source_root", "base_sha", "out") if getattr(a, n) is None]
+    if missing:
+        ap.error(f"the following arguments are required: {', '.join(missing)}")
 
     def read(path: Path | None) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8")) if path and path.is_file() else None

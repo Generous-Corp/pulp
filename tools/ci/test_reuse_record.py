@@ -567,6 +567,7 @@ class CliTests(unittest.TestCase):
                           job["link_members"]["whole_archives"]), (1, 1, ["<build>/lib/libx.a"]))
         self.assertEqual(doc["members"], {"<build>/lib/libx.a": ["one.o", "two.o"]})
         self.assertEqual(doc["executables"]["<build>/m.so"]["kind"], "module")
+        self.assertIs(job["link_members"]["usable"], True)
         # The fixture's build directory was never configured, so only the
         # toolchain warning may appear.
         self.assertEqual([l for l in proc.stdout.splitlines()
@@ -662,6 +663,7 @@ class CliTests(unittest.TestCase):
             doc = json.loads((Path(tmp) / "out" / job["object_deps"]["file"]).read_text())
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(job["object_deps"]["objects"], 1)
+        self.assertIs(job["object_deps"]["usable"], True)
         self.assertEqual(doc["objects"], {"<build>/a.o": [0]})
         self.assertEqual(doc["headers"], ["<src>/a.cpp"])
         self.assertNotIn("object deps", proc.stdout)
@@ -679,6 +681,7 @@ class CliTests(unittest.TestCase):
             job = json.loads((Path(tmp) / "out" / "job.json").read_text())
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual((job["link_members"]["executables"], job["link_members"]["shared"]), (1, 1))
+        self.assertIs(job["link_members"]["usable"], False)
         self.assertIn("::warning title=reuse-record incomplete::link members not usable for reuse: "
                       "links of kind shared are not modelled", proc.stdout)
 
