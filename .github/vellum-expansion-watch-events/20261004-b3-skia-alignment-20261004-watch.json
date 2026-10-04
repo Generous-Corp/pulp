@@ -6,9 +6,10 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
-    "render-assets-and-backends"
+    "render-assets-and-backends",
+    "visual-proof-harness"
   ],
-  "rationale": "The Android Skia builder now consumes the manifest-pinned chrome/m153 Skia and Dawn revisions and copies the matching SkUnicode headers. This closes source/artifact drift without moving design-import, Chromium, rendering, or packaging authority.",
+  "rationale": "The Android Skia builder now consumes the manifest-pinned chrome/m153 Skia and Dawn revisions, copies the matching SkUnicode headers, and enables the existing Skia raster screenshot backend in Android's CMake closure. This closes source/artifact drift without moving design-import, Chromium, rendering, or packaging authority.",
   "tests": [
     "python3 tools/scripts/test_build_skia_android_pin.py",
     "bash -n tools/build-skia-android.sh",

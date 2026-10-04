@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "android-skia-alignment-receipt",
   "status": "PASS",
-  "generated_at": "2026-10-04T04:40:00Z",
+  "generated_at": "2026-10-04T06:00:00Z",
   "source_checkout": "external/skia-src",
   "skia_branch": "chrome/m153",
   "skia_commit": "8b8c3872fbc03f025855db96ce683f34ec98a815",
@@ -15,9 +15,19 @@
   "commands": [
     "tools/build-skia-android.sh arm64",
     "python3 tools/scripts/test_build_skia_android_pin.py",
-    "pulp doctor android"
+    "pulp doctor android",
+    "JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :app:assembleDebug --no-daemon"
   ],
   "limitations": [
-    "Java 17 Gradle assemble and emulator smoke remain to be run against this freshly staged provider; native SurfaceRuntime retention attribution remains a separate B3 blocker."
-  ]
+    "Android emulator smoke and native SurfaceRuntime retention attribution remain separate B3 blockers; this receipt proves source/artifact alignment and a successful arm64 sample assembly."
+  ],
+  "gradle_assemble_debug": {
+    "status": "PASS",
+    "command": "ANDROID_HOME=/Users/danielraffel/Library/Android/sdk ANDROID_SDK_ROOT=/Users/danielraffel/Library/Android/sdk JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :app:assembleDebug --no-daemon",
+    "tasks": "37 total, 28 actionable",
+    "apk": "android/app/build/outputs/apk/debug/app-debug.apk",
+    "apk_bytes": 32925407,
+    "apk_sha256": "9eca9f17aadf10815877b04e120e0e5a73aae7644eaf232c8e3ba6436bf2eb90",
+    "libpulp_so_bytes": 439687008
+  }
 }
