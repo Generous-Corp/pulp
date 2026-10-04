@@ -167,6 +167,8 @@
         "tools/shipyard.toml",
         ".shipyard/config.toml",
         "tools/install-shipyard.sh",
+        "tools/scripts/install_shipyard_token_check.py",
+        "tools/scripts/test_install_shipyard_token_check.py",
         "tools/scripts/install-githooks.sh",
         "tools/scripts/codex_review_signal.sh",
         "tools/scripts/test_codex_review_signal.sh",

@@ -7271,6 +7271,14 @@ To install Shipyard locally for the first time:
 export PATH="$HOME/.local/bin:$PATH"  # add ~/.local/bin to PATH (one-time)
 ```
 
+In a workflow, give the step that runs `install-shipyard.sh` a token
+(`env: GITHUB_TOKEN: ${{ github.token }}`). Under `GITHUB_ACTIONS=true` the
+wrapper refuses to run without `GITHUB_TOKEN` or `SHIPYARD_GITHUB_TOKEN`:
+the upstream installer's release lookup is otherwise anonymous, and shared
+hosted-runner IPs exhaust the 60/hour limit on busy days (HTTP 403 in
+"Install pinned Shipyard"). `install_shipyard_token_check.py` in
+`workflow-lint.yml` catches a tokenless step before it runs.
+
 The public Pulp installer intentionally does not install Shipyard or GitHub
 CLI (`gh`). Ordinary Pulp users can create, build, run, and upgrade projects
 without either tool. Treat them as source-checkout contributor dependencies
