@@ -1,0 +1,17 @@
+{
+  "schema": "pulp.phase5_inventory.v1",
+  "kind": "read_only_baseline",
+  "date": "2026-10-04",
+  "worktree": "/Users/danielraffel/Code/pulp-phase5-inventory-20261004",
+  "branch": "codex/phase5-inventory-20261004",
+  "head": "dcee90cce925d42dca420284f22da7d279369c30",
+  "origin_main": "dcee90cce925d42dca420284f22da7d279369c30",
+  "scope": [
+    "A2 baseline ledger",
+    "A5 deprecation/legacy and generated-file inventory"
+  ],
+  "source_edits": false,
+  "report": "docs/validation/phase5-a2-a5-inventory-20261004/receipt.md",
+  "metrics": "docs/validation/phase5-a2-a5-inventory-20261004/metrics.json",
+  "metrics_sha256": "fb99b505d3f1bcec893dd99107066d1a27fbcd8b9f344aa73067f63312ce469f"
+}
