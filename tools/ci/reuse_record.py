@@ -102,10 +102,21 @@ RUN_KINDS = {"pull_request": "pr_head", "merge_group": "merge_group", "push": "p
 # compiler or the sources; part of the toolchain identity.
 # Toolchain fields a record must have found to be keyable; the SDK pair is
 # required on macOS as well.
-TOOLCHAIN_REQUIRED = ("compiler_id", "compiler_version", "compiler", "target")
-TOOLCHAIN_ENV = ("CC", "CXX", "CFLAGS", "CXXFLAGS", "LDFLAGS", "SDKROOT", "DEVELOPER_DIR",
-                 "MACOSX_DEPLOYMENT_TARGET", "CCACHE_COMPILERCHECK", "CCACHE_NODEPEND",
-                 "CCACHE_SLOPPINESS", "PULP_OFFLINE_BUILD")
+TOOLCHAIN_REQUIRED = ("compiler_id", "compiler_version", "compiler", "effective")
+# Environment read while the build runs, so its live value is the one that
+# shaped the objects: part of the key. Path remapping (CCACHE_BASEDIR),
+# __DATE__/__TIME__ (SOURCE_DATE_EPOCH) and archive member times (ZERO_AR_DATE)
+# all change bytes.
+BUILD_ENV = ("CCACHE_BASEDIR", "CCACHE_COMPILERCHECK", "CCACHE_DISABLE", "CCACHE_NODEPEND",
+             "CCACHE_SLOPPINESS", "PULP_OFFLINE_BUILD", "SOURCE_DATE_EPOCH", "ZERO_AR_DATE")
+# Environment CMake reads at configure time. The live value when the record is
+# written may differ from the one the build directory was configured under, so
+# it is recorded for diagnosis only; the configured result is `effective`.
+CONFIGURE_ENV = ("CC", "CFLAGS", "CXX", "CXXFLAGS", "DEVELOPER_DIR", "LDFLAGS",
+                 "MACOSX_DEPLOYMENT_TARGET", "SDKROOT")
+# What configure made of the above, from CMakeCache.txt.
+EFFECTIVE_CACHE = ("CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER", "CMAKE_C_FLAGS", "CMAKE_CXX_FLAGS",
+                   "CMAKE_EXE_LINKER_FLAGS", "CMAKE_OSX_SYSROOT", "CMAKE_OSX_DEPLOYMENT_TARGET")
 SCRIPT_INPUTS_LIST = "test/ctest_script_inputs.json"
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/")
 
@@ -436,7 +447,16 @@ def lane_context(source_root: Path | None, run_id: str | None) -> dict:
     tree, parents = _commit_parents(source_root, sha) if source_root and sha else (None, [])
     return {"run_id": run_id or None, "run_attempt": None, "run_kind": "lane", "pr": None,
             "head_sha": sha, "base_sha": parents[0] if parents else None, "merge_tree": tree,
-            "merge_sha": sha, "event": "lane", "merge_group_head_ref": None}
+            "merge_sha": sha, "event": "lane", "merge_group_head_ref": None,
+            "dirty": _dirty(source_root) if source_root else None}
+
+
+def _dirty(repo: Path) -> bool | None:
+    """Whether the checkout differs from HEAD (any `git status --porcelain`
+    line, untracked files included): a dirty lane record did not test its
+    commit. None when git could not say."""
+    proc = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True)
+    return bool(proc.stdout.strip()) if proc.returncode == 0 else None
 
 
 def _cmake_cache(build_dir: Path) -> dict[str, str]:
@@ -475,32 +495,52 @@ def _known(fields: dict) -> dict:
     return {k: v for k, v in fields.items() if v != "unknown"}
 
 
+def _env_values(env: dict[str, str], names: tuple[str, ...]) -> dict[str, str]:
+    # Only listed names are ever read: the record is uploaded, and the
+    # environment is where secrets live. Unset is the literal `unset`; an empty
+    # value stays "" so the two are distinct.
+    return {k: env[k] if k in env else "unset" for k in names}
+
+
 def toolchain_identity(build_dir: Path | None, env: dict[str, str], image_fields: dict) -> dict | None:
-    """What a compile depends on besides its sources: the compiler CMake chose
-    (id, version, its own --version line, target triple), the SDK, the
-    deployment target, and the allow-listed environment. One function so the
-    gate and the local lane compute it identically. `complete` is false when
-    any part is unknown, and a reader keys nothing on an incomplete identity."""
+    """What a compile depends on besides its sources, for a reuse key.
+
+    `fields` is keyed (and digested): the compiler CMake's check recorded (id,
+    version, its --version line), the SDK version and build, `effective` (what
+    configure resolved from the compiler and flag environment, read from
+    CMakeCache.txt), and `build_env` (environment read while compiling:
+    ccache settings, SOURCE_DATE_EPOCH, ZERO_AR_DATE). A key uses these, never
+    the live configure-time environment.
+
+    Outside `fields`, so never keyed: `configure_env`, the live values of the
+    variables CMake reads at configure time, which can differ from those the
+    build directory was configured under; and `diagnostic.target`, the
+    compiler's -print-target-triple, which names the host OS rather than the
+    deployment target.
+
+    One function, so the gate and the local lane compute it identically.
+    `complete` is false when a required field was not found."""
     if build_dir is None:
         return None
     cache = _cmake_cache(build_dir)
     probed = _cmake_compiler(build_dir)
     compiler = probed.get("CMAKE_CXX_COMPILER") or cache.get("CMAKE_CXX_COMPILER") or ""
+    effective = {k: cache[k] for k in EFFECTIVE_CACHE if k in cache}
     fields = _known({
         "compiler_id": probed.get("CMAKE_CXX_COMPILER_ID") or "unknown",
         "compiler_version": probed.get("CMAKE_CXX_COMPILER_VERSION") or "unknown",
         "compiler": _probe([compiler, "--version"]) if compiler else "unknown",
-        "target": _probe([compiler, "-print-target-triple"]) if compiler else "unknown",
         "sdk_version": image_fields.get("sdk_version", "unknown"),
         "sdk_build": image_fields.get("sdk_build", "unknown"),
-        "deployment_target": cache.get("CMAKE_OSX_DEPLOYMENT_TARGET") or "",
-        "env": {k: env.get(k, "unset") for k in TOOLCHAIN_ENV},
+        "effective": effective if "CMAKE_CXX_COMPILER" in effective else "unknown",
+        "build_env": _env_values(env, BUILD_ENV),
     })
     required = TOOLCHAIN_REQUIRED + (("sdk_version", "sdk_build") if image_fields.get("os") == "Darwin" else ())
     missing = [k for k in required if k not in fields]
-    complete = not missing
     digest = hashlib.sha256(json.dumps(fields, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-    return {"digest": digest, "complete": complete, "missing": missing, "fields": fields}
+    diagnostic = _known({"target": _probe([compiler, "-print-target-triple"]) if compiler else "unknown"})
+    return {"digest": digest, "complete": not missing, "missing": missing, "fields": fields,
+            "configure_env": _env_values(env, CONFIGURE_ENV), "diagnostic": diagnostic}
 
 
 def run_context(env: dict[str, str], source_root: Path | None) -> dict:

@@ -275,9 +275,11 @@ class RunnerImageTests(unittest.TestCase):
 
 
 class ToolchainTests(unittest.TestCase):
-    def fake_build(self, tmp: str, version: str = "21.0.0.1") -> Path:
+    IMAGE = {"os": "Darwin", "sdk_version": "26.4", "sdk_build": "25E241"}
+
+    def fake_build(self, tmp: str, version: str = "21.0.0.1", flags: str = "-Wall") -> Path:
         build = Path(tmp) / "build"
-        (build / "CMakeFiles" / "4.3.3").mkdir(parents=True)
+        (build / "CMakeFiles" / "4.3.3").mkdir(parents=True, exist_ok=True)
         cc = Path(tmp) / "fake-c++"
         cc.write_text('#!/bin/sh\ncase "$1" in --version) echo "Fake clang %s";; '
                       '-print-target-triple) echo arm64-apple-darwin25;; esac\n' % version)
@@ -285,36 +287,51 @@ class ToolchainTests(unittest.TestCase):
         (build / "CMakeFiles" / "4.3.3" / "CMakeCXXCompiler.cmake").write_text(
             f'set(CMAKE_CXX_COMPILER "{cc}")\nset(CMAKE_CXX_COMPILER_ID "AppleClang")\n'
             f'set(CMAKE_CXX_COMPILER_VERSION "{version}")\n')
-        (build / "CMakeCache.txt").write_text("CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n")
+        (build / "CMakeCache.txt").write_text(
+            f"CMAKE_CXX_COMPILER:FILEPATH={cc}\nCMAKE_CXX_FLAGS:STRING={flags}\n"
+            "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\nCMAKE_EXE_LINKER_FLAGS:STRING=\n")
         return build
 
     def test_the_identity_names_the_compiler_cmake_chose(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            t = rr.toolchain_identity(self.fake_build(tmp), {}, {"os": "Darwin", "sdk_version": "26.4",
-                                                                  "sdk_build": "25E241"})
+            t = rr.toolchain_identity(self.fake_build(tmp), {}, self.IMAGE)
         f = t["fields"]
         self.assertTrue(t["complete"])
-        self.assertEqual((f["compiler_id"], f["compiler_version"], f["compiler"], f["target"], f["deployment_target"]),
-                         ("AppleClang", "21.0.0.1", "Fake clang 21.0.0.1", "arm64-apple-darwin25", "13.4"))
+        self.assertEqual((f["compiler_id"], f["compiler_version"], f["compiler"]),
+                         ("AppleClang", "21.0.0.1", "Fake clang 21.0.0.1"))
+        self.assertEqual((f["effective"]["CMAKE_CXX_FLAGS"], f["effective"]["CMAKE_OSX_DEPLOYMENT_TARGET"],
+                          f["effective"]["CMAKE_EXE_LINKER_FLAGS"]), ("-Wall", "13.4", ""))
+        # Diagnostic only: it names the host OS, not the deployment target.
+        self.assertEqual(t["diagnostic"], {"target": "arm64-apple-darwin25"})
+        self.assertNotIn("target", f)
 
-    def test_a_compiler_env_or_sdk_change_moves_the_digest(self) -> None:
-        image = {"os": "Darwin", "sdk_version": "26.4", "sdk_build": "25E241"}
+    def test_the_key_moves_with_effective_build_env_compiler_and_sdk_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            base = rr.toolchain_identity(self.fake_build(tmp), {}, image)["digest"]
-            same = rr.toolchain_identity(Path(tmp) / "build", {"UNRELATED": "x"}, image)["digest"]
-            env = rr.toolchain_identity(Path(tmp) / "build", {"CXXFLAGS": "-O0"}, image)["digest"]
-            sdk = rr.toolchain_identity(Path(tmp) / "build", {}, {**image, "sdk_build": "25E246"})["digest"]
+            build = self.fake_build(tmp)
+            base = rr.toolchain_identity(build, {}, self.IMAGE)
+            # Live configure-time env and unlisted variables never reach the key.
+            live = rr.toolchain_identity(build, {"CXXFLAGS": "-O0", "CC": "gcc", "SECRET_TOKEN": "s"}, self.IMAGE)
+            ccache = rr.toolchain_identity(build, {"CCACHE_BASEDIR": "/w"}, self.IMAGE)["digest"]
+            epoch = rr.toolchain_identity(build, {"SOURCE_DATE_EPOCH": "1"}, self.IMAGE)["digest"]
+            empty = rr.toolchain_identity(build, {"SOURCE_DATE_EPOCH": ""}, self.IMAGE)["digest"]
+            sdk = rr.toolchain_identity(build, {}, {**self.IMAGE, "sdk_build": "25E246"})["digest"]
+            flags = rr.toolchain_identity(self.fake_build(tmp, flags="-O0"), {}, self.IMAGE)["digest"]
         with tempfile.TemporaryDirectory() as tmp:
-            newer = rr.toolchain_identity(self.fake_build(tmp, "21.0.0.2"), {}, image)["digest"]
-        self.assertEqual(base, same)
-        self.assertEqual(len({base, env, sdk, newer}), 4)
+            newer = rr.toolchain_identity(self.fake_build(tmp, "21.0.0.2"), {}, self.IMAGE)["digest"]
+        self.assertEqual(base["digest"], live["digest"])
+        self.assertEqual(live["configure_env"]["CXXFLAGS"], "-O0")
+        self.assertNotIn("SECRET_TOKEN", json.dumps(live))
+        self.assertEqual(len({base["digest"], ccache, epoch, empty, sdk, flags, newer}), 7)
+
+    def test_unset_and_empty_are_distinct(self) -> None:
+        self.assertEqual(rr._env_values({"CCACHE_DISABLE": ""}, ("CCACHE_DISABLE", "ZERO_AR_DATE")),
+                         {"CCACHE_DISABLE": "", "ZERO_AR_DATE": "unset"})
 
     def test_an_unprobed_compiler_or_unknown_sdk_is_incomplete_and_never_written(self) -> None:
-        darwin = {"os": "Darwin", "sdk_version": "26.4", "sdk_build": "x"}
         with tempfile.TemporaryDirectory() as tmp:
-            t = rr.toolchain_identity(Path(tmp), {}, darwin)
+            t = rr.toolchain_identity(Path(tmp), {}, self.IMAGE)
             self.assertEqual((t["complete"], t["missing"]),
-                             (False, ["compiler_id", "compiler_version", "compiler", "target"]))
+                             (False, ["compiler_id", "compiler_version", "compiler", "effective"]))
             # The SDK probe failed: the image has no SDK keys at all.
             t = rr.toolchain_identity(self.fake_build(tmp), {}, {"os": "Darwin"})
             self.assertEqual((t["complete"], t["missing"]), (False, ["sdk_version", "sdk_build"]))
@@ -357,6 +374,20 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual((job["run_kind"], job["run_id"], job["merge_sha"], job["head_sha"], job["merge_tree"],
                           job["base_sha"]), ("lane", "r7", head, head, tree, first))
+        self.assertIs(job["dirty"], False)
+
+    def test_a_lane_record_says_whether_the_checkout_was_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            git = lambda *a: subprocess.run(["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                                            check=True, capture_output=True, text=True)
+            git("init", "-q")
+            (Path(tmp) / "a").write_text("1")
+            git("add", "a")
+            git("commit", "-q", "-m", "one")
+            clean = rr.lane_context(Path(tmp), "r")["dirty"]
+            (Path(tmp) / "a").write_text("2")
+            modified = rr.lane_context(Path(tmp), "r")["dirty"]
+        self.assertEqual((clean, modified), (False, True))
 
     def test_a_lane_run_without_an_id_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

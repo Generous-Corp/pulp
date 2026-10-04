@@ -39,15 +39,15 @@ What a key cannot see is made an always_run reason, never a guess:
     data_*             the data scan cannot vouch for what it reads
     spawns_*           the spawn scan cannot vouch for what it runs
 
-The toolchain is what decides object bytes for equal inputs and flags:
-OS family, architecture, SDK version and build, and the compiler's version
-line. The
+The toolchain is what decides object bytes for equal inputs and flags: the
+OS family and architecture, plus the identity the reuse record computes
+(the compiler CMake chose, the SDK, the deployment target and the
+allow-listed environment), computed on this host by the same function. The
 OS version is not part of it (it is recorded for diagnosis), and neither is
-the target triple `clang -print-target-triple` prints, whose OS component is
-the host's; the triple a build targets comes from its deployment-target
-flags, which the codemodel digest covers. A test whose verdict depends on
-the host itself is environment-bound, or is what the sampled re-run of
-would-be skips exists to catch.
+the target triple the compiler prints, whose OS component is the host's;
+the triple a build targets comes from its deployment target. A test whose
+verdict depends on the host itself is environment-bound, or is what the
+sampled re-run of would-be skips exists to catch.
 
 Which record is the base is the planner's choice, made where credentials
 exist: a run built by the SAME toolchain as the one that will use the keys,
@@ -94,7 +94,7 @@ SCHEMA = "pulp-executable-keys/v1"
 # The files whose base copy computes the keys and the selection over them;
 # touching any of them makes a plan select everything.
 KEY_CODE_PATHS = ("tools/ci/executable_keys.py", "tools/ci/link_members.py", "tools/ci/object_deps.py",
-                  "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py",
+                  "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py",
                   "tools/ci/executable_selection.py")
 SCRIPT_INPUTS_PATH = "test/ctest_script_inputs.json"
 CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
@@ -250,44 +250,48 @@ def load_record(directory: Path | None) -> tuple[dict | None, str | None]:
             return None
     job = read(directory / "job.json") or {}
     image = job.get("runner_image") if isinstance(job.get("runner_image"), dict) else {}
-    toolchain = toolchain_of(image.get("fields") or {})
     # A record from another platform (the gate's no-suite alias job uploads
-    # one), or one whose toolchain probe says it is incomplete, keys nothing.
-    platform = job.get("platform")
-    block = job.get("toolchain")
-    if (platform is not None and not str(platform).startswith("darwin-")) \
-            or (isinstance(block, dict) and block.get("complete") is False):
-        toolchain = None
+    # one), or with no complete toolchain identity, keys nothing.
+    toolchain = toolchain_key(job)
     return {"codemodel": read(_one(directory, "codemodel-")), "links": read(_one(directory, "link-members-")),
             "deps": read(_one(directory, "object-deps-")),
             "image": image.get("digest"), "toolchain": toolchain}, digest.hexdigest()
 
 
-TOOLCHAIN_FIELDS = ("os", "arch", "sdk_version", "sdk_build", "clang")
+# The toolchain identity the reuse record computes (reuse_record.
+# toolchain_identity: the compiler CMake chose, the SDK, the deployment
+# target, the allow-listed environment) is what decides object bytes for
+# equal inputs and flags. The key takes all of it except the compiler's
+# printed target triple, whose OS component is the host's; the triple a
+# build targets comes from its deployment target, which stays in the key.
+# The OS family and architecture come from the runner fingerprint.
+TOOLCHAIN_NOT_KEYED = ("target",)
 
 
-def toolchain_of(fields: dict) -> dict | None:
-    """The key's toolchain identity from a runner-image fingerprint
-    (reuse_record.runner_image's fields), or None when any part is missing
-    or could not be probed."""
-    tc = {k: fields.get(k) for k in TOOLCHAIN_FIELDS}
-    return tc if all(v and v != "unknown" for v in tc.values()) else None
+def toolchain_key(job: dict) -> dict | None:
+    """The key's toolchain identity from a record's job.json (or the same
+    shape computed on this host), or None when the record is from another
+    platform or its identity is missing or incomplete."""
+    block = job.get("toolchain")
+    fields = ((job.get("runner_image") or {}).get("fields")) or {}
+    platform = job.get("platform")
+    if platform is not None and not str(platform).startswith("darwin-"):
+        return None
+    if not isinstance(block, dict) or block.get("complete") is not True or not fields.get("os") \
+            or not fields.get("arch"):
+        return None
+    key = {k: v for k, v in (block.get("fields") or {}).items() if k not in TOOLCHAIN_NOT_KEYED}
+    return {"os": fields["os"], "arch": fields["arch"], **key}
 
 
-def probe_toolchain() -> dict | None:
-    """This host's toolchain identity, probed the way the reuse record does."""
-    import platform
-
-    def first(cmd: list[str]) -> str:
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        except (OSError, subprocess.SubprocessError):
-            return "unknown"
-        lines = (proc.stdout or proc.stderr).strip().splitlines()
-        return lines[0].strip() if proc.returncode == 0 and lines else "unknown"
-    return toolchain_of({"os": platform.system(), "arch": platform.machine(), "sdk_version": first(["xcrun", "--show-sdk-version"]),
-                         "sdk_build": first(["xcrun", "--show-sdk-build-version"]),
-                         "clang": first(["clang", "--version"])})
+def probe_toolchain(build_dir: Path | None) -> dict | None:
+    """This host's toolchain identity for a configured build, computed by
+    the same functions that write it into the reuse record."""
+    import reuse_record
+    env = dict(os.environ)
+    image = reuse_record.runner_image(env)
+    return toolchain_key({"platform": reuse_record.platform_id(), "runner_image": image,
+                          "toolchain": reuse_record.toolchain_identity(build_dir, env, image["fields"])})
 
 
 def content_keyed(codemodel: dict | None) -> bool:
@@ -395,16 +399,18 @@ def key_of(digest: str | dict, toolchain: dict | None, paths: Iterable[str], blo
 
 def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[dict]]:
     """artifact (relative to the build dir) -> the ctest registrations that
-    run it."""
+    run it. `build_dir` is the path the configure used, matched as a string
+    against the inventory's commands: the same inputs give the same answer
+    on the runner and on a host that only holds copies of them."""
     out: dict[str, list[dict]] = {}
     if not ctest or build_dir is None:
         return out
-    root = os.path.realpath(build_dir)
+    root = os.path.normpath(str(build_dir))
     for test in ctest.get("tests") or []:
         cmd = test.get("command") or []
         if not cmd:
             continue
-        real = os.path.realpath(cmd[0])
+        real = os.path.normpath(cmd[0])
         if not real.startswith(root + os.sep):
             continue
         props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
@@ -468,7 +474,9 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             "include_shadow" if any(os.path.basename(p) in shadowing for p in paths
                                     if p.endswith(HEADER_SUFFIXES)) else
             None)
-        if reason is None and kind == "executable":
+        # A module the tests load reads the checkout and runs programs the
+        # same way an executable does, so the same scans have to vouch for it.
+        if reason is None:
             reason = ({"whole_checkout": "data_whole_checkout", "undeclared": "data_undeclared",
                        "unknown": "data_unknown"}.get(dstate)
                       or {"undeclared": "spawns_undeclared", "unknown": "spawns_unknown"}.get(sstate))
@@ -507,7 +515,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--ctest-json", type=Path, help="`ctest --show-only=json-v1` for the head configure")
     ap.add_argument("--build-dir", type=Path)
     ap.add_argument("--toolchain-json", type=Path,
-                    help="the head toolchain identity ({arch, sdk_version, sdk_build, clang}); probed when absent")
+                    help="the head toolchain key ({os, arch} plus reuse_record.toolchain_identity's fields "
+                         "without `target`); computed from --build-dir when absent")
     ap.add_argument("--out", required=True, type=Path)
     a = ap.parse_args(argv[1:])
 
@@ -517,7 +526,7 @@ def main(argv: list[str]) -> int:
     rev = lambda r: subprocess.run(["git", "-C", str(a.source_root), "rev-parse", r],  # noqa: E731
                                    check=True, capture_output=True, text=True).stdout.strip()
     base_sha, head_sha = rev(a.base_sha), rev(a.head_sha)
-    toolchain = read(a.toolchain_json) if a.toolchain_json else probe_toolchain()
+    toolchain = read(a.toolchain_json) if a.toolchain_json else probe_toolchain(a.build_dir)
     body = compute(a.source_root, base_sha, head_sha, record, read(a.head_codemodel), read(a.ctest_json),
                    a.build_dir, toolchain)
     manifest = {"schema": SCHEMA,

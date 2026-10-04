@@ -684,6 +684,15 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME reuse-record-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_reuse_record.py")
         set_tests_properties(reuse-record-selftest PROPERTIES TIMEOUT 120)
+        # The local mac lane's own record: the test-stage wrapper and the
+        # changed-surface runner's recording, and the generator guard that
+        # keeps the lane on Ninja, whose dependency log the record reads.
+        add_test(NAME lane-reuse-record-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_lane_reuse_record.py")
+        set_tests_properties(lane-reuse-record-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME require-build-generator-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_require_build_generator.py")
+        set_tests_properties(require-build-generator-selftest PROPERTIES TIMEOUT 60)
         # Link-map recording: the map parser, whole-archive detection, and the
         # linker launcher's pass-through of the link's status.
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
@@ -1223,6 +1232,11 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
+        # Every tools/**/test_*.py runs somewhere, or is on the shrinking baseline.
+        add_test(NAME unregistered-tests-check COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/unregistered_tests_check.py")
+        add_test(NAME unregistered-tests-check-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_unregistered_tests_check.py")
         # The generated script families in .shipyard/config.toml must match
         # test/ctest_script_inputs.json and the tree. The selector is declared
         # for the macOS target only, and the script-inputs list is written

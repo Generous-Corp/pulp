@@ -69,6 +69,17 @@ SELECT * FROM pulp_gpu_audio_events WHERE name = 'gpu.audio.terminal';
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_audio_eligible AS
 SELECT * FROM pulp_gpu_audio_events WHERE name = 'gpu.audio.eligible';
 
+CREATE OR REPLACE PERFETTO VIEW pulp_gpu_audio_terminal_disposition_counts AS
+-- A terminal disposition is first-class: every admitted block must contribute
+-- exactly one row to this census. Counts above one identify duplicate terminal
+-- records; absence is reported by the lifecycle-violation views below. Keep
+-- epoch/sequence in the grouping so reused sequence values cannot merge.
+SELECT upid, engine_id, generation, sequence,
+       gpu_terminal, outcome, COUNT(*) AS terminal_count
+FROM pulp_gpu_audio_terminals
+GROUP BY upid, engine_id, generation, sequence, gpu_terminal, outcome;
+
+
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_audio_deliveries AS
 SELECT * FROM pulp_gpu_audio_events WHERE name = 'gpu.audio.delivery';
 

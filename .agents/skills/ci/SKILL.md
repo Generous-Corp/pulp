@@ -514,6 +514,17 @@ on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
 
+## Every test file must run somewhere
+
+`unregistered-tests-check` fails when a tracked `tools/**/test_*.py` is invoked by
+no configured ctest (an `entry` in `test/ctest_script_inputs.json`), no
+source-selftest, and no workflow or CMake file (comments excluded; a directory
+handed whole to pytest or discover counts). A file nothing runs passes forever:
+its assertions never execute, and a local break-confirm is its only evidence.
+Files that predated the check are in `tools/scripts/unregistered_tests_baseline.json`,
+which only shrinks: registering or deleting one fails the check until its row is
+removed. Register a new test file in the same PR that adds it.
+
 ## Runner timing metrics
 
 When asked whether Pulp's local runners are fast, stuck, regressing, or worth
@@ -562,6 +573,21 @@ summary/watch commands.
 > legacy `planning/scripts/runner-watchdog.sh --fix` workflow, which is
 > now an anti-pattern (cancels queued runs but registers `failure` on
 > required checks).
+
+## The local mac lane builds with Ninja so its reuse record is usable
+
+The macOS lane writes a reuse record every run (`reuse_record = true`,
+`tools/ci/lane_reuse_record.py`; see docs/guides/local-ci.md). The record's
+per-object dependencies come from Ninja's `.ninja_deps`; the Makefiles
+generator keeps nothing equivalent, so a Makefiles lane records
+"object deps unavailable" and every executable reads as unrecorded, which
+reuses nothing. Before the pin, 27 of 30 lane build directories on m3 were
+Makefiles because the configure passed no `-G` and the daemon's environment
+decided. `tools/ci/require_build_generator.sh build Ninja` runs before the
+configure and removes a directory on another generator (CMake will not switch
+in place), so the first lane run on an old worktree is a cold build. A record
+that failed to write never changes the lane's verdict; read the run log's last
+`=== reuse-record: ... ===` line to know whether one exists.
 
 ## Performance lanes report; they never gate
 
