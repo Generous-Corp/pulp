@@ -7976,6 +7976,33 @@
    ],
    "kind": "python"
   },
+  "unregistered-tests-check": {
+   "entry": "tools/scripts/unregistered_tests_check.py",
+   "inputs": [
+    ".github/workflows",
+    "test/cmake",
+    "test/ctest_script_inputs.json",
+    "tools/ci/source_selftests.json",
+    "tools/cmake",
+    "tools/scripts/unregistered_tests_baseline.json",
+    "tools/scripts/unregistered_tests_check.py"
+   ],
+   "kind": "python"
+  },
+  "unregistered-tests-check-selftest": {
+   "entry": "tools/scripts/test_unregistered_tests_check.py",
+   "inputs": [
+    ".github/workflows",
+    "test/cmake",
+    "test/ctest_script_inputs.json",
+    "tools/ci/source_selftests.json",
+    "tools/cmake",
+    "tools/scripts/test_unregistered_tests_check.py",
+    "tools/scripts/unregistered_tests_baseline.json",
+    "tools/scripts/unregistered_tests_check.py"
+   ],
+   "kind": "python"
+  },
   "vellum-trusted-merge-selftest": {
    "entry": "tools/scripts/test_vellum_trusted_merge.py",
    "inputs": [

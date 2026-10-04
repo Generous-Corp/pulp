@@ -1217,6 +1217,11 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
+        # Every tools/**/test_*.py runs somewhere, or is on the shrinking baseline.
+        add_test(NAME unregistered-tests-check COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/unregistered_tests_check.py")
+        add_test(NAME unregistered-tests-check-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_unregistered_tests_check.py")
         # The generated script families in .shipyard/config.toml must match
         # test/ctest_script_inputs.json and the tree. The selector is declared
         # for the macOS target only, and the script-inputs list is written

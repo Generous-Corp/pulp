@@ -514,6 +514,17 @@ on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
 
+## Every test file must run somewhere
+
+`unregistered-tests-check` fails when a tracked `tools/**/test_*.py` is invoked by
+no configured ctest (an `entry` in `test/ctest_script_inputs.json`), no
+source-selftest, and no workflow or CMake file (comments excluded; a directory
+handed whole to pytest or discover counts). A file nothing runs passes forever:
+its assertions never execute, and a local break-confirm is its only evidence.
+Files that predated the check are in `tools/scripts/unregistered_tests_baseline.json`,
+which only shrinks: registering or deleting one fails the check until its row is
+removed. Register a new test file in the same PR that adds it.
+
 ## Runner timing metrics
 
 When asked whether Pulp's local runners are fast, stuck, regressing, or worth
