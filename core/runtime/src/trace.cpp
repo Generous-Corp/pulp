@@ -30,6 +30,17 @@ bool tracing_reminder_first_time(std::atomic<bool>& already_emitted) {
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#if defined(_WIN32)
+#include <process.h>
+#define getpid _getpid
+static int setenv(const char* k, const char* v, int overwrite) {
+    if (!overwrite && std::getenv(k)) return 0;
+    return _putenv_s(k, v);
+}
+#else
+#include <unistd.h>
+#endif
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -108,6 +119,33 @@ void ensure_initialized() {
         perfetto::Tracing::Initialize(args);
         perfetto::TrackEvent::Register();
     });
+}
+
+// ~/.config/pulp/trace-autostart (see detail::parse_trace_autostart): the
+// opt-in for a host whose environment cannot be set, such as AUHostingService.
+// Applied as environment variables so every reader below sees one source.
+void apply_trace_autostart_file() {
+    if (const char* p = std::getenv("PULP_TRACE_PATH"); p && *p) return;
+    const char* home = std::getenv("HOME");
+    if (home == nullptr || *home == '\0') return;
+    std::ifstream in(std::filesystem::path(home) / ".config" / "pulp" / "trace-autostart");
+    if (!in) return;
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto config = detail::parse_trace_autostart(text);
+    if (config.path.empty()) return;
+#if defined(__APPLE__)
+    const char* process = getprogname();
+#else
+    const char* process = "pulp";
+#endif
+    const auto out = detail::trace_autostart_output_path(config.path, process ? process : "",
+                                                         static_cast<long>(getpid()));
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(out).parent_path(), ec);
+    ::setenv("PULP_TRACE_PATH", out.c_str(), 1);
+    if (!config.seconds.empty()) ::setenv("PULP_TRACE_SECONDS", config.seconds.c_str(), 0);
+    if (!config.ring_kb.empty()) ::setenv("PULP_TRACE_RING_KB", config.ring_kb.c_str(), 0);
+    log_info("Tracing: ~/.config/pulp/trace-autostart -> {}", out);
 }
 
 std::string default_out_path() {
@@ -292,7 +330,9 @@ void Tracing::attach() {
     // Env-driven autostart. A plug-in has no main() to call Tracing::start(),
     // so without this a PULP_TRACING=ON plug-in could never actually record —
     // the session API existed but nothing reached it. Setting PULP_TRACE_PATH
-    // in the host's environment is the whole opt-in.
+    // in the host's environment is the whole opt-in; an out-of-process host
+    // that inherits no environment reads ~/.config/pulp/trace-autostart.
+    apply_trace_autostart_file();
     const char* path = std::getenv("PULP_TRACE_PATH");
     if (!path || !*path || active()) return;
     auto started = start_exclusive({}, path, autostart_ring_kb());

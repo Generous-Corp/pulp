@@ -242,3 +242,43 @@ TEST_CASE("an out-of-range ring-size override is refused at both ends",
     // small, plausible-looking ring size.
     CHECK_FALSE(parse_autostart_ring_kb("99999999999999999999").has_value());
 }
+
+// ~/.config/pulp/trace-autostart: the opt-in for a host whose environment
+// cannot be set (AUHostingService runs Logic's AU v2 plug-ins and inherits
+// nothing from a shell or launchctl setenv). Parsed config-independently so
+// the default OFF build checks it.
+using pulp::runtime::detail::parse_trace_autostart;
+using pulp::runtime::detail::trace_autostart_output_path;
+
+TEST_CASE("the trace autostart file is read as KEY=VALUE lines", "[tracing]") {
+    const auto config = parse_trace_autostart(
+        "# record every Pulp process\n"
+        "  PULP_TRACE_PATH=/Users/me/traces/  \r\n"
+        "\n"
+        "PULP_TRACE_SECONDS=12\n"
+        "PULP_TRACE_RING_KB=262144\n"
+        "PULP_SOMETHING_ELSE=ignored\n"
+        "not a setting\n");
+    CHECK(config.path == "/Users/me/traces/");
+    CHECK(config.seconds == "12");
+    CHECK(config.ring_kb == "262144");
+
+    // Absent keys stay empty, so the caller keeps its defaults.
+    const auto bare = parse_trace_autostart("PULP_TRACE_PATH=/tmp/one.pftrace");
+    CHECK(bare.path == "/tmp/one.pftrace");
+    CHECK(bare.seconds.empty());
+    CHECK(bare.ring_kb.empty());
+    CHECK(parse_trace_autostart("").path.empty());
+    CHECK(parse_trace_autostart("# PULP_TRACE_PATH=/commented/out/\n").path.empty());
+}
+
+TEST_CASE("a trace autostart directory gives each process its own file", "[tracing]") {
+    // A host and its out-of-process service record at once; one shared file
+    // would be overwritten by whichever stops last.
+    CHECK(trace_autostart_output_path("/t/", "AUHostingServiceXPC_arrow", 4242)
+          == "/t/AUHostingServiceXPC_arrow-4242.pftrace");
+    CHECK(trace_autostart_output_path("/t/", "Logic Pro X", 7) == "/t/Logic_Pro_X-7.pftrace");
+    CHECK(trace_autostart_output_path("/t/", "", 7) == "/t/pulp-7.pftrace");
+    // A file path is used as given.
+    CHECK(trace_autostart_output_path("/t/run.pftrace", "x", 7) == "/t/run.pftrace");
+}
