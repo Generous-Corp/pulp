@@ -23,6 +23,7 @@
 #include <pulp/view/design_sources.hpp>
 #include <pulp/view/design_shortcuts.hpp>
 #include <pulp/view/design_codegen.hpp>
+#include <pulp/view/design_update.hpp>
 
 #include <filesystem>
 #include <memory>
