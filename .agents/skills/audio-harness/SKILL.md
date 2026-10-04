@@ -283,6 +283,21 @@ longer drops out or steps.
   realisation fails here) and a whitened-residual spike (a cut into the faster
   one fails here). `test/test_crossfade.cpp` §5 is the reference fixture.
 
+## A hop of latency is a hop of slack -- spend it on the burst
+
+An STFT/WOLA processor whose latency is `fft_size + hop` does not need a
+frame's resynthesis until a hop after the frame completes, and a consumer
+whose output is scheduled `latency` samples after an analysis frame (an
+estimator emitting gain events) does not need that frame's result until
+then. Doing the work in the callback that completed the frame is the burst
+that misses a 32-sample deadline. Spread it inside the slack, by STREAM
+POSITION (so it stays block-size invariant), and keep at the frame boundary
+only what must be decided there (layout/control adoption).
+`SpectralFrameEngine::process()` does this for its inverse transforms
+(`Config::defer_synthesis`, default on, bit-identical). Prove exactness by
+comparing against the immediate path across block sizes 1..1024, and count
+transforms per callback with `rt::RtWorkCounter` rather than timing them.
+
 ## Copy-this patterns
 
 Describe / debug a render (the "no sound" workflow):
