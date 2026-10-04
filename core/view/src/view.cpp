@@ -2419,7 +2419,11 @@ void View::request_repaint() {
     if (window_host_) {
         window_host_->mark_dirty();
     } else if (plugin_view_host_) {
-        plugin_view_host_->repaint();
+        // Whole-surface damage, as WindowHost::mark_dirty() records it. A bare
+        // repaint() left the pending damage untouched, so a frame that also
+        // carried a bounded mark reported only that rect and a partial-repaint
+        // host would clip away this request's change.
+        plugin_view_host_->mark_dirty_full();
     }
 }
 

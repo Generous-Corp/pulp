@@ -1152,6 +1152,47 @@ public:
     }
     float modulation_phase() const { return mod_phase_; }
 
+    // ── Modulated value display ─────────────────────────────────────────
+    //
+    // The value a processor is PLAYING while a modulator (an internal LFO, an
+    // envelope, MPE) moves this parameter around the value the user set.
+    // Display only, and the contract every modulated control keeps:
+    //
+    //   * value() stays the BASE. A drag, a wheel notch or a key starts from
+    //     it, the value text prints it, and on_change / gestures report it, so
+    //     host automation records the user's moves and nothing else.
+    //   * set_modulated_value() never fires on_change and never writes a
+    //     parameter: modulation must not write a host automation lane. It
+    //     offsets around the automated (or user-set) base, so a control host
+    //     automation is moving shows both -- the base following the lane and
+    //     the modulated marker following the modulator around it.
+    //   * The marker repaints the knob's own box (request_repaint_self), never
+    //     the whole surface and never the layout, so a modulator animating a
+    //     control at the display rate costs one bounded repaint per frame.
+    //
+    // The stock paint draws the played value as a modulation-coloured arc from
+    // the base to the played value plus a dot at the played value (token
+    // `knob.modulation`); the base pointer and value arc stay as they are.
+    // Values are normalized 0..1, like value(). Unlike the Saturn rings above,
+    // which DERIVE the live value from base + depth x phase, this takes the
+    // value the processor computed, for modulation laws that are not a linear
+    // offset (a proportional pull, a clamp, a stepped target).
+    void set_modulated_value(float normalized) {
+        const float v = std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : value_;
+        if (has_modulated_ && v == modulated_) return;
+        has_modulated_ = true;
+        modulated_ = v;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    void clear_modulated_value() {
+        if (!has_modulated_) return;
+        has_modulated_ = false;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    bool has_modulated_value() const { return has_modulated_; }
+    /// The played value while one is set, else value().
+    float modulated_display_value() const { return has_modulated_ ? modulated_ : value_; }
+
     // The modulation range is [value+lo, value+hi] clipped to [0,1], sorted so
     // the returned .first ≤ .second regardless of which end is which. Exposes the
     // clipped endpoints of ring i for tests / hosts. Returns {lo_v, hi_v}.
@@ -1186,6 +1227,12 @@ public:
     bool is_gesture_active() const override { return gesture_active_ || mod_drag_ring_ >= 0; }
 
 private:
+    /// Covers the played-value dot and arc caps painted on the rim.
+    static constexpr float kModulatedMarkerHalo = 6.0f;
+    void paint_modulated_marker(canvas::Canvas& canvas, float cx, float cy, float ring_r,
+                                float arc_w);
+    bool has_modulated_ = false;   ///< a played value is being displayed
+    float modulated_ = 0.0f;       ///< played value, normalized (display only)
     std::vector<ModulationRing> mod_rings_;
     float mod_phase_ = 0.0f;       ///< live source value in [-1,1] (indicator)
     int mod_drag_ring_ = -1;       ///< ring whose handle is being dragged (-1 none)
@@ -1387,6 +1434,27 @@ public:
     }
     float value() const { return value_; }
 
+    /// Display-only played value while a modulator moves this parameter
+    /// around value(). Same contract as Knob::set_modulated_value(): never
+    /// fires on_change, never writes a parameter, repaints the fader's own box
+    /// only. The stock paint draws a modulation-coloured segment along the
+    /// track from the base to the played value and a bar across the track at
+    /// the played value (token `knob.modulation`).
+    void set_modulated_value(float normalized) {
+        const float v = std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : value_;
+        if (has_modulated_ && v == modulated_) return;
+        has_modulated_ = true;
+        modulated_ = v;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    void clear_modulated_value() {
+        if (!has_modulated_) return;
+        has_modulated_ = false;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    bool has_modulated_value() const { return has_modulated_; }
+    float modulated_display_value() const { return has_modulated_ ? modulated_ : value_; }
+
     // Scroll-wheel adjusts the value (hover + wheel).
     bool wants_wheel_value() const override { return true; }
     void on_wheel(float delta_y) override {
@@ -1474,6 +1542,10 @@ public:
 
 
 private:
+    static constexpr float kModulatedMarkerHalo = 6.0f;
+    void paint_modulated_marker(canvas::Canvas& canvas);
+    bool has_modulated_ = false;
+    float modulated_ = 0.0f;
     float value_ = 0.0f;
     float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
     Orientation orientation_ = Orientation::vertical;

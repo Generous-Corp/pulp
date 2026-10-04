@@ -29,6 +29,7 @@ createStepper	widget_factory	function	core/view/src/widget_bridge/factory_api.cp
 createPan	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 setValue	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 getValue	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
+setModulatedValue	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setMin	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setMax	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setStep	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
