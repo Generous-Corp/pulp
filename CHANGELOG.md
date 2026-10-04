@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09070"></a>
+## [0.907.0] - 2026-10-04
+
+- release/version bump ([#9476](https://github.com/Generous-Corp/pulp/pull/9476))
+- docs/gpu audio p4 stress audit 20261004 ([#9473](https://github.com/Generous-Corp/pulp/pull/9473))
+- feature/spectral frame stream start overlap ([#9470](https://github.com/Generous-Corp/pulp/pull/9470))
+- fix/a2t scope history repin ([#9469](https://github.com/Generous-Corp/pulp/pull/9469))
+
 <a id="v09061"></a>
 ## [0.906.1] - 2026-10-04
 
@@ -9703,6 +9711,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.907.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.907.0
 [0.906.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.906.1
 [0.906.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.906.0
 [0.905.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.905.0

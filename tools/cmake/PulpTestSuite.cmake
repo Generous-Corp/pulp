@@ -398,6 +398,58 @@ function(_pulp_test_pch_process_directory dir)
     endforeach()
 endfunction()
 
+# Apple's linker orders ObjC selector stubs (__TEXT,__objc_stubs) differently
+# from one link of identical objects to the next once a binary carries enough
+# of them (SDL3 alone brings about a thousand), so two builds of one tree
+# produce test executables that differ only there. The "small" stub form is
+# laid out deterministically. Applied to every executable and loadable module
+# under test/, so a test binary's bytes depend only on its inputs; shipped
+# products are linked unchanged. test_link_determinism.py relinks a real test
+# executable and fails on more than one hash.
+set(PULP_TEST_DETERMINISTIC_LINK_OPTIONS "")
+if(APPLE)
+    include(CheckLinkerFlag)
+    check_linker_flag(CXX "-Wl,-objc_stubs_small" PULP_LINKER_HAS_OBJC_STUBS_SMALL)
+    if(PULP_LINKER_HAS_OBJC_STUBS_SMALL)
+        set(PULP_TEST_DETERMINISTIC_LINK_OPTIONS "-Wl,-objc_stubs_small")
+    endif()
+    execute_process(COMMAND ${CMAKE_LINKER} -v ERROR_VARIABLE _pulp_ld_version OUTPUT_VARIABLE _pulp_ld_out
+                    ERROR_STRIP_TRAILING_WHITESPACE)
+    string(REGEX MATCH "PROJECT:[^\n ]+" _pulp_ld_version "${_pulp_ld_version}${_pulp_ld_out}")
+    set_property(GLOBAL PROPERTY PULP_TEST_DETERMINISTIC_LINK_OPTIONS "${PULP_TEST_DETERMINISTIC_LINK_OPTIONS}")
+    file(WRITE "${CMAKE_BINARY_DIR}/pulp-test-link-determinism.txt"
+        "options=${PULP_TEST_DETERMINISTIC_LINK_OPTIONS}\nlinker=${_pulp_ld_version}\n")
+endif()
+
+# For a test executable created outside the test directories' finalize pass
+# (a deferred call in the top-level directory).
+function(pulp_test_deterministic_link target)
+    get_property(_opts GLOBAL PROPERTY PULP_TEST_DETERMINISTIC_LINK_OPTIONS)
+    if(_opts)
+        target_link_options(${target} PRIVATE ${_opts})
+    endif()
+endfunction()
+
+# Adds the deterministic-link options to every executable and module declared
+# directly in ${dir} (once per target).
+function(_pulp_test_link_process_directory dir)
+    if(NOT PULP_TEST_DETERMINISTIC_LINK_OPTIONS)
+        return()
+    endif()
+    get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    get_property(_done GLOBAL PROPERTY PULP_TEST_LINK_HANDLED)
+    foreach(_t IN LISTS _targets)
+        if("${_t}" IN_LIST _done)
+            continue()
+        endif()
+        get_target_property(_type ${_t} TYPE)
+        if(_type STREQUAL "EXECUTABLE" OR _type STREQUAL "MODULE_LIBRARY")
+            target_link_options(${_t} PRIVATE ${PULP_TEST_DETERMINISTIC_LINK_OPTIONS})
+            set_property(GLOBAL APPEND PROPERTY PULP_TEST_LINK_HANDLED "${_t}")
+        endif()
+    endforeach()
+endfunction()
+
 # Runs once at the end of every directory that declared a test suite. The
 # carrier directory also sweeps every subdirectory beneath it, so a raw
 # add_executable Catch2 target in test/web-compat (which never calls
@@ -421,6 +473,7 @@ function(_pulp_test_pch_finalize_directory)
     endif()
     foreach(_d IN LISTS _dirs)
         _pulp_test_pch_process_directory("${_d}")
+        _pulp_test_link_process_directory("${_d}")
     endforeach()
     get_property(_ledger GLOBAL PROPERTY PULP_TEST_PCH_LEDGER)
     list(JOIN _ledger "\n" _body)

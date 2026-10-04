@@ -16,7 +16,7 @@
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkScalar.h"
 #include "include/core/SkTypes.h"
-#include "include/private/base/SkTDArray.h"
+#include "include/private/SkTDArray.h"
 #include "include/utils/SkNoDrawCanvas.h"
 
 #include <cstddef>
@@ -95,6 +95,7 @@ protected:
                              const SkPaint*) override;
     void onDrawAtlas2(const SkImage*, const SkRSXform[], const SkRect[], const SkColor[], int,
                   SkBlendMode, const SkSamplingOptions&, const SkRect*, const SkPaint*) override;
+    void onDrawMesh(const SkMesh&, sk_sp<SkBlender>, const SkPaint&) override;
 
     void onDrawVerticesObject(const SkVertices*, SkBlendMode, const SkPaint&) override;
     void onDrawShadowRec(const SkPath&, const SkDrawShadowRec&) override;

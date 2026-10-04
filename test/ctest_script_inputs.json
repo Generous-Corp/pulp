@@ -5894,6 +5894,14 @@
    ],
    "kind": "python"
   },
+  "link-determinism-selftest": {
+   "entry": "tools/ci/test_link_determinism.py",
+   "inputs": [
+    "tools/ci/test_link_determinism.py",
+    "tools/cmake/PulpTestSuite.cmake"
+   ],
+   "kind": "python"
+  },
   "link-members-selftest": {
    "entry": "tools/ci/test_link_members.py",
    "inputs": [
@@ -8211,6 +8219,14 @@
    "entry": "tools/scripts/test_tart_home_resolution.py",
    "inputs": [
     "tools/scripts/test_tart_home_resolution.py"
+   ],
+   "kind": "python"
+  },
+  "test-link-determinism": {
+   "entry": "tools/ci/test_link_determinism.py",
+   "inputs": [
+    "tools/ci/test_link_determinism.py",
+    "tools/cmake/PulpTestSuite.cmake"
    ],
    "kind": "python"
   },

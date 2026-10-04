@@ -35,6 +35,7 @@ function(_pulp_register_sample_region_control_e2e)
     add_executable(pulp-test-control-sample-region-e2e
         "${CMAKE_SOURCE_DIR}/test/test_control_sample_region_e2e.cpp"
         "${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp")
+    pulp_test_deterministic_link(pulp-test-control-sample-region-e2e)
     target_include_directories(pulp-test-control-sample-region-e2e PRIVATE
         "${CMAKE_SOURCE_DIR}/inspect/src" "${CMAKE_SOURCE_DIR}/test")
     target_link_libraries(pulp-test-control-sample-region-e2e PRIVATE
