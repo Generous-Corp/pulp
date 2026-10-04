@@ -2134,38 +2134,43 @@ class UnreachedChangedTest(unittest.TestCase):
     def test_changed_bytes_are_named_and_key_blind_ones_are_not(self) -> None:
         hashes = {"test/a": self.sha("bytes of a"), "test/b": self.sha("old bytes of b"),
                   "test/blind": self.sha("old bytes of blind")}
-        self.assertEqual(self.measure([], hashes, "all"), ["test/b"])
+        self.assertEqual(self.measure([], hashes, "all"), (["test/b"], 2))  # a and b compared
         # Control: unlisted, the key-blind executable's changed bytes are reported.
-        self.assertEqual(self.measure([], hashes, "all", blind_text='{"executables": {}}'),
-                         ["test/b", "test/blind"])
+        self.assertEqual(self.measure([], hashes, "all",
+                                      blind_text='{"schema": "pulp-key-blind/v1", "executables": {}}'),
+                         (["test/b", "test/blind"], 3))
         # A list the runner cannot read compares nothing rather than everything.
-        self.assertIsNone(self.measure([], hashes, "all", blind_text="{"))
+        self.assertEqual(self.measure([], hashes, "all", blind_text="{"), (None, 0))
+        self.assertEqual(self.measure([], hashes, "all", blind_text='{"schema": "other", "executables": {}}'),
+                         (None, 0))
         # Bounded: only what the sample built is compared.
-        self.assertEqual(self.measure(["test/b"], hashes, "sampled"), ["test/b"])
-        self.assertEqual(self.measure(["test/a"], hashes, "sampled"), [])
+        self.assertEqual(self.measure(["test/b"], hashes, "sampled"), (["test/b"], 1))
+        self.assertEqual(self.measure(["test/a"], hashes, "sampled"), ([], 1))
 
     def test_no_information_is_null_never_an_empty_list(self) -> None:
         # No in-scope artifact has a recorded hash.
-        self.assertIsNone(self.measure([], {"test/c": None}, "all"))
-        self.assertIsNone(self.measure(["test/c"], {"test/a": self.sha("bytes of a")}, "sampled"))
+        self.assertEqual(self.measure([], {"test/c": None}, "all"), (None, 0))
+        self.assertEqual(self.measure(["test/c"], {"test/a": self.sha("bytes of a")}, "sampled"), (None, 0))
         # Nothing was picked: the first candidate keyed, from another toolchain.
-        self.assertIsNone(self.measure([], {"test/a": self.sha("x")}, "all",
-                                       {"status": "derived", "base_record_run_id": None}))
-        self.assertIsNone(self.measure([], {"test/a": self.sha("x")}, "all", {"status": "error: x"}))
+        self.assertEqual(self.measure([], {"test/a": self.sha("x")}, "all",
+                                      {"status": "derived", "base_record_run_id": None}), (None, 0))
+        self.assertEqual(self.measure([], {"test/a": self.sha("x")}, "all", {"status": "error: x"}), (None, 0))
         # A record whose identity the recorder could not write is not evidence.
         hashes = {"test/b": self.sha("old bytes of b")}
-        self.assertEqual(self.measure([], hashes, "all", problems=["link maps absent"]), ["test/b"])
-        self.assertIsNone(self.measure([], hashes, "all", problems=["executable identity unavailable: x"]))
+        self.assertEqual(self.measure([], hashes, "all", problems=["link maps absent"]), (["test/b"], 1))
+        self.assertEqual(self.measure([], hashes, "all", problems=["executable identity unavailable: x"]),
+                         (None, 0))
         # One hashed executable is enough to measure; the unhashed ones are skipped.
-        self.assertEqual(self.measure([], {"test/a": self.sha("bytes of a"), "test/c": None}, "all"), [])
+        self.assertEqual(self.measure([], {"test/a": self.sha("bytes of a"), "test/c": None}, "all"), ([], 1))
 
     def test_each_mode_measures_its_own_scope(self) -> None:
         calls = []
         with mock.patch.object(runner, "unreached_changed",
-                               side_effect=lambda *a: calls.append(a[4]) or ["test/x"]):
+                               side_effect=lambda *a: calls.append(a[4]) or (["test/x"], 1)):
             _, _, receipt = KeyedFullTest.run_full(KeyedFullTest())
         self.assertEqual(calls, ["all"])
-        self.assertEqual(receipt["executable_reuse"]["derived"]["unreached_changed"], ["test/x"])
+        derived = receipt["executable_reuse"]["derived"]
+        self.assertEqual((derived["unreached_changed"], derived["unreached_compared"]), (["test/x"], 1))
 
 
 class SelectedLegPipelineTest(unittest.TestCase):
@@ -2310,7 +2315,8 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertEqual(result["executable_reuse"],
                          {"mode": "keyed_bounded_shadow", "bound": bound,
                           # No record was picked, so no bytes could be compared.
-                          "derived": {"status": "derived", "would_skip_count": 3, "unreached_changed": None},
+                          "derived": {"status": "derived", "would_skip_count": 3, "unreached_changed": None,
+                                      "unreached_compared": 0},
                           # No selection was written beside the receipt to measure against.
                           "would_skip_tests": None, "false_skip_count": None, "false_skips": None,
                           "sampled_failures": None})
@@ -2323,7 +2329,8 @@ class SelectedLegPipelineTest(unittest.TestCase):
         files = {"selection.json": {"would_skip": ["test/n"], "sampled_executables": []},
                  "executable-keys.json": {"executables": {"test/n": {"registrations": ["neighbor"]}}}}
         scopes = []
-        with mock.patch.object(runner, "unreached_changed", side_effect=lambda *a: scopes.append(a[4])):
+        with mock.patch.object(runner, "unreached_changed",
+                               side_effect=lambda *a: scopes.append(a[4]) or (None, 0)):
             _, _, measured = self.run_pipeline(reuse=bound, derived_files=files,
                                                failures={"full tests": ["neighbor"]})
         self.assertEqual(measured["executable_reuse"]["false_skips"], ["neighbor"])

@@ -1102,36 +1102,44 @@ def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
 KEY_BLIND_EXECUTABLES = "tools/ci/key_blind_executables.json"
 
 
+KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
+
+
 def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any],
-                      derived: dict[str, Any], scope: str) -> list[str] | None:
+                      derived: dict[str, Any], scope: str) -> tuple[list[str] | None, int]:
     """Would-skip executables whose bytes this run built differ from the
     picked base record's hash for the same artifact: a key that said
     "unchanged" about something that changed. `scope` is "all" when every
     would-skip was built (a keyed full run) and "sampled" when only the sample
     was. None, never an empty list, when nothing can be compared: no record
     was picked (bytes from another toolchain always differ), or no artifact in
-    scope has a recorded hash."""
+    scope has a recorded hash. The record hashes the executables registered
+    ctests run, which every would-skip is. Returned with the number of
+    artifacts compared, so "none changed" over one artifact reads as that."""
     if derived.get("status") != "derived" or derived.get("base_record_run_id") is None:
-        return None
+        return None, 0
     record = next((c for c in binding["candidates"] if c["run_id"] == derived["base_record_run_id"]), None)
     if record is None:
-        return None
+        return None, 0
     try:
         selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
         identity = json.loads((Path(record["record_path"]) / "identity.json").read_text(encoding="utf-8"))
         job = json.loads((Path(record["record_path"]) / "job.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None
+        return None, 0
     # The recorder writes an empty identity when it could not hash, and says so.
     if any("executable identity unavailable" in str(p) for p in job.get("problems") or []):
-        return None
+        return None, 0
     blind_path = Path(binding["derivation_code_dir"]) / KEY_BLIND_EXECUTABLES
     try:
-        blind = set(json.loads(blind_path.read_text(encoding="utf-8")).get("executables") or {})
+        listing = json.loads(blind_path.read_text(encoding="utf-8"))
+        if listing.get("schema") != KEY_BLIND_SCHEMA:
+            return None, 0
+        blind = set(listing.get("executables") or {})
     except FileNotFoundError:
         blind = set()
-    except (OSError, json.JSONDecodeError):
-        return None
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None, 0
     in_scope = set(selection.get("would_skip") or [])
     if scope == "sampled":
         in_scope &= set(selection.get("sampled_executables") or [])
@@ -1145,7 +1153,7 @@ def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any]
         compared += 1
         if hashlib.sha256(built.read_bytes()).hexdigest() != expected:
             changed.append(artifact)
-    return changed if compared else None
+    return (changed if compared else None), compared
 
 
 def lane_red_allowlist(
@@ -1436,7 +1444,8 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
                                          started_epoch)
         measured = false_skips(result_dir, junit) if derived["status"] == "derived" else None
         if build_result == 0 and derived["status"] == "derived":
-            derived["unreached_changed"] = unreached_changed(result_dir, build_dir, binding, derived, "all")
+            derived["unreached_changed"], derived["unreached_compared"] = unreached_changed(
+                result_dir, build_dir, binding, derived, "all")
         try:
             inventory_names = [t.get("name") for t in ctest_payload(build_dir)["tests"]]
         except SelectionExecutionError:
@@ -1706,7 +1715,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             if executable_reuse and executable_reuse["derived"]["status"] == "derived":
                 executable_reuse.update(false_skips(Path(result_dir), Path(directory) / "full-junit.xml")
                                         or UNMEASURED_SKIPS)
-                executable_reuse["derived"]["unreached_changed"] = unreached_changed(
+                (executable_reuse["derived"]["unreached_changed"],
+                 executable_reuse["derived"]["unreached_compared"]) = unreached_changed(
                     Path(result_dir), build_dir, executable_reuse["bound"], executable_reuse["derived"],
                     "sampled")
             eligible = compare_full and (
