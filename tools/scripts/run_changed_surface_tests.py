@@ -116,8 +116,10 @@ def decode_selection_receipt(
     }
     if isinstance(receipt, dict) and receipt.get("schema_version") == 2:
         required.update({"selected_build_targets_digest", "selected_build_targets"})
-    if not isinstance(receipt, dict) or set(receipt) != required:
+    if not isinstance(receipt, dict) or set(receipt) - {"executable_reuse"} != required:
         raise SelectionExecutionError("selection receipt has an unexpected schema")
+    if "executable_reuse" in receipt:
+        validate_executable_reuse_binding(receipt["executable_reuse"])
     if receipt["schema_version"] not in (1, 2):
         raise SelectionExecutionError("selection receipt schema version is unsupported")
     if not isinstance(receipt["pull_request"], int) or receipt["pull_request"] <= 0:
@@ -344,6 +346,144 @@ def validate_build_configuration(build_dir: Path, policy: dict[str, Any]) -> Non
         raise SelectionExecutionError(
             "live CMake configuration differs from selector policy: " + "; ".join(mismatches)
         )
+
+
+# The inputs Shipyard binds for the executable-keyed selection before any
+# stage runs. The runner derives the selection from them after configure and
+# echoes them verbatim; Shipyard re-derives from the files it copies out and
+# refuses a difference.
+EXECUTABLE_REUSE_BINDING = {
+    "base_record_run_id": str,
+    "base_record_sha256": str,
+    "base_record_path": str,
+    "base_sha": str,
+    "derivation_code_dir": str,
+    "derivation_code_sha256": str,
+    "sample_seed": str,
+    "sample_rate": (int, float),
+    "build_dir": str,
+}
+# Run from Shipyard's extracted base copies, never from the checkout.
+DERIVATION_SCRIPTS = {
+    "codemodel": "tools/ci/codemodel_digest.py",
+    "keys": "tools/ci/executable_keys.py",
+    "selection": "tools/ci/executable_selection.py",
+}
+
+
+def validate_executable_reuse_binding(binding: Any) -> None:
+    if not isinstance(binding, dict) or set(binding) != set(EXECUTABLE_REUSE_BINDING):
+        raise SelectionExecutionError("selection receipt executable_reuse has an unexpected schema")
+    for key, kind in EXECUTABLE_REUSE_BINDING.items():
+        value = binding[key]
+        if not isinstance(value, kind) or isinstance(value, bool) or value == "":
+            raise SelectionExecutionError(f"selection receipt executable_reuse.{key} is invalid")
+    for key in ("base_record_sha256", "derivation_code_sha256"):
+        if not re.fullmatch(r"[0-9a-f]{64}", binding[key]):
+            raise SelectionExecutionError(f"selection receipt executable_reuse.{key} is invalid")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", binding["base_sha"]):
+        raise SelectionExecutionError("selection receipt executable_reuse.base_sha is invalid")
+    if not 0 <= binding["sample_rate"] <= 1:
+        raise SelectionExecutionError("selection receipt executable_reuse.sample_rate is invalid")
+
+
+class DerivationError(Exception):
+    pass
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def derive_executable_reuse(
+    binding: dict[str, Any], head_sha: str, build_dir: Path, result_dir: Path, runner=subprocess.run
+) -> dict[str, Any]:
+    """Derive the executable-keyed selection for the configured head and
+    record it beside the result receipt. Shadow only: the stages run
+    unchanged, so a failure here is recorded as the status and never raised.
+    """
+    try:
+        return {"status": "derived", **_derive(binding, head_sha, build_dir, result_dir, runner)}
+    except DerivationError as error:
+        return {"status": f"error: {error}"}
+    except (OSError, ValueError, subprocess.SubprocessError, SelectionExecutionError) as error:
+        return {"status": f"error: {type(error).__name__}: {error}"}
+
+
+def _derive(binding, head_sha, build_dir, result_dir, runner) -> dict[str, Any]:
+    if Path(binding["build_dir"]).resolve() != build_dir.resolve():
+        raise DerivationError("the bound build directory is not this lane's")
+    code = Path(binding["derivation_code_dir"])
+    scripts = {k: code / v for k, v in DERIVATION_SCRIPTS.items()}
+    absent = [str(p) for p in scripts.values() if not p.is_file()]
+    if absent:
+        raise DerivationError(f"derivation code is missing {absent[0]}")
+    # A resumed or prepared build directory may hold a reply from another
+    # configure: drop it and reconfigure, so the codemodel read is this tree's.
+    api = build_dir / ".cmake" / "api" / "v1"
+    shutil.rmtree(api / "reply", ignore_errors=True)
+    (api / "query").mkdir(parents=True, exist_ok=True)
+    (api / "query" / "codemodel-v2").touch()
+    reconfigure = runner([str(REPO_ROOT / "tools" / "ci" / "governed-build.sh"), "cmake", str(build_dir)],
+                         capture_output=True, text=True, shell=False)
+    if reconfigure.returncode != 0:
+        raise DerivationError(f"reconfigure exited {reconfigure.returncode}")
+    if not (api / "reply").is_dir():
+        raise DerivationError("reconfigure wrote no codemodel reply")
+    result_dir.mkdir(parents=True, exist_ok=True)
+    files = {name: result_dir / name for name in (
+        "ctest-listing.json", "toolchain.json", "codemodel-digest.json", "executable-keys.json",
+        "selection.json")}
+    listing = runner(["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
+                     capture_output=True, text=True, shell=False)
+    if listing.returncode != 0:
+        raise DerivationError(f"ctest listing exited {listing.returncode}")
+    files["ctest-listing.json"].write_text(listing.stdout, encoding="utf-8")
+    python = [sys.executable, "-I"]
+
+    def step(argv: list[str], what: str) -> str:
+        done = runner(python + argv, capture_output=True, text=True, shell=False, cwd=str(code))
+        if done.returncode != 0:
+            raise DerivationError(f"{what} exited {done.returncode}: {done.stderr.strip()[-300:]}")
+        return done.stdout
+
+    probe = ("import json, sys; sys.path.insert(0, 'tools/ci'); import executable_keys as k; "
+             "print(json.dumps(k.probe_toolchain(), sort_keys=True))")
+    toolchain = step(["-c", probe], "toolchain probe").strip()
+    if not toolchain or json.loads(toolchain) is None:
+        raise DerivationError("the toolchain probe is incomplete")
+    files["toolchain.json"].write_text(toolchain + "\n", encoding="utf-8")
+    bound_build = binding["build_dir"]
+    step([str(scripts["codemodel"]), "--build-dir", bound_build, "--source-root", str(REPO_ROOT),
+          "--ctest-json", str(files["ctest-listing.json"]), "--out", str(files["codemodel-digest.json"])],
+         "codemodel digest")
+    step([str(scripts["keys"]), "--source-root", str(REPO_ROOT), "--base-sha", binding["base_sha"],
+          "--head-sha", head_sha, "--base-record", binding["base_record_path"],
+          "--base-record-run-id", binding["base_record_run_id"],
+          "--head-codemodel", str(files["codemodel-digest.json"]),
+          "--ctest-json", str(files["ctest-listing.json"]), "--build-dir", bound_build,
+          "--toolchain-json", str(files["toolchain.json"]), "--out", str(files["executable-keys.json"])],
+         "key manifest")
+    manifest = json.loads(files["executable-keys.json"].read_text(encoding="utf-8"))
+    if (manifest.get("producer") or {}).get("base_record_sha256") != binding["base_record_sha256"]:
+        raise DerivationError("the base record is not the one Shipyard bound")
+    step([str(scripts["selection"]), "--manifest", str(files["executable-keys.json"]),
+          "--head-codemodel", str(files["codemodel-digest.json"]),
+          "--ctest-json", str(files["ctest-listing.json"]), "--seed", binding["sample_seed"],
+          "--rate", repr(float(binding["sample_rate"])), "--out", str(files["selection.json"])],
+         "selection")
+    selection = json.loads(files["selection.json"].read_text(encoding="utf-8"))
+    return {
+        "cmake_cache_sha256": _sha256_file(build_dir / "CMakeCache.txt"),
+        "ctest_listing_sha256": _sha256_file(files["ctest-listing.json"]),
+        "toolchain_sha256": _sha256_file(files["toolchain.json"]),
+        "codemodel_digest_sha256": _sha256_file(files["codemodel-digest.json"]),
+        "key_manifest_sha256": _sha256_file(files["executable-keys.json"]),
+        "selection_sha256": _sha256_file(files["selection.json"]),
+        "would_skip_count": len(selection["would_skip"]),
+        "sampled_count": len(selection["sampled_executables"]),
+        "reasons": manifest.get("reasons"),
+    }
 
 
 def ctest_json(build_dir: Path, selected_file: Path | None = None) -> list[dict[str, Any]]:
@@ -1124,6 +1264,12 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     require_ctest_version()
     base = base_projection(selection_receipt["base_sha"], policy, build_dir)
     compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
+    executable_reuse = None
+    binding = selection_receipt.get("executable_reuse")
+    if binding is not None and os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR"):
+        executable_reuse = {"bound": binding, "derived": derive_executable_reuse(
+            binding, selection_receipt["head_sha"], build_dir,
+            Path(os.environ["SHIPYARD_CHANGED_SURFACE_RESULT_DIR"]))}
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
         selected_file = write_private_selection(Path(directory), selected_payload)
         snapshot_identity = selected_file.stat()
@@ -1306,6 +1452,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "head_sha": selection_receipt["head_sha"],
                     "tree_sha": selection_receipt["tree_sha"],
                     "execution_payload_sha256": args.selection_receipt_sha256,
+                    **({"executable_reuse": executable_reuse} if executable_reuse else {}),
                     "policy_digest": selection_receipt["policy_digest"],
                     "selection_receipt_digest": selection_receipt[
                         "selection_receipt_digest"

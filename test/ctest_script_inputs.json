@@ -3139,8 +3139,11 @@
     "test/test_child_process.cpp",
     "test/test_child_process_standard_input.cpp",
     "test/test_runtime_utils.cpp",
+    "tools/ci",
     "tools/ci/build_dir_lock.py",
     "tools/ci/changed_surface_lane_reds.json",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/executable_keys.py",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",
@@ -4034,6 +4037,11 @@
     "tools/scripts/classify_changes.py",
     "tools/scripts/protected_merge_receipt.py"
    ],
+   "kind": "python"
+  },
+  "executable-selection-selftest": {
+   "entry": "tools/ci/test_executable_selection.py",
+   "inputs": [],
    "kind": "python"
   },
   "figma-rest-export": {
@@ -5906,10 +5914,13 @@
     "test/cmake/pr_fast_tests.cmake",
     "test/fixtures",
     "test/support",
+    "tools/ci",
     "tools/ci/build_dir_lock.py",
     "tools/ci/changed_surface_lane_reds.json",
     "tools/ci/cmake_registration_impact.py",
+    "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/executable_keys.py",
     "tools/ci/install_visual_python_deps.sh",
     "tools/ci/pr_head_affected_tests.py",
     "tools/ci/source_selftests.json",

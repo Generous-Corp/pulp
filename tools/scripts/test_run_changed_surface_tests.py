@@ -1572,6 +1572,127 @@ class FailureSetTest(unittest.TestCase):
         self.assertIn(runner.LANE_RED_ALLOWLIST, policy_paths)
 
 
+class ExecutableReuseTest(unittest.TestCase):
+    """The shadow derivation of the executable-keyed selection: the bound
+    inputs, the stale-reply reconfigure, base-sourced code under -I, and the
+    copied inputs and digests beside the result receipt."""
+
+    RECORD_SHA = "9" * 64
+
+    def binding(self, build: Path, code: Path) -> dict:
+        return {"base_record_run_id": "123", "base_record_sha256": self.RECORD_SHA,
+                "base_record_path": "/host/store/record", "base_sha": "a" * 40,
+                "derivation_code_dir": str(code), "derivation_code_sha256": "8" * 64,
+                "sample_seed": "seed", "sample_rate": 0.05, "build_dir": str(build)}
+
+    def tree(self, root: Path) -> tuple[Path, Path]:
+        build, code = root / "build", root / "code"
+        (build / ".cmake/api/v1/reply").mkdir(parents=True)
+        (build / ".cmake/api/v1/reply/stale.json").write_text("{}", encoding="utf-8")
+        (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\n", encoding="utf-8")
+        for rel in runner.DERIVATION_SCRIPTS.values():
+            (code / rel).parent.mkdir(parents=True, exist_ok=True)
+            (code / rel).write_text("", encoding="utf-8")
+        return build, code
+
+    def fake(self, build: Path, record_sha: str | None = None):
+        calls: list[tuple[list[str], dict]] = []
+        record_sha = record_sha or self.RECORD_SHA
+
+        def run(argv, **kwargs):
+            calls.append((list(argv), kwargs))
+            out = ""
+            if argv[1:3] == ["cmake", str(build)]:
+                # The stale reply must already be gone when CMake runs.
+                self.assertFalse((build / ".cmake/api/v1/reply/stale.json").exists())
+                (build / ".cmake/api/v1/reply").mkdir(parents=True)
+            elif argv[0] == "ctest":
+                out = json.dumps({"tests": [{"name": "t"}]})
+            elif argv[2] == "-c":
+                out = json.dumps({"arch": "arm64"})
+            else:
+                target = Path(argv[argv.index("--out") + 1])
+                if target.name == "executable-keys.json":
+                    target.write_text(json.dumps({"producer": {"base_record_sha256": record_sha},
+                                                  "reasons": {"keyed": 1}}), encoding="utf-8")
+                elif target.name == "selection.json":
+                    target.write_text(json.dumps({"would_skip": ["a", "b"], "sampled_executables": ["a"]}),
+                                      encoding="utf-8")
+                else:
+                    target.write_text("{}", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+        return run, calls
+
+    def test_binding_shape_is_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            good = self.binding(Path(directory), Path(directory))
+            runner.validate_executable_reuse_binding(good)
+            receipt = {**selection_receipt(), "executable_reuse": good}
+            self.assertEqual(runner.decode_selection_receipt(*encode_receipt(receipt))[4], receipt)
+            for bad in ({**good, "extra": "x"}, {**good, "sample_rate": 1.5}, {**good, "sample_rate": True},
+                        {**good, "base_record_sha256": "X" * 64}, {**good, "base_sha": "a"},
+                        {**good, "sample_seed": ""}, {k: v for k, v in good.items() if k != "build_dir"}):
+                with self.subTest(bad=bad), self.assertRaises(runner.SelectionExecutionError):
+                    runner.validate_executable_reuse_binding(bad)
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "unexpected schema"):
+                runner.decode_selection_receipt(*encode_receipt({**selection_receipt(), "other": 1}))
+
+    def test_derives_from_base_code_after_a_fresh_reconfigure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build, code = self.tree(Path(directory))
+            result = Path(directory) / "result"
+            run, calls = self.fake(build)
+            derived = runner.derive_executable_reuse(self.binding(build, code), "b" * 40, build, result, run)
+            self.assertEqual(derived["status"], "derived")
+            reconfigure = calls[0][0]
+            self.assertEqual(reconfigure[1:], ["cmake", str(build)])  # no arguments to change the cache
+            self.assertTrue(reconfigure[0].endswith("tools/ci/governed-build.sh"))
+            self.assertTrue((build / ".cmake/api/v1/query/codemodel-v2").is_file())
+            python = [c for c in calls if c[0][0] == runner.sys.executable]
+            self.assertEqual(len(python), 4)  # toolchain, codemodel, keys, selection
+            for argv, kwargs in python:
+                self.assertEqual(argv[1], "-I")
+                self.assertEqual(kwargs["cwd"], str(code))
+            keys = next(a for a, _ in python if a[2] == str(code / "tools/ci/executable_keys.py"))
+            self.assertEqual(keys[keys.index("--build-dir") + 1], str(build))
+            self.assertEqual(keys[keys.index("--base-record") + 1], "/host/store/record")
+            self.assertEqual(keys[keys.index("--toolchain-json") + 1], str(result / "toolchain.json"))
+            selection = next(a for a, _ in python if a[2] == str(code / "tools/ci/executable_selection.py"))
+            self.assertEqual(selection[selection.index("--seed") + 1], "seed")
+            for name, field in (("ctest-listing.json", "ctest_listing_sha256"),
+                                ("toolchain.json", "toolchain_sha256"),
+                                ("codemodel-digest.json", "codemodel_digest_sha256"),
+                                ("executable-keys.json", "key_manifest_sha256"),
+                                ("selection.json", "selection_sha256")):
+                self.assertEqual(derived[field], hashlib.sha256((result / name).read_bytes()).hexdigest())
+            self.assertEqual(derived["cmake_cache_sha256"],
+                             hashlib.sha256((build / "CMakeCache.txt").read_bytes()).hexdigest())
+            self.assertEqual((derived["would_skip_count"], derived["sampled_count"]), (2, 1))
+
+    def test_a_failed_derivation_is_recorded_never_raised(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build, code = self.tree(Path(directory))
+            result = Path(directory) / "result"
+            run, _ = self.fake(build, record_sha="7" * 64)
+            derived = runner.derive_executable_reuse(self.binding(build, code), "b" * 40, build, result, run)
+            self.assertEqual(derived, {"status": "error: the base record is not the one Shipyard bound"})
+            run, calls = self.fake(build)
+            other = {**self.binding(build, code), "build_dir": str(Path(directory) / "elsewhere")}
+            self.assertIn("build directory", runner.derive_executable_reuse(
+                other, "b" * 40, build, result, run)["status"])
+            self.assertEqual(calls, [])
+            (code / "tools/ci/executable_selection.py").unlink()
+            self.assertIn("executable_selection.py", runner.derive_executable_reuse(
+                self.binding(build, code), "b" * 40, build, result, run)["status"])
+
+            def failing(argv, **kwargs):
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+            (code / "tools/ci/executable_selection.py").write_text("", encoding="utf-8")
+            self.assertEqual(runner.derive_executable_reuse(
+                self.binding(build, code), "b" * 40, build, result, failing)["status"],
+                "error: reconfigure exited 1")
+
+
 class SelectedLegPipelineTest(unittest.TestCase):
     """Every gate of the selected leg, in the lane's order, across the three
     states a cold lane checkout passes through: configured only, selected
@@ -1607,7 +1728,8 @@ class SelectedLegPipelineTest(unittest.TestCase):
                 "built": [*direct, *discovered, validator]}
 
     def run_pipeline(self, late_registration: bool = False, failures: dict | None = None,
-                     allowlist: tuple[list[str], str] | None = None) -> tuple[int, list[str], dict]:
+                     allowlist: tuple[list[str], str] | None = None,
+                     reuse: dict | None = None) -> tuple[int, list[str], dict]:
         """`failures` maps "selected tests" / "full tests" to the names that leg
         fails; each leg writes them as ctest's JUnit report and exits 8."""
         failures = failures or {}
@@ -1658,6 +1780,9 @@ class SelectedLegPipelineTest(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0)
 
             receipt = selection_receipt(["smoke", "core"], ["tool"])
+            if reuse is not None:
+                receipt["executable_reuse"] = reuse
+            derive = mock.Mock(return_value={"status": "derived", "would_skip_count": 3})
             (build / "config.toml").write_text("# mocked\n", encoding="utf-8")
             args = mock.Mock(config=build / "config.toml", selection_receipt_b64="e",
                              selection_receipt_sha256="0" * 64, target="mac")
@@ -1678,8 +1803,10 @@ class SelectedLegPipelineTest(unittest.TestCase):
                 mock.patch.object(runner, "ctest_json", side_effect=listing),
                 mock.patch.object(runner.subprocess, "run", side_effect=execute),
                 mock.patch.object(runner, "lane_red_allowlist", return_value=allowlist),
+                mock.patch.object(runner, "derive_executable_reuse", derive),
             ):
                 code = runner.run_locked(args, build)
+            self.derive_calls = derive.call_args_list
             receipts = sorted(results.glob("*.json")) if results.is_dir() else []
             receipt_doc = json.loads(receipts[-1].read_text()) if receipts else {}
             return code, steps, receipt_doc
@@ -1692,6 +1819,20 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertIs(result.get("graduation_eligible"), True)
         self.assertEqual(result.get("selected_returncode"), 0)
         self.assertEqual(result.get("prebuild_unbuilt_placeholder_count"), 1)
+
+    def test_a_bound_executable_reuse_is_derived_and_echoed_without_changing_the_run(self) -> None:
+        bound = {"sample_seed": "s"}
+        code, steps, result = self.run_pipeline(reuse=bound)
+        self.assertEqual(code, 0)
+        self.assertEqual(steps, ["selected build", "selected tests", "full build", "full tests"])
+        self.assertEqual(result["comparison_verdict"], "matched_pass")
+        self.assertEqual(result["executable_reuse"],
+                         {"bound": bound, "derived": {"status": "derived", "would_skip_count": 3}})
+        self.assertEqual(len(self.derive_calls), 1)
+        self.assertEqual(self.derive_calls[0].args[1], "b" * 40)  # the receipt's head
+        _, _, plain = self.run_pipeline()
+        self.assertNotIn("executable_reuse", plain)
+        self.assertEqual(self.derive_calls, [])
 
     LANE_REDS = ({"lane-red": "2026-10-17"}, "f" * 64)
 

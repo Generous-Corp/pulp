@@ -745,6 +745,12 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/ci/test_executable_keys.py")
     set_tests_properties(executable-keys-selftest PROPERTIES TIMEOUT 120)
 
+    # The selection over a key manifest: would-skip set, seeded sample, and
+    # the tests and build targets left to run, as canonical bytes.
+    add_test(NAME executable-selection-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_executable_selection.py")
+    set_tests_properties(executable-selection-selftest PROPERTIES TIMEOUT 60)
+
     # Per-job ccache delta printed by build.yml's "Ccache stats" step. The
     # cumulative `ccache --show-stats` counters belong to the host-shared cache
     # directory, so only the before/after difference describes one job.
