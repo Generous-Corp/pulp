@@ -2055,6 +2055,10 @@ class KeyedFullTest(unittest.TestCase):
         # and a2 failing in the full run is a false skip; b1 ran in the sample.
         self.assertEqual((reuse["would_skip_tests"], reuse["false_skip_count"], reuse["false_skips"]),
                          (["a1", "a2"], 1, ["a2"]))
+        # b1 belongs to the sampled test/b: the negative control caught it.
+        self.assertEqual(reuse["sampled_failures"], ["b1"])
+        _, _, quiet = self.run_full(failing=("a2",))
+        self.assertEqual(quiet["executable_reuse"]["sampled_failures"], [])
         self.assertEqual((receipt["selected_tests_digest"], receipt["selected_logical_count"],
                           receipt["selected_build_targets_digest"], receipt["selected_build_target_count"]),
                          ("", 0, None, 0))
@@ -2086,6 +2090,66 @@ class KeyedFullTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)  # derive, build
         self.assertIsNone(receipt["full_returncode"])
         self.assertIsNone(receipt["executable_reuse"]["false_skip_count"])
+
+
+class UnreachedChangedTest(unittest.TestCase):
+    """A would-skip executable whose rebuilt bytes differ from the picked
+    base record's hash: the key said unchanged about something that changed."""
+
+    def tree(self, root: Path, sampled: list[str], record_hashes: dict[str, str | None]) -> tuple:
+        result, build, record, repo = (root / n for n in ("result", "build", "record", "repo"))
+        for directory in (result, build / "test", record, repo / "tools/ci"):
+            directory.mkdir(parents=True)
+        for artifact in ("a", "b", "c", "blind"):
+            (build / "test" / artifact).write_bytes(f"bytes of {artifact}".encode())
+        (result / "selection.json").write_text(json.dumps({
+            "would_skip": ["test/a", "test/b", "test/blind", "test/c"], "sampled_executables": sampled}),
+            encoding="utf-8")
+        (record / "identity.json").write_text(json.dumps({"executables": {
+            f"<build>/{artifact}": {"sha256": digest} for artifact, digest in record_hashes.items()}}),
+            encoding="utf-8")
+        (repo / runner.KEY_BLIND_EXECUTABLES).write_text(json.dumps({"executables": ["test/blind"]}),
+                                                         encoding="utf-8")
+        binding = {"candidates": [{"run_id": "7", "record_sha256": "9" * 64, "record_path": str(record),
+                                   "commit": "a" * 40}]}
+        return result, build, binding, repo
+
+    @staticmethod
+    def sha(text: str) -> str:
+        return hashlib.sha256(text.encode()).hexdigest()
+
+    def measure(self, sampled, hashes, scope, derived=None):
+        with tempfile.TemporaryDirectory() as directory:
+            result, build, binding, repo = self.tree(Path(directory), sampled, hashes)
+            with mock.patch.object(runner, "REPO_ROOT", repo):
+                return runner.unreached_changed(result, build, binding,
+                                                derived or {"status": "derived", "base_record_run_id": "7"},
+                                                scope)
+
+    def test_changed_bytes_are_named_and_key_blind_ones_are_not(self) -> None:
+        hashes = {"test/a": self.sha("bytes of a"), "test/b": self.sha("old bytes of b"),
+                  "test/blind": self.sha("old bytes of blind")}
+        self.assertEqual(self.measure([], hashes, "all"), ["test/b"])
+        # Bounded: only what the sample built is compared.
+        self.assertEqual(self.measure(["test/b"], hashes, "sampled"), ["test/b"])
+        self.assertEqual(self.measure(["test/a"], hashes, "sampled"), [])
+
+    def test_no_information_is_null_never_an_empty_list(self) -> None:
+        # No in-scope artifact has a recorded hash.
+        self.assertIsNone(self.measure([], {"test/c": None}, "all"))
+        self.assertIsNone(self.measure(["test/c"], {"test/a": self.sha("bytes of a")}, "sampled"))
+        # Nothing was picked: the first candidate keyed, from another toolchain.
+        self.assertIsNone(self.measure([], {"test/a": self.sha("x")}, "all",
+                                       {"status": "derived", "base_record_run_id": None}))
+        self.assertIsNone(self.measure([], {"test/a": self.sha("x")}, "all", {"status": "error: x"}))
+
+    def test_each_mode_measures_its_own_scope(self) -> None:
+        calls = []
+        with mock.patch.object(runner, "unreached_changed",
+                               side_effect=lambda *a: calls.append(a[4]) or ["test/x"]):
+            _, _, receipt = KeyedFullTest.run_full(KeyedFullTest())
+        self.assertEqual(calls, ["all"])
+        self.assertEqual(receipt["executable_reuse"]["derived"]["unreached_changed"], ["test/x"])
 
 
 class SelectedLegPipelineTest(unittest.TestCase):
@@ -2229,9 +2293,11 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertEqual(result["comparison_verdict"], "matched_pass")
         self.assertEqual(result["executable_reuse"],
                          {"mode": "keyed_bounded_shadow", "bound": bound,
-                          "derived": {"status": "derived", "would_skip_count": 3},
+                          # No record was picked, so no bytes could be compared.
+                          "derived": {"status": "derived", "would_skip_count": 3, "unreached_changed": None},
                           # No selection was written beside the receipt to measure against.
-                          "would_skip_tests": None, "false_skip_count": None, "false_skips": None})
+                          "would_skip_tests": None, "false_skip_count": None, "false_skips": None,
+                          "sampled_failures": None})
         self.assertEqual(len(self.derive_calls), 1)
         self.assertEqual(self.derive_calls[0].args[1], "b" * 40)  # the receipt's head
         self.assertEqual(self.derive_calls[0].kwargs["base_sha"], "a" * 40)
@@ -2240,9 +2306,12 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertEqual(self.derive_calls, [])
         files = {"selection.json": {"would_skip": ["test/n"], "sampled_executables": []},
                  "executable-keys.json": {"executables": {"test/n": {"registrations": ["neighbor"]}}}}
-        _, _, measured = self.run_pipeline(reuse=bound, derived_files=files,
-                                           failures={"full tests": ["neighbor"]})
+        scopes = []
+        with mock.patch.object(runner, "unreached_changed", side_effect=lambda *a: scopes.append(a[4])):
+            _, _, measured = self.run_pipeline(reuse=bound, derived_files=files,
+                                               failures={"full tests": ["neighbor"]})
         self.assertEqual(measured["executable_reuse"]["false_skips"], ["neighbor"])
+        self.assertEqual(scopes, ["sampled"])  # a bounded run built only the sample
 
     LANE_REDS = ({"lane-red": "2026-10-17"}, "f" * 64)
 

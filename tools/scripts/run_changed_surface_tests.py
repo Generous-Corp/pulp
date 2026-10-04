@@ -1066,10 +1066,16 @@ def junit_failures(path: Path) -> set[str] | None:
     return {case.get("name", "") for case in root.iter("testcase") if _junit_case_failed(case)}
 
 
+UNMEASURED_SKIPS = {"would_skip_tests": None, "false_skip_count": None, "false_skips": None,
+                    "sampled_failures": None}
+
+
 def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
     """The tests the derived selection would have skipped (registrations of
     would-skip executables it did not sample) and which of them the full run
-    failed, or None when there is no derived selection or no full report."""
+    failed; and which tests of the sampled would-skips failed, the negative
+    control's catch. None when there is no derived selection or no full
+    report."""
     try:
         selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
         manifest = json.loads((result_dir / "executable-keys.json").read_text(encoding="utf-8"))
@@ -1079,10 +1085,60 @@ def false_skips(result_dir: Path, full_junit: Path) -> dict[str, Any] | None:
     if failed is None:
         return None
     executables = manifest.get("executables") or {}
-    skipped = set(selection.get("would_skip") or []) - set(selection.get("sampled_executables") or [])
-    tests = sorted({name for a in skipped for name in (executables.get(a) or {}).get("registrations") or []})
+    sampled = set(selection.get("sampled_executables") or [])
+    skipped = set(selection.get("would_skip") or []) - sampled
+
+    def registered(artifacts: set[str]) -> set[str]:
+        return {name for a in artifacts for name in (executables.get(a) or {}).get("registrations") or []}
+    tests = sorted(registered(skipped))
     caught = sorted(set(tests) & failed)
-    return {"would_skip_tests": tests, "false_skip_count": len(caught), "false_skips": caught}
+    return {"would_skip_tests": tests, "false_skip_count": len(caught), "false_skips": caught,
+            "sampled_failures": sorted(registered(sampled) & failed)}
+
+
+# Executables whose key ignores what decides their bytes; a hash difference
+# there is expected and says nothing about the key.
+KEY_BLIND_EXECUTABLES = "tools/ci/key_blind_executables.json"
+
+
+def unreached_changed(result_dir: Path, build_dir: Path, binding: dict[str, Any],
+                      derived: dict[str, Any], scope: str) -> list[str] | None:
+    """Would-skip executables whose bytes this run built differ from the
+    picked base record's hash for the same artifact: a key that said
+    "unchanged" about something that changed. `scope` is "all" when every
+    would-skip was built (a keyed full run) and "sampled" when only the sample
+    was. None, never an empty list, when nothing can be compared: no record
+    was picked (bytes from another toolchain always differ), or no artifact in
+    scope has a recorded hash."""
+    if derived.get("status") != "derived" or derived.get("base_record_run_id") is None:
+        return None
+    record = next((c for c in binding["candidates"] if c["run_id"] == derived["base_record_run_id"]), None)
+    if record is None:
+        return None
+    try:
+        selection = json.loads((result_dir / "selection.json").read_text(encoding="utf-8"))
+        identity = json.loads((Path(record["record_path"]) / "identity.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    blind_path = REPO_ROOT / KEY_BLIND_EXECUTABLES
+    try:
+        blind = set(json.loads(blind_path.read_text(encoding="utf-8")).get("executables") or [])
+    except FileNotFoundError:
+        blind = set()
+    in_scope = set(selection.get("would_skip") or [])
+    if scope == "sampled":
+        in_scope &= set(selection.get("sampled_executables") or [])
+    recorded = identity.get("executables") or {}
+    compared, changed = 0, []
+    for artifact in sorted(in_scope - blind):
+        expected = (recorded.get(f"<build>/{artifact}") or {}).get("sha256")
+        built = build_dir / artifact
+        if not expected or not built.is_file():
+            continue
+        compared += 1
+        if hashlib.sha256(built.read_bytes()).hexdigest() != expected:
+            changed.append(artifact)
+    return changed if compared else None
 
 
 def lane_red_allowlist(
@@ -1372,6 +1428,8 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
                 lane_reuse_record.record(build_dir, REPO_ROOT, [("full", recorded, attempts, True)],
                                          started_epoch)
         measured = false_skips(result_dir, junit) if derived["status"] == "derived" else None
+        if build_result == 0 and derived["status"] == "derived":
+            derived["unreached_changed"] = unreached_changed(result_dir, build_dir, binding, derived, "all")
         try:
             inventory_names = [t.get("name") for t in ctest_payload(build_dir)["tests"]]
         except SelectionExecutionError:
@@ -1403,8 +1461,7 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
         "failure_coverage": "not_compared",
         "graduation_eligible": False,
         "executable_reuse": {"mode": "keyed_full_shadow", "bound": binding, "derived": derived,
-                             **(measured or {"would_skip_tests": None, "false_skip_count": None,
-                                             "false_skips": None})},
+                             **(measured or UNMEASURED_SKIPS)},
     })
     return returncode
 
@@ -1641,8 +1698,10 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                                  if allowlist is not None else None)
             if executable_reuse and executable_reuse["derived"]["status"] == "derived":
                 executable_reuse.update(false_skips(Path(result_dir), Path(directory) / "full-junit.xml")
-                                        or {"would_skip_tests": None, "false_skip_count": None,
-                                            "false_skips": None})
+                                        or UNMEASURED_SKIPS)
+                executable_reuse["derived"]["unreached_changed"] = unreached_changed(
+                    Path(result_dir), build_dir, executable_reuse["bound"], executable_reuse["derived"],
+                    "sampled")
             eligible = compare_full and (
                 verdict == "matched_pass"
                 or (verdict == "matched_fail" and allowlist is not None
