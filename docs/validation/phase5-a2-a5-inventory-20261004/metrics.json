@@ -1,0 +1,2486 @@
+{
+  "repo_head": "dcee90cce925d42dca420284f22da7d279369c30",
+  "origin_main": "dcee90cce925d42dca420284f22da7d279369c30",
+  "header_direct_include_fanout": {
+    "core/host/include/pulp/host/forge_lofi_catalog.hpp": [
+      "./core/host/include/pulp/host/detail/forge_lofi_catalog_descriptor.hpp",
+      "./core/host/include/pulp/host/forge_catalog_index.hpp",
+      "./core/host/src/forge_catalog_export_lofi.cpp",
+      "./test/test_forge_lofi_catalog.cpp"
+    ],
+    "core/host/include/pulp/host/forge_space_catalog.hpp": [
+      "./core/host/include/pulp/host/forge_catalog_index.hpp",
+      "./core/host/src/forge_catalog_export_space_synthesis.cpp",
+      "./test/test_forge_space_catalog_support.hpp",
+      "./test/test_gpu_convolution_reverb_probe.cpp"
+    ],
+    "core/host/include/pulp/host/forge_effect_modulation_catalog.hpp": [
+      "./core/host/include/pulp/host/detail/forge_effect_modulation_catalog_descriptor.hpp",
+      "./core/host/include/pulp/host/forge_catalog_index.hpp",
+      "./core/host/src/forge_catalog_export_modulation.cpp",
+      "./test/test_forge_effect_modulation_catalog_support.hpp"
+    ],
+    "core/host/include/pulp/host/forge_sequencing_catalog.hpp": [
+      "./core/host/include/pulp/host/forge_catalog_index.hpp",
+      "./core/host/src/forge_catalog_export_pitch_sequencing.cpp",
+      "./test/test_forge_sequencing_catalog_support.hpp"
+    ],
+    "core/host/include/pulp/host/forge_modulation_catalog.hpp": [
+      "./core/host/include/pulp/host/forge_catalog_index.hpp",
+      "./core/host/src/forge_catalog_export_lofi.cpp",
+      "./test/test_forge_modulation_catalog.cpp",
+      "./test/test_forge_modulation_catalog_contracts.cpp"
+    ],
+    "core/host/include/pulp/host/forge_synthesis_catalog.hpp": [
+      "./core/host/include/pulp/host/forge_catalog_index.hpp",
+      "./core/host/src/forge_catalog_export_space_synthesis.cpp",
+      "./test/test_forge_spectral_dynamics_catalogs.cpp",
+      "./test/test_forge_synthesis_catalog_support.hpp"
+    ],
+    "core/host/include/pulp/host/signal_graph_runtime.hpp": [
+      "./core/host/include/pulp/host/signal_graph.hpp",
+      "./core/host/include/pulp/host/timeline_offline_graph.hpp",
+      "./core/host/src/signal_graph_diagnostics.cpp",
+      "./test/header_compile/host_signal_graph_runtime.cpp",
+      "./test/test_agent_capability_compile.cpp",
+      "./test/test_sample_region_sequencer.cpp",
+      "./test/test_timeline_cli_offline_render.cpp",
+      "./tools/timeline/src/timeline_render.cpp"
+    ],
+    "core/host/include/pulp/host/signal_graph.hpp": [
+      "./core/host/include/pulp/host/baked_codec.hpp",
+      "./core/host/include/pulp/host/baked_graph_processor.hpp",
+      "./core/host/include/pulp/host/detail/forge_effect_modulation_extended_catalog.hpp",
+      "./core/host/include/pulp/host/forge_analog_vcf_catalog.hpp",
+      "./core/host/include/pulp/host/forge_character_delay_catalog.hpp",
+      "./core/host/include/pulp/host/forge_descriptor_audit.hpp",
+      "./core/host/include/pulp/host/forge_distortion_catalog.hpp",
+      "./core/host/include/pulp/host/forge_drum_catalog_contract.hpp",
+      "./core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+      "./core/host/include/pulp/host/forge_effect_modulation_catalog.hpp",
+      "./core/host/include/pulp/host/forge_eurorack_utility_catalog.hpp",
+      "./core/host/include/pulp/host/forge_fdn_reverb_catalog.hpp",
+      "./core/host/include/pulp/host/forge_fuzz_catalog.hpp",
+      "./core/host/include/pulp/host/forge_lofi_catalog.hpp",
+      "./core/host/include/pulp/host/forge_modulation_catalog.hpp",
+      "./core/host/include/pulp/host/forge_multiband_catalog.hpp",
+      "./core/host/include/pulp/host/forge_pitch_catalog.hpp",
+      "./core/host/include/pulp/host/forge_saturator_catalog.hpp",
+      "./core/host/include/pulp/host/forge_sequencing_catalog.hpp",
+      "./core/host/include/pulp/host/forge_sidechain_catalog.hpp",
+      "./core/host/include/pulp/host/forge_space_catalog.hpp",
+      "./core/host/include/pulp/host/forge_synthesis_catalog.hpp",
+      "./core/host/include/pulp/host/forge_tape_catalog.hpp",
+      "./core/host/include/pulp/host/forge_wavetable_catalog.hpp",
+      "./core/host/include/pulp/host/graph_serializer.hpp",
+      "./core/host/include/pulp/host/signal_graph_execution_snapshot.hpp",
+      "./core/host/src/anticipation_eligibility.cpp",
+      "./core/host/src/anticipation_lane.cpp",
+      "./core/host/src/anticipation_partition.cpp",
+      "./core/host/src/anticipation_subgraph.cpp",
+      "./core/host/src/forge_catalog_export.cpp",
+      "./core/host/src/offline_signal_graph_host.cpp",
+      "./core/host/src/signal_graph.cpp",
+      "./core/host/src/signal_graph_executor_routing.cpp",
+      "./core/host/src/signal_graph_live_swap.cpp",
+      "./core/host/src/signal_graph_prepare.cpp",
+      "./core/host/src/signal_graph_reference_walk.cpp",
+      "./core/host/src/timeline_offline_renderer.cpp",
+      "./core/view/include/pulp/view/widgets/graph_editor_view.hpp",
+      "./examples/forge-modular/test/block_size_parity.cpp",
+      "./examples/forge-modular/test/graph_cost_bench.cpp",
+      "./test/cmake/test_custom_node_enumeration_sdk_consumer.cmake",
+      "./test/cmake/test_sample_kernel_sdk_consumer.cmake",
+      "./test/harness/baked_node_fixture.hpp",
+      "./test/header_compile/host_signal_graph_umbrella.cpp",
+      "./test/sample_region_compat/compat_runner.cpp",
+      "./test/sample_region_compat/old_graph_serializer_v2.hpp",
+      "./test/sample_region_compat/old_installed_sdk_consumer.cpp",
+      "./test/sample_region_i2/i2_negative_controls.cpp",
+      "./test/test_agent_capability_compile.cpp",
+      "./test/test_anticipation_eligibility.cpp",
+      "./test/test_anticipation_lane.cpp",
+      "./test/test_anticipation_partition.cpp",
+      "./test/test_anticipation_subgraph.cpp",
+      "./test/test_anticipation_subgraph_render.cpp",
+      "./test/test_baked_graph_param_injection.cpp",
+      "./test/test_baked_graph_processor_parity.cpp",
+      "./test/test_character_delay_adapter_bench.cpp",
+      "./test/test_cli_bake.cpp",
+      "./test/test_connection_classify.cpp",
+      "./test/test_custom_node_diagnostics.cpp",
+      "./test/test_custom_node_enumeration.cpp",
+      "./test/test_forge_catalog_index.cpp",
+      "./test/test_forge_character_delay_catalog.cpp",
+      "./test/test_forge_fdn_reverb_catalog.cpp",
+      "./test/test_forge_lofi_catalog.cpp",
+      "./test/test_forge_modulation_catalog.cpp",
+      "./test/test_forge_modulation_catalog_contracts.cpp",
+      "./test/test_forge_spectral_dynamics_catalogs.cpp",
+      "./test/test_graph_editor_open.cpp",
+      "./test/test_graph_editor_view.cpp",
+      "./test/test_graph_executor_parity.cpp",
+      "./test/test_graph_executor_routing.cpp",
+      "./test/test_graph_routing_differential_parity.cpp",
+      "./test/test_graph_serializer.cpp",
+      "./test/test_host.cpp",
+      "./test/test_host_regression.cpp",
+      "./test/test_host_signal_graph.cpp",
+      "./test/test_host_signal_graph_prepared_edit.cpp",
+      "./test/test_live_dsp_telemetry_graph.cpp",
+      "./test/test_live_swap_admission.cpp",
+      "./test/test_plugin_manager_panel.cpp",
+      "./test/test_sample_kernel_registry.cpp",
+      "./test/test_signal_graph_anticipation.cpp",
+      "./test/test_signal_graph_audio_parity.cpp",
+      "./test/test_signal_graph_executor_parity.cpp",
+      "./test/test_signal_graph_live_swap_continuity.cpp",
+      "./test/test_signal_graph_live_swap_staging.cpp",
+      "./test/test_signal_graph_metadata_cache.cpp",
+      "./test/test_signal_graph_offline_parity.cpp",
+      "./test/test_signal_graph_parallel_cost.cpp",
+      "./test/test_signal_graph_parallel_plugin_scratch.cpp",
+      "./test/test_signal_graph_pdc_swap_continuity.cpp",
+      "./test/test_signal_graph_prepared_swap.cpp",
+      "./test/test_signal_graph_prepared_swap_live.cpp",
+      "./test/test_signal_graph_rt_safety.cpp",
+      "./test/test_signal_graph_transport.cpp",
+      "./tools/cli/cmd_bake.cpp"
+    ],
+    "tools/cmake/PulpInstallRules.cmake": [],
+    "tools/cmake/PulpDependencies.cmake": [],
+    "tools/cmake/PulpTestSuite.cmake": [],
+    "tools/cmake/PulpUtils.cmake": [
+      "./test/cmake/test_inspector_shipping_scanner.cmake",
+      "./test/cmake/test_pulp_utils_compat.cmake",
+      "./tools/cmake/PulpAppTargets.cmake",
+      "./tools/cmake/PulpPlugin.cmake"
+    ],
+    "tools/cmake/FindSkia.cmake": [
+      "./tools/cmake/PulpDependencies.cmake"
+    ]
+  },
+  "target_line_counts": {
+    "core/host/include/pulp/host/forge_lofi_catalog.hpp": 1465,
+    "core/host/include/pulp/host/forge_space_catalog.hpp": 925,
+    "core/host/include/pulp/host/forge_effect_modulation_catalog.hpp": 900,
+    "core/host/include/pulp/host/forge_sequencing_catalog.hpp": 855,
+    "core/host/include/pulp/host/forge_modulation_catalog.hpp": 827,
+    "core/host/include/pulp/host/forge_synthesis_catalog.hpp": 768,
+    "core/host/include/pulp/host/signal_graph_runtime.hpp": 1716,
+    "core/host/include/pulp/host/signal_graph.hpp": 9,
+    "tools/cmake/PulpInstallRules.cmake": 1065,
+    "tools/cmake/PulpDependencies.cmake": 995,
+    "tools/cmake/PulpTestSuite.cmake": 727,
+    "tools/cmake/PulpUtils.cmake": 294,
+    "tools/cmake/FindSkia.cmake": 523
+  },
+  "large_tests": [
+    {
+      "path": "forge-seam/test/test_chrome_no_leak.cpp",
+      "lines": 10000,
+      "macro_cases": 188,
+      "sha256": "5398c334899ca785f4a033edca27eedd12e518b8a2aaaee927b481badc07367b"
+    },
+    {
+      "path": "test/test_design_import_cpp_codegen.cpp",
+      "lines": 7789,
+      "macro_cases": 41,
+      "sha256": "d144073fa0d4b233e0a5de3ddeb44d7b9b7ff1d2a1a844863e9493273d1fcecb"
+    },
+    {
+      "path": "test/test_inspector.cpp",
+      "lines": 7305,
+      "macro_cases": 168,
+      "sha256": "f8f771d80f4a4aaca40e6d01aeb58988a85093ce2799bbbe4cf294eeeb9535dd"
+    },
+    {
+      "path": "test/test_widget_bridge.cpp",
+      "lines": 6679,
+      "macro_cases": 176,
+      "sha256": "e746d2a031e7bea2583f070a8abdf36334e8783262ed1eed94d08386c4025342"
+    },
+    {
+      "path": "test/test_vst3_plugin_state.cpp",
+      "lines": 6422,
+      "macro_cases": 97,
+      "sha256": "0b12a47d12621bfec71c46a48b696e7a042a7bcb4c92a352bb3a9547e70c50d5"
+    },
+    {
+      "path": "test/test_host_signal_graph.cpp",
+      "lines": 5296,
+      "macro_cases": 99,
+      "sha256": "8c71d7dde177f1f6aa712c75c7c40aa65efd0a6d9d7b1a173e25d9aea4e0336b"
+    },
+    {
+      "path": "test/test_clap_midi_events.cpp",
+      "lines": 5122,
+      "macro_cases": 97,
+      "sha256": "fbb17290a7d3d3f5cf5a7711a60620cc025736111d49256da2473f527978e91a"
+    },
+    {
+      "path": "test/test_design_import_native_materializer.cpp",
+      "lines": 4817,
+      "macro_cases": 81,
+      "sha256": "05fd80b0cceb331e0fc49e1efe6272b2576f7adeec00300b660322884d3eb58b"
+    },
+    {
+      "path": "test/test_authoring_capsule.cpp",
+      "lines": 4476,
+      "macro_cases": 81,
+      "sha256": "d5d77be992932f667ca06ceab29a1e9b02c99b9329a5d2029c32149be1d9fba6"
+    },
+    {
+      "path": "test/test_import_design_tool.cpp",
+      "lines": 3704,
+      "macro_cases": 53,
+      "sha256": "f7fd5118fa79e378ffeaf7b70b8fa08660db6db3f85eb8698eebafcd4051736b"
+    },
+    {
+      "path": "test/test_browser_capture_tree.cpp",
+      "lines": 3480,
+      "macro_cases": 64,
+      "sha256": "30dd4e0450337effa4a1c7d629d3560699660ab5af852bcbd00fb98e300cd67e"
+    },
+    {
+      "path": "test/test_cli_shellout.cpp",
+      "lines": 3430,
+      "macro_cases": 75,
+      "sha256": "9fd03a7f0d2045c2c4bd4273c9e086257a1e0d81a4bdcfc5e2dddefdf6dd7b20"
+    },
+    {
+      "path": "test/test_timeline_nesting_playback.cpp",
+      "lines": 3418,
+      "macro_cases": 64,
+      "sha256": "6e8315f921e98316366e6c783ed4130614aaa8651f0a402850b41523f2288ea8"
+    },
+    {
+      "path": "test/test_mcp_server.cpp",
+      "lines": 3413,
+      "macro_cases": 75,
+      "sha256": "404b96ee390b6de8350d04173acbc18893a4f3ed9308fb15090ef4ee153588fa"
+    },
+    {
+      "path": "test/test_signal_graph_executor_parity.cpp",
+      "lines": 3304,
+      "macro_cases": 62,
+      "sha256": "1c582b9bd7a4dab9c9af5bf26ca349947d7463a8f13d2bb2876a970663727bcc"
+    },
+    {
+      "path": "test/test_widgets.cpp",
+      "lines": 3170,
+      "macro_cases": 117,
+      "sha256": "7a6280cf40a30ddc37183b674c540c2bf536e8b96eee18ed00aeafc85e834d1b"
+    },
+    {
+      "path": "test/test_state.cpp",
+      "lines": 3069,
+      "macro_cases": 108,
+      "sha256": "bf8bcb3ce741d37eb3bfe54c16cdd2ea3dc613a97ad0393100578f70e8011472"
+    },
+    {
+      "path": "test/test_cli_kit_commands.cpp",
+      "lines": 2900,
+      "macro_cases": 70,
+      "sha256": "6c51b2fc23f76d1f043c786a84c04dbcf9a604c5720578e5d9b0039cbe28b9f0"
+    },
+    {
+      "path": "test/test_canvas.cpp",
+      "lines": 2870,
+      "macro_cases": 83,
+      "sha256": "ed10c954820808432466157b23af95a4307adf79d34287e57308d4fd18fe2a8c"
+    },
+    {
+      "path": "test/test_audio_file.cpp",
+      "lines": 2849,
+      "macro_cases": 72,
+      "sha256": "7319e074c0b166fa1917b483d35dd7187679a2d4b674c3a3b263ef91475fdbd5"
+    },
+    {
+      "path": "test/test_browser_capture_ir.cpp",
+      "lines": 2764,
+      "macro_cases": 40,
+      "sha256": "37c78c50009b8bf081f4b6a47b60375533d31ce150e5337f5d22c36e116dec6f"
+    },
+    {
+      "path": "test/web-compat/test_threejs_bridge.cpp",
+      "lines": 2722,
+      "macro_cases": 11,
+      "sha256": "d6babdcadce246fb3e85b5a331531aa7570f1c57c1ec63ee345b26908e741a23"
+    },
+    {
+      "path": "test/test_view_bridge.cpp",
+      "lines": 2718,
+      "macro_cases": 66,
+      "sha256": "02a946acdb655b47fc6a7a566300aa53d058e00601ac5a3fc07918d7d67739e7"
+    },
+    {
+      "path": "test/test_overlay_routing.cpp",
+      "lines": 2555,
+      "macro_cases": 82,
+      "sha256": "450b2821cb5a0162c72c2bdba6e5ef3fff20aef80a376bebdc088cc2d9ae5c64"
+    },
+    {
+      "path": "test/test_ipc.cpp",
+      "lines": 2539,
+      "macro_cases": 60,
+      "sha256": "d3658a345ccfce24723799eb4afd5924b213350ec91b52f6053f1471eeeeb336"
+    },
+    {
+      "path": "test/test_graph_serializer.cpp",
+      "lines": 2532,
+      "macro_cases": 50,
+      "sha256": "49d6dc50d88a9c3929d8d73844fef3bf9da39fe3e0b2fde0bfa3ad2cafa0feed"
+    }
+  ],
+  "inventory": {
+    "deprecated": [
+      {
+        "path": "tools/rack/vendor/zstd-1.5.7/zstddeclib.c",
+        "matches": 32
+      },
+      {
+        "path": "test/test_cli_import_detect.cpp",
+        "matches": 4
+      },
+      {
+        "path": "core/dawproject/include/pulp/dawproject/dawproject_export.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/host/include/pulp/host/extensions_visitor.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/host/include/pulp/host/plugin_slot.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/state/include/pulp/state/binding.hpp",
+        "matches": 2
+      },
+      {
+        "path": "test/cmake/mac_platform_tests.cmake",
+        "matches": 2
+      },
+      {
+        "path": "test/test_cli_project_command.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_cli_shellout.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/cli/cmd_inspect.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/import-design/import_detect.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/audio/include/pulp/audio/realtime_sample_recorder.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/audio/include/pulp/audio/rolling_audio_capture_buffer.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/audio/include/pulp/audio/sample_slot_bank.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/audio/src/web_audio.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/canvas/src/svg_dom_cache.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/host/include/pulp/host/native_handle_visitor.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/runtime/src/system_info.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/design_codegen.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/design_tokens_w3c.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/inspector_window.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/param_attachment.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/widgets.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/design_tokens_w3c.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/inspector_window.cpp",
+        "matches": 1
+      },
+      {
+        "path": "inspect/src/capabilities.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_cli_inspect_shellout.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_dawproject_export.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_hosted_editor.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_mcp_server.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_widget_bridge_wave5_css.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cli/cmd_project.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cli/cmd_project_common.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpPlugin.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/ios.toolchain.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/import-design/import_detect.hpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/mcp/pulp_mcp.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/rack/patch_gate.cpp",
+        "matches": 1
+      }
+    ],
+    "generated": [
+      {
+        "path": "test/test_design_import_cpp_codegen.cpp",
+        "matches": 192
+      },
+      {
+        "path": "test/test_playback_generated_event_source.cpp",
+        "matches": 129
+      },
+      {
+        "path": "test/test_design_import_fidelity.cpp",
+        "matches": 122
+      },
+      {
+        "path": "test/test_design_import_native_materializer.cpp",
+        "matches": 80
+      },
+      {
+        "path": "core/playback/src/generated_event_source.cpp",
+        "matches": 78
+      },
+      {
+        "path": "test/test_lock_to_source.cpp",
+        "matches": 61
+      },
+      {
+        "path": "core/playback/include/pulp/playback/generated_event_source.hpp",
+        "matches": 59
+      },
+      {
+        "path": "test/test_design_import_codegen.cpp",
+        "matches": 59
+      },
+      {
+        "path": "test/cmake/design_import_native_codegen_tests.cmake",
+        "matches": 50
+      },
+      {
+        "path": "test/test_node_pack.cpp",
+        "matches": 46
+      },
+      {
+        "path": "test/test_design_import_codegen_layout_text.cpp",
+        "matches": 44
+      },
+      {
+        "path": "core/host/include/pulp/host/node_pack.hpp",
+        "matches": 38
+      },
+      {
+        "path": "test/test_design_import_codegen_web_controls.cpp",
+        "matches": 38
+      },
+      {
+        "path": "test/test_design_import_codegen_paint.cpp",
+        "matches": 37
+      },
+      {
+        "path": "test/test_design_import_anchors.cpp",
+        "matches": 35
+      },
+      {
+        "path": "tools/rack/vendor/zstd-1.5.7/zstddeclib.c",
+        "matches": 34
+      },
+      {
+        "path": "core/view/src/design_codegen.cpp",
+        "matches": 33
+      },
+      {
+        "path": "tools/import-design/pulp_import_design.cpp",
+        "matches": 33
+      },
+      {
+        "path": "test/test_import_design_tool.cpp",
+        "matches": 32
+      },
+      {
+        "path": "forge-seam/test/test_chrome_no_leak.cpp",
+        "matches": 30
+      },
+      {
+        "path": "test/test_design_import_shortcuts.cpp",
+        "matches": 30
+      },
+      {
+        "path": "test/test_design_swift_codegen.cpp",
+        "matches": 28
+      },
+      {
+        "path": "core/host/src/signal_graph_prepare.cpp",
+        "matches": 27
+      },
+      {
+        "path": "core/playback/src/sequence_content_lowerer.cpp",
+        "matches": 25
+      },
+      {
+        "path": "test/test_host_signal_graph.cpp",
+        "matches": 23
+      },
+      {
+        "path": "test/test_design_import_sources.cpp",
+        "matches": 22
+      },
+      {
+        "path": "test/test_browser_knob_sprites.cpp",
+        "matches": 21
+      },
+      {
+        "path": "test/test_design_import_parity.cpp",
+        "matches": 21
+      },
+      {
+        "path": "core/view/include/pulp/view/lock_to_source.hpp",
+        "matches": 19
+      },
+      {
+        "path": "core/view/src/design_swift_codegen.cpp",
+        "matches": 19
+      },
+      {
+        "path": "examples/timeline-sdk-consumer/registered_chord_renderer.cpp",
+        "matches": 19
+      },
+      {
+        "path": "test/test_import_object_coverage.cpp",
+        "matches": 19
+      },
+      {
+        "path": "core/view/src/lock_to_source.cpp",
+        "matches": 18
+      },
+      {
+        "path": "test/test_cli_import_emit.cpp",
+        "matches": 18
+      },
+      {
+        "path": "test/test_design_import_toggle_binding.cpp",
+        "matches": 18
+      },
+      {
+        "path": "test/test_browser_capture_tree.cpp",
+        "matches": 17
+      },
+      {
+        "path": "core/playback/src/program_compiler.cpp",
+        "matches": 16
+      },
+      {
+        "path": "test/test_cli_migration_index.cpp",
+        "matches": 16
+      },
+      {
+        "path": "test/test_graph_serializer.cpp",
+        "matches": 16
+      },
+      {
+        "path": "test/test_playback_chord_pattern_renderer.cpp",
+        "matches": 16
+      },
+      {
+        "path": "test/test_design_cpp_codegen_golden.cpp",
+        "matches": 15
+      },
+      {
+        "path": "test/test_generated_dsp_graph_parity.cpp",
+        "matches": 15
+      },
+      {
+        "path": "core/host/include/pulp/host/signal_graph_runtime.hpp",
+        "matches": 14
+      },
+      {
+        "path": "core/view/include/pulp/view/design_codegen.hpp",
+        "matches": 14
+      },
+      {
+        "path": "core/view/src/design_cpp_tree_codegen.cpp",
+        "matches": 13
+      },
+      {
+        "path": "core/view/src/design_fidelity.cpp",
+        "matches": 13
+      },
+      {
+        "path": "tools/cli/kit_commands.cpp",
+        "matches": 13
+      },
+      {
+        "path": "test/test_cli_project_command.cpp",
+        "matches": 12
+      },
+      {
+        "path": "test/test_design_import_ir.cpp",
+        "matches": 12
+      },
+      {
+        "path": "tools/import-design/sprite_skins.cpp",
+        "matches": 12
+      },
+      {
+        "path": "core/playback/include/pulp/playback/program.hpp",
+        "matches": 11
+      },
+      {
+        "path": "core/view/src/design_import_native_common.cpp",
+        "matches": 11
+      },
+      {
+        "path": "test/cmake/test_pulp_add_binary_data_encoder.cmake",
+        "matches": 11
+      },
+      {
+        "path": "test/test_cli_kit_commands.cpp",
+        "matches": 11
+      },
+      {
+        "path": "test/test_timeline_nesting_playback.cpp",
+        "matches": 11
+      },
+      {
+        "path": "tools/import-design/browser_capture_tree.cpp",
+        "matches": 11
+      },
+      {
+        "path": "core/view/include/pulp/view/design_fidelity.hpp",
+        "matches": 10
+      },
+      {
+        "path": "core/view/src/design_ir_json.cpp",
+        "matches": 10
+      },
+      {
+        "path": "test/cmake/design_import_runtime_bridge_tests.cmake",
+        "matches": 10
+      },
+      {
+        "path": "tools/cmake/PulpEmbed.cmake",
+        "matches": 10
+      },
+      {
+        "path": "tools/screenshot/pulp_screenshot.cpp",
+        "matches": 10
+      },
+      {
+        "path": "core/midi/include/pulp/midi/arpeggiator.hpp",
+        "matches": 9
+      },
+      {
+        "path": "core/playback/src/sequence_compile_bookkeeping.hpp",
+        "matches": 9
+      },
+      {
+        "path": "test/test_cli_create_shellout.cpp",
+        "matches": 9
+      },
+      {
+        "path": "test/test_mcp_server.cpp",
+        "matches": 9
+      },
+      {
+        "path": "tools/cli/kit_manifest_validation.cpp",
+        "matches": 9
+      },
+      {
+        "path": "core/view/cmake/PulpViewSources.cmake",
+        "matches": 8
+      },
+      {
+        "path": "forge-seam/modular/modular_shell.cpp",
+        "matches": 8
+      },
+      {
+        "path": "test/cmake/test_plugin_bundle_icon.cmake",
+        "matches": 8
+      },
+      {
+        "path": "test/cmake/test_project_package_compile_out.cmake",
+        "matches": 8
+      },
+      {
+        "path": "test/test_timeline_schema_codegen.cpp",
+        "matches": 8
+      },
+      {
+        "path": "tools/cli/cli_doctor_helpers.cpp",
+        "matches": 8
+      },
+      {
+        "path": "tools/cmake/PulpEmbedData.cmake",
+        "matches": 8
+      },
+      {
+        "path": "core/midi/include/pulp/midi/step_player.hpp",
+        "matches": 7
+      },
+      {
+        "path": "core/playback/src/sequence_compile_bookkeeping.cpp",
+        "matches": 7
+      },
+      {
+        "path": "core/view/cmake/PulpViewJsPreludes.cmake",
+        "matches": 7
+      },
+      {
+        "path": "core/view/include/pulp/view/design_ir.hpp",
+        "matches": 7
+      },
+      {
+        "path": "core/view/src/design_cpp_binding_codegen.cpp",
+        "matches": 7
+      },
+      {
+        "path": "test/cmake/quality_tests.cmake",
+        "matches": 7
+      },
+      {
+        "path": "test/cmake/test_standalone_document_types.cmake",
+        "matches": 7
+      },
+      {
+        "path": "test/test_design_import_claude_runtime.cpp",
+        "matches": 7
+      },
+      {
+        "path": "test/test_design_multi_state.cpp",
+        "matches": 7
+      },
+      {
+        "path": "test/test_widget_bridge_tier4_oos.cpp",
+        "matches": 7
+      },
+      {
+        "path": "tools/cmake/PulpFaust.cmake",
+        "matches": 7
+      },
+      {
+        "path": "core/audio/include/pulp/audio/sample_heritage_bus_dsp.hpp",
+        "matches": 6
+      },
+      {
+        "path": "core/host/src/timeline_device_resolver.cpp",
+        "matches": 6
+      },
+      {
+        "path": "core/playback/src/program_wire.cpp",
+        "matches": 6
+      },
+      {
+        "path": "core/view/include/pulp/view/design_import.hpp",
+        "matches": 6
+      },
+      {
+        "path": "core/view/include/pulp/view/design_shortcuts.hpp",
+        "matches": 6
+      },
+      {
+        "path": "core/view/src/claude_bundle.cpp",
+        "matches": 6
+      },
+      {
+        "path": "examples/ui-preview/main.cpp",
+        "matches": 6
+      },
+      {
+        "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
+        "matches": 6
+      },
+      {
+        "path": "test/cmake/sampler_runtime_tests.cmake",
+        "matches": 6
+      },
+      {
+        "path": "test/test_fixture_runner_cli.cpp",
+        "matches": 6
+      },
+      {
+        "path": "test/test_inspector.cpp",
+        "matches": 6
+      },
+      {
+        "path": "test/test_jsx_lock.cpp",
+        "matches": 6
+      },
+      {
+        "path": "test/test_linux_packaging.cpp",
+        "matches": 6
+      },
+      {
+        "path": "test/test_x25519.cpp",
+        "matches": 6
+      },
+      {
+        "path": "tools/cmake/PulpV8Windows.cmake",
+        "matches": 6
+      },
+      {
+        "path": "tools/import-design/browser_capture_ir.cpp",
+        "matches": 6
+      },
+      {
+        "path": "core/format/include/pulp/format/reload/key_store.hpp",
+        "matches": 5
+      },
+      {
+        "path": "core/timeline_view/src/arranger_view.cpp",
+        "matches": 5
+      },
+      {
+        "path": "core/view/include/pulp/design/design_manifest.hpp",
+        "matches": 5
+      },
+      {
+        "path": "core/view/include/pulp/view/jsx_lock.hpp",
+        "matches": 5
+      },
+      {
+        "path": "core/view/src/design_cpp_codegen.cpp",
+        "matches": 5
+      },
+      {
+        "path": "core/view/src/design_cpp_style_codegen.cpp",
+        "matches": 5
+      },
+      {
+        "path": "test/fixtures/design_import_generated_binding_runtime_fixture.cpp",
+        "matches": 5
+      },
+      {
+        "path": "test/sample_interpolation_benchmark.cpp",
+        "matches": 5
+      },
+      {
+        "path": "test/test_cli_import_terms.cpp",
+        "matches": 5
+      },
+      {
+        "path": "test/test_cross_platform_audio_golden.cpp",
+        "matches": 5
+      },
+      {
+        "path": "test/test_design_fidelity.cpp",
+        "matches": 5
+      },
+      {
+        "path": "test/test_platform_key_wireup.cpp",
+        "matches": 5
+      },
+      {
+        "path": "test/test_sampler_looper_integration.cpp",
+        "matches": 5
+      },
+      {
+        "path": "tools/cli/cmd_ship.cpp",
+        "matches": 5
+      },
+      {
+        "path": "tools/cli/import_emit.hpp",
+        "matches": 5
+      },
+      {
+        "path": "tools/cli/import_emit_scan.hpp",
+        "matches": 5
+      },
+      {
+        "path": "tools/cli/import_run.cpp",
+        "matches": 5
+      },
+      {
+        "path": "core/dsl/include/pulp/dsl/dsl_processor.hpp",
+        "matches": 4
+      },
+      {
+        "path": "core/gpu_audio/src/detail/gpu_convolver_raw_trace_jsonl.hpp",
+        "matches": 4
+      },
+      {
+        "path": "core/host/src/graph_serializer.cpp",
+        "matches": 4
+      },
+      {
+        "path": "core/interchange/tools/fixture_runner_main.cpp",
+        "matches": 4
+      },
+      {
+        "path": "core/playback/src/program.cpp",
+        "matches": 4
+      },
+      {
+        "path": "core/playback/src/sequence_content_lowerer.hpp",
+        "matches": 4
+      },
+      {
+        "path": "core/view/src/design_cpp_codegen_support.cpp",
+        "matches": 4
+      },
+      {
+        "path": "core/view/src/design_import_native_common.hpp",
+        "matches": 4
+      },
+      {
+        "path": "core/view/src/design_import_shortcuts.cpp",
+        "matches": 4
+      },
+      {
+        "path": "core/view/src/design_ir_helpers.hpp",
+        "matches": 4
+      },
+      {
+        "path": "core/view/src/jsx_lock.cpp",
+        "matches": 4
+      },
+      {
+        "path": "examples/design-panel-midi-effect/test_design_panel_midi_effect.cpp",
+        "matches": 4
+      },
+      {
+        "path": "examples/forge-modular/src/plugin.hpp",
+        "matches": 4
+      },
+      {
+        "path": "test/cmake/test_pulp_install_layout.cmake",
+        "matches": 4
+      },
+      {
+        "path": "test/support/render_scenario.cpp",
+        "matches": 4
+      },
+      {
+        "path": "test/test_analysis_utilities_bench.cpp",
+        "matches": 4
+      },
+      {
+        "path": "test/test_auto_ui.cpp",
+        "matches": 4
+      },
+      {
+        "path": "test/test_cli_import_design.cpp",
+        "matches": 4
+      },
+      {
+        "path": "test/test_design_browser_capture.cpp",
+        "matches": 4
+      },
+      {
+        "path": "test/test_design_fidelity_ledger.cpp",
+        "matches": 4
+      },
+      {
+        "path": "test/test_design_import_cpp_only.cpp",
+        "matches": 4
+      },
+      {
+        "path": "test/test_font_rendering_goldens.cpp",
+        "matches": 4
+      },
+      {
+        "path": "test/test_tuning.cpp",
+        "matches": 4
+      },
+      {
+        "path": "tools/cli/import_emit.cpp",
+        "matches": 4
+      },
+      {
+        "path": "tools/cli/package_commands_util.cpp",
+        "matches": 4
+      },
+      {
+        "path": "tools/cmake/PulpAppIcon.cmake",
+        "matches": 4
+      },
+      {
+        "path": "tools/cmake/PulpFonts.cmake",
+        "matches": 4
+      },
+      {
+        "path": "tools/cmake/PulpForgeCatalogInstall.cmake",
+        "matches": 4
+      },
+      {
+        "path": "tools/cmake/PulpInstallRules.cmake",
+        "matches": 4
+      },
+      {
+        "path": "tools/cmake/PulpUtils.cmake",
+        "matches": 4
+      },
+      {
+        "path": "tools/rack/behaviour_gate.cpp",
+        "matches": 4
+      },
+      {
+        "path": "core/canvas/include/pulp/canvas/canvas.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/dsl/include/pulp/dsl/faust_processor.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/format/include/pulp/format/vst3_entry.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/format/include/pulp/format/web/wam_adapter.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/format/src/host_quirks.cpp",
+        "matches": 3
+      },
+      {
+        "path": "core/interchange/include/pulp/interchange/concept.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/interchange/include/pulp/interchange/generated/capability_tables.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/native-components/include/pulp/native_components/native_core.h",
+        "matches": 3
+      },
+      {
+        "path": "core/playback/include/pulp/playback/program_wire.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/timeline/include/pulp/timeline/device_placement.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/timeline/src/schema_codegen.cpp",
+        "matches": 3
+      },
+      {
+        "path": "core/view/include/pulp/view/design_sources.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/view/src/design_binding_metadata.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/view/src/design_cpp_binding_codegen.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/view/src/design_cpp_codegen_internal.hpp",
+        "matches": 3
+      },
+      {
+        "path": "core/view/src/design_ir_normalize.cpp",
+        "matches": 3
+      },
+      {
+        "path": "forge-seam/modular/build_monitor.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/cmake/core_audio_platform_format_tests.cmake",
+        "matches": 3
+      },
+      {
+        "path": "test/cmake/gpu_audio_web_tests.cmake",
+        "matches": 3
+      },
+      {
+        "path": "test/cmake/interchange_tests.cmake",
+        "matches": 3
+      },
+      {
+        "path": "test/fixtures/design_import_generated_cpp_fixture.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/header_compile/faust_legacy_forwarding.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/test_cli_shellout.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/test_cli_swap_pack.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/test_dsl_processor.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/test_faithful_port_toolkit.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/test_identity.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/test_view_core_link.cpp",
+        "matches": 3
+      },
+      {
+        "path": "test/test_widget_bridge.cpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/cli/importer_git_install.cpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/cli/importer_install.cpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/cmake/FindSkia.cmake",
+        "matches": 3
+      },
+      {
+        "path": "tools/cmake/PulpTestSuite.cmake",
+        "matches": 3
+      },
+      {
+        "path": "tools/cmake/PulpWam.cmake",
+        "matches": 3
+      },
+      {
+        "path": "tools/import-design/annotated_capture.cpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/import-design/annotated_capture.hpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/import-design/browser_import_cli.hpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/import-design/import_design_cli_help.cpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/import-design/import_timing.hpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/import-design/sprite_skins.hpp",
+        "matches": 3
+      },
+      {
+        "path": "tools/mcp/pulp_mcp.cpp",
+        "matches": 3
+      },
+      {
+        "path": "core/audio/include/pulp/audio/streaming_sample_source.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/audio/src/streaming_sample_source.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/canvas/src/skia_canvas_opacity.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/dsl/include/pulp/dsl/faust_base.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/format/include/pulp/format/aax_entry.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/format/include/pulp/format/processor.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/format/include/pulp/format/reload/pack_signing_ui.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/format/include/pulp/format/standalone_control_host.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/host/src/timeline_graph_binding_candidate.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/interchange/include/pulp/interchange/capability.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/playback/include/pulp/playback/compile_context_registry.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/signal/include/pulp/signal/frequency_shifter_ssb.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/timeline/src/serialize_command_decode.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/timeline/src/serialize_encode.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/timeline/src/serialize_project_decode.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/include/pulp/view/auto_ui.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/include/pulp/view/design_fidelity_ledger.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/include/pulp/view/widget_bridge.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/src/design_fidelity_ledger.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/src/design_import.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/src/design_import_internal.hpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/src/widget_bridge/layout_api.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/src/widget_bridge/storage_assets_api.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/view/src/widget_bridge/text_runs_api.cpp",
+        "matches": 2
+      },
+      {
+        "path": "examples/PulpDrums/test_pulp_drums.cpp",
+        "matches": 2
+      },
+      {
+        "path": "examples/forge-modular/src/plugin.cpp",
+        "matches": 2
+      },
+      {
+        "path": "examples/forge-modular/test/graph_cost_bench.cpp",
+        "matches": 2
+      },
+      {
+        "path": "examples/super-convolver/super_convolver.hpp",
+        "matches": 2
+      },
+      {
+        "path": "forge-seam/modular/modular_shell.hpp",
+        "matches": 2
+      },
+      {
+        "path": "forge-seam/modular/module_summary.hpp",
+        "matches": 2
+      },
+      {
+        "path": "forge-seam/modular/patch_explanation.cpp",
+        "matches": 2
+      },
+      {
+        "path": "forge-seam/modular/rack_layout.hpp",
+        "matches": 2
+      },
+      {
+        "path": "forge-seam/test/chrome_no_leak_test_support.hpp",
+        "matches": 2
+      },
+      {
+        "path": "inspect/src/inspector_overlay.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/cmake/cmake_smoke_tests.cmake",
+        "matches": 2
+      },
+      {
+        "path": "test/cmake/design_import_tests.cmake",
+        "matches": 2
+      },
+      {
+        "path": "test/cmake/test_control_sdk_consumer.cmake",
+        "matches": 2
+      },
+      {
+        "path": "test/cmake/test_pulp_add_sparkle.cmake",
+        "matches": 2
+      },
+      {
+        "path": "test/cmake/timeline_tests.cmake",
+        "matches": 2
+      },
+      {
+        "path": "test/fuzz/timeline_document_corpus.hpp",
+        "matches": 2
+      },
+      {
+        "path": "test/support/render_scenario.hpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_aax_entry_registration.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_au_bundle_entry.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_au_v2_effect.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_baked_codec.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_cli_package_commands.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_design_import_screenshot_parity.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_inspector_knob_panel_screenshot.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_inspector_knobs_host_integration.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_license_migration.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_lv2_adapter.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_pack_signing_ui.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_reload_key_store.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_sample_region_runtime.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_super_convolver_clap_params.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_timeline_graph_binding.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_vst3_bundle_entry.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_widget_bridge_param_binding.cpp",
+        "matches": 2
+      },
+      {
+        "path": "test/test_widget_bridge_svg.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/cli/cmd_config.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/cli/cmd_create.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/cli/cmd_misc.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/cli/migration_index.hpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/cli/migration_runtime.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/cli/package_commands_add.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/import-design/annotated_capture_import.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/import-design/browser_capture_backend.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/import-design/browser_capture_diagnostics.cpp",
+        "matches": 2
+      },
+      {
+        "path": "tools/mcp/mcp_timeline_tools.cpp",
+        "matches": 2
+      },
+      {
+        "path": "core/audio/include/pulp/audio/rt_safety_contract.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/authoring_capsule/include/pulp/authoring_capsule/safe_path.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/canvas/include/pulp/canvas/path.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/canvas/include/pulp/canvas/path_to_sdf.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/canvas/src/bundled_fonts.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/canvas/src/named_shader_effects.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/events/include/pulp/events/push_notifications.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/include/pulp/format/aax_effect_gui.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/include/pulp/format/au_v2_entry.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/include/pulp/format/clap_entry.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/include/pulp/format/diagnostic_reporter.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/include/pulp/format/generation_routing.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/include/pulp/format/lv2_entry.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/include/pulp/format/plugin_descriptor.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/include/pulp/format/rack/module_descriptor.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/src/aax_runtime.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/src/view_bridge.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/format/src/wasm/clap_webview.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/host/include/pulp/host/baked_graph_processor.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/host/include/pulp/host/detail/forge_lofi_catalog_descriptor.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/host/include/pulp/host/forge_lofi_catalog.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/host/src/node_pack.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/host/src/signal_graph_prepared_topology_edit.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/host/src/timeline_graph_binding_internal.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/interchange/include/pulp/interchange/census.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/interchange/include/pulp/interchange/generated/concepts.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/midi/include/pulp/midi/note_delay.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/midi/include/pulp/midi/synthesiser.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/midi/platform/win/winrt_midi_device.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/native-components/include/pulp/native_components/pulp_node_v1.h",
+        "matches": 1
+      },
+      {
+        "path": "core/playback/PulpPlaybackSources.cmake",
+        "matches": 1
+      },
+      {
+        "path": "core/playback/include/pulp/playback/buffered_content_source.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/playback/src/offline_stretch_artifact.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/runtime/include/pulp/runtime/identity.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/cartesian_walk.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/character_delay/tape_loss.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/distortion.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/drum/fm.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/drum/hat.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/dust.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/fuzz_pair.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/nonlin_ambience.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/nonlin_ambience_design.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/osc/blep.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/osc/detail/minblep_table.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/osc/va.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/phaser_stages.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/signal/include/pulp/signal/realtime_pitch_time_processor.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/simd/src/highway.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/state/include/pulp/state/param_json.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/state/include/pulp/state/store.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/timeline/PulpTimelineSources.cmake",
+        "matches": 1
+      },
+      {
+        "path": "core/timeline/include/pulp/timeline/command.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/timeline/include/pulp/timeline/journal.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/timeline/include/pulp/timeline/schema_codegen.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/timeline/include/pulp/timeline/schema_json.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/timeline/tools/schema_emit_main.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/design/design_adherence.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/design/design_tweaks.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/animation.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/asset_manager.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/binding_diagnostics.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/canvas_widget.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/channel_strip_view.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/css_gradient.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/design_export.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/group_box_view.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/inline_value_editor_view.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/js_engine.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/knob_modulation_view.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/motion.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/number_box_states_view.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/property_panel_view.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/range_slider_view.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/screenshot_compare.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/scripted_ui.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/token_lock.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/include/pulp/view/waveform_recorder_view.hpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/js/embed_js.cmake",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/auto_ui.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/channel_strip_view_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/css_gradient.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/design_system.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/design_tokens.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/grid_layout.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/group_box_view_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/import_validation_bridge.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/inline_value_editor_view_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/knob_modulation_view_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/musical_typing_keyboard_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/native_view_host.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/number_box_states_view_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/property_panel_view_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/range_slider_view_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/view.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/waveform_recorder_view_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/widget_bridge.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/widget_bridge/border_box_api.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/widget_bridge/metadata_api.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/widget_bridge/runtime_api.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/widget_bridge/state_binding_api.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/widget_bridge/svg_api.cpp",
+        "matches": 1
+      },
+      {
+        "path": "core/view/src/widgets.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/PulpTempoSampler/au_v2_entry.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/audio-inspector-demo/main.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/design-panel-instrument/render_adapter_editor.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/design-panel-midi-effect/lattice_arp_dsp.hpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/design-panel-midi-effect/render_adapter_editor.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/design-panel-plugin/design_panel_plugin.hpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/design-panel-plugin/render_adapter_editor.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/design-tool/main.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/faust-filter/generated_filter.hpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/faust-gain/generated_gain.hpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/faust-tremolo/generated_tremolo.hpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/forge-modular/app/src/entries.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/forge-modular/app/src/shell.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/forge-modular/src/CARTOG.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/forge-modular/src/MIX.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/forge-modular/src/VCO.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/forge-modular/src/forge_components.hpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/forge-modular/src/generated_modules.hpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/forge-modular/test/shell_interaction.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/native-ui-phase-f-preview/main.cpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/super-convolver/super_convolver_ui.hpp",
+        "matches": 1
+      },
+      {
+        "path": "examples/timeline-session/test_timeline_daw_project.cpp",
+        "matches": 1
+      },
+      {
+        "path": "forge-seam/modular/entries/vst3_entry.cpp",
+        "matches": 1
+      },
+      {
+        "path": "forge-seam/modular/main.cpp",
+        "matches": 1
+      },
+      {
+        "path": "forge-seam/modular/process_engine.cpp",
+        "matches": 1
+      },
+      {
+        "path": "forge-seam/modular/process_engine.hpp",
+        "matches": 1
+      },
+      {
+        "path": "forge-seam/modular/rack_preview.hpp",
+        "matches": 1
+      },
+      {
+        "path": "forge-seam/modular/standalone/main.cpp",
+        "matches": 1
+      },
+      {
+        "path": "forge-seam/modular/vst3_entry.cpp",
+        "matches": 1
+      },
+      {
+        "path": "forge-seam/test/main.cpp",
+        "matches": 1
+      },
+      {
+        "path": "inspect/include/pulp/inspect/test_input.hpp",
+        "matches": 1
+      },
+      {
+        "path": "inspect/src/control_host_preflight.cpp",
+        "matches": 1
+      },
+      {
+        "path": "ship/include/pulp/ship/installer.hpp",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/cli_import_tool_tests.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/consumption_census_tests.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/content_workflow_tests.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/design_import_tool_cli_tests.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/pr_fast_tests.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/rack_fidelity_tests.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/render_gpu_compute_pool_tests.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/test_timeline_sdk_consumer.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/cmake/view_widget_bridge_tests.cmake",
+        "matches": 1
+      },
+      {
+        "path": "test/fixtures/fake_screenshot_tool.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/native_components/lv2_ttl_fixture_plugin.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/support/control_sample_region_e2e.hpp",
+        "matches": 1
+      },
+      {
+        "path": "test/support/osc_wav_scenario.hpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_aax_effect_gui.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_adapter_audio_parity.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_agent_capability_compile.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_audio_file.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_audio_stream_handoff.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_audio_support.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_authoring_capsule.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_browser_capture_ir.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_browser_capture_svg_render.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_canvas2d_shim.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_canvas_filter_chain.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_canvas_shader_effects.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_clap_entry.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_cli_create_targets.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_cli_import_detect.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_cli_shellout_lifecycle.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_design_import_cpp_core_link.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_design_import_masks.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_design_import_native_common.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_design_import_shared.hpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_design_ir_normalize.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_design_tool_layout.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_drum_fm.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_ed25519.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_faithful_specimens.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_font_rendering_goldens_gpu.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_gpu_audio_p4_matched_convolution_benchmark.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_gpu_audio_trace.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_graph_routing_differential_parity.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_html_project_stager.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_interchange_capability.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_mcp_control_adapter.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_mcp_timeline_sessions.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_midi_arpeggiator.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_midi_step_player.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_motion_provenance.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_osc_blep.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_playback_note_renderer.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_push_notifications.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_renderer3d_loading.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_scene3d.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_scripted_ui_runtime_eval.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_signal_diode_bridge_compressor_curve_ballistics.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_signal_fuzz_pair.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_svg.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_vst3_audio_parity.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_web_compat_overlay.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_web_compat_react_shims.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_widget_bridge_api_contracts.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_widget_promotion.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/test_xml_zip.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/web-compat/test_popover_row_template_1147.cpp",
+        "matches": 1
+      },
+      {
+        "path": "test/web-compat/test_selector_matching.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/audio/host-probe/au_effect_ab.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cli/cli_common.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cli/cli_sdk.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cli/cmd_pr.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cli/import_emit_scan.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cli/pulp_cli.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/Ccache.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpBuildInfo.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpCheckForgeCatalog.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpConfigureCheckCache.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpFetchContent.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpPluginFormats.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpRack.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpReactRuntime.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpRuntimePins.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpTestSharedObjects.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/cmake/PulpWebUi.cmake",
+        "matches": 1
+      },
+      {
+        "path": "tools/import-design/browser_capture_validation.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/import-design/browser_import_session.hpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/import-design/browser_knob_sprites.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/import-design/design_import_benchmark.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/import-design/fig_lane.hpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/mcp/mcp_compat.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/mcp/mcp_control_tool_catalog.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/mcp/mcp_tools.hpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/rack/fidelity_probe.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/rack/patch_gate.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/timeline/src/timeline_agent.cpp",
+        "matches": 1
+      },
+      {
+        "path": "tools/timeline/sync_soak_capture.cpp",
+        "matches": 1
+      }
+    ]
+  },
+  "key_manifests": [
+    {
+      "path": "test/ctest_script_inputs.json",
+      "bytes": 263742,
+      "sha256": "ccc4a6493cbd0263751d0783495941a02cb02f7dbcaa5e77fba7caa90af917e4"
+    },
+    {
+      "path": "tools/scripts/header_fanout_guard.json",
+      "bytes": 5100,
+      "sha256": "ee7fce1695a7f4bb5ea5b318ee3134778b8f07551fad143f9c5325f4398321d8"
+    },
+    {
+      "path": "docs/status/agent-capability-surface.json",
+      "bytes": 236442,
+      "sha256": "e76b6124583931f517b1ad595c4af95e2c4a27074a84492f7ec873c59a1de423"
+    },
+    {
+      "path": "docs/status/agent-capabilities.json",
+      "bytes": 541254,
+      "sha256": "c7d17fff9fd463c60fb4a7f5559fb3fc1051e9b14b39d104d0ed8150c1115231"
+    },
+    {
+      "path": ".github/vellum-ownership.json",
+      "bytes": 100818,
+      "sha256": "648d637e45afd1335215934f374bf97b7f558c8f9398751c0d3825536e4f1938"
+    },
+    {
+      "path": ".agents/contract.toml",
+      "bytes": 19105,
+      "sha256": "086e2396de37ef6a22d6306e3549756fce86ec9194e58f1b044d77a6ae955f2f"
+    }
+  ]
+}
