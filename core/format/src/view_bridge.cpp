@@ -445,6 +445,16 @@ void ViewBridge::close() {
         if (s.view) { s.view->set_host_params(nullptr); s.view->set_host_actions(nullptr); }
 
     scripted_ui_.reset();
+    // A processor-built editor's session borrows this root, and the processor
+    // only drops it in on_view_closed() -- which never ran for a view that was
+    // opened but not attached (a failed host attach, a harness). Retire its
+    // realm before the root goes, unless the root was released to a new owner.
+    // Only while the processor lives: once it is gone, so is its session.
+    if (!released_ && owner_is_alive()) {
+        if (auto* session = safe_active_scripted_ui(processor_);
+            session && session->borrows_root(*view_raw_))
+            session->release_root();
+    }
     view_.reset();          // no-op if already released
     host_param_surface_.reset();
     view_raw_ = nullptr;

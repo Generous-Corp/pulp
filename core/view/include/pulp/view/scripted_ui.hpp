@@ -90,6 +90,16 @@ public:
     ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options);
     ~ScriptedUiSession();
 
+    /// Tear down everything that borrows the root -- the realm, its engine and
+    /// bridge, and the accessibility handles over them -- now, while the root
+    /// still exists, and leave the session inert (loads are refused). The
+    /// session borrows its root, so a root destroyed first must be preceded by
+    /// this; ViewBridge::close() calls it for the processor's active session
+    /// before it destroys the editor root. Idempotent; the destructor runs it.
+    void release_root() noexcept;
+    /// True when `view` is this session's root.
+    bool borrows_root(const View& view) const noexcept { return &root_ == &view; }
+
     ScriptedUiSession(const ScriptedUiSession&) = delete;
     ScriptedUiSession& operator=(const ScriptedUiSession&) = delete;
 
@@ -307,6 +317,7 @@ private:
     // thread. Re-attached to the live engine after every rebuild_from_code().
     ScriptInspectorBridge inspector_bridge_;
     std::unique_ptr<HotReloader> reloader_;
+    bool root_released_ = false;
     std::function<void()> repaint_callback_;
     std::string host_kind_ = "unknown";
     std::function<void()> post_evaluation_reset_callback_;

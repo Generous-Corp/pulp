@@ -697,6 +697,38 @@ class FirstFrameRecordingHost final : public view::PluginViewHost {
 
 } // namespace
 
+TEST_CASE("Editor close: a processor's session is released before an unattached root is destroyed",
+          "[view_bridge][scripted-ui][editor-open][lifetime]") {
+    // The processor owns its ScriptedUiSession and drops it in
+    // on_view_closed(), which never runs for a view that was opened but not
+    // attached (a failed host attach). The bridge destroys that root anyway,
+    // so it must retire the session's realm first: otherwise the session
+    // outlives the root it borrows and its teardown writes into freed memory
+    // (heap-use-after-free in WidgetBridge::quarantine_realm under ASan).
+    state::StateStore store;
+    DeferredScriptEditorProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    p.script_path =
+        write_editor_script("pulp-editor-unattached-close", "createLabel('status', 'mounted', '');\n");
+    {
+        auto options = format::ViewBridge::Options::hosted_editor();
+        options.content_first_open = true;
+        format::ViewBridge bridge(p, store, options);
+        REQUIRE(bridge.open());
+        FirstFrameRecordingHost host;
+        REQUIRE(bridge.prepare_first_frame(host));
+        REQUIRE(p.session->bridge() != nullptr);
+        bridge.close();  // never attached: on_view_closed() does not run
+        CHECK(p.closed_count == 0);
+        // The realm is gone with the root, and the session refuses to remount.
+        CHECK(p.session->bridge() == nullptr);
+        CHECK_FALSE(p.session->load());
+    }
+    p.session.reset();  // destroying the inert session touches nothing freed
+    std::filesystem::remove_all(p.script_path.parent_path());
+}
+
 TEST_CASE("Editor open: hosted editors open content-first unless PULP_EDITOR_OPEN=view-first",
           "[view_bridge][scripted-ui][editor-open][content-first]") {
     const char* saved = std::getenv("PULP_EDITOR_OPEN");
