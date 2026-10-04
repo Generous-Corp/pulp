@@ -890,6 +890,11 @@ public:
     /// See `WidgetBridge::set_repaint_callback` for the override path.
     void request_repaint();
 
+    /// Ask the host for a frame without marking any damage: the frame's own
+    /// work (a queued requestAnimationFrame callback, a canvas redraw) marks
+    /// what it changes. Use only when nothing has changed yet.
+    void request_frame();
+
     /// Bounded repaint: invalidate only `local_dirty` (this view's local
     /// coordinates), mapped to root space, so a live sub-view (meter, grid,
     /// overlay) does not force the whole surface to re-composite. Escalates to a

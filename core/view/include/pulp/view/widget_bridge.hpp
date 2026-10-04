@@ -390,8 +390,14 @@ public:
         std::uint64_t unmarked_mutations = 0;
         std::uint64_t layout_generation = 0;
         bool self_damaged(const View& root) const;
+        bool untouched(const View& root) const;
     };
     DamageLedger damage_ledger() const;
+    /// The repaint owed after a batch of script work that requested none
+    /// itself, decided from what it marked (see DamageLedger).
+    void request_repaint_after(const DamageLedger& ledger);
+    /// Ask for a frame without marking damage (View::request_frame()).
+    void request_frame();
 
     // Override the AI CLI command used by the design tool chat.
     void set_ai_cli_command(std::string cmd);
@@ -809,6 +815,9 @@ private:
     std::vector<BindingAttempt> binding_attempts_;
 
     std::function<void()> repaint_callback_;
+    /// The constructor's own callback (the root's host) is still installed,
+    /// so a frame without damage can be asked of that host directly.
+    bool default_repaint_callback_ = true;
     std::uint64_t repaint_request_generation_ = 0;
 
 #ifdef PULP_BENCHMARK

@@ -1479,6 +1479,17 @@ TEST_CASE("Native message dispatch adds no whole-surface damage when the work ma
     CHECK(own.damage.width < 100.0f);
     CHECK(own.damage.height < 100.0f);
 
+    // A handler that changes nothing (it only queues a frame callback) asks
+    // for a frame, not for damage: that frame marks what it draws.
+    bridge.load_script("globalThis.queueOnly = function(type, payload, id) {"
+                       " requestAnimationFrame(function() {}); };", "dispatch-queue");
+    const auto& quiet = probe.measure([&] {
+        bridge.dispatch_native_message("queueOnly", "tick", payload, "t", "test");
+    });
+    CHECK_FALSE(quiet.full_damage);
+    CHECK(quiet.repaint_requests == 0);
+    CHECK(quiet.frame_requests >= 1);
+
     // Negative control: an unmarked paint change in the same handler keeps
     // the whole-surface request.
     const auto& mixed = probe.measure([&] {

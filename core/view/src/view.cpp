@@ -2437,6 +2437,14 @@ void View::request_repaint() {
     }
 }
 
+void View::request_frame() {
+    if (window_host_) {
+        window_host_->request_frame();
+    } else if (plugin_view_host_) {
+        plugin_view_host_->request_frame();
+    }
+}
+
 void View::request_repaint_self(float halo) {
     // Bounded invalidation for a widget's own repaint. The rect-less
     // request_repaint() marks the WHOLE surface dirty by design, which is right

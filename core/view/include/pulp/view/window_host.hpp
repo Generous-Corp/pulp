@@ -153,6 +153,13 @@ public:
     // simply repaints in full, so bounded marks are always safe to ignore.
     void mark_dirty(const Rect& root_rect);
 
+    // Schedule a frame WITHOUT adding damage: for work that changed nothing
+    // yet needs a frame to run (a requestAnimationFrame callback queued by a
+    // message handler). Whatever that frame changes marks its own damage; a
+    // frame that marks nothing repaints in full, as an unbounded one always
+    // has.
+    void request_frame() { schedule_repaint(); }
+
     // True when the pending repaint covers the whole surface. Defaults true
     // (the first frame is always full) and after any no-arg mark_dirty();
     // becomes false once clear_pending_dirty() runs and only bounded
