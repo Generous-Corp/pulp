@@ -45,8 +45,10 @@ export function endBridgeBatch(): void {
         } catch (error) {
             // A failed setter must not strand later independent updates. The
             // first error remains observable after the queue is fully drained.
-            firstError ??= error;
-            hasError = true;
+            if (!hasError) {
+                firstError = error;
+                hasError = true;
+            }
         }
     }
     if (hasError) throw firstError;
