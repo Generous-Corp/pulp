@@ -1672,10 +1672,6 @@ class BaseInventoryTest(unittest.TestCase):
 
 
 class FailureSetTest(unittest.TestCase):
-    """The per-test failure sets a bounded run's verdict rests on, read from
-    ctest's own JUnit reports: what counts as failed, and the verdict over the
-    selected, full and allowlisted sets."""
-
     FIXTURE = Path(__file__).resolve().parent / "fixtures/changed_surface/ctest-junit.xml"
 
     def test_ctest_junit_failures_exclude_passes_and_skips(self) -> None:
