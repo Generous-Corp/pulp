@@ -58,12 +58,13 @@ struct ProcessingSwitchPlan {
 /// of delay that needs `incoming_history` samples of input before its output
 /// is steady (an FIR's length; zero for a realisation that primes its own
 /// stream start). The fade is `fade_seconds` at `sample_rate`. Pure.
-[[nodiscard]] inline ProcessingSwitchPlan plan_processing_switch(
-    std::int64_t incoming_latency, std::int64_t incoming_history, double sample_rate,
-    double fade_seconds) noexcept {
+[[nodiscard]] inline ProcessingSwitchPlan plan_processing_switch(std::int64_t incoming_latency,
+                                                                 std::int64_t incoming_history,
+                                                                 double sample_rate,
+                                                                 double fade_seconds) noexcept {
     ProcessingSwitchPlan plan;
-    plan.warm_samples = std::max<std::int64_t>(0, incoming_latency)
-                      + std::max<std::int64_t>(0, incoming_history);
+    plan.warm_samples =
+        std::max<std::int64_t>(0, incoming_latency) + std::max<std::int64_t>(0, incoming_history);
     const double rate = (std::isfinite(sample_rate) && sample_rate > 0.0) ? sample_rate : 48000.0;
     const double fade = (std::isfinite(fade_seconds) && fade_seconds > 0.0) ? fade_seconds : 0.0;
     plan.fade_samples = std::max<std::int64_t>(1, std::llround(fade * rate));
@@ -76,8 +77,16 @@ template <typename SampleType = float>
 inline void processing_switch_gains_at(const ProcessingSwitchPlan& plan, std::int64_t position,
                                        SampleType& outgoing, SampleType& incoming) noexcept {
     const std::int64_t into_fade = position - plan.warm_samples;
-    if (into_fade < 0) { outgoing = SampleType{1}; incoming = SampleType{0}; return; }
-    if (into_fade >= plan.fade_samples) { outgoing = SampleType{0}; incoming = SampleType{1}; return; }
+    if (into_fade < 0) {
+        outgoing = SampleType{1};
+        incoming = SampleType{0};
+        return;
+    }
+    if (into_fade >= plan.fade_samples) {
+        outgoing = SampleType{0};
+        incoming = SampleType{1};
+        return;
+    }
     TransitionMixerT<SampleType> mixer;
     mixer.configure(static_cast<std::size_t>(plan.fade_samples), TransitionCurve::EqualPower);
     mixer.gains_at(static_cast<std::size_t>(into_fade), outgoing, incoming);
@@ -90,38 +99,49 @@ inline void processing_switch_gains_at(const ProcessingSwitchPlan& plan, std::in
 /// calls `mix()`, which leaves the heard result in `output`. Once `finished()`
 /// the caller drops the outgoing realisation and runs the incoming one alone;
 /// `mix()` has by then already been returning the incoming output exactly.
-template <typename SampleType = float>
-class ProcessingSwitchCrossfadeT {
-public:
+template <typename SampleType = float> class ProcessingSwitchCrossfadeT {
+  public:
     void begin(const ProcessingSwitchPlan& plan) noexcept {
         plan_ = plan;
-        if (plan_.fade_samples < 1) plan_.fade_samples = 1;
+        if (plan_.fade_samples < 1)
+            plan_.fade_samples = 1;
         mixer_.configure(static_cast<std::size_t>(plan_.fade_samples), TransitionCurve::EqualPower);
         position_ = 0;
         active_ = true;
     }
-    void cancel() noexcept { active_ = false; position_ = 0; }
+    void cancel() noexcept {
+        active_ = false;
+        position_ = 0;
+    }
 
-    [[nodiscard]] bool active() const noexcept { return active_; }
+    [[nodiscard]] bool active() const noexcept {
+        return active_;
+    }
     [[nodiscard]] bool finished() const noexcept {
         return active_ && position_ >= plan_.total_samples();
     }
     [[nodiscard]] bool warming() const noexcept {
         return active_ && position_ < plan_.warm_samples;
     }
-    [[nodiscard]] std::int64_t position() const noexcept { return position_; }
-    [[nodiscard]] const ProcessingSwitchPlan& plan() const noexcept { return plan_; }
+    [[nodiscard]] std::int64_t position() const noexcept {
+        return position_;
+    }
+    [[nodiscard]] const ProcessingSwitchPlan& plan() const noexcept {
+        return plan_;
+    }
 
     /// Blend `num_samples` of the outgoing output (in `output`) with the
     /// incoming output, in place, and advance. While warming `output` is left
     /// untouched; past the fade it becomes the incoming output exactly.
     void mix(SampleType* const* output, const SampleType* const* incoming, int channels,
              int num_samples) noexcept {
-        if (!active_ || num_samples <= 0) return;
+        if (!active_ || num_samples <= 0)
+            return;
         for (int i = 0; i < num_samples; ++i) {
             const std::int64_t into_fade = position_ - plan_.warm_samples;
             if (into_fade >= plan_.fade_samples) {
-                for (int ch = 0; ch < channels; ++ch) output[ch][i] = incoming[ch][i];
+                for (int ch = 0; ch < channels; ++ch)
+                    output[ch][i] = incoming[ch][i];
             } else if (into_fade >= 0) {
                 SampleType g_out{}, g_in{};
                 mixer_.gains_at(static_cast<std::size_t>(into_fade), g_out, g_in);
@@ -132,7 +152,7 @@ public:
         }
     }
 
-private:
+  private:
     ProcessingSwitchPlan plan_{};
     TransitionMixerT<SampleType> mixer_{};
     std::int64_t position_ = 0;
@@ -142,4 +162,4 @@ private:
 using ProcessingSwitchCrossfade = ProcessingSwitchCrossfadeT<float>;
 using ProcessingSwitchCrossfade64 = ProcessingSwitchCrossfadeT<double>;
 
-}  // namespace pulp::signal
+} // namespace pulp::signal
