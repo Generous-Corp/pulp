@@ -211,17 +211,36 @@ TEST_CASE("GPU plug-in host: a resize before the display link paints re-presents
     auto host = PluginViewHost::create(root, options(true, kDeclared));
     REQUIRE(host);
     if (host->gpu_surface() == nullptr) SKIP("no Dawn/Metal adapter in this process");
+    // In a window that is never ordered in: the host treats the view as shown,
+    // and nothing appears on screen.
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 64, 40)
+                                                   styleMask:NSWindowStyleMaskBorderless
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    window.releasedWhenClosed = NO;
+    NSView* view = (__bridge NSView*)host->native_handle();
+    [window.contentView addSubview:view];
+    host->set_idle_callback(nullptr);
     REQUIRE(host->present_first_frame());
     REQUIRE(root.paints == 1);
     CHECK(root.last_w == 64.0f);
 
-    // A host that shrinks the editor right after open (a restored or minimum
-    // size): the only frame on screen is the content-first one, so the new
-    // size is presented now instead of that frame stretched into new bounds.
+    // A host that resizes the editor right after open, twice in one run-loop
+    // turn (a container settling): one new frame, at the final size, before
+    // the turn's transaction commits -- not that frame stretched until the
+    // display link paints.
+    host->set_size(56, 35);
     host->set_size(48, 30);
-    CHECK(root.paints == 2);
+    CHECK(root.paints == 1);  // presented with the commit, not inside set_size
+    [[NSRunLoop mainRunLoop] runMode:NSDefaultRunLoopMode
+                          beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    CHECK(root.paints >= 2);
     CHECK(root.last_w == 48.0f);
     CHECK(root.last_h == 30.0f);
+
+    host->detach();
+    host.reset();
+    [window close];
 }
 #endif
 

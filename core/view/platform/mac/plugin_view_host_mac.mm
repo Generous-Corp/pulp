@@ -2345,6 +2345,7 @@ public:
         // queued on the main thread becomes a no-op before we free anything
         // (mirrors the #2502 deferred-click token).
         alive_->store(false, std::memory_order_release);
+        release_resize_present_observer();
         root_.set_plugin_view_host(nullptr);
         // Drop held motion rather than delivering it: the drag target may
         // already be unmounted, and a teardown is not a frame.
@@ -2404,21 +2405,24 @@ public:
     // CAMetalLayer now, inside the host's view-creation call, so the first
     // image the window server composites for this view is that frame.
     //
-    // A drawable presents asynchronously, once the GPU finishes it, while the
-    // view's insertion into the host's window (and any geometry flush) reaches
-    // the window server with the next Core Animation commit. Presented the
-    // ordinary way, that commit can land first: a host whose window is already
-    // on screen when it attaches the editor (VST3 attached(), CLAP set_parent(),
-    // AU v3) then shows the layer's backing colour for a vsync before the frame.
-    // So this one frame is presented WITH the transaction: the GPU work is
-    // finished before the present, and a single flush commits the layer's
-    // geometry and its first contents together. No window is needed, so out of
-    // process (AUHostingService) the view already holds the frame when it
-    // arrives. Skipped once the display link has painted.
+    // Not yet in a window (AU v2's factory; out of process AUHostingService
+    // inserts the view later), an ordinary present suffices: the drawable is
+    // the layer's contents long before the layer reaches the screen.
+    //
+    // Already in a window that is on screen (VST3 attached(), CLAP
+    // set_parent(), AU v3), an ordinary present loses a race: the drawable
+    // presents asynchronously once the GPU finishes it, while the view's
+    // insertion (and any geometry flush) reaches the window server with the
+    // next Core Animation commit, which can land first and show the backing
+    // colour for a vsync. There the frame is presented WITH the transaction:
+    // the GPU work is finished first, and one flush commits the layer's
+    // geometry and its first contents together. Skipped once the display link
+    // has painted.
     bool present_first_frame() override {
         needs_repaint_.store(true, std::memory_order_relaxed);
         if (frame_ok_count_ > 0) return false;
-        only_first_frame_presented_ = present_with_transaction();
+        only_first_frame_presented_ =
+            metal_view_.window ? present_with_transaction() : render_frame();
         return only_first_frame_presented_;
     }
 
@@ -2439,6 +2443,37 @@ public:
         return presented;
     }
 
+    // A host that sizes the editor right after the content-first frame (a
+    // restored or minimum size, a container settling) would otherwise show
+    // that frame stretched into the new bounds until the display link's first
+    // frame. Until the link has painted, the new size is presented with the
+    // transaction that commits it: once, at the final size, from a run-loop
+    // observer that runs just before Core Animation commits the run loop's
+    // implicit transaction, so a burst of resizes in one turn costs one frame.
+    // A view with no window is not on screen; the link paints it on arrival.
+    void schedule_resize_present() {
+        if (resize_present_observer_) return;
+        auto alive = alive_;
+        resize_present_observer_ = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault, kCFRunLoopBeforeWaiting | kCFRunLoopExit,
+            /*repeats=*/false, /*order: before Core Animation's commit*/ 1999000,
+            ^(CFRunLoopObserverRef, CFRunLoopActivity) {
+                if (!alive->load(std::memory_order_acquire)) return;
+                release_resize_present_observer();
+                if (only_first_frame_presented_ && metal_view_.window)
+                    present_with_transaction();
+            });
+        CFRunLoopAddObserver(CFRunLoopGetMain(), resize_present_observer_,
+                             kCFRunLoopCommonModes);
+    }
+
+    void release_resize_present_observer() {
+        if (!resize_present_observer_) return;
+        CFRunLoopObserverInvalidate(resize_present_observer_);
+        CFRelease(resize_present_observer_);
+        resize_present_observer_ = nullptr;
+    }
+
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
         @autoreleasepool {
@@ -2456,13 +2491,9 @@ public:
             }
         }
         needs_repaint_.store(true, std::memory_order_relaxed);
-        // A host that sizes the editor right after the content-first frame
-        // (a restored or minimum size, a container settling) would otherwise
-        // show that frame stretched into the new bounds until the display
-        // link's first frame. Until the link has painted, present the new size
-        // with the resize's own transaction instead.
+        // See schedule_resize_present().
         if (only_first_frame_presented_ && width > 0 && height > 0)
-            present_with_transaction();
+            schedule_resize_present();
     }
 
     Size get_size() const override { return size_; }
@@ -2635,6 +2666,7 @@ private:
     // True from the content-first frame until the display link paints: the
     // only frames on screen are ones this host presented with a transaction.
     bool only_first_frame_presented_ = false;
+    CFRunLoopObserverRef resize_present_observer_ = nullptr;
 
     // FIRST-PAINT SIZE matters: the (width,height) this surface is created at
     // becomes the first painted frame's size. In an out-of-process plugin host
