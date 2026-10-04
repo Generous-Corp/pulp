@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include <string>
 #include <string_view>
 #include <functional>
@@ -311,11 +313,28 @@ struct ScriptBytecodeCacheStats {
     std::uint64_t compiles = 0;   ///< scripts compiled and stored
     std::uint64_t hits = 0;       ///< evaluations served from stored bytecode
     std::uint64_t bypassed = 0;   ///< too small to cache, or cache disabled
+    std::uint64_t precompiled = 0;  ///< of `compiles`, done by precompile_scripts()
+    std::uint64_t waits = 0;      ///< evaluations that waited for an in-flight compile
     std::size_t entries = 0;
     std::size_t bytes = 0;        ///< bytecode + key bytes held
 };
 ScriptBytecodeCacheStats script_bytecode_cache_stats();
 /// Drop every stored script (tests; a host that wants the memory back).
 void clear_script_bytecode_cache();
+
+/// Compile whole scripts into the bytecode cache without running them, on the
+/// calling thread, in a private QuickJS runtime. A later realm that evaluates
+/// byte-identical source with `evaluate_script()` reads the bytecode instead
+/// of parsing; one that asks while this call is still compiling that source
+/// waits for it rather than compiling it a second time. Sources already
+/// cached, being compiled elsewhere, or below the cache's size floor are
+/// skipped. `cancel`, when set, is checked between scripts. Returns how many
+/// scripts it compiled. A no-op (0) when the cache is disabled.
+/// The calling thread needs a stack of a few MB: QuickJS's parser recurses on
+/// the native stack (`ScriptedUiPrewarmer` runs it on such a thread).
+std::size_t precompile_scripts(const std::vector<std::string>& sources,
+                               const std::atomic<bool>* cancel = nullptr);
+/// True when byte-identical `source` has stored bytecode (tests, diagnostics).
+bool script_bytecode_cached(const std::string& source);
 
 } // namespace pulp::view

@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_sources.hpp>
 #include <pulp/view/js_engine.hpp>
+#include <pulp/view/scripted_ui_prewarm.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
 using namespace pulp::view;
@@ -611,6 +612,45 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ verifies a document once per proce
     CHECK(stats.verifies == 2);
     CHECK(stats.hits == 1);
     CHECK(stats.entries == 2);
+
+    clear_materialized_document_cache();
+    clear_script_bytecode_cache();
+}
+
+TEST_CASE("prewarm_scripted_ui prepares a materialized document before the editor imports it",
+          "[view][bridge][runtime-import][materialized-browser][editor-open]") {
+    // A plug-in prewarms at instantiation; the editor's first import then
+    // neither verifies the document nor compiles its scripts.
+    clear_materialized_document_cache();
+    clear_script_bytecode_cache();
+    const auto doc = reopen_sidecar("prewarm");
+    std::string runtime = "var __prewarmRuntime = 0;\n";
+    while (runtime.size() < 16 * 1024)
+        runtime += "__prewarmRuntime += 1; // stands in for a bundled UI runtime\n";
+
+    const auto before = scripted_ui_prewarm_stats();
+    prewarm_scripted_ui({{runtime}, {doc}});
+    REQUIRE(wait_for_scripted_ui_prewarm(std::chrono::seconds(20)));
+    const auto after = scripted_ui_prewarm_stats();
+    CHECK(after.requests == before.requests + 1);
+    CHECK(after.documents_verified == before.documents_verified + 1);
+    CHECK(after.documents_rejected == before.documents_rejected);
+    CHECK(after.scripts_compiled == before.scripts_compiled + 2);  // runtime + inline
+    CHECK(script_bytecode_cached(runtime));
+    CHECK(materialized_document_cache_stats().verifies == 1);
+
+    const auto first_open = import_in_fresh_realm(doc);
+    CHECK(first_open.compiles == 0);
+    CHECK(first_open.hits == 1);
+    const auto stats = materialized_document_cache_stats();
+    CHECK(stats.verifies == 1);
+    CHECK(stats.hits == 1);
+
+    // Asking again is free: everything is cached.
+    prewarm_scripted_ui({{runtime}, {doc}});
+    REQUIRE(wait_for_scripted_ui_prewarm(std::chrono::seconds(20)));
+    CHECK(scripted_ui_prewarm_stats().scripts_compiled == after.scripts_compiled);
+    CHECK(materialized_document_cache_stats().verifies == 1);
 
     clear_materialized_document_cache();
     clear_script_bytecode_cache();

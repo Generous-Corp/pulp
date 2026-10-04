@@ -4,11 +4,14 @@
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/design_sources.hpp>
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <mutex>
 #include <string_view>
+#include <vector>
 
 namespace pulp::view {
 namespace {
@@ -42,14 +45,50 @@ public:
 
     std::shared_ptr<const ClaudeBundle> lookup(const std::string& json) {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& entry : entries_) {
-            if (entry.input.size() == json.size()
-                && std::memcmp(entry.input.data(), json.data(), json.size()) == 0) {
-                ++stats_.hits;
-                return entry.bundle;
-            }
+        if (auto hit = find_locked(json)) {
+            ++stats_.hits;
+            return hit;
         }
         return nullptr;
+    }
+
+    // A miss claims `json` for the caller, who verifies it and then calls
+    // release(). If another thread holds the claim for the same bytes (a
+    // background prewarm started first), wait for its result instead of
+    // decoding the same document twice; a waiter that finds the document
+    // still absent afterwards (it was rejected, or evicted) claims it itself.
+    std::shared_ptr<const ClaudeBundle> lookup_or_claim(const std::string& json,
+                                                        bool& claimed) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        claimed = false;
+        for (;;) {
+            if (auto hit = find_locked(json)) {
+                ++stats_.hits;
+                return hit;
+            }
+            if (!pending_locked(json)) {
+                pending_.push_back(&json);
+                claimed = true;
+                return nullptr;
+            }
+            ++stats_.waits;
+            if (!changed_.wait_for(lock, std::chrono::seconds(5),
+                                   [&] { return !pending_locked(json); }))
+                return nullptr;  // not claimed: the caller verifies unshared
+        }
+    }
+
+    void release(const std::string& json) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto it = pending_.begin(); it != pending_.end(); ++it) {
+                if (*it == &json) {
+                    pending_.erase(it);
+                    break;
+                }
+            }
+        }
+        changed_.notify_all();
     }
 
     void note_verify(bool accepted) {
@@ -92,8 +131,29 @@ private:
         std::shared_ptr<const ClaudeBundle> bundle;
         std::size_t bytes = 0;
     };
+
+    std::shared_ptr<const ClaudeBundle> find_locked(const std::string& json) const {
+        for (const auto& entry : entries_) {
+            if (entry.input.size() == json.size()
+                && std::memcmp(entry.input.data(), json.data(), json.size()) == 0)
+                return entry.bundle;
+        }
+        return nullptr;
+    }
+
+    // A claim is the claimer's own string, alive until it releases.
+    bool pending_locked(const std::string& json) const {
+        for (const auto* claimed : pending_)
+            if (claimed->size() == json.size()
+                && std::memcmp(claimed->data(), json.data(), json.size()) == 0)
+                return true;
+        return false;
+    }
+
     std::mutex mutex_;
+    std::condition_variable changed_;
     std::deque<Entry> entries_;
+    std::vector<const std::string*> pending_;
     MaterializedDocumentCacheStats stats_;
 };
 
@@ -103,9 +163,18 @@ std::shared_ptr<const ClaudeBundle> parse_materialized_browser_document_shared(
     const std::string& json) {
     auto& cache = MaterializedDocumentCache::instance();
     const bool reuse = MaterializedDocumentCache::enabled();
+    bool claimed = false;
     if (reuse) {
-        if (auto hit = cache.lookup(json)) return hit;
+        if (auto hit = cache.lookup_or_claim(json, claimed)) return hit;
     }
+    // Release the claim on every path (a throw inside the decoder included),
+    // after the result is stored, so a waiter wakes to find it.
+    struct Release {
+        MaterializedDocumentCache& cache;
+        const std::string& json;
+        bool active;
+        ~Release() { if (active) cache.release(json); }
+    } release{cache, json, claimed};
     std::optional<ClaudeBundle> parsed;
     {
         PULP_TRACE_SCOPE_NAMED("js", "runtime_import_verify");
