@@ -10,6 +10,8 @@
 // Bridge globals are looked up through globalThis at call time so the
 // mock-bridge install path picks them up. See host-config.ts for the
 // matching pattern.
+import { queueBridgeCall } from './bridge-batch.js';
+
 type AnyFn = (...args: unknown[]) => unknown;
 const g = globalThis as unknown as Record<string, AnyFn | undefined>;
 let _pa_count = 0;
@@ -46,6 +48,7 @@ export function call(name: string, ...args: unknown[]): void {
             lg('[pa#' + _pa_count + '] ' + name + '(' + a0 + ',' + a1 + (args.length > 2 ? ',' + a2 : '') + ')');
         }
     }
+    if (queueBridgeCall(name, fn, args)) return;
     fn(...args);
 }
 
