@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261004-design-import-next-wave-watch",
+  "created_at": "2026-10-04T23:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "design-import-refactor: browser fidelity and importer safety improvements remain Pulp-only per owner decision 2026-10-04; no design-import, Chromium, rendering, packaging, or Vellum authority moves; Vellum inherits later.",
+  "tests": [
+    "node --check tools/import-design/browser_capture/capture.mjs",
+    "node --test tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+    "python3 tools/scripts/vellum_watch_preflight.py --enforce --inventories"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
