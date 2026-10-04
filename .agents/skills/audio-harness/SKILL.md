@@ -1314,6 +1314,28 @@ against `SpectralFrameEngine` (true latency `fft_size + analysis_hop` = 2560),
 not just against a delay line, and a companion case deliberately misreports by
 one analysis hop to confirm the catch. Copy that shape when covering real DSP.
 
+**A latency contract can pass while the stream start is wrong.** The
+`SpectralFrameEngine` latency dogfood above passed at -137 dB on a noise
+stimulus while the engine was swallowing the first `fft_size - hop` samples
+after every prepare()/reset() — a contract proves *where* the audio is, not that
+the head of the stream survived. That defect shipped: the first ~85 ms of every playback start or
+seek through `SpectralFrameEngine` were tapered (impulse at sample 0 → -300 dB,
+1024 → -24.8 dB, 2048 → -3.5 dB at FFT 8192 / hop 2048) because the first
+frames ended at sample `fft_size - 1` and the startup normalisation floor
+attenuated the partial overlap. The engine now starts its frame grid at
+`first_frame_start()` (the last hop multiple above `-fft_size`, implicit
+silence before 0), so sample 0 has full overlap and the reported latency is
+unchanged; `spectral_ola_window_energy()` states the coverage at any position
+without running audio. Prove stream starts with *positioned* stimuli — impulses
+at 0, 13, 512, 1024, 2048, 6000 and a kick at 0, after prepare AND after reset —
+nulled against the input delayed by the reported latency
+(`test/test_spectral_frame_engine_stream_start.cpp`). Do not prime the engine
+with silence app-side any more: it is redundant, and it now emits real frames,
+so it costs FFTs on the audio thread's reset. A split-API caller that maps frame
+ordinals to time itself (`RealtimePitchTimeProcessor`) opts out with
+`SpectralFrameEngineConfig::full_overlap_stream_start = false` and keeps the
+tapered start.
+
 ## Proving an SOS cascade executor
 
 For a runtime cascade, do not use its own DF2T recurrence as the oracle. Compare

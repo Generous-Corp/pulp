@@ -23,6 +23,15 @@
 /// synthesis window, which keeps amplitude exact for any hop (including
 /// variable hops and stream edges) without hardcoded COLA constants.
 ///
+/// Stream start: by default the frame grid begins before the first input
+/// sample (at `first_frame_start()`, the last hop multiple above -fft_size),
+/// with silence as the implicit history. Every real sample, including sample 0
+/// after prepare() or reset(), is therefore covered by the full set of
+/// overlapping windows and reconstructs exactly; the pre-stream part of those
+/// frames is discarded, and the reported latency is unchanged. Callers need
+/// not prime the engine with silence; doing so is harmless but runs the FFTs
+/// of the primed frames.
+///
 /// Basis: Allen & Rabiner 1977 (unified STFT analysis/synthesis);
 /// Crochiere 1980 (weighted overlap-add). No allocation or locks after
 /// `prepare()`.
@@ -49,6 +58,14 @@ struct SpectralFrameEngineConfig {
     int max_block = 4096;      // Largest process() block the caller will use
     int max_synthesis_hop = 0; // 0 = 2 * analysis_hop; upper bound for synthesize_frame()
     WindowFunction::Type window = WindowFunction::Type::hann;
+    /// true: analysis frames start before the stream so the first sample after
+    /// prepare()/reset() gets full overlap (exact reconstruction from sample 0,
+    /// at the same reported latency). false: the first frame ends at input
+    /// sample fft_size - 1, and samples in the first fft_size - analysis_hop
+    /// are covered by fewer windows and tapered toward zero at the start. Keep
+    /// false only for split-API callers that map frame ordinals to stream time
+    /// themselves and rely on frame k analysing input [k * hop, k * hop + fft).
+    bool full_overlap_stream_start = true;
 };
 
 inline constexpr int kSpectralFrameEngineMinimumFftSize = 256;
@@ -72,6 +89,37 @@ inline bool is_valid_spectral_frame_geometry(int fft_size, int analysis_hop) noe
         && (fft_size & (fft_size - 1)) == 0
         && analysis_hop > 0
         && analysis_hop <= fft_size / 2;
+}
+
+/// Stream position of the first analysis frame after prepare()/reset(). With
+/// full overlap this is the largest multiple of `analysis_hop` that lies above
+/// -fft_size, so every frame that overlaps input sample 0 exists.
+inline constexpr std::int64_t spectral_frame_engine_first_frame_start(
+    int fft_size, int analysis_hop, bool full_overlap_stream_start) noexcept {
+    if (!full_overlap_stream_start || fft_size <= 0 || analysis_hop <= 0) return 0;
+    return -static_cast<std::int64_t>((fft_size - 1) / analysis_hop) * analysis_hop;
+}
+
+/// Accumulated squared synthesis window at stream `position` for equal-hop
+/// frames of length `fft_size` starting at `first_frame_start + k * hop`
+/// (k >= 0) — the per-sample divisor the WOLA path normalizes by. Pure, so a
+/// test or tool can state the coverage at any sample without running audio.
+template <typename SampleType>
+inline double spectral_ola_window_energy(const SampleType* window, int fft_size, int hop,
+                                         std::int64_t first_frame_start,
+                                         std::int64_t position) noexcept {
+    if (window == nullptr || fft_size <= 0 || hop <= 0 || position < first_frame_start)
+        return 0.0;
+    const std::int64_t lowest =
+        std::max(first_frame_start, position - static_cast<std::int64_t>(fft_size) + 1);
+    const std::int64_t first_k = (lowest - first_frame_start + hop - 1) / hop;
+    double sum = 0.0;
+    for (std::int64_t start = first_frame_start + first_k * hop; start <= position;
+         start += hop) {
+        const auto w = static_cast<double>(window[static_cast<std::size_t>(position - start)]);
+        sum += w * w;
+    }
+    return sum;
 }
 
 /// Derive every integer and typed backing-store capacity used by prepare().
@@ -165,17 +213,20 @@ public:
         config_ = config;
         config_.max_synthesis_hop = geometry->max_synthesis_hop;
         num_bins_ = geometry->num_bins;
+        first_frame_start_ = spectral_frame_engine_first_frame_start(
+            config_.fft_size, config_.analysis_hop, config_.full_overlap_stream_start);
 
         fft_ = FftT<SampleType>(config_.fft_size);
         window_ = WindowFunction::generate<SampleType>(config_.fft_size,
                                                        config_.window);
 
         // Steady-state OLA window-energy at a fully-overlapped sample for
-        // the analysis hop. Used to floor the per-sample normalization so
-        // partial-overlap samples at stream edges taper to zero instead of
-        // being amplified by division by a near-zero coverage (pulp #3975).
-        // The floor sits far below any real body coverage (down to a 4x
-        // sparser synthesis hop), so body samples normalize unchanged.
+        // the analysis hop. Without full-overlap stream start it floors the
+        // per-sample normalization so partial-overlap samples at the stream
+        // start taper to zero instead of being amplified by division by a
+        // near-zero coverage. The floor sits far below any real body coverage
+        // (down to a 4x sparser synthesis hop), so body samples normalize
+        // unchanged.
         double steady = 0.0;
         const int n = config_.fft_size, h = config_.analysis_hop;
         const int center = n; // well inside the plateau
@@ -217,6 +268,12 @@ public:
     /// block phase; the constant fft_size + analysis_hop bound makes the
     /// reported latency exact and block-size independent.
     int latency_samples() const { return config_.fft_size + config_.analysis_hop; }
+
+    /// Stream position of the first analysis frame after prepare()/reset():
+    /// 0 without full-overlap stream start, otherwise in (-fft_size, 0] and a
+    /// multiple of analysis_hop. Frame k analyses input
+    /// [first_frame_start() + k * hop, ... + fft_size), silence before 0.
+    std::int64_t first_frame_start() const { return first_frame_start_; }
 
     int fft_size() const { return config_.fft_size; }
     int analysis_hop() const { return config_.analysis_hop; }
@@ -266,9 +323,11 @@ public:
 
     /// Split API — analysis only. Pushes `num_samples` per channel from
     /// `in`, invoking `on_frames` once per completed frame. Runs are split
-    /// exactly at frame boundaries, so frames land at fft_size + k * hop
-    /// for ANY feed chunking — the analysis hop the callback observes is
-    /// constant regardless of host block size.
+    /// exactly at frame boundaries, so frames land at
+    /// fft_size + first_frame_start() + k * hop for ANY feed chunking — the
+    /// analysis hop the callback observes is constant regardless of host block
+    /// size. With full-overlap stream start the first frames arrive after
+    /// fewer than fft_size samples and carry the implicit pre-stream silence.
     template <typename Fn>
     void analyze(const SampleType* const* in, int num_samples, Fn&& on_frames) {
         const int n = config_.fft_size;
@@ -298,9 +357,17 @@ public:
     /// current synthesis position, then advance it by `synthesis_hop`.
     /// `frames` must hold `channels()` pointers to `num_bins()` bins
     /// (DC..Nyquist); the conjugate half is reconstructed internally.
+    /// The synthesis position starts at first_frame_start(); output that falls
+    /// before stream position 0 is discarded.
     void synthesize_frame(std::complex<SampleType>* const* frames, int synthesis_hop) {
         assert(synthesis_hop > 0 && synthesis_hop <= config_.max_synthesis_hop);
         const int n = config_.fft_size;
+        // Pre-stream samples of a frame that starts before position 0 are
+        // never read, so they are never written: the ring slots they would
+        // alias stay clean for the real stream.
+        const int skip = synth_pos_ < 0
+            ? static_cast<int>(std::min<std::int64_t>(-synth_pos_, n))
+            : 0;
         for (int ch = 0; ch < config_.channels; ++ch) {
             for (int k = 0; k < num_bins_; ++k) {
                 freq_buf_[static_cast<size_t>(k)] = frames[ch][k];
@@ -310,12 +377,12 @@ public:
             fft_.inverse(freq_buf_.data());
             SampleType* ring =
                 output_ring_.data() + static_cast<size_t>(ch) * ring_size_;
-            for (int i = 0; i < n; ++i) {
+            for (int i = skip; i < n; ++i) {
                 const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
                 ring[idx] += freq_buf_[static_cast<size_t>(i)].real() * window_[static_cast<size_t>(i)];
             }
         }
-        for (int i = 0; i < n; ++i) {
+        for (int i = skip; i < n; ++i) {
             const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
             norm_ring_[idx] += window_[static_cast<size_t>(i)] * window_[static_cast<size_t>(i)];
         }
@@ -353,8 +420,8 @@ public:
                   std::complex<SampleType>(SampleType{0.0f}, SampleType{0.0f}));
         input_pos_ = 0;
         samples_fed_ = 0;
-        next_frame_at_ = config_.fft_size;
-        synth_pos_ = 0;
+        next_frame_at_ = config_.fft_size + first_frame_start_;
+        synth_pos_ = first_frame_start_;
         available_ = 0;
         read_pos_ = 0;
         out_count_ = 0;
@@ -366,11 +433,13 @@ private:
     void pop_one(SampleType* const* out, int i) {
         assert(read_pos_ < available_);
         const auto idx = static_cast<size_t>(read_pos_ & ring_mask_);
-        // Floor only the stream-start partial-overlap region. Once a full FFT
-        // window has elapsed, per-sample normalization must remain exact for
-        // non-COLA windows/hops whose valid body coverage can dip below the
-        // startup floor.
-        const bool startup_edge = read_pos_ < config_.fft_size;
+        // Floor only the stream-start partial-overlap region, which exists
+        // only without full-overlap stream start. Elsewhere per-sample
+        // normalization must remain exact for non-COLA windows/hops whose
+        // valid body coverage can dip below the startup floor; a genuinely
+        // zero coverage is still guarded below.
+        const bool startup_edge =
+            !config_.full_overlap_stream_start && read_pos_ < config_.fft_size;
         const SampleType norm = startup_edge
             ? std::max(norm_ring_[idx], min_norm_)
             : norm_ring_[idx];
@@ -410,6 +479,7 @@ private:
     int ring_size_ = 0;
     int ring_mask_ = 0;
     SampleType min_norm_ = SampleType{1e-9f}; // OLA coverage floor for edge taper.
+    std::int64_t first_frame_start_ = 0;      // <= 0; see first_frame_start().
 
     std::vector<SampleType> input_ring_;  // channels * fft_size
     std::vector<SampleType> output_ring_; // channels * ring_size

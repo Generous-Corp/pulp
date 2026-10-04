@@ -171,27 +171,33 @@ TEST_CASE("SpectralFrameEngine tapers stream edges instead of spiking",
     // partial-overlap samples at the very start of the stream by a
     // near-zero coverage, producing a full-scale spike in the first
     // ~fft_size/hop samples. The whole output — including sample 0 —
-    // must stay within a small per-sample step for a sustained tone.
-    SpectralFrameEngineConfig config;
-    config.fft_size = 2048;
-    config.analysis_hop = 512;
-    SpectralFrameEngine engine;
-    engine.prepare(config);
+    // must stay within a small per-sample step for a sustained tone, both
+    // with full-overlap stream start and with the anchored grid, whose
+    // partial-overlap start is floored instead.
+    for (bool full_overlap : {true, false}) {
+        SpectralFrameEngineConfig config;
+        config.fft_size = 2048;
+        config.analysis_hop = 512;
+        config.full_overlap_stream_start = full_overlap;
+        SpectralFrameEngine engine;
+        engine.prepare(config);
 
-    auto in = make_tone_channels(1, 48000);
-    auto out = run_identity(engine, in, 480); // non-hop-aligned blocks
+        auto in = make_tone_channels(1, 48000);
+        auto out = run_identity(engine, in, 480); // non-hop-aligned blocks
 
-    float max_step = 0.0f, peak = 0.0f;
-    for (size_t i = 1; i < out[0].size(); ++i) {
-        max_step = std::max(max_step, std::abs(out[0][i] - out[0][i - 1]));
-        peak = std::max(peak, std::abs(out[0][i]));
+        float max_step = 0.0f, peak = 0.0f;
+        for (size_t i = 1; i < out[0].size(); ++i) {
+            max_step = std::max(max_step, std::abs(out[0][i] - out[0][i - 1]));
+            peak = std::max(peak, std::abs(out[0][i]));
+        }
+        INFO("full_overlap: " << full_overlap << ", whole-stream max step: " << max_step
+                              << ", peak: " << peak);
+        // A 440+1237 Hz tone at 0.7 amp has per-sample steps well under 0.2;
+        // the old edge spike was ~2.0 (full-scale). Peak must not exceed the
+        // input amplitude envelope.
+        REQUIRE(max_step < 0.3f);
+        REQUIRE(peak < 1.0f);
     }
-    INFO("whole-stream max step: " << max_step << ", peak: " << peak);
-    // A 440+1237 Hz tone at 0.7 amp has per-sample steps well under 0.2;
-    // the old edge spike was ~2.0 (full-scale). Peak must not exceed the
-    // input amplitude envelope.
-    REQUIRE(max_step < 0.3f);
-    REQUIRE(peak < 1.0f);
 }
 
 TEST_CASE("SpectralFrameEngine preserves non-default steady-state body normalization",
@@ -303,9 +309,22 @@ TEST_CASE("SpectralFrameEngine frame cadence and bin count",
                        ++frames;
                        bins_seen = bins;
                    });
-    // First frame at sample 1024, then every 256: 1 + (10240 - 1024) / 256.
-    REQUIRE(frames == 37);
+    // Full-overlap stream start: the grid begins at -768 (the last hop
+    // multiple above -fft_size), so the first frame completes at sample 256
+    // and one follows every 256: 10240 / 256.
+    REQUIRE(engine.first_frame_start() == -768);
+    REQUIRE(frames == 40);
     REQUIRE(bins_seen == 513);
+
+    // Anchored grid: first frame at sample 1024, then every 256:
+    // 1 + (10240 - 1024) / 256.
+    config.full_overlap_stream_start = false;
+    engine.prepare(config);
+    REQUIRE(engine.first_frame_start() == 0);
+    frames = 0;
+    engine.analyze(in_ptr.data(), 10240,
+                   [&](std::complex<float>* const*, int) { ++frames; });
+    REQUIRE(frames == 37);
 }
 
 TEST_CASE("SpectralFrameEngine64 analyzes and synthesizes double frames",

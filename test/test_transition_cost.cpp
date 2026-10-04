@@ -282,9 +282,10 @@ std::unique_ptr<pulp::format::Processor> make_freeze_processor() {
 
 template <bool Bounded>
 std::vector<TransitionOutcome> freeze_engage_outcomes() {
-    // 0.5 s of capture at a 512-sample hop is 47 frames; the first frame
-    // completes after 4096 samples. 240 blocks of 128 fill the window with
-    // margin, and 64 settle blocks cover the fade and the staged engage.
+    // 0.5 s of capture at a 512-sample hop is 47 frames; the frame grid
+    // starts before the stream, so the first frame completes after one hop.
+    // 240 blocks of 128 fill the window with margin, and 64 settle blocks
+    // cover the fade and the staged engage.
     return TransitionScenario(make_freeze_processor<Bounded>)
         .add({"Freeze engage", kFreeze, 0.0f, 1.0f})
         .block_sizes({128})
