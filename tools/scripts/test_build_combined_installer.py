@@ -564,6 +564,11 @@ class CombinedInstallerTest(unittest.TestCase):
             self._last_productsign_argv,
             msg="productsign must sign the archive with the installer identity",
         )
+        self.assertIn(
+            "--keychain",
+            self._last_productsign_argv,
+            msg="productsign must use the exact unattended signing keychain",
+        )
 
     def test_multi_plugin_packages_are_unique_and_grouped_by_plugin(self) -> None:
         xml, _ = self._run_installer(
