@@ -91,9 +91,9 @@ What Pulp does for you (every hosted format, nothing to opt into):
   needs it too: out of process, AUHostingService inserts the AU v2 view right
   after the factory returns, and a plain present showed the backing colour on
   about one open in twelve. Until the display link paints
-  its first frame, a host resize of a windowed view (a restored or minimum
-  size, a container settling) is presented the same way, right inside
-  `set_size()`; otherwise the content-first frame shows stretched into the new
+  its first frame, a host resize (a restored or minimum size, a container
+  settling) is presented the same way, right inside `set_size()`, window or
+  not (a new drawable size empties the layer); otherwise the content-first frame shows stretched into the new
   bounds, or only the backing colour when the drawable size changed, for a
   vsync. Deferring that present to the end of the run-loop turn is not enough:
   AUHostingService commits its container's intermediate sizes before the turn

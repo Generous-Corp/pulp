@@ -2443,15 +2443,15 @@ public:
     // restored or minimum size, a container settling) would otherwise show
     // that frame stretched into the new bounds -- or, when the drawable size
     // changes under it, only the backing colour -- until the display link's
-    // first frame. Until the link has painted, a resize of a view that is in a
-    // window is presented right here, with the transaction that carries it.
-    // Deferring it to the end of the run-loop turn is not enough out of
-    // process: AUHostingService commits the container's intermediate sizes
-    // before the turn ends, and about one open in twenty-five showed the
-    // backing colour. A view with no window is not on screen; the link paints
-    // it when it arrives.
+    // first frame. Until the link has painted, a resize is presented right
+    // here, with the transaction that carries it. Deferring it to the end of
+    // the run-loop turn is not enough out of process: AUHostingService commits
+    // the container's intermediate sizes before the turn ends, and about one
+    // open in twenty-five showed the backing colour. Nor is skipping a view
+    // that has no window yet: the new drawable size empties the layer, which a
+    // host that resizes its container before showing it then composites.
     void present_resize_before_first_link_frame() {
-        if (!only_first_frame_presented_ || !metal_view_.window) return;
+        if (!only_first_frame_presented_) return;
         if (size_.width == 0 || size_.height == 0) return;
         present_with_transaction();
     }

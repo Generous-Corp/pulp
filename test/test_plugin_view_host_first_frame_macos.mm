@@ -225,6 +225,17 @@ TEST_CASE("GPU plug-in host: a resize before the display link paints re-presents
     REQUIRE(root.paints == 1);
     CHECK(root.last_w == 64.0f);
 
+    // Before the view has a window too: a host that sizes its container
+    // before showing it must not composite an emptied layer.
+    {
+        CountingRoot bare;
+        auto windowless = PluginViewHost::create(bare, options(true, kDeclared));
+        REQUIRE(windowless->present_first_frame());
+        windowless->set_size(40, 25);
+        CHECK(bare.paints == 2);
+        CHECK(bare.last_w == 40.0f);
+    }
+
     // A host that resizes the editor right after open (a restored or minimum
     // size, a container settling): each new size is presented with the resize,
     // not that frame stretched until the display link paints.
