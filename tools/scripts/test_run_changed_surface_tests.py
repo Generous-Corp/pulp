@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 from pathlib import Path
@@ -1364,14 +1365,18 @@ class BaseInventoryTest(unittest.TestCase):
             calls, _ = self.run_base(build, [0, 0, 0])
             self.assertTrue(calls)
 
-    def test_the_only_raw_download_in_cmake_is_the_universal_webgpu_slice(self) -> None:
+    def test_every_raw_download_in_cmake_is_guarded_from_the_base_configure(self) -> None:
         # Every other dependency fetch goes through FetchContent, which the
-        # base configure disconnects. A new file(DOWNLOAD) needs its own guard.
+        # base configure disconnects. A new file(DOWNLOAD) needs its own guard:
+        # the universal WebGPU slice is refused by base_projection, and Sparkle
+        # (a hash-pinned release for a standalone app's updater) downloads only
+        # for a target that calls pulp_add_sparkle(), which nothing in-tree does.
         listed = subprocess.run(["git", "-C", str(runner.REPO_ROOT), "grep", "-l", "file(DOWNLOAD",
                                  "--", "*.cmake", "*CMakeLists.txt"],
                                 capture_output=True, text=True)
         self.assertEqual(
-            listed.stdout.split(), ["tools/cmake/PulpWgpuUniversal.cmake"],
+            sorted(listed.stdout.split()),
+            ["tools/cmake/PulpSparkle.cmake", "tools/cmake/PulpWgpuUniversal.cmake"],
             "a new raw file(DOWNLOAD) can reach the network during a bounded run's "
             "disconnected base configure: fetch it through FetchContent instead, or gate "
             "it like PulpWgpuUniversal.cmake and make base_projection refuse that "
@@ -1379,6 +1384,27 @@ class BaseInventoryTest(unittest.TestCase):
         )
         guard = (runner.REPO_ROOT / "tools/cmake/PulpWgpuUniversal.cmake").read_text()
         self.assertIn('if(NOT (_want_arm64 AND _want_x86_64))', guard)
+        sparkle = (runner.REPO_ROOT / "tools/cmake/PulpSparkle.cmake").read_text()
+        self.assertIn("EXPECTED_HASH SHA256=${_sha256}", sparkle)
+        callers = subprocess.run(
+            ["git", "-C", str(runner.REPO_ROOT), "grep", "-l", "pulp_add_sparkle(", "--",
+             "*.cmake", "*CMakeLists.txt", ":!tools/cmake/PulpSparkle.cmake",
+             ":!tools/cmake/PulpInstallRules.cmake"],
+            capture_output=True, text=True).stdout.split()
+        self.assertIn("test/cmake/test_pulp_add_sparkle.cmake", callers)  # control: the scan sees calls
+        downloading = []
+        for path in callers:
+            text = "\n".join(line for line in (runner.REPO_ROOT / path).read_text(
+                encoding="utf-8").splitlines() if not line.lstrip().startswith("#"))
+            for start in [m.end() for m in re.finditer(r"pulp_add_sparkle\(", text)]:
+                # A call with DIST_DIR uses a local distribution and downloads nothing.
+                if "DIST_DIR" not in text[start:text.index(")", start)]:
+                    downloading.append(path)
+        self.assertEqual(
+            downloading, [],
+            "an in-tree target now calls pulp_add_sparkle(), so a disconnected base "
+            "configure would download Sparkle: make base_projection refuse that "
+            "configuration (as it does a universal build) before listing it here")
 
     def test_a_base_that_is_not_the_checkouts_merge_base_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1519,14 +1545,26 @@ class FailureSetTest(unittest.TestCase):
     FIXTURE = Path(__file__).resolve().parent / "fixtures/changed_surface/ctest-junit.xml"
 
     def test_ctest_junit_failures_exclude_passes_and_skips(self) -> None:
-        # A report ctest --output-junit wrote for one pass, two fails (one
-        # named with spaces) and one SKIP_RETURN_CODE skip.
-        self.assertEqual(runner.junit_failures(self.FIXTURE), {"fails", "has spaces fails"})
+        # A report ctest --output-junit wrote. ctest's FAILED list for it was
+        # fails, has spaces fails, missing-executable (Not Run), setup and
+        # needs-fixture (Not Run); the skip-return-code and skip-regex skips and
+        # the disabled test are not failures.
+        self.assertEqual(runner.junit_failures(self.FIXTURE),
+                         {"fails", "has spaces fails", "missing-executable", "setup", "needs-fixture"})
         with tempfile.TemporaryDirectory() as directory:
             self.assertIsNone(runner.junit_failures(Path(directory) / "absent.xml"))
             broken = Path(directory) / "broken.xml"
             broken.write_text("<testsuite>", encoding="utf-8")
             self.assertIsNone(runner.junit_failures(broken))
+
+    def test_each_legs_report_is_copied_for_the_reuse_record(self) -> None:
+        with tempfile.TemporaryDirectory() as private, tempfile.TemporaryDirectory() as record:
+            (Path(private) / "full-junit.xml").write_text("<testsuite/>", encoding="utf-8")
+            self.assertEqual(runner.copy_junit_reports(Path(private), None), [])
+            self.assertEqual(runner.copy_junit_reports(Path(private), record), ["full-junit.xml"])
+            self.assertEqual((Path(record) / "full-junit.xml").read_text(encoding="utf-8"),
+                             "<testsuite/>")
+            self.assertFalse((Path(record) / "selected-junit.xml").exists())
 
     def test_two_failing_legs_without_sets_stay_unproven(self) -> None:
         self.assertEqual(runner.comparison_verdict(8, 8), "failure_overlap_unproven")
@@ -1563,6 +1601,10 @@ class FailureSetTest(unittest.TestCase):
     def test_the_checked_in_allowlist_parses_and_is_a_policy_path(self) -> None:
         doc = json.loads((runner.REPO_ROOT / runner.LANE_RED_ALLOWLIST).read_text(encoding="utf-8"))
         names = [entry["name"] for entry in doc["tests"]]
+        # An expiry is a short re-confirmation window, never a standing waiver.
+        horizon = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 28 * 86400))
+        self.assertTrue(all(entry["expires"] <= horizon for entry in doc["tests"]),
+                        f"an allowlist expiry is more than 28 days out (> {horizon})")
         self.assertTrue(names and all(entry.get("reason") and entry.get("owner_issue")
                                       and re.fullmatch(r"\d{4}-\d{2}-\d{2}", entry.get("expires", ""))
                                       for entry in doc["tests"]))
@@ -1708,7 +1750,13 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertEqual(result["lane_red_allowlist"], ["lane-red"])
         self.assertEqual(result["lane_red_allowlist_expires"], {"lane-red": "2026-10-17"})
         self.assertEqual(result["allowlisted_failure_count"], 1)
+        self.assertEqual(result["allowlisted_selected_failure_count"], 0)
         self.assertEqual(code, 8)
+        # A matched_fail whose in-selection failure is itself a lane red says so.
+        _, _, resting = self.run_pipeline(
+            failures={"selected tests": ["core"], "full tests": ["core"]},
+            allowlist=({"core": "2026-10-17"}, "f" * 64))
+        self.assertEqual(resting["allowlisted_selected_failure_count"], 1)
 
     def test_a_full_failure_outside_the_allowlist_never_graduates(self) -> None:
         _, _, result = self.run_pipeline(

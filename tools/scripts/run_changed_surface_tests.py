@@ -830,20 +830,48 @@ def failure_coverage(selected_result: int, full_result: int | None) -> str:
 LANE_RED_ALLOWLIST = "tools/ci/changed_surface_lane_reds.json"
 
 
+def _junit_case_failed(case: Any) -> bool:
+    """Whether ctest counts this case as failed. A "Not Run" test (a missing
+    executable, a failed fixture dependency) is in ctest's FAILED list and exit
+    code but its JUnit row is `notrun` with a <skipped> child, the same shape as
+    a real skip; only the message tells them apart, and a real skip's message
+    (SKIP_RETURN_CODE, SKIP_REGULAR_EXPRESSION) starts with SKIP_. A disabled
+    test is `disabled` and not failed."""
+    status = case.get("status")
+    if status == "fail" or case.find("failure") is not None:
+        return True
+    if status == "notrun":
+        skipped = case.find("skipped")
+        return not (skipped is not None and skipped.get("message", "").startswith("SKIP_"))
+    return False
+
+
 def junit_failures(path: Path) -> set[str] | None:
-    """Names of the tests a ctest --output-junit report records as failed, or
-    None when the report is absent or unreadable."""
+    """Names of the tests a ctest --output-junit report records as failed
+    (including Not Run), or None when the report is absent or unreadable."""
     import xml.etree.ElementTree as ElementTree
 
     try:
         root = ElementTree.parse(path).getroot()
     except (OSError, ElementTree.ParseError):
         return None
-    return {
-        case.get("name", "")
-        for case in root.iter("testcase")
-        if case.get("status") == "fail" or case.find("failure") is not None
-    }
+    return {case.get("name", "") for case in root.iter("testcase") if _junit_case_failed(case)}
+
+
+def copy_junit_reports(private_dir: Path, record_dir: str | None) -> list[str]:
+    """Copy each leg's JUnit report into the reuse record's directory before the
+    private directory goes away; a bounded run replaces the ordinary test stage,
+    so these are the only per-test results it leaves. Best effort: a missing
+    report is simply not copied."""
+    if not record_dir:
+        return []
+    copied = []
+    for name in ("selected-junit.xml", "full-junit.xml"):
+        source = private_dir / name
+        if source.is_file():
+            shutil.copyfile(source, Path(record_dir) / name)
+            copied.append(name)
+    return copied
 
 
 def lane_red_allowlist(
@@ -1279,6 +1307,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             or selected_file.read_bytes() != selected_payload
         ):
             raise SelectionExecutionError("private selected-tests snapshot changed during execution")
+        copy_junit_reports(Path(directory), os.environ.get("SHIPYARD_REUSE_RECORD_DIR"))
         result_dir = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
         if result_dir:
             selected_failures = junit_failures(Path(directory) / "selected-junit.xml")
@@ -1290,6 +1319,10 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             outside = sorted(full_failures - set(selected_names)) if full_failures is not None else None
             absorbed = (len(set(outside or []) & set(allowlist[0]))
                         if allowlist is not None else None)
+            # In-selection failures that are themselves lane reds: a matched_fail
+            # resting on these proved less than one resting on new failures.
+            absorbed_selected = (len((selected_failures or set()) & set(allowlist[0]))
+                                 if allowlist is not None else None)
             eligible = compare_full and (
                 verdict == "matched_pass"
                 or (verdict == "matched_fail" and allowlist is not None
@@ -1361,6 +1394,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "lane_red_allowlist_expires": allowlist[0] if allowlist else None,
                     # How much of a matched_fail rested on the allowlist.
                     "allowlisted_failure_count": absorbed,
+                    "allowlisted_selected_failure_count": absorbed_selected,
                     "lane_red_allowlist_sha256": allowlist[1] if allowlist else None,
                 },
             )

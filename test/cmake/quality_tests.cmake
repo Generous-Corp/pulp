@@ -1217,6 +1217,13 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
+        # The lane runner's own contract: base provisioning and configure-shape
+        # comparison, the selected-leg pipeline through every build state, and
+        # the per-test failure-set verdict. The runner drives a POSIX lane.
+        if(UNIX)
+            add_test(NAME changed-surface-runner-selftest COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_run_changed_surface_tests.py")
+        endif()
         # The generated script families in .shipyard/config.toml must match
         # test/ctest_script_inputs.json and the tree. The selector is declared
         # for the macOS target only, and the script-inputs list is written

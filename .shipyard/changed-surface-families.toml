@@ -198,7 +198,6 @@ paths = [
   "tools/scripts/test_resolve_runs_on_extra.py",
   "tools/scripts/test_reuse_policy_replay.py",
   "tools/scripts/test_ruleset_drift_config.py",
-  "tools/scripts/test_run_changed_surface_tests.py",
   "tools/scripts/test_run_coverage.py",
   "tools/scripts/test_run_python_coverage.py",
   "tools/scripts/test_run_python_coverage_extra.py",
@@ -2901,6 +2900,33 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "repo-source-scan",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-9df02af7d340"
+paths = ["tools/scripts/test_run_changed_surface_tests.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-runner-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
   "reuse-policy-replay-selftest",
 ]
 build_targets = ["pulp-cli"]
