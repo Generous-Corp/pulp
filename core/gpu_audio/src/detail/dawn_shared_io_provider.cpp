@@ -539,7 +539,14 @@ struct DawnSharedIoProvider::Impl {
             stats.wait_any_max_futures =
                 std::max(stats.wait_any_max_futures, static_cast<std::uint64_t>(wait_count));
             stats.wait_any_max_timeout_ns = std::max(stats.wait_any_max_timeout_ns, timeout_ns);
+            const auto wait_started = std::chrono::steady_clock::now();
             const auto status = invoke_wait_any(wait_count, timeout_ns);
+            const auto wait_elapsed =
+                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now() - wait_started)
+                                               .count());
+            stats.wait_any_wall_ns += wait_elapsed;
+            stats.wait_any_max_wall_ns = std::max(stats.wait_any_max_wall_ns, wait_elapsed);
             if (status == wgpu::WaitStatus::TimedOut) {
                 ++stats.wait_any_timeouts;
             } else if (status == wgpu::WaitStatus::Error) {
@@ -2306,6 +2313,8 @@ void DawnSharedIoProvider::poll() noexcept {
 void DawnSharedIoProvider::service_until(std::uint64_t deadline_ns) noexcept {
     if (!impl_)
         return;
+    const auto service_started = std::chrono::steady_clock::now();
+    ++impl_->stats.service_calls;
     const auto now = std::chrono::steady_clock::now();
     const auto max_ns = static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
     const auto deadline =
@@ -2332,6 +2341,10 @@ void DawnSharedIoProvider::service_until(std::uint64_t deadline_ns) noexcept {
         }
         impl_->refresh(*slot, false);
     }
+    impl_->stats.service_wall_ns +=
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now() - service_started)
+                                       .count());
 }
 
 bool DawnSharedIoProvider::drain() noexcept {

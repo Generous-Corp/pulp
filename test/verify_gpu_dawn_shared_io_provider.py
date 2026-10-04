@@ -83,6 +83,18 @@ def run(probe: str, scenario: str, timeout: float) -> dict:
         raise RuntimeError(f"{scenario}: proc table was not installed exactly once")
     if receipt.get("render_concurrency") != "not_exercised":
         raise RuntimeError(f"{scenario}: render-concurrency boundary missing")
+    # Phase-1 service timing is host-dispatch evidence only. It must be
+    # present for every prepared provider, but is never interpreted as GPU
+    # execution time.
+    expected_submissions = SCENARIOS[scenario][2]
+    if expected_submissions > 0 and (
+        receipt.get("service_calls", 0) <= 0 or receipt.get("service_wall_ns", 0) <= 0
+    ):
+        raise RuntimeError(f"{scenario}: completion service timing missing {receipt!r}")
+    if receipt.get("wait_any_calls", 0) > 0 and (
+        receipt.get("wait_any_wall_ns", 0) <= 0 or receipt.get("wait_any_max_wall_ns", 0) <= 0
+    ):
+        raise RuntimeError(f"{scenario}: wait-any timing missing {receipt!r}")
     if (
         receipt.get("architecture") != "arm64"
         or receipt.get("adapter_backend") != "metal"
