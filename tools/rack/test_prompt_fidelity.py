@@ -21,9 +21,11 @@ The "inconsistently" was two effects at once, both content-dependent:
     200 and the 120 used elsewhere in the same file.
 
 So this file measures three things, and NONE of them by reading source and
-hoping. The two transit boundaries are driven end to end with real processes,
-and the display helper is EXTRACTED FROM THE SHIPPING SOURCE at test time and
-compiled -- there is no copy of it here to drift out of date.
+hoping. The two transit boundaries this repository owns -- the hand-off file
+into the generator, and the generator into the model -- are driven end to end
+with real processes, and the display helper is EXTRACTED FROM THE SHIPPING
+SOURCE at test time and compiled -- there is no copy of it here to drift out of
+date.
 """
 
 from __future__ import annotations
@@ -37,7 +39,6 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 SHELL_SRC = os.path.join(ROOT, "forge-seam", "modular", "modular_shell.cpp")
-ENGINE_SRC = os.path.join(ROOT, "forge-seam", "modular", "process_engine.cpp")
 
 sys.path.insert(0, HERE)
 
@@ -83,7 +84,14 @@ def compile_probe(body: str, main: str, out: str) -> str | None:
     return out
 
 
-# ── boundary 1: what a person typed -> the generator's argv ─────────────────
+# ── boundary 1: the hand-off file -> the generator's argv ────────────────────
+#
+# The app writes the prompt to a file and starts the generator with
+# `--prompt-file PATH` in the prompt's place; an argument of its own would hit
+# Linux's 128 KiB per-argument limit and macOS's 1 MiB argv limit. The app half,
+# ProcessEngine, ships in the Forge repository and is tested there against
+# these same tools. This half checks that what the file holds is what the
+# generator reads, for every awkward byte pattern and well past both limits.
 
 CASES = {
     "plain ascii":      lambda n: b"a" * n,
@@ -95,78 +103,51 @@ CASES = {
     "utf8 emoji":       lambda n: "\U0001f3b9".encode() * n,
     "mixed ascii+emoji": lambda n: (b"a" * 7 + "\U0001f3b9".encode()) * (n // 11 + 1),
 }
-LENGTHS = [100, 4000, 64000, 200000]
+LENGTHS = [100, 4000, 64000, 200000, 2 * 1024 * 1024]
 
 
-def check_shell_boundary() -> tuple:
-    """The prompt must reach the generator's argv byte for byte.
+def check_prompt_file_boundary() -> tuple:
+    """The prompt file must reach the generator's argv byte for byte.
 
-    Drives the EXACT command ProcessEngine::start builds -- shell_quote, `sh
-    -c`, nohup, the background `&` and the stdout redirect all in place -- with
-    the shipping `shell_quote` extracted and compiled, not re-implemented.
-
-    A re-implementation would pass this test while the shipped function was
-    broken, which is the whole class of defect being ruled out.
+    Runs a stand-in generator as a real process that resolves `--prompt-file`
+    with the shipping `prompt_handoff`, exactly as patch.py build does, and
+    records the length and sha256 of the prompt it ended up with.
     """
     bad, ran = 0, 1
     work = tempfile.mkdtemp(prefix="prompt-fidelity-")
-    quote_main = """
-int main(int argc, char** argv) {
-    std::ifstream f(argv[1], std::ios::binary);
-    std::stringstream ss; ss << f.rdbuf();
-    const std::string q = shell_quote(ss.str());
-    std::fwrite(q.data(), 1, q.size(), stdout);
-    return 0;
-}
-"""
-    probe = compile_probe(extract(ENGINE_SRC, "std::string shell_quote("),
-                          quote_main, os.path.join(work, "quote"))
-    if not probe:
-        return 1, ran
-
     recorder = os.path.join(work, "recorder.py")
     with open(recorder, "w") as f:
         f.write("import hashlib, os, sys\n"
-                "b = (sys.argv[2] if len(sys.argv) > 2 else '')"
-                ".encode('utf-8', 'surrogatepass')\n"
+                f"sys.path.insert(0, {HERE!r})\n"
+                "import prompt_handoff\n"
+                "argv = prompt_handoff.resolve(sys.argv, 2)\n"
+                "b = os.fsencode(argv[2])\n"
                 "open(os.environ['RECORD_TO'], 'w').write("
                 "f'{len(b)} {hashlib.sha256(b).hexdigest()}')\n")
-
-    def quoted(raw: bytes) -> str:
-        p = os.path.join(work, "in.bin")
-        open(p, "wb").write(raw)
-        return subprocess.run([probe, p], capture_output=True).stdout.decode(
-            "utf-8", "surrogatepass")
-
-    import time
     losses = []
     for name, make in CASES.items():
         for n in LENGTHS:
             want = make(n)
+            prompt = os.path.join(work, "run.prompt")
+            with open(prompt, "wb") as f:
+                f.write(want)
             rec = os.path.join(work, "rec.txt")
             if os.path.exists(rec):
                 os.remove(rec)
-            log = os.path.join(work, "log.txt")
-            cmd = (f"cd {quoted(work.encode())} && nohup python3 -u recorder.py "
-                   f"build {quoted(want)} > {quoted(log.encode())} 2>&1 &")
-            subprocess.run(["sh", "-c", cmd], capture_output=True,
-                           env=dict(os.environ, RECORD_TO=rec))
-            got = None
-            for _ in range(400):
-                if os.path.exists(rec):
-                    got = open(rec).read().split()
-                    break
-                time.sleep(0.05)
+            subprocess.run([sys.executable, "-u", recorder, "build", "--prompt-file", prompt],
+                           capture_output=True, env=dict(os.environ, RECORD_TO=rec))
+            got = open(rec).read().split() if os.path.exists(rec) else None
             if not got or int(got[0]) != len(want) or \
                     got[1] != hashlib.sha256(want).hexdigest():
-                losses.append(f"{name}@{len(want)}B -> "
-                              f"{got[0] if got else 'never arrived'}")
+                losses.append(f"{name}@{len(want)}B -> {got[0] if got else 'never arrived'}")
+            elif os.path.exists(prompt):
+                losses.append(f"{name}@{len(want)}B -> the prompt file was left behind")
     if losses:
         bad += 1
-        print(f"  WRONG  the prompt does not survive the shell: {losses[:6]}")
+        print(f"  WRONG  the prompt does not survive the hand-off: {losses[:6]}")
     else:
-        print(f"  ok     {len(CASES) * len(LENGTHS)} prompts up to "
-              f"{max(LENGTHS):,} bytes reach the generator byte for byte")
+        print(f"  ok     {len(CASES) * len(LENGTHS)} prompts up to {max(LENGTHS):,} bytes "
+              f"reach the generator byte for byte, and the hand-off file is gone")
     return bad, ran
 
 
@@ -351,7 +332,7 @@ int main() {
 
 def main() -> int:
     bad, ran = 0, 0
-    for check in (check_shell_boundary, check_model_boundary,
+    for check in (check_prompt_file_boundary, check_model_boundary,
                   check_echo_is_character_safe):
         b, r = check()
         bad += b

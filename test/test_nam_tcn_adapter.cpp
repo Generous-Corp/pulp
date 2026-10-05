@@ -19,12 +19,21 @@ namespace {
 struct TestKernel {
     float previous = 0.0f;
     bool prepared = false;
+    bool fail_once = false;
+    bool fail_release_once = false;
+    std::size_t prepare_calls = 0;
+    std::size_t release_calls = 0;
 };
 
 bool prepare(void* opaque, const StreamingPrepareContext&) noexcept {
     auto& state = *static_cast<TestKernel*>(opaque);
+    ++state.prepare_calls;
     state.previous = 0.0f;
     state.prepared = true;
+    if (state.fail_once) {
+        state.fail_once = false;
+        return false;
+    }
     return true;
 }
 
@@ -43,7 +52,13 @@ bool quiesce(void*) noexcept {
     return true;
 }
 bool release(void* opaque) noexcept {
-    static_cast<TestKernel*>(opaque)->prepared = false;
+    auto& state = *static_cast<TestKernel*>(opaque);
+    ++state.release_calls;
+    if (state.fail_release_once) {
+        state.fail_release_once = false;
+        return false;
+    }
+    state.prepared = false;
     return true;
 }
 
@@ -160,6 +175,120 @@ TEST_CASE("NAM/TCN adapter rejects non-mono buffers at the private boundary",
     auto out = pulp::audio::BufferView<float>(output_channels, 2, 2);
     model.process_cpu(in, out, 2, {.epoch = 1, .sequence = 0});
     CHECK(output == std::array<float, 4>{0, 0, 0, 0});
+}
+
+TEST_CASE("NAM/TCN adapter cleans up a failed preparation before retrying",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    TestKernel state{.fail_once = true};
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    CHECK_FALSE(model.prepare(context));
+    CHECK_FALSE(state.prepared);
+    CHECK(state.release_calls == 1);
+
+    REQUIRE(model.prepare(context));
+    CHECK(state.prepare_calls == 2);
+    REQUIRE(model.release());
+    CHECK_FALSE(state.prepared);
+    CHECK(state.release_calls == 2);
+}
+
+TEST_CASE("NAM/TCN adapter preserves a live preparation across failed replacement",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    TestKernel state;
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    REQUIRE(model.prepare(context));
+    const auto prepare_calls = state.prepare_calls;
+
+    auto malformed_context = context;
+    malformed_context.artifact_hash = {};
+    CHECK_FALSE(model.prepare(malformed_context));
+    CHECK(state.prepared);
+    CHECK(state.prepare_calls == prepare_calls);
+
+    std::array<float, 1> input{1.0f};
+    std::array<float, 1> output{};
+    const float* input_channels[] = {input.data()};
+    float* output_channels[] = {output.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 1);
+    auto out = pulp::audio::BufferView<float>(output_channels, 1, 1);
+    model.process_cpu(in, out, 1, {.epoch = 1, .sequence = 0});
+    CHECK(output[0] != 0.0f);
+    REQUIRE(model.release());
+}
+
+TEST_CASE("NAM/TCN adapter keeps live state when release fails and retries",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    TestKernel state{.fail_release_once = true};
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    REQUIRE(model.prepare(context));
+    CHECK_FALSE(model.release());
+    CHECK(state.prepared);
+    REQUIRE(model.release());
+    CHECK_FALSE(state.prepared);
+    CHECK(model.release());
+    CHECK(state.release_calls == 2);
+}
+
+TEST_CASE("NAM/TCN adapter rejects aliasing and partial overlap without advancing state",
+          "[gpu_audio][neural][nam][validation]") {
+    TestKernel state;
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    REQUIRE(model.prepare(context));
+
+    std::array<float, 2> alias_samples{1.0f, 2.0f};
+    const float* alias_input[] = {alias_samples.data()};
+    float* alias_output[] = {alias_samples.data()};
+    const auto alias_in = pulp::audio::BufferView<const float>(alias_input, 1, 2);
+    auto alias_out = pulp::audio::BufferView<float>(alias_output, 1, 2);
+    model.process_cpu(alias_in, alias_out, 2, {.epoch = 1, .sequence = 0});
+    CHECK(alias_samples == std::array<float, 2>{0.0f, 0.0f});
+    CHECK(state.previous == 0.0f);
+
+    std::array<float, 3> partial_samples{1.0f, 2.0f, 3.0f};
+    const float* partial_input[] = {partial_samples.data()};
+    float* partial_output[] = {partial_samples.data() + 1};
+    const auto partial_in = pulp::audio::BufferView<const float>(partial_input, 1, 2);
+    auto partial_out = pulp::audio::BufferView<float>(partial_output, 1, 2);
+    model.process_cpu(partial_in, partial_out, 2, {.epoch = 1, .sequence = 1});
+    CHECK(partial_samples == std::array<float, 3>{1.0f, 0.0f, 0.0f});
+    CHECK(state.previous == 0.0f);
+    REQUIRE(model.release());
 }
 
 namespace {
