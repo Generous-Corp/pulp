@@ -8440,6 +8440,13 @@
    ],
    "kind": "python"
   },
+  "setup-cache-lock": {
+   "entry": "tools/scripts/test_setup_cache_lock.sh",
+   "inputs": [
+    "tools/scripts/test_setup_cache_lock.sh"
+   ],
+   "kind": "shell"
+  },
   "setup-source-cache": {
    "entry": "tools/scripts/test_setup_source_cache.sh",
    "inputs": [
