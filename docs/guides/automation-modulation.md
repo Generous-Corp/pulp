@@ -36,6 +36,14 @@ Processor-owned graph and reaches the canonical route operation through the
 generic CLI and generated MCP projections, including lifecycle receipts and
 bounded refusal for the prepared graph route. This live-control receipt is scoped to the namespaced example
 host; Forge and commercial products still require their own equivalent proof.
+The product receipt records the staged executable and manifest SHA-256 values,
+the broker inventory ticket and schema, exact instance/registration/publication
+identity, and the route operation receipt with its graph generation and applied
+count. The fixture also proves inventory replay, released grants, unbound
+instances, and a removed route are refused with typed failures. On non-Apple
+builders the same CTest case is discovered and reports its explicit
+`DSPX-04 product broker fixture is Apple-only` skip, so the platform boundary is
+visible rather than silently absent.
 Offline timeline CLI and MCP surfaces remain deferred until they can publish the
 complete route lifecycle and dense overflow receipt.
 

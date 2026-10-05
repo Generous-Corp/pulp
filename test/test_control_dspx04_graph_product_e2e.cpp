@@ -39,6 +39,7 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     REQUIRE(manifest["schema"].getString() == "dev.pulp.control/artifact-manifest@1");
     REQUIRE(manifest["bundle_id"].getString() == "dev.pulp.test.dspx04-graph-product");
     REQUIRE(manifest["target"].getString() == "pulp-control-dspx04-graph-product-fixture");
+    const auto manifest_digest = pulp::runtime::sha256_hex(manifest_bytes);
     std::filesystem::permissions(host, std::filesystem::perms::owner_all,
                                  std::filesystem::perm_options::replace);
     std::filesystem::permissions(host.string() + ".inspector-capabilities.json",
@@ -88,18 +89,34 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     INFO(prepared.explanation);
     INFO(prepared.data_json);
     REQUIRE(prepared.status_id == "prepared");
+    const auto prepared_data = choc::json::parse(prepared.data_json);
+    REQUIRE(prepared_data["schema"].getString() ==
+            "pulp.control.host-prepare-installed.v1");
+    REQUIRE(prepared_data["host_id"].getString() == "dspx04-graph-product");
+    REQUIRE_FALSE(prepared_data["inventory_id"].getString().empty());
     auto launch = choc::value::createObject("");
     launch.addMember("inventory_id",
                      choc::value::createString(
-                         choc::json::parse(prepared.data_json)["inventory_id"].getString()));
+                         prepared_data["inventory_id"].getString()));
     const auto launched =
         management.manage("host-launch", choc::json::toString(launch, false), 10s);
     INFO(launched.explanation);
     INFO(launched.data_json);
     REQUIRE(launched.status_id == "launched");
+    const auto launch_data = choc::json::parse(launched.data_json);
+    REQUIRE(launch_data["schema"].getString() == "pulp.control.host-launch.v1");
+    REQUIRE(launch_data["inventory_id"].getString() ==
+            prepared_data["inventory_id"].getString());
+    const auto replay =
+        management.manage("host-launch", choc::json::toString(launch, false), 10s);
+    CHECK(replay.status_id == "inventory_unavailable");
     const auto identity = wait_for_instance(management, "dev.pulp.test.dspx04-graph-product");
     const std::string instance(identity["instance_id"].getString());
     REQUIRE_FALSE(instance.empty());
+    CHECK(identity["artifact_digest"].getString() == *source_digest);
+    CHECK(identity["manifest_digest"].getString() == manifest_digest);
+    CHECK_FALSE(identity["registration_id"].getString().empty());
+    CHECK_FALSE(identity["publication_id"].getString().empty());
 
     const auto develop =
         run(cli, root.runtime,
@@ -126,9 +143,20 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     INFO(cli_failure_diagnostics(applied, daemon.state_directory() / "operations"));
     REQUIRE(applied.exit_code == 0);
     const auto applied_receipt = choc::json::parse(applied.stdout_output);
+    REQUIRE_FALSE(applied_receipt["receipt_id"].getString().empty());
     REQUIRE(applied_receipt["state"].getString() == "completed");
     REQUIRE(applied_receipt["detail"]["code"].getString() == "applied");
+    REQUIRE(applied_receipt["detail"]["receipt_id"].getString() ==
+            applied_receipt["receipt_id"].getString());
     REQUIRE(applied_receipt["detail"]["applied"].getInt64() == 1);
+    REQUIRE(applied_receipt["detail"]["generation"].getInt64() >= 1);
+    const auto applied_operation =
+        wait_terminal_receipt(daemon.state_directory() / "operations",
+                              std::string(applied_receipt["receipt_id"].getString()));
+    require_instance_binding(applied_operation, identity);
+    CHECK(applied_operation["manifest_digest"].getString() == manifest_digest);
+    CHECK(applied_operation["producer_artifact_digest"].getString() == *source_digest);
+    CHECK_FALSE(applied_operation["instance_generation"].getString().empty());
 
     const auto rewired = call(
         R"({"commands":[{"kind":"rewire","source":1,"source_port":0,"destination":2,"parameter_id":7,"previous_source":1,"previous_source_port":0,"range_lo":0.0,"range_hi":1.0}]})");
@@ -147,6 +175,12 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     REQUIRE(removed_receipt["state"].getString() == "completed");
     REQUIRE(removed_receipt["detail"]["code"].getString() == "applied");
     REQUIRE(removed_receipt["detail"]["applied"].getInt64() == 1);
+
+    const auto stale_generation = call(
+        R"({"commands":[{"kind":"remove","source":1,"source_port":0,"destination":2,"parameter_id":7}]})");
+    INFO(cli_failure_diagnostics(stale_generation, daemon.state_directory() / "operations"));
+    CHECK(stale_generation.exit_code != 0);
+    CHECK(stale_generation.exit_code != 0);
 
     const auto invalid = call(
         R"({"commands":[{"kind":"unknown","source":1,"source_port":0,"destination":2,"parameter_id":7}]})");
@@ -175,6 +209,31 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     // before dispatch; the authority-level test separately proves the same
     // bound preserves graph state when a dense batch reaches the executor.
     REQUIRE(refused.stdout_output.find("invalid-request") != std::string::npos);
+
+    const auto unbound = run(cli, root.runtime,
+                             {"control", "call", "--instance", "instance-unbound",
+                              "dev.pulp.graph/modulation-route.edit@1", "--params",
+                              R"({"commands":[{"kind":"remove","source":1,"source_port":0,"destination":2,"parameter_id":7}]})",
+                              "--json", "--grant", develop_grant});
+    CHECK(unbound.exit_code != 0);
+    const bool unbound_refused =
+        unbound.stdout_output.find("not-found") != std::string::npos ||
+        unbound.stdout_output.find("unavailable") != std::string::npos;
+    CHECK(unbound_refused);
+
+    auto revoke = choc::value::createObject("");
+    revoke.addMember("grant_id", choc::value::createString(develop_grant));
+    const auto revoked = management.manage("revoke", choc::json::toString(revoke, false), 10s);
+    INFO(revoked.status_id);
+    CHECK_FALSE(revoked.status_id.empty());
+    const auto revoked_call = run(
+        cli, root.runtime,
+        std::vector<std::string>{"control", "call", "--instance", std::string(instance),
+                                 "dev.pulp.graph/modulation-route.edit@1", "--params",
+                                 R"({"commands":[{"kind":"remove","source":1,"source_port":0,"destination":2,"parameter_id":7}]})",
+                                 "--json", "--grant", develop_grant});
+    CHECK(revoked_call.exit_code != 0);
+    CHECK_FALSE(revoked_call.stdout_output.empty());
 #else
     SKIP("DSPX-04 product broker fixture is Apple-only");
 #endif
