@@ -1301,3 +1301,22 @@ Four things about the cache are load-bearing, and all four are easy to break:
   against a widget that no longer holds that value — which renders wrong with
   every test still green, because `el.style.foo` reads back the assigned string
   whether or not it ever reached the widget. Assert against real `View` state.
+
+## Precompiling whole scripts off the UI thread (QuickJS)
+
+`precompile_scripts(sources, cancel)` compiles whole scripts into the
+process-wide bytecode cache in a private QuickJS runtime on the calling thread,
+without running them; `evaluate_script()` in any later realm then reads the
+bytecode (`script_bytecode_read`) instead of compiling (`script_compile`).
+Bytecode is runtime-independent (atoms serialize as strings), which is what
+makes a background compile reusable. Gotchas: the calling thread needs a stack
+of a few MB — QuickJS's parser recurses on the native stack and the engine
+allows it 1 MB of JS stack, so a default 512 KB macOS secondary thread can
+crash before QuickJS notices (`view::prewarm_scripted_ui` uses an 8 MB
+thread); the cache tracks in-flight sources, so an evaluation that asks for a
+source another thread is compiling waits (bounded, 5 s) instead of compiling it
+twice — `script_bytecode_cache_stats().waits` counts those; a precompile that
+finds the source already cached is not a hit (hits count evaluations only).
+Only the QuickJS backend has a bytecode cache; with a JSC or V8 default the
+prewarm is a no-op. Bytecode stays in memory, never on disk (QuickJS does not
+validate untrusted bytecode).

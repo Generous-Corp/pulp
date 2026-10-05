@@ -591,3 +591,9 @@ pulp_add_test_suite(pulp-test-multi-plugin-coexistence GROUP pulp-test-group-vie
 # host is proven by the web-UI headless-Chrome pixel fixture.
 pulp_add_test_suite(pulp-test-window-host-web GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
+
+# The stage classifier behind tools/editor-open/editor_open_oop_probe.mm (what
+# a host window showed while an editor opened). Pure C++, every platform.
+pulp_add_test_suite(pulp-test-editor-open-stages
+    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../tools/editor-open
+    LABELS "view;editor-open;tools")

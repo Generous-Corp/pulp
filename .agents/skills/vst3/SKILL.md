@@ -1413,3 +1413,16 @@ edges: a feature one or two device pixels wide at 16x16 smears into its
 neighbours and the bundle edge picks up a bright halo. Render each size on
 its own pixel grid and pass the finished `.icns`.
 
+## The adapter asks for an editor prewarm when the host instantiates the plug-in
+
+Right after the processor is created and its parameters defined, the adapter
+calls `request_editor_prewarm(*processor)` (`PulpVst3Processor::initialize()`; a scanner that calls `initialize()` and exits may wait for at most one in-flight compile at teardown). It hands
+`Processor::editor_prewarm()` (the scripts and materialized documents the
+editor evaluates on every open) to the background worker the view layer
+installs, once per plug-in bundle per process, never under a headless/CI
+environment or `PULP_EDITOR_PREWARM=0`. Keep the call after
+`define_parameters()` and outside any audio-thread path; a processor with no
+editor, or nothing to prewarm, costs one virtual call. The editor itself does
+not change: an open that races the worker waits for the in-flight result
+instead of compiling again. Details: `view-bridge`, "What the host shows while
+it waits".

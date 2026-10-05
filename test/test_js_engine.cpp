@@ -3,11 +3,14 @@
 #include <pulp/view/js_engine.hpp>
 #include <pulp/view/js_engine_recommend.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #if defined(_WIN32)
 #include <io.h>
@@ -931,6 +934,76 @@ TEST_CASE("QuickJS reuses a large script's bytecode across engines",
     auto after_other = script_bytecode_cache_stats();
     CHECK(after_other.hits == after_hit.hits);
     CHECK(after_other.compiles == after_hit.compiles + 1);
+    clear_script_bytecode_cache();
+}
+
+TEST_CASE("QuickJS precompile_scripts fills the bytecode cache a later realm reads",
+          "[view][js-engine][editor-open]") {
+    clear_script_bytecode_cache();
+    const auto code = large_counting_script(11);
+    const auto small = std::string("40 + 2");
+    const auto broken = large_counting_script(3) + "\nthis is not javascript {{{\n";
+
+    // Compiles the large script only: the small one is under the cache floor
+    // and the broken one does not compile. Nothing runs.
+    CHECK(precompile_scripts({code, small, broken}) == 1);
+    CHECK(script_bytecode_cached(code));
+    CHECK_FALSE(script_bytecode_cached(broken));
+    auto stats = script_bytecode_cache_stats();
+    CHECK(stats.compiles == 1);
+    CHECK(stats.precompiled == 1);
+    CHECK(stats.entries == 1);
+
+    // A second request finds it cached and compiles nothing.
+    CHECK(precompile_scripts({code}) == 0);
+
+    // A realm evaluating the same source reads the precompiled bytecode and
+    // runs it in full; it does not compile.
+    auto engine = create_js_engine(JsEngineType::quickjs);
+    const auto expected = engine->evaluate(code).getWithDefault<double>(-1);
+    CHECK(engine->evaluate_script(code).getWithDefault<double>(-2) == expected);
+    stats = script_bytecode_cache_stats();
+    CHECK(stats.hits == 1);
+    CHECK(stats.compiles == 1);
+    // The broken script still reports its syntax error from the realm.
+    CHECK_THROWS(engine->evaluate_script(broken));
+
+    // A cancelled request compiles nothing.
+    std::atomic<bool> cancelled{true};
+    CHECK(precompile_scripts({large_counting_script(12)}, &cancelled) == 0);
+    clear_script_bytecode_cache();
+}
+
+TEST_CASE("QuickJS evaluate_script waits for an in-flight precompile of the same source",
+          "[view][js-engine][editor-open]") {
+    clear_script_bytecode_cache();
+    // Big enough that compiling it takes far longer than the head start below.
+    std::string code = "var __bc_total = 1;\n";
+    while (code.size() < 6 * 1024 * 1024)
+        code += "__bc_total += 1; // padding so the compile is slow enough to overlap\n";
+    code += "__bc_total;\n";
+
+    std::atomic<bool> started{false};
+    std::size_t precompiled = 0;
+    std::thread worker([&] {
+        started.store(true);
+        precompiled = precompile_scripts({code});
+    });
+    while (!started.load()) std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    auto engine = create_js_engine(JsEngineType::quickjs);
+    const auto result = engine->evaluate_script(code).getWithDefault<double>(-1);
+    worker.join();
+    CHECK(result > 1);
+
+    // The editor-side evaluation waited for the background compile and read
+    // its bytecode: the source was compiled exactly once, by the precompiler.
+    const auto stats = script_bytecode_cache_stats();
+    CHECK(precompiled == 1);
+    CHECK(stats.waits == 1);
+    CHECK(stats.hits == 1);
+    CHECK(stats.compiles == 1);
     clear_script_bytecode_cache();
 }
 

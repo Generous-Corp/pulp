@@ -8,6 +8,7 @@
 #include <mach/mach_time.h>
 
 #include <pulp/format/au_v2_instrument.hpp>
+#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/au_v2_adapter.hpp>  // kPulpEditorContextProperty, PulpEditorContext, fill_cocoa_view_info
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/registry.hpp>
@@ -66,6 +67,7 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory f
         if (processor_) {
             processor_->set_state_store(&store_);
             processor_->define_parameters(store_);
+            request_editor_prewarm(*processor_);
             // Cache the immutable descriptor once so the render path can view its
             // bus-name strings without copying it per block (which would allocate
             // on the audio thread).

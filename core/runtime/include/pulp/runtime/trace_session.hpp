@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -69,6 +70,70 @@ inline std::optional<std::uint32_t> parse_autostart_ring_kb(const char* raw) {
     }
     if (value < min_autostart_ring_kb) return std::nullopt;
     return static_cast<std::uint32_t>(value);
+}
+
+/// A traced plug-in records when PULP_TRACE_PATH is set in its host's
+/// environment, but an out-of-process host (AUHostingService, where Logic
+/// runs AU v2 plug-ins) inherits nothing from a shell or `launchctl setenv`.
+/// So a traced build also reads `~/.config/pulp/trace-autostart` when the
+/// variable is unset: `KEY=VALUE` lines for PULP_TRACE_PATH, PULP_TRACE_SECONDS
+/// and PULP_TRACE_RING_KB (anything else, blank lines and `#` comments are
+/// ignored). A PULP_TRACE_PATH ending in `/` is a directory: each process
+/// writes `<process>-<pid>.pftrace` into it, so a host and its out-of-process
+/// service never overwrite one another. A leading `$TMPDIR` is the process's
+/// own temporary directory, the one place a sandboxed service can write; a
+/// directory the process cannot create falls back to it as well. The chosen
+/// path is logged (os_log on Apple: `log show --predicate 'eventMessage
+/// CONTAINS "pulp-trace"'`). Delete the file to stop recording.
+struct TraceAutostartConfig {
+    std::string path;
+    std::string seconds;
+    std::string ring_kb;
+};
+
+/// Parse the autostart file's text. Config-independent (testable in the OFF
+/// build); values are taken verbatim and validated by their usual readers.
+inline TraceAutostartConfig parse_trace_autostart(std::string_view text) {
+    TraceAutostartConfig config;
+    while (!text.empty()) {
+        const auto end = text.find('\n');
+        auto line = text.substr(0, end);
+        text = end == std::string_view::npos ? std::string_view{} : text.substr(end + 1);
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+            line.remove_suffix(1);
+        while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
+        if (line.empty() || line.front() == '#') continue;
+        const auto eq = line.find('=');
+        if (eq == std::string_view::npos) continue;
+        const auto key = line.substr(0, eq);
+        const auto value = std::string(line.substr(eq + 1));
+        if (key == "PULP_TRACE_PATH") config.path = value;
+        else if (key == "PULP_TRACE_SECONDS") config.seconds = value;
+        else if (key == "PULP_TRACE_RING_KB") config.ring_kb = value;
+    }
+    return config;
+}
+
+/// Expand a leading `$TMPDIR` in an autostart path to `temp_dir` (the
+/// process's own temporary directory: a sandboxed service such as
+/// AUHostingService can write there and nowhere else under the user's home).
+inline std::string trace_autostart_expand(const std::string& path, const std::string& temp_dir) {
+    constexpr std::string_view token = "$TMPDIR";
+    if (path.compare(0, token.size(), token) != 0) return path;
+    std::string base = temp_dir;
+    if (!base.empty() && base.back() == '/') base.pop_back();
+    return base + path.substr(token.size());
+}
+
+/// The file a process writes for `path`: `path` itself, or, for a directory
+/// (ends with '/'), `<path><process>-<pid>.pftrace`.
+inline std::string trace_autostart_output_path(const std::string& path,
+                                               std::string_view process_name, long pid) {
+    if (path.empty() || path.back() != '/') return path;
+    std::string name(process_name.empty() ? std::string_view{"pulp"} : process_name);
+    for (auto& c : name)
+        if (c == '/' || c == ' ') c = '_';
+    return path + name + "-" + std::to_string(pid) + ".pftrace";
 }
 
 }  // namespace detail

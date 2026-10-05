@@ -7,6 +7,7 @@
 #include <AudioToolbox/AudioToolbox.h>  // kAudioUnitProperty_CocoaUI, AudioUnitCocoaViewInfo
 
 #include <pulp/format/au_v2_adapter.hpp>
+#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/detail/param_host_sync.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
@@ -36,6 +37,9 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
         if (processor_) {
             processor_->set_state_store(&store_);
             processor_->define_parameters(store_);
+            // Compile/verify the editor's scripts off-thread before the host
+            // asks for the view (once per plug-in per process).
+            request_editor_prewarm(*processor_);
             // Cache the immutable descriptor so the render path can view its bus
             // names without a per-block copy (which would allocate on the audio
             // thread).

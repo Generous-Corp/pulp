@@ -23,6 +23,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /// Present while Processor::editor_background() exists (the colour a
@@ -516,6 +517,28 @@ public:
 
     /// Whether this processor has a GUI editor. Default true (AutoUi).
     virtual bool has_editor() const { return true; }
+
+    /// What a scripted editor evaluates every time it opens and that does not
+    /// depend on the instance: the text of the scripts it loads through
+    /// `WidgetBridge::load_script()` (its ScriptedUiSession's script file, a
+    /// design or help script loaded after the mount) and the inputs it passes
+    /// to `__pulpRuntimeImport__(text, 'materialized-browser')`, byte-identical.
+    ///
+    /// When a host instantiates the plug-in, the format adapter hands this to
+    /// a background worker that compiles the scripts and verifies the
+    /// documents into the process-wide caches (see `editor_prewarm.hpp`), so
+    /// the first editor open does not do that work inside the host's
+    /// view-creation call. Asked at most once per plug-in bundle per process,
+    /// on the host's instantiation thread, and never under a headless/CI
+    /// environment, so keep it cheap: return views of embedded, static data.
+    /// The views must stay valid for the life of the plug-in image.
+    /// Default (`editor_prewarm()`, declared after `editor_background()`):
+    /// nothing to prewarm.
+    struct EditorPrewarm {
+        std::vector<std::string_view> scripts;
+        std::vector<std::string_view> materialized_documents;
+        bool empty() const noexcept { return scripts.empty() && materialized_documents.empty(); }
+    };
 
     /// Preferred editor window size in logical pixels.
     virtual std::pair<uint32_t, uint32_t> editor_size() const { return {400, 300}; }
@@ -1081,6 +1104,10 @@ public:
     virtual std::optional<std::uint32_t> editor_background() const {
         return std::nullopt;
     }
+
+    /// See `EditorPrewarm` above. Appended to preserve additive-only vtable
+    /// ordering (node_abi_gate).
+    virtual EditorPrewarm editor_prewarm() const { return {}; }
 
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
