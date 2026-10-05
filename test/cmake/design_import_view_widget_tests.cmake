@@ -249,3 +249,6 @@ pulp_add_test_suite(pulp-test-native-filter-render GROUP pulp-test-group-design-
 # the built-in blue whatever the design said.
 pulp_add_test_suite(pulp-test-design-token-widget-derive GROUP pulp-test-group-design-import-widgets
     LIBRARIES pulp::view)
+
+# Reviewed plugin-loader calls (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-group-graph-editor NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")

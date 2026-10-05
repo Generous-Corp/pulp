@@ -43,6 +43,22 @@ been admitted to the GPU worker. A completed/published GPU result does not mean
 the callback selected it. One group includes all configured channels.
 
 The canonical SQL is `.agents/skills/trace-sql/pulp_gpu_audio_blocks.sql`.
+Lifecycle boundary arguments are explicit in schema-2 events: terminal rows
+carry `admission_timestamp_ns`, `terminal_ns`, and `retirement_ns`; delivery rows carry
+`delivery_decision_ns` (the callback-end delivery decision), `callback_start_ns`,
+`callback_end_ns`, and `result_visible_ns`. There is no independent delivery
+clock in `SharedIoTraceRecord`; the decision timestamp is therefore named
+explicitly instead of being presented as a separate measurement.
+These are monotonic worker/callback observations and remain nullable when the
+corresponding producer did not instrument them. The
+`pulp_gpu_audio_lifecycle_records` view retains every emitted lifecycle row,
+including duplicate identities, for integrity review; joined convenience
+views must not be treated as a lossless receipt.
+Perfetto lifecycle captures do not authenticate source, executable, or provider
+identity. Promotion to an authenticated campaign receipt still requires the
+private raw manifest's exact `source_revision`, `binary_sha256`,
+`provider_revision`, and `provider_asset_sha256` bindings; a trace by itself
+cannot satisfy that gate.
 `callback_ingress_ns` is the observed transport callback entry supplied by its
 caller. `ingress_to_worker_ns` measures time until the worker acquired that input.
 `worker_to_observed_ns` covers the group until all channel results were observed.

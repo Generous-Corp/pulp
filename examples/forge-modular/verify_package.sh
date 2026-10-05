@@ -316,6 +316,8 @@ need_file "Contents/Resources/tools/rack/patch.py"     "the patch generator ship
 need_file "Contents/Resources/tools/rack/maker_intent.py" \
           "the maker-intent resolver ships"
 need_file "Contents/Resources/tools/rack/generate.py"  "the module generator ships"
+need_file "Contents/Resources/tools/rack/prompt_handoff.py" \
+          "the generators' prompt hand-off ships"
 need_file "Contents/Resources/tools/rack/fetch_sdk.py" "the SDK fetcher ships"
 need_file "Contents/Resources/tools/rack/archive.py"   "the archive helper ships"
 need_file "Contents/Resources/uninstall.sh"            "the uninstaller ships"
@@ -581,6 +583,7 @@ for kind in au vst3 clap; do
         Contents/Resources/tools/rack/patch.py \
         Contents/Resources/tools/rack/maker_intent.py \
         Contents/Resources/tools/rack/generate.py \
+        Contents/Resources/tools/rack/prompt_handoff.py \
         Contents/Resources/tools/dsp_vocabulary.py \
         Contents/Resources/docs/status/agent-capabilities.json \
         Contents/Resources/external/fonts/Inter-Regular.ttf \

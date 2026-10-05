@@ -36,4 +36,4 @@ endif()
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-authoring-capsule-hostile NONE) # the calls are a list of forbidden API names
+pulp_test_spawns(pulp-test-authoring-capsule-hostile NONE REASON "its process calls are a list of forbidden API names, never made, it loads nothing the tree builds")

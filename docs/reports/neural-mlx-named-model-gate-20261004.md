@@ -5,6 +5,12 @@ Source baseline: `origin/main` at `e260a88701eb85d1a22e11952826f98a4a36671c`
 Scope: read-only named-model gate investigation; no public ABI, E126 capability
 transaction, Dawn ownership, or GPU-NAM source changes
 
+> **Historical audit snapshot.** This gate review records the MLX named-model
+> state at the source baseline above; it is not a current-head status receipt.
+> For current coordination and acceptance state, see the [neural audio program
+> status](../status/neural-audio-program-status-20261004.md) and the [neural
+> real-time competitive proof plan](neural-competitive-proof-plan-20261003.md).
+
 ## Disposition
 
 **FAIL / product gate remains open.** A redistributable named fixture is

@@ -198,6 +198,11 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
     def rows(self, view: str) -> list[tuple]:
         return self.db.execute(f"SELECT * FROM pulp_gpu_audio_{view}").fetchall()
 
+    def row_dicts(self, view: str) -> list[dict[str, object]]:
+        columns = [row[1] for row in self.db.execute(
+            f"PRAGMA table_info(pulp_gpu_audio_{view})").fetchall()]
+        return [dict(zip(columns, row)) for row in self.rows(view)]
+
     def require_unqualified(self) -> None:
         self.assertEqual(self.rows("full_lifecycle_generations"), [])
 
@@ -208,6 +213,35 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT sequence, gpu_elapsed_ns FROM "
                                         "pulp_gpu_audio_blocks ORDER BY sequence").fetchall(),
                          [(0, None), (1, None)])
+
+    def test_lifecycle_timestamps_are_projected_without_zero_filling(self) -> None:
+        self.add("terminal", sequence=9, gpu_work_admitted=1, output_eligible=0,
+                 gpu_terminal="completed_accepted", outcome="success", gpu_reason="none",
+                 admission_timestamp_ns=101, terminal_ns=202, retirement_ns=303,
+                 gpu_elapsed_available=0, gpu_elapsed_ns=-1)
+        self.add("delivery", sequence=9, output_eligible=1, delivery="gpu_delivered",
+                 delivery_reason="none", delivery_decision_ns=404,
+                 callback_start_ns=405, callback_end_ns=406, result_visible_ns=407)
+        terminals = [row for row in self.row_dicts("terminals") if row["sequence"] == 9]
+        deliveries = [row for row in self.row_dicts("deliveries") if row["sequence"] == 9]
+        self.assertEqual(len(terminals), 1)
+        self.assertEqual({terminals[0][name] for name in (
+            "admission_timestamp_ns", "terminal_ns", "retirement_ns")}, {101, 202, 303})
+        self.assertEqual(len(deliveries), 1)
+        self.assertEqual({deliveries[0][name] for name in (
+            "delivery_decision_ns", "callback_start_ns", "callback_end_ns",
+            "result_visible_ns")}, {404, 405, 406, 407})
+
+    def test_lossless_lifecycle_projection_retains_duplicate_events(self) -> None:
+        self.add("terminal", sequence=77, gpu_work_admitted=1, output_eligible=0,
+                 gpu_terminal="completed_accepted", outcome="success", gpu_reason="none",
+                 gpu_elapsed_available=0, gpu_elapsed_ns=-1)
+        self.add("terminal", sequence=77, gpu_work_admitted=1, output_eligible=0,
+                 gpu_terminal="completed_accepted", outcome="success", gpu_reason="none",
+                 gpu_elapsed_available=0, gpu_elapsed_ns=-1)
+        rows = [row for row in self.row_dicts("lifecycle_records")
+                if row["lifecycle_event"] == "gpu.audio.terminal" and row["sequence"] == 77]
+        self.assertEqual(len(rows), 2)
 
     def test_unresolved_physical_ownership_rejects_otherwise_complete_lifecycle(self) -> None:
         self.add("ownership", physical_release_complete=0, unresolved_channel_count=1)

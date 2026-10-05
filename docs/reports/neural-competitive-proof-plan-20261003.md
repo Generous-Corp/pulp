@@ -8,13 +8,11 @@ counter, or a model that merely produces plausible audio is insufficient.
 ## Current source boundary
 
 The source snapshot for this plan is `origin/main` at
-`e260a88701eb85d1a22e11952826f98a4a36671c`. It includes the private CPU
+`ab7e48d234bf8ce034b2abd47796d074bd39f4c5`. It includes the private CPU
 neural lifecycle facade, manifest/installed-asset admission, serialized NAM/TCN
-CPU bridge, and the tools-only `tools/validation/mlx_worker_harness.py` probe
-through merged neural packages ([PR 9332](https://github.com/Generous-Corp/pulp/pull/9332),
-[PR 9331](https://github.com/Generous-Corp/pulp/pull/9331),
-[PR 9412](https://github.com/Generous-Corp/pulp/pull/9412), and
-[PR 9415](https://github.com/Generous-Corp/pulp/pull/9415)). The MLX probe is
+CPU bridge, the tools-only `tools/validation/mlx_worker_harness.py` probe,
+the Apple host-tier planning matrix, and the later CI/pluginval and CLAP-width
+refusals through merged PR9591. The MLX probe is
 default-off synthetic scheduling evidence; it is not wired into a plugin build
 and is not a shipped product/provider. The processor facade still executes CPU
 and records non-CPU requests as fallback or unavailable, so every MLX, Dawn,
@@ -137,9 +135,9 @@ needs its own receipt:
 
 | Host tier | Permitted use before a real provider receipt | Promotion evidence required |
 | --- | --- | --- |
-| M1 Max | CPU/reference work and Dawn feasibility experiments | paced named-model receipt with zero unexplained fallback and deadline margin |
-| M3 Ultra | block-parallel MLX/Dawn experiments and multi-instance profiling | the same receipt plus useful accelerator parallelism and reset/device-loss evidence |
-| M5 Max/Studio | primary sustained GPU-audio campaign candidate | the same receipt at production block sizes, with independent cold starts and packaging identity |
+| M1 Max | CPU/reference work and Dawn feasibility experiments | host-bound named-model receipt with provider/executable identity, CPU shadow parity and quality, 100,000 paced blocks, the full block/rate/channel/instance matrix, zero unexplained fallback, p95/p99 deadline margin, model/license/package hashes, and reset/device-loss evidence before any host claim |
+| M3 Ultra | block-parallel MLX/Dawn experiments and multi-instance profiling | the same host-bound receipt plus measured accelerator parallelism, instance-scaling evidence, reset/device-loss recovery, and proof that GPU work is useful at production block sizes |
+| M5 Max/Studio | primary sustained GPU-audio campaign candidate | the same host-bound receipt at production block sizes, with independent-process cold starts, signed package identity, serialized model/license hashes, and no cross-host promotion |
 
 Results remain host-specific. A pass on M5 does not promote M1 or M3, and a
 control that runs on all three does not prove that a persistent audio node

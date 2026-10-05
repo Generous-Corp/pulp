@@ -8234,6 +8234,9 @@ def main(argv):
     if len(argv) < 2:
         print(__doc__)
         return 2
+    if argv[1] == "build":
+        import prompt_handoff
+        argv = prompt_handoff.resolve(argv, 2)
     # Help is always local and free. In particular, `build --help` must never
     # reinterpret "--help" as a musical prompt and contact the selected model.
     if any(arg in {"-h", "--help"} for arg in argv[1:]):
