@@ -675,6 +675,36 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
                 previous_async_path = path
             elif path_valid and pair_id is not None:
                 errors.append(f"line {line}: staged_sync pair_id must be null")
+            trial_scheduling_fields = {"queue_capacity", "max_inflight", "lead_blocks",
+                                       "thermal_state", "workgroup_requested", "workgroup_joined"}
+            present_scheduling_fields = trial_scheduling_fields.intersection(record)
+            if present_scheduling_fields:
+                if present_scheduling_fields != trial_scheduling_fields:
+                    errors.append(f"line {line}: trial_begin scheduling fields must be complete")
+                for field in ("queue_capacity", "max_inflight", "lead_blocks"):
+                    if not _integer_at_least(record.get(field), 1):
+                        errors.append(f"line {line}: trial_begin.{field} must be a positive integer")
+                queue_capacity = record.get("queue_capacity")
+                lead_blocks = record.get("lead_blocks")
+                if (isinstance(queue_capacity, int) and isinstance(lead_blocks, int)
+                        and queue_capacity <= lead_blocks):
+                    errors.append(f"line {line}: trial_begin.queue_capacity must exceed lead_blocks")
+                max_inflight = record.get("max_inflight")
+                if (isinstance(max_inflight, int) and isinstance(queue_capacity, int)
+                        and isinstance(lead_blocks, int)
+                        and max_inflight > queue_capacity - lead_blocks):
+                    errors.append(f"line {line}: trial_begin.max_inflight exceeds available queue depth")
+                if record.get("thermal_state") not in {"unavailable", "nominal", "warm", "throttled"}:
+                    errors.append(f"line {line}: trial_begin.thermal_state is invalid")
+                if (not isinstance(record.get("workgroup_requested"), bool)
+                        or not isinstance(record.get("workgroup_joined"), bool)):
+                    errors.append(f"line {line}: trial_begin.workgroup fields must be boolean")
+                elif record["workgroup_requested"] and not record["workgroup_joined"]:
+                    errors.append(f"line {line}: trial_begin requested workgroup must be joined")
+                if isinstance(row, dict) and trial_scheduling_fields.issubset(row):
+                    for field in trial_scheduling_fields:
+                        if record.get(field) != row.get(field):
+                            errors.append(f"line {line}: trial_begin.{field} disagrees with manifest row")
             current = {"id": trial_id, "path": path, "pair_id": pair_id,
                        "block_count": 0, "digest": hashlib.sha256(),
                        "first_sequence": None, "submit_samples": 0,

@@ -78,12 +78,17 @@ def fixture() -> list[dict]:
         "bootstrap_resamples": 1000,
         "row": {"block_frames": 128, "sample_rate_hz": 48000, "channels": 2,
                 "ir_frames": 4096, "inflight_depth": 2, "lead_blocks": 2,
-                "load": "quiet", "deadline_ns": 1000, "watchdog_ns": 5000},
+                "load": "quiet", "deadline_ns": 1000, "watchdog_ns": 5000,
+                "queue_capacity": 4, "max_inflight": 2, "thermal_state": "unavailable",
+                "workgroup_requested": False, "workgroup_joined": False},
     }]
     for trial_id, path in enumerate(("staged_async", "shared_async", "staged_sync")):
         pair_id = 0 if path != "staged_sync" else None
         records.append({"schema": MODULE.SCHEMA, "record_kind": "trial_begin",
-                        "trial_id": trial_id, "pair_id": pair_id, "path": path})
+                        "trial_id": trial_id, "pair_id": pair_id, "path": path,
+                        "queue_capacity": 4, "max_inflight": 2, "lead_blocks": 2,
+                        "thermal_state": "unavailable", "workgroup_requested": False,
+                        "workgroup_joined": False})
         digest = hashlib.sha256()
         for ordinal in range(2):
             block = {
@@ -189,6 +194,14 @@ class EvidenceTests(unittest.TestCase):
                                   workgroup_requested=False, workgroup_joined=False)
         errors = MODULE.validate_records(records)
         self.assertTrue(any("row.max_inflight exceeds available queue depth" in error for error in errors))
+
+    def test_trial_begin_rejects_max_inflight_beyond_lead_adjusted_capacity(self) -> None:
+        records = fixture()
+        begin = next(record for record in records if record.get("record_kind") == "trial_begin")
+        begin["max_inflight"] = 3
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("trial_begin.max_inflight exceeds available queue depth" in error
+                            for error in errors), errors)
 
     def test_valid_fixture_and_summary(self) -> None:
         records = fixture()
