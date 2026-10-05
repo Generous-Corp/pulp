@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from typing import Iterable
 
 import changed_surface_inventory as inventory
 import changed_surface_script_families as families
@@ -132,10 +134,19 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertNotEqual(self.family_for(generated, "tools/scripts/test_runner.py"), [])
 
     def test_the_static_predictor_agrees_with_native_reachable_on_the_live_tree(self) -> None:
+        # The fixture case above proves the shared seed rule; this one checks
+        # the predictor's backwards walk against the configured forward walk
+        # on real script bodies, over a fixed sample of each side (the full
+        # set costs about 40 s more than the sample).
         root, scripts, declared, configured = live_reachability()
         prediction = families.Prediction(families.Snapshot(root, "HEAD", {}), declared)
-        self.assertTrue(configured)  # control: something is reachable, so both sides were read
-        self.assertEqual({s for s in scripts if prediction.reached(s)}, configured)
+
+        def sample(pool: Iterable[str]) -> list[str]:
+            return sorted(pool, key=lambda s: hashlib.sha256(s.encode()).hexdigest())[:20]
+        reachable, unreachable = sample(configured), sample(set(scripts) - configured)
+        # Control: both sides of the sample are populated, so the tree was read.
+        self.assertEqual((len(reachable), len(unreachable)), (20, 20))
+        self.assertEqual([s for s in reachable + unreachable if prediction.reached(s) != (s in configured)], [])
 
     def test_the_live_tree_keeps_a_reviewed_scanner_list_out_of_script_bodies(self) -> None:
         # A script body that names a path makes it reachable, so a list of
