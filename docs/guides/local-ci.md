@@ -946,7 +946,14 @@ was unknown. Each run ends with one
 platform registers was audited, and no audited executable has a finding.
 `incomplete` means the run cannot vouch for itself. The nightly passes `--fail-on-findings`, so its
 exit follows that verdict: 0 for clean, 1 for findings, 2 for incomplete. A
-red nightly therefore means the streak of clean runs is broken.
+red nightly therefore means the streak of clean runs is broken. The streak
+counts clean days on main, whatever triggered the run: a dispatch counts the
+same as the schedule, two runs on one day count once, a day with no run
+neither adds nor resets, and a non-clean run resets it.
+`.github/workflows/read-audit-cadence-check.yml` (`tools/ci/read_audit_cadence.py`)
+rebuilds that ledger every 30 minutes from each run's own stage0 verdict,
+writes each day's run ids and the streak to its summary and artifact, and
+opens a tracking issue naming any recent day with no run on main.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
