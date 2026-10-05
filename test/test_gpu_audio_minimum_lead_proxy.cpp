@@ -1,5 +1,9 @@
 #include "detail/minimum_lead_proxy.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <type_traits>
+
+static_assert(noexcept(std::declval<pulp::gpu_audio::detail::MinimumLeadProxyEvaluator&>().observe(
+    std::declval<const pulp::gpu_audio::detail::MinimumLeadProxySample&>())));
 
 using namespace pulp::gpu_audio::detail;
 namespace {
@@ -207,6 +211,36 @@ TEST_CASE("minimum lead proxy rejects bound beyond deadline and zero safety") {
     auto r = run(s);
     CHECK_FALSE(r.prediction_valid);
 }
+TEST_CASE("minimum lead proxy rejects unauthenticated sample identity") {
+    auto s = sample(0);
+    s.identity.raw_hashes_authenticated = false;
+    auto r = run(s);
+    CHECK(r.missing_evidence > 0);
+    CHECK_FALSE(r.complete);
+}
+TEST_CASE("minimum lead proxy rejects generation epoch reset and reprepare") {
+    MinimumLeadProxyEvaluator e(admission());
+    e.observe(sample(0));
+    auto reset = sample(1);
+    reset.generation = 8;
+    reset.admission_generation = 8;
+    reset.terminal_generation = 8;
+    reset.delivery_generation = 8;
+    reset.admission_epoch = 10;
+    e.observe(reset);
+    const auto r = e.finish();
+    CHECK(r.generation_mismatches > 0);
+    CHECK(r.missing_evidence > 0);
+    CHECK_FALSE(r.complete);
+}
+TEST_CASE("minimum lead proxy fails closed on bounded ID storage overflow") {
+    MinimumLeadProxyEvaluator e(admission());
+    for (std::uint64_t n = 0; n <= MinimumLeadProxyEvaluator::bounded_id_capacity; ++n)
+        e.observe(sample(n));
+    CHECK(e.finish().id_storage_overflow > 0);
+    CHECK_FALSE(e.finish().complete);
+}
+
 TEST_CASE("minimum lead proxy rejects fabricated identity and reset epoch") {
     auto s = sample(0);
     s.admission_epoch = 8;

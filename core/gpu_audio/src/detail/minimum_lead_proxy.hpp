@@ -1,8 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <limits>
-#include <unordered_set>
 
 namespace pulp::gpu_audio::detail {
 
@@ -108,6 +108,7 @@ struct MinimumLeadProxyReceipt {
     std::uint64_t invalid_predictions = 0;
     std::uint64_t observer_overflow = 0;
     std::uint64_t duplicate_ids = 0;
+    std::uint64_t id_storage_overflow = 0;
     std::uint64_t prediction_samples = 0;
     std::uint64_t prediction_abs_error_max_ns = unavailable;
     std::uint64_t prediction_margin_min_ns = unavailable;
@@ -123,6 +124,8 @@ class MinimumLeadProxyEvaluator {
   public:
     static constexpr std::uint64_t diagnostic_minimum_samples = 1000;
     static constexpr std::uint64_t authoritative_minimum_samples = 100000;
+    static constexpr std::size_t bounded_id_capacity = 131072;
+    static constexpr bool uses_bounded_id_storage = true;
 
     explicit MinimumLeadProxyEvaluator(const MinimumLeadProxyAdmission& admission) noexcept
         : admission_(admission) {}
@@ -149,10 +152,19 @@ class MinimumLeadProxyEvaluator {
             s.admission_epoch == admission_.admission_epoch;
         if (!ids || !s.terminal_present || !s.delivery_present || s.generation == 0)
             ++receipt_.missing_evidence;
-        if (!admission_ids_.insert(s.admission_id).second ||
-            !terminal_ids_.insert(s.terminal_id).second ||
-            !delivery_ids_.insert(s.delivery_id).second)
-            saturating_increment(receipt_.duplicate_ids);
+        const auto admission_result =
+            insert_id(admission_ids_, s.admission_id, 0x9e3779b97f4a7c15ULL);
+        const auto terminal_result = insert_id(terminal_ids_, s.terminal_id, 0xc2b2ae3d27d4eb4fULL);
+        const auto delivery_result = insert_id(delivery_ids_, s.delivery_id, 0x165667b19e3779f9ULL);
+        const auto results = {admission_result, terminal_result, delivery_result};
+        for (const auto result : results) {
+            if (result == IdInsertResult::duplicate)
+                saturating_increment(receipt_.duplicate_ids);
+            else if (result == IdInsertResult::overflow)
+                saturating_increment(receipt_.id_storage_overflow);
+        }
+        if (!s.identity.raw_hashes_authenticated)
+            ++receipt_.missing_evidence;
         if (s.identity.provider != admission_.identity.provider ||
             s.identity.executable != admission_.identity.executable ||
             s.identity.model != admission_.identity.model ||
@@ -232,11 +244,11 @@ class MinimumLeadProxyEvaluator {
                                out.prediction_margin_min_ns != Receipt::unavailable &&
                                out.predictor_underestimates == 0 && out.invalid_predictions == 0;
         out.complete = out.sample_count >= diagnostic_minimum_samples && out.duplicate_ids == 0 &&
-                       out.missing_evidence == 0 && out.duplicate_records == 0 &&
-                       out.sequence_gaps == 0 && out.generation_mismatches == 0 &&
-                       out.identity_mismatches == 0 && out.observer_overflow == 0 &&
-                       out.callback_deadline_misses == 0 && out.gpu_completed == out.sample_count &&
-                       out.cpu_fallback == 0;
+                       out.id_storage_overflow == 0 && out.missing_evidence == 0 &&
+                       out.duplicate_records == 0 && out.sequence_gaps == 0 &&
+                       out.generation_mismatches == 0 && out.identity_mismatches == 0 &&
+                       out.observer_overflow == 0 && out.callback_deadline_misses == 0 &&
+                       out.gpu_completed == out.sample_count && out.cpu_fallback == 0;
         out.authoritative_campaign = out.sample_count >= authoritative_minimum_samples &&
                                      admission_.slots_mask == 0x1e &&
                                      admission_.leads_mask == 0x0f && admission_.cold_runs == 5 &&
@@ -254,14 +266,39 @@ class MinimumLeadProxyEvaluator {
 
   private:
     using Receipt = MinimumLeadProxyReceipt;
+    enum class IdInsertResult : std::uint8_t { inserted, duplicate, overflow };
+
     MinimumLeadProxyAdmission admission_;
     MinimumLeadProxyReceipt receipt_;
     std::uint64_t expected_generation_ = 0;
     std::uint64_t next_sequence_ = 0;
     bool seen_sequence_ = false;
-    std::unordered_set<std::uint64_t> admission_ids_;
-    std::unordered_set<std::uint64_t> terminal_ids_;
-    std::unordered_set<std::uint64_t> delivery_ids_;
+    std::array<std::uint64_t, bounded_id_capacity> admission_ids_{};
+    std::array<std::uint64_t, bounded_id_capacity> terminal_ids_{};
+    std::array<std::uint64_t, bounded_id_capacity> delivery_ids_{};
+
+    static IdInsertResult insert_id(std::array<std::uint64_t, bounded_id_capacity>& table,
+                                    std::uint64_t id, std::uint64_t salt) noexcept {
+        if (id == 0)
+            return IdInsertResult::duplicate;
+        auto hash = id ^ salt;
+        hash ^= hash >> 30;
+        hash *= 0xbf58476d1ce4e5b9ULL;
+        hash ^= hash >> 27;
+        hash *= 0x94d049bb133111ebULL;
+        hash ^= hash >> 31;
+        const auto start = static_cast<std::size_t>(hash % bounded_id_capacity);
+        for (std::size_t probe = 0; probe < bounded_id_capacity; ++probe) {
+            auto& slot = table[(start + probe) % bounded_id_capacity];
+            if (slot == id)
+                return IdInsertResult::duplicate;
+            if (slot == 0) {
+                slot = id;
+                return IdInsertResult::inserted;
+            }
+        }
+        return IdInsertResult::overflow;
+    }
 
     static void saturating_increment(std::uint64_t& value) noexcept {
         if (value != std::numeric_limits<std::uint64_t>::max())
