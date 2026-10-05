@@ -483,6 +483,7 @@ struct ControlBrokerDaemon::Impl {
             for (const auto& candidate :
                  {broker_directory / "pulp", broker_directory / "pulp-cpp",
                   broker_directory / "pulp-mcp",
+                  broker_directory / "tools" / "cli" / "pulp-cpp",
                   broker_directory.parent_path() / "pulp",
                   broker_directory.parent_path() / "tools" / "cli" / "pulp-cpp",
                   broker_directory.parent_path() / "tools" / "mcp" / "pulp-mcp",
