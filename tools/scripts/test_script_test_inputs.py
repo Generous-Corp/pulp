@@ -205,6 +205,17 @@ class BuildListTests(unittest.TestCase):
         for name in ("cmake-nested", "no-command", "compiled"):
             self.assertNotIn(name, self.lst["tests"], name)
 
+    def test_an_argument_longer_than_a_file_name_is_not_an_input(self) -> None:
+        inv = self.repo.inventory()
+        long_arg = "key=true.*" * 40  # 400 bytes in one path component
+        inv["tests"].append({"name": "long-arg", "properties": [{"name": "WORKING_DIRECTORY",
+                             "value": str(self.repo.root)}],
+                             "command": ["/usr/bin/python3", str(self.repo.root / "tools/scripts/test_alpha.py"),
+                                         long_arg]})
+        lst = sti.build_list(inv, self.repo.root)
+        want = [p for p in self.lst["tests"]["alpha"]["inputs"] if p != "test/fixtures/data.txt"]
+        self.assertEqual(lst["tests"]["long-arg"]["inputs"], want)
+
     def test_output_is_sorted_and_repo_relative(self) -> None:
         self.assertEqual(list(self.lst["tests"]), sorted(self.lst["tests"]))
         for rec in self.lst["tests"].values():

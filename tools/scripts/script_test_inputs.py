@@ -202,7 +202,15 @@ class Walker:
 
     # -- resolution helpers -------------------------------------------------
     def _in_repo(self, p: Path) -> bool:
-        return _rel(p, self.root) is not None and p.exists()
+        if _rel(p, self.root) is None:
+            return False
+        # A test argument is probed as a path, and some are not paths at all:
+        # a PASS_REGULAR_EXPRESSION or a long key=value list can exceed the
+        # file-name limit, which stat() reports as an error, not "absent".
+        try:
+            return p.exists()
+        except OSError:
+            return False
 
     def python_module_candidates(self, name: str, search: list[Path]) -> list[Path]:
         parts = name.split(".")
