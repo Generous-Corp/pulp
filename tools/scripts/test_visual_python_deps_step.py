@@ -111,6 +111,30 @@ class EveryCtestJobInstallsTest(unittest.TestCase):
             self.assertNotIn("requirements.lock", text, f"{workflow.name} inlines the install")
 
 
+class ShallowFetchOrderTest(unittest.TestCase):
+    """A depth-1 fetch of origin/main after GPU provenance hydration writes a
+    new shallow boundary at main's tip and cuts the history hydration
+    reconnected, so the history-reading GPU selftests see one commit. Every
+    job that does both must fetch the capability base first, as build.yml does."""
+
+    def test_capability_base_fetch_precedes_hydration(self) -> None:
+        for workflow in ("build.yml", "cross-platform-check.yml"):
+            text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
+            for job in re.split(r"\n  (?=[a-z][a-z0-9_-]*:\n)", text):
+                fetch = job.find("name: Fetch protected capability base")
+                hydrate = job.find("name: Hydrate bounded GPU provenance commits")
+                if fetch < 0 or hydrate < 0:
+                    continue
+                self.assertLess(fetch, hydrate, f"{workflow}: {job.split(':', 1)[0]}")
+
+    def test_both_nightly_linux_jobs_are_checked(self) -> None:
+        text = (REPO / ".github/workflows/cross-platform-check.yml").read_text(encoding="utf-8")
+        jobs = [job for job in re.split(r"\n  (?=[a-z][a-z0-9_-]*:\n)", text)
+                if "name: Fetch protected capability base" in job
+                and "name: Hydrate bounded GPU provenance commits" in job]
+        self.assertEqual(len(jobs), 2)
+
+
 class VisualPythonDepsStepTest(unittest.TestCase):
     """Run the real step against each cache shape a configure can produce."""
 

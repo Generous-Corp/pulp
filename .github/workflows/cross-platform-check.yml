@@ -61,6 +61,15 @@ jobs:
         with:
           lfs: false
 
+      - name: Fetch protected capability base
+        # The agent-capability checks compare against origin/main, which the
+        # nightly's checkout does not carry. It runs BEFORE hydration, as in
+        # build.yml: a depth-1 fetch after hydration writes a new shallow
+        # boundary at main's tip and cuts the history hydration reconnected,
+        # which the GPU provenance selftests read.
+        shell: bash
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+
       - name: Hydrate bounded GPU provenance commits
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
@@ -120,12 +129,6 @@ jobs:
         # Studio MSBuild one project at a time) and every leg hit its timeout.
         run: cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4 2>&1 | tee build-linux.log
 
-      - name: Fetch protected capability base
-        # The agent-capability checks compare against origin/main, which the
-        # nightly's checkout does not carry; build.yml fetches it the same way.
-        shell: bash
-        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-
       - name: Install visual-analysis Python dependencies
         # The same script build.yml and sanitizers.yml call, so the
         # non-skippable visual-python-deps-present ctest is answerable here.
@@ -183,6 +186,15 @@ jobs:
         with:
           lfs: false
 
+      - name: Fetch protected capability base
+        # The agent-capability checks compare against origin/main, which the
+        # nightly's checkout does not carry. It runs BEFORE hydration, as in
+        # build.yml: a depth-1 fetch after hydration writes a new shallow
+        # boundary at main's tip and cuts the history hydration reconnected,
+        # which the GPU provenance selftests read.
+        shell: bash
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+
       - name: Hydrate bounded GPU provenance commits
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
@@ -228,12 +240,6 @@ jobs:
         # default generators build serially (Makefiles `make -j1`, Visual
         # Studio MSBuild one project at a time) and every leg hit its timeout.
         run: cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4 2>&1 | tee build-linux.log
-
-      - name: Fetch protected capability base
-        # The agent-capability checks compare against origin/main, which the
-        # nightly's checkout does not carry; build.yml fetches it the same way.
-        shell: bash
-        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
 
       - name: Install visual-analysis Python dependencies
         # The same script build.yml and sanitizers.yml call, so the
