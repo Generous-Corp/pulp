@@ -36,6 +36,17 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# GCC contracts a*b+c into a fused multiply-add across statements by default
+# in C++ (its ISO-mode "off" applies only to C), so the same arithmetic reached
+# through two code paths (block vs scalar, whole vs partitioned) can round
+# differently on targets with FMA, such as every aarch64 core. Clang and
+# AppleClang contract only within one expression, so they agree with
+# themselves. Turn GCC's contraction off to keep DSP results reproducible
+# across code paths and block partitions.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-ffp-contract=off>)
+endif()
+
 if(APPLE)
     include(CheckLanguage)
     check_language(OBJCXX)
