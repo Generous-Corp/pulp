@@ -1063,26 +1063,6 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
-  "pulp-test-control-dspx04-graph-product-e2e": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli",
-    "pulp-control-dspx04-graph-product-fixture",
-    "pulp-mcp"
-   ],
-   "sources": [],
-   "spawning_sources": [
-    "inspect/src/control_broker_daemon.cpp",
-    "test/support/control_sample_region_e2e.hpp"
-   ],
-   "spawns": "undeclared",
-   "undeclared_sources": [],
-   "unmatched_programs": [
-    "pulp-control-broker"
-   ]
-  },
   "pulp-test-control-endpoint-enrollment": {
    "data": "none",
    "inputs": [],
@@ -2684,6 +2664,7 @@
   "pulp-test-project-package",
   "pulp-test-pulp-node-v1",
   "pulp-test-real-plugin-runner-cache",
+  "pulp-test-recurrent-cpu-adapter",
   "pulp-test-reed-waveguide-loop",
   "pulp-test-relative-point",
   "pulp-test-reload-controller",

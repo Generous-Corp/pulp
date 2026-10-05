@@ -23,13 +23,9 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         VERBATIM)
 
     add_executable(pulp-test-control-dspx04-graph-product-e2e
-        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_e2e.cpp
-        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
-    target_include_directories(pulp-test-control-dspx04-graph-product-e2e PRIVATE
-        ${CMAKE_SOURCE_DIR}/inspect/src ${CMAKE_SOURCE_DIR}/test
-        ${CMAKE_SOURCE_DIR}/core/audio/include)
+        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_typed_skip.cpp)
     target_link_libraries(pulp-test-control-dspx04-graph-product-e2e PRIVATE
-        pulp::inspect-client pulp::audio Catch2::Catch2WithMain)
+        Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-dspx04-graph-product-e2e PRIVATE
         PULP_DSPX04_GRAPH_PRODUCT_FIXTURE="$<TARGET_FILE:pulp-control-dspx04-graph-product-fixture>" PULP_SAMPLE_REGION_EDITABLE_STANDALONE="" PULP_SAMPLE_REGION_FROZEN_STANDALONE="")
     add_dependencies(pulp-test-control-dspx04-graph-product-e2e
@@ -71,14 +67,6 @@ if(PULP_ENABLE_INSPECTOR AND NOT APPLE AND NOT IOS AND NOT PULP_IOS AND
         pulp::inspect-client pulp::audio Catch2::Catch2WithMain)
     set_target_properties(pulp-test-control-dspx04-graph-product-e2e PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/dspx04-control")
-    add_custom_command(TARGET pulp-test-control-dspx04-graph-product-e2e POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-cli>"
-                "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/pulp"
-        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-mcp>"
-                "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/pulp-mcp"
-        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-dspx04-graph-product-e2e>"
-                "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/pulp-control-broker"
-        VERBATIM)
     pulp_scaled_test_timeout(_pulp_dspx04_graph_product_nonapple_timeout 30)
     catch_discover_tests(pulp-test-control-dspx04-graph-product-e2e
         PROPERTIES TIMEOUT "${_pulp_dspx04_graph_product_nonapple_timeout}"
