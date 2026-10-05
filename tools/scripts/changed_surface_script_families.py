@@ -326,8 +326,6 @@ def environment_bound(tests: list[dict]) -> set[str]:
     bound = set()
     for test in tests:
         props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
-        if props.get("PULP_OPTIONAL") in (True, "TRUE", "true", 1, "1"):
-            continue
         labels = props.get("LABELS") or []
         if props.get("RESOURCE_LOCK") or ENVIRONMENT_LABELS & set(labels):
             bound.add(test["name"])
