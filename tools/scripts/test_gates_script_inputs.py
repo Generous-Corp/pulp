@@ -48,6 +48,7 @@ COPIED = [
     "tools/scripts/gate_common.py",
     "tools/ci/source_selftests.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ui-build/lint/clean_output_lint.py",
 ]
 
 # Stands in for changed_surface_script_families.py: its own suite covers what it
@@ -111,6 +112,13 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.write(".github/workflows/version-skill-check.yml",
                    "jobs:\n  lane:\n    steps:\n      - run: python3 tools/ci/source_selftests.py run\n")
         self.write("tools/ci/test_beta.py", "print('beta')\n")
+        self.write(
+            "tools/ui-build/lint/fixtures/clean/FilterPanel.tsx",
+            "export function FilterPanel({value}: {value: number}) {\n"
+            "  return <button data-pulp-action=\"filter\" aria-label=\"Filter\" "
+            "style={{color: tokens.text}}>{value}</button>;\n"
+            "}\n",
+        )
         self.write("tools/ci/source_selftests.json", json.dumps({"schema_version": 1, "tests": [
             {"name": "beta", "argv": ["{repo}/tools/ci/test_beta.py"], "timeout": 120.0}]}) + "\n")
         inventory = {"tests": [
