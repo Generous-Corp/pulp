@@ -140,10 +140,14 @@ inline bool valid_thermal_state(GpuConvolverThermalState state) noexcept {
 
 inline const char* thermal_state_name(GpuConvolverThermalState state) noexcept {
     switch (state) {
-    case GpuConvolverThermalState::Nominal: return "nominal";
-    case GpuConvolverThermalState::Warm: return "warm";
-    case GpuConvolverThermalState::Throttled: return "throttled";
-    case GpuConvolverThermalState::Unavailable: break;
+    case GpuConvolverThermalState::Nominal:
+        return "nominal";
+    case GpuConvolverThermalState::Warm:
+        return "warm";
+    case GpuConvolverThermalState::Throttled:
+        return "throttled";
+    case GpuConvolverThermalState::Unavailable:
+        break;
     }
     return "unavailable";
 }
@@ -310,10 +314,12 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
         manifest.expected_matched_pairs == 0 || manifest.bootstrap_resamples < 100 ||
         !manifest.paced || manifest.block_frames == 0 || manifest.sample_rate_hz == 0 ||
         manifest.channels == 0 || manifest.ir_frames == 0 || manifest.inflight_depth == 0 ||
-        manifest.expected_blocks_per_trial == 0 || manifest.queue_capacity <= manifest.lead_blocks ||
-        manifest.max_inflight == 0 || manifest.max_inflight > manifest.queue_capacity - manifest.lead_blocks ||
-        manifest.lead_blocks == 0 || manifest.deadline_ns == 0 || manifest.watchdog_ns <= manifest.deadline_ns ||
-        !valid_load(manifest.load) || !valid_thermal_state(manifest.thermal_state) ||
+        manifest.expected_blocks_per_trial == 0 ||
+        manifest.queue_capacity <= manifest.lead_blocks || manifest.max_inflight == 0 ||
+        manifest.max_inflight > manifest.queue_capacity - manifest.lead_blocks ||
+        manifest.lead_blocks == 0 || manifest.deadline_ns == 0 ||
+        manifest.watchdog_ns <= manifest.deadline_ns || !valid_load(manifest.load) ||
+        !valid_thermal_state(manifest.thermal_state) ||
         (manifest.workgroup_requested && !manifest.workgroup_joined))
         return false;
     bool has_o3 = false;
@@ -613,8 +619,9 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
              << R"(,"lead_blocks":)" << manifest.lead_blocks << R"(,"workgroup_requested":)"
              << (manifest.workgroup_requested ? "true" : "false") << R"(,"workgroup_joined":)"
              << (manifest.workgroup_joined ? "true" : "false") << R"(,"thermal_state":")"
-             << raw_writer_detail::thermal_state_name(manifest.thermal_state) << R"(","deadline_ns":)" << manifest.deadline_ns
-             << R"(,"watchdog_ns":)" << manifest.watchdog_ns << "}\n";
+             << raw_writer_detail::thermal_state_name(manifest.thermal_state)
+             << R"(","deadline_ns":)" << manifest.deadline_ns << R"(,"watchdog_ns":)"
+             << manifest.watchdog_ns << "}\n";
         std::map<std::string, std::uint32_t> terminal_counts{
             {"cancelled_teardown", 0}, {"completed", 0},        {"device_lost", 0},
             {"late_rejected", 0},      {"provider_failure", 0}, {"stale_rejected", 0}};
@@ -724,8 +731,9 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
                   << R"(,"lead_blocks":)" << manifest.lead_blocks << R"(,"workgroup_requested":)"
                   << (manifest.workgroup_requested ? "true" : "false") << R"(,"workgroup_joined":)"
                   << (manifest.workgroup_joined ? "true" : "false") << R"(,"thermal_state":")"
-                  << raw_writer_detail::thermal_state_name(manifest.thermal_state) << R"(","deadline_ns":)" << manifest.deadline_ns
-                  << R"(,"watchdog_ns":)" << manifest.watchdog_ns << R"(,"load":")"
+                  << raw_writer_detail::thermal_state_name(manifest.thermal_state)
+                  << R"(","deadline_ns":)" << manifest.deadline_ns << R"(,"watchdog_ns":)"
+                  << manifest.watchdog_ns << R"(,"load":")"
                   << raw_writer_detail::load_name(manifest.load) << R"("})";
     if (manifest.campaign == "default") {
         manifest_line << R"(,"confirmation_campaign_id":)";

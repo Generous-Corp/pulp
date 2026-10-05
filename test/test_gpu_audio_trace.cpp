@@ -1203,12 +1203,22 @@ TEST_CASE("staged async records require quiescent ownership before producer drai
 
 TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trace][p4]") {
     GpuConvolverTrialContext context;
+    context.trial_id = context.pair_id = 1;
+    context.block_frames = context.channels = context.ir_frames = 1;
+    context.sample_rate_hz = 48000;
+    context.inflight_depth = 3;
+    context.queue_capacity = 4;
+    context.max_inflight = 2;
+    context.lead_blocks = 2;
+    context.deadline_ns = 1000;
+    context.watchdog_ns = 2000;
+    context.transfer_counters_direct = context.timing_provenance_direct = true;
+    REQUIRE(valid_gpu_convolver_trial_context(context));
     context.thermal_state = static_cast<GpuConvolverThermalState>(255);
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
 }
 
-TEST_CASE("P4 receipt rejects an unsafe queue admission geometry",
-          "[gpu_audio][trace][raw][p4]") {
+TEST_CASE("P4 receipt rejects an unsafe queue admission geometry", "[gpu_audio][trace][raw][p4]") {
     auto manifest = raw_manifest();
     manifest.queue_capacity = manifest.lead_blocks;
     auto terminal = raw_terminal(0);
