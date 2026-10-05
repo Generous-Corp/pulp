@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <vector>
 
 using pulp::view::KeyCode;
 using pulp::view::WindowOptions;
@@ -56,36 +57,106 @@ WindowOptions::MenuCommand make_command(std::string menu, std::string title,
     return command;
 }
 
+// Every item's title in order, separators as "<separator>".
+std::vector<std::string> titles(NSMenu* menu) {
+    std::vector<std::string> out;
+    for (NSInteger i = 0; menu != nil && i < [menu numberOfItems]; ++i)
+        out.push_back(title_at(menu, i));
+    return out;
+}
+
+std::string app_name() {
+    NSString* name = [[NSProcessInfo processInfo] processName];
+    for (NSString* key in @[ @"CFBundleDisplayName", @"CFBundleName" ]) {
+        id value = [[NSBundle mainBundle] objectForInfoDictionaryKey:key];
+        if ([value isKindOfClass:[NSString class]] && [(NSString*)value length] > 0) {
+            name = (NSString*)value;
+            break;
+        }
+    }
+    return [name UTF8String];
+}
+
+// The fixed tail every application menu ends with.
+std::vector<std::string> standard_tail() {
+    return {"Services", "<separator>", "Hide " + app_name(), "Hide Others",
+            "Show All", "<separator>", "Quit " + app_name()};
+}
+
+std::vector<std::string> concat(std::vector<std::string> a, const std::vector<std::string>& b) {
+    a.insert(a.end(), b.begin(), b.end());
+    return a;
+}
+
+WindowOptions::MenuCommand after_about(std::string title, std::function<void()> action = [] {}) {
+    auto command = make_command("", std::move(title), std::move(action));
+    command.key = KeyCode::unknown;
+    command.modifiers = pulp::view::kModNone;
+    command.app_menu_section = WindowOptions::MenuCommand::AppMenuSection::after_about;
+    return command;
+}
+
 } // namespace
 
-TEST_CASE("application menu holds only Quit when nothing registers a command",
+TEST_CASE("application menu is the standard macOS layout when nothing registers a command",
           "[view][menu]") {
     [NSApplication sharedApplication];
     install_application_menu({}, [] {});
 
     NSMenu* menu = app_menu();
     REQUIRE(menu != nil);
-    // No leading separator: a lone rule above Quit reads as a missing item.
-    CHECK([menu numberOfItems] == 1);
-    CHECK(title_at(menu, 0) == "Quit");
+    // No app-command group, so no stray rule for it.
+    CHECK(titles(menu) == concat({"About " + app_name(), "<separator>"}, standard_tail()));
+    // Quit keeps Cmd-Q and is last, as macOS expects.
+    NSMenuItem* quit = [menu itemAtIndex:[menu numberOfItems] - 1];
+    CHECK(std::string([[quit keyEquivalent] UTF8String]) == "q");
+    CHECK([NSApp servicesMenu] != nil);
 }
 
-TEST_CASE("an empty menu name places the command in the application menu",
-          "[view][menu]") {
+TEST_CASE("an empty menu name places the command in the app-command group", "[view][menu]") {
     [NSApplication sharedApplication];
     install_application_menu({make_command("", "Musical Typing Keyboard")}, [] {});
 
     NSMenu* menu = app_menu();
     REQUIRE(menu != nil);
-    // Above Quit, separated from it — Quit must stay last, per macOS.
-    REQUIRE([menu numberOfItems] == 3);
-    CHECK(title_at(menu, 0) == "Musical Typing Keyboard");
-    CHECK(title_at(menu, 1) == "<separator>");
-    CHECK(title_at(menu, 2) == "Quit");
+    CHECK(titles(menu) ==
+          concat({"About " + app_name(), "<separator>", "Musical Typing Keyboard", "<separator>"},
+                 standard_tail()));
 
-    NSMenuItem* item = [menu itemAtIndex:0];
+    NSMenuItem* item = [menu itemAtIndex:2];
     CHECK(std::string([[item keyEquivalent] UTF8String]) == "k");
     CHECK(([item keyEquivalentModifierMask] & NSEventModifierFlagCommand) != 0);
+}
+
+TEST_CASE("Check for Updates sits directly under About, Settings below it",
+          "[view][menu][updater]") {
+    [NSApplication sharedApplication];
+    // Registration order deliberately puts Settings… first: the section, not
+    // the order, decides where the updater goes.
+    install_application_menu(
+        {make_command("", "Settings\xE2\x80\xA6"), after_about("Check for Updates\xE2\x80\xA6")},
+        [] {});
+
+    NSMenu* menu = app_menu();
+    REQUIRE(menu != nil);
+    CHECK(titles(menu) == concat({"About " + app_name(), "Check for Updates\xE2\x80\xA6",
+                                  "<separator>", "Settings\xE2\x80\xA6", "<separator>"},
+                                 standard_tail()));
+}
+
+TEST_CASE("without the after_about section the updater would land in the command group",
+          "[view][menu][updater]") {
+    // Negative control for the case above: the same title registered as an
+    // ordinary app command follows Settings…, so the placement is the field's.
+    [NSApplication sharedApplication];
+    install_application_menu({make_command("", "Settings\xE2\x80\xA6"),
+                              make_command("", "Check for Updates\xE2\x80\xA6")},
+                             [] {});
+    NSMenu* menu = app_menu();
+    REQUIRE(menu != nil);
+    CHECK(title_at(menu, 1) == "<separator>");
+    CHECK(title_at(menu, 2) == "Settings\xE2\x80\xA6");
+    CHECK(title_at(menu, 3) == "Check for Updates\xE2\x80\xA6");
 }
 
 TEST_CASE("a named menu still becomes its own menu-bar submenu", "[view][menu]") {
@@ -100,8 +171,7 @@ TEST_CASE("a named menu still becomes its own menu-bar submenu", "[view][menu]")
     // The named command must NOT also land in the app menu.
     NSMenu* menu = app_menu();
     REQUIRE(menu != nil);
-    CHECK([menu numberOfItems] == 1);
-    CHECK(title_at(menu, 0) == "Quit");
+    CHECK(titles(menu) == concat({"About " + app_name(), "<separator>"}, standard_tail()));
 }
 
 TEST_CASE("app-menu and named-menu commands coexist without stealing each other",
@@ -117,32 +187,49 @@ TEST_CASE("app-menu and named-menu commands coexist without stealing each other"
 
     NSMenu* menu = app_menu();
     REQUIRE(menu != nil);
-    // Registration order is preserved, and ONE separator divides the group
-    // from Quit however many commands precede it.
-    REQUIRE([menu numberOfItems] == 4);
-    CHECK(title_at(menu, 0) == "Musical Typing Keyboard");
-    CHECK(title_at(menu, 1) == "Audio Settings");
-    CHECK(title_at(menu, 2) == "<separator>");
-    CHECK(title_at(menu, 3) == "Quit");
+    // Registration order is preserved, and ONE separator closes the group
+    // however many commands it holds.
+    CHECK(titles(menu) == concat({"About " + app_name(), "<separator>", "Musical Typing Keyboard",
+                                  "Audio Settings", "<separator>"},
+                                 standard_tail()));
 
     NSMenu* window_menu = named_menu(@"Window");
     REQUIRE(window_menu != nil);
     CHECK([window_menu numberOfItems] == 1);
 }
 
-TEST_CASE("an app-menu item invokes its action", "[view][menu]") {
+TEST_CASE("app-menu items invoke their actions, Quit included", "[view][menu]") {
     [NSApplication sharedApplication];
     int fired = 0;
-    install_application_menu({make_command("", "Toggle", [&fired] { ++fired; })}, [] {});
+    int updates = 0;
+    int quits = 0;
+    install_application_menu(
+        {make_command("", "Toggle", [&fired] { ++fired; }),
+         after_about("Check for Updates\xE2\x80\xA6", [&updates] { ++updates; })},
+        [&quits] { ++quits; });
 
     NSMenu* menu = app_menu();
     REQUIRE(menu != nil);
-    NSMenuItem* item = [menu itemAtIndex:0];
-    // The target is retained via representedObject; sending the action here is
-    // what AppKit does on click, and proves the target outlived installation.
-    REQUIRE([item target] != nil);
-    [[item target] performSelector:[item action] withObject:item];
+    // Sending the action is what AppKit does on click, and proves each target
+    // (retained via representedObject) outlived installation.
+    auto send = [menu](NSInteger index) {
+        NSMenuItem* item = [menu itemAtIndex:index];
+        REQUIRE([item target] != nil);
+        [[item target] performSelector:[item action] withObject:item];
+    };
+    REQUIRE(title_at(menu, 1) == "Check for Updates\xE2\x80\xA6");
+    send(1);
+    REQUIRE(title_at(menu, 3) == "Toggle");
+    send(3);
+    send([menu numberOfItems] - 1);
+    CHECK(updates == 1);
     CHECK(fired == 1);
+    CHECK(quits == 1);
+
+    // About and Hide go to NSApp's standard actions.
+    NSMenuItem* about = [menu itemAtIndex:0];
+    CHECK([about target] == NSApp);
+    CHECK([about action] == @selector(orderFrontStandardAboutPanel:));
 }
 
 TEST_CASE("malformed commands are dropped rather than rendered blank",
@@ -151,11 +238,11 @@ TEST_CASE("malformed commands are dropped rather than rendered blank",
     WindowOptions::MenuCommand no_title = make_command("", "");
     WindowOptions::MenuCommand no_action = make_command("", "Orphan");
     no_action.action = nullptr;
-    install_application_menu({no_title, no_action}, [] {});
+    WindowOptions::MenuCommand blank_update = after_about("");
+    install_application_menu({no_title, no_action, blank_update}, [] {});
 
     NSMenu* menu = app_menu();
     REQUIRE(menu != nil);
-    // Both rejected, so no separator either.
-    CHECK([menu numberOfItems] == 1);
-    CHECK(title_at(menu, 0) == "Quit");
+    // All rejected, so no app-command group and no extra separator either.
+    CHECK(titles(menu) == concat({"About " + app_name(), "<separator>"}, standard_tail()));
 }

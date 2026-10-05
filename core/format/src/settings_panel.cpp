@@ -1,9 +1,10 @@
+#include <algorithm>
+#include <cmath>
+#include <pulp/format/app_updates_settings_view.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
-#include <pulp/view/buttons.hpp>  // TextButton (momentary Done)
-#include <algorithm>
-#include <cmath>
+#include <pulp/view/buttons.hpp> // TextButton (momentary Done)
 #include <sstream>
 
 namespace pulp::format {
@@ -347,7 +348,11 @@ void SettingsPanel::build_midi_tab() {
 }
 
 void SettingsPanel::add_section(std::string title, std::unique_ptr<view::View> view) {
-    if (tab_panel_ && view) tab_panel_->add_tab(std::move(title), std::move(view));
+    if (!tab_panel_ || !view)
+        return;
+    if (auto* updates = dynamic_cast<AppUpdatesSettingsView*>(view.get()))
+        updates_view_ = updates;
+    tab_panel_->add_tab(std::move(title), std::move(view));
 }
 
 int SettingsPanel::tab_count() const {
@@ -634,6 +639,14 @@ void SettingsPanel::poll() {
     const bool repaint = visible();
     update_meter_from_bridge(input_bridge_, input_meter_, repaint);
     update_meter_from_bridge(output_bridge_, output_meter_, repaint);
+
+    // A check finishes (and the last-check time moves) on Sparkle's schedule,
+    // not on a click here, so the Updates tab re-reads its status about once
+    // a second while Settings is open.
+    if (updates_view_ && repaint && ++updates_poll_count_ >= 30) {
+        updates_poll_count_ = 0;
+        updates_view_->refresh();
+    }
 }
 
 } // namespace pulp::format

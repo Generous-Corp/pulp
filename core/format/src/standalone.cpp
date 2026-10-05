@@ -317,6 +317,8 @@ StandaloneApp::StandaloneApp(ProcessorFactory factory)
 }
 
 StandaloneApp::~StandaloneApp() {
+    // The update service belongs to the app run that installed it.
+    set_app_update_service(nullptr);
     stop();
 }
 
@@ -922,6 +924,14 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // installs the xdg-desktop-portal bridge when libdbus is available.
     platform::FileDialog::install_native_backend();
 
+    // In-app updates: Sparkle when the app embeds it via pulp_add_sparkle(),
+    // or the development stub. Installed before the editor opens, so a JS
+    // editor's update bridge reads a live service from its first render, and
+    // before the chrome is built, so the Settings panel offers its Updates tab.
+    const auto updater_plan = detail::plan_standalone_updater(
+        detail::probe_standalone_updater_environment(effective_config.headless));
+    set_app_update_service(detail::make_standalone_update_service(updater_plan));
+
     std::string editor_error;
     auto bridge = std::make_unique<ViewBridge>(
         *processor_, store_,
@@ -984,9 +994,6 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         size_hints, chrome, desc.name + " — Standalone", use_gpu,
         bridge->editor_background_rgb());
     detail::add_standalone_settings_menu_command(opts, chrome);
-    // Sparkle auto-update, when the app embeds it via pulp_add_sparkle().
-    const auto updater_plan = detail::plan_standalone_updater(
-        detail::probe_standalone_updater_environment(effective_config.headless));
     detail::add_standalone_updater_menu_command(opts, updater_plan);
     if (updater_plan.start_at_launch) detail::start_standalone_updater();
     opts.initially_hidden = effective_config.headless;

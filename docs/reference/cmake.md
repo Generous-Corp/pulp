@@ -491,6 +491,9 @@ pulp_add_sparkle(MyPlugin_Standalone
     PUBLIC_ED_KEY "<44-character base64 Ed25519 public key>"
     [AUTOMATIC_CHECKS ON|OFF]       # SUEnableAutomaticChecks; omit to let Sparkle ask
     [CHECK_INTERVAL 86400]          # SUScheduledCheckInterval, seconds
+    [RELEASES_URL <https page>]     # linked in the Settings "Updates" note
+    [INSTALLER package|app]         # what an update installs; the note says so
+    [AUTOMATIC_INSTALL ON|OFF]      # SUAllowsAutomaticUpdates; default OFF
     [KEEP_XPC_SERVICES]             # keep Installer/Downloader.xpc (sandboxed apps only)
     [VERSION 2.10.0 SHA256 <hash>]  # override the pinned release
     [DIST_DIR <extracted-dist>])    # offline: an already-extracted distribution
@@ -517,7 +520,14 @@ belongs in a build file: keep it outside the repository and pass it to
 `pulp ship appcast --sign-key-file` when publishing.
 
 At run time the standalone host finds Sparkle through the Objective-C runtime
-and adds **Check for Updates…** to the application menu. Scheduled background
+and, with no further code, adds **Check for Updates…** directly under **About
+<App>** in the application menu, an **Updates** tab to Pulp's Settings panel
+(automatic-check toggle, Check for Updates…, version, last check and a note
+generated from `RELEASES_URL`, `INSTALLER` and `AUTOMATIC_INSTALL`), and the
+`pulp::format::app_update_status()` service a custom editor's own Settings can
+read (see [In-app updates](../guides/app-updates.md)). `AUTOMATIC_INSTALL` is
+off unless set, so Sparkle never installs an update the user did not choose.
+Scheduled background
 checks start only when the app carries a Developer ID signature, so local and
 CI launches stay quiet; `PULP_STANDALONE_UPDATER=on` starts them in a
 development build, and `=off` disables the updater entirely.

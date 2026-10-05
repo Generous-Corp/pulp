@@ -1071,6 +1071,28 @@ because the feed length and signature describe different bytes.
 - **Scheduled checks start only in a Developer-ID-signed build** (Team ID on the
   main executable). Dev/CI launches show the menu item but never prompt or reach
   the network on their own; `PULP_STANDALONE_UPDATER=on|off` overrides.
+- **Two surfaces, one service.** The standalone installs the backend as the
+  process-wide `pulp::format::AppUpdateService` (`app_updates.hpp`) BEFORE the
+  editor opens. The app menu (About, then **Check for Updates…** via
+  `MenuCommand::AppMenuSection::after_about`), Pulp's Settings **Updates** tab
+  and a custom editor's `pulp_updates_*` EditorBridge messages
+  (`add_app_update_handlers()`, client `useAppUpdates()` in `@pulp/react`) all
+  read and drive it. Plug-ins install no service, so the shared editor code
+  sees `available: false` and renders nothing — never gate update UI on a
+  compile-time "is standalone" flag the plug-in build also sets.
+- **The Settings note is derived, not written.** It comes from
+  `RELEASES_URL`, `INSTALLER package|app` and `AUTOMATIC_INSTALL` (default OFF
+  → `SUAllowsAutomaticUpdates=false`). Declare them instead of hand-writing
+  "requires an administrator password" — an app-bundle update needs none.
+- **Dev builds without Sparkle show nothing.** `PULP_STANDALONE_UPDATER=stub`
+  wires the menu item and Settings controls to a stub that never contacts a
+  feed, so the placement can be exercised without a release feed.
+- **Status before the controller exists** is read from Sparkle's own
+  persistence: user defaults `SUEnableAutomaticChecks` (falling back to the
+  Info.plist key) and `SULastCheckTime`. Writing the toggle there before
+  Sparkle starts is what `SPUUpdater`'s setter does; once the controller
+  exists, go through `-[SPUUpdater setAutomaticallyChecksForUpdates:]` so it
+  reschedules.
 - **Signing order is load-bearing.** `codesign` without `--deep` never reaches
   inside a framework, and notarization rejects Sparkle's upstream ad hoc
   signatures. `build_combined_installer.sh` signs `XPCServices/*.xpc`

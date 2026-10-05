@@ -712,6 +712,7 @@ used only to regenerate and freshness-check that payload.
 | Appcast feed generation (Sparkle-compatible) | usable | ship | |
 | Appcast XML parsing | usable | ship | |
 | Ed25519 update signing | usable | ship | Sparkle appcast signatures via `sign_file_ed25519()` and `pulp ship appcast --sign-key` |
+| In-app updates for standalone apps (Sparkle 2) | experimental | format | [app-updates](../guides/app-updates.md) — `pulp_add_sparkle()`; About → Check for Updates… in the app menu, Settings Updates group, `AppUpdateService` + `pulp_updates_*` editor bridge; plug-ins report unavailable |
 | Semantic version comparison | usable | ship | |
 | Windows code signing | partial | ship | [windows](../guides/platforms/windows.md) — Authenticode via Windows SDK `signtool`; signing is implemented, but certificate provisioning and real signing validation remain host-owned |
 | Linux packaging | usable | ship | [linux](../guides/platforms/linux.md) — tested `.deb` path with `.tar.gz` fallback independent of runtime platform maturity, plus standalone AppImage wrapping when `appimagetool` is installed |

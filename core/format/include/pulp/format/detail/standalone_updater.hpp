@@ -12,9 +12,16 @@
 // this code: it lives in pulp-standalone, which only standalone executables
 // link, and the probe ignores a Sparkle that the hosting process (a DAW) may
 // have loaded from its own bundle.
+//
+// The standalone installs the chosen backend as the process-wide
+// AppUpdateService (pulp/format/app_updates.hpp), which is what the app menu,
+// the Settings panel's Updates tab and a JS editor's bridge messages read.
 
+#include <pulp/format/app_updates.hpp>
 #include <pulp/view/window_host.hpp>
 
+#include <cstdint>
+#include <memory>
 #include <string>
 
 namespace pulp::format::detail {
@@ -35,9 +42,13 @@ struct StandaloneUpdaterEnvironment {
     bool developer_id_signed = false;
     /// Value of PULP_STANDALONE_UPDATER: "" (default policy), "0"/"off"
     /// (disable entirely), "1"/"on" (start scheduled checks even in an
-    /// ad-hoc build, for practising against a local feed).
+    /// ad-hoc build, for practising against a local feed), "stub" (offer the
+    /// menu item and Settings controls backed by a stub that never contacts
+    /// a feed -- for exercising the wiring in a build without Sparkle).
     std::string override_value;
 };
+
+enum class StandaloneUpdaterBackend : std::uint8_t { none, sparkle, stub };
 
 struct StandaloneUpdaterPlan {
     /// Add "Check for Updates…" to the application menu.
@@ -45,6 +56,8 @@ struct StandaloneUpdaterPlan {
     /// Start Sparkle at launch so its scheduled background checks run.
     /// When false the updater still starts on the first menu click.
     bool start_at_launch = false;
+    /// What backs the menu item and the AppUpdateService.
+    StandaloneUpdaterBackend backend = StandaloneUpdaterBackend::none;
 };
 
 /// The policy. Automatic checks start only in a Developer-ID-signed build, so
@@ -64,7 +77,20 @@ void start_standalone_updater();
 /// Sparkle's own progress / "up to date" / update dialogs.
 void check_for_standalone_updates();
 
-/// Append the "Check for Updates…" app-menu command when the plan offers it.
+/// The AppUpdateService for the plan's backend, or nullptr for `none`.
+/// Sparkle's service reads the app's Info.plist (version, SUFeedURL,
+/// PulpUpdatesReleasesURL, PulpUpdatesInstaller, SUAllowsAutomaticUpdates)
+/// and Sparkle's own persisted settings.
+std::shared_ptr<AppUpdateService> make_standalone_update_service(const StandaloneUpdaterPlan& plan);
+
+/// A service that never contacts a feed: a check only records its time and
+/// the automatic-check preference lives in memory. Portable; used for the
+/// "stub" backend and by tests.
+std::shared_ptr<AppUpdateService> make_stub_update_service(std::string app_name,
+                                                           std::string version);
+
+/// Add "Check for Updates…" to the application menu, directly under "About
+/// <App>", when the plan offers it. The command calls check_for_app_updates().
 void add_standalone_updater_menu_command(view::WindowOptions& options,
                                          const StandaloneUpdaterPlan& plan);
 
