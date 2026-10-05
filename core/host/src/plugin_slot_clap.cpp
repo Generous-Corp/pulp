@@ -129,9 +129,55 @@ public:
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return plugin_ != nullptr; }
 
+    // A CLAP plugin declares its audio ports statically, so unlike the AU path
+    // the host cannot renegotiate the width. Record what the caller wants and
+    // let prepare refuse a request the plugin cannot serve, rather than handing
+    // the plugin a buffer shape it will reject per block.
+    void set_preferred_channel_layout(int inputs, int outputs) override {
+        preferred_in_ = inputs;
+        preferred_out_ = outputs;
+    }
+
+    // Declared channel count of the plugin's first audio port, or -1 when the
+    // plugin exposes no audio-ports extension (in which case nothing is known
+    // and nothing is policed).
+    int declared_port_channels(bool is_input) const {
+        if (!plugin_) return -1;
+        auto* ext = (const clap_plugin_audio_ports_t*)plugin_->get_extension(
+            plugin_, CLAP_EXT_AUDIO_PORTS);
+        if (!ext || !ext->count || !ext->get) return -1;
+        if (ext->count(plugin_, is_input) == 0) return 0;
+        clap_audio_port_info_t port{};
+        if (!ext->get(plugin_, 0, is_input, &port)) return -1;
+        return (int)port.channel_count;
+    }
+
     bool prepare(double sample_rate, int max_block_size) override {
         if (!plugin_) return false;
         if (active_) release();
+        // Refuse a width the plugin's own ports cannot serve. A CLAP plugin that
+        // is handed a buffer shape it does not accept returns without writing
+        // its output, which the caller sees as a successful render of pure
+        // silence — a wrong answer presented as data. Fail here instead, where
+        // the shape is still explainable, and say both numbers.
+        if (preferred_in_ >= 0 || preferred_out_ >= 0) {
+            const int want_in = preferred_in_;
+            const int want_out = preferred_out_;
+            const int have_in = declared_port_channels(/*is_input=*/true);
+            const int have_out = declared_port_channels(/*is_input=*/false);
+            const bool in_bad = want_in > 0 && have_in >= 0 && want_in != have_in;
+            const bool out_bad = want_out > 0 && have_out >= 0 && want_out != have_out;
+            if (in_bad || out_bad) {
+                runtime::log_error(
+                    "ClapSlot: '{}' declares {} input / {} output channel(s) and cannot "
+                    "serve the requested {} in / {} out. A CLAP plugin's audio ports are "
+                    "static, so the host cannot renegotiate this; rendering anyway would "
+                    "produce silence reported as success. Request the declared width, or "
+                    "pick a plugin whose ports match.",
+                    info_.name, have_in, have_out, want_in, want_out);
+                return false;
+            }
+        }
         if (!plugin_->activate(plugin_, sample_rate, 1, (uint32_t)max_block_size)) {
             runtime::log_error("ClapSlot: activate failed for '{}'", info_.name);
             return false;
@@ -867,6 +913,11 @@ private:
 
     bool active_ = false;
     bool processing_ = false;
+    // Channel layout the caller asked for, as handed to
+    // set_preferred_channel_layout before prepare. -1 means "no request", in
+    // which case prepare does not police the width at all.
+    int preferred_in_ = -1;
+    int preferred_out_ = -1;
     std::atomic<bool> bypassed_{false};
     int64_t steady_time_ = 0;
 };

@@ -18,4 +18,4 @@ catch_discover_tests(pulp-test-cli-package-analyzer-descriptors)
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-cli-package-analyzer-descriptors NONE) # links the registry's curl/powershell download
+pulp_test_spawns(pulp-test-cli-package-analyzer-descriptors NONE REASON "links the registry's curl/powershell download, it runs nothing the tree builds")

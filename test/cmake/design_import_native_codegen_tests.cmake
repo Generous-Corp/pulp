@@ -354,4 +354,4 @@ catch_discover_tests(pulp-test-design-import-screenshot-parity
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-design-import-native-materializer NONE) # the host C++ compiler and xcrun
+pulp_test_spawns(pulp-test-design-import-native-materializer NONE REASON "runs the host C++ compiler and xcrun, nothing the tree builds")

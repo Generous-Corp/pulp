@@ -1,0 +1,72 @@
+{
+  "id": "clap-slot-channel-width-refusal",
+  "title": "A CLAP width the plugin's ports cannot serve is refused, not rendered as silence",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "d6968d29-2382-441c-a0a1-b5df16f1b858",
+  "owned_paths": [
+    "core/host/src/plugin_slot_clap.cpp",
+    "docs/status/sequencer-exposure/rows/clap-slot-channel-width-refusal.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/src/plugin_slot_clap.cpp",
+      "needles": [
+        "CLAP_EXT_AUDIO_PORTS",
+        "declares {} input / {} output channel(s) and cannot ",
+        "void set_preferred_channel_layout(int inputs, int outputs) override"
+      ]
+    },
+    {
+      "path": "test/test_clap_slot_channel_width.cpp",
+      "needles": [
+        "CLAP prepare refuses a width the plugin's ports cannot serve",
+        "no request means nothing is policed"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "PluginSlot::prepare is declared in the installed header core/host/include/pulp/host/plugin_slot.hpp, and core/host/include/pulp/ is installed by the per-subsystem header loop in PulpInstallRules.cmake. An SDK consumer that calls set_preferred_channel_layout and then prepare now observes a false return where it previously observed success followed by a silent render, so the behaviour change is reachable from the installed surface.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/plugin_slot.hpp",
+          "needles": [
+            "virtual void set_preferred_channel_layout(int /*inputs*/, int /*outputs*/) {}"
+          ]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "list(APPEND _pulp_sdk_header_subsystems host)"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI verb, flag or handler changes. The caller whose behaviour moves is `pulp audio render`, which is the offline plugin-render command rather than a timeline surface; it now exits non-zero instead of writing a silent WAV."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler changes; no MCP surface prepares a CLAP slot."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "A refusal at prepare is not a musician-facing control. A shipped product picks a width its own plugin declares, so this path is not reachable as an operation; it changes what an offline measurement does when asked for an impossible shape."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No capability key is added or changed. The refusal tightens an existing PluginSlot behaviour rather than publishing a new capability for an agent to discover."
+    }
+  }
+}

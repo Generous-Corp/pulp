@@ -1025,6 +1025,101 @@ TEST_CASE("NamedPipe POSIX read observes peer close",
     pair.server->close();
 }
 
+TEST_CASE("NamedPipe POSIX server accepts a client that wrote and left half-open",
+          "[stream][named_pipe]") {
+    // A client that opens the public FIFO, writes and exits before the server
+    // sees its reply reader leaves the reply FIFO with no reader. The server
+    // must still accept it: the buffered bytes are the proof it connected.
+    auto path = make_temp_path("pulp_named_pipe_half_open");
+    auto reply = std::filesystem::path(path.string() + ".reply");
+    std::filesystem::remove(path);
+    std::filesystem::remove(reply);
+
+    NamedPipe server;
+    std::atomic<bool> server_done{false};
+    std::atomic<bool> server_ok{false};
+    std::thread server_thread([&] {
+        server_ok.store(server.create_server(path.string()));
+        server_done.store(true);
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((!std::filesystem::exists(path) || !std::filesystem::exists(reply)) &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    // The client never opens the reply FIFO: it writes, closes and is gone.
+    int public_writer = -1;
+    while (public_writer < 0 && std::chrono::steady_clock::now() < deadline) {
+        public_writer = ::open(path.c_str(), O_WRONLY | O_NONBLOCK);
+        if (public_writer < 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(public_writer >= 0);
+    REQUIRE(::write(public_writer, "ready", 5) == 5);
+    ::close(public_writer);
+
+    // Without the half-open accept the server waits for a reply reader that
+    // never comes; close it after a bound so the case fails instead of hanging.
+    const auto accept_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!server_done.load() && std::chrono::steady_clock::now() < accept_deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const bool accepted_in_time = server_done.load();
+    if (!accepted_in_time)
+        server.close();
+    server_thread.join();
+    REQUIRE(accepted_in_time);
+    REQUIRE(server_ok.load());
+    REQUIRE_FALSE(server.is_open()); // no reply write end
+
+    std::array<std::uint8_t, 5> got{};
+    REQUIRE(server.read(got.data(), got.size()) == 5);
+    REQUIRE(std::memcmp(got.data(), "ready", 5) == 0);
+    std::uint8_t byte = 0;
+    REQUIRE(server.read(&byte, 1) == 0);                    // then the peer close
+    REQUIRE(server.write(std::string_view{"reply"}) == -1); // fails cleanly
+
+    server.close();
+    REQUIRE_FALSE(std::filesystem::exists(path));
+    REQUIRE_FALSE(std::filesystem::exists(reply));
+}
+
+TEST_CASE("NamedPipe POSIX server does not accept a client that left without writing",
+          "[stream][named_pipe]") {
+    // A writer that opened and closed the public FIFO without sending a byte
+    // never connected; the server keeps waiting until it is closed.
+    auto path = make_temp_path("pulp_named_pipe_half_open_empty");
+    auto reply = std::filesystem::path(path.string() + ".reply");
+    std::filesystem::remove(path);
+    std::filesystem::remove(reply);
+
+    NamedPipe server;
+    std::atomic<bool> server_done{false};
+    std::atomic<bool> server_ok{false};
+    std::thread server_thread([&] {
+        server_ok.store(server.create_server(path.string()));
+        server_done.store(true);
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((!std::filesystem::exists(path) || !std::filesystem::exists(reply)) &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    int public_writer = -1;
+    while (public_writer < 0 && std::chrono::steady_clock::now() < deadline) {
+        public_writer = ::open(path.c_str(), O_WRONLY | O_NONBLOCK);
+        if (public_writer < 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(public_writer >= 0);
+    ::close(public_writer);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK_FALSE(server_done.load());
+    server.close();
+    server_thread.join();
+    CHECK_FALSE(server_ok.load());
+}
+
 TEST_CASE("NamedPipe POSIX client read waits through initial reply EOF",
           "[stream][named_pipe]") {
     auto path = make_temp_path("pulp_named_pipe_reply_handshake");

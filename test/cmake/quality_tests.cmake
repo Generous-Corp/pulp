@@ -28,7 +28,15 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
-    # The importer, UI compiler and SDK are extractable packages.  Keep their
+    # Private MLX validation stays tools-only/default-off. Register the test so
+    # the repository-wide test-registration guard and generated script-input
+    # manifest observe the harness on every configured platform. The test
+    # skips its optional MLX parity case when MLX is unavailable.
+    add_test(NAME mlx-named-model-harness-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
+
+    # The importer, UI compiler and SDK are extractable packages. Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
     # and proves the same instrument fails closed.
@@ -55,7 +63,6 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(pulp-ui-clean-output-lint
         pulp-ui-clean-output-lint-negative-contract
         PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
-
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")
@@ -1278,9 +1285,7 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         # Two cases walk the whole tracked tree for configured reachability,
-        # once, shared. The matcher is cached, but hosted runners can still be
-        # several times slower than the owner's machine as the script corpus
-        # grows; keep the contract bounded without making normal runs brittle.
+        # once, shared; about 50 s on m3.
         set_tests_properties(changed-surface-script-families-selftest PROPERTIES TIMEOUT 300)
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")

@@ -2575,6 +2575,45 @@ Diagnostic: the AU slot logs `AU v2: initialized with N channels`. If that N dis
 width you are rendering, the render is silence regardless of what the status says — check it before
 trusting any AU measurement.
 
+## A CLAP cannot negotiate its width at all — so the host must refuse
+
+The AU trap above has a CLAP counterpart with the same symptom and the opposite
+cause. A CLAP plugin declares its audio ports **statically**: there is no
+initialize-time negotiation, so a host cannot reshape the plugin to match the
+buffer it wants to render. Handed a `clap_audio_buffer_t` whose
+`channel_count` its ports do not accept, a conforming plugin returns without
+writing its output — and the caller sees a successful render of pure silence.
+
+This was live on `main` until recently, and the default configuration was the
+broken one: `pulp audio render` defaults to `--in-channels 2 --out-channels 2`,
+so any plugin whose ports are not stereo produced a silent WAV and **exit 0**.
+Measured with the sample-region allpass CLAP: 1x1 rendered peak −6.0 dBFS, 2x2
+rendered −200.0 dBFS on both channels with a silence run covering every frame.
+
+Two things made it invisible. The plugin was behaving correctly — it
+fail-closes, returning without writing unless handed exactly its declared
+shape. And the slot queried the GUI, LATENCY, PARAMS, STATE and TAIL
+extensions but **never `CLAP_EXT_AUDIO_PORTS`**, so it had no idea what the
+plugin declared and simply forwarded the caller's widths. Neither half was
+lying; together they produced a wrong answer presented as data.
+
+`prepare()` now queries the declared port widths and refuses a request it
+cannot serve, naming both numbers. Three things to know when working here:
+
+* **The fix is a refusal, not a conversion, and that is deliberate.** Making
+  the host mix to fit would invent a channel-conversion semantic and quietly
+  change what a measurement means. If an explicit opt-in conversion is ever
+  wanted, it is a new feature with its own proof, not a widening of this.
+* **Only a caller that asks is policed.** The refusal fires only when
+  `set_preferred_channel_layout` was called before `prepare` — the render CLI
+  does, the graph does not. A plugin exposing no audio-ports extension is not
+  policed either, because nothing is known about it.
+* **Suspect the measurement before the DSP.** A silent or wrong render from a
+  hosted plugin is more often the host handing it a shape it refuses than the
+  DSP being wrong. Render at the plugin's declared width first, and check the
+  per-channel metrics rather than the aggregate level — an aggregate can look
+  plausible while one channel is dead for every frame.
+
 ## Querying the instance that actually runs
 
 Do not use `nodes()` and an opaque pointer as a live diagnostics shortcut. A

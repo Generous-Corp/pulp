@@ -4073,7 +4073,7 @@ name, which silently disabled PR-head receipt reuse for weeks. The pr-fast
 A compiled timeline test whose sources call `PluginSlot::load`, `fork`, or
 another process or module API is scanned at configure time
 (`tools/scripts/script_test_inputs.py`). Unless it has an edge to the built
-target it loads, or a reviewed `pulp_test_spawns(<test> NONE)` in
+target it loads, or a reviewed `pulp_test_spawns(<test> NONE REASON "<why>")` in
 `test/cmake/timeline_tests.cmake`, it is `spawns: undeclared` and a selector
 never skips it. The graph-binding suite loads `PulpGain.clap` only through
 `PULP_TEST_CLAP_PATH`, which the top-level `CMakeLists.txt` sets together
