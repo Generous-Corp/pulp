@@ -1329,40 +1329,40 @@ TEST_CASE("setBackgroundGradient resolves radial sizing keywords per axis",
         return View::resolve_radial(root.background_gradient_layers().front(),
                                     200.0f, 120.0f);
     };
-    auto near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
+    auto close_to = [](float a, float b) { return std::abs(a - b) < 0.01f; };
 
     // A circle takes ONE radius: the nearest side on either axis, so the short
     // axis wins. A per-axis model would give it 100.
     const auto cs_circle =
         resolved("radial-gradient(circle closest-side at 50% 50%, #fff, #000)");
-    CHECK(near(cs_circle.rx, 60.0f));
-    CHECK(near(cs_circle.ry, 60.0f));
+    CHECK(close_to(cs_circle.rx, 60.0f));
+    CHECK(close_to(cs_circle.ry, 60.0f));
 
     // An ellipse takes the nearest side on EACH axis independently.
     const auto cs_ellipse =
         resolved("radial-gradient(closest-side at 50% 50%, #fff, #000)");
-    CHECK(near(cs_ellipse.rx, 100.0f));
-    CHECK(near(cs_ellipse.ry, 60.0f));
+    CHECK(close_to(cs_ellipse.rx, 100.0f));
+    CHECK(close_to(cs_ellipse.ry, 60.0f));
 
     // farthest-corner keeps the farthest-side aspect and scales until it meets
     // the corner — exactly sqrt(2) per axis, not the corner distance (116.6).
     const auto fc = resolved("radial-gradient(farthest-corner at 50% 50%, #fff, #000)");
-    CHECK(near(fc.rx, 141.42f));
-    CHECK(near(fc.ry, 84.85f));
+    CHECK(close_to(fc.rx, 141.42f));
+    CHECK(close_to(fc.ry, 84.85f));
 
     // No prefix at all means `farthest-corner ellipse at center`.
     const auto bare = resolved("radial-gradient(#fff, #000)");
-    CHECK(near(bare.rx, 141.42f));
-    CHECK(near(bare.ry, 84.85f));
+    CHECK(close_to(bare.rx, 141.42f));
+    CHECK(close_to(bare.ry, 84.85f));
 
     // An off-centre `at` changes every radius, which a box-relative constant
     // cannot express at all: the centre sits 40px from the left and 160 from
     // the right, 24 from the top and 96 from the bottom.
     const auto off = resolved("radial-gradient(farthest-side at 20% 20%, #fff, #000)");
-    CHECK(near(off.cx, 40.0f));
-    CHECK(near(off.cy, 24.0f));
-    CHECK(near(off.rx, 160.0f));
-    CHECK(near(off.ry, 96.0f));
+    CHECK(close_to(off.cx, 40.0f));
+    CHECK(close_to(off.cy, 24.0f));
+    CHECK(close_to(off.rx, 160.0f));
+    CHECK(close_to(off.ry, 96.0f));
 }
 
 TEST_CASE("setTextRuns builds a styled AttributedString on the Label",
