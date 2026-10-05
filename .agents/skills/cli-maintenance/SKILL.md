@@ -3803,3 +3803,15 @@ CLI-side scripts that probe a pid (`tools/ci/build_dir_lock.py`,
 process with `PROCESS_QUERY_LIMITED_INFORMATION` and reads `STILL_ACTIVE`; copy
 that, not the POSIX `os.kill`, into any new Python that probes a pid.
 
+## Untrusted paths go through `pulp::runtime::is_safe_relative_path`
+
+An archive entry, manifest member, template path or registry location that the
+CLI joins onto a directory must be screened by
+`pulp::runtime::is_safe_relative_path` (`pulp/runtime/safe_relative_path.hpp`),
+never by `is_absolute()`: on Windows `/x`, `\x` and `C:x` are not absolute and
+replace the destination's root when joined. Where a destination exists, also
+check `pulp::runtime::is_within_directory` after the join.
+`tools/scripts/safe_path_guard_lint.py` fails a `*safe*` guard that skips the
+helper. A source-compiled test target that does not link `pulp::runtime`
+(`pulp-test-cli-import-emit`, the gpu-probe model library) needs
+`core/runtime/include` on its include path for the header.

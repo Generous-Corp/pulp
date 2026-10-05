@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-safe-relative-path-helper-watch",
+  "created_at": "2026-10-05T16:46:11Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Untrusted relative paths (pack manifest members, content and kit archive entries, declared assets, template and importer paths) are now screened by one header-only helper, pulp::runtime::is_safe_relative_path, which refuses rooted forms on every platform. The design-source-ingest and render-assets-and-backends touches are the import-emit write plan and the widget-bridge asset path guard, which now refuse more names, never fewer. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-kit-commands",
+    "ctest --test-dir build -R pulp-test-reload-remote-fetch",
+    "ctest --test-dir build -R pulp-test-safe-relative-path",
+    "python3 tools/scripts/test_safe_path_guard_lint.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
