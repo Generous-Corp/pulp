@@ -238,6 +238,35 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
     REQUIRE(plan.release());
 }
 
+TEST_CASE("shared IO execution predictor is opt-in and conservative",
+          "[gpu_audio][shared_io][prediction]") {
+    SharedIoExecutionPredictor predictor;
+    REQUIRE(predictor.admit(1000, 1001));
+
+    predictor.configure({.enabled = true, .minimum_samples = 2, .safety_margin_ns = 100});
+    predictor.observe(1000);
+    REQUIRE_FALSE(predictor.estimate().ready);
+    predictor.observe(1200);
+
+    const auto estimate = predictor.estimate();
+    REQUIRE(estimate.enabled);
+    REQUIRE(estimate.ready);
+    REQUIRE(estimate.samples == 2);
+    REQUIRE(estimate.mean_ns >= 1000);
+    REQUIRE(estimate.conservative_ns > estimate.mean_ns);
+    REQUIRE_FALSE(predictor.admit(10'000, 10'000 + estimate.conservative_ns - 1));
+    REQUIRE(predictor.admit(10'000, 10'000 + estimate.conservative_ns));
+
+    // A contention spike must not be hidden by the EWMA. The bound remains at
+    // or above every observed wall-clock sample, with no GPU timestamp claim.
+    predictor.observe(5'000);
+    REQUIRE(predictor.estimate().conservative_ns >= 5'100);
+
+    predictor.configure({});
+    REQUIRE_FALSE(predictor.estimate().enabled);
+    REQUIRE(predictor.admit(10'000, 10'001));
+}
+
 TEST_CASE("shared IO compute plan classifies completion after bounded wake",
           "[gpu_audio][shared_io][p2]") {
     FakeProvider provider;
