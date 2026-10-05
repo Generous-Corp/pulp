@@ -1,17 +1,24 @@
+#include <algorithm>
+#include <chrono>
+#include <exception>
+#include <filesystem>
+#include <optional>
 #include <pulp/events/child_process_manager.hpp>
 #include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/scope_guard.hpp>
-#include <algorithm>
-#include <exception>
-#include <filesystem>
 #include <random>
-#include <chrono>
 
 namespace pulp::events {
 
 namespace {
 
 constexpr auto kChildIpcConnectTimeout = std::chrono::seconds(5);
+// How long a launch keeps waiting for the IPC handshake after the child has
+// already exited. A child that connects, reports ready and exits at once can
+// finish before the server thread is scheduled to complete the accept; its
+// connection is still real, so the launch succeeds and the monitor reports the
+// exit. Only a child that never connected within the grace is a failed launch.
+constexpr auto kChildExitHandshakeGrace = std::chrono::milliseconds(100);
 
 thread_local const ConnectedChildProcess* current_message_callback_child = nullptr;
 
@@ -209,10 +216,16 @@ bool ConnectedChildProcess::launch(std::string_view executable,
     }
     pid_.store(process_.process_id());
     const auto connect_started = std::chrono::steady_clock::now();
+    std::optional<std::chrono::steady_clock::time_point> exited_at;
     while (!server_done.load()) {
         if (!process_.is_running()) {
-            connection_.disconnect();
-            break;
+            const auto now = std::chrono::steady_clock::now();
+            if (!exited_at)
+                exited_at = now;
+            else if (now - *exited_at >= kChildExitHandshakeGrace) {
+                connection_.disconnect();
+                break;
+            }
         }
 
         const auto elapsed = std::chrono::steady_clock::now() - connect_started;
