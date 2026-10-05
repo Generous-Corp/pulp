@@ -387,14 +387,17 @@ def _git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
     command = ["git", "-C", str(root), *args]
     if stdin is None:
         return subprocess.run(command, check=True, capture_output=True).stdout
-    # Keep the request out of a pipe.  `git cat-file --batch` can emit a large
+    # Keep both sides out of pipes.  `git cat-file --batch` can emit a large
     # response before consuming all object IDs; feeding it through
-    # subprocess.run(input=...) can then deadlock when both pipes fill.
-    with tempfile.TemporaryFile() as request:
+    # subprocess.run(input=...) or capturing its response through a pipe can
+    # then deadlock when either pipe fills.
+    with tempfile.TemporaryFile() as request, tempfile.TemporaryFile() as response:
         request.write(stdin)
         request.seek(0)
-        return subprocess.run(command, stdin=request, check=True,
-                              capture_output=True).stdout
+        subprocess.run(command, stdin=request, stdout=response, check=True,
+                       stderr=subprocess.PIPE)
+        response.seek(0)
+        return response.read()
 
 
 class Snapshot:

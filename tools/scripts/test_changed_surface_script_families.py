@@ -134,6 +134,14 @@ sys.stdout.flush()
         probe = """import pathlib, sys
 sys.path.insert(0, sys.argv[1])
 import changed_surface_script_families as families
+import subprocess
+original_run = families.subprocess.run
+def checked_run(*args, **kwargs):
+    if kwargs.get("stdin") is not None:
+        assert kwargs.get("stdout") is not subprocess.PIPE
+        assert "capture_output" not in kwargs
+    return original_run(*args, **kwargs)
+families.subprocess.run = checked_run
 request = (b"deadbeef\\n" * 20000)
 result = families._git(pathlib.Path('.'), 'cat-file', '--batch', stdin=request)
 print(result[-len(str(len(request))):].decode())
