@@ -246,10 +246,15 @@ if [ -f "$VELLUM_BOUNDARY" ]; then
 fi
 
 # ── 0e. clean-output source fixture ────────────────────────────────────────
-# Exercise the reusable importer-output lint in the cheap gate. The full
-# planted-control unittest is registered with CTest; this gate keeps a stable
-# clean fixture from silently disappearing or becoming malformed.
-if [ -f "$CLEAN_OUTPUT_LINT" ] && [ -d "$ROOT/tools/ui-build/lint/fixtures/clean" ]; then
+# Exercise the reusable importer-output lint in the cheap gate. The linter is
+# fail-closed for both a missing and an empty source root, so invoke it even
+# when the checked-in fixture has disappeared. A conditional directory check
+# would turn that omission into a silent green gate. The companion unittest
+# plants every lint class and the missing/empty negative controls.
+if [ ! -f "$CLEAN_OUTPUT_LINT" ]; then
+    echo "gates: clean-output linter is missing: $CLEAN_OUTPUT_LINT" >&2
+    fail=1
+else
     echo "" >&2
     echo "▸ clean-output source fixture" >&2
     if ! "$PYTHON" "$CLEAN_OUTPUT_LINT" "$ROOT/tools/ui-build/lint/fixtures/clean"; then

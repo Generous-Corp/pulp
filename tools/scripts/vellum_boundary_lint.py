@@ -24,6 +24,8 @@ _SOURCE_SUFFIXES = {
     ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py",
 }
 _INCLUDE_RE = re.compile(r"(?:#\s*include|(?:import|export)\s+(?:[^\n]*?\s+from\s+)?)[ \t]*[<\"']([^>\"']+)[>\"']")
+_DYNAMIC_MODULE_RE = re.compile(
+    r"(?:\bimport\s*\(|\brequire\s*\()[ \t]*([\"'])([^\"']+)\1")
 
 
 @dataclass(frozen=True)
@@ -47,16 +49,28 @@ def _load_manifest(path: Path, root: Path) -> Manifest:
     missing = [key for key in required if key not in raw]
     if missing:
         raise ValueError(f"{path}: missing fields: {', '.join(missing)}")
-    package_root = root / str(raw["root"])
+    root_value = raw["root"]
+    if not isinstance(root_value, str) or not root_value:
+        raise ValueError(f"{path}: root must be a non-empty relative path")
+    relative_parts = Path(root_value).parts
+    if Path(root_value).is_absolute() or ".." in relative_parts:
+        raise ValueError(f"{path}: root must stay beneath the repository: {root_value!r}")
+    repository_root = root.resolve()
+    package_root = (repository_root / root_value).resolve()
+    try:
+        package_root.relative_to(repository_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"{path}: root escapes the repository: {root_value!r}") from exc
     if not package_root.is_dir():
-        raise ValueError(f"{path}: package root does not exist: {raw['root']}")
+        raise ValueError(f"{path}: package root does not exist: {root_value}")
     deps = raw["dependencies"]
     targets = raw["test_targets"]
     if not isinstance(deps, list) or not all(isinstance(item, str) for item in deps):
         raise ValueError(f"{path}: dependencies must be a list of strings")
     if not isinstance(targets, list) or not all(isinstance(item, str) for item in targets):
         raise ValueError(f"{path}: test_targets must be a list of strings")
-    return Manifest(path, str(raw["name"]), str(raw["root"]), str(raw["kind"]),
+    return Manifest(path, str(raw["name"]), root_value, str(raw["kind"]),
                     tuple(deps), tuple(targets))
 
 
@@ -78,6 +92,12 @@ def _normalise(value: str) -> str:
     return value.replace("\\", "/").lstrip("./")
 
 
+def _is_private_core_view_target(target: str) -> bool:
+    normalised = _normalise(target)
+    return ("core/view/src/" in normalised or
+            normalised.startswith("core/view/src"))
+
+
 def _violations(root: Path, manifest: Manifest) -> list[str]:
     problems: list[str] = []
     package_root = root / manifest.root
@@ -91,9 +111,12 @@ def _violations(root: Path, manifest: Manifest) -> list[str]:
         for match in _INCLUDE_RE.finditer(text):
             target = _normalise(match.group(1))
             # A package may consume only the public installed-header surface.
-            if ("core/view/src/" in target or target.startswith("core/view/src")
-                    or target.startswith("../core/view/src")):
+            if _is_private_core_view_target(target):
                 problems.append(f"{rel}: private core/view include {target!r}")
+        for match in _DYNAMIC_MODULE_RE.finditer(text):
+            target = match.group(2)
+            if _is_private_core_view_target(target):
+                problems.append(f"{rel}: private core/view module reference {target!r}")
     return problems
 
 
@@ -111,6 +134,10 @@ def _core_view_references(root: Path, manifests: tuple[Manifest, ...]) -> list[s
             continue
         for match in _INCLUDE_RE.finditer(text):
             target = _normalise(match.group(1))
+            if any(target == prefix or target.startswith(prefix + "/") for prefix in forbidden):
+                problems.append(f"{rel}: core/view reaches extractable package {target!r}")
+        for match in _DYNAMIC_MODULE_RE.finditer(text):
+            target = _normalise(match.group(2))
             if any(target == prefix or target.startswith(prefix + "/") for prefix in forbidden):
                 problems.append(f"{rel}: core/view reaches extractable package {target!r}")
     return problems

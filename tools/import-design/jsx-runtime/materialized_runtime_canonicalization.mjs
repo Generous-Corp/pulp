@@ -1,7 +1,8 @@
 import { transformSync } from 'esbuild';
+import { trustedVendorPayload } from '../browser_capture/vendor_payload.mjs';
 
 function assetText(asset) {
-  if (!asset || asset.mime_type !== 'text/javascript' ||
+  if (!asset || !/^(?:text|application)\/javascript(?:\s*;|$)/i.test(asset.mime_type || '') ||
       typeof asset.data_base64 !== 'string') return '';
   return Buffer.from(asset.data_base64, 'base64').toString('utf8');
 }
@@ -10,7 +11,8 @@ function nativeVendorKind(asset) {
   // marker matching can delete authored assets that happen to contain a
   // license string or Babel-like text.
   const kind = asset?.vendor_kind;
-  return kind === 'react' || kind === 'react-dom' || kind === 'babel' ? kind : '';
+  return (kind === 'react' || kind === 'react-dom' || kind === 'babel') &&
+      trustedVendorPayload(kind, assetText(asset)) ? kind : '';
 }
 
 
