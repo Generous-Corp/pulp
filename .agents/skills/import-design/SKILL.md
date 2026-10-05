@@ -3929,23 +3929,25 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `pulp config set import_design.browser {auto,managed,system}` picks the mode;
   `managed-browser-unavailable` fires only when `managed` is selected
   explicitly and nothing is installed.
-- **The Node capture tests do NOT share the C++ discovery order above.**
-  `browser_capture/capture_integration_support.mjs` carries their own
-  `installedBrowser()` resolver, and it is the only browser resolution in the
-  repository written in JavaScript. Under GitHub Actions it accepts only
-  `PULP_DESIGN_BROWSER`: a lane that did not provision the pinned build skips
-  the real-browser cases instead of launching the runner image's Chrome. Whatever the C++ probe learns about managed
-  browsers, `current.json`, or config modes is invisible to it, so a provisioned
-  browser reaches the Node suite only through the environment. Hand it
-  `PULP_DESIGN_BROWSER`, the same variable `collect_browser_candidates` reads.
-  Anything else falls through to the hardcoded system installations, which
-  silently substitutes an unpinned host Chrome for the version the caller
-  verified. The macOS gate provisions exactly this way: it downloads a
-  checksum-pinned Chrome for Testing and publishes `PULP_DESIGN_BROWSER` to
-  `$GITHUB_ENV` for the `pulp-browser-capture-node-integration` ctest. When you
-  add a browser-driven `.mjs` test, read that variable rather than growing a
-  second candidate list, and remember that on a host with no system Chrome the
-  cost of getting this wrong is a silent skip rather than a failure.
+- **The Node capture tests share the C++ order only in part.**
+  `browser_capture/capture_integration_support.mjs` carries its own
+  `installedBrowser()` resolver, the only browser resolution in the repository
+  written in JavaScript. Its order is `PULP_DESIGN_BROWSER`, then (under GitHub
+  Actions) nothing, so a lane that did not provision the pinned build skips the
+  real-browser cases instead of launching the runner image's Chrome; then the
+  legacy `PULP_BROWSER`, then the managed install (`managedBrowser()`, the same
+  `current.json` containment rules as `managed_current_browser`), then
+  hardcoded system paths. It does not read `import_design.browser` modes. On a
+  developer host, run `pulp tool install chrome-for-testing` once: until then
+  every local run of these suites, and every host-side `pulp import-design`,
+  launches the mutable system Chrome (on m3 that was 32 launches in a day, each
+  leaving a code-sign clone under `/var/folders/.../X`). The macOS gate
+  provisions differently: it downloads a checksum-pinned Chrome for Testing and
+  publishes `PULP_DESIGN_BROWSER` to `$GITHUB_ENV` for the
+  `pulp-browser-capture-node-integration` ctest. When you add a browser-driven
+  `.mjs` test, call `installedBrowser()` rather than growing a second candidate
+  list, and remember that on a host with no browser the cost of getting this
+  wrong is a silent skip rather than a failure.
 - **Real-browser cases live in `*.integration.test.mjs` files, and they run
   concurrently.** The ctest `pulp-browser-capture-node-integration` is
   `RUN_SERIAL` with the `browser` RESOURCE_LOCK and the suite's highest `COST`,
