@@ -434,11 +434,17 @@ class ManifestTests(unittest.TestCase):
                     "--out", str(out)]
             # Without the audit report every executable is unvouched for.
             self.assertEqual(ek.main([a for a in argv if a not in ("--audit-report", str(audit))]), 0)
-            self.assertEqual(json.loads(out.read_text())["reasons"], {"audit_uncovered": 2, "keyed": 1})
+            absent = json.loads(out.read_text())
+            self.assertEqual((absent["reasons"], absent["producer"]["audit_status"]),
+                             ({"audit_uncovered": 2, "keyed": 1}, "absent"))
+            unclean = Path(tmp) / "unclean.json"
+            unclean.write_text(json.dumps({"schema": ek.READ_AUDIT_SCHEMA, "stage0": {"verdict": "findings"}}))
+            self.assertEqual(ek.main([str(unclean) if a == str(audit) else a for a in argv]), 0)
+            self.assertEqual(json.loads(out.read_text())["producer"]["audit_status"], "not_clean")
             self.assertEqual(ek.main(argv), 0)
             doc = json.loads(out.read_text())
-            self.assertEqual((doc["producer"]["audit_commit"], len(doc["producer"]["audit_report_sha256"])),
-                             ("c0ffee", 64))
+            self.assertEqual((doc["producer"]["audit_commit"], len(doc["producer"]["audit_report_sha256"]),
+                              doc["producer"]["audit_status"]), ("c0ffee", 64, "clean"))
             self.assertEqual(doc["schema"], ek.SCHEMA)
             producer = doc["producer"]
             self.assertEqual((producer["base_sha"], producer["head_sha"], producer["base_record_run_id"]),

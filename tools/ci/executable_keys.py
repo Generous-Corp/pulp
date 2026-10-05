@@ -623,7 +623,11 @@ def main(argv: list[str]) -> int:
                              "base_record_image": (record or {}).get("image"),
                              "audit_report_sha256": (hashlib.sha256(a.audit_report.read_bytes()).hexdigest()
                                                      if a.audit_report and a.audit_report.is_file() else None),
-                             "audit_commit": (audit or {}).get("commit")},
+                             "audit_commit": (audit or {}).get("commit"),
+                             # Says in words why nothing was keyed on data
+                             # when a report was missing or not clean.
+                             "audit_status": ("absent" if audit is None else
+                                              "clean" if audit_covered(audit) is not None else "not_clean")},
                 **body}
     a.out.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print(f"executable-keys: {len(body['executables'])} entries; {body['reasons']}")
