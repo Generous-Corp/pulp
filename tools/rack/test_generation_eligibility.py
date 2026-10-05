@@ -134,8 +134,8 @@ class FreshGenerationEligibilityTest(unittest.TestCase):
     def test_random_example_pools_are_identical_and_supported(self) -> None:
         """The native shell and browser demo must not advertise phantom modules."""
         root = Path(__file__).resolve().parents[2]
-        native = (root / "forge-seam/modular/modular_shell.cpp").read_text()
-        browser = (root / "examples/forge-modular/app/ui/main.js").read_text()
+        native = (root / "forge-seam/modular/modular_shell.cpp").read_text(encoding="utf-8")
+        browser = (root / "examples/forge-modular/app/ui/main.js").read_text(encoding="utf-8")
 
         def pool(source: str, name: str) -> list[str]:
             tail = source.split(name, 1)[1]

@@ -348,6 +348,8 @@ jobs:
           python3 tools/scripts/win32_include_lint.py
           python3 tools/scripts/test_safe_path_guard_lint.py
           python3 tools/scripts/safe_path_guard_lint.py
+          python3 tools/scripts/test_text_encoding_lint.py
+          python3 tools/scripts/text_encoding_lint.py --base "${{ steps.base.outputs.ref }}"
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest
