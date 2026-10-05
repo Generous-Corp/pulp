@@ -1,5 +1,7 @@
 #include "shared_io_convolution_session.hpp"
 
+#include "dawn_shared_io_provider.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -49,6 +51,34 @@ SharedIoExecutionContract SharedIoConvolutionSession::execution_contract() const
     contract.shared_host_pointer_capable = config_.shared_host_pointer_capable;
     contract.cpu_fallback_prepared = config_.cpu_fallback_prepared;
     return contract;
+}
+
+SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const noexcept {
+    SharedIoProviderIdentity identity;
+    const auto* provider = dynamic_cast<const DawnSharedIoProvider*>(provider_.get());
+    if (provider == nullptr)
+        return identity;
+    try {
+        const auto adapter = provider->adapter_identity();
+        identity.provider_revision = provider->dawn_revision();
+        identity.adapter_name = adapter.name;
+        // The provider rejects every backend other than Metal before the
+        // session is prepared. Record that observed backend beside the
+        // adapter identity rather than relying on a build-time label.
+        identity.adapter_backend = "Metal";
+        identity.adapter_vendor_id = adapter.vendor_id;
+        identity.adapter_device_id = adapter.device_id;
+        identity.native_runtime_name = "Dawn";
+        identity.native_runtime_backend = identity.adapter_backend;
+        identity.authenticated = !identity.provider_revision.empty() &&
+                                 !identity.adapter_name.empty() &&
+                                 identity.adapter_vendor_id != 0 &&
+                                 identity.adapter_device_id != 0;
+        identity.native_runtime_authenticated = identity.authenticated;
+    } catch (...) {
+        return SharedIoProviderIdentity{};
+    }
+    return identity;
 }
 
 bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {

@@ -84,6 +84,33 @@ struct Record {
     bool finite = true;
 };
 
+void json_string(std::ostream& stream, std::string_view value) {
+    stream << '"';
+    for (const char character : value) {
+        switch (character) {
+        case '"':
+            stream << "\\\"";
+            break;
+        case '\\':
+            stream << "\\\\";
+            break;
+        case '\n':
+            stream << "\\n";
+            break;
+        case '\r':
+            stream << "\\r";
+            break;
+        case '\t':
+            stream << "\\t";
+            break;
+        default:
+            stream << character;
+            break;
+        }
+    }
+    stream << '"';
+}
+
 int run(Config config) {
     const auto run_identity = nanoseconds(Clock::now().time_since_epoch());
     constexpr std::uint32_t sample_rate = 48000;
@@ -153,6 +180,8 @@ int run(Config config) {
     }
     const auto transport_stats = transport.stats();
     const auto delivery_stats = transport.delivery_snapshot();
+    const auto provider_identity =
+        pulp::gpu_audio::detail::realtime_gpu_provider_identity(&node);
     transport.release();
 
     std::vector<pulp::gpu_audio::detail::SharedIoTraceRecord> trace_records;
@@ -293,6 +322,25 @@ int run(Config config) {
                << ",\"trace_sampled_out\":" << trace_stats.trace_sampled_out
                << ",\"trace_invalid\":" << trace_stats.trace_invalid
                << ",\"gpu_receipt_authenticated\":" << (gpu_progress ? "true" : "false")
+               << ",\"provider_identity_status\":";
+        json_string(stream, provider_identity.authenticated ? "passed" : "failed");
+        stream << ",\"provider_observed_identity\":";
+        json_string(stream, provider_identity.authenticated ? "passed" : "failed");
+        stream << ",\"provider_revision\":";
+        json_string(stream, provider_identity.provider_revision);
+        stream << ",\"adapter_name\":";
+        json_string(stream, provider_identity.adapter_name);
+        stream << ",\"adapter_backend\":";
+        json_string(stream, provider_identity.adapter_backend);
+        stream << ",\"adapter_vendor_id\":" << provider_identity.adapter_vendor_id
+               << ",\"adapter_device_id\":" << provider_identity.adapter_device_id
+               << ",\"native_runtime_identity_status\":";
+        json_string(stream, provider_identity.native_runtime_authenticated ? "passed" : "failed");
+        stream << ",\"native_runtime_name\":";
+        json_string(stream, provider_identity.native_runtime_name);
+        stream << ",\"native_runtime_backend\":";
+        json_string(stream, provider_identity.native_runtime_backend);
+        stream
                << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
                << ",\"miss_blocks\":" << transport_stats.miss_blocks
                << ",\"late_completions\":" << late_completions << ",\"run_identity\":\""

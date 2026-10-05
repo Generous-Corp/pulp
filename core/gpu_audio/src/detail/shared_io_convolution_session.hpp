@@ -2,6 +2,7 @@
 
 #include "shared_io_compute_plan.hpp"
 #include "shared_io_convolution_pipeline.hpp"
+#include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
 
 #include <cstddef>
@@ -148,6 +149,7 @@ class SharedIoConvolutionSession {
                 plan.late_completions, identity.engine_id,
                 identity.generation,   fenced()};
     }
+    SharedIoProviderIdentity provider_identity() const noexcept;
     SharedIoTelemetrySnapshot trace_telemetry() const noexcept {
         return trace_telemetry_.snapshot();
     }

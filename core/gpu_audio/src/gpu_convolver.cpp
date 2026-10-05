@@ -467,6 +467,14 @@ bool GpuConvolver::has_realtime_shared_io() const noexcept {
 #endif
 }
 
+detail::SharedIoProviderIdentity GpuConvolver::provider_identity_for_diagnostics() const noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (shared_io_ != nullptr && shared_io_->session != nullptr)
+        return shared_io_->session->provider_identity();
+#endif
+    return {};
+}
+
 void GpuConvolver::process_block(const audio::BufferView<const float>& input,
                                  audio::BufferView<float>& output, uint32_t n) {
     if (!prepared_ || n != block_ || input.num_channels() < channels_ ||
