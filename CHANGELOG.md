@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09120"></a>
+## [0.912.0] - 2026-10-05
+
+- codex/neural status current head 20261005 r3 ([#9589](https://github.com/Generous-Corp/pulp/pull/9589))
+- codex/dspx01 descriptor registry impl ([#9510](https://github.com/Generous-Corp/pulp/pull/9510))
+- fix/child process launch race ([#9580](https://github.com/Generous-Corp/pulp/pull/9580))
+- release/version bump ([#9584](https://github.com/Generous-Corp/pulp/pull/9584))
+- codex/spectr forge successor 20261005 ([#9581](https://github.com/Generous-Corp/pulp/pull/9581))
+- codex/recurrent cpu adapter 20261005 ([#9578](https://github.com/Generous-Corp/pulp/pull/9578))
+- codex/neural package a pr 20261005 ([#9579](https://github.com/Generous-Corp/pulp/pull/9579))
+- codex/neural status refresh 20261005 r2 ([#9576](https://github.com/Generous-Corp/pulp/pull/9576))
+- feature/standalone check for updates menu ([#9547](https://github.com/Generous-Corp/pulp/pull/9547))
+
 <a id="v09110"></a>
 ## [0.911.0] - 2026-10-05
 
@@ -9799,6 +9812,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.912.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.912.0
 [0.911.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.911.0
 [0.910.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.910.0
 [0.909.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.909.0

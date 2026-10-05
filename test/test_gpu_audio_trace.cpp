@@ -457,6 +457,13 @@ TEST_CASE("strict P4 raw writer emits a complete campaign envelope", "[gpu_audio
     std::ostringstream output;
     REQUIRE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
     REQUIRE(output.str().find("\"schema\":\"pulp.gpu-audio.p4.raw.v1\"") != std::string::npos);
+    CHECK(output.str().find("\"source_revision\":\"" + manifest.source_revision) !=
+          std::string::npos);
+    CHECK(output.str().find("\"binary_sha256\":\"" + manifest.binary_sha256) != std::string::npos);
+    CHECK(output.str().find("\"provider_revision\":\"" + manifest.provider_revision) !=
+          std::string::npos);
+    CHECK(output.str().find("\"provider_asset_sha256\":\"" + manifest.provider_asset_sha256) !=
+          std::string::npos);
     std::ofstream("/tmp/pulp-p4-raw-writer-test.jsonl") << output.str();
 }
 
