@@ -471,7 +471,7 @@ jobs:
           run_id='${{ github.run_id }}'
 
           last_green_sha=$(
-            gh api "repos/${repo}/actions/workflows/cross-platform-check.yml/runs?status=success&per_page=20" \
+            gh api "repos/${repo}/actions/workflows/cross-platform-check.yml/runs?status=success&branch=main&per_page=20" \
               --jq "[.workflow_runs[] | select((.id | tostring) != \"${run_id}\")] | first | .head_sha // \"\"" \
               2>/dev/null || echo ""
           )
