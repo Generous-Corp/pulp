@@ -496,6 +496,48 @@ TEST_CASE("GPU audio trace records require ordered timestamps and preserve unava
     REQUIRE_FALSE(late_gpu_delivery.valid());
 }
 
+TEST_CASE("GPU audio trace census requires one terminal for every admission",
+          "[gpu_audio][trace][census]") {
+    const std::array admissions{
+        SharedIoTraceAdmission{.generation = 7, .sequence = 11},
+        SharedIoTraceAdmission{.generation = 7, .sequence = 12},
+    };
+    std::array records{record(11), record(12)};
+    for (auto& value : records)
+        value.generation = 7;
+
+    const auto valid = validate_shared_io_trace_census(admissions, records);
+    REQUIRE(valid.valid);
+    CHECK(valid.admissions == 2);
+    CHECK(valid.terminals == 2);
+    CHECK(valid.missing_terminals == 0);
+    CHECK(valid.duplicate_terminals == 0);
+    CHECK(valid.orphan_terminals == 0);
+    CHECK(std::all_of(records.begin(), records.end(),
+                      [](const auto& value) { return value.admission_identity_matched; }));
+
+    auto duplicate = records;
+    duplicate[1].sequence = duplicate[0].sequence;
+    const auto duplicate_result =
+        validate_shared_io_trace_census(admissions, duplicate);
+    CHECK_FALSE(duplicate_result.valid);
+    CHECK(duplicate_result.duplicate_terminals == 1);
+    CHECK(duplicate_result.missing_terminals == 1);
+
+    auto orphan = records;
+    orphan[1].sequence = 99;
+    const auto orphan_result = validate_shared_io_trace_census(admissions, orphan);
+    CHECK_FALSE(orphan_result.valid);
+    CHECK(orphan_result.orphan_terminals == 1);
+    CHECK(orphan_result.missing_terminals == 1);
+
+    std::array missing{records[0]};
+    const auto missing_result = validate_shared_io_trace_census(admissions, missing);
+    CHECK_FALSE(missing_result.valid);
+    CHECK(missing_result.terminals == 1);
+    CHECK(missing_result.missing_terminals == 1);
+}
+
 TEST_CASE("GPU audio trace samples successes but keeps every anomaly", "[gpu_audio][trace]") {
     SharedIoTraceRecorder recorder(config(4));
     REQUIRE(recorder.enabled());

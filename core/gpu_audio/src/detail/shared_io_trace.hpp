@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <span>
 #include <type_traits>
 
 namespace pulp::gpu_audio::detail {
@@ -187,6 +188,26 @@ struct SharedIoTraceAdmission {
     std::uint64_t sequence = 0;
 };
 static_assert(std::is_trivially_copyable_v<SharedIoTraceAdmission>);
+
+// A closed generation is authenticated by the admission/terminal multiset,
+// not by aggregate counters.  The same stream identity may appear in several
+// other diagnostic records (for example a delivery row), but every admitted
+// (generation, sequence) pair must have exactly one terminal disposition.
+struct SharedIoTraceCensus {
+    bool valid = false;
+    std::uint64_t admissions = 0;
+    std::uint64_t terminals = 0;
+    std::uint64_t missing_terminals = 0;
+    std::uint64_t duplicate_terminals = 0;
+    std::uint64_t orphan_terminals = 0;
+};
+
+// Marks each terminal record's one-to-one admission match in place.  This is
+// a non-RT close-time operation and may use bounded temporary indexing storage;
+// callers must treat allocation failure as an unauthenticated census.
+SharedIoTraceCensus validate_shared_io_trace_census(
+    std::span<const SharedIoTraceAdmission> admissions,
+    std::span<SharedIoTraceRecord> records);
 
 // Construct and destroy after callback and worker quiescence. The session worker
 // and callback each own a distinct SPSC queue; one diagnostic thread drains both. Callback code

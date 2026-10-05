@@ -137,6 +137,12 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
     try {
         if (convolver.shared_io_->session->prepared() && !convolver.shared_io_->session->release())
             return false;
+        // A trial receipt is promotable only when the shared session retained
+        // a lossless admission/terminal census. Partial vectors from a queue
+        // overflow or an identity mismatch are diagnostic artifacts, never a
+        // successful GPU proof.
+        if (!convolver.shared_io_->session->trace_census_valid())
+            return false;
         records = convolver.shared_io_->session->take_last_closed_trace_records();
         return !records.empty();
     } catch (...) {

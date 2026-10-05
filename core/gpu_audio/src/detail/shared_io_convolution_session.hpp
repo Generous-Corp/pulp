@@ -166,6 +166,16 @@ class SharedIoConvolutionSession {
     bool trace_recording_enabled() const noexcept {
         return trace_recorder_ != nullptr && trace_recorder_->enabled();
     }
+    // True only for a lossless, capture-admissions generation whose retained
+    // terminal rows form an exact one-to-one multiset with admissions. A
+    // missing row, duplicate/orphan identity, or bounded-retention overflow
+    // keeps this false and must fail a campaign closed.
+    bool trace_census_valid() const noexcept {
+        return trace_census_valid_ && !trace_retention_overflow_;
+    }
+    bool trace_retention_overflow() const noexcept {
+        return trace_retention_overflow_;
+    }
     // Exactly one serialized diagnostic consumer, stopped before any lifetime/epoch operation.
     SharedIoTraceDrainResult drain_trace(std::uint32_t budget = 256) noexcept;
     template <class Sink> std::uint32_t drain_trace_records(std::uint32_t budget, Sink&& sink) {
@@ -184,6 +194,12 @@ class SharedIoConvolutionSession {
     bool prepare_trace_generation() noexcept;
     void close_trace_generation() noexcept;
     void drain_trace_until_empty() noexcept;
+    static void retain_trace_record(void*, std::uint64_t,
+                                    const SharedIoTraceRecord&) noexcept;
+    static void retain_trace_admission(void*, std::uint64_t,
+                                       const SharedIoTraceAdmission&) noexcept;
+    void retain_record(const SharedIoTraceRecord&) noexcept;
+    void retain_admission(const SharedIoTraceAdmission&) noexcept;
     static std::uint64_t trace_now_ns() noexcept;
     bool pack_input(const SharedIoConvolutionPipeline::Lease&, SharedIoArena::WriteLease&) noexcept;
     void fail_closed() noexcept;
@@ -215,6 +231,9 @@ class SharedIoConvolutionSession {
     SharedIoTraceStats last_closed_trace_stats_{};
     std::vector<SharedIoTraceRecord> last_closed_trace_records_;
     std::vector<SharedIoTraceAdmission> last_closed_trace_admissions_;
+    static constexpr std::size_t kTraceRetentionCapacity = 400'000;
+    bool trace_census_valid_ = false;
+    bool trace_retention_overflow_ = false;
     std::uint64_t provider_starved_ = 0;
     std::optional<SharedIoConvolutionPipeline::Lease> pending_ingress_;
     std::vector<float> terminal_;

@@ -3,6 +3,7 @@
 #include <pulp/runtime/trace.hpp>
 
 #include <limits>
+#include <map>
 
 namespace pulp::gpu_audio::detail {
 
@@ -183,6 +184,43 @@ SharedIoTraceDuration shared_io_trace_duration(const SharedIoTraceRecord& record
     if (b < a)
         return {};
     return {b - a, true};
+}
+
+SharedIoTraceCensus validate_shared_io_trace_census(
+    std::span<const SharedIoTraceAdmission> admissions,
+    std::span<SharedIoTraceRecord> records) {
+    using Identity = std::pair<std::uint64_t, std::uint64_t>;
+    std::map<Identity, std::uint64_t> remaining;
+    SharedIoTraceCensus result;
+    result.admissions = admissions.size();
+    for (const auto& admission : admissions)
+        ++remaining[{admission.generation, admission.sequence}];
+
+    for (auto& record : records) {
+        record.admission_identity_matched = false;
+        if (record.kind != SharedIoTraceKind::Terminal)
+            continue;
+        ++result.terminals;
+        const auto identity = Identity{record.generation, record.sequence};
+        const auto found = remaining.find(identity);
+        if (found == remaining.end()) {
+            ++result.orphan_terminals;
+            continue;
+        }
+        if (found->second == 0) {
+            ++result.duplicate_terminals;
+            continue;
+        }
+        --found->second;
+        record.admission_identity_matched = true;
+    }
+    for (const auto& [identity, count] : remaining) {
+        (void)identity;
+        result.missing_terminals += count;
+    }
+    result.valid = result.missing_terminals == 0 && result.duplicate_terminals == 0 &&
+                   result.orphan_terminals == 0 && result.terminals == result.admissions;
+    return result;
 }
 
 bool SharedIoTraceRecorder::publish_completed(const SharedIoTraceRecord& record) noexcept {

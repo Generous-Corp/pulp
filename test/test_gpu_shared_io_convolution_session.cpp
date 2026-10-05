@@ -313,6 +313,8 @@ TEST_CASE("shared convolution session closes only matched admission identities",
     callback(fixture.session, a, output);
     REQUIRE(fixture.session.service(10).submitted == 1);
     REQUIRE(fixture.session.release());
+    CHECK(fixture.session.trace_census_valid());
+    CHECK_FALSE(fixture.session.trace_retention_overflow());
     const auto records = fixture.session.take_last_closed_trace_records();
     REQUIRE(records.size() == 1);
     CHECK(records.front().admission_identity_matched);

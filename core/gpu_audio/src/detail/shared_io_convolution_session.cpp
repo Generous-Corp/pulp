@@ -54,6 +54,10 @@ SharedIoExecutionContract SharedIoConvolutionSession::execution_contract() const
 bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     trace_recorder_.reset();
     trace_telemetry_.reset();
+    last_closed_trace_records_.clear();
+    last_closed_trace_admissions_.clear();
+    trace_census_valid_ = false;
+    trace_retention_overflow_ = false;
     trace_template_ = config_.trace;
     if (!trace_template_.enabled)
         return true;
@@ -73,8 +77,15 @@ bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     }
     try {
         trace_slots_.assign(config_.slots, {});
+        if (trace_template_.capture_admissions) {
+            // Reserve the complete bounded diagnostic census before the
+            // worker starts. Runtime drains then append without allocating;
+            // crossing the bound is an explicit unauthenticated result.
+            last_closed_trace_records_.reserve(kTraceRetentionCapacity);
+            last_closed_trace_admissions_.reserve(kTraceRetentionCapacity);
+        }
     } catch (...) {
-        trace_recorder_.reset();
+        trace_retention_overflow_ = true;
     }
     pipeline_.set_trace(trace_recorder_.get(), trace_recorder_ ? &trace_telemetry_ : nullptr);
     return true;
@@ -83,13 +94,54 @@ bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
 SharedIoTraceDrainResult SharedIoConvolutionSession::drain_trace(std::uint32_t budget) noexcept {
     if (!trace_recorder_)
         return {};
-    return drain_shared_io_trace(*trace_recorder_, trace_telemetry_.snapshot(), budget);
+    const SharedIoTraceDrainObserver observer{
+        this,
+        &SharedIoConvolutionSession::retain_trace_record,
+        &SharedIoConvolutionSession::retain_trace_admission,
+        nullptr};
+    return drain_shared_io_trace(*trace_recorder_, trace_telemetry_.snapshot(), budget, &observer);
+}
+
+void SharedIoConvolutionSession::retain_trace_record(
+    void* context, std::uint64_t, const SharedIoTraceRecord& record) noexcept {
+    static_cast<SharedIoConvolutionSession*>(context)->retain_record(record);
+}
+
+void SharedIoConvolutionSession::retain_trace_admission(
+    void* context, std::uint64_t, const SharedIoTraceAdmission& admission) noexcept {
+    static_cast<SharedIoConvolutionSession*>(context)->retain_admission(admission);
+}
+
+void SharedIoConvolutionSession::retain_record(const SharedIoTraceRecord& record) noexcept {
+    if (!trace_template_.capture_admissions)
+        return;
+    if (last_closed_trace_records_.size() >= kTraceRetentionCapacity) {
+        trace_retention_overflow_ = true;
+        return;
+    }
+    // The vector is reserved during prepare_trace_generation(). Do not allow
+    // an unexpected allocation on the serialized service path to turn a
+    // diagnostic overflow into an exception or a partial receipt.
+    last_closed_trace_records_.push_back(record);
+}
+
+void SharedIoConvolutionSession::retain_admission(
+    const SharedIoTraceAdmission& admission) noexcept {
+    if (!trace_template_.capture_admissions)
+        return;
+    if (last_closed_trace_admissions_.size() >= kTraceRetentionCapacity) {
+        trace_retention_overflow_ = true;
+        return;
+    }
+    last_closed_trace_admissions_.push_back(admission);
 }
 
 void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
     if (!trace_recorder_)
         return;
-    for (std::uint32_t attempt = 0; attempt < 4; ++attempt) {
+    constexpr auto max_attempts =
+        static_cast<std::uint32_t>(kTraceRetentionCapacity / SharedIoTraceRecorder::capacity + 4);
+    for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
         const auto before = trace_recorder_->stats();
         (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity));
         const auto after = trace_recorder_->stats();
@@ -103,33 +155,13 @@ void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
 }
 
 void SharedIoConvolutionSession::close_trace_generation() noexcept {
-    last_closed_trace_records_.clear();
-    last_closed_trace_admissions_.clear();
     if (trace_recorder_) {
         try {
-            last_closed_trace_records_.reserve(SharedIoTraceRecorder::capacity);
-            last_closed_trace_admissions_.reserve(SharedIoTraceRecorder::capacity);
-            for (;;) {
-                const auto drained = trace_recorder_->drain_admissions(
-                    static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-                    [&](const SharedIoTraceAdmission& admission) {
-                        last_closed_trace_admissions_.push_back(admission);
-                    });
-                if (drained < SharedIoTraceRecorder::capacity)
-                    break;
-            }
-            for (;;) {
-                const auto drained =
-                    drain_trace_records(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-                                        [&](const SharedIoTraceRecord& record) {
-                                            last_closed_trace_records_.push_back(record);
-                                        });
-                if (drained < SharedIoTraceRecorder::capacity)
-                    break;
-            }
-            std::vector<bool> admission_used(last_closed_trace_admissions_.size(), false);
+            // The ordinary worker drains as it runs. This final pass catches
+            // records produced by the terminal/release boundary itself.
+            drain_trace_until_empty();
+            const auto stats = trace_recorder_->stats();
             for (auto& record : last_closed_trace_records_) {
-                const auto stats = trace_recorder_->stats();
                 record.admissions_attempted = stats.admissions_attempted;
                 record.admissions_enqueued = stats.admissions_enqueued;
                 record.admissions_dropped = stats.admissions_dropped;
@@ -138,25 +170,19 @@ void SharedIoConvolutionSession::close_trace_generation() noexcept {
                 record.trace_dropped = stats.dropped;
                 record.trace_sampled_out = stats.sampled_out;
                 record.trace_invalid = stats.invalid;
-                record.admission_identity_matched = false;
-                if (record.kind != SharedIoTraceKind::Terminal)
-                    continue;
-                for (std::size_t i = 0; i < last_closed_trace_admissions_.size(); ++i) {
-                    const auto& admission = last_closed_trace_admissions_[i];
-                    if (!admission_used[i] && admission.generation == record.generation &&
-                        admission.sequence == record.sequence) {
-                        admission_used[i] = true;
-                        record.admission_identity_matched = true;
-                        break;
-                    }
-                }
+            }
+            if (trace_template_.capture_admissions && !trace_retention_overflow_) {
+                const auto census = validate_shared_io_trace_census(
+                    last_closed_trace_admissions_, last_closed_trace_records_);
+                trace_census_valid_ = census.valid && stats.admissions_dropped == 0 &&
+                                      stats.dropped == 0 &&
+                                      stats.admissions_attempted == stats.admissions_enqueued;
             }
         } catch (...) {
-            last_closed_trace_records_.clear();
-            last_closed_trace_admissions_.clear();
+            trace_census_valid_ = false;
+            trace_retention_overflow_ = true;
         }
     }
-    drain_trace_until_empty();
     last_closed_trace_stats_ = trace_recorder_ ? trace_recorder_->stats() : SharedIoTraceStats{};
     last_closed_trace_telemetry_ = trace_telemetry_.snapshot();
     pipeline_.set_trace(nullptr);
@@ -508,17 +534,23 @@ SharedIoConvolutionSession::service(std::uint64_t now_ns) noexcept {
         return result;
     if (!drain_completions(now_ns, result)) {
         fail_closed();
+        (void)drain_trace();
         result.fenced = true;
         return result;
     }
     if (!submit_available(result)) {
         fail_closed();
+        (void)drain_trace();
         result.fenced = true;
         return result;
     }
     // Deterministic fakes may retire synchronously; one second drain turns
     // those exact terminals into pipeline records without another callback.
     (void)drain_completions(now_ns, result);
+    // Diagnostic capture must be drained continuously. Waiting until release
+    // allows the fixed SPSC queues to overflow during a long campaign, which
+    // makes an otherwise correct run unauthenticated.
+    (void)drain_trace();
     result.fenced = fenced();
     return result;
 }
