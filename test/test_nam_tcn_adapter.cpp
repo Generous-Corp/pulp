@@ -506,3 +506,71 @@ TEST_CASE("serialized NAM adapter keeps the live preparation on a failed replace
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
 }
+
+TEST_CASE("serialized NAM loader rejects absent and non-finite sample rates",
+          "[gpu_audio][neural][nam][validation]") {
+    std::ifstream source(fixture_path());
+    std::stringstream contents;
+    contents << source.rdbuf();
+    const auto marker = std::string(", \"sample_rate\": 48000");
+    const auto position = contents.str().find(marker);
+    REQUIRE(position != std::string::npos);
+
+    auto missing_sample_rate = contents.str();
+    missing_sample_rate.erase(position, marker.size());
+    const auto missing_path =
+        std::filesystem::temp_directory_path() / "pulp-nam-missing-sample-rate.nam";
+    {
+        std::ofstream output(missing_path);
+        output << missing_sample_rate;
+    }
+    NamTcnArtifact missing_artifact;
+    std::string missing_error;
+    CHECK_FALSE(missing_artifact.load(missing_path.string(), &missing_error));
+    CHECK(missing_error.find("sample_rate") != std::string::npos);
+
+    auto infinite_sample_rate = contents.str();
+    const auto value_marker = std::string("\"sample_rate\": 48000");
+    const auto value_position = infinite_sample_rate.find(value_marker);
+    REQUIRE(value_position != std::string::npos);
+    infinite_sample_rate.replace(value_position, value_marker.size(), "\"sample_rate\": 1e999");
+    const auto infinite_path =
+        std::filesystem::temp_directory_path() / "pulp-nam-infinite-sample-rate.nam";
+    {
+        std::ofstream output(infinite_path);
+        output << infinite_sample_rate;
+    }
+    NamTcnArtifact infinite_artifact;
+    std::string infinite_error;
+    CHECK_FALSE(infinite_artifact.load(infinite_path.string(), &infinite_error));
+    CHECK(infinite_error.find("sample_rate") != std::string::npos);
+
+    std::error_code ignored;
+    std::filesystem::remove(missing_path, ignored);
+    std::filesystem::remove(infinite_path, ignored);
+}
+
+TEST_CASE("serialized NAM adapter rejects each runtime shape mismatch",
+          "[gpu_audio][neural][nam][validation]") {
+    const auto path = fixture_path();
+
+    auto receptive_field_spec = artifact_spec();
+    ++receptive_field_spec.receptive_field_samples;
+    NamTcnArtifactAdapter receptive_field_model(receptive_field_spec, path);
+    const auto receptive_field_context =
+        StreamingPrepareContext{.spec = &receptive_field_model.spec(),
+                                .artifact_id = "example.nam",
+                                .artifact_hash = receptive_field_spec.weights_hash,
+                                .max_frames = 128};
+    CHECK_FALSE(receptive_field_model.prepare(receptive_field_context));
+
+    auto state_bytes_spec = artifact_spec();
+    ++state_bytes_spec.state_bytes;
+    NamTcnArtifactAdapter state_bytes_model(state_bytes_spec, path);
+    const auto state_bytes_context =
+        StreamingPrepareContext{.spec = &state_bytes_model.spec(),
+                                .artifact_id = "example.nam",
+                                .artifact_hash = state_bytes_spec.weights_hash,
+                                .max_frames = 128};
+    CHECK_FALSE(state_bytes_model.prepare(state_bytes_context));
+}
