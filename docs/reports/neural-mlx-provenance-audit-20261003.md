@@ -4,6 +4,11 @@ Date: 2026-10-03 (refreshed 2026-10-04)
 Audit ref: `origin/main` at `e260a88701eb85d1a22e11952826f98a4a36671c`
 Audit worktree: fresh checkout from current `origin/main`
 
+> **Historical audit snapshot.** This report records MLX provenance at the audit
+> reference above; it is not a current-head status receipt. For current
+> coordination and acceptance state, see the [neural audio program status](../status/neural-audio-program-status-20261004.md)
+> and the [neural real-time competitive proof plan](neural-competitive-proof-plan-20261003.md).
+
 The original audit below was performed against `5ea08fd82495687c8e23c85de1a7d4ff429809a8`.
 That snapshot is historical. This refresh reconciles the receipts with the
 merged neural packages and the current source tree.
