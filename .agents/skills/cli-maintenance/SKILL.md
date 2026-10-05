@@ -3806,3 +3806,10 @@ opens the process with `PROCESS_QUERY_LIMITED_INFORMATION` and reads
 copied as a single sealed file into evidence and so keeps its own Windows route
 with a lint skip.
 
+## Browser capture runtime dependency closure
+
+When `tools/import-design/browser_capture/capture.mjs` gains a relative `.mjs`
+import, add that module to `runtime_manifest.txt`,
+`tools/cli/upgrade_install.hpp`, and the release product matrix together. Run
+the upgrade runtime graph test so staged installs fail before shipping with an
+unresolved module.
