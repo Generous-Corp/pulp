@@ -1577,6 +1577,28 @@ if(UNIX)
     add_test(NAME setup-source-cache
         COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_source_cache.sh")
 endif()
+
+# setup.sh's shared source cache after a killed priming run: a lock whose owner
+# is gone is reclaimed (a live one never is), and a half-populated cache is
+# re-fetched rather than trusted. Windows runs it under Git for Windows' bash,
+# located beside git rather than on PATH, where bash.exe may be WSL's.
+if(UNIX)
+    add_test(NAME setup-cache-lock
+        COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
+    set_tests_properties(setup-cache-lock PROPERTIES TIMEOUT 240)
+elseif(WIN32)
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        get_filename_component(_pulp_git_bin_dir "${GIT_EXECUTABLE}" DIRECTORY)
+        get_filename_component(_pulp_git_root "${_pulp_git_bin_dir}" DIRECTORY)
+        find_program(PULP_GIT_BASH bash HINTS "${_pulp_git_root}/bin" NO_DEFAULT_PATH)
+        if(PULP_GIT_BASH)
+            add_test(NAME setup-cache-lock
+                COMMAND "${PULP_GIT_BASH}" "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
+            set_tests_properties(setup-cache-lock PROPERTIES TIMEOUT 240)
+        endif()
+    endif()
+endif()
 # Catch2 discovery must preserve multi-label lists as one CTest property value.
 if(Python3_Interpreter_FOUND)
     add_test(
