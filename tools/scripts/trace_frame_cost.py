@@ -17,7 +17,10 @@ Stages are Pulp trace categories (layout, canvas, js, text, state, render;
 see core/runtime/include/pulp/runtime/trace.hpp). `repaints` counts
 `view_repaint_request` slices -- each one is a whole-surface repaint request
 (a bounded one takes a different path and emits none) -- and `layout` counts
-frames that ran `layout_children`. `--group` splits the frames by the
+frames that ran `layout_children`. `damage` is the share of `--surface` a
+frame asked to repaint: 100 % for any whole-surface request, else the summed
+area of its bounded requests (`view_repaint_bounded`, an upper bound on their
+union). `--group` splits the frames by the
 enclosing span of that name, in time order; `--labels` names those spans.
 
 Budgets make it a gate: a breach prints one line per failure and exits 1.
@@ -66,7 +69,7 @@ WITH frames AS (
   SELECT parent_id, SUM(dur) AS dur FROM slice
   WHERE dur >= 0 AND parent_id IS NOT NULL GROUP BY parent_id
 ), inner_slices AS (
-  SELECT f.id AS frame_id, s.category, s.name,
+  SELECT f.id AS frame_id, s.category, s.name, s.arg_set_id,
          s.dur - COALESCE(cs.dur, 0) AS self_dur
   FROM frames f
   JOIN slice s ON s.track_id = f.track_id AND s.depth > f.depth
@@ -80,14 +83,17 @@ WITH frames AS (
   SELECT f.id, f.ts, f.dur,
   {stage_cols},
   COALESCE(SUM(CASE WHEN i.name = 'view_repaint_request' THEN 1 END), 0) AS repaints,
-  COALESCE(SUM(CASE WHEN i.name = 'layout_children' THEN 1 END), 0) AS layouts
+  COALESCE(SUM(CASE WHEN i.name = 'layout_children' THEN 1 END), 0) AS layouts,
+  COALESCE(SUM(CASE WHEN i.name = 'view_repaint_bounded'
+    THEN EXTRACT_ARG(i.arg_set_id, 'debug.w') * EXTRACT_ARG(i.arg_set_id, 'debug.h') END), 0)
+    AS bounded_area
   FROM frames f LEFT JOIN inner_slices i ON i.frame_id = f.id
   GROUP BY f.id
 )
 SELECT '{MARKER}|frame|' ||
   COALESCE((SELECT g.idx FROM groups g WHERE p.ts >= g.ts AND p.ts < g.ts + g.dur), -1)
   || '|' || printf('%.6f', p.dur / 1e6) || '|' || {stage_out}
-  || '|' || p.repaints || '|' || p.layouts
+  || '|' || p.repaints || '|' || p.layouts || '|' || p.bounded_area
 FROM per_frame p
 UNION ALL
 SELECT '{MARKER}|stat|' || name || '|' || value FROM stats
@@ -103,6 +109,7 @@ class Frame:
     stages: dict
     repaints: int
     layouts: int
+    bounded_area: float = 0.0
 
 
 def parse(output: str) -> tuple[list[Frame], dict]:
@@ -117,12 +124,14 @@ def parse(output: str) -> tuple[list[Frame], dict]:
             stats[parts[2]] = int(float(parts[3]))
             continue
         values = parts[2:]
-        if len(values) != 4 + len(STAGES):
+        if len(values) not in (4 + len(STAGES), 5 + len(STAGES)):
             raise ValueError(f"malformed frame row: {line}")
+        area = float(values[4 + len(STAGES)]) if len(values) == 5 + len(STAGES) else 0.0
         frames.append(Frame(
             group=int(values[0]), frame_ms=float(values[1]),
             stages={s: float(v) for s, v in zip(STAGES, values[2:2 + len(STAGES)])},
-            repaints=int(values[-2]), layouts=int(values[-1])))
+            repaints=int(values[2 + len(STAGES)]), layouts=int(values[3 + len(STAGES)]),
+            bounded_area=area))
     return frames, stats
 
 
@@ -133,6 +142,20 @@ def percentile(values: list[float], q: float) -> float:
     ordered = sorted(values)
     rank = max(1, -(-int(q * len(ordered) * 100) // 10000))  # ceil(q% of n)
     return ordered[min(rank, len(ordered)) - 1]
+
+
+SURFACE_AREA = [0.0]
+
+
+def damage_fraction(f: Frame) -> float:
+    """The share of the surface a frame asked to repaint: all of it for any
+    whole-surface request, else its bounded rects' summed area (an upper bound
+    on their union). 0 for a frame that requested nothing."""
+    if f.repaints > 0:
+        return 1.0
+    if SURFACE_AREA[0] <= 0.0:
+        return 0.0
+    return min(1.0, f.bounded_area / SURFACE_AREA[0])
 
 
 def summarize(frames: list[Frame]) -> dict:
@@ -146,6 +169,8 @@ def summarize(frames: list[Frame]) -> dict:
         "repaints_per_frame": (sum(f.repaints for f in frames) / len(frames)) if frames else 0.0,
         "repaint_frames": sum(1 for f in frames if f.repaints > 0),
         "layout_frames": sum(1 for f in frames if f.layouts > 0),
+        "damage_frac": pcts([damage_fraction(f) for f in frames]),
+        "bounded_area_px2": pcts([f.bounded_area for f in frames]),
     }
 
 
@@ -170,6 +195,12 @@ def check(summary: dict, args, baseline: dict | None) -> list[str]:
                                 f"{grown:.3f} ms > {args.max_p95_ms:.3f} ms")
         if args.max_layout_frames is not None and s["layout_frames"] > args.max_layout_frames:
             failures.append(f"{name}: {s['layout_frames']}/{s['frames']} frames ran a layout pass")
+        if args.max_damage_frac is not None:
+            if SURFACE_AREA[0] <= 0.0:
+                failures.append("damage budget needs --surface WxH")
+            elif s["damage_frac"]["p95"] > args.max_damage_frac:
+                failures.append(f"{name}: p95 damage {100 * s['damage_frac']['p95']:.2f}% of the "
+                                f"surface > {100 * args.max_damage_frac:.2f}%")
         if args.max_repaint_frames is not None and s["repaint_frames"] > args.max_repaint_frames:
             failures.append(f"{name}: {s['repaint_frames']}/{s['frames']} frames requested a "
                             "whole-surface repaint")
@@ -179,14 +210,15 @@ def check(summary: dict, args, baseline: dict | None) -> list[str]:
 def render_table(summary: dict) -> str:
     head = (f"{'group':<22} {'frames':>6}  {'frame p50/p95/max ms':>22}  "
             + "  ".join(f"{s + ' p95':>10}" for s in STAGES)
-            + f"  {'repaint/f':>9} {'layout f':>8}")
+            + f"  {'repaint/f':>9} {'layout f':>8} {'damage p95':>10}")
     rows = [head, "-" * len(head)]
     for name, s in summary.items():
         f = s["frame_ms"]
         rows.append(f"{name:<22} {s['frames']:>6}  "
                     f"{f['p50']:>6.3f}/{f['p95']:>6.3f}/{f['max']:>7.3f}  "
                     + "  ".join(f"{s['stages_ms'][st]['p95']:>10.3f}" for st in STAGES)
-                    + f"  {s['repaints_per_frame']:>9.2f} {s['layout_frames']:>8}")
+                    + f"  {s['repaints_per_frame']:>9.2f} {s['layout_frames']:>8}"
+                    + f" {100 * s['damage_frac']['p95']:>9.2f}%")
     return "\n".join(rows)
 
 
@@ -226,12 +258,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-p95-ms", type=float, default=None)
     parser.add_argument("--max-layout-frames", type=int, default=None)
     parser.add_argument("--max-repaint-frames", type=int, default=None)
+    parser.add_argument("--max-damage-frac", type=float, default=None,
+                        help="p95 share of the surface a frame may repaint (needs --surface)")
+    parser.add_argument("--surface", default="", help="logical surface size, WxH")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--processor", default="")
     args = parser.parse_args(argv)
 
     if not args.trace.is_file():
         parser.error(f"trace does not exist: {args.trace}")
+    SURFACE_AREA[0] = 0.0
+    if args.surface:
+        w, _, h = args.surface.lower().partition("x")
+        SURFACE_AREA[0] = float(w) * float(h)
     processor = resolve_processor(args.processor)
     if not processor:
         print("trace_processor not found; run `pulp trace fetch` or set PULP_TRACE_PROCESSOR",

@@ -1,16 +1,17 @@
 #pragma once
 
-#include <string>
+#include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
-#include <cstdint>
-#include <cmath>
-#include <algorithm>
-#include <cctype>
 
 namespace pulp::state {
 
@@ -676,6 +677,20 @@ public:
     /// Clear the modulation offset to zero.
     void reset_mod() { set_mod_offset(0.0f); }
 
+    /// The value a plugin's OWN modulator is playing for this parameter, in
+    /// plain units, published for display only (StateStore::
+    /// set_display_modulation()). NaN means nothing is published. Never read
+    /// by DSP and never written to the host. Real-time safe.
+    void set_display_modulation(float plain) noexcept {
+        display_mod_.store(plain, std::memory_order_relaxed);
+    }
+    void clear_display_modulation() noexcept {
+        display_mod_.store(std::numeric_limits<float>::quiet_NaN(), std::memory_order_relaxed);
+    }
+    float display_modulation() const noexcept {
+        return display_mod_.load(std::memory_order_relaxed);
+    }
+
     /// Read the current value mapped to [0, 1] via the given range.
     float get_normalized(const ParamRange& range) const {
         return range.normalize(get());
@@ -707,6 +722,7 @@ private:
     std::atomic<std::uint64_t> committed_generation_{0};
     std::atomic<VersionedValue> mod_offset_{pack(0.0f, 0)};
     std::atomic<std::uint64_t> committed_mod_generation_{0};
+    std::atomic<float> display_mod_{std::numeric_limits<float>::quiet_NaN()};
 
     // The packed base value/generation stamp and modulation offset are read and
     // written on the audio thread through relaxed atomics. Fail the build if a

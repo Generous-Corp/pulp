@@ -1,16 +1,20 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/state_migration.hpp>
-#include <array>
-#include <vector>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <span>
+#include <utility>
+#include <vector>
 
 namespace pulp::events { class EventLoop; }
 
@@ -127,6 +131,40 @@ public:
 
     /// Clear all modulation offsets to zero.
     void reset_all_mod();
+
+    // ── Modulated value for display ─────────────────────────────────────
+    //
+    // A control bound to a parameter shows two things: the BASE (what the
+    // user set or host automation plays; what gestures edit and the host
+    // records) and, when something modulates the parameter, the value
+    // PLAYING. Two sources feed the second, and neither is ever a host
+    // automation write:
+    //
+    //   * host modulation -- a CLAP host's parameter modulation, which the
+    //     adapter writes as the mod offset (set_mod_offset). Shown by every
+    //     bound control with no plugin code.
+    //   * the plugin's own modulation (an internal LFO) -- opt-in: the
+    //     plugin publishes the value its DSP plays with
+    //     set_display_modulation(), from any thread, real-time safe.
+    //
+    // A published display value wins over the host offset; nothing published
+    // and a zero offset means nothing is shown.
+
+    /// Publish the value (plain units) a plugin's own modulator plays for
+    /// @p id. Display only. Real-time safe (one relaxed store).
+    void set_display_modulation(ParamID id, float plain_value) noexcept;
+    /// Stop showing a plugin-published modulated value for @p id.
+    void clear_display_modulation(ParamID id) noexcept;
+    /// The modulated value a control should show, normalized to the
+    /// parameter's range, or nullopt when nothing modulates @p id.
+    std::optional<float> displayed_modulation(ParamID id) const noexcept;
+
+    class ModulationWatch;
+    /// Call @p on_change on the main thread, from pump_listeners(), whenever
+    /// displayed_modulation(@p id) changes (nullopt when it stops). The watch
+    /// lasts as long as the returned token. Main thread only.
+    [[nodiscard]] ModulationWatch
+    watch_modulation(ParamID id, std::function<void(std::optional<float>)> on_change);
 
     /// Read a parameter's value mapped to [0, 1] (lock-free).
     float get_normalized(ParamID id) const;
@@ -515,6 +553,63 @@ private:
     // thread. Empty for the overwhelmingly common no-trigger store.
     std::vector<std::size_t> trigger_indices_;
     std::shared_ptr<detail::ListenerRegistry> registry_;
+
+  public:
+    struct ModulationWatchers {
+        struct Entry {
+            std::uint64_t id = 0;
+            ParamID param = 0;
+            std::function<void(std::optional<float>)> on_change;
+            std::optional<float> last;
+        };
+        std::vector<Entry> entries;
+        std::uint64_t next_id = 1;
+    };
+    /// RAII handle for watch_modulation(). Move-only; dropping it unwatches.
+    class ModulationWatch {
+      public:
+        ModulationWatch() = default;
+        ModulationWatch(std::weak_ptr<ModulationWatchers> owner, std::uint64_t id) noexcept
+            : owner_(std::move(owner)), id_(id) {}
+        ModulationWatch(ModulationWatch&& other) noexcept
+            : owner_(std::move(other.owner_)), id_(std::exchange(other.id_, 0)) {}
+        ModulationWatch& operator=(ModulationWatch&& other) noexcept {
+            if (this != &other) {
+                reset();
+                owner_ = std::move(other.owner_);
+                id_ = std::exchange(other.id_, 0);
+            }
+            return *this;
+        }
+        ModulationWatch(const ModulationWatch&) = delete;
+        ModulationWatch& operator=(const ModulationWatch&) = delete;
+        ~ModulationWatch() {
+            reset();
+        }
+        void reset() noexcept {
+            if (id_ == 0)
+                return;
+            if (auto owner = owner_.lock()) {
+                auto& e = owner->entries;
+                e.erase(std::remove_if(e.begin(), e.end(),
+                                       [this](const auto& x) { return x.id == id_; }),
+                        e.end());
+            }
+            id_ = 0;
+        }
+        explicit operator bool() const noexcept {
+            return id_ != 0;
+        }
+
+      private:
+        std::weak_ptr<ModulationWatchers> owner_;
+        std::uint64_t id_ = 0;
+    };
+
+  private:
+    std::shared_ptr<ModulationWatchers> modulation_watchers_ =
+        std::make_shared<ModulationWatchers>();
+    void service_modulation_watchers();
     std::vector<ListenerToken> permanent_listener_tokens_;
     StateMigrationRegistry migrations_;
     uint32_t state_version_ = 1;
