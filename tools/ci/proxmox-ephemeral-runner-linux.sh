@@ -503,9 +503,22 @@ fi
 # ── admission ────────────────────────────────────────────────────────────────
 # Ask before taking. A refused job queues on GitHub, which is recoverable; an
 # oversubscribed host that stops responding is not.
-if ! "$GOVERNOR" can-start-new "$CORES" "$MEM_MB" >/dev/null 2>&1; then
+#
+# A refusal waits before exiting. systemd's RestartSec cannot vary by exit
+# status, so without this wait a host that stays full (another VM holding the
+# memory for days) restarts this unit every ~35 s and buries the journal under
+# tens of thousands of identical refusals. The wait keeps refusals to roughly
+# one per GOVERNOR_REFUSAL_BACKOFF_SECONDS while leaving genuine failures on the
+# unit's short RestartSec.
+GOVERNOR_REFUSAL_BACKOFF_SECONDS="${TARTCI_GOVERNOR_REFUSAL_BACKOFF_SECONDS:-${PULP_GOVERNOR_REFUSAL_BACKOFF_SECONDS:-270}}"
+[[ "$GOVERNOR_REFUSAL_BACKOFF_SECONDS" =~ ^[0-9]+$ ]] \
+    || die "governor refusal backoff must be a whole number of seconds"
+if ! admission="$("$GOVERNOR" can-start-new "$CORES" "$MEM_MB" 2>&1)"; then
     log "REFUSED by governor — host has no room for ${CORES}c/${MEM_MB}M"
+    printf '%s\n' "$admission" | sed 's/^/    /'
     "$GOVERNOR" status | sed 's/^/    /'
+    log "retrying admission in ${GOVERNOR_REFUSAL_BACKOFF_SECONDS}s"
+    sleep "$GOVERNOR_REFUSAL_BACKOFF_SECONDS"
     exit 75   # EX_TEMPFAIL: caller should retry later, not treat as broken
 fi
 
