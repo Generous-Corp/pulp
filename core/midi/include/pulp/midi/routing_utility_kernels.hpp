@@ -2,6 +2,8 @@
 
 #include <pulp/midi/utility_contract.hpp>
 
+#include <memory>
+
 namespace pulp::midi {
 
 namespace routing_detail {
@@ -375,13 +377,17 @@ class ChannelRouter {
                 return false;
         return true;
     }
-    explicit constexpr ChannelRouter(ChannelRouteSpec spec = {}) noexcept
-        : spec_(spec), valid_(valid_spec(spec)) {}
-    constexpr bool valid() const noexcept {
-        return valid_;
+    // The ownership ledger is about 1.2 MB, so it lives on the heap: one
+    // allocation here, none in process(), flush(), reset() or replace_spec().
+    explicit ChannelRouter(ChannelRouteSpec spec = {})
+        : spec_(spec), valid_(valid_spec(spec)),
+          held_notes_(std::make_unique<routing_detail::HeldNoteLedger>()) {}
+    // A moved-from object has no ledger and refuses every entry point.
+    bool valid() const noexcept {
+        return valid_ && held_notes_ != nullptr;
     }
-    constexpr bool replace_spec(ChannelRouteSpec spec) noexcept {
-        if (!valid_spec(spec) || !held_notes_.empty())
+    bool replace_spec(ChannelRouteSpec spec) noexcept {
+        if (!held_notes_ || !valid_spec(spec) || !held_notes_->empty())
             return false;
         spec_ = spec;
         valid_ = true;
@@ -390,12 +396,14 @@ class ChannelRouter {
 
     MidiUtilityProcessReport flush(MidiBuffer& output) const noexcept {
         utility_detail::clear_output(output);
+        if (!held_notes_)
+            return {0, 0, 0, false};
         MidiUtilityProcessReport report;
-        if (held_notes_.output_ownership_empty())
+        if (held_notes_->output_ownership_empty())
             return report;
         if (!utility_detail::ready(output))
             return {0, 0, 1, false};
-        report.complete = held_notes_.flush(
+        report.complete = held_notes_->flush(
             [&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(
                     output,
@@ -424,7 +432,7 @@ class ChannelRouter {
     MidiUtilityProcessReport reset(MidiBuffer& output) const noexcept {
         auto report = flush(output);
         if (report.complete)
-            held_notes_.discard_input_ownership();
+            held_notes_->discard_input_ownership();
         return report;
     }
 
@@ -445,16 +453,18 @@ class ChannelRouter {
         if (utility_detail::blocks_alias(input, output))
             return {0, input.size(), 0, false};
         utility_detail::clear_output(output);
+        if (!held_notes_)
+            return {0, input.size(), 0, false};
         MidiUtilityProcessReport report;
         if (!utility_detail::ready(output)) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
         if (!valid_) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
-        const bool midi_drained = held_notes_.drain_midi_releases(
+        const bool midi_drained = held_notes_->drain_midi_releases(
             [&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(
                     output,
@@ -462,7 +472,7 @@ class ChannelRouter {
                         MidiEvent::note_off(channel, note), spec_.output_channel[channel]),
                     report);
             });
-        const bool ump_drained = held_notes_.drain_ump_releases(
+        const bool ump_drained = held_notes_->drain_ump_releases(
             [&](bool midi2, std::uint8_t group, std::uint8_t channel,
                 std::uint8_t note) {
                 const bool emitted = utility_detail::emit_ump(
@@ -477,7 +487,7 @@ class ChannelRouter {
                 return emitted;
             });
         if (!midi_drained || !ump_drained) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             report.dropped += input.size();
             report.complete = false;
             return report;
@@ -487,22 +497,22 @@ class ChannelRouter {
                 utility_detail::emit(output, event, report);
                 continue;
             }
-            if (held_notes_.consume_suppressed_release(event))
+            if (held_notes_->consume_suppressed_release(event))
                 continue;
             const auto channel = event.channel();
             if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0) {
-                held_notes_.record(event, false);
+                held_notes_->record(event, false);
                 continue;
             }
-            if (!held_notes_.can_forward(event)) {
-                held_notes_.record(event, false);
+            if (!held_notes_->can_forward(event)) {
+                held_notes_->record(event, false);
                 ++report.dropped;
                 report.complete = false;
                 continue;
             }
             const bool forwarded = utility_detail::emit(
                 output, utility_detail::with_channel(event, spec_.output_channel[channel]), report);
-            held_notes_.record(event, forwarded);
+            held_notes_->record(event, forwarded);
         }
         bool copied_sidecars = utility_detail::copy_sysex_sidecar(input, output);
         if (const auto* source = input.ump()) {
@@ -512,24 +522,24 @@ class ChannelRouter {
                         utility_detail::emit_ump(output.ump(), event) && copied_sidecars;
                     continue;
                 }
-                if (held_notes_.consume_suppressed_release(event.packet))
+                if (held_notes_->consume_suppressed_release(event.packet))
                     continue;
                 const auto channel = event.packet.channel();
                 if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0) {
-                    held_notes_.record(event.packet, false);
+                    held_notes_->record(event.packet, false);
                     continue;
                 }
                 auto routed = event;
                 routed.packet =
                     utility_detail::with_channel(event.packet, spec_.output_channel[channel]);
-                if (!held_notes_.can_forward(event.packet)) {
-                    held_notes_.record(event.packet, false);
+                if (!held_notes_->can_forward(event.packet)) {
+                    held_notes_->record(event.packet, false);
                     ++report.dropped;
                     report.complete = false;
                     continue;
                 }
                 const bool forwarded = utility_detail::emit_ump(output.ump(), routed);
-                held_notes_.record(event.packet, forwarded);
+                held_notes_->record(event.packet, forwarded);
                 copied_sidecars = forwarded && copied_sidecars;
             }
         }
@@ -543,8 +553,12 @@ class ChannelRouter {
   private:
     ChannelRouteSpec spec_{};
     bool valid_ = true;
-    mutable routing_detail::HeldNoteLedger held_notes_{};
+    std::unique_ptr<routing_detail::HeldNoteLedger> held_notes_;
 };
+
+// Stack-safe by construction: the ledger is heap-owned. A bound here fails
+// every consumer's compile if a large array is ever inlined again.
+static_assert(sizeof(ChannelRouter) <= 4096);
 
 struct NoteRangeSpec {
     std::uint8_t lowest = 0;
@@ -562,13 +576,17 @@ class NoteRangeFilter {
     static constexpr bool valid_spec(NoteRangeSpec spec) noexcept {
         return spec.lowest <= 127 && spec.highest <= 127 && spec.lowest <= spec.highest;
     }
-    explicit constexpr NoteRangeFilter(NoteRangeSpec spec = {}) noexcept
-        : spec_(spec), valid_(valid_spec(spec)) {}
-    constexpr bool valid() const noexcept {
-        return valid_;
+    // The ownership ledger is about 1.2 MB, so it lives on the heap: one
+    // allocation here, none in process(), flush(), reset() or replace_spec().
+    explicit NoteRangeFilter(NoteRangeSpec spec = {})
+        : spec_(spec), valid_(valid_spec(spec)),
+          held_notes_(std::make_unique<routing_detail::HeldNoteLedger>()) {}
+    // A moved-from object has no ledger and refuses every entry point.
+    bool valid() const noexcept {
+        return valid_ && held_notes_ != nullptr;
     }
-    constexpr bool replace_spec(NoteRangeSpec spec) noexcept {
-        if (!valid_spec(spec) || !held_notes_.empty())
+    bool replace_spec(NoteRangeSpec spec) noexcept {
+        if (!held_notes_ || !valid_spec(spec) || !held_notes_->empty())
             return false;
         spec_ = spec;
         valid_ = true;
@@ -577,12 +595,14 @@ class NoteRangeFilter {
 
     MidiUtilityProcessReport flush(MidiBuffer& output) const noexcept {
         utility_detail::clear_output(output);
+        if (!held_notes_)
+            return {0, 0, 0, false};
         MidiUtilityProcessReport report;
-        if (held_notes_.output_ownership_empty())
+        if (held_notes_->output_ownership_empty())
             return report;
         if (!utility_detail::ready(output))
             return {0, 0, 1, false};
-        report.complete = held_notes_.flush(
+        report.complete = held_notes_->flush(
             [&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(output, MidiEvent::note_off(channel, note), report);
             },
@@ -605,7 +625,7 @@ class NoteRangeFilter {
     MidiUtilityProcessReport reset(MidiBuffer& output) const noexcept {
         auto report = flush(output);
         if (report.complete)
-            held_notes_.discard_input_ownership();
+            held_notes_->discard_input_ownership();
         return report;
     }
 
@@ -626,21 +646,23 @@ class NoteRangeFilter {
         if (utility_detail::blocks_alias(input, output))
             return {0, input.size(), 0, false};
         utility_detail::clear_output(output);
+        if (!held_notes_)
+            return {0, input.size(), 0, false};
         MidiUtilityProcessReport report;
         if (!utility_detail::ready(output)) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
         if (!valid_) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
-        const bool midi_drained = held_notes_.drain_midi_releases(
+        const bool midi_drained = held_notes_->drain_midi_releases(
             [&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(
                     output, MidiEvent::note_off(channel, note), report);
             });
-        const bool ump_drained = held_notes_.drain_ump_releases(
+        const bool ump_drained = held_notes_->drain_ump_releases(
             [&](bool midi2, std::uint8_t group, std::uint8_t channel,
                 std::uint8_t note) {
                 const bool emitted = utility_detail::emit_ump(
@@ -653,47 +675,47 @@ class NoteRangeFilter {
                 return emitted;
             });
         if (!midi_drained || !ump_drained) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             report.dropped += input.size();
             report.complete = false;
             return report;
         }
         for (const auto& event : input) {
-            if (held_notes_.consume_suppressed_release(event))
+            if (held_notes_->consume_suppressed_release(event))
                 continue;
             if (utility_detail::is_note_addressed(event) &&
                 (event.note() < spec_.lowest || event.note() > spec_.highest)) {
-                held_notes_.record(event, false);
+                held_notes_->record(event, false);
                 continue;
             }
-            if (!held_notes_.can_forward(event)) {
-                held_notes_.record(event, false);
+            if (!held_notes_->can_forward(event)) {
+                held_notes_->record(event, false);
                 ++report.dropped;
                 report.complete = false;
                 continue;
             }
             const bool forwarded = utility_detail::emit(output, event, report);
-            held_notes_.record(event, forwarded);
+            held_notes_->record(event, forwarded);
         }
         bool copied_sidecars = utility_detail::copy_sysex_sidecar(input, output);
         if (const auto* source = input.ump()) {
             for (const auto& event : *source) {
-                if (held_notes_.consume_suppressed_release(event.packet))
+                if (held_notes_->consume_suppressed_release(event.packet))
                     continue;
                 if (utility_detail::is_note_addressed(event.packet) &&
                     (event.packet.note_number() < spec_.lowest ||
                      event.packet.note_number() > spec_.highest)) {
-                    held_notes_.record(event.packet, false);
+                    held_notes_->record(event.packet, false);
                     continue;
                 }
-                if (!held_notes_.can_forward(event.packet)) {
-                    held_notes_.record(event.packet, false);
+                if (!held_notes_->can_forward(event.packet)) {
+                    held_notes_->record(event.packet, false);
                     ++report.dropped;
                     report.complete = false;
                     continue;
                 }
                 const bool forwarded = utility_detail::emit_ump(output.ump(), event);
-                held_notes_.record(event.packet, forwarded);
+                held_notes_->record(event.packet, forwarded);
                 copied_sidecars = forwarded && copied_sidecars;
             }
         }
@@ -707,8 +729,12 @@ class NoteRangeFilter {
   private:
     NoteRangeSpec spec_{};
     bool valid_ = true;
-    mutable routing_detail::HeldNoteLedger held_notes_{};
+    std::unique_ptr<routing_detail::HeldNoteLedger> held_notes_;
 };
+
+// Stack-safe by construction: the ledger is heap-owned. A bound here fails
+// every consumer's compile if a large array is ever inlined again.
+static_assert(sizeof(NoteRangeFilter) <= 4096);
 
 struct KeyboardSplitSpec {
     std::uint8_t split_note = 60;
@@ -728,13 +754,17 @@ class KeyboardSplit {
     static constexpr bool valid_spec(KeyboardSplitSpec spec) noexcept {
         return spec.split_note <= 127 && spec.lower_channel <= 15 && spec.upper_channel <= 15;
     }
-    explicit constexpr KeyboardSplit(KeyboardSplitSpec spec = {}) noexcept
-        : spec_(spec), valid_(valid_spec(spec)) {}
-    constexpr bool valid() const noexcept {
-        return valid_;
+    // The ownership ledger is about 1.2 MB, so it lives on the heap: one
+    // allocation here, none in process(), flush(), reset() or replace_spec().
+    explicit KeyboardSplit(KeyboardSplitSpec spec = {})
+        : spec_(spec), valid_(valid_spec(spec)),
+          held_notes_(std::make_unique<routing_detail::HeldNoteLedger>()) {}
+    // A moved-from object has no ledger and refuses every entry point.
+    bool valid() const noexcept {
+        return valid_ && held_notes_ != nullptr;
     }
-    constexpr bool replace_spec(KeyboardSplitSpec spec) noexcept {
-        if (!valid_spec(spec) || !held_notes_.empty())
+    bool replace_spec(KeyboardSplitSpec spec) noexcept {
+        if (!held_notes_ || !valid_spec(spec) || !held_notes_->empty())
             return false;
         spec_ = spec;
         valid_ = true;
@@ -744,12 +774,14 @@ class KeyboardSplit {
     MidiUtilityProcessReport flush(MidiBuffer& lower, MidiBuffer& upper) const noexcept {
         utility_detail::clear_output(lower);
         utility_detail::clear_output(upper);
+        if (!held_notes_)
+            return {0, 0, 0, false};
         MidiUtilityProcessReport report;
-        if (held_notes_.output_ownership_empty())
+        if (held_notes_->output_ownership_empty())
             return report;
         if (!utility_detail::ready(lower) || !utility_detail::ready(upper))
             return {0, 0, 1, false};
-        report.complete = held_notes_.flush(
+        report.complete = held_notes_->flush(
             [&](std::uint8_t, std::uint8_t note) {
                 const bool is_upper =
                     note > spec_.split_note ||
@@ -785,7 +817,7 @@ class KeyboardSplit {
     MidiUtilityProcessReport reset(MidiBuffer& lower, MidiBuffer& upper) const noexcept {
         auto report = flush(lower, upper);
         if (report.complete)
-            held_notes_.discard_input_ownership();
+            held_notes_->discard_input_ownership();
         return report;
     }
 
@@ -812,16 +844,18 @@ class KeyboardSplit {
             return {0, input.size(), 0, false};
         utility_detail::clear_output(lower);
         utility_detail::clear_output(upper);
+        if (!held_notes_)
+            return {0, input.size(), 0, false};
         MidiUtilityProcessReport report;
         if (!utility_detail::ready(lower) || !utility_detail::ready(upper)) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
         if (!valid_) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
-        const bool midi_drained = held_notes_.drain_midi_releases(
+        const bool midi_drained = held_notes_->drain_midi_releases(
             [&](std::uint8_t channel, std::uint8_t note) {
                 const bool is_upper =
                     note > spec_.split_note ||
@@ -832,7 +866,7 @@ class KeyboardSplit {
                         is_upper ? spec_.upper_channel : spec_.lower_channel, note),
                     report);
             });
-        const bool ump_drained = held_notes_.drain_ump_releases(
+        const bool ump_drained = held_notes_->drain_ump_releases(
             [&](bool midi2, std::uint8_t group, std::uint8_t channel,
                 std::uint8_t note) {
                 (void)channel;
@@ -852,7 +886,7 @@ class KeyboardSplit {
                 return emitted;
             });
         if (!midi_drained || !ump_drained) {
-            held_notes_.retain_unprocessed_ownership(input);
+            held_notes_->retain_unprocessed_ownership(input);
             report.dropped += input.size();
             report.complete = false;
             return report;
@@ -869,17 +903,17 @@ class KeyboardSplit {
                     (event.note() == spec_.split_note && spec_.split_note_is_upper);
                 auto routed = utility_detail::with_channel(event, is_upper ? spec_.upper_channel
                                                                            : spec_.lower_channel);
-                if (held_notes_.consume_suppressed_release(event))
+                if (held_notes_->consume_suppressed_release(event))
                     continue;
-                if (!held_notes_.can_forward(event)) {
-                    held_notes_.record(event, false);
+                if (!held_notes_->can_forward(event)) {
+                    held_notes_->record(event, false);
                     ++report.dropped;
                     report.complete = false;
                     continue;
                 }
                 const bool forwarded = utility_detail::emit(
                     is_upper ? upper : lower, routed, report);
-                held_notes_.record(event, forwarded);
+                held_notes_->record(event, forwarded);
                 continue;
             }
             utility_detail::emit(lower, utility_detail::with_channel(event, spec_.lower_channel),
@@ -905,17 +939,17 @@ class KeyboardSplit {
                     auto routed = event;
                     routed.packet = utility_detail::with_channel(
                         event.packet, is_upper ? spec_.upper_channel : spec_.lower_channel);
-                    if (held_notes_.consume_suppressed_release(event.packet))
+                    if (held_notes_->consume_suppressed_release(event.packet))
                         continue;
-                    if (!held_notes_.can_forward(event.packet)) {
-                        held_notes_.record(event.packet, false);
+                    if (!held_notes_->can_forward(event.packet)) {
+                        held_notes_->record(event.packet, false);
                         ++report.dropped;
                         report.complete = false;
                         continue;
                     }
                     const bool forwarded = utility_detail::emit_ump(
                         is_upper ? upper.ump() : lower.ump(), routed);
-                    held_notes_.record(event.packet, forwarded);
+                    held_notes_->record(event.packet, forwarded);
                     copied_sidecars = forwarded && copied_sidecars;
                     continue;
                 }
@@ -941,7 +975,11 @@ class KeyboardSplit {
   private:
     KeyboardSplitSpec spec_{};
     bool valid_ = true;
-    mutable routing_detail::HeldNoteLedger held_notes_{};
+    std::unique_ptr<routing_detail::HeldNoteLedger> held_notes_;
 };
+
+// Stack-safe by construction: the ledger is heap-owned. A bound here fails
+// every consumer's compile if a large array is ever inlined again.
+static_assert(sizeof(KeyboardSplit) <= 4096);
 
 } // namespace pulp::midi

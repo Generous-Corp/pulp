@@ -1589,3 +1589,18 @@ then re-run the rederive with `PULP_AGENT_CAPABILITY_BASE_REF=$(git rev-parse
 origin/main)`; it reports whether the counters themselves need to move (often
 they do not), and `agent_capability_manifest.py --check` plus
 `sequencer_exposure_check.py --base origin/main` confirm both ledgers.
+
+## A contract major bump: read the history's last entry, not `--check`
+
+Moving `midi.channel-routing`, `midi.note-range-filtering` and
+`midi.keyboard-split` to major 2 (construction and release became `control`
+when the routers started allocating their ledger) took three `--write` runs:
+the fingerprint refusal, then "manifest changed without a manifest_revision
+increase", then success. That successful run reported writing
+`contract-history.json`, yet the file was byte-identical to the base and its
+last entry still said major 1, while `--check` reported `fresh`. One more
+`--write`, started from the base history, appended the entry (84 to 85
+entries). For a real contract movement, confirm
+`entries[-1].manifest.capabilities[<key>].contract_version` shows the new
+version before shipping, and make sure the file differs from the base by
+exactly one entry.

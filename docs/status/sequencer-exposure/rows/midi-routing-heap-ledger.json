@@ -1,0 +1,103 @@
+{
+  "id": "midi-routing-heap-ledger",
+  "title": "MIDI routing kernels own their ownership ledger on the heap",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "11e24032-1352-4e78-9273-52d54875f834",
+  "owned_paths": [
+    "core/midi/include/pulp/midi/routing_utility_kernels.hpp",
+    "test/test_midi_routing_ledger.cpp",
+    "test/test_public_type_sizes.cpp",
+    "test/cmake/late_core_tests.cmake",
+    "tools/scripts/agent_capability_catalog_performance.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
+    ".agents/skills/mpe/SKILL.md",
+    "tools/agent-capabilities/contract-history.json",
+    ".agents/skills/agent-capabilities/SKILL.md",
+    "docs/status/sequencer-exposure/rows/agent-capability-surface-midi-output-reconciliation.json",
+    "docs/status/sequencer-exposure/rows/midi-routing-heap-ledger.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/midi/include/pulp/midi/routing_utility_kernels.hpp",
+      "needles": [
+        "std::unique_ptr<routing_detail::HeldNoteLedger> held_notes_;",
+        "static_assert(sizeof(ChannelRouter) <= 4096);",
+        "static_assert(sizeof(NoteRangeFilter) <= 4096);",
+        "static_assert(sizeof(KeyboardSplit) <= 4096);"
+      ]
+    },
+    {
+      "path": "test/test_midi_routing_ledger.cpp",
+      "needles": [
+        "MIDI routing kernels allocate only in their constructors",
+        "a moved-from MIDI routing kernel refuses every entry point"
+      ]
+    },
+    {
+      "path": "tools/scripts/agent_capability_manifest.py",
+      "needles": [
+        "SURFACE_INVENTORY_VERSION = 124"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The installed routing_utility_kernels.hpp changes layout: each router holds a unique_ptr to its ledger, is move-only, and its constructor is no longer constexpr or noexcept. The probe that default-constructs each router still compiles.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/midi/include/pulp/midi/routing_utility_kernels.hpp",
+          "needles": [
+            "class ChannelRouter",
+            "class NoteRangeFilter",
+            "class KeyboardSplit",
+            "std::unique_ptr<routing_detail::HeldNoteLedger> held_notes_;"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler reads the routing kernels."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler reads the routing kernels."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability operation, executor binding, or profile policy changes; the routers' processing semantics are unchanged."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "midi.channel-routing, midi.note-range-filtering and midi.keyboard-split move to contract major 2 with construction and release on control, because construction now allocates the ledger. process, reset and replace_spec keep their lifecycle values.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"midi.channel-routing\"",
+            "\"key\": \"midi.note-range-filtering\"",
+            "\"key\": \"midi.keyboard-split\""
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}
