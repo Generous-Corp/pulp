@@ -3189,7 +3189,8 @@
             "preserves controller order exactly, ties included",
             "carries a chased controller origin",
             "rejects malformed controller records",
-            "a version 3 reader accepts a version 2 payload"
+            "a version 3 reader accepts a version 2 payload",
+            "::operator new[](bytes, std::align_val_t{kProgramWireAlignment})"
           ]
         }
       ],
@@ -6176,7 +6177,7 @@
           "path": "inspect/include/pulp/inspect/control_registry_digest.inc",
           "needles": [
             "PULP_CONTROL_REGISTRY_DIGEST_V1",
-            "f402b3a0e12ecd0417669029d27353c46a7d114e47f32443cba616fe8960c99e"
+            "d98850681408945533dff4b647ddf0309f500cdbafc13f4af983ba4674410e8e"
           ]
         }
       ],
@@ -8858,7 +8859,7 @@
               "kind": "test",
               "path": "test/test_control_manifest.cpp",
               "needles": [
-                "CHECK(receipt_binding_count == 12);"
+                "CHECK(receipt_binding_count == 13);"
               ]
             },
             {
@@ -8926,6 +8927,7 @@
         "test/test_control_trusted_host_inventory.cpp",
         "test/test_inspector_domain_helpers.cpp",
         "test/test_mcp_control_adapter.cpp",
+        "test/test_timebase_loop_region.cpp",
         "tools/cmake/PulpControlShipping.cmake",
         "tools/cmake/PulpUtils.cmake",
         "tools/cmake/check_control_shipping_artifact.cmake",

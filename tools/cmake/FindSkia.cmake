@@ -503,9 +503,13 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
 
         # Platform frameworks
         if(WIN32)
-            # Dawn's D3D12 backend references WKPDID_D3DDebugObjectName.
+            # Dawn's D3D12 backend references WKPDID_D3DDebugObjectName
+            # (dxguid), and its SharedFence calls CompareObjectHandles, which
+            # kernel32.lib does not import. The Windows SDK ships no
+            # kernelbase.lib to link; the OneCore umbrella import library
+            # carries it (Windows 10+, inside Pulp's floor).
             set_property(TARGET skia::skia APPEND PROPERTY
-                INTERFACE_LINK_LIBRARIES dxguid)
+                INTERFACE_LINK_LIBRARIES dxguid onecore)
         elseif(APPLE)
             # Dawn's Metal archive contains Objective-C++ objects even when
             # final targets only link from C++ sources. Explicitly linking

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-windows-portable-test-env-watch",
+  "created_at": "2026-10-05T09:16:12Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record that a Windows test-portability fix crosses two families only through their broad test/** selectors. test/test_cli_import.cpp, test/test_gpu_diagnostics.cpp, test/test_skia_surface.cpp and test/test_view_bridge.cpp called POSIX setenv/unsetenv, which MSVC's runtime lacks, so they did not compile on Windows; they now call a new test/support/portable_env.hpp that wraps _putenv_s on Windows and setenv/unsetenv elsewhere. Each test sets and clears the same variables to the same values as before. No importer, DesignIR, capture path, renderer, asset, codegen output, fixture, threshold or Vellum-owned source changes, and no existing test's verdict changes. Registered as watch-only so the families' coverage stays honest about a change that crossed their selectors. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-cli-import",
+    "pulp-test-gpu-diagnostics",
+    "pulp-test-skia-surface",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -224,7 +224,7 @@
    "spawning_sources": [
     "test/test_baked_graph_processor_parity.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-browser-capture-import": {
@@ -1063,6 +1063,26 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-control-dspx04-graph-product-e2e": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-control-dspx04-graph-product-fixture",
+    "pulp-mcp"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp",
+    "test/support/control_sample_region_e2e.hpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": [],
+   "unmatched_programs": [
+    "pulp-control-broker"
+   ]
+  },
   "pulp-test-control-endpoint-enrollment": {
    "data": "none",
    "inputs": [],
@@ -1575,6 +1595,7 @@
     "test/test_baked_codec.cpp"
    ],
    "spawning_sources": [
+    "test/test_retained_history_dspx03.cpp",
     "test/test_signal_graph_anticipation.cpp",
     "test/test_signal_graph_live_swap_continuity.cpp",
     "test/test_signal_graph_live_swap_staging.cpp",
@@ -1584,7 +1605,7 @@
     "test/test_signal_graph_prepared_swap_live.cpp",
     "test/test_signal_graph_transport.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-group-script-format": {
@@ -2056,7 +2077,7 @@
    "spawning_sources": [
     "test/test_signal_graph_executor_parity.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-streaming-model-contract": {
@@ -2358,6 +2379,7 @@
   "pulp-test-commuted-string-excitation",
   "pulp-test-control-broker-daemon",
   "pulp-test-control-client-connection",
+  "pulp-test-control-dspx04-graph-product-e2e",
   "pulp-test-control-endpoint",
   "pulp-test-control-endpoint-enrollment",
   "pulp-test-control-gpu-health-provider",
@@ -2721,6 +2743,7 @@
   "pulp-test-signal-frequency-shifter-ssb",
   "pulp-test-signal-granular",
   "pulp-test-signal-graph-audio-parity",
+  "pulp-test-signal-graph-control-authority",
   "pulp-test-signal-graph-executor-parity",
   "pulp-test-signal-graph-offline-parity",
   "pulp-test-signal-harmony-engine",

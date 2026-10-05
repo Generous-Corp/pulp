@@ -29,4 +29,5 @@ PULP_INSPECT_CAPABILITY(SequencerTransportWrite, "sequencer.transport.loop.write
 PULP_INSPECT_CAPABILITY(TimelineDocumentSession, "timeline.document.session", "dev.pulp.timeline/document-session@1", Control, Authoring, Background, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(GraphSampleRegionRead, "graph.sample-region.read", "dev.pulp.graph/sample-region.read@1", Sensitive, None, HostMain, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(GraphSampleRegionEdit, "graph.sample-region.edit", "dev.pulp.graph/sample-region.edit@1", Control, Authoring, HostMain, Receipt, 0, 1, 1, 0)
+PULP_INSPECT_CAPABILITY(ModulationRouteEdit, "graph.modulation-route.edit", "dev.pulp.graph/modulation-route.edit@1", Control, Authoring, HostMain, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(Unavailable, "unavailable", "dev.pulp.unavailable/operation@1", Unavailable, None, Protocol, Response, 0, 0, 0, 0)

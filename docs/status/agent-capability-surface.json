@@ -1207,7 +1207,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_prepared_topology_edit.hpp",
-      "fingerprint": "sha256:e4d22adde4a16ab367d0b8c1acbcdced9cec747b1bbe5543003c5d396d39c628",
+      "fingerprint": "sha256:0022182b0e350a7aa975e8eab7ef47b1ca1e1c15bfaffd9b6ce13aa10370fb94",
       "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1218,7 +1218,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:2184129ca983c41e575e23199b83bb0ef6dc12a748154995f695e755db7bc711",
+      "fingerprint": "sha256:027bc469687908ad5abebc130f736925c37ea650b165dd95e58dd8a531cd585a",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

@@ -3792,10 +3792,14 @@ appear as `T` (defined) with **zero** `U` entries, and the binary should run —
 argument form: it is `pulp-cpp version`, not `pulp-cpp pulp version`, and
 `pulp-cpp sdk` rather than `sdk --help`.
 
-## Browser capture runtime dependency closure
+### Never probe a pid with `os.kill(pid, 0)` on Windows
 
-When `tools/import-design/browser_capture/capture.mjs` gains a relative `.mjs`
-import, add that module to `runtime_manifest.txt`,
-`tools/cli/upgrade_install.hpp`, and the release product matrix together. Run
-the upgrade runtime graph test so staged installs fail before shipping with an
-unresolved module.
+On Windows `os.kill(pid, 0)` is `os.kill(pid, signal.CTRL_C_EVENT)`: Python calls
+`GenerateConsoleCtrlEvent`, which sends Ctrl+C to every process on the console
+instead of testing `pid`. A liveness probe in a ctest-run script killed the whole
+Windows ctest run that way (`0xC000013A`, "Terminate batch job (Y/N)?"). The
+CLI-side scripts that probe a pid (`tools/ci/build_dir_lock.py`,
+`tools/scripts/live_build_check.py`) take an `os.name == "nt"` route that opens the
+process with `PROCESS_QUERY_LIMITED_INFORMATION` and reads `STILL_ACTIVE`; copy
+that, not the POSIX `os.kill`, into any new Python that probes a pid.
+

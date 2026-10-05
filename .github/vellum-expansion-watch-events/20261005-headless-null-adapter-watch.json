@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-headless-null-adapter-watch",
+  "created_at": "2026-10-05T15:50:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "HeadlessSurface now rejects Dawn's Null backend because it can return a flat readback while no native GPU driver exists. The guard protects executable pixel proof from treating unavailable hardware as a rendered product frame; native GPU adapters remain unchanged. This crosses the render-assets-and-backends watch family through core/render only, with no Vellum authority move, asset change, or accepted boundary change. Registered watch-only so the family's coverage remains explicit.",
+  "tests": [
+    "AudioInspectorPanel renders a non-empty headless snapshot",
+    "ctest --test-dir build -R pulp-test-group-view-host",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

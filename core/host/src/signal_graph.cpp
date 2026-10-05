@@ -1785,6 +1785,27 @@ bool SignalGraph::disconnect(NodeId source, PortIndex source_port,
     return true;
 }
 
+bool SignalGraph::disconnect_modulation(NodeId source, PortIndex source_port, NodeId dest,
+                                        uint32_t dest_param_id, bool audio_rate) {
+    GraphMutationLock mutation_lock(*this);
+    if (prepared_edit_origin_ == nullptr &&
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
+        return false;
+    const auto it =
+        std::find_if(connections_.begin(), connections_.end(), [&](const Connection& connection) {
+            return connection.source_node == source && connection.source_port == source_port &&
+                   connection.dest_node == dest &&
+                   connection.automation_param_id == dest_param_id &&
+                   connection.automation == !audio_rate &&
+                   connection.audio_rate_modulation == audio_rate;
+        });
+    if (it == connections_.end())
+        return false;
+    erase_connection_at_locked_(static_cast<std::size_t>(std::distance(connections_.begin(), it)));
+    invalidate_live_locked_();
+    return true;
+}
+
 // Does not lock: scans nodes_; the caller MUST hold graph_mutation_mutex_
 // (every internal mutator/reader below does). Public direct callers
 // (e.g. nodes()/node() external users) own their serialization per the accessor

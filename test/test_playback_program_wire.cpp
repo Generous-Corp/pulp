@@ -369,7 +369,9 @@ struct CompiledProgram {
 class WireBuffer {
   public:
     explicit WireBuffer(std::size_t bytes)
-        : storage_(new (std::align_val_t{kProgramWireAlignment}) std::byte[bytes]), size_(bytes) {}
+        : storage_(static_cast<std::byte*>(
+              ::operator new[](bytes, std::align_val_t{kProgramWireAlignment}))),
+          size_(bytes) {}
     ~WireBuffer() {
         ::operator delete[](storage_, std::align_val_t{kProgramWireAlignment});
     }
