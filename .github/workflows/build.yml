@@ -2552,13 +2552,22 @@ jobs:
           # before archiving so downstream consumers fail closed on malformed
           # or unmarked SDKs instead of discovering the problem at configure
           # time.
-          python3 tools/scripts/sdk_provenance.py stamp \
-            --prefix "$SDK_ARTIFACT_DIR" \
-            --build-dir "$PULP_BUILD_DIR" \
-            --source-dir "$GITHUB_WORKSPACE" \
-            --release-tag "v$(tr -d '[:space:]' < "$SDK_ARTIFACT_DIR/version.txt")" \
-            --source-sha "$source_sha" \
-            --platform darwin-arm64
+          release_tag="v$(tr -d '[:space:]' < "$SDK_ARTIFACT_DIR/version.txt")"
+          if [[ "$(git rev-parse "$release_tag^{commit}" 2>/dev/null || true)" == "$source_sha" ]]; then
+            python3 tools/scripts/sdk_provenance.py stamp \
+              --prefix "$SDK_ARTIFACT_DIR" \
+              --build-dir "$PULP_BUILD_DIR" \
+              --source-dir "$GITHUB_WORKSPACE" \
+              --release-tag "$release_tag" \
+              --source-sha "$source_sha" \
+              --platform darwin-arm64
+          else
+            python3 tools/scripts/sdk_development_provenance.py stamp \
+              --prefix "$SDK_ARTIFACT_DIR" \
+              --build-dir "$PULP_BUILD_DIR" \
+              --source-dir "$GITHUB_WORKSPACE" \
+              --source-sha "$source_sha"
+          fi
           python3 - "$SDK_ARTIFACT_DIR" "$SDK_ARTIFACT_RECEIPT" "$source_sha" <<'PY'
           import hashlib
           import json

@@ -1029,10 +1029,12 @@ VM record and an m3 record have different digests even when their clang is
 identical. Each host's records match only that host's records, by design.
 
 The merge-group GPU-audio SDK artifact has one additional consumer contract:
-after `cmake --install`, the release lane stamps `sdk-provenance.json` with
-`tools/scripts/sdk_provenance.py stamp` before archiving the prefix. Forge
-rejects an unmarked or mismatched prefix, so the stamp must bind the exact
-release tag, source SHA, Release build directory, and `darwin-arm64` platform.
+after `cmake --install`, the release lane stamps `sdk-provenance.json` before
+archiving the prefix. A source that exactly matches its release tag receives
+the official marker from `tools/scripts/sdk_provenance.py stamp`; a PR or
+merge-group source without that tag receives an explicit development marker.
+Forge rejects an unmarked, development, or mismatched prefix, so only the
+tagged marker is suitable for a release package.
 
 Two parts are recorded but never keyed. `configure_env` holds the live
 values of the variables CMake reads at configure time (`CC`, `CXXFLAGS`,
