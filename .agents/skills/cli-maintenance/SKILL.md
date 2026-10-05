@@ -3791,3 +3791,11 @@ appear as `T` (defined) with **zero** `U` entries, and the binary should run —
 `pulp-cpp version` and `pulp-cpp sdk` are the cheapest live checks. Note the
 argument form: it is `pulp-cpp version`, not `pulp-cpp pulp version`, and
 `pulp-cpp sdk` rather than `sdk --help`.
+
+## Browser capture runtime dependency closure
+
+When `tools/import-design/browser_capture/capture.mjs` gains a relative `.mjs`
+import, add that module to `runtime_manifest.txt`,
+`tools/cli/upgrade_install.hpp`, and the release product matrix together. Run
+the upgrade runtime graph test so staged installs fail before shipping with an
+unresolved module.
