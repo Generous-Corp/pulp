@@ -107,6 +107,36 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         self.assertIn('--base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA"', issuer)
 
 
+class LinuxRuntimeNodeProvisioningTest(unittest.TestCase):
+    """The Linux matrix must provision Node before materialized-runtime npm ci."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.steps = _build_steps()
+        cls.setup = cls.steps["Set up Node.js for materialized runtime tests (Linux)"]
+        cls.install = cls.steps["Install materialized runtime Node test dependencies (Linux)"]
+
+    def test_setup_node_is_linux_only_and_pinned(self) -> None:
+        self.assertEqual(self.setup["if"], "runner.os == 'Linux'")
+        self.assertEqual(self.setup["uses"], "actions/setup-node@v4")
+        self.assertEqual(self.setup["with"]["node-version"], "22.14.0")
+        self.assertEqual(self.setup["with"]["cache"], "npm")
+        self.assertEqual(
+            self.setup["with"]["cache-dependency-path"],
+            "tools/import-design/jsx-runtime/package-lock.json",
+        )
+
+    def test_runtime_install_is_linux_only_and_follows_provisioning(self) -> None:
+        self.assertEqual(self.install["if"], "runner.os == 'Linux'")
+        self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", self.install["run"])
+        names = [step.get("name") for step in _workflow()["jobs"]["build"]["steps"]]
+        self.assertLess(names.index(self.setup["name"]), names.index(self.install["name"]))
+
+    def test_other_matrix_legs_do_not_claim_linux_runtime_install(self) -> None:
+        self.assertNotIn("runner.os != 'Linux'", str(self.install["if"]))
+        self.assertNotIn("npm ci --prefix tools/import-design/jsx-runtime", self.setup.get("run", ""))
+
+
 def _build_steps() -> dict[str, dict[str, object]]:
     steps = _workflow()["jobs"]["build"]["steps"]
     return {step["name"]: step for step in steps if "name" in step}

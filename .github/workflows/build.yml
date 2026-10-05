@@ -1789,6 +1789,22 @@ jobs:
             echo "ccache not available; skipping config proof"
           fi
 
+      # The automatic Linux selector may resolve to a clean Proxmox VM rather
+      # than GitHub's ubuntu image.  Those VMs intentionally carry only the
+      # native build toolchain, so npm is not guaranteed to be on PATH.  The
+      # JSX materialization tests are product coverage and must not disappear
+      # just because the runner image changed; install the exact Node LTS
+      # toolchain they require before invoking npm.  setup-node also restores
+      # the lockfile-keyed npm cache, while npm ci below remains the authority
+      # that verifies the committed dependency lock.
+      - name: Set up Node.js for materialized runtime tests (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+          cache: npm
+          cache-dependency-path: tools/import-design/jsx-runtime/package-lock.json
+
       - name: Install materialized runtime Node test dependencies (Linux)
         if: runner.os == 'Linux'
         run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
