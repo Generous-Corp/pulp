@@ -2180,8 +2180,17 @@ executable `data: undeclared` (the shadow selects it on every change). The
 pr-fast `script-test-inputs-drift` check fails a PR head that adds a NEW
 undeclared source (one not undeclared in the base list); the backlog can only
 shrink. A test that reaches its data through its own definition
-(`PULP_REPO_ROOT`, a fixture-dir macro, `__FILE__`, a walk up from its
-working directory) declares with `NO_DEFINE` so its flags stay identical;
+(`PULP_REPO_ROOT`, a fixture-dir macro, a walk up from its working
+directory) declares with `NO_DEFINE` so its flags stay identical. Never build
+a fixture path from `__FILE__`: the self-hosted Macs set ccache `base_dir`,
+which rewrites `__FILE__` relative to the compiler's cwd (Ninja's build
+tree), so `path(__FILE__).parent_path()` becomes `../test` and resolves only
+from `build/`, never from `build/test` where ctest runs. Hosts without
+`base_dir` (GitHub runners) keep the absolute path, so only the local lanes
+fail. Use `pulp_test::fixture_root()` (`test/support/fixture_root.hpp`, which
+checks the root holds `test/` and names it and the cwd when not) with the
+`PULP_SOURCE_DIR` definition; the `test-file-paths-lint` ctest rejects
+`__FILE__` path forms under `test/`.
 `SOURCES` narrows a declaration to some of an executable's sources (a group
 or multi-source target), and `NONE` records a reviewed source whose
 `test/fixtures` text is only a comment or a temp-staged fixture. A test that

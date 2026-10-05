@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-test-fixture-source-dir-watch",
+  "created_at": "2026-10-05T00:27:36Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Test-only: five tests that built fixture paths from __FILE__ now take the checkout root from the PULP_SOURCE_DIR / PULP_REPO_ROOT definitions through test/support/fixture_root.hpp, and a lint rejects __FILE__ used as a path under test/. Under ccache base_dir plus Ninja, __FILE__ is relative to the build tree, so those paths resolved only from there. No design-import, Chromium, rendering or packaging code changes; only how tests locate checked-in fixtures.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-baked-codec",
+    "ctest --test-dir build -R pulp-test-cli-import-design",
+    "ctest --test-dir build -R pulp-test-design-tool-layout",
+    "ctest --test-dir build -R pulp-test-mcp-server",
+    "ctest --test-dir build -R pulp-test-nam-tcn-adapter",
+    "ctest --test-dir build -R pulp-test-validation-contract",
+    "python3 tools/scripts/test_check_test_file_paths.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -39,6 +39,7 @@
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp_tooling/gpu_probe/probe_result.hpp>
+#include "support/fixture_root.hpp"
 
 namespace {
 
@@ -198,33 +199,8 @@ std::filesystem::path normalize_path(const std::filesystem::path& path) {
 }
 
 std::filesystem::path find_repo_root() {
-#ifdef PULP_SOURCE_DIR
-    auto configured = std::filesystem::path(PULP_SOURCE_DIR);
-    if (has_repo_markers(configured))
-        return normalize_path(configured);
-#endif
-
-    std::vector<std::filesystem::path> seeds = {
-        std::filesystem::current_path(),
-        std::filesystem::path(__FILE__),
-    };
-
-    if (!seeds.back().is_absolute()) {
-        seeds.back() = std::filesystem::current_path() / seeds.back();
-    }
-
-    for (auto seed : seeds) {
-        if (std::filesystem::is_regular_file(seed))
-            seed = seed.parent_path();
-        for (auto candidate = seed; !candidate.empty(); candidate = candidate.parent_path()) {
-            if (has_repo_markers(candidate))
-                return normalize_path(candidate);
-            if (candidate == candidate.root_path())
-                break;
-        }
-    }
-
-    return {};
+    auto root = normalize_path(pulp_test::fixture_root());
+    return has_repo_markers(root) ? root : std::filesystem::path{};
 }
 
 std::filesystem::path repo_root_path() {

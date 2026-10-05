@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include "support/fixture_root.hpp"
 
 using namespace pulp::gpu_audio::detail;
 
@@ -162,7 +163,7 @@ TEST_CASE("NAM/TCN adapter rejects non-mono buffers at the private boundary",
 
 namespace {
 std::string fixture_path() {
-    return (std::filesystem::path(__FILE__).parent_path() / "fixtures/neural/example.nam").string();
+    return (pulp_test::fixture_root() / "test/fixtures/neural/example.nam").string();
 }
 
 StreamingModelSpec artifact_spec() {

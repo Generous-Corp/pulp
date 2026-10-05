@@ -16,6 +16,7 @@
 #include <limits>
 #include <string_view>
 #include <vector>
+#include "support/fixture_root.hpp"
 
 namespace fs = std::filesystem;
 
@@ -149,7 +150,7 @@ TEST_CASE("legacy v1 signed fixture remains byte-identical", "[host][bake][codec
     const auto plan = legacy_v1_golden_plan();
     REQUIRE(plan.format_version == pulp::host::kBakedPlanV1FormatVersion);
     const auto generated = pulp::host::write_baked_signed(plan, kp->private_key);
-    const auto fixture = read_bytes(fs::path(__FILE__).parent_path().parent_path() /
+    const auto fixture = read_bytes(pulp_test::fixture_root() /
                                     "test/fixtures/sample-region-compat/bake/legacy-v1.pulpbake");
     REQUIRE_FALSE(fixture.empty());
 
