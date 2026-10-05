@@ -63,6 +63,7 @@ the self-tests for the compiler-asymmetry lints:
 
 | Lint | Catches |
 |---|---|
+| `raw_pid_probe_lint.py` | a liveness probe written as `os.kill(pid, 0)`, which on Windows sends Ctrl+C to the whole console; probe through `process_liveness.pid_alive` |
 | `intel_canary_lint.py` | arm64-only code that drops the SSE/scalar fallback |
 | `designated_initializer_lint.py` | duplicate designators in one aggregate — legal to Clang, `C7560` on MSVC |
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |

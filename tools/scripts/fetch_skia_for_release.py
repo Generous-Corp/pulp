@@ -80,6 +80,15 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
+try:
+    from process_liveness import pid_alive
+except ImportError:  # imported as tools.scripts.*, or copied without its sibling
+    try:
+        from tools.scripts.process_liveness import pid_alive
+    except ImportError:
+        def pid_alive(pid):  # type: ignore[no-redef]
+            """No probe available: say "unknown", so a lock is never judged stale."""
+            return None
 
 # Matrix platform (release-cli.yml) → manifest release_assets key.
 # Matrix uses `darwin-*` and `windows-*`; manifest uses `mac-*` and `win-*`.
@@ -141,13 +150,8 @@ def cache_lock(dest_root: str, timeout_secs: float):
             try:
                 current = json.loads(owner_path.read_text(encoding="utf-8"))
                 if current.get("host") == socket.gethostname():
-                    try:
-                        os.kill(int(current["pid"]), 0)
-                    except ProcessLookupError:
+                    if pid_alive(int(current["pid"])) is False:
                         stale = True
-                    except PermissionError:
-                        # A live owner under another uid is still live.
-                        pass
             except (OSError, ValueError, KeyError, json.JSONDecodeError):
                 # The owner may still be writing. Only treat an unreadable lock
                 # as stale after the entire bounded wait has elapsed.

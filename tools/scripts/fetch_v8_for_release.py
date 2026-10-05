@@ -53,6 +53,15 @@ import urllib.request
 import urllib.parse
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
+try:
+    from process_liveness import pid_alive
+except ImportError:  # imported as tools.scripts.*, or copied without its sibling
+    try:
+        from tools.scripts.process_liveness import pid_alive
+    except ImportError:
+        def pid_alive(pid):  # type: ignore[no-redef]
+            """No probe available: say "unknown", so a lock is never judged stale."""
+            return None
 
 # Matrix platform → manifest release_assets key. Matrix uses `darwin-*`
 # and `windows-*`; the manifest uses `mac-*` and `win-*`.
@@ -111,12 +120,8 @@ def publication_lock(dest: Path, timeout_secs: float):
             try:
                 current = json.loads(owner_path.read_text(encoding="utf-8"))
                 if current.get("host") == socket.gethostname():
-                    try:
-                        os.kill(int(current["pid"]), 0)
-                    except ProcessLookupError:
+                    if pid_alive(int(current["pid"])) is False:
                         stale = True
-                    except PermissionError:
-                        pass
             except (OSError, ValueError, KeyError, json.JSONDecodeError):
                 # A live owner may still be writing owner.json. Only recover an
                 # unreadable lock after the bounded wait has elapsed.
