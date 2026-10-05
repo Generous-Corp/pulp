@@ -48,6 +48,39 @@ function(is_gpu_compute_adapter_unavailable result_json output_variable)
     set(${output_variable} ${is_expected_unavailable} PARENT_SCOPE)
 endfunction()
 
+# A software adapter (llvmpipe on the Linux leg) runs the whole recipe: the
+# dispatch completes and the CPU oracle matches, and the verdict is
+# unverified only because the adapter is not authentic hardware. That is the
+# recipe's documented outcome there, asserted exactly, never a pass.
+function(is_gpu_compute_software_unverified result_json output_variable)
+    set(is_software_unverified FALSE)
+    string(JSON result_schema ERROR_VARIABLE result_schema_error GET "${result_json}" schema)
+    string(JSON result_verdict ERROR_VARIABLE result_verdict_error GET "${result_json}" verdict)
+    string(JSON adapter_class ERROR_VARIABLE adapter_class_error GET "${result_json}" adapter class)
+    string(JSON pass_count ERROR_VARIABLE pass_count_error LENGTH "${result_json}" passes)
+    if(NOT result_schema_error AND NOT result_verdict_error AND NOT adapter_class_error AND
+       NOT pass_count_error AND result_schema STREQUAL "pulp.gpu-probe-result.v1" AND
+       result_verdict STREQUAL "unverified" AND adapter_class STREQUAL "software" AND
+       pass_count EQUAL 3)
+        set(is_software_unverified TRUE)
+        set(expected_passes
+            "adapter|unverified|compute_adapter_unverified"
+            "dispatch|pass|magnitude_dispatch_completed"
+            "oracle|pass|cpu_oracle_match")
+        foreach(pass_index RANGE 0 2)
+            list(GET expected_passes ${pass_index} expected)
+            string(JSON pass_name ERROR_VARIABLE pass_name_error GET "${result_json}" passes ${pass_index} name)
+            string(JSON pass_verdict ERROR_VARIABLE pass_verdict_error GET "${result_json}" passes ${pass_index} verdict)
+            string(JSON pass_code ERROR_VARIABLE pass_code_error GET "${result_json}" passes ${pass_index} code)
+            if(pass_name_error OR pass_verdict_error OR pass_code_error OR
+               NOT "${pass_name}|${pass_verdict}|${pass_code}" STREQUAL "${expected}")
+                set(is_software_unverified FALSE)
+            endif()
+        endforeach()
+    endif()
+    set(${output_variable} ${is_software_unverified} PARENT_SCOPE)
+endfunction()
+
 # Keep the narrow headless-Linux allowance fail-closed: another typed exit-2
 # result (for example, a runtime failure) must not impersonate adapter absence.
 set(adapter_unavailable_fixture
@@ -69,6 +102,20 @@ is_gpu_compute_adapter_unavailable("${incomplete_exit_two_fixture}"
 if(NOT exact_adapter_unavailable_fixture OR unrelated_exit_two_accepted OR
    mixed_exit_two_accepted OR incomplete_exit_two_accepted)
     message(FATAL_ERROR "adapter-unavailable result classifier is not fail-closed")
+endif()
+
+set(software_unverified_fixture
+    [[{"schema":"pulp.gpu-probe-result.v1","version":1,"verdict":"unverified","adapter":{"class":"software"},"passes":[{"sequence":0,"name":"adapter","verdict":"unverified","code":"compute_adapter_unverified"},{"sequence":1,"name":"dispatch","verdict":"pass","code":"magnitude_dispatch_completed"},{"sequence":2,"name":"oracle","verdict":"pass","code":"cpu_oracle_match"}]}]])
+is_gpu_compute_software_unverified("${software_unverified_fixture}" exact_software_unverified_fixture)
+string(REPLACE "\"class\":\"software\"" "\"class\":\"hardware\""
+    hardware_unverified_fixture "${software_unverified_fixture}")
+is_gpu_compute_software_unverified("${hardware_unverified_fixture}" hardware_unverified_accepted)
+string(REPLACE "cpu_oracle_match" "cpu_oracle_mismatch"
+    software_mismatch_fixture "${software_unverified_fixture}")
+is_gpu_compute_software_unverified("${software_mismatch_fixture}" software_mismatch_accepted)
+if(NOT exact_software_unverified_fixture OR hardware_unverified_accepted OR
+   software_mismatch_accepted)
+    message(FATAL_ERROR "software-adapter result classifier is not fail-closed")
 endif()
 
 file(REMOVE_RECURSE "${ARTIFACT_ROOT}")
@@ -273,7 +320,16 @@ if(positive_rc EQUAL 0)
 elseif(UNIX AND NOT APPLE AND positive_rc EQUAL 2)
     is_gpu_compute_adapter_unavailable("${positive_json}"
         positive_adapter_unavailable)
-    if(NOT positive_adapter_unavailable)
+    is_gpu_compute_software_unverified("${positive_json}"
+        positive_software_unverified)
+    if(positive_software_unverified)
+        foreach(artifact IN ITEMS input.complex-f32 expected.f32 observed.f32)
+            if(NOT EXISTS "${ARTIFACT_ROOT}/positive/${artifact}")
+                message(FATAL_ERROR "software-adapter probe omitted ${artifact}")
+            endif()
+        endforeach()
+        message(STATUS "positive probe ran on a software adapter: dispatch and oracle passed, verdict unverified")
+    elseif(NOT positive_adapter_unavailable)
         message(FATAL_ERROR
             "headless Linux probe did not emit exact typed unavailable evidence: "
             "${positive_stderr}")
