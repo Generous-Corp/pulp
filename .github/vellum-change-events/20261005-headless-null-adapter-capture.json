@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20261005-headless-null-adapter-capture",
+  "kind": "change",
+  "created_at": "2026-10-05T15:50:00Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "HeadlessSurface is used for executable pixel proof, but Dawn can initialize its Null backend on a host with no native GPU driver. That backend accepts rendering commands yet produces a flat zero-variance readback, so treating it as a successful capture would turn unavailable hardware into false product evidence. The Pulp-owned headless wrapper now rejects unavailable and Null adapters before Skia setup, allowing callers to take the existing explicit runtime-skip path while retaining real proof on a native GPU. This is a Pulp-only evidence-integrity guard; it does not change Vellum framework behavior or the public rendering API.",
+  "tests": [
+    "AudioInspectorPanel renders a non-empty headless snapshot",
+    "Vellum freeze",
+    "Vellum trusted freeze"
+  ],
+  "disposition": "pulp-only"
+}

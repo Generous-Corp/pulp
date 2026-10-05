@@ -224,3 +224,34 @@ artifact. Node capture and UI input use the host-owned exact-target adapter and
 remain unavailable when that component is not installed.
 Changing any of these limits changes the registry digest and therefore the
 artifact and consent identity reviewed above.
+
+## Processor-owned SignalGraph modulation control
+
+A standalone product may expose `dev.pulp.graph/modulation-route.edit@1` only when
+its `Processor` explicitly owns a prepared `SignalGraph`. The public
+`pulp::host::ProcessorSignalGraphBinding::install()` helper registers that
+relationship in an ABI-neutral side table and returns a lifetime token. Keep the
+token alive inside the Processor and destroy it before releasing the graph. A
+second binding for the same Processor is refused; after release, the canonical
+standalone resolver returns `HostUnavailable` and does not retain the old graph
+pointer.
+
+The generated standalone target installs the canonical resolver when the graph
+capability is declared. It does not construct a graph or infer ownership from an
+arbitrary Processor. Products without an explicit binding therefore remain
+fail-closed. The binding must be installed after graph preparation with the
+actual sample rate and maximum block size, and all route edits still pass
+through `SignalGraphControlAuthority`'s bounded transaction and dense-queue
+refusal.
+
+The approved minimal installable DSPX-04 example host is the namespaced fixture
+`dev.pulp.test.dspx04-graph-product`. Its broker receipt stages and launches the
+custom standalone host, acquires the controller lease, and submits
+`dev.pulp.graph/modulation-route.edit@1` through the generic CLI. The fixture
+keeps its prepared graph and `ProcessorSignalGraphBinding` alive for the host
+lifetime. The lifecycle proof covers insert, rewire, and remove for the prepared graph route,
+refuses an invalid typed mutation before dispatch, and refuses a batch beyond
+the bounded dense capacity. The same
+registry operation is reachable through the generated MCP projection. This is
+live-control evidence for the namespaced example host; Forge and commercial
+products still require their own equivalent receipt.

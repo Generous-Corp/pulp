@@ -359,6 +359,24 @@ public:
     // render reported as success. Slots that take their width from the
     // per-block buffers (VST3, CLAP, LV2) need nothing and do not override it.
     virtual void set_preferred_channel_layout(int /*inputs*/, int /*outputs*/) {}
+
+    /// Optional realtime DSP-history carry for a prepared replacement.  This
+    /// is deliberately separate from save_state()/restore_state(): preset
+    /// state describes user-facing parameters, while this opaque blob carries
+    /// delay lines, tails, waveguide state, or physical-model integrators.
+    /// The default is cold-start safe for every existing slot implementation.
+    virtual std::string retained_history_key() const {
+        return {};
+    }
+    virtual std::vector<uint8_t> serialize_dsp_state() const {
+        return {};
+    }
+    virtual bool restore_dsp_state(const std::vector<uint8_t>&) {
+        return false;
+    }
+    virtual bool reseed_dsp_state(std::uint64_t) {
+        return false;
+    }
 };
 
 } // namespace pulp::host

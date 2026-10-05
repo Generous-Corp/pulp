@@ -28,6 +28,10 @@ add_executable(pulp-test-wam-adapter test_wam_adapter.cpp ${CMAKE_SOURCE_DIR}/co
 target_link_libraries(pulp-test-wam-adapter PRIVATE Catch2::Catch2WithMain pulp::format pulp::state pulp::runtime pulp::events pulp::midi pulp::audio)
 catch_discover_tests(pulp-test-wam-adapter)
 
+pulp_add_test_suite(pulp-test-signal-graph-control-authority
+    SOURCES test_signal_graph_control_authority.cpp
+    LIBRARIES pulp::host pulp::signal pulp::inspect-graph-runtime)
+
 # Parameter attachment tests
 pulp_add_test_suite(pulp-test-param-attachment GROUP pulp-test-group-app-view
     LIBRARIES pulp::view)
