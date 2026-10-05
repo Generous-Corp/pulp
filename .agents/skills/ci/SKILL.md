@@ -596,13 +596,15 @@ that failed to write never changes the lane's verdict; read the run log's last
 key code there with `python3 -I`. Three mistakes do not error at configure
 time; they make every keyed run fail to derive or every re-derivation refuse:
 
-- **A new import in the key code must join `derivation_paths` in the same
-  change.** The bare copy holds only the listed files. `test_receipts_shadow`
-  pulls in `affected_tests_shadow` and `tools/scripts/protected_merge_receipt`,
-  which is how the list grew past the obvious five. Check the closure by
-  copying exactly the listed files from the branch into a temp dir and running
-  `python3 -I tools/ci/executable_keys.py --print-toolchain --build-dir /nonexistent`
-  and `python3 -I tools/ci/executable_selection.py --help` there.
+- **`derivation_paths` is exactly the key code's import closure plus the
+  adapter, no more and no less.** The bare copy holds only the listed files, so
+  a missing import fails every derivation; an extra file is also a selector
+  policy path, so every base that moves it plans full as
+  `selector_policy_drift` (the receipts shadow was 5 of 38 such drifts before
+  the shared name pattern moved to `tools/ci/always_run_names.py`).
+  `KeyCodeClosureTests` in `tools/ci/test_executable_keys.py` derives the
+  closure from the imports and pins the list and `KEY_CODE_PATHS` to it; run it
+  after any import change in the key code.
 - **`load_record` must digest a record in byte order of its relative paths**
   (`a.b` before `a/b`), as Shipyard's `record_digest` does. Sorting `Path`
   objects orders by parts and gives a different digest on any record whose

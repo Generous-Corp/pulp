@@ -521,10 +521,10 @@ class KeyCodeClosureTests(unittest.TestCase):
                 names = ([a.name for a in node.names] if isinstance(node, ast.Import) else
                          [node.module] if isinstance(node, ast.ImportFrom) and node.module and not node.level else [])
                 for name in names:
-                    for root in ("tools/ci", "tools/scripts"):
-                        candidate = f"{root}/{name.split('.')[0]}.py"
-                        if (self.REPO / candidate).is_file():
-                            todo.append(candidate)
+                    for root in (HERE, HERE.parent / "scripts"):
+                        candidate = root / f"{name.split('.')[0]}.py"
+                        if candidate.is_file():
+                            todo.append(candidate.relative_to(self.REPO).as_posix())
                             break
         return seen
 
