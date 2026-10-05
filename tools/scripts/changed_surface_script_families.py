@@ -63,6 +63,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -383,8 +384,17 @@ def render(families: list[dict[str, Any]]) -> str:
 # a regenerated file.
 
 def _git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
-    return subprocess.run(["git", "-C", str(root), *args], input=stdin, check=True,
-                          capture_output=True).stdout
+    command = ["git", "-C", str(root), *args]
+    if stdin is None:
+        return subprocess.run(command, check=True, capture_output=True).stdout
+    # Keep the request out of a pipe.  `git cat-file --batch` can emit a large
+    # response before consuming all object IDs; feeding it through
+    # subprocess.run(input=...) can then deadlock when both pipes fill.
+    with tempfile.TemporaryFile() as request:
+        request.write(stdin)
+        request.seek(0)
+        return subprocess.run(command, stdin=request, check=True,
+                              capture_output=True).stdout
 
 
 class Snapshot:
