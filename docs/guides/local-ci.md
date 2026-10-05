@@ -2098,7 +2098,10 @@ cannot allowlist its own regression; owners delete their row when they fix the
 test.
 
 The mandatory kernel always runs, including the selector's own
-`changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
+`changed-surface-policy-selftest` (the policy tables, from source) and
+`changed-surface-policy-inventory` (the live-tree inventory check, registered
+only under `PULP_CHANGED_SURFACE_INVENTORY_TARGET`; the selftest takes no
+build-tree argument because it is also a source-lane test). Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes
 require the full suite; unknown paths fail safely to full as well. Reviewed
 bounded families cover Forge/DSP catalog projection commands, the isolated

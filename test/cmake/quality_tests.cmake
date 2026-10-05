@@ -1247,13 +1247,17 @@ if(Python3_Interpreter_FOUND)
     # Shipyard's declared target so a different optional feature set cannot be
     # mistaken for inventory drift.
     if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
-        set(_changed_surface_policy_args)
-        if(PULP_CHANGED_SURFACE_INVENTORY_TARGET)
-            list(APPEND _changed_surface_policy_args --build-dir "${CMAKE_BINARY_DIR}")
-        endif()
+        # The policy tables alone, from source: this is also a source-lane
+        # test, so it never takes a build-tree argument. The live-tree
+        # inventory check reads the build tree and is its own registration,
+        # present only where Shipyard's target enables it.
         add_test(NAME changed-surface-policy-selftest COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
-            ${_changed_surface_policy_args})
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py")
+        if(PULP_CHANGED_SURFACE_INVENTORY_TARGET)
+            add_test(NAME changed-surface-policy-inventory COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
+                --build-dir "${CMAKE_BINARY_DIR}")
+        endif()
         add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         # Two cases walk the whole tracked tree for configured reachability,

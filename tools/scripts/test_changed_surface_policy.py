@@ -171,6 +171,9 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertTrue(self.policy["baseline_tests"])
         self.assertTrue(self.policy["baseline_build_targets"])
         self.assertIn("changed-surface-policy-selftest", self.policy["baseline_tests"])
+        # The live-tree inventory check, registered only under Shipyard's
+        # PULP_CHANGED_SURFACE_INVENTORY_TARGET, is what a bounded leg relies on.
+        self.assertIn("changed-surface-policy-inventory", self.policy["baseline_tests"])
         self.assertTrue(self.policy["families"])
         self.assertNotIn("**", self.policy.get("baseline_only_paths", []))
         for family in self.policy["families"]:
