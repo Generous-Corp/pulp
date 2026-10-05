@@ -224,7 +224,7 @@
    "spawning_sources": [
     "test/test_baked_graph_processor_parity.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-browser-capture-import": {
@@ -1595,6 +1595,7 @@
     "test/test_baked_codec.cpp"
    ],
    "spawning_sources": [
+    "test/test_retained_history_dspx03.cpp",
     "test/test_signal_graph_anticipation.cpp",
     "test/test_signal_graph_live_swap_continuity.cpp",
     "test/test_signal_graph_live_swap_staging.cpp",
@@ -1604,7 +1605,7 @@
     "test/test_signal_graph_prepared_swap_live.cpp",
     "test/test_signal_graph_transport.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-group-script-format": {
@@ -2076,7 +2077,7 @@
    "spawning_sources": [
     "test/test_signal_graph_executor_parity.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-streaming-model-contract": {
