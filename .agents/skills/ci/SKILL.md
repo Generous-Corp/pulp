@@ -5551,6 +5551,14 @@ gets slower, not faster — and the re-dispatched runs then wedge each other. If
 the pool is already saturated with advisory work, cancel it (the macOS legs have
 usually finished, so nothing is lost) rather than adding more.
 
+Every advisory hosted lane that runs on `pull_request` already groups per PR ref
+with `cancel-in-progress` on for PR events, so a new push retires the previous
+head's runs. That includes `codeql-advanced.yml` (six hosted jobs, one on macOS),
+pinned by `tools/scripts/test_codeql_workflow_concurrency.py`. A backlog of
+Coverage / Sanitizers / CodeQL runs is therefore one run per *open PR*, not
+superseded heads; check `head_branch` for duplicates before reaching for more
+concurrency settings. Required checks keep their own non-cancelling groups.
+
 ### A step gated on `!= 'pull_request'` also fires on `merge_group`
 
 `merge_group` is not `pull_request`, so `if: github.event_name != 'pull_request'`
