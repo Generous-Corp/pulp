@@ -44,6 +44,8 @@ STEP_NAME = "Install visual-analysis Python dependencies"
 CTEST_JOBS = {
     ".github/workflows/build.yml": ["$PULP_BUILD_DIR"],
     ".github/workflows/sanitizers.yml": ["build-asan", "build-tsan", "build-ubsan", "build-rtsan"],
+    # The two Linux legs of the nightly; both name their tree in $PULP_BUILD_DIR.
+    ".github/workflows/cross-platform-check.yml": ["$PULP_BUILD_DIR", "$PULP_BUILD_DIR"],
 }
 REQUIREMENTS = REPO / "tools/motion/visual/requirements.txt"
 LOCK = REPO / "tools/motion/visual/requirements.lock"
