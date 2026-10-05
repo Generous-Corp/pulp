@@ -11,6 +11,16 @@ EXPECTED_BUNDLE_ID='com.pulp.sample-region-allpass'
 ROOT=Path(__file__).resolve().parent
 LUA=ROOT/'sample_region_native_reaper.lua'
 
+def overall_status(results):
+    """Preserve hard failures in the packet summary instead of hiding them."""
+    statuses = [result.get('status') for result in results]
+    if statuses and all(status == 'passed' for status in statuses):
+        return 'passed'
+    if any(status == 'failed' for status in statuses):
+        return 'failed'
+    return 'inconclusive'
+
+
 def receipt_verdict(receipt):
     import importlib.util
     spec=importlib.util.spec_from_file_location('sample_region_native_smoke', ROOT/'sample_region_native_smoke.py')
@@ -53,35 +63,54 @@ def serialized_coefficient(rpp):
     (u32 id, f32 plain-value) pairs.
     """
     import base64, struct
-    payload = []
-    inside = False
-    for line in Path(rpp).read_text(errors='ignore').splitlines():
-        s = line.strip()
-        if s.startswith('<VST ') or s.startswith('<AU ') or s.startswith('<CLAP '):
-            inside = True
-            continue
-        if inside:
-            if s == '>':
-                break
-            payload.append(s.strip('"'))
-    if not payload:
-        return None
+    text = Path(rpp).read_text(errors='ignore')
+    blobs = []
+    # VST3 stores the PULP state directly in the FX payload. AU stores an
+    # outer base64 encoded plist, whose nested <data> element carries the
+    # plugin state. CLAP has a nested STATE block; stopping at the first
+    # child block's `>` loses that state, so extract STATE explicitly.
+    if '<AU ' in text:
+        match = re.search(r'<AU\s+[^\n]*\n(.*?)\n\s*>', text, re.S)
+        if match:
+            try:
+                outer = base64.b64decode(''.join(line.strip().strip('"')
+                                                  for line in match.group(1).splitlines()))
+                xml = outer.decode('utf-8', 'ignore')
+                for data in re.findall(r'<data>\s*([^<\s]+)\s*</data>', xml):
+                    try:
+                        blobs.append(base64.b64decode(data))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    elif '<CLAP ' in text:
+        match = re.search(r'<STATE\s*\n(.*?)\n\s*>', text, re.S)
+        if match:
+            try:
+                blobs.append(base64.b64decode(''.join(match.group(1).split())))
+            except Exception:
+                pass
+    else:
+        match = re.search(r'<VST\s+[^\n]*\n(.*?)\n\s*>', text, re.S)
+        if match:
+            try:
+                blobs.append(base64.b64decode(''.join(line.strip().strip('"')
+                                                      for line in match.group(1).splitlines())))
+            except Exception:
+                pass
     try:
-        blob = base64.b64decode(''.join(payload))
-    except Exception:
-        return None
-    magic = blob.find(b'PULP')
-    if magic < 0:
-        return None
-    try:
-        count = struct.unpack_from('<I', blob, magic + 8)[0]
-        for n in range(count):
-            off = magic + 12 + n * 8
-            if off + 8 > len(blob):
-                break
-            pid, value = struct.unpack_from('<If', blob, off)
-            if pid == 2901:
-                return value
+        for blob in blobs:
+            magic = blob.find(b'PULP')
+            if magic < 0:
+                continue
+            count = struct.unpack_from('<I', blob, magic + 8)[0]
+            for n in range(count):
+                off = magic + 12 + n * 8
+                if off + 8 > len(blob):
+                    break
+                pid, value = struct.unpack_from('<If', blob, off)
+                if pid == 2901:
+                    return value
     except Exception:
         return None
     return None
@@ -497,6 +526,6 @@ def main(argv=None):
                                    f"residual={rec.get('render_envelope_residual')})")
         receipt=a.out/f'{fmt}-receipt.log'; receipt.write_text('[sample-region-f4] '+json.dumps(rec)+'\n')
         results.append(rec)
-    summary={'packet':'PKT-F4-01','acceptance':'PUB-04','results':results,'status':'passed' if all(r.get('status')=='passed' for r in results) else 'inconclusive'}
+    summary={'packet':'PKT-F4-01','acceptance':'PUB-04','results':results,'status':overall_status(results)}
     a.out.mkdir(parents=True,exist_ok=True); (a.out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n'); print(json.dumps(summary,indent=2)); return 0 if summary['status']=='passed' else 3
 if __name__=='__main__': raise SystemExit(main())
