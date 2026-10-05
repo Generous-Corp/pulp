@@ -359,12 +359,16 @@ int run(Config config) {
         trace_stats.trace_attempted == trace_stats.trace_enqueued + trace_stats.trace_dropped +
                                            trace_stats.trace_sampled_out +
                                            trace_stats.trace_invalid;
+    const bool provider_authenticated = provider_identity.authenticated &&
+                                        provider_identity.native_runtime_authenticated &&
+                                        engine_id != 0;
+    const bool receipt_authenticated = gpu_progress && provider_authenticated;
     const auto emit = [&](std::ostream& stream) {
         const auto executable_sha =
             pulp::runtime::sha256_file_hex(config.executable, 512ull * 1024ull * 1024ull)
                 .value_or("");
         stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\""
-               << (correct && gpu_progress ? "completed" : "failed")
+               << (correct && receipt_authenticated ? "completed" : "failed")
                << "\",\"performance_verdict\":\"unassigned\",\"path\":\"shared_async\","
                   "\"completion_service\":\"process_events\",\"callback_driver\":\"sleep_until_non_"
                   "rt\","
@@ -393,7 +397,8 @@ int run(Config config) {
                << ",\"trace_dropped\":" << trace_stats.trace_dropped
                << ",\"trace_sampled_out\":" << trace_stats.trace_sampled_out
                << ",\"trace_invalid\":" << trace_stats.trace_invalid
-               << ",\"gpu_receipt_authenticated\":" << (gpu_progress ? "true" : "false")
+               << ",\"gpu_receipt_authenticated\":"
+               << (receipt_authenticated ? "true" : "false")
                << ",\"provider_identity_status\":";
         json_string(stream, provider_identity.authenticated ? "passed" : "failed");
         stream << ",\"provider_observed_identity\":";
@@ -510,7 +515,7 @@ int run(Config config) {
     }
     emit(std::cout);
     std::cerr << "artifacts: " << config.directory << '\n';
-    const bool passed = correct && gpu_progress;
+    const bool passed = correct && receipt_authenticated;
     if (config.expect_failure)
         return !passed && config.corrupt_output ? 0 : 1;
     return passed ? 0 : 1;

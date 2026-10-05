@@ -72,8 +72,11 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
         identity.native_runtime_backend = identity.adapter_backend;
         identity.authenticated = !identity.provider_revision.empty() &&
                                  !identity.adapter_name.empty() &&
-                                 identity.adapter_vendor_id != 0 &&
-                                 identity.adapter_device_id != 0;
+                                 identity.adapter_backend == "Metal" &&
+                                 identity.adapter_vendor_id != 0;
+        // Metal may report device ID zero for a valid Apple adapter.  Zero is
+        // an observed identifier, not an absent identity; backend, vendor,
+        // name, and immutable provider revision remain mandatory above.
         identity.native_runtime_authenticated = identity.authenticated;
     } catch (...) {
         return SharedIoProviderIdentity{};
