@@ -13,6 +13,12 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+The GPU-audio SDK artifact is not distribution-ready after `cmake --install`
+alone. The release lane must run `tools/scripts/sdk_provenance.py stamp` on
+the staged prefix before archiving it; Forge and other SDK consumers reject an
+unmarked prefix by design. Keep the stamp bound to the exact release tag,
+source SHA, Release build directory, and `darwin-arm64` platform.
+
 The hosted `drift-fast` workflow is a required status check. It selects the
 historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 `hydrate_gpu_provenance_commits.py` step after checkout and before configure;
