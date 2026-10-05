@@ -343,7 +343,18 @@ class LocalProofWorkflowTest(unittest.TestCase):
         self.assertTrue(ordinary)
         for name in sorted(ordinary):
             with self.subTest(job=name):
-                self.assertIn("!inputs.local_proof", str(self.jobs[name].get("if", "")))
+                condition = " ".join(str(self.jobs[name].get("if", "")).split())
+                # Dispatch inputs are absent on pull_request/merge_group events.
+                # The workflow therefore uses an event-aware equivalent guard;
+                # retain acceptance of the original direct negation as well.
+                self.assertTrue(
+                    "!inputs.local_proof" in condition
+                    or (
+                        "inputs.local_proof != true" in condition
+                        and "inputs.local_proof != 'true'" in condition
+                    ),
+                    condition,
+                )
 
 
 class CtestParallelismTest(unittest.TestCase):
