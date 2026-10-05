@@ -1063,26 +1063,6 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
-  "pulp-test-control-dspx04-graph-product-e2e": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli",
-    "pulp-control-dspx04-graph-product-fixture",
-    "pulp-mcp"
-   ],
-   "sources": [],
-   "spawning_sources": [
-    "inspect/src/control_broker_daemon.cpp",
-    "test/support/control_sample_region_e2e.hpp"
-   ],
-   "spawns": "undeclared",
-   "undeclared_sources": [],
-   "unmatched_programs": [
-    "pulp-control-broker"
-   ]
-  },
   "pulp-test-control-endpoint-enrollment": {
    "data": "none",
    "inputs": [],
@@ -2378,7 +2358,6 @@
   "pulp-test-commuted-string-excitation",
   "pulp-test-control-broker-daemon",
   "pulp-test-control-client-connection",
-  "pulp-test-control-dspx04-graph-product-e2e",
   "pulp-test-control-endpoint",
   "pulp-test-control-endpoint-enrollment",
   "pulp-test-control-gpu-health-provider",
