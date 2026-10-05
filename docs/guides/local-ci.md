@@ -6850,6 +6850,14 @@ which of those failed.
 - Shipyard binds a record by a digest over its files in byte order of their
   relative paths; `tools/ci/executable_keys.py`'s `load_record` must digest
   the same way or every derivation refuses its record.
+- From payload schema 3 the binding no longer rides in the command: Shipyard
+  writes it to `executable-reuse-binding.json` in the run's result directory
+  and the payload carries only `executable_reuse_binding_digest`. The adapter
+  reads that file and uses it only when its sha256 equals the digest;
+  otherwise it runs the plan unkeyed and records `executable_reuse_binding`
+  with `keyed_binding_mismatch` or `keyed_binding_unreadable`, and a verified
+  run records the digest it used. The 4 KiB cap applies to the selected-test
+  list; the decoded payload is bounded at 6,000 bytes by the command limit.
 
 ## "Can this PR actually land?" — the two-detector wedge check
 

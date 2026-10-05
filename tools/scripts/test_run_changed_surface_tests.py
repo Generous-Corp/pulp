@@ -1978,6 +1978,58 @@ class KeyedFullTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(runner.SelectionExecutionError):
                 runner.decode_selection_receipt(*encode_receipt(bad))
 
+    def v3_receipt(self, digest: str) -> dict:
+        receipt = {k: v for k, v in self.receipt().items() if k != "executable_reuse"}
+        return {**receipt, "schema_version": 3, runner.BINDING_DIGEST_KEY: digest}
+
+    def test_a_schema_3_receipt_names_its_binding_by_digest_only(self) -> None:
+        full = self.v3_receipt("7" * 64)
+        self.assertEqual(runner.decode_selection_receipt(*encode_receipt(full))[4], full)
+        bounded = {**selection_receipt(["x"], ["t"]), "schema_version": 3,
+                   runner.BINDING_DIGEST_KEY: "7" * 64}
+        self.assertEqual(runner.decode_selection_receipt(*encode_receipt(bounded))[4], bounded)
+        unkeyed = {**selection_receipt(["x"], ["t"]), "schema_version": 3}
+        self.assertEqual(runner.decode_selection_receipt(*encode_receipt(unkeyed))[4], unkeyed)
+        for bad in ({**full, runner.BINDING_DIGEST_KEY: "7" * 63},
+                    {**full, "executable_reuse": dict(self.BINDING)},  # inline is schema 2's
+                    {**self.receipt(), runner.BINDING_DIGEST_KEY: "7" * 64},  # digest is schema 3's
+                    {k: v for k, v in full.items() if k != runner.BINDING_DIGEST_KEY}):
+            with self.subTest(bad=bad), self.assertRaises(runner.SelectionExecutionError):
+                runner.decode_selection_receipt(*encode_receipt(bad))
+
+    def test_the_test_list_alone_is_capped_at_4_kib(self) -> None:
+        # B's real shape: a ~3 KB list plus identity and a digest is over 4 KiB
+        # as a whole payload yet within the limits; a list over 4 KiB is not.
+        names = [f"test-name-{i:04d}-" + "x" * 20 for i in range(100)]
+        within = {**selection_receipt(names, ["t"]), "schema_version": 3,
+                  runner.BINDING_DIGEST_KEY: "7" * 64}
+        payload, digest = encode_receipt(within)
+        self.assertGreater(len(json.dumps(within, separators=(",", ":"))), runner.MAX_SELECTED_TEST_BYTES)
+        self.assertEqual(runner.decode_selection_receipt(payload, digest)[0], names)
+        # A list just over 4 KiB in a payload still under the 6,000-byte bound:
+        # only the list cap can refuse it.
+        longer = names + [f"test-name-{i:04d}-" + "x" * 20 for i in range(100, 134)]
+        over = {**selection_receipt(longer, ["t"]), "schema_version": 3}
+        self.assertLess(len(json.dumps(over, separators=(",", ":"))), runner.MAX_EXECUTION_PAYLOAD_BYTES)
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "safe execution limit"):
+            runner.decode_selection_receipt(*encode_receipt(over))
+
+    def test_a_keyed_full_run_reads_its_binding_file_and_refuses_a_mismatch(self) -> None:
+        data = json.dumps(self.BINDING, sort_keys=True).encode()
+        digest = hashlib.sha256(data).hexdigest()
+        code, calls, result = self.run_full(receipt=self.v3_receipt(digest), binding_file=data)
+        self.assertEqual(calls[0], "derive")
+        self.assertEqual(result["executable_reuse"]["bound"], self.BINDING)
+        self.assertEqual(result["executable_reuse_binding"], {"digest": digest, "status": "verified"})
+        for file, status in ((data + b" ", "keyed_binding_mismatch"), (None, "keyed_binding_unreadable")):
+            with self.subTest(status):
+                code, calls, result = self.run_full(receipt=self.v3_receipt(digest), binding_file=file)
+                self.assertNotIn("derive", calls)  # nothing keyed against an unverified binding
+                self.assertEqual(code, 0)  # the configured stages still ran and decided
+                self.assertIsNone(result["executable_reuse"]["bound"])
+                self.assertEqual(result["executable_reuse"]["derived"]["status"], f"error: {status}")
+                self.assertEqual(result["executable_reuse_binding"], {"digest": digest, "status": status})
+
     def test_keyed_full_execs_the_configured_stages(self) -> None:
         config = tomllib.loads((runner.REPO_ROOT / ".shipyard/config.toml").read_text(encoding="utf-8"))
         default = config["validation"]["default"]
@@ -2003,12 +2055,16 @@ class KeyedFullTest(unittest.TestCase):
         self.assertEqual(runner.stage_test_argv(Path("build"), Path("/j"))[-2:], ["--output-junit", "/j"])
 
     def run_full(self, derived_ok: bool = True, build_rc: int = 0, failing: tuple = (),
-                 record: bool = False) -> tuple:
+                 record: bool = False, receipt: dict | None = None,
+                 binding_file: bytes | None = None) -> tuple:
         calls: list = []
         self.recorded: list = []
         with tempfile.TemporaryDirectory() as directory:
             build, results = Path(directory) / "build", Path(directory) / "results"
             build.mkdir()
+            if binding_file is not None:
+                results.mkdir()
+                (results / runner.BINDING_FILE).write_bytes(binding_file)
 
             def derive(binding, head, build_dir, result_dir, *, base_sha):
                 self.assertEqual(base_sha, "a" * 40)  # the receipt's base, when no candidate keys
@@ -2048,7 +2104,7 @@ class KeyedFullTest(unittest.TestCase):
                   mock.patch.object(runner, "derive_executable_reuse", side_effect=derive),
                   mock.patch.object(runner.subprocess, "run", side_effect=execute),
                   mock.patch.object(runner, "ctest_payload", return_value={"tests": [{"name": "a1"}, {"name": "b1"}]})):
-                code = runner.run_keyed_full(args, build, self.receipt())
+                code = runner.run_keyed_full(args, build, receipt or self.receipt())
             receipt = json.loads(sorted(results.glob("result-*.json"))[-1].read_text())
             return code, calls, receipt
 
@@ -2276,7 +2332,9 @@ class SelectedLegPipelineTest(unittest.TestCase):
     def run_pipeline(self, late_registration: bool = False, failures: dict | None = None,
                      allowlist: tuple[list[str], str] | None = None,
                      reuse: dict | None = None,
-                     derived_files: dict | None = None) -> tuple[int, list[str], dict]:
+                     derived_files: dict | None = None,
+                     binding_digest: str | None = None,
+                     binding_file: bytes | None = None) -> tuple[int, list[str], dict]:
         """`failures` maps "selected tests" / "full tests" to the names that leg
         fails; each leg writes them as ctest's JUnit report and exits 8."""
         failures = failures or {}
@@ -2329,6 +2387,8 @@ class SelectedLegPipelineTest(unittest.TestCase):
             receipt = selection_receipt(["smoke", "core"], ["tool"])
             if reuse is not None:
                 receipt["executable_reuse"] = reuse
+            if binding_digest is not None:
+                receipt = {**receipt, "schema_version": 3, runner.BINDING_DIGEST_KEY: binding_digest}
             def derived(binding, head, build_dir, result_dir, *, base_sha):
                 if derived_files == "error":
                     return {"status": "error: base refused"}
@@ -2341,6 +2401,9 @@ class SelectedLegPipelineTest(unittest.TestCase):
             args = mock.Mock(config=build / "config.toml", selection_receipt_b64="e",
                              selection_receipt_sha256="0" * 64, target="mac")
             results = build / "results"
+            if binding_file is not None:
+                results.mkdir(parents=True, exist_ok=True)
+                (results / runner.BINDING_FILE).write_bytes(binding_file)
             with (
                 mock.patch.dict(os.environ, {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
                                              "SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results)}),
@@ -2408,6 +2471,44 @@ class SelectedLegPipelineTest(unittest.TestCase):
         reuse = failed["executable_reuse"]
         self.assertEqual({k: reuse[k] for k in runner.UNMEASURED_SKIPS}, runner.UNMEASURED_SKIPS)
         self.assertEqual(reuse["derived"], {"status": "error: base refused", **runner.UNKNOWN_UNREACHED})
+
+    BINDING = {"candidates": [{"run_id": "1", "record_sha256": "9" * 64, "record_path": "/r", "commit": "a" * 40}],
+               "rules_digest": "6" * 64, "derivation_code_dir": "/code", "derivation_code_sha256": "8" * 64,
+               "sample_seed": "s", "sample_percent": 5, "build_dir": "/b"}
+
+    def test_a_binding_named_by_digest_is_read_from_its_file_and_used(self) -> None:
+        data = json.dumps(self.BINDING, sort_keys=True).encode()
+        digest = hashlib.sha256(data).hexdigest()
+        code, _, result = self.run_pipeline(binding_digest=digest, binding_file=data)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["executable_reuse"]["bound"], self.BINDING)
+        self.assertEqual(result["executable_reuse_binding"], {"digest": digest, "status": "verified"})
+        self.assertEqual(self.derive_calls[0].args[0], self.BINDING)
+
+    def test_a_tampered_or_missing_binding_file_runs_unkeyed_and_says_so(self) -> None:
+        data = json.dumps(self.BINDING, sort_keys=True).encode()
+        digest = hashlib.sha256(data).hexdigest()
+        tampered = data.replace(b'"sample_percent": 5', b'"sample_percent": 6')
+        for label, file, status in (("tampered", tampered, "keyed_binding_mismatch"),
+                                    ("missing", None, "keyed_binding_unreadable"),
+                                    ("not json", b"\xff", "keyed_binding_mismatch")):
+            with self.subTest(label):
+                code, steps, result = self.run_pipeline(binding_digest=digest, binding_file=file)
+                # The bounded run is exactly an unkeyed one: same legs, same
+                # verdict, no executable-reuse block, and the reason recorded.
+                self.assertEqual(code, 0)
+                self.assertEqual(steps, ["selected build", "selected tests", "full build", "full tests"])
+                self.assertEqual(result["comparison_verdict"], "matched_pass")
+                self.assertNotIn("executable_reuse", result)
+                self.assertEqual(result["executable_reuse_binding"], {"digest": digest, "status": status})
+                self.assertEqual(self.derive_calls, [])
+
+    def test_a_matching_file_that_is_not_a_binding_is_unreadable(self) -> None:
+        data = b'{"candidates": []}'
+        digest = hashlib.sha256(data).hexdigest()
+        _, _, result = self.run_pipeline(binding_digest=digest, binding_file=data)
+        self.assertNotIn("executable_reuse", result)
+        self.assertEqual(result["executable_reuse_binding"]["status"], "keyed_binding_unreadable")
 
     LANE_REDS = ({"lane-red": "2026-10-17"}, "f" * 64)
 
