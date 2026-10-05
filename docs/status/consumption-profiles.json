@@ -1062,6 +1062,7 @@
       "pulp/signal/tape_machine.hpp",
       "pulp/signal/tape_machine_components.hpp",
       "pulp/signal/tempo_delay.hpp",
+      "pulp/signal/tempo_delay_wrapper.hpp",
       "pulp/signal/tilt_eq.hpp",
       "pulp/signal/tpt_filter.hpp",
       "pulp/signal/transfer_curve.hpp",

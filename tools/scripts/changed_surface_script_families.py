@@ -161,8 +161,25 @@ def seeds_reachability(script: str, native_text: str, cmake_text: str, cmake_run
         or (script in entries and name in cmake_running)
 
 
+_WORD = re.compile(r"\w+")
+
+
+def word_set(text: str) -> frozenset[str]:
+    return frozenset(_WORD.findall(text))
+
+
+def names_stem(stem: str, text: str, words: frozenset[str]) -> bool:
+    """Whether `text` names `stem` as a whole word, as `\\bstem\\b` decides.
+    A stem made only of word characters matches exactly when it is one of the
+    text's maximal word runs, so `words` (word_set(text)) answers it without a
+    regex scan; any other stem falls back to the regex."""
+    if _WORD.fullmatch(stem):
+        return stem in words
+    return re.search(r"\b" + re.escape(stem) + r"\b", text) is not None
+
+
 def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
-                    text: Any) -> set[str]:
+                     text: Any) -> set[str]:
     """Scripts that code outside the declared script tests can run."""
     native = [p for p in tracked if p.endswith(NATIVE_SUFFIXES)
               and not p.startswith(NON_EXECUTING_PREFIXES)]
@@ -172,20 +189,14 @@ def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
     cmake_running = "\n".join(_without_comments_and_add_tests(text(p)) for p in cmake)
     reached = {script for script in scripts
                if seeds_reachability(script, native_text, cmake_text, cmake_running, entries)}
-    # The closure walk can inspect thousands of script bodies. Compile each
-    # basename matcher once so the cost is proportional to the number of
-    # inspected bodies and scripts, rather than recompiling a regex for every
-    # pair. Keep the script path beside the matcher so discovery order stays
-    # identical to the previous implementation.
-    matchers = [(script, re.compile(r"\b" + re.escape(os.path.basename(script)[:-3]) + r"\b"))
-                for script in scripts]
     pending = sorted(reached)
     while pending:
         body = text(pending.pop())
-        for script, matcher in matchers:
+        words = word_set(body)
+        for script in scripts:
             if script in reached:
                 continue
-            if matcher.search(body):
+            if names_stem(os.path.basename(script)[:-3], body, words):
                 reached.add(script)
                 pending.append(script)
     return reached
@@ -314,8 +325,6 @@ def environment_bound(tests: list[dict]) -> set[str]:
     bound = set()
     for test in tests:
         props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
-        if props.get("PULP_OPTIONAL") in (True, "TRUE", "true", 1, "1"):
-            continue
         labels = props.get("LABELS") or []
         if props.get("RESOURCE_LOCK") or ENVIRONMENT_LABELS & set(labels):
             bound.add(test["name"])
@@ -432,6 +441,12 @@ class Prediction:
         self.cmake_text = "\n".join(snap.text(p) for p in cmake)
         self.cmake_running = "\n".join(_without_comments_and_add_tests(snap.text(p)) for p in cmake)
         self.memo: dict[str, bool] = {}
+        self.words: dict[str, frozenset[str]] = {}
+
+    def _words(self, script: str) -> frozenset[str]:
+        if script not in self.words:
+            self.words[script] = word_set(self.snap.text(script))
+        return self.words[script]
 
     def _seed(self, script: str) -> bool:
         return seeds_reachability(script, self.native_text, self.cmake_text, self.cmake_running,
@@ -448,11 +463,11 @@ class Prediction:
             if self.memo.get(node) or self._seed(node):
                 self.memo[script] = True
                 return True
-            stem = re.compile(r"\b" + re.escape(os.path.basename(node)[:-3]) + r"\b")
+            stem = os.path.basename(node)[:-3]
             for other in self.scripts:
                 if other in seen or self.memo.get(other) is False:
                     continue
-                if stem.search(self.snap.text(other)):
+                if names_stem(stem, self.snap.text(other), self._words(other)):
                     seen.add(other)
                     queue.append(other)
         for node in seen:
