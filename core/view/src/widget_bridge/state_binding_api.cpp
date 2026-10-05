@@ -333,10 +333,23 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
     // matched so an unbindable target neither claims a repaint nor churns.
     b.last_applied = target;
     bool matched = true;
+    // A bound Knob, Fader or RangeSlider also draws the parameter's modulated value: a
+    // host's CLAP modulation, or the plugin's own published one. Both
+    // setters are value-gated and repaint only the control's box.
+    const auto show_modulation = [&](auto* control) {
+        if (!b.value_channel.empty())
+            return;
+        if (const auto played = store_.displayed_modulation(b.param_id))
+            control->set_modulated_value(*played);
+        else
+            control->clear_modulated_value();
+    };
     if (auto* k = dynamic_cast<Knob*>(w)) {
         k->set_value(target);
+        show_modulation(k);
     } else if (auto* f = dynamic_cast<Fader*>(w)) {
         f->set_value(target);
+        show_modulation(f);
     } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
         // RangeSlider works in real units [min,max]; treat the transformed
         // [0,1] value as a fraction of its own range so a non-normalized slider
@@ -344,6 +357,7 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
         const float lo = r->min_value();
         const float hi = r->max_value();
         r->set_value(lo + std::clamp(target, 0.0f, 1.0f) * (hi - lo));
+        show_modulation(r);
     } else if (auto* t = dynamic_cast<Toggle*>(w)) {
         t->set_on(toggle_on_from_normalized(target));
     } else if (auto* seg = dynamic_cast<SegmentedControl*>(w)) {
@@ -356,9 +370,11 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
         st->set_value_silent(stepper_plain_value(
             target, st->minimum(), st->maximum(), st->step()));
     } else if (auto* p = dynamic_cast<ProgressBar*>(w)) {
-        // ProgressBar::set_progress does NOT self-repaint; the caller schedules
-        // one when `changed`.
+        // ProgressBar::set_progress does NOT self-repaint, so the binding
+        // repaints the bar's own box when the value moved.
         p->set_progress(target);
+        if (changed)
+            p->request_repaint_self();
     } else {
         matched = false;
     }
@@ -420,11 +436,17 @@ void WidgetBridge::service_param_subscriptions() {
         // every frame forever. service_param_bindings() refuses NaN for the
         // same reason.
         if (std::isnan(value) || std::isnan(modulated)) continue;
+        // The value a modulator is playing -- a host's CLAP modulation or the
+        // plugin's own published one -- as one field a UI draws its single
+        // indicator from (`playing`, normalized, null when nothing modulates).
+        const auto playing = store_.displayed_modulation(param_id);
         // Modulation is part of the change signal, not just the payload: a CLAP
         // host can move the modulated value while the base is static, and a UI
         // drawing the modulated position has to see that.
         if (value == param_subscriptions_[i].last_value &&
-            modulated == param_subscriptions_[i].last_modulated)
+            modulated == param_subscriptions_[i].last_modulated &&
+            playing.has_value() == param_subscriptions_[i].has_playing &&
+            (!playing || *playing == param_subscriptions_[i].last_playing))
             continue;
 
         // The value is snapshotted once per frame and compared against the
@@ -433,12 +455,17 @@ void WidgetBridge::service_param_subscriptions() {
         // change on the next frame — one dispatch per frame, never recursion.
         param_subscriptions_[i].last_value = value;
         param_subscriptions_[i].last_modulated = modulated;
+        param_subscriptions_[i].has_playing = playing.has_value();
+        param_subscriptions_[i].last_playing = playing.value_or(0.0f);
 
         const auto* info = store_.info(param_id);
         if (info == nullptr) continue;
         // Same serializer as getParamMetadata and the inspector, so a
         // subscriber and a poller cannot disagree about a param's shape.
-        const auto payload = choc::json::toString(state::param_snapshot_to_value(store_, *info));
+        auto snapshot = state::param_snapshot_to_value(store_, *info);
+        snapshot.addMember("playing",
+                           playing ? choc::value::createFloat64(*playing) : choc::value::Value());
+        const auto payload = choc::json::toString(snapshot);
         safe_dispatch_eval(callback_alive_, &engine_,
                            "__dispatch__(" + js_string_literal(param_subscription_key(id)) +
                                ", 'paramchange', " + payload + ")",
@@ -738,6 +765,9 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
         // Seed from the store so the first frame is not reported as a change.
         sub.last_value = self.store_.get_value(param_id);
         sub.last_modulated = self.store_.get_modulated(param_id);
+        const auto playing = self.store_.displayed_modulation(param_id);
+        sub.has_playing = playing.has_value();
+        sub.last_playing = playing.value_or(0.0f);
         self.param_subscriptions_.push_back(std::move(sub));
         return choc::value::createInt64(static_cast<std::int64_t>(
             self.param_subscriptions_.back().id));

@@ -881,6 +881,7 @@ void WidgetBridge::dispatch_document_event(const std::string& event_type,
 }
 
 void WidgetBridge::set_repaint_callback(std::function<void()> cb) {
+    default_repaint_callback_ = false;
     repaint_callback_ = std::move(cb);
 }
 
@@ -986,10 +987,60 @@ void WidgetBridge::dispatch_native_message(
             "native message receiver must not be empty");
     }
     const auto repaint_generation_before = repaint_request_generation_;
+    const DamageLedger ledger = damage_ledger();
     invoke_or_throw(engine_, receiver, type, payload, id, context);
     engine_.pump_message_loop();
     if (repaint_request_generation_ == repaint_generation_before)
-        request_repaint();
+        request_repaint_after(ledger);
+}
+
+void WidgetBridge::request_frame() {
+    // With the constructor's callback the root's host can schedule a frame
+    // without damage; a custom callback (a standalone window's own
+    // invalidator) is the only thing that knows how to wake its host.
+    ++repaint_request_generation_;
+    if (!default_repaint_callback_) {
+        if (repaint_callback_)
+            repaint_callback_();
+        return;
+    }
+    PULP_TRACE_SCOPE_NAMED("render", "repaint_frame_only");
+    root_.request_frame();
+}
+
+void WidgetBridge::request_repaint_after(const DamageLedger& ledger) {
+    // The work marked its own damage and nothing else: the marks scheduled
+    // the repaint. It changed nothing at all (a handler that only queued a
+    // requestAnimationFrame): ask for a frame and let that frame mark what it
+    // draws. Anything else keeps the whole-surface request.
+    if (ledger.self_damaged(root_))
+        return;
+    if (ledger.untouched(root_)) {
+        request_frame();
+        return;
+    }
+    request_repaint();
+}
+
+WidgetBridge::DamageLedger WidgetBridge::damage_ledger() const {
+    return {View::damage_request_count(), View::unmarked_paint_mutation_count(),
+            root_.tree_layout_generation()};
+}
+
+bool WidgetBridge::DamageLedger::untouched(const View& root) const {
+    return View::damage_request_count() == damage_requests &&
+           View::unmarked_paint_mutation_count() == unmarked_mutations &&
+           root.tree_layout_generation() == layout_generation;
+}
+
+bool WidgetBridge::DamageLedger::self_damaged(const View& root) const {
+    // The work since the ledger was taken asked for its own repaints (each
+    // mark scheduled one), changed nothing it did not mark, and moved no
+    // geometry. Then a blanket whole-surface request adds nothing but area:
+    // a knob's played-value marker repaints the knob, not the editor.
+    return View::damage_request_count() != damage_requests &&
+           View::unmarked_paint_mutation_count() == unmarked_mutations &&
+           root.tree_layout_generation() == layout_generation;
 }
 
 void WidgetBridge::load_script(const std::string& code,
@@ -1178,12 +1229,21 @@ void WidgetBridge::poll_async_results() {
     // exchange consumes the slot, so at most one poll can skip per service
     // drain and a poll-only host still drains on every call.
     const bool serviced = std::exchange(frames_drained_by_service_, false);
+    const DamageLedger ledger = damage_ledger();
+    bool flushed = false;
     if (had_pending_frames && !serviced) {
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
+        flushed = true;
     }
 
+    // Frames this poll drained that marked their own damage (and only that)
+    // already scheduled their repaint; anything else keeps the whole-surface
+    // request it always had.
     if (!pending.empty() || had_pending_frames) {
-        request_repaint();
+        if (flushed && pending.empty())
+            request_repaint_after(ledger);
+        else
+            request_repaint();
     }
 }
 

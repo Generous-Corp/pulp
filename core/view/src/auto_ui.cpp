@@ -1,12 +1,14 @@
-#include <pulp/view/auto_ui.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/widgets.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <sstream>
+#include <functional>
 #include <iomanip>
+#include <pulp/view/auto_ui.hpp>
+#include <pulp/view/parameter_binding.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
+#include <sstream>
 #include <vector>
 
 namespace pulp::view {
@@ -181,19 +183,27 @@ private:
 /// a real host resize.
 class AutoUiRoot final : public View {
 public:
-    void layout_children() override {
-        const auto size = local_bounds();
-        const bool needs_convergence =
-            !has_settled_layout_ || size.width != settled_width_ ||
-            size.height != settled_height_;
+  /// The editor's parameter bindings (bind_parameter): host gestures,
+  /// automation playback and modulated display for every control, living as
+  /// long as the editor.
+  std::vector<ParameterBinding> bindings;
+  /// Keeps each control's value row reading the parameter as automation
+  /// moves it.
+  state::ListenerToken value_rows;
 
-        View::layout_children();
-        if (needs_convergence) View::layout_children();
+  void layout_children() override {
+      const auto size = local_bounds();
+      const bool needs_convergence =
+          !has_settled_layout_ || size.width != settled_width_ || size.height != settled_height_;
 
-        has_settled_layout_ = true;
-        settled_width_ = size.width;
-        settled_height_ = size.height;
-    }
+      View::layout_children();
+      if (needs_convergence)
+          View::layout_children();
+
+      has_settled_layout_ = true;
+      settled_width_ = size.width;
+      settled_height_ = size.height;
+  }
 
 private:
     bool has_settled_layout_ = false;
@@ -238,6 +248,7 @@ private:
 
 std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
     auto root = std::make_unique<AutoUiRoot>();
+    auto* root_raw = root.get();
     root->flex().direction = FlexDirection::column;
     root->flex().padding = 14;
     root->flex().gap = 12;
@@ -277,15 +288,9 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             auto toggle = std::make_unique<Toggle>();
             toggle->set_id(param.name);
             toggle->set_label(param.name);
-            toggle->set_on(store.get_normalized(param.id) > 0.5f);
-            // A toggle is an instantaneous edit rather than a drag, so the
-            // whole gesture is opened and closed around the single write —
-            // the host still needs the begin/end bracket to record it.
-            toggle->on_toggle = [&store, id = param.id](bool on) {
-                store.begin_gesture(id);
-                store.set_normalized(id, on ? 1.0f : 0.0f);
-                store.end_gesture(id);
-            };
+            // One complete gesture per flip (the host records a discrete
+            // change) and automation playback, by bind_parameter.
+            root_raw->bindings.push_back(bind_parameter(*toggle, store, param.id));
             toggle->flex().preferred_height = 30;
             toggle->flex().preferred_width = 54;
             tile->add_child(std::move(toggle));
@@ -298,20 +303,11 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             // control artwork; set_label above still supplies its accessible name.
             knob->set_show_label(false);
             knob->set_show_value(false);
-            knob->set_value(store.get_normalized(param.id));
-            knob->on_change = [&store, id = param.id](float norm) {
-                store.set_normalized(id, norm);
-            };
-            // Bracket the drag in a host automation gesture. Without this the
-            // host is never told an edit is in progress, so a knob drag moves
-            // the DSP but the host's parameter (and any automation write /
-            // undo grouping) never follows it.
-            knob->on_gesture_begin = [&store, id = param.id] {
-                store.begin_gesture(id);
-            };
-            knob->on_gesture_end = [&store, id = param.id] {
-                store.end_gesture(id);
-            };
+            // A drag is one host gesture, automation playback turns the
+            // knob, and whatever modulates the parameter (a host's CLAP
+            // modulation; the plugin's own published modulation) is drawn as
+            // its played value -- all by bind_parameter.
+            root_raw->bindings.push_back(bind_parameter(*knob, store, param.id));
             // Keep the physical-unit formatter on the Knob even though AutoUi
             // paints that value in its own row. AccessibilityValueInterface uses
             // the formatter for the value announced by platform assistive tech.
@@ -418,6 +414,25 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
     }
 
     root->add_child(std::move(body));
+    // Each knob's value row follows its parameter as automation plays.
+    root_raw->value_rows = store.add_listener(
+        [root_raw, &store](state::ParamID changed, float) {
+            const auto* info = store.info(changed);
+            if (info == nullptr)
+                return;
+            std::function<void(View&)> visit = [&](View& view) {
+                if (view.id() == value_label_id(changed)) {
+                    if (auto* label = dynamic_cast<Label*>(&view))
+                        label->set_text(
+                            format_parameter_value(*info, store.get_normalized(changed)));
+                    return;
+                }
+                for (std::size_t i = 0; i < view.child_count(); ++i)
+                    visit(*view.child_at(i));
+            };
+            visit(*root_raw);
+        },
+        state::ListenerThread::Main);
     return root;
 }
 
@@ -491,12 +506,25 @@ void AutoUi::sync(View& root, state::StateStore& store) {
         std::function<void(View&)> visit = [&](View& view) {
             if (view.id() == param.name) {
                 float norm = store.get_normalized(param.id);
-                if (auto* knob = dynamic_cast<Knob*>(&view))
+                // The modulated value a host's CLAP modulation (or the
+                // plugin's own published modulation) plays, drawn over the
+                // base; cleared when nothing modulates the parameter.
+                const auto played = store.displayed_modulation(param.id);
+                if (auto* knob = dynamic_cast<Knob*>(&view)) {
                     knob->set_value(norm);
-                else if (auto* toggle = dynamic_cast<Toggle*>(&view))
+                    if (played)
+                        knob->set_modulated_value(*played);
+                    else
+                        knob->clear_modulated_value();
+                } else if (auto* toggle = dynamic_cast<Toggle*>(&view)) {
                     toggle->set_on(norm > 0.5f);
-                else if (auto* fader = dynamic_cast<Fader*>(&view))
+                } else if (auto* fader = dynamic_cast<Fader*>(&view)) {
                     fader->set_value(norm);
+                    if (played)
+                        fader->set_modulated_value(*played);
+                    else
+                        fader->clear_modulated_value();
+                }
             } else if (view.id() == value_label_id(param.id)) {
                 if (auto* label = dynamic_cast<Label*>(&view))
                     label->set_text(format_parameter_value(

@@ -114,6 +114,11 @@ class Label : public View, public SelectableText {
         const bool probe_height = has_explicit_width && single_line_simple &&
                                   !has_explicit_height && !baseline_aligned;
         const float height_before = probe_height ? intrinsic_height() : 0.0f;
+        // The ink a fixed-box, single-line Label paints can run past its box
+        // when the copy is wider than the box; measured before the copy
+        // changes so the repaint below covers the old text's ink too.
+        const float ink_before =
+            has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
         text_ = std::move(text);
         // The text IS the accessible name for a label — the two-arg ctor set it
         // and set_text() did not, so every Label built by the JS bridge
@@ -145,7 +150,19 @@ class Label : public View, public SelectableText {
         // the capability unmeasured until the repaint records the new run.
         selection_layout_ = {};
         selection_layout_pending_ = {};
-        request_repaint();
+        if (!text_geometry_is_fixed) {
+            request_repaint();
+            return;
+        }
+        // Nothing moved: repaint this Label's box, widened by however far
+        // the old or new copy overhangs it (either side: the alignment is
+        // the paint's business), plus room for anti-aliasing. A live readout
+        // or a modulated value label then repaints itself, not the editor.
+        const float box_w = local_bounds().width;
+        const float overhang = std::max(0.0f, std::max(ink_before, intrinsic_width()) - box_w);
+        const float halo = 4.0f;
+        request_repaint(Rect{-overhang - halo, -halo, box_w + 2.0f * (overhang + halo),
+                             local_bounds().height + 2.0f * halo});
     }
     const std::string& text() const { return text_; }
 
@@ -1159,7 +1176,7 @@ public:
     // Display only, and the contract every modulated control keeps:
     //
     //   * value() stays the BASE. A drag, a wheel notch or a key starts from
-    //     it, the value text prints it, and on_change / gestures report it, so
+    //     it, and on_change / gestures report it, so
     //     host automation records the user's moves and nothing else.
     //   * set_modulated_value() never fires on_change and never writes a
     //     parameter: modulation must not write a host automation lane. It
@@ -1170,9 +1187,12 @@ public:
     //     the whole surface and never the layout, so a modulator animating a
     //     control at the display rate costs one bounded repaint per frame.
     //
-    // The stock paint draws the played value as a modulation-coloured arc from
-    // the base to the played value plus a dot at the played value (token
-    // `knob.modulation`); the base pointer and value arc stay as they are.
+    // One indicator, never two: while a played value is set, the knob's single
+    // pointer and value arc show the value PLAYING, in the modulation colour
+    // (token `knob.modulation`), on every body style; the base is a quiet
+    // notch across the ring. The value text prints the played value, and the
+    // base while the user drags it (the drag edits the base and the notch
+    // follows).
     // Values are normalized 0..1, like value(). Unlike the Saturn rings above,
     // which DERIVE the live value from base + depth x phase, this takes the
     // value the processor computed, for modulation laws that are not a linear
@@ -1444,9 +1464,9 @@ public:
     /// Display-only played value while a modulator moves this parameter
     /// around value(). Same contract as Knob::set_modulated_value(): never
     /// fires on_change, never writes a parameter, repaints the fader's own box
-    /// only. The stock paint draws a modulation-coloured segment along the
-    /// track from the base to the played value and a bar across the track at
-    /// the played value (token `knob.modulation`).
+    /// only. One thumb: while a played value is set, the fader's thumb and
+    /// fill sit at the value PLAYING in the modulation colour (token
+    /// `knob.modulation`), and the base is a quiet tick across the track.
     void set_modulated_value(float normalized) {
         const float v = std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : value_;
         if (has_modulated_ && v == modulated_)
@@ -1836,6 +1856,35 @@ public:
     }
     float value() const { return value_; }
 
+    /// Display-only played value while a modulator moves this parameter
+    /// around value() (same contract as Knob::set_modulated_value): never
+    /// fires on_change, never writes a parameter, repaints the slider's own
+    /// box. `normalized` is a fraction of [min, max]. One thumb: the thumb
+    /// and fill sit at the value playing in the modulation colour (token
+    /// `knob.modulation`); the base is a quiet tick across the track.
+    void set_modulated_value(float normalized) {
+        const float v =
+            std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : value_to_position_();
+        if (has_modulated_ && v == modulated_)
+            return;
+        has_modulated_ = true;
+        modulated_ = v;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    void clear_modulated_value() {
+        if (!has_modulated_)
+            return;
+        has_modulated_ = false;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    bool has_modulated_value() const {
+        return has_modulated_;
+    }
+    /// The played fraction of [min, max] while one is set.
+    float modulated_display_value() const {
+        return modulated_;
+    }
+
     // Scroll-wheel adjusts the value (hover + wheel), scaled to the range.
     bool wants_wheel_value() const override { return true; }
     void on_wheel(float delta_y) override {
@@ -1929,6 +1978,9 @@ private:
     float max_ = 1.0f;
     float step_ = 0.0f;
     float value_ = 0.0f;
+    bool has_modulated_ = false;
+    float modulated_ = 0.0f;
+    static constexpr float kModulatedMarkerHalo = 2.0f;
     float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
     Orientation orientation_ = Orientation::horizontal;
     bool dragging_ = false;
@@ -2403,6 +2455,35 @@ public:
     float x_value() const { return x_; }
     float y_value() const { return y_; }
 
+    /// Display-only played position on either axis while a modulator moves
+    /// that parameter around the base (same contract as
+    /// Knob::set_modulated_value): never fires on_change, never writes a
+    /// parameter, repaints the pad's own box. One puck: it sits at the
+    /// position playing (an unmodulated axis keeps its base) in the
+    /// modulation colour (token `knob.modulation`); the base is a small ring.
+    void set_modulated_x(float normalized) {
+        set_modulated_axis(has_mod_x_, mod_x_, x_, normalized);
+    }
+    void set_modulated_y(float normalized) {
+        set_modulated_axis(has_mod_y_, mod_y_, y_, normalized);
+    }
+    void clear_modulated_x() {
+        clear_modulated_axis(has_mod_x_);
+    }
+    void clear_modulated_y() {
+        clear_modulated_axis(has_mod_y_);
+    }
+    bool has_modulated_value() const {
+        return has_mod_x_ || has_mod_y_;
+    }
+    /// The played position on each axis while one is set, else the base.
+    float modulated_display_x() const {
+        return has_mod_x_ ? mod_x_ : x_;
+    }
+    float modulated_display_y() const {
+        return has_mod_y_ ? mod_y_ : y_;
+    }
+
     void set_x_label(std::string l) { x_label_ = std::move(l); }
     void set_y_label(std::string l) { y_label_ = std::move(l); }
 
@@ -2421,7 +2502,24 @@ public:
 
 private:
     void update_from_pos(Point pos);
+    void set_modulated_axis(bool& has, float& slot, float base, float normalized) {
+        const float v = std::isfinite(normalized) ? std::clamp(normalized, 0.0f, 1.0f) : base;
+        if (has && v == slot)
+            return;
+        has = true;
+        slot = v;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    void clear_modulated_axis(bool& has) {
+        if (!has)
+            return;
+        has = false;
+        request_repaint_self(kModulatedMarkerHalo);
+    }
+    static constexpr float kModulatedMarkerHalo = 2.0f;
     float x_ = 0.5f, y_ = 0.5f;
+    bool has_mod_x_ = false, has_mod_y_ = false;
+    float mod_x_ = 0.0f, mod_y_ = 0.0f;
     std::string x_label_, y_label_;
     bool dragging_ = false;
 };

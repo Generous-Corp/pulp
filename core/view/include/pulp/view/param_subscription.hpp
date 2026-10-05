@@ -32,6 +32,10 @@ struct ParamSubscription {
     /// on the first frame.
     float last_value = 0.0f;
     float last_modulated = 0.0f;
+    /// The value a modulator is playing (StateStore::displayed_modulation),
+    /// normalized; `has_playing` false when nothing modulates the parameter.
+    bool has_playing = false;
+    float last_playing = 0.0f;
 };
 
 } // namespace pulp::view

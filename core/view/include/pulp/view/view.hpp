@@ -268,7 +268,10 @@ public:
     // back-include of widgets.hpp; the int matches LabelAlign's enum
     // order: 0 = left, 1 = center, 2 = right.
 
-    void set_inheritable_text_color(Color c) { inh_text_color_ = c; }
+    void set_inheritable_text_color(Color c) {
+        inh_text_color_ = c;
+        invalidate_subtree_caches_up();
+    }
     void clear_inheritable_text_color() { inh_text_color_.reset(); }
     /// Walks own value, then parent chain. nullopt if no ancestor set it.
     std::optional<Color> inheritable_text_color() const;
@@ -769,7 +772,10 @@ public:
     /// with `@pulp/react`. Pulp's transform model is currently 2D-affine, so
     /// this behaves as a paint-time no-op.
     bool backface_visible() const { return backface_visible_; }
-    void set_backface_visible(bool v) { backface_visible_ = v; }
+    void set_backface_visible(bool v) {
+        backface_visible_ = v;
+        invalidate_subtree_caches_up();
+    }
 
     /// GPU-host capability signal.
     /// A view that is rendered through the Skia/Dawn/Yoga scripted-UI path —
@@ -839,6 +845,32 @@ public:
     /// Number of `layout_children()` calls since process start. A test seam:
     /// the property under test is "how many tree walks did that read loop
     /// cost", which timing cannot answer reliably and this can.
+    /// Repaint requests that marked damage (bounded or whole surface) since
+    /// process start, and paint mutations that staled caches WITHOUT marking
+    /// any. A caller that batches work and owes the host a repaint for it (the
+    /// script bridge after a native dispatch) compares both before and after:
+    /// when the work marked its own damage and left nothing unmarked, the
+    /// marks already scheduled the repaint and a blanket whole-surface request
+    /// would only widen it.
+    static std::uint64_t damage_request_count() noexcept {
+        return damage_request_count_.load(std::memory_order_relaxed);
+    }
+    static std::uint64_t unmarked_paint_mutation_count() noexcept {
+        return unmarked_paint_mutation_count_.load(std::memory_order_relaxed);
+    }
+    /// Record a paint change that requested no repaint of its own.
+    static void note_unmarked_paint_mutation() noexcept {
+        unmarked_paint_mutation_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    /// Map a rect in this view's local (painted) coordinates through the
+    /// paint transforms this view applies -- the scalar translate/rotate/
+    /// scale around the transform origin, then the explicit affine matrix --
+    /// into its own untransformed box coordinates. Returns the axis-aligned
+    /// bounds of the mapped corners, so a rotation can only widen it. Skew is
+    /// not painted on the scalar path and is ignored here for the same reason.
+    Rect map_rect_through_own_transform(const Rect& local) const;
+
     static std::uint64_t layout_pass_count() noexcept {
         return layout_pass_count_.load(std::memory_order_relaxed);
     }
@@ -863,6 +895,11 @@ public:
     /// `requestAnimationFrame` callbacks reach the host's invalidator.
     /// See `WidgetBridge::set_repaint_callback` for the override path.
     void request_repaint();
+
+    /// Ask the host for a frame without marking any damage: the frame's own
+    /// work (a queued requestAnimationFrame callback, a canvas redraw) marks
+    /// what it changes. Use only when nothing has changed yet.
+    void request_frame();
 
     /// Bounded repaint: invalidate only `local_dirty` (this view's local
     /// coordinates), mapped to root space, so a live sub-view (meter, grid,
@@ -1051,12 +1088,32 @@ public:
     // ── Visual properties (CSS Box Model) ────────────────────────────────
 
     /// Opacity (0.0 = transparent, 1.0 = opaque). Applied as layer alpha.
-    void set_opacity(float o) { opacity_ = std::clamp(o, 0.0f, 1.0f); }
+    // Opacity is applied by the live compositing layer, outside any cached
+    // recording, so it stales no cache -- but it is a paint change nobody
+    // marked, which a batched repaint decision has to see.
+    void set_opacity(float o) {
+        opacity_ = std::clamp(o, 0.0f, 1.0f);
+        note_unmarked_paint_mutation();
+    }
     float opacity() const { return opacity_; }
 
     /// Background color (optional — if set, painted before children)
-    void set_background_color(Color c) { bg_color_ = c; has_bg_ = true; invalidate_subtree_caches_up(); }
-    void clear_background_color() { has_bg_ = false; invalidate_subtree_caches_up(); }
+    // The paint setters below skip a write that changes nothing: a script
+    // that re-applies the same style every frame must not read as an
+    // unmarked paint change (which costs a whole-surface repaint).
+    void set_background_color(Color c) {
+        if (has_bg_ && bg_color_ == c)
+            return;
+        bg_color_ = c;
+        has_bg_ = true;
+        invalidate_subtree_caches_up();
+    }
+    void clear_background_color() {
+        if (!has_bg_)
+            return;
+        has_bg_ = false;
+        invalidate_subtree_caches_up();
+    }
     bool has_background_color() const { return has_bg_; }
     Color background_color() const { return bg_color_; }
 
@@ -1089,7 +1146,10 @@ public:
     /// without an API break. Accepted CSS keywords: `repeat`, `repeat-x`,
     /// `repeat-y`, `no-repeat`, `space`, `round`. Unknown / empty = `repeat`
     /// (CSS initial value).
-    void set_background_repeat(std::string kw) { background_repeat_ = std::move(kw); }
+    void set_background_repeat(std::string kw) {
+        background_repeat_ = std::move(kw);
+        invalidate_subtree_caches_up();
+    }
     const std::string& background_repeat() const { return background_repeat_; }
 
     /// Border (optional — painted on top of background)
@@ -1106,12 +1166,35 @@ public:
     /// Standalone border setters for RN parity. Each setter flips the
     /// has_border_ flag on so paint_all() actually emits the stroke even when
     /// set_border() was never called.
-    void set_border_color(Color c) { border_color_ = c; has_border_ = true; invalidate_subtree_caches_up(); }
-    void set_border_width(float w) { border_width_ = w; has_border_ = true; invalidate_subtree_caches_up(); }
-    void set_border_radius(float r) { corner_radius_ = r; corner_radius_pct_ = 0; invalidate_subtree_caches_up(); }
+    void set_border_color(Color c) {
+        if (has_border_ && border_color_ == c)
+            return;
+        border_color_ = c;
+        has_border_ = true;
+        invalidate_subtree_caches_up();
+    }
+    void set_border_width(float w) {
+        if (has_border_ && border_width_ == w)
+            return;
+        border_width_ = w;
+        has_border_ = true;
+        invalidate_subtree_caches_up();
+    }
+    void set_border_radius(float r) {
+        if (corner_radius_ == r && corner_radius_pct_ == 0)
+            return;
+        corner_radius_ = r;
+        corner_radius_pct_ = 0;
+        invalidate_subtree_caches_up();
+    }
     /// Set corner radius as percent of min(width,height). Resolved at paint
     /// time. Pass 0 to clear the percent and revert to the plain px slot.
-    void set_border_radius_pct(float pct) { corner_radius_pct_ = pct; invalidate_subtree_caches_up(); }
+    void set_border_radius_pct(float pct) {
+        if (corner_radius_pct_ == pct)
+            return;
+        corner_radius_pct_ = pct;
+        invalidate_subtree_caches_up();
+    }
     float corner_radius_pct() const { return corner_radius_pct_; }
 
     /// RN's `borderCurve`: corner shape selection. `circular` (default) is the
@@ -1195,10 +1278,22 @@ public:
     /// View::BorderStyle for the line-style enum since CSS keyword sets are
     /// identical. Skia inflates the box by `outline_offset_ + outline_width_ /
     /// 2` and strokes; CG falls through for dashed/dotted same as border-style.
-    void set_outline_color(Color c) { outline_color_ = c; }
-    void set_outline_offset(float px) { outline_offset_ = px; }
-    void set_outline_style(BorderStyle s) { outline_style_ = s; }
-    void set_outline_width(float px) { outline_width_ = px; }
+    void set_outline_color(Color c) {
+        outline_color_ = c;
+        invalidate_subtree_caches_up();
+    }
+    void set_outline_offset(float px) {
+        outline_offset_ = px;
+        invalidate_subtree_caches_up();
+    }
+    void set_outline_style(BorderStyle s) {
+        outline_style_ = s;
+        invalidate_subtree_caches_up();
+    }
+    void set_outline_width(float px) {
+        outline_width_ = px;
+        invalidate_subtree_caches_up();
+    }
     Color outline_color() const { return outline_color_; }
     float outline_offset() const { return outline_offset_; }
     BorderStyle outline_style() const { return outline_style_; }
@@ -1695,7 +1790,10 @@ public:
     bool has_right() const { return has_right_; }
     bool has_bottom() const { return has_bottom_; }
     bool has_left() const { return has_left_; }
-    void set_z_index(int z) { z_index_ = z; }
+    void set_z_index(int z) {
+        z_index_ = z;
+        invalidate_subtree_caches_up();
+    }
     int z_index() const { return z_index_; }
 
     /// Children stably sorted by z_index() ascending — paint order (higher-z on top); hit_test walks it reversed. Exposed for tests.
@@ -2897,6 +2995,11 @@ private:
     std::uint64_t tree_layout_generation_ = 1;
     static std::atomic<std::uint64_t> layout_generation_;
     static std::atomic<std::uint64_t> layout_pass_count_;
+    static std::atomic<std::uint64_t> damage_request_count_;
+    static std::atomic<std::uint64_t> unmarked_paint_mutation_count_;
+    /// Clears scene-cache validity up the ancestor chain without counting an
+    /// unmarked paint mutation (the repaint requests use it: they mark).
+    void stale_subtree_caches_up();
     bool has_focus_ = false;
     // WidgetBridge may lend the root focus slot to a materialized document
     // while that document has an explicit, bounded navigation interaction.

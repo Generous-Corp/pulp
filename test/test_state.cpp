@@ -35,10 +35,12 @@ using namespace pulp::state;
 // member, so the lock-free guarantee belongs to that member and is already
 // asserted beside it (parameter.hpp: is_always_lock_free on
 // std::atomic<VersionedValue>) — not to this enclosing class, which holds four
-// separate 64-bit atomics (value, generation, mod offset, mod generation).
+// separate 64-bit atomics (value, generation, mod offset, mod generation) plus
+// the display-only modulated value a plugin publishes (written by the audio
+// thread, read only by the editor, padded to a word).
 // What is worth guarding here is that the class does not silently GROW another
 // atomic word, since each one added is another load some reader has to make.
-static_assert(sizeof(ParamValue) == 4 * sizeof(std::uint64_t),
+static_assert(sizeof(ParamValue) == 5 * sizeof(std::uint64_t),
               "ParamValue changed atomic-word count; re-check that every audio-thread "
               "read still needs only one relaxed load per value");
 using Catch::Matchers::WithinAbs;

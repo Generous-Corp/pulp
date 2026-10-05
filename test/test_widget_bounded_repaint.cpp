@@ -11,6 +11,7 @@
 // pixel the widget can touch (glow, focus ring, modulation arc).
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/frame_cost_probe.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -18,6 +19,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -231,6 +233,146 @@ TEST_CASE("Knob modulated value is display only and repaints its own box",
     CHECK_FALSE(knob->has_modulated_value());
     CHECK(knob->modulated_display_value() == 0.8f);
     CHECK(changes == 0);
+}
+
+namespace {
+
+// What a painted knob shows as its value: every value arc (an arc from the
+// start of travel that stops short of the end) and every pointer dot (a
+// filled circle off the knob's centre), with the angle each one points at.
+struct IndicatorCount {
+    int value_arcs = 0;
+    int pointers = 0;
+    float arc_end = 0.0f;
+    float pointer_angle = 0.0f;
+    pulp::canvas::Color arc_color{};
+    pulp::canvas::Color pointer_color{};
+    int base_ticks = 0;
+};
+
+IndicatorCount count_indicators(const pulp::canvas::RecordingCanvas& rec, float cx, float cy) {
+    using T = pulp::canvas::DrawCommand::Type;
+    IndicatorCount out;
+    pulp::canvas::Color stroke{}, fill{};
+    for (const auto& c : rec.commands()) {
+        if (c.type == T::set_stroke_color)
+            stroke = c.color;
+        else if (c.type == T::set_fill_color)
+            fill = c.color;
+        else if (c.type == T::stroke_arc && std::abs(c.f[3] - Knob::start_angle) < 1e-4f &&
+                 c.f[4] < Knob::end_angle - 1e-3f) {
+            ++out.value_arcs;
+            out.arc_end = c.f[4];
+            out.arc_color = stroke;
+        } else if (c.type == T::fill_circle && std::hypot(c.f[0] - cx, c.f[1] - cy) > 1.0f) {
+            ++out.pointers;
+            out.pointer_angle = std::atan2(c.f[1] - cy, c.f[0] - cx);
+            out.pointer_color = fill;
+        } else if (c.type == T::stroke_line) {
+            ++out.base_ticks;
+        }
+    }
+    return out;
+}
+
+float wrap_angle(float a) {
+    while (a > 3.14159265f)
+        a -= 6.2831853f;
+    while (a < -3.14159265f)
+        a += 6.2831853f;
+    return a;
+}
+
+} // namespace
+
+TEST_CASE("A modulated knob shows one indicator at the value playing",
+          "[view][widgets][modulation][single-indicator]") {
+    // The checker can fail: a knob drawn the old way -- a base arc and pointer
+    // PLUS a second arc and dot for the played value -- counts two of each.
+    {
+        pulp::canvas::RecordingCanvas twice;
+        twice.stroke_arc(32, 32, 26, Knob::start_angle, 0.5f);
+        twice.fill_circle(40, 20, 3);
+        twice.stroke_arc(32, 32, 26, Knob::start_angle, 1.5f);
+        twice.fill_circle(20, 40, 3);
+        const auto two = count_indicators(twice, 32, 32);
+        CHECK(two.value_arcs == 2);
+        CHECK(two.pointers == 2);
+    }
+
+    KnobRig rig;
+    auto* knob = rig.knob;
+    knob->set_value(0.8f);
+    const auto kb = knob->local_bounds();
+    const float cx = kb.width * 0.5f, cy = kb.height * 0.5f;
+    const auto angle_of = [](float pos) {
+        return Knob::start_angle + pos * (Knob::end_angle - Knob::start_angle);
+    };
+
+    // Unmodulated: one arc and one pointer at the base, no base tick.
+    {
+        pulp::canvas::RecordingCanvas rec;
+        knob->paint(rec);
+        const auto n = count_indicators(rec, cx, cy);
+        CHECK(n.value_arcs == 1);
+        CHECK(n.pointers == 1);
+        CHECK(n.base_ticks == 0);
+        CHECK(std::abs(n.arc_end - angle_of(0.8f)) < 1e-3f);
+    }
+
+    // Modulated: still ONE arc and ONE pointer, both at the played value and
+    // in the modulation colour; the base is a single quiet tick.
+    knob->set_modulated_value(0.3f);
+    pulp::canvas::RecordingCanvas rec;
+    knob->paint(rec);
+    const auto n = count_indicators(rec, cx, cy);
+    CHECK(n.value_arcs == 1);
+    CHECK(n.pointers == 1);
+    CHECK(n.base_ticks == 1);
+    CHECK(std::abs(n.arc_end - angle_of(0.3f)) < 1e-3f);
+    CHECK(std::abs(wrap_angle(n.pointer_angle - angle_of(0.3f))) < 0.05f);
+    const auto violet =
+        knob->resolve_color("knob.modulation", pulp::canvas::Color::rgba8(190, 150, 255));
+    CHECK(n.arc_color == violet);
+    CHECK(n.pointer_color == violet);
+    CHECK(knob->value() == 0.8f);
+}
+
+TEST_CASE("A modulated fader shows one thumb at the value playing",
+          "[view][widgets][modulation][single-indicator]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<Fader>();
+    owned->set_orientation(Fader::Orientation::horizontal);
+    auto* fader = owned.get();
+    owned->flex().preferred_width = 120;
+    owned->flex().preferred_height = 24;
+    root.add_child(std::move(owned));
+    root.layout_children();
+    fader->set_value(0.8f);
+    fader->set_modulated_value(0.25f);
+    pulp::canvas::RecordingCanvas rec;
+    fader->paint(rec);
+    using T = pulp::canvas::DrawCommand::Type;
+    const auto violet =
+        fader->resolve_color("knob.modulation", pulp::canvas::Color::rgba8(190, 150, 255));
+    pulp::canvas::Color fill{};
+    int violet_fills = 0, ticks = 0;
+    float fill_right = 0.0f;
+    for (const auto& c : rec.commands()) {
+        if (c.type == T::set_fill_color)
+            fill = c.color;
+        else if (c.type == T::fill_rounded_rect && fill == violet) {
+            ++violet_fills;
+            fill_right = std::max(fill_right, c.f[0] + c.f[2]);
+        } else if (c.type == T::stroke_line) {
+            ++ticks;
+        }
+    }
+    // The fill and the one thumb sit at the played value, not the base.
+    CHECK(violet_fills >= 1);
+    CHECK(fill_right < 0.5f * 120.0f);
+    CHECK(ticks == 1);
 }
 
 TEST_CASE("Fader modulated value is display only and repaints its own box",
@@ -456,4 +598,139 @@ TEST_CASE("A redrawn CanvasWidget requests a repaint of its own box only",
     CHECK(d.bounds.height >= cb.height);
     CHECK(d.bounds.width <= cb.width + 4.0f);
     CHECK(d.bounds.height <= cb.height + 4.0f);
+}
+
+// ── Bounded repaint maps through transforms and scroll offsets ──────────────
+
+namespace {
+
+struct DamageHost final : public PluginViewHost {
+    NativeViewHandle native_handle() override {
+        return {};
+    }
+    void attach_to_parent(NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(std::uint32_t, std::uint32_t) override {}
+    Size get_size() const override {
+        return {};
+    }
+};
+
+// A 1000 x 1000 root holding `wrapper` holding a 20 x 20 knob at (100, 100).
+struct TransformRig {
+    std::unique_ptr<View> root = std::make_unique<View>();
+    View* wrapper = nullptr;
+    Knob* knob = nullptr;
+    DamageHost host;
+    TransformRig() {
+        // Bounds set directly and no layout pass: the mapping is the subject.
+        root->set_bounds({0, 0, 1000, 1000});
+        auto w = std::make_unique<View>();
+        wrapper = w.get();
+        w->set_bounds({0, 0, 1000, 1000});
+        auto k = std::make_unique<Knob>();
+        knob = k.get();
+        k->set_bounds({100, 100, 20, 20});
+        w->add_child(std::move(k));
+        root->add_child(std::move(w));
+        root->set_plugin_view_host(&host);
+    }
+    ~TransformRig() {
+        root->set_plugin_view_host(nullptr);
+    }
+};
+
+} // namespace
+
+TEST_CASE("A bounded repaint under a scaled ancestor maps through the scale",
+          "[view][widgets][partial-repaint][transform]") {
+    TransformRig rig;
+    // A design-viewport style scale on the wrapper, about its top-left.
+    rig.wrapper->set_transform_matrix(0.5f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f);
+    rig.host.clear_pending_dirty();
+    rig.knob->set_value(0.9f);
+    REQUIRE_FALSE(rig.host.pending_repaint_is_full());
+    REQUIRE(rig.host.has_pending_dirty_bounds());
+    const auto b = rig.host.pending_dirty_bounds();
+    // The knob paints at (100, 100) x 0.5 = (50, 50), 10 x 10, plus its halo.
+    CHECK(b.x <= 50.0f);
+    CHECK(b.y <= 50.0f);
+    CHECK(b.x + b.width >= 60.0f);
+    CHECK(b.y + b.height >= 60.0f);
+    CHECK(b.width < 30.0f);
+    CHECK(b.x > 40.0f); // not the unscaled (100, 100) position
+}
+
+TEST_CASE("A bounded repaint under a pixel-spreading filter stays whole-surface",
+          "[view][widgets][partial-repaint][transform]") {
+    TransformRig rig;
+    rig.wrapper->set_filter_blur(4.0f);
+    rig.host.clear_pending_dirty();
+    rig.knob->set_value(0.9f);
+    CHECK(rig.host.pending_repaint_is_full());
+}
+
+TEST_CASE("A paint-only setter is counted as an unmarked paint mutation",
+          "[view][widgets][partial-repaint]") {
+    // The script bridge skips its blanket whole-surface request only when the
+    // work left no unmarked paint change; a setter that changes paint without
+    // requesting a repaint must therefore be visible to that count.
+    View v;
+    const auto before = View::unmarked_paint_mutation_count();
+    v.set_opacity(0.5f);
+    v.set_background_color(pulp::canvas::Color::rgba8(10, 20, 30));
+    CHECK(View::unmarked_paint_mutation_count() >= before + 2);
+    const auto marks = View::damage_request_count();
+    const auto unmarked = View::unmarked_paint_mutation_count();
+    v.request_repaint();
+    CHECK(View::damage_request_count() == marks + 1);
+    CHECK(View::unmarked_paint_mutation_count() == unmarked);
+}
+
+TEST_CASE("Re-applying a paint style a view already has changes nothing",
+          "[view][widgets][partial-repaint]") {
+    View v;
+    const auto red = pulp::canvas::Color::rgba8(200, 0, 0);
+    v.set_background_color(red);
+    v.set_border_radius(4.0f);
+    v.set_border_color(red);
+    v.set_border_width(1.0f);
+    const auto unmarked = View::unmarked_paint_mutation_count();
+    v.set_background_color(red);
+    v.set_border_radius(4.0f);
+    v.set_border_color(red);
+    v.set_border_width(1.0f);
+    CHECK(View::unmarked_paint_mutation_count() == unmarked);
+    // Control: a real change is still counted.
+    v.set_background_color(pulp::canvas::Color::rgba8(0, 200, 0));
+    CHECK(View::unmarked_paint_mutation_count() == unmarked + 1);
+    CHECK(v.background_color() == pulp::canvas::Color::rgba8(0, 200, 0));
+}
+
+TEST_CASE("A fixed-box Label repaints its own box when its copy changes",
+          "[view][widgets][partial-repaint][label]") {
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 400, 300});
+    auto owned = std::make_unique<Label>("32 BANDS");
+    auto* label = owned.get();
+    owned->flex().preferred_width = 80;
+    owned->flex().preferred_height = 16;
+    root->add_child(std::move(owned));
+    root->layout_children();
+    const auto lb = label->local_bounds();
+    REQUIRE(lb.width == 80.0f);
+
+    const auto d = damage_of(*root, [&] { label->set_text("64 BANDS"); });
+    REQUIRE_FALSE(d.full);
+    CHECK(d.bounds.width >= lb.width);
+    CHECK(d.bounds.width < 200.0f);
+
+    // A label whose width follows its copy moves its siblings: whole surface.
+    auto free_owned = std::make_unique<Label>("x");
+    auto* free_label = free_owned.get();
+    root->add_child(std::move(free_owned));
+    root->layout_children();
+    const auto d2 = damage_of(*root, [&] { free_label->set_text("a much longer string"); });
+    CHECK(d2.full);
 }

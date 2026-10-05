@@ -6,12 +6,25 @@
 /// widget-callback ↔ parameter-listener pair an editor would otherwise
 /// maintain per control.
 ///
-/// `bind_parameter(widget, store, id)` wires:
-///   - widget interaction → host gesture (begin on press, end on release)
-///     so DAWs record and play back the control's automation;
+/// `bind_parameter(widget, store, id)` wires, with no further code:
+///   - widget interaction → host gesture (begin on press, end on release; a
+///     discrete control -- toggle, button, combo, stepper -- is one complete
+///     gesture per change) so DAWs record the control's automation;
 ///   - widget value changes → `store.set_normalized(id, …)`;
-///   - store changes (e.g. automation playback, preset load) → the widget's
-///     displayed value.
+///   - store changes (automation playback, preset load) → the widget's
+///     displayed value, so the control moves while the host plays it back;
+///   - for a continuous control (Knob, Fader, RangeSlider, XYPad), the
+///     parameter's modulated value as the control's one indicator: a host's
+///     CLAP modulation by default, and the plugin's own modulation when it
+///     publishes one (StateStore::set_display_modulation). Nothing changes
+///     when nothing modulates the parameter. Modulation never writes a host
+///     lane. A discrete control (toggle, button, checkbox, combo, stepper)
+///     shows its base: a stepped parameter has no position between states
+///     for a modulator to move it to.
+///
+/// Bind once, get automation and playback animation for free. Showing a
+/// plugin's INTERNAL modulation is opt-in (the plugin publishes it); any
+/// modulation menus or routing UI are the plugin's own.
 ///
 /// It returns a `ParameterBinding` that owns the store listener. The binding
 /// is lifetime-scoped: keep it alive for as long as the widget is bound
@@ -25,11 +38,12 @@
 ///
 /// UI-thread only.
 
+#include <optional>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/design_frame_view.hpp> // DesignStepper
+#include <pulp/view/ui_components.hpp>     // ComboBox
 #include <pulp/view/widgets.hpp>
-#include <pulp/view/ui_components.hpp>       // ComboBox
-#include <pulp/view/design_frame_view.hpp>   // DesignStepper
 #include <utility>
 
 namespace pulp::view {
@@ -40,6 +54,13 @@ class ParameterBinding {
 public:
     ParameterBinding() = default;
     explicit ParameterBinding(state::ListenerToken token) : token_(std::move(token)) {}
+    ParameterBinding(state::ListenerToken token, state::StateStore::ModulationWatch watch)
+        : token_(std::move(token)), watch_(std::move(watch)) {}
+    /// A two-parameter control (XY pad): one watch per axis.
+    ParameterBinding(state::ListenerToken token, state::StateStore::ModulationWatch watch,
+                     state::StateStore::ModulationWatch second_watch)
+        : token_(std::move(token)), watch_(std::move(watch)),
+          second_watch_(std::move(second_watch)) {}
     ParameterBinding(ParameterBinding&&) noexcept = default;
     ParameterBinding& operator=(ParameterBinding&&) noexcept = default;
     ParameterBinding(const ParameterBinding&) = delete;
@@ -47,7 +68,28 @@ public:
 
 private:
     state::ListenerToken token_;
+    state::StateStore::ModulationWatch watch_;
+    state::StateStore::ModulationWatch second_watch_;
 };
+
+namespace detail {
+/// The modulated-value half of a binding: whatever modulates the parameter
+/// -- a host's CLAP modulation, or the plugin's own published modulation
+/// (StateStore::set_display_modulation) -- is drawn on the control as its
+/// played value; nothing is drawn when nothing modulates it. Serviced from
+/// StateStore::pump_listeners() (the editor's UI tick), so it costs a few
+/// relaxed loads per frame and a bounded repaint only when the value moves.
+template <typename Control>
+state::StateStore::ModulationWatch
+watch_modulated_display(Control& control, state::StateStore& store, state::ParamID id) {
+    return store.watch_modulation(id, [&control](std::optional<float> played) {
+        if (played)
+            control.set_modulated_value(*played);
+        else
+            control.clear_modulated_value();
+    });
+}
+} // namespace detail
 
 /// Knob ↔ parameter (normalized).
 [[nodiscard]] inline ParameterBinding
@@ -57,11 +99,13 @@ bind_parameter(Knob& knob, state::StateStore& store, state::ParamID id) {
     knob.on_change = [&store, id](float v) { store.set_normalized(id, v); };
     knob.on_gesture_end = [&store, id] { store.end_gesture(id); };
     return ParameterBinding(store.add_listener(
-        [&knob, &store, id](state::ParamID changed, float) {
-            if (changed == id) knob.set_value(store.get_normalized(id));
-        },
-        state::ListenerThread::Main,
-        state::ListenerRestoreBehavior::Reconcile));
+                                [&knob, &store, id](state::ParamID changed, float) {
+                                    if (changed == id)
+                                        knob.set_value(store.get_normalized(id));
+                                },
+                                state::ListenerThread::Main,
+                                state::ListenerRestoreBehavior::Reconcile),
+                            detail::watch_modulated_display(knob, store, id));
 }
 
 /// Fader ↔ parameter (normalized).
@@ -72,11 +116,13 @@ bind_parameter(Fader& fader, state::StateStore& store, state::ParamID id) {
     fader.on_change = [&store, id](float v) { store.set_normalized(id, v); };
     fader.on_gesture_end = [&store, id] { store.end_gesture(id); };
     return ParameterBinding(store.add_listener(
-        [&fader, &store, id](state::ParamID changed, float) {
-            if (changed == id) fader.set_value(store.get_normalized(id));
-        },
-        state::ListenerThread::Main,
-        state::ListenerRestoreBehavior::Reconcile));
+                                [&fader, &store, id](state::ParamID changed, float) {
+                                    if (changed == id)
+                                        fader.set_value(store.get_normalized(id));
+                                },
+                                state::ListenerThread::Main,
+                                state::ListenerRestoreBehavior::Reconcile),
+                            detail::watch_modulated_display(fader, store, id));
 }
 
 /// XY pad ↔ two parameters (normalized). A single drag drives both.
@@ -94,28 +140,49 @@ bind_parameter(XYPad& pad, state::StateStore& store, state::ParamID x_id, state:
         store.end_gesture(x_id);
         store.end_gesture(y_id);
     };
+    pad.set_x(store.get_normalized(x_id));
+    pad.set_y(store.get_normalized(y_id));
     return ParameterBinding(store.add_listener(
-        [&pad, &store, x_id, y_id](state::ParamID changed, float) {
-            if (changed == x_id) pad.set_x(store.get_normalized(x_id));
-            if (changed == y_id) pad.set_y(store.get_normalized(y_id));
-        },
-        state::ListenerThread::Main,
-        state::ListenerRestoreBehavior::Reconcile));
+                                [&pad, &store, x_id, y_id](state::ParamID changed, float) {
+                                    if (changed == x_id)
+                                        pad.set_x(store.get_normalized(x_id));
+                                    if (changed == y_id)
+                                        pad.set_y(store.get_normalized(y_id));
+                                },
+                                state::ListenerThread::Main,
+                                state::ListenerRestoreBehavior::Reconcile),
+                            store.watch_modulation(x_id,
+                                                   [&pad](std::optional<float> played) {
+                                                       if (played)
+                                                           pad.set_modulated_x(*played);
+                                                       else
+                                                           pad.clear_modulated_x();
+                                                   }),
+                            store.watch_modulation(y_id, [&pad](std::optional<float> played) {
+                                if (played)
+                                    pad.set_modulated_y(*played);
+                                else
+                                    pad.clear_modulated_y();
+                            }));
 }
 
 /// Range slider ↔ parameter (normalized).
 [[nodiscard]] inline ParameterBinding
 bind_parameter(RangeSlider& slider, state::StateStore& store, state::ParamID id) {
-    slider.set_value(store.get_normalized(id));
+    // Synced FROM the parameter without notifying, so playback never echoes
+    // a write back into the store.
+    slider.set_value(store.get_normalized(id), Notify::none);
     slider.on_gesture_begin = [&store, id] { store.begin_gesture(id); };
     slider.on_change = [&store, id](float v) { store.set_normalized(id, v); };
     slider.on_gesture_end = [&store, id] { store.end_gesture(id); };
     return ParameterBinding(store.add_listener(
-        [&slider, &store, id](state::ParamID changed, float) {
-            if (changed == id) slider.set_value(store.get_normalized(id));
-        },
-        state::ListenerThread::Main,
-        state::ListenerRestoreBehavior::Reconcile));
+                                [&slider, &store, id](state::ParamID changed, float) {
+                                    if (changed == id)
+                                        slider.set_value(store.get_normalized(id), Notify::none);
+                                },
+                                state::ListenerThread::Main,
+                                state::ListenerRestoreBehavior::Reconcile),
+                            detail::watch_modulated_display(slider, store, id));
 }
 
 /// ComboBox ↔ stepped/index parameter. A selection is a one-shot gesture so

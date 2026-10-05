@@ -1,0 +1,82 @@
+{
+  "id": "bind-once-modulated-display",
+  "title": "Bound knobs and faders draw their modulated value; AutoUi binds through bind_parameter",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "bind-once-modulated-display-20261004",
+  "owned_paths": [
+    "core/state/include/pulp/state/parameter.hpp",
+    "core/state/include/pulp/state/store.hpp",
+    "core/state/src/store.cpp",
+    "core/view/include/pulp/view/parameter_binding.hpp",
+    "core/view/src/auto_ui.cpp",
+    "test/test_parameter_edit.cpp",
+    "test/test_auto_ui.cpp",
+    "docs/status/sequencer-exposure/rows/bind-once-modulated-display.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/state/include/pulp/state/store.hpp",
+      "needles": [
+        "void set_display_modulation(ParamID id, float plain_value) noexcept;",
+        "std::optional<float> displayed_modulation(ParamID id) const noexcept;"
+      ]
+    },
+    {
+      "path": "core/view/include/pulp/view/parameter_binding.hpp",
+      "needles": [
+        "watch_modulated_display(Control& control, state::StateStore& store, state::ParamID id) {"
+      ]
+    },
+    {
+      "path": "core/view/src/auto_ui.cpp",
+      "needles": [
+        "root_raw->bindings.push_back(bind_parameter(*toggle, store, param.id));"
+      ]
+    },
+    {
+      "path": "test/test_parameter_edit.cpp",
+      "needles": [
+        "Host modulation of a bound knob draws its played value with no plugin code",
+        "A plugin's own modulation shows only when it publishes one"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "StateStore gains set_display_modulation / clear_display_modulation / displayed_modulation and an RAII watch_modulation, all on the installed state header. The publish call is one relaxed atomic store, so a plugin's own modulator can call it from the audio thread; it is display-only and never reaches automation or the parameter value. bind_parameter on a Knob or Fader now draws the host's modulation offset (CLAP param_mod) with no plugin code, and AutoUi binds through bind_parameter so its controls follow automation playback. A plugin that never publishes shows no internal-modulation marker.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/state/include/pulp/state/store.hpp",
+          "needles": [
+            "void set_display_modulation(ParamID id, float plain_value) noexcept;"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command is added or altered; the change is editor display of a value the processor already plays."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added, removed or changed."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No product control, grant or policy projection is created. The displayed modulated value is read-only UI state; parameter values, automation and gestures are unchanged."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time authoring capability is added or altered."
+    }
+  }
+}
