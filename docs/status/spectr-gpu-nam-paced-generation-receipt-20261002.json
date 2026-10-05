@@ -16,7 +16,7 @@
   ],
   "local_probe": {
     "checked_at": "2026-10-05",
-    "rechecked_parent_head": "c252c9c3582c2eff7636e74fa8ee8186bb040abf",
+    "rechecked_parent_head": "ff83c0e9fd147dc143af7228eac0e3298e84b35f",
     "status": "unavailable",
     "checked_paths": [
       "/Users/danielraffel/.pulp/magenta",
@@ -44,7 +44,7 @@
     "provenance_note": "The metadata-only closure was rechecked against the protected origin/main head above; unavailable-artifact evidence remains historical and does not claim product execution."
   },
   "metadata_audit": {
-    "origin_main": "c252c9c3582c2eff7636e74fa8ee8186bb040abf",
+    "origin_main": "ff83c0e9fd147dc143af7228eac0e3298e84b35f",
     "prior_receipt_parent_was_stale": "8b10d5ada01466d39de2d519811e7c74bc5b0340",
     "gpu_nam_consumer_checkout": {
       "path": "/Users/danielraffel/Code/pulp-gpu-nam",
