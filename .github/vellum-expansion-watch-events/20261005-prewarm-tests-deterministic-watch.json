@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-prewarm-tests-deterministic-watch",
+  "created_at": "2026-10-05T02:07:55Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Test-only changes: a test hook in precompile_scripts (detail::set_precompile_claim_hook_for_tests, a no-op unless a test installs it) makes the in-flight-precompile test deterministic, and the editor-prewarm test stands in a display on Linux. No imported document, evaluated source, rendered output, design-import, Chromium, rendering or packaging authority changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-js-engine",
+    "ctest --test-dir build -R pulp-test-view-bridge",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
