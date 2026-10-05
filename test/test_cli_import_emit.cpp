@@ -452,4 +452,3 @@ TEST_CASE("import emit end-to-end fails closed when the importer smuggles "
 #endif  // PULP_CLI_BINARY && !_WIN32
 
 // ── Vendor-agnostic source guard ──
-

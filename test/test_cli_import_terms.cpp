@@ -444,4 +444,3 @@ TEST_CASE("provenance check FAILS framework source in a generated file",
 #endif  // PULP_SOURCE_DIR && !_WIN32
 
 // ── Vendor-agnostic source guard ──
-
