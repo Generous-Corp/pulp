@@ -5,8 +5,8 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -32,7 +32,8 @@ namespace pulp::import_design::browser_capture {
 
 int probe_timeout_from_environment(int fallback_ms) {
     const char* value = std::getenv("PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS");
-    if (value == nullptr || *value == '\0') return fallback_ms;
+    if (value == nullptr || *value == '\0')
+        return fallback_ms;
     char* end = nullptr;
     errno = 0;
     const long parsed = std::strtol(value, &end, 10);
@@ -387,11 +388,10 @@ Diagnostic discovery_diagnostic(
                 reason = probe.failure;
                 break;
             }
-        return {
-            "browser-capability-unavailable",
-            "Chrome or Chromium does not provide the required headless capture capabilities" +
-                (reason.empty() ? std::string(".") : " (" + reason + ")."),
-            "browser-discovery"};
+        return {"browser-capability-unavailable",
+                "Chrome or Chromium does not provide the required headless capture capabilities" +
+                    (reason.empty() ? std::string(".") : " (" + reason + ")."),
+                "browser-discovery"};
     }
     if (has_failure(BrowserProbeFailure::browser_incompatible)) {
         return {
