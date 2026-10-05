@@ -924,8 +924,7 @@ catch_discover_tests(pulp-test-web-demos)
 # AI Designer: design tool layout/parity tests
 pulp_add_test_suite(pulp-test-design-tool-layout GROUP pulp-test-group-app-view
     LIBRARIES pulp::view pulp::state)
-# It finds the design tool's modules from its own source file's location.
-pulp_test_data(pulp-test-design-tool-layout NO_DEFINE PATHS examples/design-tool/*.js)
+pulp_test_data(pulp-test-design-tool-layout PATHS examples/design-tool/*.js)
 
 add_executable(pulp-test-design-debug-contracts test_design_debug_contracts.cpp)
 target_link_libraries(pulp-test-design-debug-contracts PRIVATE

@@ -1353,6 +1353,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-aa13e05462bf"
+paths = ["tools/scripts/test_check_test_file_paths.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "test-file-paths-lint-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-b7e6a7693fec"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
@@ -4881,6 +4908,7 @@ paths = [
   "tools/scripts/test_check_manifest_mirrors.py",
   "tools/scripts/test_check_sdk_complete.py",
   "tools/scripts/test_check_skip_not_pass.py",
+  "tools/scripts/test_check_test_file_paths.py",
   "tools/scripts/test_check_transient_interaction_trace.py",
   "tools/scripts/test_check_visual_python_deps.py",
   "tools/scripts/test_check_web_plugin_docs.py",
@@ -5214,6 +5242,8 @@ tests = [
   "status-tone-signal-lint",
   "status-tone-signal-lint-selftest",
   "style-dedup-table-sync",
+  "test-file-paths-lint",
+  "test-file-paths-lint-selftest",
   "timeline-mcp-drift",
   "timeline-schema-cli-drift",
   "timeline-schema-drift",
@@ -5370,6 +5400,7 @@ paths = [
   "tools/scripts/test_check_manifest_mirrors.py",
   "tools/scripts/test_check_sdk_complete.py",
   "tools/scripts/test_check_skip_not_pass.py",
+  "tools/scripts/test_check_test_file_paths.py",
   "tools/scripts/test_check_transient_interaction_trace.py",
   "tools/scripts/test_check_visual_python_deps.py",
   "tools/scripts/test_check_web_plugin_docs.py",

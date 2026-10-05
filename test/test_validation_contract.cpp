@@ -8,6 +8,8 @@
 #include <string>
 #include <filesystem>
 
+#include "support/fixture_root.hpp"
+
 // Read a file into a string
 static std::string read_file(const std::filesystem::path& path) {
     std::ifstream f(path);
@@ -24,28 +26,10 @@ static bool json_contains_key(const std::string& json, const std::string& key) {
     return json.find(quoted) != std::string::npos;
 }
 
-// Find the project root by walking up from the test binary directory
+// The checkout root, from the PULP_SOURCE_DIR definition pulp_test_data()
+// gives this executable.
 static std::filesystem::path find_project_root() {
-    // Prefer the compile-time source file location so detached validation
-    // worktrees under /tmp still resolve the source tree correctly.
-    auto source_file = std::filesystem::path(__FILE__);
-    if (!source_file.empty()) {
-        auto candidate = source_file.parent_path().parent_path();
-        auto schema = candidate / "docs" / "contracts" / "validation-report-v1.schema.json";
-        if (std::filesystem::exists(schema)) return std::filesystem::canonical(candidate);
-    }
-
-    // Try common relative paths from where ctest runs
-    for (auto candidate : {
-        std::filesystem::current_path(),
-        std::filesystem::current_path() / "..",
-        std::filesystem::current_path() / "../..",
-        std::filesystem::current_path() / "../../..",
-    }) {
-        auto schema = candidate / "docs" / "contracts" / "validation-report-v1.schema.json";
-        if (std::filesystem::exists(schema)) return std::filesystem::canonical(candidate);
-    }
-    return {};
+    return pulp_test::fixture_root();
 }
 
 TEST_CASE("Validation schema file exists and is well-formed JSON", "[contract][phase1]") {
