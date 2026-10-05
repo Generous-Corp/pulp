@@ -27,6 +27,7 @@
 #include <pulp/host/sample_region_authoring.hpp>
 #include <pulp/host/sample_region_runtime.hpp>
 #include <pulp/host/signal_graph_connection.hpp>
+#include <pulp/host/signal_graph_execution_status.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_node.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -525,28 +526,7 @@ public:
     /// compiled snapshot. Unlike topology eligibility, this reports whether
     /// snapshot construction and its fixed scratch pools both succeeded for the
     /// requested block size.
-    struct RoutedExecutionStatus {
-        bool prepared = false;
-        bool serial_selected = false;
-        bool serial_snapshot_valid = false;
-        bool serial_pool_fits = false;
-        bool parallel_selected = false;
-        bool parallel_snapshot_valid = false;
-        bool parallel_pool_fits = false;
-        bool worker_pool_running = false;
-        bool reference_walk_permitted = true;
-
-        constexpr bool routed_path_ready() const noexcept {
-            const bool serial_ready =
-                serial_selected && serial_snapshot_valid && serial_pool_fits;
-            const bool parallel_ready = parallel_selected && parallel_snapshot_valid &&
-                                        parallel_pool_fits && worker_pool_running;
-            return prepared && (serial_ready || parallel_ready);
-        }
-        constexpr bool strict_routed_ready() const noexcept {
-            return routed_path_ready() && !reference_walk_permitted;
-        }
-    };
+    using RoutedExecutionStatus = SignalGraphExecutionStatus;
     RoutedExecutionStatus routed_execution_status(int block_size) const noexcept;
     std::uint64_t routed_only_execution_failures() const noexcept {
         return routed_only_execution_failures_.load(std::memory_order_relaxed);

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261004-standalone-first-frame-brand-watch",
+  "created_at": "2026-10-04T18:30:31Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "WindowOptions gains background_rgb and the macOS window hosts paint it as the NSWindow background, the GPU content layer colour and the frame fill; the plug-in standalone passes the editor's resolved background into it. Pure colour plumbing for app windows: no design-import, Chromium, rendering-pipeline, asset or packaging authority moves, and the default keeps every existing window on kEditorHostClearRgb.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-standalone-editor-chrome",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
