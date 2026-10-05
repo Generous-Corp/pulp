@@ -819,10 +819,16 @@ def stage0_main(a) -> int:
     fs = score(corpus, STAGE0_POLICY)["false_skip_rows"]
     run = rrc.trailing_clean(rows, a.restart_run, {str(r["group_run_id"]) for r in fs})
     dc = rrc.data_scan_control(a.corpus, corpus, a.repo, gh)
+    # The same control over the lists the (b) window's pairs read, so the
+    # window's exit stands without the older lists.
+    window_ids = {str(r["group_run_id"]) for r in rows}
+    window = Corpus(list(corpus.runs.values()), [p for p in corpus.pairs if str(p.get("group_run_id")) in window_ids])
+    dc_window = rrc.data_scan_control(a.corpus, window, a.repo, gh)
     regressions = [(r["pr"], r["group_run_id"], r["regression"]) for r in rows if r["regression"]]
     if a.json:
         print(json.dumps({"pairs": rows, "ancestry_unknown": st["ancestry_unknown"], "trailing_clean": run,
-                          "false_skips": fs, "data_scan_control": dc}, indent=1))
+                          "false_skips": fs, "data_scan_control": dc,
+                          "data_scan_control_in_window": dc_window}, indent=1))
     else:
         kb = [r["key_blind"] for r in rows]
         print(f"stage0: {len(rows)} content-keyed pairs whose group contains {a.fix}; "
@@ -841,6 +847,10 @@ def stage0_main(a) -> int:
               f"{dc['holds']} hold, fails {dc['fails']}, no data scan {dc['no_data_scan']}, unreadable {dc['unreadable']}; "
               f"negative control: {dc['pairs_on_failing_list']} pairs on a failing list, "
               f"{dc['read_as_scanned_on_failing_list']} read as scanned (must be 0)")
+        print(f"stage0: (c) within the (b) window: {dc_window['lists']} lists at the head and group checkouts of "
+              f"{len(rows)} pairs, {dc_window['declaring']} declare a data scan, {dc_window['holds']} hold, "
+              f"fails {dc_window['fails']}, no data scan {dc_window['no_data_scan']}, "
+              f"unreadable {dc_window['unreadable']}")
     if st["ancestry_unknown"] or not run["restart_found"]:
         return 2
     return 1 if regressions or dc["read_as_scanned_on_failing_list"] else 0

@@ -307,6 +307,28 @@ class Stage0Tests(unittest.TestCase):
             self.assertEqual(rrc.key_blind_list_at(c, after), {"pulp-test-a"})
             self.assertIsNone(rrc.key_blind_list_at(c, "0" * 40))   # git says "not in"; the commit is not here
 
+    def test_the_cli_reads_the_control_again_over_the_window_pairs_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "c"
+            rpr.write_jsonl(root / "runs.jsonl", [group(run_id="g1"), group(run_id="g2"), head()])
+            rpr.write_jsonl(root / "pairs.jsonl", [dict(pair(), group_run_id="g1"), dict(pair(), group_run_id="g2")])
+            seen = []
+            control = {"lists": 1, "declaring": 1, "holds": 1, "fails": {}, "no_data_scan": 0, "unreadable": 0,
+                       "pairs_on_failing_list": 0, "read_as_scanned_on_failing_list": 0}
+
+            def record(corpus_dir, corpus, repo, gh):
+                seen.append(sorted(p["group_run_id"] for p in corpus.pairs))
+                return control
+            row = {"pr": 1, "group_run_id": "g2", "unreached": [], "regression": [], "key_blind": 0, "commit_bound": 0,
+                   "relinked_clean": True, "rebuilt": [], "unreached_outside": []}
+            with mock.patch.object(rrc, "GitHub"), mock.patch.object(rrc, "ancestry"), \
+                    mock.patch.object(rrc, "stage0_pairs", return_value={"pairs": [row], "ancestry_unknown": []}), \
+                    mock.patch.object(rrc, "data_scan_control", record), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(rpr.main(["stage0", "--corpus", str(root), "--fix", "f", "--restart-run", "g2",
+                                           "--watch", "pulp-test-a"]), 0)
+            self.assertEqual(seen, [["g1", "g2"], ["g2"]])
+
     def test_the_cli_exit_codes(self):
         base = {"pairs": [], "ancestry_unknown": []}
         clean = {"count": 3, "restart_found": True, "broken_by": None}
@@ -330,6 +352,7 @@ class Stage0Tests(unittest.TestCase):
                     self.assertEqual(rpr.main(["stage0", "--corpus", str(root), "--fix", "f", "--watch", "pulp-test-a"]),
                                      code, (st, run, dc))
                 self.assertIn("(c) detected-reader control", out.getvalue())
+                self.assertIn("(c) within the (b) window", out.getvalue())
 
 
 class KeyBlindTests(unittest.TestCase):
