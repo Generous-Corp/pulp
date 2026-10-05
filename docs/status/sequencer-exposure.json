@@ -8926,6 +8926,7 @@
         "test/test_control_trusted_host_inventory.cpp",
         "test/test_inspector_domain_helpers.cpp",
         "test/test_mcp_control_adapter.cpp",
+        "test/test_timebase_loop_region.cpp",
         "tools/cmake/PulpControlShipping.cmake",
         "tools/cmake/PulpUtils.cmake",
         "tools/cmake/check_control_shipping_artifact.cmake",
