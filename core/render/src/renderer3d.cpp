@@ -2873,17 +2873,11 @@ std::optional<SceneReadback> encode_scene_pass(
 // frame is not blank. When it fell short without a specific error, name the
 // stages that are missing.
 void finalize_scene_result(Scene3DRenderResult& result) {
-    result.success = result.scene_data_consumed &&
-                     result.color_target_allocated &&
-                     result.depth_target_allocated &&
-                     result.vertex_buffer_uploaded &&
-                     result.index_buffer_uploaded &&
-                     result.uniform_buffer_uploaded &&
-                     result.texture_uploaded &&
-                     result.command_submitted &&
-                     result.readback_completed &&
-                     result.distinct_color_count > 1 &&
-                     result.non_transparent_pixel_count > 0;
+    result.success = result.scene_data_consumed && result.color_target_allocated &&
+                     result.depth_target_allocated && result.vertex_buffer_uploaded &&
+                     result.index_buffer_uploaded && result.uniform_buffer_uploaded &&
+                     result.texture_uploaded && result.command_submitted &&
+                     result.readback_completed && Renderer3D::readback_holds_frame(result);
     if (!result.success && result.error.empty()) {
         result.error = "Renderer3D: SceneData render incomplete:";
         auto append_missing = [&](bool condition, const char* name) {
@@ -2904,11 +2898,17 @@ void finalize_scene_result(Scene3DRenderResult& result) {
         append_missing(result.distinct_color_count > 1, "distinct_color_count");
         append_missing(result.non_transparent_pixel_count > 0,
                        "non_transparent_pixel_count");
+        append_missing(result.adapter_backend_type != "Null", "drawing_adapter");
     }
 }
 
 } // namespace
 #endif
+
+bool Renderer3D::readback_holds_frame(const Scene3DRenderResult& result) {
+    return result.distinct_color_count > 1 && result.non_transparent_pixel_count > 0 &&
+           result.adapter_backend_type != "Null";
+}
 
 Scene3DRenderResult Renderer3D::render_hardcoded_textured_cube(
     const HardcodedCubeRenderConfig& config) {
@@ -3265,16 +3265,11 @@ fn fs_main(input: VertexOut) -> @location(0) vec4f {
         return result;
     }
 
-    result.success = result.color_target_allocated &&
-                     result.depth_target_allocated &&
-                     result.vertex_buffer_uploaded &&
-                     result.index_buffer_uploaded &&
-                     result.uniform_buffer_uploaded &&
-                     result.texture_uploaded &&
-                     result.command_submitted &&
-                     result.readback_completed &&
-                     result.distinct_color_count > 1 &&
-                     result.non_transparent_pixel_count > 0;
+    result.success = result.color_target_allocated && result.depth_target_allocated &&
+                     result.vertex_buffer_uploaded && result.index_buffer_uploaded &&
+                     result.uniform_buffer_uploaded && result.texture_uploaded &&
+                     result.command_submitted && result.readback_completed &&
+                     readback_holds_frame(result);
     if (!result.success && result.error.empty()) {
         result.error = "Renderer3D: hardcoded cube structural validation failed";
     }
