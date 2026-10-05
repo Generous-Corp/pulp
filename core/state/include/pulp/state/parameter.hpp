@@ -15,6 +15,41 @@
 
 namespace pulp::state {
 
+/// Canonical automation value shared by graph, Processor, and timeline
+/// delivery. The host writes the base value; modulators contribute an
+/// additive offset. Keeping the pair explicit prevents a surface from
+/// replacing the authored value when it only meant to update modulation.
+struct BaseOffsetValue {
+    float base = 0.0f;
+    float offset = 0.0f;
+
+    constexpr float effective() const noexcept {
+        return base + offset;
+    }
+    constexpr BaseOffsetValue without_offset() const noexcept {
+        return {base, 0.0f};
+    }
+};
+
+enum class BaseOffsetRefusal : std::uint8_t {
+    None,
+    NonFiniteBase,
+    NonFiniteOffset,
+    OutOfRange,
+};
+
+inline BaseOffsetRefusal validate_base_offset(BaseOffsetValue value, float minimum,
+                                              float maximum) noexcept {
+    if (!std::isfinite(value.base))
+        return BaseOffsetRefusal::NonFiniteBase;
+    if (!std::isfinite(value.offset))
+        return BaseOffsetRefusal::NonFiniteOffset;
+    if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum ||
+        value.effective() < minimum || value.effective() > maximum)
+        return BaseOffsetRefusal::OutOfRange;
+    return BaseOffsetRefusal::None;
+}
+
 /// Unique parameter identifier, stable across plugin versions.
 /// Use a hash or manual assignment to keep IDs consistent between releases.
 using ParamID = uint32_t;
@@ -632,6 +667,11 @@ public:
 
     float get_mod_offset() const {
         return unpack_value(mod_offset_.load(std::memory_order_relaxed));
+    }
+
+    /// Read the explicit base-vs-offset pair used by every automation route.
+    BaseOffsetValue get_base_offset() const noexcept {
+        return {get(), get_mod_offset()};
     }
 
     /// Set the absolute modulation offset (replaces any existing offset).

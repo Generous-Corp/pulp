@@ -203,6 +203,18 @@ std::unique_ptr<HeadlessSurface> HeadlessSurface::create(
         return nullptr;
     }
 
+    // Dawn can successfully initialize its Null backend when the host has no
+    // native GPU driver (common on headless Linux CI).  That backend accepts
+    // commands but cannot provide product rendering proof: readback is a flat
+    // zero-variance frame.  Treat it as unavailable so callers take their
+    // existing honest runtime-skip path instead of accepting a fabricated
+    // capture as GPU evidence.
+    const auto adapter = gpu->adapter_info();
+    if (!adapter.available || adapter.null_backend) {
+        set_err("HeadlessSurface::create: native GPU adapter unavailable (Dawn Null backend)");
+        return nullptr;
+    }
+
     SkiaSurface::Config skia_config{};
     skia_config.width = config.width;
     skia_config.height = config.height;

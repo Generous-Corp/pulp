@@ -20,6 +20,106 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
+MAX_LAYERS = 128
+MAX_CHANNELS = 4096
+MAX_KERNEL_SIZE = 4096
+MAX_DILATIONS = 256
+DEFAULT_SERVICE_SAMPLE_CAP = 4096
+MAX_SERVICE_SAMPLE_CAP = 65536
+
+
+def _positive_int(value, name: str, maximum: int | None = None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} exceeds the supported limit ({maximum})")
+    return value
+
+
+def validate_model_document(doc: dict) -> None:
+    """Reject malformed or unbounded input before constructing model state."""
+    if not isinstance(doc, dict):
+        raise ValueError("model document must be an object")
+    _positive_int(doc.get("sample_rate"), "sample_rate")
+    weights = doc.get("weights")
+    if not isinstance(weights, list) or not weights:
+        raise ValueError("weights must be a non-empty array")
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+           for value in weights):
+        raise ValueError("weights must contain finite numeric values")
+    config = doc.get("config")
+    if not isinstance(config, dict):
+        raise ValueError("config must be an object")
+    head_scale = config.get("head_scale")
+    if isinstance(head_scale, bool) or not isinstance(head_scale, (int, float)) or not math.isfinite(head_scale):
+        raise ValueError("config.head_scale must be finite")
+    layers = config.get("layers")
+    if not isinstance(layers, list) or not layers or len(layers) > MAX_LAYERS:
+        raise ValueError(f"config.layers must contain 1..{MAX_LAYERS} layers")
+    expected_weights = 1  # serialized head_scale sentinel
+    for index, layer in enumerate(layers):
+        if not isinstance(layer, dict):
+            raise ValueError(f"layer {index} must be an object")
+        input_size = _positive_int(layer.get("input_size"), f"layer {index}.input_size", MAX_CHANNELS)
+        condition_size = _positive_int(layer.get("condition_size"), f"layer {index}.condition_size", MAX_CHANNELS)
+        if condition_size != 1:
+            raise ValueError("only scalar conditioning is supported by this probe")
+        head_size = _positive_int(layer.get("head_size"), f"layer {index}.head_size", MAX_CHANNELS)
+        channels = _positive_int(layer.get("channels"), f"layer {index}.channels", MAX_CHANNELS)
+        kernel_size = _positive_int(layer.get("kernel_size"), f"layer {index}.kernel_size", MAX_KERNEL_SIZE)
+        dilations = layer.get("dilations")
+        if not isinstance(dilations, list) or not dilations or len(dilations) > MAX_DILATIONS:
+            raise ValueError(f"layer {index}.dilations must contain 1..{MAX_DILATIONS} values")
+        for dilation in dilations:
+            _positive_int(dilation, f"layer {index}.dilation", MAX_KERNEL_SIZE * MAX_DILATIONS)
+        for flag in ("gated", "head_bias"):
+            if flag in layer and not isinstance(layer[flag], bool):
+                raise ValueError(f"layer {index}.{flag} must be boolean")
+        if input_size > MAX_CHANNELS or channels > MAX_CHANNELS:
+            raise ValueError(f"layer {index} channel dimensions exceed the supported limit")
+        expected_weights += input_size * channels
+        for _ in dilations:
+            output_channels = channels * (2 if layer.get("gated", False) else 1)
+            expected_weights += channels * output_channels * kernel_size + output_channels
+            expected_weights += output_channels
+            expected_weights += channels * channels + channels
+        expected_weights += channels * head_size
+        if layer.get("head_bias", False):
+            expected_weights += head_size
+    if len(weights) != expected_weights:
+        raise ValueError(
+            f"weights length {len(weights)} does not match serialized schema ({expected_weights})"
+        )
+
+
+class BoundedSamples:
+    """Deterministic reservoir for raw timing samples without unbounded growth."""
+
+    def __init__(self, capacity: int):
+        if capacity <= 0 or capacity > MAX_SERVICE_SAMPLE_CAP:
+            raise ValueError(f"service sample capacity must be 1..{MAX_SERVICE_SAMPLE_CAP}")
+        self.capacity = capacity
+        self.count = 0
+        self.values: list[float] = []
+        self._state = 0x9E3779B97F4A7C15
+
+    def append(self, value: float) -> None:
+        self.count += 1
+        if len(self.values) < self.capacity:
+            self.values.append(value)
+            return
+        # SplitMix64 gives a deterministic uniform replacement index without
+        # importing a global RNG into the timed worker.
+        self._state = (self._state + 0x9E3779B97F4A7C15) & ((1 << 64) - 1)
+        mixed = self._state
+        mixed = ((mixed ^ (mixed >> 30)) * 0xBF58476D1CE4E5B9) & ((1 << 64) - 1)
+        mixed = ((mixed ^ (mixed >> 27)) * 0x94D049BB133111EB) & ((1 << 64) - 1)
+        mixed ^= mixed >> 31
+        slot = mixed % self.count
+        if slot < self.capacity:
+            self.values[slot] = value
+
+
 def _activation(name: str, value: float) -> float:
     if name == "ReLU":
         return max(0.0, value)
@@ -52,6 +152,11 @@ class CpuConv:
             self.biases[:] = weights[cursor:cursor + self.out]
             cursor += self.out
         return cursor
+
+    def reset(self) -> None:
+        for slot in self.history:
+            slot[:] = [0.0] * self.inp
+        self.head = 0
 
     def step(self, x: list[float]) -> list[float]:
         self.history[self.head] = list(x)
@@ -93,6 +198,11 @@ class MlxConv:
         self.mx.eval(*self.weights, self.biases)
         return cursor
 
+    def reset(self) -> None:
+        self.history = [self.mx.zeros((self.inp,), dtype=self.mx.float32) for _ in self.history]
+        self.head = 0
+        self.mx.eval(*self.history)
+
     def step(self, x):
         self.history[self.head] = x
         y = self.biases
@@ -108,6 +218,7 @@ class MlxConv:
 
 class CpuNam:
     def __init__(self, doc: dict):
+        validate_model_document(doc)
         self.scale = float(doc["config"]["head_scale"])
         self.arrays = []
         cursor = 0
@@ -136,6 +247,15 @@ class CpuNam:
         if cursor != len(doc["weights"]) - 1 or abs(float(doc["weights"][cursor]) - self.scale) > 1e-6:
             raise ValueError("serialized head scale or weight cursor mismatch")
 
+    def reset(self) -> None:
+        for array in self.arrays:
+            array["rechannel"].reset()
+            array["head"].reset()
+            for layer in array["layers"]:
+                layer["conv"].reset()
+                layer["mixin"].reset()
+                layer["residual"].reset()
+
     def sample(self, value: float) -> float:
         current = [value]
         prior = None
@@ -162,6 +282,7 @@ class CpuNam:
 
 class MlxNam:
     def __init__(self, mx, doc: dict):
+        validate_model_document(doc)
         self.mx, self.scale = mx, float(doc["config"]["head_scale"])
         self.arrays = []
         cursor = 0
@@ -181,6 +302,15 @@ class MlxNam:
         if cursor != len(doc["weights"]) - 1 or abs(float(doc["weights"][cursor]) - self.scale) > 1e-6:
             raise ValueError("serialized head scale or weight cursor mismatch")
         mx.eval(*[w for a in self.arrays for w in self._weights(a)])
+
+    def reset(self) -> None:
+        for array in self.arrays:
+            array["rechannel"].reset()
+            array["head"].reset()
+            for layer in array["layers"]:
+                layer["conv"].reset()
+                layer["mixin"].reset()
+                layer["residual"].reset()
 
     @staticmethod
     def _weights(array):
@@ -235,6 +365,9 @@ class WorkerResult:
     peak_memory: int
     service_us_p50: float
     service_us_p95: float
+    service_sample_count: int
+    service_sample_cap: int
+    service_samples_us: list[float]
     error: str = ""
 
 
@@ -244,8 +377,10 @@ def _percentile(values: list[float], p: float) -> float:
     return statistics.quantiles(values, n=100, method="inclusive")[int(p) - 1] if len(values) > 1 else values[0]
 
 
-def _worker(index: int, blocks: int, model_path: Path, out: list[WorkerResult], barrier: threading.Barrier, timeout: float) -> None:
+def _worker(index: int, blocks: int, model_path: Path, out: list[WorkerResult], barrier: threading.Barrier,
+            timeout: float, stop_event: threading.Event, sample_cap: int) -> None:
     owner = threading.get_ident()
+    samples = BoundedSamples(sample_cap)
     try:
         import mlx.core as mx
         doc = json.loads(model_path.read_text())
@@ -254,10 +389,12 @@ def _worker(index: int, blocks: int, model_path: Path, out: list[WorkerResult], 
         mlx = MlxNam(mx, doc)
         after_prepare = int(mx.get_active_memory())
         barrier.wait(timeout=timeout)
-        services, misses, residual, failures = [], 0, 0.0, 0
+        misses, residual, failures = 0, 0.0, 0
         period_ns = int(32 * 1_000_000_000 / int(doc["sample_rate"]))
         next_deadline = time.perf_counter_ns()
         for block in range(blocks):
+            if stop_event.is_set():
+                raise TimeoutError("worker cancelled after harness timeout")
             next_deadline += period_ns
             delay = next_deadline - time.perf_counter_ns()
             if delay > 0:
@@ -271,7 +408,7 @@ def _worker(index: int, blocks: int, model_path: Path, out: list[WorkerResult], 
                 residual = max(residual, delta)
                 failures += int(delta > 1e-5)
             elapsed = (time.perf_counter_ns() - begin) / 1000.0
-            services.append(elapsed)
+            samples.append(elapsed)
             misses += int(elapsed * 1000 > period_ns)
         mx.eval()
         peak = int(mx.get_peak_memory())
@@ -279,13 +416,54 @@ def _worker(index: int, blocks: int, model_path: Path, out: list[WorkerResult], 
         del mlx
         mx.clear_cache()
         after_release = int(mx.get_active_memory())
-        out.append(WorkerResult(index, owner, threading.get_ident(), "mlx", str(doc.get("metadata", {}).get("name", "")), blocks * 32, residual, failures, misses, 0, before, after_prepare, after_release, peak, _percentile(services, 50), _percentile(services, 95)))
+        out.append(WorkerResult(
+            worker=index,
+            owner_thread_id=owner,
+            release_thread_id=threading.get_ident(),
+            provider="mlx",
+            model_id=str(doc.get("metadata", {}).get("name", "")),
+            eval_count=blocks * 32,
+            max_residual=residual,
+            parity_failures=failures,
+            deadline_misses=misses,
+            fallback_blocks=0,
+            active_memory_before=before,
+            active_memory_after_prepare=after_prepare,
+            active_memory_after_release=after_release,
+            peak_memory=peak,
+            service_us_p50=_percentile(samples.values, 50),
+            service_us_p95=_percentile(samples.values, 95),
+            service_sample_count=samples.count,
+            service_sample_cap=samples.capacity,
+            service_samples_us=samples.values,
+        ))
     except Exception as exc:
         try:
             barrier.abort()
         except threading.BrokenBarrierError:
             pass
-        out.append(WorkerResult(index, owner, threading.get_ident(), "unavailable", "", 0, 0.0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, f"{type(exc).__name__}: {exc}"))
+        out.append(WorkerResult(
+            worker=index,
+            owner_thread_id=owner,
+            release_thread_id=threading.get_ident(),
+            provider="unavailable",
+            model_id="",
+            eval_count=0,
+            max_residual=0.0,
+            parity_failures=0,
+            deadline_misses=0,
+            fallback_blocks=0,
+            active_memory_before=0,
+            active_memory_after_prepare=0,
+            active_memory_after_release=0,
+            peak_memory=0,
+            service_us_p50=_percentile(samples.values, 50),
+            service_us_p95=_percentile(samples.values, 95),
+            service_sample_count=samples.count,
+            service_sample_cap=samples.capacity,
+            service_samples_us=samples.values,
+            error=f"{type(exc).__name__}: {exc}",
+        ))
 
 
 def main() -> int:
@@ -294,10 +472,15 @@ def main() -> int:
     parser.add_argument("--blocks", type=int, default=8)
     parser.add_argument("--instances", type=int, choices=(1, 2), default=2)
     parser.add_argument("--worker-timeout-seconds", type=float, default=30.0)
+    parser.add_argument("--service-sample-cap", type=int, default=DEFAULT_SERVICE_SAMPLE_CAP)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if args.blocks <= 0 or not args.model.is_file():
         parser.error("--blocks must be positive and --model must be a file")
+    if args.worker_timeout_seconds <= 0:
+        parser.error("--worker-timeout-seconds must be positive")
+    if not 0 < args.service_sample_cap <= MAX_SERVICE_SAMPLE_CAP:
+        parser.error(f"--service-sample-cap must be 1..{MAX_SERVICE_SAMPLE_CAP}")
     try:
         import mlx.core as mx
         version, device = getattr(mx, "__version__", "unknown"), str(mx.default_device())
@@ -306,14 +489,38 @@ def main() -> int:
         print(json.dumps(payload, sort_keys=True) if args.json else payload["reason"])
         return 2
     barrier, results = threading.Barrier(args.instances), []
-    threads = [threading.Thread(target=_worker, args=(i, args.blocks, args.model, results, barrier, args.worker_timeout_seconds), name=f"mlx-nam-worker-{i}", daemon=True) for i in range(args.instances)]
+    stop_event = threading.Event()
+    threads = [threading.Thread(
+        target=_worker,
+        args=(i, args.blocks, args.model, results, barrier, args.worker_timeout_seconds,
+              stop_event, args.service_sample_cap),
+        name=f"mlx-nam-worker-{i}",
+        daemon=True,
+    ) for i in range(args.instances)]
     for thread in threads:
         thread.start()
+    join_deadline = time.monotonic() + args.worker_timeout_seconds
     for thread in threads:
-        thread.join(args.worker_timeout_seconds)
+        thread.join(max(0.0, join_deadline - time.monotonic()))
     alive = [thread.name for thread in threads if thread.is_alive()]
+    if alive:
+        # Barrier waits and the per-block loop are cooperative.  A provider
+        # extension that is stuck in native code cannot be force-killed safely;
+        # report the live worker and return an error rather than claiming a
+        # partial receipt or waiting without a bound.
+        stop_event.set()
+        try:
+            barrier.abort()
+        except threading.BrokenBarrierError:
+            pass
+        grace_deadline = time.monotonic() + min(1.0, args.worker_timeout_seconds)
+        for thread in threads:
+            if thread.is_alive():
+                thread.join(max(0.0, grace_deadline - time.monotonic()))
+        alive = [thread.name for thread in threads if thread.is_alive()]
+    status = "error" if alive or any(r.error for r in results) else "ok"
     payload = {
-        "status": "error" if alive or any(r.error for r in results) else "ok",
+        "status": status,
         "model_id": "nam.example",
         "model_name": "Test Model",
         "model_sha256": hashlib.sha256(args.model.read_bytes()).hexdigest(),
@@ -322,10 +529,12 @@ def main() -> int:
         "host": {"machine": platform.machine(), "platform": platform.platform()},
         "instances": args.instances,
         "blocks": args.blocks,
+        "service_sample_cap": args.service_sample_cap,
         "workers": [asdict(r) for r in sorted(results, key=lambda r: r.worker)],
         "alive_workers": alive,
+        "timeout_contract": "cooperative cancellation; live native workers fail closed",
         "cpu_shadow": "private Python mirror of NamTcnArtifactAdapter arithmetic",
-        "selected_provider": "mlx" if not alive and results else "unavailable",
+        "selected_provider": "mlx" if status == "ok" else "unavailable",
         "fallback_contract": "cpu_control_available; Pulp transport fallback not exercised",
         "phase3_gate": "not_claimed: private harness has no Pulp transport or callback",
     }

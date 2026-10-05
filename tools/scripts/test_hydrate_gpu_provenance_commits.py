@@ -161,6 +161,96 @@ class HydrationTests(unittest.TestCase):
                             hydration.hydrate(pathlib.Path("/repo"), "origin"), (1, 0)
                         )
 
+    def test_a_hung_fetch_times_out_into_the_ancestry_invariant(self) -> None:
+        """A fetch that never returns is bounded and treated as unfetchable.
+
+        The ancestry check then decides, exactly as for a missing ref: green
+        when the pinned commits are ancestors, red when they are not.
+        """
+        revision = "a" * 40
+        seen_timeouts: list[object] = []
+
+        def run_with_ancestry(ancestor_rc: int):
+            def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                if command[:3] == ["git", "rev-parse", "--is-shallow-repository"]:
+                    return subprocess.CompletedProcess(command, 0, "true\n", "")
+                if command[:2] == ["git", "fetch"]:
+                    seen_timeouts.append(kwargs.get("timeout"))
+                    raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 0)
+                if command[:2] == ["git", "merge-base"]:
+                    return subprocess.CompletedProcess(command, ancestor_rc, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return run
+
+        for ancestor_rc, expect_raise in ((0, False), (1, True)):
+            with self.subTest(ancestor_rc=ancestor_rc):
+                err = io.StringIO()
+                with (
+                    mock.patch.object(hydration, "required_commits", return_value=[revision]),
+                    mock.patch.object(hydration, "is_commit", return_value=True),
+                    mock.patch.object(
+                        hydration.subprocess, "run", side_effect=run_with_ancestry(ancestor_rc),
+                    ),
+                    mock.patch.dict(os.environ, {"GITHUB_REF": "refs/pull/7882/merge"}),
+                    contextlib.redirect_stderr(err),
+                ):
+                    if expect_raise:
+                        with self.assertRaisesRegex(
+                            hydration.HydrationError, "not ancestors of HEAD"
+                        ):
+                            hydration.hydrate(pathlib.Path("/repo"), "origin")
+                    else:
+                        self.assertEqual(
+                            hydration.hydrate(pathlib.Path("/repo"), "origin"), (1, 0)
+                        )
+                self.assertIn("did not finish within", err.getvalue())
+        # Every fetch carried a bound inside the shared budget; an unbounded
+        # call is the defect.
+        self.assertTrue(seen_timeouts)
+        self.assertTrue(
+            all(t is not None and 0 < t <= hydration.FETCH_TIMEOUT_SECONDS
+                for t in seen_timeouts),
+            seen_timeouts)
+
+    def test_a_spent_budget_skips_the_remaining_candidates(self) -> None:
+        """Once one hung fetch spends the shared budget, no further fetch runs.
+
+        Each later candidate is recorded as not fetched, and the ancestry check
+        still decides the outcome.
+        """
+        revision = "a" * 40
+        clock = [1000.0]
+        fetched: list[str] = []
+
+        def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            if command[:3] == ["git", "rev-parse", "--is-shallow-repository"]:
+                return subprocess.CompletedProcess(command, 0, "true\n", "")
+            if command[:2] == ["git", "fetch"]:
+                fetched.append(command[-1])
+                # The hung fetch consumes the whole budget before timing out.
+                clock[0] += hydration.FETCH_TIMEOUT_SECONDS + 1
+                raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 0)
+            if command[:2] == ["git", "merge-base"]:
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        err = io.StringIO()
+        with (
+            mock.patch.object(hydration, "required_commits", return_value=[revision]),
+            mock.patch.object(hydration, "is_commit", return_value=True),
+            mock.patch.object(hydration.subprocess, "run", side_effect=run),
+            mock.patch.object(hydration.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.dict(
+                os.environ,
+                {"GITHUB_REF": "refs/pull/7882/merge", "GITHUB_SHA": "b" * 40},
+            ),
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertEqual(hydration.hydrate(pathlib.Path("/repo"), "origin"), (1, 0))
+        self.assertEqual(len(fetched), 1, fetched)
+        self.assertIn("refs/pull/7882/merge", fetched[0])
+        self.assertEqual(err.getvalue().count("fetch budget is spent"), 2, err.getvalue())
+
     def _hydrate_with_fetch_errors(
         self, event_ref: str, errors: dict[str, str], event_sha: str = "",
         commits_present: bool = True,

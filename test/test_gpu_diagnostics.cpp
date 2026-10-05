@@ -8,6 +8,7 @@
 #include <pulp/runtime/trace.hpp>
 
 #include "support/stderr_capture.hpp"
+#include "support/portable_env.hpp"
 
 #include <cstdarg>
 #include <cstdint>
@@ -32,9 +33,9 @@ namespace {
 
 void set_opt_in(const char* value) {
     if (value == nullptr) {
-        ::unsetenv("PULP_GPU_LOG_BRIDGE");
+        pulp::test::unset_env_var("PULP_GPU_LOG_BRIDGE");
     } else {
-        ::setenv("PULP_GPU_LOG_BRIDGE", value, 1);
+        pulp::test::set_env_var("PULP_GPU_LOG_BRIDGE", value);
     }
 }
 

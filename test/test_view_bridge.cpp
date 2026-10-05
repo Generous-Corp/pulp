@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+
+#include "support/portable_env.hpp"
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/editor_ui.hpp>
@@ -42,21 +44,8 @@ using namespace pulp;
 
 namespace {
 
-int set_env_var(const char* name, const char* value) {
-#if defined(_WIN32)
-    return _putenv_s(name, value);
-#else
-    return ::setenv(name, value, 1);
-#endif
-}
-
-int unset_env_var(const char* name) {
-#if defined(_WIN32)
-    return _putenv_s(name, "");
-#else
-    return ::unsetenv(name);
-#endif
-}
+using pulp::test::set_env_var;
+using pulp::test::unset_env_var;
 
 class ScopedEnvVar {
 public:
@@ -837,19 +826,19 @@ TEST_CASE("Editor open: hosted editors open content-first unless PULP_EDITOR_OPE
           "[view_bridge][scripted-ui][editor-open][content-first]") {
     const char* saved = std::getenv("PULP_EDITOR_OPEN");
     const std::string saved_value = saved ? saved : "";
-    unsetenv("PULP_EDITOR_OPEN");
+    unset_env_var("PULP_EDITOR_OPEN");
     CHECK(format::ViewBridge::Options::hosted_editor().content_first_open);
     CHECK(format::ViewBridge::Options::hosted_editor().defer_document_load);
-    setenv("PULP_EDITOR_OPEN", "view-first", 1);
+    set_env_var("PULP_EDITOR_OPEN", "view-first");
     CHECK_FALSE(format::ViewBridge::Options::hosted_editor().content_first_open);
-    setenv("PULP_EDITOR_OPEN", "content-first", 1);
+    set_env_var("PULP_EDITOR_OPEN", "content-first");
     CHECK(format::ViewBridge::Options::hosted_editor().content_first_open);
     // Standalone and harness bridges never ask a host to present anything.
     CHECK_FALSE(format::ViewBridge::Options{}.content_first_open);
     if (saved)
-        setenv("PULP_EDITOR_OPEN", saved_value.c_str(), 1);
+        set_env_var("PULP_EDITOR_OPEN", saved_value.c_str());
     else
-        unsetenv("PULP_EDITOR_OPEN");
+        unset_env_var("PULP_EDITOR_OPEN");
 }
 
 TEST_CASE("Editor open: content-first mounts the document before the host's first frame",
