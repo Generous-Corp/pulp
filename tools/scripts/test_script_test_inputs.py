@@ -205,6 +205,14 @@ class BuildListTests(unittest.TestCase):
         for name in ("cmake-nested", "no-command", "compiled"):
             self.assertNotIn(name, self.lst["tests"], name)
 
+    def test_a_shared_walker_lists_what_a_fresh_one_does_for_every_test(self) -> None:
+        # build_list() shares one memoizing Walker across tests; each record
+        # must equal the one a walker that saw no other test produces.
+        for t in self.repo.inventory()["tests"]:
+            if t["name"] in self.lst["tests"]:
+                with self.subTest(test=t["name"]):
+                    self.assertEqual(self.lst["tests"][t["name"]], sti.inputs_for(t, self.repo.root))
+
     def test_an_argument_longer_than_a_file_name_is_not_an_input(self) -> None:
         inv = self.repo.inventory()
         long_arg = "key=true.*" * 40  # 400 bytes in one path component

@@ -197,11 +197,23 @@ def outside_gate_profile(inventory: dict, root: Path, scope: dict[str, str] | No
 
 
 class Walker:
+    """Resolves one tree. A build_list() run shares one Walker across every
+    test, so it memoizes what a file says (its imports, its literal paths)
+    and whether a path is in the repo: the tree does not change mid-run."""
+
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
+        self._in_repo_memo: dict[Path, bool] = {}
+        self._imports_memo: dict[Path, list[tuple] | None] = {}
+        self._literals_memo: dict[Path, list[Path]] = {}
 
     # -- resolution helpers -------------------------------------------------
     def _in_repo(self, p: Path) -> bool:
+        if p not in self._in_repo_memo:
+            self._in_repo_memo[p] = self._probe_in_repo(p)
+        return self._in_repo_memo[p]
+
+    def _probe_in_repo(self, p: Path) -> bool:
         if _rel(p, self.root) is None:
             return False
         # A test argument is probed as a path, and some are not paths at all:
@@ -220,15 +232,19 @@ class Walker:
             out.append(base.joinpath(*parts) / "__init__.py")
         return out
 
-    def walk_python(self, entry: Path, search: list[Path], seen: set[Path]) -> None:
-        if entry in seen or not self._in_repo(entry):
-            return
-        seen.add(entry)
+    def python_imports(self, entry: Path) -> list[tuple] | None:
+        """The file's imports in source order, or None when it does not parse:
+        ("rel", candidate paths) for a relative import, every one of which is
+        walked, and ("abs", module names) for an absolute one, resolved against
+        the search path of whichever test reaches the file."""
+        if entry in self._imports_memo:
+            return self._imports_memo[entry]
         try:
             tree = ast.parse(entry.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
-            return
-        local_search = [entry.parent] + search
+            self._imports_memo[entry] = None
+            return None
+        imports: list[tuple] = []
         for node in ast.walk(tree):
             names: list[str] = []
             if isinstance(node, ast.Import):
@@ -239,16 +255,33 @@ class Walker:
                     for _ in range(node.level - 1):
                         base = base.parent
                     mod = node.module or ""
-                    for cand in self.python_module_candidates(mod, [base]) if mod else [base / "__init__.py"]:
-                        self.walk_python(cand, search, seen)
+                    cands = list(self.python_module_candidates(mod, [base]) if mod else [base / "__init__.py"])
                     for a in node.names:
-                        for cand in self.python_module_candidates((mod + "." if mod else "") + a.name, [base]):
-                            self.walk_python(cand, search, seen)
+                        cands += self.python_module_candidates((mod + "." if mod else "") + a.name, [base])
+                    imports.append(("rel", cands))
                     continue
                 names = [node.module] if node.module else []
                 # `from pkg import mod`: the alias may be a submodule file.
                 names += [f"{node.module}.{a.name}" for a in node.names] if node.module else []
-            for name in names:
+            if names:
+                imports.append(("abs", names))
+        self._imports_memo[entry] = imports
+        return imports
+
+    def walk_python(self, entry: Path, search: list[Path], seen: set[Path]) -> None:
+        if entry in seen or not self._in_repo(entry):
+            return
+        seen.add(entry)
+        imports = self.python_imports(entry)
+        if imports is None:
+            return
+        local_search = [entry.parent] + search
+        for kind, items in imports:
+            if kind == "rel":
+                for cand in items:
+                    self.walk_python(cand, search, seen)
+                continue
+            for name in items:
                 for cand in self.python_module_candidates(name, local_search):
                     if self._in_repo(cand):
                         self.walk_python(cand, search, seen)
@@ -294,6 +327,12 @@ class Walker:
         self.literal_paths(entry, seen)
 
     def literal_paths(self, entry: Path, seen: set[Path]) -> None:
+        if entry not in self._literals_memo:
+            self._literals_memo[entry] = self._literal_paths(entry)
+        seen.update(self._literals_memo[entry])
+
+    def _literal_paths(self, entry: Path) -> list[Path]:
+        found: list[Path] = []
         text = entry.read_text(encoding="utf-8", errors="replace")
         for m in LITERAL_RE.finditer(text):
             rel = m.group("p")
@@ -303,7 +342,8 @@ class Walker:
                 continue
             cand = self.root / rel
             if cand.exists():
-                seen.add(cand)
+                found.append(cand)
+        return found
 
 
 def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str]]:
@@ -340,13 +380,14 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
-def inputs_for(test: dict, root: Path, build_dir: Path | None = None) -> dict | None:
+def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
+               walker: Walker | None = None, tracked: set[str] | None = None) -> dict | None:
     props = {p["name"]: p["value"] for p in test.get("properties", [])}
     wd = Path(props.get("WORKING_DIRECTORY") or root)
     kind, entry, args = classify(test.get("command") or [], root)
     if kind == "undeclarable":
         return None
-    w = Walker(root)
+    w = walker or Walker(root)
     seen: set[Path] = set()
     search = [wd, root / "tools" / "scripts", root / "tools" / "ci"]
     env = props.get("ENVIRONMENT") or []
@@ -380,7 +421,8 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None) -> dict | 
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
                 seen.add(cand)
-    tracked = tracked_paths(root)
+    if tracked is None:
+        tracked = tracked_paths(root)
     rels = sorted({r for r in (_rel(p, root) for p in seen) if r and r != "." and is_tracked(r, tracked)})
     entry_rel = f"{BINARY_DIR_TOKEN}/{generated}" if generated is not None else _rel(entry, root)
     return {"kind": kind, "entry": entry_rel, "inputs": rels}
@@ -729,6 +771,7 @@ def base_list(root: Path, base: str | None) -> dict | None:
 def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> dict:
     tests = {}
     excluded = outside_gate_profile(inventory, root)
+    walker, tracked = Walker(root), tracked_paths(root)
     for t in inventory.get("tests", []):
         name = t.get("name", "")
         if not name or name.endswith("_NOT_BUILT") or name in excluded:
@@ -736,7 +779,7 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         cmd = t.get("command") or []
         if cmd and _rel(Path(cmd[0]), root) is None and not os.path.basename(cmd[0]).startswith(INTERPRETERS):
             continue  # a compiled test binary or a tool outside the repo: the graph owns it
-        rec = inputs_for(t, root, build_dir)
+        rec = inputs_for(t, root, build_dir, walker=walker, tracked=tracked)
         if rec is not None:
             tests[name] = rec
     doc = {"schema": SCHEMA, "tests": dict(sorted(tests.items()))}
