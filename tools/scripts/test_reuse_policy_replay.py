@@ -1447,7 +1447,10 @@ class ScriptInputsTests(unittest.TestCase):
 
 
 class RunListingTests(unittest.TestCase):
-    def collector(self, tmp, pages):
+    def collector(self, tmp, pages, totals=None):
+        # Each response states a total_count: the given one, or by default
+        # the page's own length (every listing here is one page unless the
+        # test says otherwise).
         c = rrc.Collector.__new__(rrc.Collector)
         c.cache = Path(tmp)
         calls = []
@@ -1456,17 +1459,19 @@ class RunListingTests(unittest.TestCase):
 
         def json_(path):
             calls.append(path)
-            return {"workflow_runs": pages.pop(0) if pages else []}
+            batch = pages.pop(0) if pages else []
+            total = totals.pop(0) if totals else len(batch)
+            return {"workflow_runs": batch} | ({} if total is None else {"total_count": total})
         gh.json = json_
         c.gh = gh
         return c, calls
 
-    def listed(self, day):
-        return {"id": 1, "head_sha": "s", "head_branch": "b", "created_at": f"{day}T12:00:00Z", "updated_at": None,
+    def listed(self, day, run_id=1):
+        return {"id": run_id, "head_sha": "s", "head_branch": "b", "created_at": f"{day}T12:00:00Z", "updated_at": None,
                 "status": "completed", "conclusion": "success", "event": "pull_request", "run_attempt": 1, "path": "p"}
 
-    def listing(self, tmp, day, pages):
-        c, calls = self.collector(tmp, pages)
+    def listing(self, tmp, day, pages, totals=None):
+        c, calls = self.collector(tmp, pages, totals)
         start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
         runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
         return runs, calls, (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists()
@@ -1502,6 +1507,62 @@ class RunListingTests(unittest.TestCase):
             runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
             self.assertEqual(len(runs), 1)
             self.assertEqual(len(calls), 1)
+
+    def old_day(self):
+        return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).date().isoformat()
+
+    def test_a_listing_short_of_its_total_count_is_asked_again_then_fails_loudly(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort) as caught:
+                self.listing(tmp, day, [[self.listed(day)], [self.listed(day)]], totals=[2, 2])
+            self.assertIn(f"pull_request runs created {day}: listed 1 of total_count 2", str(caught.exception))
+            self.assertFalse((Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists())
+
+    def test_a_short_listing_that_is_whole_when_asked_again_is_used(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            whole = [self.listed(day, 1), self.listed(day, 2)]
+            runs, calls, cached = self.listing(tmp, day, [[self.listed(day)], whole], totals=[2, 2])
+            self.assertEqual(([r["id"] for r in runs], len(calls), cached), ([1, 2], 2, True))
+
+    def test_a_truncated_later_page_fails(self):
+        day = self.old_day()
+        full = [self.listed(day, n) for n in range(100)]
+        with tempfile.TemporaryDirectory() as tmp:
+            runs, calls, _ = self.listing(tmp, day, [full, [self.listed(day, 100)]], totals=[101, 101])
+            self.assertEqual((len(runs), len(calls)), (101, 2))
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort) as caught:
+                self.listing(tmp, day, [full, [], full, []], totals=[101, 101, 101, 101])
+            self.assertIn("listed 100 of total_count 101 after page 2", str(caught.exception))
+
+    def test_a_repeated_run_does_not_count_twice(self):
+        # A run created while the pages are read shifts the next page by one,
+        # so its first row repeats; repeats must not make up a shortfall.
+        day = self.old_day()
+        full = [self.listed(day, n) for n in range(100)]
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort):
+                self.listing(tmp, day, [full, [self.listed(day, 99)], full, [self.listed(day, 99)]],
+                             totals=[101, 101, 101, 101])
+
+    def test_a_response_without_a_total_count_fails(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort):
+                self.listing(tmp, day, [[self.listed(day)], [self.listed(day)]], totals=[None, None])
+
+    def test_the_cli_exits_non_zero_naming_the_day(self):
+        err = rrc.ListingShort("pull_request runs created 2026-10-05: listed 1 of total_count 2 after page 1")
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc, "GitHub"), \
+                mock.patch.object(rrc.Collector, "collect", side_effect=err), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = rpr.main(["collect", "--since", "2026-10-05", "--out", str(Path(tmp) / "c")])
+        self.assertEqual(code, 1)
+        self.assertIn("LISTING SHORT: pull_request runs created 2026-10-05: listed 1 of total_count 2",
+                      stderr.getvalue())
 
 
 class GraftTests(unittest.TestCase):
