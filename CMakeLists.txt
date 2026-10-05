@@ -46,6 +46,8 @@ if(APPLE)
     endif()
 endif()
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFloatingPointContraction.cmake)
+
 # Required on Linux: static libraries linked into shared objects (.clap, .so) need PIC
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
