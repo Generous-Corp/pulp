@@ -73,7 +73,9 @@ def compile_probe(body: str, main: str, out: str) -> str | None:
     src = out + ".cpp"
     with open(src, "w", encoding="utf-8") as f:
         f.write("#include <cstdio>\n#include <cstdlib>\n#include <cstddef>\n"
-                "#include <fstream>\n#include <sstream>\n#include <string>\n\n")
+                "#include <cerrno>\n#include <cstring>\n#include <filesystem>\n"
+                "#include <fstream>\n#include <sstream>\n#include <string>\n"
+                "#include <fcntl.h>\n#include <unistd.h>\n\n")
         f.write(body + "\n\n" + main + "\n")
     r = subprocess.run(["clang++", "-std=c++20", "-O1", "-o", out, src],
                        capture_output=True, text=True)
@@ -95,78 +97,130 @@ CASES = {
     "utf8 emoji":       lambda n: "\U0001f3b9".encode() * n,
     "mixed ascii+emoji": lambda n: (b"a" * 7 + "\U0001f3b9".encode()) * (n // 11 + 1),
 }
-LENGTHS = [100, 4000, 64000, 200000]
+LENGTHS = [100, 4000, 64000, 200000, 2 * 1024 * 1024]
 
 
 def check_shell_boundary() -> tuple:
     """The prompt must reach the generator's argv byte for byte.
 
-    Drives the EXACT command ProcessEngine::start builds -- shell_quote, `sh
-    -c`, nohup, the background `&` and the stdout redirect all in place -- with
-    the shipping `shell_quote` extracted and compiled, not re-implemented.
+    Builds the EXACT command ProcessEngine::start runs -- `generation_command`,
+    `write_prompt_file` and `shell_quote` extracted from the shipping source
+    and compiled, not re-implemented -- and runs it through `/bin/sh -c` the
+    way the engine does. The stand-in generator resolves `--prompt-file` with
+    the shipping `prompt_handoff`, so both halves of the hand-off are the real
+    ones.
 
-    A re-implementation would pass this test while the shipped function was
-    broken, which is the whole class of defect being ruled out.
+    The longest case is 2 MiB on purpose. When the prompt was itself an
+    argument, Linux refused anything over 128 KiB and macOS anything over
+    1 MiB with E2BIG, so the command never started; that length fails the old
+    form on both platforms.
     """
     bad, ran = 0, 1
     work = tempfile.mkdtemp(prefix="prompt-fidelity-")
-    quote_main = """
+    command_main = """
 int main(int argc, char** argv) {
     std::ifstream f(argv[1], std::ios::binary);
     std::stringstream ss; ss << f.rdbuf();
-    const std::string q = shell_quote(ss.str());
-    std::fwrite(q.data(), 1, q.size(), stdout);
+    const std::string prompt_path = prompt_path_for(argv[2]);
+    const std::string failure = write_prompt_file(prompt_path, ss.str());
+    if (!failure.empty()) {
+        std::fprintf(stderr, "%s\\n", failure.c_str());
+        return 3;
+    }
+    const std::string command = generation_command(
+        "claude", "a-model", "medium", argv[3], " build ", prompt_path, argv[2]);
+    std::fwrite(command.data(), 1, command.size(), stdout);
     return 0;
 }
 """
-    probe = compile_probe(extract(ENGINE_SRC, "std::string shell_quote("),
-                          quote_main, os.path.join(work, "quote"))
+    body = "\n\n".join(extract(ENGINE_SRC, sig) for sig in (
+        "std::string shell_quote(", "std::string prompt_path_for(",
+        "std::string write_prompt_file(", "std::string generation_command("))
+    probe = compile_probe(body, command_main, os.path.join(work, "command"))
     if not probe:
         return 1, ran
 
     recorder = os.path.join(work, "recorder.py")
     with open(recorder, "w") as f:
         f.write("import hashlib, os, sys\n"
-                "b = (sys.argv[2] if len(sys.argv) > 2 else '')"
-                ".encode('utf-8', 'surrogatepass')\n"
+                f"sys.path.insert(0, {HERE!r})\n"
+                "import prompt_handoff\n"
+                "argv = prompt_handoff.resolve(sys.argv, 2)\n"
+                "b = os.fsencode(argv[2]) if len(argv) > 2 else b''\n"
                 "open(os.environ['RECORD_TO'], 'w').write("
                 "f'{len(b)} {hashlib.sha256(b).hexdigest()}')\n")
 
-    def quoted(raw: bytes) -> str:
-        p = os.path.join(work, "in.bin")
-        open(p, "wb").write(raw)
-        return subprocess.run([probe, p], capture_output=True).stdout.decode(
-            "utf-8", "surrogatepass")
-
-    import time
     losses = []
     for name, make in CASES.items():
         for n in LENGTHS:
             want = make(n)
+            raw = os.path.join(work, "in.bin")
+            with open(raw, "wb") as f:
+                f.write(want)
+            log = os.path.join(work, "run.log")
+            built = subprocess.run([probe, raw, log, recorder], capture_output=True)
+            if built.returncode != 0:
+                losses.append(f"{name}@{len(want)}B -> {built.stderr.decode()[:80]}")
+                continue
             rec = os.path.join(work, "rec.txt")
             if os.path.exists(rec):
                 os.remove(rec)
-            log = os.path.join(work, "log.txt")
-            cmd = (f"cd {quoted(work.encode())} && nohup python3 -u recorder.py "
-                   f"build {quoted(want)} > {quoted(log.encode())} 2>&1 &")
-            subprocess.run(["sh", "-c", cmd], capture_output=True,
-                           env=dict(os.environ, RECORD_TO=rec))
-            got = None
-            for _ in range(400):
-                if os.path.exists(rec):
-                    got = open(rec).read().split()
-                    break
-                time.sleep(0.05)
+            try:
+                subprocess.run(["/bin/sh", "-c", built.stdout.decode("utf-8", "surrogateescape")],
+                               capture_output=True, cwd=work,
+                               env=dict(os.environ, RECORD_TO=rec))
+            except OSError as exc:
+                losses.append(f"{name}@{len(want)}B -> did not start: {exc}")
+                continue
+            got = open(rec).read().split() if os.path.exists(rec) else None
             if not got or int(got[0]) != len(want) or \
                     got[1] != hashlib.sha256(want).hexdigest():
                 losses.append(f"{name}@{len(want)}B -> "
                               f"{got[0] if got else 'never arrived'}")
+            elif os.path.exists(os.path.join(work, "run.prompt")):
+                losses.append(f"{name}@{len(want)}B -> the prompt file was left behind")
     if losses:
         bad += 1
-        print(f"  WRONG  the prompt does not survive the shell: {losses[:6]}")
+        print(f"  WRONG  the prompt does not survive the hand-off: {losses[:6]}")
     else:
         print(f"  ok     {len(CASES) * len(LENGTHS)} prompts up to "
-              f"{max(LENGTHS):,} bytes reach the generator byte for byte")
+              f"{max(LENGTHS):,} bytes reach the generator byte for byte, "
+              f"and the hand-off file is gone afterwards")
+
+    # A NUL cannot be carried as text the generator reads back unchanged, so
+    # the engine refuses it by name and writes nothing.
+    ran += 1
+    raw = os.path.join(work, "nul.bin")
+    with open(raw, "wb") as f:
+        f.write(b"before\0after")
+    log = os.path.join(work, "nul.log")
+    refused = subprocess.run([probe, raw, log, recorder], capture_output=True)
+    if refused.returncode != 3 or b"NUL" not in refused.stderr or \
+            os.path.exists(os.path.join(work, "nul.prompt")):
+        bad += 1
+        print("  WRONG  a prompt with a NUL byte was not refused, or left a file")
+    else:
+        print("  ok     a prompt with a NUL byte is refused by name and writes nothing")
+
+    # A leftover hand-off file at the same path is replaced, never reused.
+    ran += 1
+    stale = os.path.join(work, "stale.prompt")
+    with open(stale, "w") as f:
+        f.write("a previous run's request")
+    raw = os.path.join(work, "fresh.bin")
+    with open(raw, "wb") as f:
+        f.write(b"this run's request")
+    replaced = subprocess.run([probe, raw, os.path.join(work, "stale.log"), recorder],
+                              capture_output=True)
+    content = open(stale, "rb").read() if os.path.exists(stale) else b""
+    mode = os.stat(stale).st_mode & 0o777 if os.path.exists(stale) else None
+    if replaced.returncode != 0 or content != b"this run's request" or mode != 0o600:
+        bad += 1
+        print(f"  WRONG  a stale prompt file was not replaced by a private one "
+              f"(content {content[:30]!r}, mode {oct(mode) if mode else None})")
+    else:
+        print("  ok     a stale prompt file is replaced by this run's, readable "
+              "only by its owner")
     return bad, ran
 
 

@@ -27,6 +27,22 @@ the toolchain tree list in `tools/rack/install_toolchain.sh`, and the generator'
 `INCLUDES` in `tools/rack/generate.py` (preflight and syntax compilation). A pack that
 misses it fails at the compiler after the model has already been called.
 
+## The prompt reaches the generator by file, never as an argument
+
+`ProcessEngine::submit` writes the request to `<run>.prompt` beside the run's
+log (0600, created exclusively) and starts `patch.py build` / `generate.py`
+with `--prompt-file PATH` where the prompt used to be. `prompt_handoff.resolve()`
+puts the text back into argv at that position and deletes the file, so the rest
+of each tool reads argv exactly as before. Do not move the prompt back onto the
+command line: Linux refuses any single argument over 128 KiB and macOS refuses
+argv plus the environment over 1 MiB, and both fail with E2BIG before the tool
+starts. A stub generator in a test must read `--prompt-file`, not
+`sys.argv[2]`. A prompt with a NUL byte is refused by name, never truncated. A
+file a run never read is removed on launch failure, on Stop, and by the next
+claimed submit. `test_prompt_fidelity.py` drives the extracted shipping command
+builder with prompts up to 2 MiB, and the old one-argument form fails it on
+both platforms.
+
 ## A run that fails still has to hand something over
 
 `generate()` returns `(patch, why, shortfall)`. `shortfall` is `None` on a pass
