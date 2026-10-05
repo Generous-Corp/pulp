@@ -1,7 +1,7 @@
 # Spectr / Forge / Magenta metadata audit
 
 Audited against `origin/main` at
-`5ea08fd82495687c8e23c85de1a7d4ff429809a8` in the isolated metadata-audit
+`e41946bedea98001f68bcc8712aedaa4dd5b7075` in the isolated metadata-audit
 worktree.
 
 The paced-generation receipt remains blocked and metadata-only. Its prior
