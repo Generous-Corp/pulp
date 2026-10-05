@@ -51,6 +51,10 @@ pulp_add_test_suite(pulp-test-parameter-event-queue
     SOURCES test_parameter_event_queue.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host)
 
+pulp_add_test_suite(pulp-test-tempo-delay-wrapper GROUP pulp-test-group-dsp-rt-signal
+    SOURCES test_tempo_delay_wrapper.cpp
+    LIBRARIES pulp::signal)
+
 pulp_add_test_suite(pulp-test-signal-rt-safety GROUP pulp-test-group-dsp-rt-signal-fft
     SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::signal-fft-backend)

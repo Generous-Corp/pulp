@@ -130,8 +130,12 @@ def copy_bundle_preserving_signature(src: Path, dst: Path) -> None:
     all" on the sidecar, even though the original bundle verifies clean.
     `ditto` is Apple's own tool for exactly this case: it preserves extended
     attributes, resource forks, and ACLs, so the copy verifies the same as
-    the original.
+    the original. Code signatures exist only on macOS, and only macOS ships
+    `ditto`, so elsewhere a symlink-preserving tree copy is the whole job.
     """
+    if sys.platform != "darwin":
+        shutil.copytree(src, dst, symlinks=True)
+        return
     subprocess.run(["ditto", str(src), str(dst)], check=True)
 
 

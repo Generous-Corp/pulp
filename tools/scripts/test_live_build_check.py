@@ -32,14 +32,62 @@ CHECK = Path(__file__).with_name("live_build_check.py")
 
 
 def dead_pid() -> int:
-    """A pid that has certainly exited (spawned and reaped here)."""
-    proc = subprocess.Popen(["true"])
+    """A pid that has certainly exited (spawned and reaped here).
+
+    Checked with the script's own probe: os.kill(pid, 0) would send Ctrl+C to
+    the whole console on Windows.
+    """
+    proc = subprocess.Popen([sys.executable, "-c", ""])
     proc.wait()
-    try:
-        os.kill(proc.pid, 0)
-    except ProcessLookupError:
+    if not _live_build_check().pid_is_alive(proc.pid):
         return proc.pid
     raise unittest.SkipTest("could not obtain a reliably-dead pid")
+
+
+def _live_build_check():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("live_build_check", CHECK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class WindowsLivenessProbeTests(unittest.TestCase):
+    """On Windows os.kill(pid, 0) is a console-wide Ctrl+C, not a probe.
+
+    It killed the nightly Windows ctest run mid-suite, so the probe must never
+    reach os.kill there. This drives the Windows route on any host.
+    """
+
+    def test_windows_route_never_calls_os_kill(self) -> None:
+        module = _live_build_check()
+
+        def tripwire(*_args):
+            raise AssertionError("os.kill must not run on Windows")
+
+        asked: list[int] = []
+
+        def windows_probe(pid: int) -> bool:
+            asked.append(pid)
+            return True
+
+        real_name, real_kill = module.os.name, module.os.kill
+        module.os.name, module.os.kill = "nt", tripwire
+        module._windows_pid_alive = windows_probe
+        try:
+            self.assertTrue(module.pid_is_alive(4242))
+        finally:
+            module.os.name, module.os.kill = real_name, real_kill
+        self.assertEqual(asked, [4242])
+
+    def test_posix_route_still_probes_with_signal_zero(self) -> None:
+        # Control: off Windows the probe is still the real os.kill(pid, 0).
+        if os.name == "nt":
+            self.skipTest("POSIX route")
+        module = _live_build_check()
+        self.assertTrue(module.pid_is_alive(os.getpid()))
+        self.assertFalse(module.pid_is_alive(dead_pid()))
 
 
 class LiveBuildCheckTests(unittest.TestCase):

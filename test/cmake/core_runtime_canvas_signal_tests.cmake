@@ -611,6 +611,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-contract GROUP pulp-test-group
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Private minimum-lead proxy: complete admission, prediction, terminal, and
+# delivery evidence is required before a one-block lead can be accepted.
+pulp_add_test_suite(pulp-test-gpu-audio-minimum-lead-proxy
+    SOURCES test_gpu_audio_minimum_lead_proxy.cpp
+    GROUP pulp-test-group-core-gpu-audio-private
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 pulp_add_test_suite(pulp-test-streaming-model-contract
     SOURCES test_streaming_model_contract.cpp
             $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>

@@ -7,6 +7,7 @@
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/canvas.hpp>  // FillRule + Canvas path API (pulp #3656)
 #include <pulp/view/svg_path_widget.hpp>  // gradient-stroke raster proof
+#include "support/portable_env.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -663,13 +664,13 @@ TEST_CASE("maybe_capture_skp_from_env captures one .skp when PULP_SKP_CAPTURE_DI
     };
 
     // Unset → honest no-op with a reason.
-    ::unsetenv("PULP_SKP_CAPTURE_DIR");
+    pulp::test::unset_env_var("PULP_SKP_CAPTURE_DIR");
     auto none = pulp::render::maybe_capture_skp_from_env(32, 32, paint);
     REQUIRE_FALSE(none.ok);
     REQUIRE_FALSE(none.reason.empty());
 
     // Armed → captures one nonempty, loadable .skp into the directory.
-    ::setenv("PULP_SKP_CAPTURE_DIR", dir.string().c_str(), 1);
+    pulp::test::set_env_var("PULP_SKP_CAPTURE_DIR", dir.string().c_str());
     auto first = pulp::render::maybe_capture_skp_from_env(32, 32, paint);
     REQUIRE(first.ok);
     REQUIRE(fs::exists(first.path));
@@ -688,7 +689,7 @@ TEST_CASE("maybe_capture_skp_from_env captures one .skp when PULP_SKP_CAPTURE_DI
         if (entry.path().extension() == ".skp") ++skp_count;
     REQUIRE(skp_count == 1);
 
-    ::unsetenv("PULP_SKP_CAPTURE_DIR");
+    pulp::test::unset_env_var("PULP_SKP_CAPTURE_DIR");
     fs::remove_all(dir, ec);
 }
 

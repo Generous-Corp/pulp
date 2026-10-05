@@ -653,6 +653,49 @@ KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
 KEY_BLIND_VARIANT = "cmake-codemodel-recorded"
 
 
+def pairs_since(corpus: Corpus, since: str) -> list[dict]:
+    """The corpus's pairs whose merge group was created at or after `since`
+    (an ISO date or datetime, UTC). A pair whose group run is unknown is
+    dropped: its time cannot be shown to be inside the window."""
+    cutoff = _parse_time(since if "T" in since else since + "T00:00:00Z")
+    out = []
+    for pair in corpus.pairs:
+        created = (corpus.run(pair.get("group_run_id")) or {}).get("created_at")
+        if created and _parse_time(created) >= cutoff:
+            out.append(pair)
+    return out
+
+
+class CutoffUnproven(ValueError):
+    """The window a commit opens cannot be shown from the corpus."""
+
+
+def cutoff_after(corpus: Corpus, commit: str, contains: Callable[[str, str], bool | None]) -> dict:
+    """The `--since` a fix opens, derived rather than chosen: the created_at
+    of the first merge group whose checkout contains `commit`. The window is
+    only a time if time and ancestry agree, so every group created at or
+    after the cutoff must contain the commit too; `contains(commit,
+    checkout)` answers True, False, or None when it cannot tell, and any
+    None or later group without the commit raises instead of guessing."""
+    groups = sorted((r for r in corpus.runs.values() if r.get("run_kind") == "merge_group"
+                     and r.get("checkout_sha") and r.get("created_at")), key=lambda r: r["created_at"])
+    answers = [(g, contains(commit, g["checkout_sha"])) for g in groups]
+    unknown = [g["run_id"] for g, v in answers if v is None]
+    if unknown:
+        raise CutoffUnproven(f"cannot tell whether {len(unknown)} group checkouts contain {commit}: "
+                             f"{', '.join(map(str, unknown[:10]))}")
+    first = next((i for i, (_, v) in enumerate(answers) if v), None)
+    if first is None:
+        raise CutoffUnproven(f"no merge group in the corpus contains {commit}")
+    without = [g["run_id"] for g, v in answers[first:] if not v]
+    if without:
+        raise CutoffUnproven(f"{len(without)} groups created after the first that contains {commit} do not "
+                             f"contain it, so no time window matches: {', '.join(map(str, without[:10]))}")
+    g = answers[first][0]
+    return {"since": g["created_at"], "group_run_id": g["run_id"], "pr": g.get("pr"),
+            "groups_after": len(answers) - first}
+
+
 def key_blind_update(pairs: Iterable[dict], existing: dict | None) -> tuple[dict, list[str]]:
     """The key-blind list after one more corpus: every executable whose
     recorded bytes changed between a PR head and its merge group while the
@@ -752,6 +795,13 @@ def render(result: dict) -> str:
     for row in result["false_skip_rows"][:20]:
         lines.append(f"  false skip: PR {row['pr']} group run {row['group_run_id']}: {row['test_id']} "
                      f"({row['outcome']}, attempts {row['attempts']}; {row['reason']})")
+    if "same_bytes_rows" in result:
+        lines.append(f"  same-bytes nondeterministic {result['same_bytes_nondeterministic']} of "
+                     f"{result['false_skips']} false skips (net {result['false_skips_net']})")
+        for row in result["same_bytes_rows"][:20]:
+            lines.append(f"  same-bytes: group run {row['group_run_id']} {row['test_id']}: head {row['head_run_id']} "
+                         f"{(row['head_digest'] or '-')[:16]} group {(row['group_digest'] or '-')[:16]} "
+                         f"witness {row['witness_run_id'] or 'none'}")
     return "\n".join(lines)
 
 
@@ -789,6 +839,14 @@ def main(argv: list[str]) -> int:
     b.add_argument("--corpus", required=True, type=Path)
     b.add_argument("--list", type=Path, default=REPO_ROOT / "tools" / "ci" / "key_blind_executables.json")
     b.add_argument("--write", action="store_true", help="write the grown list (default: report only)")
+    b.add_argument("--since-commit", default=None,
+                   help="derive --since from a fix commit: the created_at of the first merge group whose "
+                        "checkout contains it (every later group must contain it too)")
+    b.add_argument("--repo", default=str(REPO_ROOT), type=Path, help="local clone for ancestry")
+    b.add_argument("--repository", default="Generous-Corp/pulp")
+    b.add_argument("--since", default=None,
+                   help="only groups created at or after this ISO time: start after the change that "
+                        "made a delisted executable deterministic, or its older misses list it again")
     s = sub.add_parser("score", help="score policies over a corpus or the scenario fixtures")
     group = s.add_mutually_exclusive_group(required=True)
     group.add_argument("--corpus", type=Path)
@@ -801,6 +859,10 @@ def main(argv: list[str]) -> int:
     s.add_argument("--since", default=None, help="score only groups created at or after this ISO time")
     s.add_argument("--min-sample", type=int, default=20)
     s.add_argument("--json", action="store_true")
+    s.add_argument("--same-bytes", action="store_true",
+                   help="also report which false skips are same-bytes nondeterministic (identical executable "
+                        "bytes in head and group, and a third run that passed the test on them); the exit "
+                        "status still counts every false skip")
     a = ap.parse_args(argv)
 
     if a.cmd == "collect":
@@ -811,12 +873,20 @@ def main(argv: list[str]) -> int:
             since = since.replace(tzinfo=dt.timezone.utc)
         import reuse_replay_collect as rrc
         gh = rrc.GitHub(a.repository, a.token, reserve=a.rate_reserve)
-        manifest = rrc.Collector(gh, a.out, a.repo, a.workers).collect(since, until)
+        try:
+            manifest = rrc.Collector(gh, a.out, a.repo, a.workers).collect(since, until)
+        except rrc.ListingShort as err:
+            print(f"collect: LISTING SHORT: {err}; the corpus is not rewritten: every pair needing a missing run "
+                  "would have been dropped", file=sys.stderr)
+            return 1
         print(json.dumps(manifest, indent=2))
         cov = manifest.get("record_coverage") or {}
         print(f"collect: record coverage: {cov.get('without_record')} of {cov.get('executed_jobs')} executed macOS jobs "
               f"since {cov.get('since')} published no reuse record (expected 0); "
               f"{cov.get('interrupted_jobs')} jobs lost their runner before the record step", file=sys.stderr)
+        for row in manifest.get("listing_shortfalls") or []:
+            print(f"collect: instrument event: {row['event']} runs created {row['day']} listed {row['listed']} of "
+                  f"total_count {row['total_count']}; whole when asked again", file=sys.stderr)
         if manifest["merge_groups"] == 0 or manifest["pairs_with_head_run"] == 0:
             print("collect: CONTROL FAILED: no merge groups or no PR-head pairs in the window; "
                   "the instrument is broken, not the history", file=sys.stderr)
@@ -842,7 +912,22 @@ def main(argv: list[str]) -> int:
 
     if a.cmd == "key-blind":
         existing = json.loads(a.list.read_text(encoding="utf-8")) if a.list.is_file() else None
-        doc, added = key_blind_update(Corpus.load(a.corpus).pairs, existing)
+        corpus = Corpus.load(a.corpus)
+        since = a.since
+        if a.since_commit:
+            if a.since:
+                print("key-blind: --since and --since-commit are exclusive", file=sys.stderr)
+                return 2
+            import reuse_replay_collect as rrc
+            try:
+                cut = cutoff_after(corpus, a.since_commit, rrc.ancestry(a.repo, a.repository))
+            except CutoffUnproven as err:
+                print(f"key-blind: CUTOFF UNPROVEN: {err}", file=sys.stderr)
+                return 2
+            since = cut["since"]
+            print(f"key-blind: since {since}: first group containing {a.since_commit} is run "
+                  f"{cut['group_run_id']} (PR #{cut['pr']}); {cut['groups_after']} groups from there all contain it")
+        doc, added = key_blind_update(pairs_since(corpus, since) if since else corpus.pairs, existing)
         for exe in added:
             print(f"key-blind: NEW {exe}")
         print(f"key-blind: {len(doc['executables'])} listed, {len(added)} new")
@@ -862,10 +947,7 @@ def main(argv: list[str]) -> int:
 
     corpus = Corpus.load(a.corpus)
     if a.since:
-        cutoff = _parse_time(a.since if "T" in a.since else a.since + "T00:00:00Z")
-        corpus.pairs = [p for p in corpus.pairs
-                        if (corpus.run(p["group_run_id"]) or {}).get("created_at")
-                        and _parse_time(corpus.run(p["group_run_id"])["created_at"]) >= cutoff]
+        corpus.pairs = pairs_since(corpus, a.since)
     names = a.policy or [p.name for p in POLICIES.values() if p.candidate and p.decide]
     opts = {"receipt_source": a.receipt_source, "contexts": a.contexts, "min_sample": a.min_sample}
     results = []
@@ -875,6 +957,13 @@ def main(argv: list[str]) -> int:
         except (KeyError, PolicyNotImplemented) as err:
             print(f"score: {err}", file=sys.stderr)
             return 2
+    if a.same_bytes:
+        import reuse_replay_collect as rrc
+        for r in results:
+            rows = rrc.same_bytes_evidence(a.corpus, corpus, r["false_skip_rows"])
+            r["same_bytes_rows"] = rows
+            r["same_bytes_nondeterministic"] = sum(1 for x in rows if x["qualifies"])
+            r["false_skips_net"] = r["false_skips"] - r["same_bytes_nondeterministic"]
     if a.json:
         print(json.dumps(results, indent=2))
     else:

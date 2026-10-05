@@ -206,6 +206,25 @@ class BuildListTests(unittest.TestCase):
         for name in ("cmake-nested", "no-command", "compiled"):
             self.assertNotIn(name, self.lst["tests"], name)
 
+    def test_a_shared_walker_lists_what_a_fresh_one_does_for_every_test(self) -> None:
+        # build_list() shares one memoizing Walker across tests; each record
+        # must equal the one a walker that saw no other test produces.
+        for t in self.repo.inventory()["tests"]:
+            if t["name"] in self.lst["tests"]:
+                with self.subTest(test=t["name"]):
+                    self.assertEqual(self.lst["tests"][t["name"]], sti.inputs_for(t, self.repo.root))
+
+    def test_an_argument_longer_than_a_file_name_is_not_an_input(self) -> None:
+        inv = self.repo.inventory()
+        long_arg = "key=true.*" * 40  # 400 bytes in one path component
+        inv["tests"].append({"name": "long-arg", "properties": [{"name": "WORKING_DIRECTORY",
+                             "value": str(self.repo.root)}],
+                             "command": ["/usr/bin/python3", str(self.repo.root / "tools/scripts/test_alpha.py"),
+                                         long_arg]})
+        lst = sti.build_list(inv, self.repo.root)
+        want = [p for p in self.lst["tests"]["alpha"]["inputs"] if p != "test/fixtures/data.txt"]
+        self.assertEqual(lst["tests"]["long-arg"]["inputs"], want)
+
     def test_output_is_sorted_and_repo_relative(self) -> None:
         self.assertEqual(list(self.lst["tests"]), sorted(self.lst["tests"]))
         for rec in self.lst["tests"].values():
@@ -867,6 +886,41 @@ class GateProfileTests(unittest.TestCase):
                 proc = self.run_tool(repo, "--write")
                 self.assertEqual(proc.returncode, 2)
                 self.assertIn("refusing to write", proc.stderr)
+
+
+class GatePlatformTests(unittest.TestCase):
+    def cache(self, repo: Repo, CMAKE_SYSTEM_NAME: str) -> None:
+        # Where CMake records it: not CMakeCache.txt, but CMakeSystem.cmake.
+        write(repo.root / "build", "CMakeFiles/4.3.3/CMakeSystem.cmake",
+              f'set(CMAKE_SYSTEM_NAME "{CMAKE_SYSTEM_NAME}")\n')
+
+    def run_tool(self, repo: Repo, *args: str) -> subprocess.CompletedProcess:
+        inv = repo.root / "build" / "inv.json"
+        inv.parent.mkdir(parents=True, exist_ok=True)
+        inv.write_text(json.dumps(repo.inventory()), encoding="utf-8")
+        return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
+                               "--build-dir", str(repo.root / "build"), "--inventory-json", str(inv), *args],
+                              capture_output=True, text=True, timeout=60, env=tool_env(event=None, strict=False))
+
+    def test_another_platform_skips_by_name_and_never_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.cache(repo, CMAKE_SYSTEM_NAME="Darwin")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            # A Linux configure registers tests the macOS-written list cannot have.
+            self.cache(repo, CMAKE_SYSTEM_NAME="Linux")
+            write(repo.root, "tools/scripts/newmod.py", "")
+            write(repo.root, "tools/scripts/test_alpha.py", "import alpha_lib\nimport newmod\n")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, sti.SKIP_EXIT, proc.stdout + proc.stderr)
+            self.assertIn("SKIPPED: CMAKE_SYSTEM_NAME=Linux", proc.stdout)
+            self.assertIn("this is a skip, not a pass", proc.stdout)
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("refusing to write: CMAKE_SYSTEM_NAME=Linux", proc.stderr)
+            # Control: the same drift on the gate's platform still fails.
+            self.cache(repo, CMAKE_SYSTEM_NAME="Darwin")
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 1)
 
 
 class ScanScopeTests(unittest.TestCase):

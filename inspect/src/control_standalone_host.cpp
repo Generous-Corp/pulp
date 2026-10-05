@@ -3,6 +3,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/host/signal_graph_control.hpp>
 #include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/control_gpu_health_provider.hpp>
 #include <pulp/inspect/control_gpu_health_read_executor.hpp>
@@ -15,6 +16,7 @@
 #include <pulp/inspect/control_sample_region_read_executor.hpp>
 #include <pulp/inspect/control_sequencer_state_executor.hpp>
 #include <pulp/inspect/control_sequencer_transport_executor.hpp>
+#include <pulp/inspect/control_signal_graph_executor.hpp>
 #include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/control_state_read_executor.hpp>
 #include <pulp/inspect/control_state_write_executor.hpp>
@@ -123,6 +125,11 @@ std::atomic<detail::StandaloneControlAuthorHooksFactory>& author_hooks_factory()
 
 std::atomic<detail::StandaloneTimelineDocumentSessionFactory>& timeline_document_session_factory() {
     static std::atomic<detail::StandaloneTimelineDocumentSessionFactory> factory{nullptr};
+    return factory;
+}
+
+std::atomic<detail::StandaloneSignalGraphAuthorityFactory>& signal_graph_authority_factory() {
+    static std::atomic<detail::StandaloneSignalGraphAuthorityFactory> factory{nullptr};
     return factory;
 }
 
@@ -466,6 +473,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                 -> std::optional<ControlTimelineDocumentSessionSource> {
                 return detail::create_standalone_timeline_document_session_source(plan);
             });
+        auto signal_graph_route =
+            make_control_signal_graph_executor([&processor](const ControlAdmissionPlan&) {
+                return detail::create_standalone_signal_graph_authority(processor);
+            });
         ControlOperationExecutor state_executor =
             [state_read = std::move(state_read), state_write = std::move(fenced_state_write),
              sequencer_read = std::move(fenced_sequencer_read),
@@ -475,7 +486,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
              transport_write = std::move(fenced_transport_write),
              timeline_document_session = std::move(timeline_document_session),
              sample_region_read = std::move(fenced_sample_region_read),
-             sample_region_edit = std::move(fenced_sample_region_edit)](
+             sample_region_edit = std::move(fenced_sample_region_edit),
+             signal_graph_route = std::move(signal_graph_route)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")
@@ -496,6 +508,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return sample_region_read(plan, request, context);
                 if (request.operation_id == "dev.pulp.graph/sample-region.edit@1")
                     return sample_region_edit(plan, request, context);
+                if (request.operation_id == "dev.pulp.graph/modulation-route.edit@1")
+                    return signal_graph_route(plan, request, context);
                 if (request.operation_id == "dev.pulp.timeline/document-session@1")
                     return timeline_document_session(plan, request, context);
                 return unavailable_operation();
@@ -1018,6 +1032,21 @@ std::optional<ControlTimelineDocumentSessionSource>
 create_standalone_timeline_document_session_source(const ControlAdmissionPlan& plan) {
     const auto factory = timeline_document_session_factory().load(std::memory_order_acquire);
     return factory ? factory(plan) : std::nullopt;
+}
+
+bool install_standalone_signal_graph_authority_factory(
+    StandaloneSignalGraphAuthorityFactory factory) noexcept {
+    if (!factory)
+        return false;
+    auto expected = static_cast<StandaloneSignalGraphAuthorityFactory>(nullptr);
+    return signal_graph_authority_factory().compare_exchange_strong(
+        expected, factory, std::memory_order_release, std::memory_order_relaxed);
+}
+
+pulp::host::SignalGraphControlAuthority*
+create_standalone_signal_graph_authority(format::Processor& processor) {
+    const auto factory = signal_graph_authority_factory().load(std::memory_order_acquire);
+    return factory ? factory(processor) : nullptr;
 }
 
 bool install_standalone_sample_region_target_factory(
