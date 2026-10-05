@@ -5790,6 +5790,14 @@ for the generated lane to use it.
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
 
+- **Node suites under `browser_capture/` and `jsx-runtime/` must remove every
+  temp dir they make.** The `pulp-browser-capture-node-unit` aggregate runs
+  inside `tools/scripts/tmp_leak_guard.py`, which points `TMPDIR` at a private
+  directory and fails the test if anything is left there. Put a suite's
+  scratch under one `mkdtempSync` root removed by node:test's `after()` (or a
+  per-test `t.after()`), as `materialized_state_atlas.test.mjs` does. Before
+  the guard, that one file left 21 directories per run on the boot volume.
+
 - **A per-node clip RECTANGLE cannot carry a rounded clipper, and the node that
   renders wrong is not the node that owns the radius.** Lowering flattens the
   tree and gives each node its own resolved clip, deliberately dropping

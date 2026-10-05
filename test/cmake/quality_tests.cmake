@@ -342,6 +342,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # Temp-leak guard: wraps a test command in a private temp directory and
+    # fails when the command leaves anything there (see its use on the Node
+    # unit aggregate in design_import_tool_cli_tests.cmake).
+    add_test(NAME tmp-leak-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_tmp_leak_guard.py")
+
     # Shared Catch2 test PCH: the configure-time ledger says which suites reuse
     # a carrier; this reads the generator's compile lines back and proves it
     # (carrier named by -include-pch, matching -std, no carrier-only -D). The

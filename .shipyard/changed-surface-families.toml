@@ -3868,6 +3868,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b65ea4a4ca0e"
+paths = ["tools/scripts/test_tmp_leak_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "tmp-leak-guard-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-9ece129bb475"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
@@ -5156,6 +5183,7 @@ paths = [
   "tools/scripts/test_summarize_daw_bench_results.py",
   "tools/scripts/test_tart_home_resolution.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
+  "tools/scripts/test_tmp_leak_guard.py",
   "tools/scripts/test_tools_registry_check.py",
   "tools/scripts/test_trace_frame_cost.py",
   "tools/scripts/test_trace_span_category_lint.py",
@@ -5283,6 +5311,7 @@ tests = [
   "timeline-schema-js-drift",
   "timeline-schema-ts-drift",
   "timeline-sync-soak-verifier-self-test",
+  "tmp-leak-guard-selftest",
   "tool-registry-reminder-hook",
   "tools-registry-check",
   "tools-registry-check-selftest",
@@ -5652,6 +5681,7 @@ paths = [
   "tools/scripts/test_summarize_daw_bench_results.py",
   "tools/scripts/test_tart_home_resolution.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
+  "tools/scripts/test_tmp_leak_guard.py",
   "tools/scripts/test_tools_registry_check.py",
   "tools/scripts/test_trace_frame_cost.py",
   "tools/scripts/test_trace_span_category_lint.py",
