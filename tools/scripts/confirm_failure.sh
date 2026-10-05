@@ -26,7 +26,9 @@
 #   confirm_failure.sh --file <path> --break <sed/perl cmd> \
 #                      --build-dir <dir> --target <cmake target> \
 #                      --test <command> [--jobs N] [--object <basename>] \
-#                      [--subject <binary>]
+#                      [--subject <binary>] [--keep-logs]
+#
+# --keep-logs keeps the per-phase test logs after a CONFIRMED run too.
 #
 # --subject names the compiled binary the edit must reach when it is not the
 # test's own executable: a CLI shell-out suite fingerprints as
@@ -78,6 +80,12 @@
 #      cover the change
 #   2  INCONCLUSIVE — the loop could not be run honestly (dirty file, build
 #      never picked up the edit, test already failing, restore failed)
+#
+# Each phase's test output (baseline, broken, restored) goes to its own log in
+# a temp directory. A NOT CONFIRMED or INCONCLUSIVE verdict keeps the directory
+# and prints the log of the phase that decided it with its tail, so a wrong
+# verdict leaves its evidence. CONFIRMED removes it, unless --keep-logs is
+# given, in which case it keeps it and prints its path.
 
 set -uo pipefail
 
@@ -91,6 +99,7 @@ JOBS=""
 OBJECT=""
 NO_BUILD=0
 PYTHON_MODE=0
+KEEP_LOGS=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -104,6 +113,7 @@ while [ $# -gt 0 ]; do
         --object)    OBJECT="$2"; shift 2 ;;
         --no-build)  NO_BUILD=1; shift ;;
         --python)    NO_BUILD=1; PYTHON_MODE=1; shift ;;
+        --keep-logs) KEEP_LOGS=1; shift ;;
         -h|--help)   sed -n '3,40p' "$0"; exit 0 ;;
         *) echo "confirm-failure: unknown argument '$1'" >&2; exit 2 ;;
     esac
@@ -139,7 +149,19 @@ if [ -z "$JOBS" ]; then
 fi
 
 say() { printf 'confirm-failure: %s\n' "$1"; }
-die_inconclusive() { say "INCONCLUSIVE — $1"; exit 2; }
+
+# Created by the first test run, so a run that stops before any test leaves
+# nothing behind.
+TEST_LOG_DIR=""
+LAST_TEST_LOG=""
+
+# Name the log of the phase that decided the verdict and show its tail.
+show_test_log() {
+    [ -n "$LAST_TEST_LOG" ] || return 0
+    say "test output ($(basename "$LAST_TEST_LOG" .log)): $LAST_TEST_LOG"
+    tail -n 20 "$LAST_TEST_LOG" | sed 's/^/    | /'
+}
+die_inconclusive() { say "INCONCLUSIVE — $1"; show_test_log; exit 2; }
 
 [ -f "$FILE" ] || die_inconclusive "no such file: $FILE"
 
@@ -341,17 +363,20 @@ purge_pycache() {
 }
 
 run_test() {
+    [ -n "$TEST_LOG_DIR" ] ||
+        TEST_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/confirm-failure.XXXXXX")"
+    LAST_TEST_LOG="$TEST_LOG_DIR/$1.log"
     if [ "$PYTHON_MODE" -eq 1 ]; then
         purge_pycache
         local prefix rc
         prefix="$(mktemp -d)"
         ( export PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="$prefix"
-          eval "$TEST_CMD" ) > /dev/null 2>&1
+          eval "$TEST_CMD" ) > "$LAST_TEST_LOG" 2>&1
         rc=$?
         rm -rf "$prefix"
         return "$rc"
     fi
-    ( eval "$TEST_CMD" ) > /dev/null 2>&1
+    ( eval "$TEST_CMD" ) > "$LAST_TEST_LOG" 2>&1
 }
 
 restore() {
@@ -365,7 +390,7 @@ restore() {
 say "checking the test passes before the edit"
 invalidate
 build_and_verify_recompile "baseline" || die_inconclusive "could not build a clean baseline"
-if ! run_test; then
+if ! run_test baseline; then
     die_inconclusive "the test already fails before any edit; fix that first"
 fi
 BASELINE_BINARY="$(binary_fingerprint)"
@@ -400,6 +425,7 @@ if [ "$BUILD_STATUS" -eq 2 ]; then
 fi
 
 BROKEN_PASSES=0
+BROKEN_TEST_LOG=""
 if [ "$BUILD_STATUS" -eq 0 ]; then
     # The binary must differ from the one the baseline ran. If it does not, the
     # edit never reached what the test executes and any verdict here would be
@@ -411,14 +437,15 @@ if [ "$BUILD_STATUS" -eq 0 ]; then
     edit did not reach what the test runs, so no verdict is possible. If the
     test drives a different compiled binary, name it with --subject <path>"
     fi
-    if run_test; then BROKEN_PASSES=1; fi
+    if run_test broken; then BROKEN_PASSES=1; fi
+    BROKEN_TEST_LOG="$LAST_TEST_LOG"
 fi
 
 # ── 3. Put it back and prove we are green again ──────────────────────────────
 say "restoring $FILE"
 restore || die_inconclusive "could not restore $FILE — the tree is left dirty"
 build_and_verify_recompile "restored" || die_inconclusive "could not rebuild after restoring"
-if ! run_test; then
+if ! run_test restored; then
     die_inconclusive "the test does not pass after restoring; the tree may be inconsistent"
 fi
 
@@ -428,8 +455,15 @@ if [ "$BROKEN_PASSES" -eq 1 ]; then
     say "  It does not cover this change. Common causes: the assertion restates"
     say "  what the code assumes, the broken path is never reached by the inputs"
     say "  under test, or a guard skips the check when the thing it needs is absent."
+    LAST_TEST_LOG="$BROKEN_TEST_LOG"
+    show_test_log
     exit 1
 fi
 
 say "CONFIRMED — the test passes with the fix and fails without it."
+if [ "$KEEP_LOGS" -eq 1 ]; then
+    say "test output: $TEST_LOG_DIR"
+else
+    rm -rf "$TEST_LOG_DIR"
+fi
 exit 0
