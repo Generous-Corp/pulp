@@ -137,9 +137,9 @@ needs its own receipt:
 
 | Host tier | Permitted use before a real provider receipt | Promotion evidence required |
 | --- | --- | --- |
-| M1 Max | CPU/reference work and Dawn feasibility experiments | paced named-model receipt with zero unexplained fallback and deadline margin |
-| M3 Ultra | block-parallel MLX/Dawn experiments and multi-instance profiling | the same receipt plus useful accelerator parallelism and reset/device-loss evidence |
-| M5 Max/Studio | primary sustained GPU-audio campaign candidate | the same receipt at production block sizes, with independent cold starts and packaging identity |
+| M1 Max | CPU/reference work and Dawn feasibility experiments | host-bound named-model receipt with provider/executable identity, CPU shadow parity and quality, 100,000 paced blocks, the full block/rate/channel/instance matrix, zero unexplained fallback, p95/p99 deadline margin, model/license/package hashes, and reset/device-loss evidence before any host claim |
+| M3 Ultra | block-parallel MLX/Dawn experiments and multi-instance profiling | the same host-bound receipt plus measured accelerator parallelism, instance-scaling evidence, reset/device-loss recovery, and proof that GPU work is useful at production block sizes |
+| M5 Max/Studio | primary sustained GPU-audio campaign candidate | the same host-bound receipt at production block sizes, with independent-process cold starts, signed package identity, serialized model/license hashes, and no cross-host promotion |
 
 Results remain host-specific. A pass on M5 does not promote M1 or M3, and a
 control that runs on all three does not prove that a persistent audio node
