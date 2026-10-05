@@ -3189,7 +3189,8 @@
             "preserves controller order exactly, ties included",
             "carries a chased controller origin",
             "rejects malformed controller records",
-            "a version 3 reader accepts a version 2 payload"
+            "a version 3 reader accepts a version 2 payload",
+            "::operator new[](bytes, std::align_val_t{kProgramWireAlignment})"
           ]
         }
       ],
