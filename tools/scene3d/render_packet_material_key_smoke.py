@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from scene3d_launch import argv_for
 
 
 EXPECTED_FEATURES = (
@@ -282,7 +283,7 @@ def main():
             encoding="utf-8")
 
         result = subprocess.run(
-            [str(args.inspect_tool), "--render-packet", str(scene_path)],
+            [*argv_for(args.inspect_tool), "--render-packet", str(scene_path)],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
