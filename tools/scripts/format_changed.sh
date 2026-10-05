@@ -220,6 +220,11 @@ printf 'SCANNED\n' > "$report"
     else
         ranges="$(hunk_ranges "$f")"
         [ -n "$ranges" ] || continue
+        # Include sorting ignores --lines: one new #include re-sorts its whole
+        # block, rewriting (and, in --check, blaming) lines nobody touched. An
+        # edited file keeps its include order; a new file is sorted whole.
+        ranges="$ranges
+--sort-includes=false"
     fi
     # shellcheck disable=SC2086  # ranges are one --lines= per word
     if [ "$check" -eq 1 ]; then

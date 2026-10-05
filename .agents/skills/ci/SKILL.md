@@ -11418,7 +11418,9 @@ which also RUNS each shell caller's block against a stub `format_changed.sh`
 fix cannot clear. It once read the formatter's output through `$(...)`, which
 strips trailing newlines, so every touched file ending in a blank line read
 dirty while `format_changed.sh` left it alone; it now keeps the output
-byte-for-byte (`tools/scripts/test_format_changed.sh` pins that case).
+byte-for-byte (`tools/scripts/test_format_changed.sh` pins that case). Include sorting ignores `--lines`: one new `#include` re-sorts its whole
+block, rewriting and blaming lines nobody touched, so an edited file is
+formatted with `--sort-includes=false`; a new file is still sorted whole.
 
 ### Its `--lines` output is not always what clang-format would produce
 

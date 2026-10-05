@@ -38,7 +38,7 @@ for a in "$@"; do
     case "$a" in
         -i) inplace=1 ;;
         --lines=*) ranges="$ranges ${a#--lines=}" ;;
-        --style=*) ;;
+        --style=*|--sort-includes=*) ;;
         *) file="$a" ;;
     esac
 done
@@ -293,6 +293,25 @@ printf 'line1\nline2\nF:CHANGED\nline4\nline5\n\n' > "$repo/core/a.cpp"
 run "$repo" "$fake" --check
 expect_rc "trailing blank line, touched lines already formatted → --check clean" 0
 expect_no_out "trailing blank line → no spurious end-of-file hunk" "need formatting"
+rm -rf "$repo"
+
+# ── include sorting stays off for an edited file, on for a new one ─────────
+# clang-format sorts a whole include block even under --lines, so one added
+# #include would rewrite lines nobody touched. The fake logs its argv.
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+printf 'n1\n' > "$repo/core/new.cpp"
+run "$repo" "$fake" --check
+if grep -E -- 'core/a\.cpp' "$repo/fake.log" | grep -q -- '--sort-includes=false'; then
+    ok "edited file → formatter called with --sort-includes=false"
+else
+    bad "edited file → formatter called with --sort-includes=false" "$(cat "$repo/fake.log")"
+fi
+if grep -E -- 'core/new\.cpp' "$repo/fake.log" | grep -q -- '--sort-includes=false'; then
+    bad "new file → include sorting left on" "$(cat "$repo/fake.log")"
+else
+    ok "new file → include sorting left on"
+fi
 rm -rf "$repo"
 
 # ── path restriction ────────────────────────────────────────────────────────
