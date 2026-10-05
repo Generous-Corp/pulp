@@ -9,6 +9,7 @@ import pathlib
 import re
 import os
 import subprocess
+import time
 import tempfile
 import sys
 from typing import Any
@@ -16,6 +17,13 @@ from typing import Any
 
 SHA = re.compile(r"[0-9a-f]{40}")
 MAX_COMMITS = 128
+# A history fetch reconnecting a shallow checkout takes seconds (p99 45 s over
+# 766 gate runs); one hung for 43 min with no output and turned the required
+# gate red before any build. All candidate fetches share this budget, so the
+# whole hydration stays inside its step's timeout-minutes. Past it a fetch is
+# treated exactly like an unfetchable ref: warn, and let the fail-closed
+# ancestry checks decide.
+FETCH_TIMEOUT_SECONDS = 300
 
 
 class HydrationError(RuntimeError):
@@ -311,14 +319,28 @@ def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
             raise HydrationError("shallow checkout lacks an exact GITHUB_REF to hydrate")
         failures = []
         event_sha = os.environ.get("GITHUB_SHA", "")
+        deadline = time.monotonic() + FETCH_TIMEOUT_SECONDS
         for candidate in event_ref_candidates(event_ref, event_sha):
-            completed = subprocess.run(
-                [
-                    "git", "fetch", "--no-tags", "--unshallow", remote,
-                    f"+{candidate}:refs/pulp-ci/gpu-provenance/event",
-                ],
-                cwd=root, text=True, capture_output=True, check=False,
-            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                failures.append(
+                    f"{candidate}: not fetched; the {FETCH_TIMEOUT_SECONDS} s fetch budget is spent"
+                )
+                continue
+            command = [
+                "git", "fetch", "--no-tags", "--unshallow", remote,
+                f"+{candidate}:refs/pulp-ci/gpu-provenance/event",
+            ]
+            try:
+                completed = subprocess.run(
+                    command, cwd=root, text=True, capture_output=True, check=False,
+                    timeout=remaining,
+                )
+            except subprocess.TimeoutExpired:
+                failures.append(
+                    f"{candidate}: fetch did not finish within {FETCH_TIMEOUT_SECONDS} s"
+                )
+                continue
             if completed.returncode == 0:
                 break
             output = (completed.stderr or completed.stdout).strip()

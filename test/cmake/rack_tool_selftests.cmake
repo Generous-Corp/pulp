@@ -37,6 +37,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME rack-prompt-fidelity-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/rack/test_prompt_fidelity.py")
     set_tests_properties(rack-prompt-fidelity-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 600)
+    add_test(NAME rack-prompt-handoff-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/rack/test_prompt_handoff.py")
+    set_tests_properties(rack-prompt-handoff-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 120)
     add_test(NAME rack-patch-lang-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/rack/test_patch_lang.py")
     set_tests_properties(rack-patch-lang-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 120)

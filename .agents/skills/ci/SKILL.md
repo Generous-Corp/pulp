@@ -4039,7 +4039,11 @@ The fix is a literal `--parallel 4` on those hosted 4-core legs, the same as
 annotations ("The job has exceeded the maximum execution time"), not by grepping
 the log, which also matches the workflow's own comments about `timeout-minutes`.
 On a PR the `windows` check is an Ubuntu aggregate that compiles and tests nothing
-on Windows (see `docs/guides/test-lanes.md`).
+on Windows (see `docs/guides/test-lanes.md`). The nightly's Windows Test step runs
+after a Build that finished with errors, not only after a clean one: MSBuild keeps
+building the other projects, so the targets that built are tested and the broken
+ones read "Not Run". The job stays red because Build failed; do not read a Windows
+ctest summary in a red nightly as a green build.
 
 Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
 and its `tracking-issues` job find-or-creates a per-platform issue on failure,
@@ -11626,6 +11630,18 @@ Two rules follow, and they generalise past this step:
 When adding any step to a required gate, ask whether it can fail because a
 service outside this fleet is down. If it can, you have handed the merge queue
 to someone else's uptime.
+
+## An unbounded network call in the required gate is a defect on sight
+
+A step that waits on the network with no timeout turns one stalled connection into a
+red required gate with nothing built: `hydrate_gpu_provenance_commits.py`'s
+`git fetch --unshallow` once held the `macos` gate for 43 minutes with no output
+(1 of 766 runs). Bound the call itself (that script now shares a 300 s budget across
+its fetches and then lets its fail-closed checks decide) and give the step a
+`timeout-minutes` above that budget. When measuring how often a step hangs, query
+jobs with `filter=all`: the jobs API defaults to the latest attempt, which hides the
+cancelled attempt you are looking for.
+
 
 ## Design-import clean-output and Vellum boundary gates
 

@@ -189,9 +189,8 @@ min_jobs() {
 available_cores() {
   local status avail
   status="$("$TARTCI_BIN" leases status --json 2>/dev/null)" || return 0
-  avail="$(printf '%s' "$status" \
-    | grep -o '"non_gate_available_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
-    | grep -o '[0-9][0-9]*$' | head -n 1 || true)"
+  avail="$(grep -o '"non_gate_available_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' <<<"$status" \
+    | grep -o '[0-9][0-9]*$' | sed -n 1p || true)"
   if [ -n "$avail" ]; then echo "$avail"; fi
   return 0
 }
@@ -271,14 +270,13 @@ find_tartci() {
 
 # Named capacity field from `tartci leases status --json`, or "" if unknown.
 status_field() {
-  printf '%s' "$1" \
-    | grep -o "\"$2\"[[:space:]]*:[[:space:]]*[0-9][0-9]*" \
-    | grep -o '[0-9][0-9]*$' | head -n 1 || true
+  grep -o "\"$2\"[[:space:]]*:[[:space:]]*[0-9][0-9]*" <<<"$1" \
+    | grep -o '[0-9][0-9]*$' | sed -n 1p || true
 }
 
 # Value of KEY in `tartci host-profile` output ($1), or "".
 profile_value() {
-  printf '%s\n' "$1" | awk -F= -v k="$2" '$1 == k {print $2; exit}'
+  awk -F= -v k="$2" '$1 == k {print $2; exit}' <<<"$1"
 }
 
 # The build class this invocation runs as: interactive (default) or background.
@@ -301,7 +299,7 @@ probe_jobs() {
     TARTCI_BIN="$(find_tartci)"
   fi
   if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; then
-    jobs="$(printf '%s\n' "$profile" | awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}')"
+    jobs="$(awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}' <<<"$profile")"
     positive_int "$jobs" || jobs="$(tier0_jobs)"
     if positive_int "$requested" && [ "$requested" -lt "$jobs" ]; then jobs="$requested"; fi
     status="$("$TARTCI_BIN" leases status --json 2>/dev/null)" || status=""
@@ -524,10 +522,9 @@ acquire_floor_lease() {
     --id "$LEASE_ID" --cores "$1" --priority build --allow-floor ${class_args[@]+"${class_args[@]}"} \
     --kind shipyard-local --owner "governed-build" --pid "$$" \
     --job-id "${GITHUB_RUN_ID:-}" --json 2>/dev/null)" || return 1
-  printf '%s' "$out" | grep -q '"ok"[[:space:]]*:[[:space:]]*true' || return 1
-  size="$(printf '%s' "$out" \
-    | grep -o '"lease_size_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
-    | grep -o '[0-9][0-9]*$' | head -n 1 || true)"
+  grep -q '"ok"[[:space:]]*:[[:space:]]*true' <<<"$out" || return 1
+  size="$(grep -o '"lease_size_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' <<<"$out" \
+    | grep -o '[0-9][0-9]*$' | sed -n 1p || true)"
   if ! positive_int "$size" || [ "$size" -gt "$1" ]; then
     # A grant this script cannot size must not run unbounded, and it must not
     # stay held either: hand it back and treat the attempt as a denial.
@@ -535,9 +532,9 @@ acquire_floor_lease() {
     return 1
   fi
   FLOOR_CORES="$size"
-  if printf '%s' "$out" | grep -q '"floor"[[:space:]]*:[[:space:]]*true'; then
+  if grep -q '"floor"[[:space:]]*:[[:space:]]*true' <<<"$out"; then
     FLOOR_QOS="background"
-    if printf '%s' "$out" | grep -q '"qos"[[:space:]]*:[[:space:]]*"utility"'; then
+    if grep -q '"qos"[[:space:]]*:[[:space:]]*"utility"' <<<"$out"; then
       FLOOR_QOS="utility"
     fi
   fi
@@ -599,11 +596,10 @@ acquire_class_lease() {
     err="$(cat "$errf" 2>/dev/null || true)"
     rm -f "$errf"
   fi
-  if ! printf '%s' "$out" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
-    reason="$(printf '%s' "$out" \
-      | grep -o '"reason"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 \
+  if ! grep -q '"ok"[[:space:]]*:[[:space:]]*true' <<<"$out"; then
+    reason="$(grep -o '"reason"[[:space:]]*:[[:space:]]*"[^"]*"' <<<"$out" | sed -n 1p \
       | sed 's/.*"\([^"]*\)"$/\1/' || true)"
-    detail="$(printf '%s\n' "$err" | awk 'NF {print; exit}' | cut -c1-200)"
+    detail="$(awk 'NF {print; exit}' <<<"$err" | cut -c1-200)"
     if [ -n "$reason" ] || [ "$rc" = 75 ]; then
       LEASE_FAIL_REASON="denied by tartci after ${took}s (asked $cores, min $min, waited up to ${wait}s): ${reason:-no reason given}"
     elif [ "$rc" != 0 ]; then
@@ -614,9 +610,8 @@ acquire_class_lease() {
     LEASE_ID=""
     return 1
   fi
-  size="$(printf '%s' "$out" \
-    | grep -o '"lease_size_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
-    | grep -o '[0-9][0-9]*$' | head -n 1 || true)"
+  size="$(grep -o '"lease_size_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' <<<"$out" \
+    | grep -o '[0-9][0-9]*$' | sed -n 1p || true)"
   if ! positive_int "$size" || [ "$size" -gt "$cores" ]; then
     LEASE_FAIL_REASON="tartci granted an unusable size (lease_size_cores=${size:-missing}, asked $cores); handed it back"
     "$TARTCI_BIN" leases release --id "$LEASE_ID" --json >/dev/null 2>&1 || true
@@ -656,8 +651,8 @@ if [ "$profile_rc" = 0 ]; then
   # invocation relied, even when tartci was found outside the child's PATH.
   export PULP_GOVERNED_TARTCI_BIN="$TARTCI_BIN"
   # Host profile is available → size the lease from it.
-  jobs="$(printf '%s\n' "$profile" | awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}')"
-  qos="$(printf '%s\n' "$profile" | awk -F= '/^TARTCI_AGENT_QOS=/{print $2; exit}')"
+  jobs="$(awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}' <<<"$profile")"
+  qos="$(awk -F= '/^TARTCI_AGENT_QOS=/{print $2; exit}' <<<"$profile")"
   governor_schema="$(profile_value "$profile" TARTCI_GOVERNOR_SCHEMA)"
   if [ "$BUILD_CLASS" = "interactive" ]; then
     # Someone is waiting: never background QoS, whatever the host role says.

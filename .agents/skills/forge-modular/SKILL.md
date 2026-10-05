@@ -27,6 +27,23 @@ the toolchain tree list in `tools/rack/install_toolchain.sh`, and the generator'
 `INCLUDES` in `tools/rack/generate.py` (preflight and syntax compilation). A pack that
 misses it fails at the compiler after the model has already been called.
 
+## The prompt reaches the generator by file, never as an argument
+
+Linux refuses any single argument over 128 KiB and macOS refuses argv plus the
+environment over 1 MiB, and both fail with E2BIG before the tool starts, so a
+long request cannot travel on the generator's command line. `patch.py build`
+and `generate.py` therefore accept `--prompt-file PATH` in the prompt's place:
+`prompt_handoff.resolve()` puts the file's text back into argv at that position
+(decoded as CPython decodes argv), deletes the file, and refuses a NUL byte. A
+positional prompt still works from the command line.
+
+The app half lives in the Forge repository, not here: Forge's
+`src/process_engine.cpp` is the shipping ProcessEngine, and Pulp's
+`forge-seam/modular/` copy is an older staging snapshot that no build uses.
+Change the engine in Forge, and test the app-to-generator boundary there
+against these tools. A stub generator in a Forge test must read
+`--prompt-file`, not `sys.argv[2]`, once the engine passes it.
+
 ## A run that fails still has to hand something over
 
 `generate()` returns `(patch, why, shortfall)`. `shortfall` is `None` on a pass

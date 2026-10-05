@@ -8,7 +8,7 @@ counter, or a model that merely produces plausible audio is insufficient.
 ## Current source boundary
 
 The source snapshot for this plan is `origin/main` at
-`ab7e48d234bf8ce034b2abd47796d074bd39f4c5`. It includes the private CPU
+`b038559ab2d019566c4964d42c0786310c139860`. It includes the private CPU
 neural lifecycle facade, manifest/installed-asset admission, serialized NAM/TCN
 CPU bridge, the tools-only `tools/validation/mlx_worker_harness.py` probe,
 the Apple host-tier planning matrix, and the later CI/pluginval and CLAP-width
@@ -127,7 +127,10 @@ quality metric is within the predeclared tolerance.
 ## Apple Silicon service matrix
 
 M1, M3, and M5 are valid experiment hosts, but a control-path measurement is
-not a neural-provider support claim. Existing native-control observations
+not a neural-provider support claim. The current protected source is
+[`b038559ab2d019566c4964d42c0786310c139860`](https://github.com/Generous-Corp/pulp/commit/b038559ab2d019566c4964d42c0786310c139860),
+which includes the named-model MLX, host-evidence, GPU lifecycle, and provenance
+merges ([PR 9577](https://github.com/Generous-Corp/pulp/pull/9577), [PR 9602](https://github.com/Generous-Corp/pulp/pull/9602), [PR 9525](https://github.com/Generous-Corp/pulp/pull/9525), and [PR 9605](https://github.com/Generous-Corp/pulp/pull/9605)). Existing native-control observations
 reported GPU p50 values of 10.250 us on M1 Max, 6.792 us on M3 Ultra, and
 7.292 us on M5 Max. Those runs had observer and allocation confounders, so
 they prove cross-generation availability only. Each provider and model still
