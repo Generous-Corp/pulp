@@ -977,25 +977,36 @@ TEST_CASE("QuickJS precompile_scripts fills the bytecode cache a later realm rea
 TEST_CASE("QuickJS evaluate_script waits for an in-flight precompile of the same source",
           "[view][js-engine][editor-open]") {
     clear_script_bytecode_cache();
-    // Big enough that compiling it takes far longer than the head start below.
-    std::string code = "var __bc_total = 1;\n";
-    while (code.size() < 6 * 1024 * 1024)
-        code += "__bc_total += 1; // padding so the compile is slow enough to overlap\n";
-    code += "__bc_total;\n";
+    const auto code = large_counting_script(21);
 
-    std::atomic<bool> started{false};
-    std::size_t precompiled = 0;
-    std::thread worker([&] {
-        started.store(true);
-        precompiled = precompile_scripts({code});
+    // Hold the precompile in flight -- it has claimed the source and not yet
+    // compiled it -- until the editor-side evaluation is waiting on it, so the
+    // overlap does not depend on timing.
+    std::atomic<bool> claimed{false};
+    std::atomic<bool> saw_waiter{false};
+    detail::set_precompile_claim_hook_for_tests([&](const std::string&) {
+        claimed.store(true);
+        const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (script_bytecode_cache_stats().waits == 0
+               && std::chrono::steady_clock::now() < give_up)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        saw_waiter.store(script_bytecode_cache_stats().waits > 0);
     });
-    while (!started.load()) std::this_thread::yield();
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::size_t precompiled = 0;
+    std::thread worker([&] { precompiled = precompile_scripts({code}); });
+    // Bounded: without the hook nothing ever sets `claimed`, and the test must
+    // fail rather than hang.
+    const auto claim_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!claimed.load() && std::chrono::steady_clock::now() < claim_deadline)
+        std::this_thread::yield();
+    CHECK(claimed.load());
 
     auto engine = create_js_engine(JsEngineType::quickjs);
     const auto result = engine->evaluate_script(code).getWithDefault<double>(-1);
     worker.join();
-    CHECK(result > 1);
+    detail::set_precompile_claim_hook_for_tests({});
+    CHECK(result > 21);
+    CHECK(saw_waiter.load());
 
     // The editor-side evaluation waited for the background compile and read
     // its bytecode: the source was compiled exactly once, by the precompiler.
