@@ -11626,3 +11626,15 @@ Two rules follow, and they generalise past this step:
 When adding any step to a required gate, ask whether it can fail because a
 service outside this fleet is down. If it can, you have handed the merge queue
 to someone else's uptime.
+
+## An unbounded network call in the required gate is a defect on sight
+
+A step that waits on the network with no timeout turns one stalled connection into a
+red required gate with nothing built: `hydrate_gpu_provenance_commits.py`'s
+`git fetch --unshallow` once held the `macos` gate for 43 minutes with no output
+(1 of 766 runs). Bound the call itself (that script now shares a 300 s budget across
+its fetches and then lets its fail-closed checks decide) and give the step a
+`timeout-minutes` above that budget. When measuring how often a step hangs, query
+jobs with `filter=all`: the jobs API defaults to the latest attempt, which hides the
+cancelled attempt you are looking for.
+
