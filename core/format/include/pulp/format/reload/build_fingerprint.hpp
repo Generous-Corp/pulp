@@ -27,7 +27,7 @@ inline constexpr uint32_t kBuildFingerprintSchema = 1;
 
 struct BuildFingerprint {
     uint32_t schema_version = 0;
-    int32_t cpp_standard = 0;       // __cplusplus
+    int32_t cpp_standard = 0;       // __cplusplus (_MSVC_LANG under MSVC)
     uint8_t sample_precision = 0;   // bits: 32 (float) / 64 (double)
     char compiler[64] = {};         // "clang 17.0.0" / "gcc 13.2.0" / "msvc 1939"
     char target[48] = {};           // "arm64-macos"
@@ -50,7 +50,13 @@ inline void set_field(char* dst, std::size_t cap, const char* src) {
 inline BuildFingerprint current_build_fingerprint() {
     BuildFingerprint fp{};
     fp.schema_version = kBuildFingerprintSchema;
+#if defined(_MSVC_LANG)
+    // MSVC reports __cplusplus as 199711 unless /Zc:__cplusplus is set;
+    // _MSVC_LANG always carries the selected language standard.
+    fp.cpp_standard = static_cast<int32_t>(_MSVC_LANG);
+#else
     fp.cpp_standard = static_cast<int32_t>(__cplusplus);
+#endif
     fp.sample_precision = static_cast<uint8_t>(sizeof(float) * 8);
 
 #if defined(__clang__)
