@@ -73,7 +73,7 @@ import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mj
 import {
   materializedCoordinateSpaceFromQuad,
 } from "./materialized_coordinate_space.mjs";
-import { trustedVendorPayload } from "./vendor_payload.mjs";
+import { trustedCapturedVendorPayload } from "./vendor_payload.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -911,7 +911,7 @@ async function captureMaterializedDocument(cdp) {
     if (emptyScript && javascriptMime &&
         (declaredVendor === 'react' || declaredVendor === 'react-dom' || declaredVendor === 'babel') &&
         scriptRefs.every((ref) => !ref.vendor || ref.vendor === declaredVendor) &&
-        trustedVendorPayload(
+        trustedCapturedVendorPayload(
           declaredVendor, Buffer.from(dataBase64, "base64").toString("utf8"))) {
       asset.vendor_kind = declaredVendor;
     }
