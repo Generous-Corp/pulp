@@ -33,9 +33,15 @@ const asset = (id, source) => ({
 });
 
 function fixture() {
-  const react = '/** @license React react.development.js */';
-  const reactDom = '/** @license React react-dom.development.js */';
-  const babel = `.Babel=${' '.repeat(1_000_000)}transform`;
+  // Keep the fixture payloads representative of the capture adapter's trust
+  // gate.  Marker-only payloads must remain in the document and would make
+  // this conformance probe fail before it can exercise canonicalization.
+  const react = '/** @license React react.development.js */\n' +
+    'ReactVersion createElement ' + ' '.repeat(32 * 1024);
+  const reactDom = '/** @license React react-dom.development.js */\n' +
+    'ReactVersion createRoot ' + ' '.repeat(32 * 1024);
+  const babel = `.Babel=${' '.repeat(1_000_000)}` +
+    'transformScriptTags registerPlugin';
   return {
     schema: 'pulp-materialized-browser-document-v1',
     version: 1,
