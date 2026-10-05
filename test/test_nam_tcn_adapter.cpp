@@ -406,3 +406,103 @@ TEST_CASE("serialized NAM loader rejects divergent runtime head scale",
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
 }
+
+TEST_CASE("serialized NAM loader preserves the live artifact on a failed replacement",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    std::ifstream source(fixture_path());
+    std::stringstream contents;
+    contents << source.rdbuf();
+    auto replacement = contents.str();
+    const auto sample_rate_marker = std::string("\"sample_rate\": 48000");
+    const auto sample_rate_position = replacement.find(sample_rate_marker);
+    REQUIRE(sample_rate_position != std::string::npos);
+    replacement.replace(sample_rate_position, sample_rate_marker.size(), "\"sample_rate\": 0");
+    const auto weight_marker = std::string("-0.6180188059806824");
+    const auto weight_position = replacement.find(weight_marker);
+    REQUIRE(weight_position != std::string::npos);
+    replacement.replace(weight_position, weight_marker.size(), "10.0");
+    const auto path = std::filesystem::temp_directory_path() / "pulp-nam-loader-transaction.nam";
+    {
+        NamTcnArtifact artifact;
+        REQUIRE(artifact.load(fixture_path()));
+        std::array<float, 8> input{};
+        for (std::size_t i = 0; i < input.size(); ++i)
+            input[i] = std::sin(static_cast<float>(i) * 0.17f);
+        std::array<float, 8> expected{};
+        artifact.process(input.data(), expected.data(), input.size());
+        artifact.reset();
+
+        std::ofstream output(path);
+        output << replacement;
+        output.close();
+        std::string error;
+        CHECK_FALSE(artifact.load(path.string(), &error));
+        CHECK(artifact.loaded());
+        CHECK(artifact.sample_rate() == Catch::Approx(48000.0));
+        CHECK(artifact.receptive_field() == 22);
+        CHECK(artifact.state_bytes() == 232);
+
+        std::array<float, 8> replay{};
+        artifact.reset();
+        artifact.process(input.data(), replay.data(), input.size());
+        CHECK(replay == expected);
+    }
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+TEST_CASE("serialized NAM adapter keeps the live preparation on a failed replacement",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    std::ifstream source(fixture_path());
+    std::stringstream contents;
+    contents << source.rdbuf();
+    const auto path = std::filesystem::temp_directory_path() / "pulp-nam-adapter-transaction.nam";
+    {
+        std::ofstream output(path);
+        output << contents.str();
+    }
+
+    const auto spec_value = artifact_spec();
+    NamTcnArtifactAdapter model(spec_value, path.string());
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "example.nam",
+                                                 .artifact_hash = spec_value.weights_hash,
+                                                 .max_frames = 128};
+    REQUIRE(model.prepare(context));
+
+    std::array<float, 8> input{};
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = std::sin(static_cast<float>(i) * 0.17f);
+    std::array<float, 8> expected{};
+    const float* input_channels[] = {input.data()};
+    float* expected_channels[] = {expected.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, input.size());
+    auto expected_view = pulp::audio::BufferView<float>(expected_channels, 1, expected.size());
+    model.process_cpu(in, expected_view, input.size(), {.epoch = 1, .sequence = 0});
+
+    std::ifstream replacement_source(fixture_path());
+    std::stringstream replacement_contents;
+    replacement_contents << replacement_source.rdbuf();
+    auto replacement = replacement_contents.str();
+    const auto marker = std::string("\"sample_rate\": 48000");
+    const auto position = replacement.find(marker);
+    REQUIRE(position != std::string::npos);
+    replacement.replace(position, marker.size(), "\"sample_rate\": 44100");
+    {
+        std::ofstream output(path);
+        output << replacement;
+    }
+
+    CHECK_FALSE(model.prepare(context));
+    CHECK(model.quiesce());
+    std::array<float, 8> replay{};
+    float* replay_channels[] = {replay.data()};
+    auto replay_view = pulp::audio::BufferView<float>(replay_channels, 1, replay.size());
+    model.reset(2, StreamingResetReason::ModelSwap);
+    model.process_cpu(in, replay_view, input.size(), {.epoch = 2, .sequence = 0});
+    CHECK(replay == expected);
+    REQUIRE(model.release());
+
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}

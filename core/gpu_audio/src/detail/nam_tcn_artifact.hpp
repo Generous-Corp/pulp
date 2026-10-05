@@ -149,11 +149,17 @@ class NamTcnArtifact final {
         Model candidate;
         if (!candidate.configure(parsed, weights, scale, error))
             return false;
+        const auto sample_rate =
+            root.hasObjectMember("sample_rate") ? number(root["sample_rate"]) : -1.0;
+        if (!(sample_rate > 0.0) || !std::isfinite(sample_rate))
+            return fail("invalid sample_rate");
+
+        // Commit only after every parse, shape, weight, and metadata check has
+        // passed. A failed replacement must leave a previously loaded artifact
+        // byte-for-byte usable by its owner.
         arrays_ = std::move(candidate.arrays);
         head_scale_ = candidate.head_scale;
-        sample_rate_ = root.hasObjectMember("sample_rate") ? number(root["sample_rate"]) : -1.0;
-        if (!(sample_rate_ > 0.0) || !std::isfinite(sample_rate_))
-            return fail("invalid sample_rate");
+        sample_rate_ = sample_rate;
         receptive_field_ = candidate.receptive_field;
         state_bytes_ = candidate.state_bytes;
         weights_size_ = weights.size();
@@ -511,17 +517,22 @@ class NamTcnArtifactAdapter final : public StreamingModel {
     }
 
     bool prepare(const StreamingPrepareContext& context) noexcept override {
-        prepared_ = false;
         if (!valid_streaming_prepare_context(context) || context.spec != &spec_ ||
             context.max_frames == 0 || spec_.input_channels != 1 || spec_.output_channels != 1)
             return false;
+
+        // Stage parsing and allocation in a separate artifact. The currently
+        // prepared model remains live if any replacement check fails.
+        NamTcnArtifact candidate;
         std::string error;
-        if (!artifact_.load(artifact_path_, &error))
+        if (!candidate.load(artifact_path_, &error))
             return false;
-        if (artifact_.sample_rate() != static_cast<double>(spec_.sample_rate) ||
-            artifact_.receptive_field() != spec_.receptive_field_samples ||
-            artifact_.state_bytes() != spec_.state_bytes)
+        if (candidate.sample_rate() != static_cast<double>(spec_.sample_rate) ||
+            candidate.receptive_field() != spec_.receptive_field_samples ||
+            candidate.state_bytes() != spec_.state_bytes)
             return false;
+
+        artifact_ = std::move(candidate);
         max_frames_ = context.max_frames;
         prepared_ = true;
         return true;
