@@ -811,7 +811,12 @@ def main(argv: list[str]) -> int:
             since = since.replace(tzinfo=dt.timezone.utc)
         import reuse_replay_collect as rrc
         gh = rrc.GitHub(a.repository, a.token, reserve=a.rate_reserve)
-        manifest = rrc.Collector(gh, a.out, a.repo, a.workers).collect(since, until)
+        try:
+            manifest = rrc.Collector(gh, a.out, a.repo, a.workers).collect(since, until)
+        except rrc.ListingShort as err:
+            print(f"collect: LISTING SHORT: {err}; the corpus is not rewritten: every pair needing a missing run "
+                  "would have been dropped", file=sys.stderr)
+            return 1
         print(json.dumps(manifest, indent=2))
         cov = manifest.get("record_coverage") or {}
         print(f"collect: record coverage: {cov.get('without_record')} of {cov.get('executed_jobs')} executed macOS jobs "
