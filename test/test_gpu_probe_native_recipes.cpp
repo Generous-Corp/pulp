@@ -97,7 +97,8 @@ TEST_CASE("Renderer3D recipe produces bounded typed evidence", "[gpu][gpu-probe]
     require_work_or_skip(run);
     REQUIRE_FALSE(run.payloads.empty());
     REQUIRE(run.result.passes.size() == 4);
-    for (std::size_t i = 0; i < 3; ++i) REQUIRE(run.result.passes[i].verdict == probe::Verdict::pass);
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE(run.result.passes[i].verdict == probe::Verdict::pass);
     // The exact golden is the macOS default Metal adapter's fingerprint. Any
     // other adapter (llvmpipe on the Linux leg) is held to the portable
     // structure only, which the recipe reports as unverified rather than pass.
