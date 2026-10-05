@@ -4,9 +4,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include <array>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <optional>
+#include <string>
 #include <set>
 
 TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
@@ -97,13 +100,26 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     auto launch = choc::value::createObject("");
     launch.addMember("inventory_id",
                      choc::value::createString(prepared_data["inventory_id"].getString()));
-    // The product fixture is a headless control host. Force the standalone
-    // driver onto Pulp's deterministic null device so preflight reaches the
-    // broker-owned control host without depending on CI audio hardware.
+    // The product fixture is a real standalone control host. Keep CI's parent
+    // environment from forcing the child into screenshot-only headless mode,
+    // while retaining the deterministic null audio device for CI hardware.
+    const std::array<const char*, 6> child_environment = {
+        "CI", "PULP_HEADLESS", "PULP_TEST_MODE", "PULP_SCREENSHOT",
+        "PULP_SCREENSHOT_PATH", "PULP_SCREENSHOT_KEEP_AUDIO"};
+    std::array<std::optional<std::string>, 6> saved_environment;
+    for (std::size_t index = 0; index < child_environment.size(); ++index) {
+        if (const auto* value = std::getenv(child_environment[index]))
+            saved_environment[index] = value;
+        REQUIRE(unsetenv(child_environment[index]) == 0);
+    }
     REQUIRE(setenv("PULP_AUDIO_DEVICE", "null", 1) == 0);
     const auto launched =
         management.manage("host-launch", choc::json::toString(launch, false), 10s);
     REQUIRE(unsetenv("PULP_AUDIO_DEVICE") == 0);
+    for (std::size_t index = 0; index < child_environment.size(); ++index) {
+        if (saved_environment[index])
+            REQUIRE(setenv(child_environment[index], saved_environment[index]->c_str(), 1) == 0);
+    }
     INFO(launched.explanation);
     INFO(launched.data_json);
     REQUIRE(launched.status_id == "launched");
