@@ -1940,6 +1940,28 @@ class ExecutableReuseTest(unittest.TestCase):
             with self.assertRaisesRegex(runner.SelectionExecutionError, "unexpected schema"):
                 runner.decode_selection_receipt(*encode_receipt({**selection_receipt(), "other": 1}))
 
+    def test_a_relative_bound_build_dir_reaches_every_step_absolute(self) -> None:
+        # Shipyard binds the build directory as the lane spells it, relative to
+        # the checkout; the steps run in the derivation code directory.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build, code = self.tree(root)
+            run, calls = self.fake(build)
+            binding = {**self.binding(build, code), "build_dir": "build"}
+            previous = os.getcwd()
+            os.chdir(root)
+            try:
+                derived = runner.derive_executable_reuse(binding, "b" * 40, build, root / "result", run)
+            finally:
+                os.chdir(previous)
+            self.assertEqual(derived["status"], "derived", derived)
+            steps = [argv for argv, kwargs in calls if kwargs.get("cwd") == str(code)]
+            self.assertEqual(len(steps), 4)  # toolchain pick, codemodel, keys, selection
+            pick = next(argv for argv in steps if argv[2] == "-c")
+            self.assertEqual(pick[4], str(build))
+            build_dirs = [argv[argv.index("--build-dir") + 1] for argv in steps if "--build-dir" in argv]
+            self.assertEqual(build_dirs, [str(build), str(build)])  # codemodel and keys
+
     def test_derives_from_base_code_after_a_fresh_reconfigure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build, code = self.tree(Path(directory))
