@@ -9,6 +9,24 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09131"></a>
+## [0.913.1] - 2026-10-05
+
+- release/version bump ([#9628](https://github.com/Generous-Corp/pulp/pull/9628))
+- fix/forge prompt by file ([#9621](https://github.com/Generous-Corp/pulp/pull/9621))
+- codex/neural host serviceability 20261005 ([#9625](https://github.com/Generous-Corp/pulp/pull/9625))
+- codex/neural mlx harness hardening 20261005 ([#9624](https://github.com/Generous-Corp/pulp/pull/9624))
+- codex/dsp e042 tempo delay wrapper 20261004 ([#9540](https://github.com/Generous-Corp/pulp/pull/9540))
+- fix/daw smoke copy off macos ([#9616](https://github.com/Generous-Corp/pulp/pull/9616))
+- fix/script inputs linux legs ([#9607](https://github.com/Generous-Corp/pulp/pull/9607))
+- test/rack maker intent arch ([#9612](https://github.com/Generous-Corp/pulp/pull/9612))
+- perf/families word set ([#9609](https://github.com/Generous-Corp/pulp/pull/9609))
+- ci/replay runs cache settle ([#9597](https://github.com/Generous-Corp/pulp/pull/9597))
+- codex/neural provenance refresh 20261005 ([#9605](https://github.com/Generous-Corp/pulp/pull/9605))
+- fix/node tests prefer managed chrome ([#9603](https://github.com/Generous-Corp/pulp/pull/9603))
+- codex/mlx named model implementation 20261005 ([#9577](https://github.com/Generous-Corp/pulp/pull/9577))
+- test/spawn scan loader coverage ([#9604](https://github.com/Generous-Corp/pulp/pull/9604))
+
 <a id="v09130"></a>
 ## [0.913.0] - 2026-10-05
 
@@ -9823,6 +9841,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.913.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.913.1
 [0.913.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.913.0
 [0.912.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.912.0
 [0.911.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.911.0
