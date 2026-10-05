@@ -164,8 +164,8 @@ TEST_CASE("imported node capabilities batch through one receipt-checked transact
     // node.
     REQUIRE(graph.set_node_gain(first, 0.5f));
     const auto current_after_first = graph.authoring_receipt();
-    const std::vector<ImportedNodeCapability> mixed_capabilities{
-        {receipt, first}, {current_after_first, second}};
+    const std::vector<ImportedNodeCapability> mixed_capabilities{{receipt, first},
+                                                                 {current_after_first, second}};
     CHECK_FALSE(apply_imported_gain_batch(graph, mixed_capabilities, 0.75f));
     CHECK(graph.node_gain(first) == 0.5f);
     CHECK(graph.node_gain(second) == 0.25f);
