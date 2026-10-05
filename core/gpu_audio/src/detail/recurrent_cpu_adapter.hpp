@@ -37,8 +37,8 @@ constexpr bool valid_recurrent_cpu_shape(const RecurrentCpuShape& shape) noexcep
 constexpr std::size_t recurrent_state_bytes(const RecurrentCpuShape& shape) noexcept {
     if (!valid_recurrent_cpu_shape(shape))
         return 0;
-    const auto floats = (recurrent_state_count(shape.family) +
-                         recurrent_gate_count(shape.family)) * shape.hidden_size;
+    const auto floats = (recurrent_state_count(shape.family) + recurrent_gate_count(shape.family)) *
+                        shape.hidden_size;
     return floats * sizeof(float);
 }
 
@@ -137,8 +137,7 @@ class RecurrentCpuAdapter final : public StreamingModel {
   private:
     static constexpr std::uint32_t kMaxSupportedFrames = 4096;
 
-    static bool buffers_overlap(const float* input, float* output,
-                                std::uint32_t frames) noexcept {
+    static bool buffers_overlap(const float* input, float* output, std::uint32_t frames) noexcept {
         if (frames == 0)
             return false;
         const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);

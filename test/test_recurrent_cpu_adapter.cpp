@@ -58,7 +58,8 @@ bool prepare_kernel(void* opaque, const StreamingPrepareContext&) noexcept {
     return true;
 }
 
-void process_kernel(void* opaque, const float* input, float* output, std::uint32_t frames) noexcept {
+void process_kernel(void* opaque, const float* input, float* output,
+                    std::uint32_t frames) noexcept {
     auto& kernel = *static_cast<SyntheticKernel*>(opaque);
     if (kernel.fault_callback != nullptr)
         kernel.fault_callback();
@@ -88,8 +89,8 @@ void process_kernel(void* opaque, const float* input, float* output, std::uint32
             }
         }
         output[frame] = kernel.family == RecurrentFamily::Lstm
-                             ? 0.7f * kernel.hidden[0] - 0.2f * kernel.hidden[1] + 0.05f
-                             : 0.6f * kernel.hidden[0] + 0.1f * kernel.hidden[1] - 0.03f;
+                            ? 0.7f * kernel.hidden[0] - 0.2f * kernel.hidden[1] + 0.05f
+                            : 0.6f * kernel.hidden[0] + 0.1f * kernel.hidden[1] - 0.03f;
     }
 }
 
@@ -274,15 +275,17 @@ TEST_CASE("recurrent CPU adapter retries failed preparation and releases idempot
     CHECK(adapter.release());
 }
 
-TEST_CASE("recurrent CPU adapter keeps active state across failed replacement and changed reprepare",
-          "[gpu_audio][neural][recurrent][lifecycle]") {
+TEST_CASE(
+    "recurrent CPU adapter keeps active state across failed replacement and changed reprepare",
+    "[gpu_audio][neural][recurrent][lifecycle]") {
     const auto old_spec = make_spec(RecurrentFamily::Lstm, 48000);
     SyntheticKernel old_kernel{.family = RecurrentFamily::Lstm};
-    RecurrentCpuAdapter old_adapter(old_spec, make_shape(RecurrentFamily::Lstm), make_kernel(old_kernel));
+    RecurrentCpuAdapter old_adapter(old_spec, make_shape(RecurrentFamily::Lstm),
+                                    make_kernel(old_kernel));
     const auto old_context = StreamingPrepareContext{.spec = &old_adapter.spec(),
-                                                      .artifact_id = "synthetic-recurrent-old",
-                                                      .artifact_hash = "synthetic-weights-old",
-                                                      .max_frames = 32};
+                                                     .artifact_id = "synthetic-recurrent-old",
+                                                     .artifact_hash = "synthetic-weights-old",
+                                                     .max_frames = 32};
     REQUIRE(old_adapter.prepare(old_context));
     const auto prepare_calls = old_kernel.prepare_calls;
 
@@ -303,11 +306,12 @@ TEST_CASE("recurrent CPU adapter keeps active state across failed replacement an
 
     const auto new_spec = make_spec(RecurrentFamily::Lstm, 96000, 64);
     SyntheticKernel new_kernel{.family = RecurrentFamily::Lstm};
-    RecurrentCpuAdapter new_adapter(new_spec, make_shape(RecurrentFamily::Lstm), make_kernel(new_kernel));
+    RecurrentCpuAdapter new_adapter(new_spec, make_shape(RecurrentFamily::Lstm),
+                                    make_kernel(new_kernel));
     const auto new_context = StreamingPrepareContext{.spec = &new_adapter.spec(),
-                                                      .artifact_id = "synthetic-recurrent-new",
-                                                      .artifact_hash = "synthetic-weights-new",
-                                                      .max_frames = 64};
+                                                     .artifact_id = "synthetic-recurrent-new",
+                                                     .artifact_hash = "synthetic-weights-new",
+                                                     .max_frames = 64};
     CHECK_FALSE(old_adapter.prepare(new_context));
     CHECK(old_kernel.prepared);
     REQUIRE(old_adapter.quiesce());
@@ -391,11 +395,13 @@ TEST_CASE("recurrent CPU adapter rejects noncausal and malformed shapes",
 
     auto wrong_state = spec;
     wrong_state.state_bytes -= sizeof(float);
-    RecurrentCpuAdapter malformed(wrong_state, make_shape(RecurrentFamily::Lstm), make_kernel(kernel));
+    RecurrentCpuAdapter malformed(wrong_state, make_shape(RecurrentFamily::Lstm),
+                                  make_kernel(kernel));
     CHECK_FALSE(malformed.prepare(context_for(malformed)));
 }
 
-TEST_CASE("recurrent CPU adapter rejects alias, partial overlap, and oversized buffers without advancing state",
+TEST_CASE("recurrent CPU adapter rejects alias, partial overlap, and oversized buffers without "
+          "advancing state",
           "[gpu_audio][neural][recurrent][validation]") {
     const auto spec = make_spec(RecurrentFamily::Gru);
     SyntheticKernel kernel{.family = RecurrentFamily::Gru};
