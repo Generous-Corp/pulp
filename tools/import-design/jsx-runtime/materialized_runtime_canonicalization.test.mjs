@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import { canonicalizeMaterializedRuntimeDocument } from
   './materialized_runtime_canonicalization.mjs';
+import { trustedVendorPayload } from
+  '../browser_capture/vendor_payload.mjs';
 
 const asset = (id, source) => ({
   id, mime_type: 'text/javascript', byte_length: Buffer.byteLength(source),
@@ -19,12 +21,17 @@ const trustedReactDom = () =>
   'ReactVersion createRoot ' + ' '.repeat(32 * 1024);
 const trustedBabel = () =>
   `.Babel=${' '.repeat(1_000_000)}transformScriptTags registerPlugin`;
+// Synthetic fixtures exercise canonicalizer behavior without checking in
+// multi-megabyte browser bundles. Production uses the exact SHA-256 verifier;
+// the strict path is covered by the padded-spoof control below.
+const canonicalizeSynthetic = document => canonicalizeMaterializedRuntimeDocument(
+  document, { vendorPayloadTrust: trustedVendorPayload });
 test('precompiles captured JSX and removes redundant browser vendors', () => {
   const react = trustedReact();
   const reactDom = trustedReactDom();
   const babel = trustedBabel();
   const app = 'globalThis.keepMe = true;';
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="react"></script><script src="react-dom"></script>' +
       '<script src="babel"></script><script src="app"></script>' +
       '<script type="text/babel">globalThis.node = <span>OK</span>;</script>',
@@ -42,7 +49,7 @@ test('precompiles captured JSX and removes redundant browser vendors', () => {
 });
 
 test('does not strip an unrelated external JavaScript asset', () => {
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="app"></script>',
     assets: [asset('app', 'globalThis.App = function App() {};')],
   });
@@ -51,7 +58,7 @@ test('does not strip an unrelated external JavaScript asset', () => {
 });
 
 test('parses script attributes without treating quoted markup as a tag end', () => {
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script data-note="> bait" TYPE="text/jsx">' +
       'globalThis.node = <span title="</scriptx>">OK</span>;</script>',
     assets: [],
@@ -63,7 +70,7 @@ test('parses script attributes without treating quoted markup as a tag end', () 
 
 test('reuses the compiled form for repeated inline JSX programs', () => {
   const source = 'globalThis.node = <span>OK</span>;';
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: `<script type="text/babel">${source}</script>` +
       `<script type="text/jsx">${source}</script>`,
     assets: [],
@@ -74,7 +81,7 @@ test('reuses the compiled form for repeated inline JSX programs', () => {
 
 test('does not remove a vendor-looking src from a script with authored body', () => {
   const react = trustedReact();
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="react">globalThis.authored = true;</script>',
     assets: [vendorAsset('react', react, 'react')],
   });
@@ -84,7 +91,7 @@ test('does not remove a vendor-looking src from a script with authored body', ()
 test('does not classify authored marker collisions as browser vendors', () => {
   const authored = '/** @license React react.development.js */\n' +
     'globalThis.Authored = true;';
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="app.js?v=1"></script>',
     assets: [asset('app.js?v=1', authored)],
   });
@@ -94,7 +101,7 @@ test('does not classify authored marker collisions as browser vendors', () => {
 
 test('preserves legacy captures without explicit vendor metadata', () => {
   const react = '/** @license React react.development.js */';
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     version: 1,
     html: '<script src="react"></script>',
     assets: [asset('react', react)],
@@ -105,7 +112,7 @@ test('preserves legacy captures without explicit vendor metadata', () => {
 
 test('preserves a vendor asset when another reference has authored code', () => {
   const react = trustedReact();
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="react"></script><script src="react">globalThis.keep = 1;</script>',
     assets: [vendorAsset('react', react, 'react')],
   });
@@ -115,7 +122,7 @@ test('preserves a vendor asset when another reference has authored code', () => 
 
 test('accepts whitespace-only empty vendor script bodies', () => {
   const react = trustedReact();
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="react"> \n </script>',
     assets: [vendorAsset('react', react, 'react')],
   });
@@ -124,7 +131,7 @@ test('accepts whitespace-only empty vendor script bodies', () => {
 });
 
 test('ignores unknown vendor roles', () => {
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="mystery"></script>',
     assets: [vendorAsset('mystery', 'globalThis.keep = true;', 'maybe-react')],
   });
@@ -133,7 +140,7 @@ test('ignores unknown vendor roles', () => {
 });
 
 test('does not remove a marked asset whose payload is not a trusted vendor', () => {
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="react"></script>',
     assets: [vendorAsset('react', '/* data-pulp-vendor=react */ window.keep = true;', 'react')],
   });
@@ -141,9 +148,19 @@ test('does not remove a marked asset whose payload is not a trusted vendor', () 
   assert.match(result.html, /src="react"/);
 });
 
+test('strict canonicalization rejects a padded vendor marker spoof', () => {
+  const spoof = trustedReact() + 'globalThis.authored = true;';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script src="react"></script>',
+    assets: [vendorAsset('react', spoof, 'react')],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /src="react"/);
+});
+
 test('canonicalizes application/javascript vendor assets consistently', () => {
   const source = trustedReact();
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<script src="react"></script>',
     assets: [{ ...vendorAsset('react', source, 'react'),
       mime_type: 'application/javascript; charset=utf-8' }],
@@ -154,7 +171,7 @@ test('canonicalizes application/javascript vendor assets consistently', () => {
 
 test('preserves vendor assets referenced outside script tags', () => {
   const react = trustedReact();
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<link rel="preload" href="react"><script src="react"></script>',
     assets: [vendorAsset('react', react, 'react')],
   });
@@ -164,7 +181,7 @@ test('preserves vendor assets referenced outside script tags', () => {
 
 test('preserves vendor assets in unquoted and CSS references', () => {
   const react = trustedReact();
-  const result = canonicalizeMaterializedRuntimeDocument({
+  const result = canonicalizeSynthetic({
     html: '<img src=react><script src="react"></script>' +
       '<style>.x{background:url(react)}</style>',
     assets: [vendorAsset('react', react, 'react')],

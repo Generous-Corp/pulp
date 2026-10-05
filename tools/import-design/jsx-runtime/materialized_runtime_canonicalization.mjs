@@ -1,18 +1,20 @@
 import { transformSync } from 'esbuild';
-import { trustedVendorPayload } from '../browser_capture/vendor_payload.mjs';
+import { trustedCapturedVendorPayload } from '../browser_capture/vendor_payload.mjs';
 
 function assetText(asset) {
   if (!asset || !/^(?:text|application)\/javascript(?:\s*;|$)/i.test(asset.mime_type || '') ||
       typeof asset.data_base64 !== 'string') return '';
   return Buffer.from(asset.data_base64, 'base64').toString('utf8');
 }
-function nativeVendorKind(asset) {
+function nativeVendorKind(asset, payloadTrust) {
   // Vendor classification is an explicit capture/schema fact. Content-only
   // marker matching can delete authored assets that happen to contain a
-  // license string or Babel-like text.
+  // license string or Babel-like text. Capture and canonicalization both
+  // require the exact supported payload digest; the verifier parameter is a
+  // narrow test seam for synthetic shape fixtures.
   const kind = asset?.vendor_kind;
   return (kind === 'react' || kind === 'react-dom' || kind === 'babel') &&
-      trustedVendorPayload(kind, assetText(asset)) ? kind : '';
+      payloadTrust(kind, assetText(asset)) ? kind : '';
 }
 
 
@@ -90,11 +92,12 @@ function rewriteScripts(html, rewrite) {
 // Runtime imports already install @pulp/react as React/ReactDOM. Compile the
 // captured JSX at build time, then remove browser-only development React and
 // Babel payloads rather than parsing several megabytes on every editor open.
-export function canonicalizeMaterializedRuntimeDocument(document) {
+export function canonicalizeMaterializedRuntimeDocument(document, options = {}) {
+  const payloadTrust = options.vendorPayloadTrust || trustedCapturedVendorPayload;
   const assets = Array.isArray(document.assets) ? document.assets : [];
   const removable = new Map();
   for (const asset of assets) {
-    const kind = nativeVendorKind(asset);
+    const kind = nativeVendorKind(asset, payloadTrust);
     if (kind) removable.set(String(asset.id), kind);
   }
 
