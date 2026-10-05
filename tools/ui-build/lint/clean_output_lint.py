@@ -52,7 +52,27 @@ def _source_files(root: Path) -> list[Path]:
 def lint_source(root: Path, *, enforce_size: bool = False, max_component_lines: int = 150,
                 max_function_lines: int = 80) -> dict:
     findings: list[Finding] = []
+    if not root.exists():
+        return {
+            "schema": "pulp-clean-output-v1",
+            "files": 0,
+            "components": 0,
+            "findings": [asdict(Finding(
+                "missing-source-root", ".", 1,
+                "clean-output source root does not exist"))],
+            "ok": False,
+        }
     files = _source_files(root)
+    if not files:
+        return {
+            "schema": "pulp-clean-output-v1",
+            "files": 0,
+            "components": 0,
+            "findings": [asdict(Finding(
+                "empty-source-root", ".", 1,
+                "clean-output source root contains no source files"))],
+            "ok": False,
+        }
     component_count = 0
     for path in files:
         text = path.read_text(encoding="utf-8")

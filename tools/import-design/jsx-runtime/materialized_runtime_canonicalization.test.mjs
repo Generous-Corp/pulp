@@ -11,10 +11,18 @@ const asset = (id, source) => ({
 const vendorAsset = (id, source, vendor_kind) => ({
   ...asset(id, source), vendor_kind,
 });
+const trustedReact = () =>
+  '/** @license React react.development.js */\n' +
+  'ReactVersion createElement ' + ' '.repeat(32 * 1024);
+const trustedReactDom = () =>
+  '/** @license React react-dom.development.js */\n' +
+  'ReactVersion createRoot ' + ' '.repeat(32 * 1024);
+const trustedBabel = () =>
+  `.Babel=${' '.repeat(1_000_000)}transformScriptTags registerPlugin`;
 test('precompiles captured JSX and removes redundant browser vendors', () => {
-  const react = '/** @license React react.development.js */';
-  const reactDom = '/** @license React react-dom.development.js */';
-  const babel = `.Babel=${' '.repeat(1_000_000)}transform`;
+  const react = trustedReact();
+  const reactDom = trustedReactDom();
+  const babel = trustedBabel();
   const app = 'globalThis.keepMe = true;';
   const result = canonicalizeMaterializedRuntimeDocument({
     html: '<script src="react"></script><script src="react-dom"></script>' +
@@ -65,7 +73,7 @@ test('reuses the compiled form for repeated inline JSX programs', () => {
 });
 
 test('does not remove a vendor-looking src from a script with authored body', () => {
-  const react = '/** @license React react.development.js */';
+  const react = trustedReact();
   const result = canonicalizeMaterializedRuntimeDocument({
     html: '<script src="react">globalThis.authored = true;</script>',
     assets: [vendorAsset('react', react, 'react')],
@@ -96,7 +104,7 @@ test('preserves legacy captures without explicit vendor metadata', () => {
 });
 
 test('preserves a vendor asset when another reference has authored code', () => {
-  const react = '/** @license React react.development.js */';
+  const react = trustedReact();
   const result = canonicalizeMaterializedRuntimeDocument({
     html: '<script src="react"></script><script src="react">globalThis.keep = 1;</script>',
     assets: [vendorAsset('react', react, 'react')],
@@ -106,7 +114,7 @@ test('preserves a vendor asset when another reference has authored code', () => 
 });
 
 test('accepts whitespace-only empty vendor script bodies', () => {
-  const react = '/** @license React react.development.js */';
+  const react = trustedReact();
   const result = canonicalizeMaterializedRuntimeDocument({
     html: '<script src="react"> \n </script>',
     assets: [vendorAsset('react', react, 'react')],
@@ -124,8 +132,28 @@ test('ignores unknown vendor roles', () => {
   assert.match(result.html, /src="mystery"/);
 });
 
+test('does not remove a marked asset whose payload is not a trusted vendor', () => {
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script src="react"></script>',
+    assets: [vendorAsset('react', '/* data-pulp-vendor=react */ window.keep = true;', 'react')],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /src="react"/);
+});
+
+test('canonicalizes application/javascript vendor assets consistently', () => {
+  const source = trustedReact();
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script src="react"></script>',
+    assets: [{ ...vendorAsset('react', source, 'react'),
+      mime_type: 'application/javascript; charset=utf-8' }],
+  });
+  assert.equal(result.assets.length, 0);
+  assert.doesNotMatch(result.html, /src="react"/);
+});
+
 test('preserves vendor assets referenced outside script tags', () => {
-  const react = '/** @license React react.development.js */';
+  const react = trustedReact();
   const result = canonicalizeMaterializedRuntimeDocument({
     html: '<link rel="preload" href="react"><script src="react"></script>',
     assets: [vendorAsset('react', react, 'react')],
@@ -135,7 +163,7 @@ test('preserves vendor assets referenced outside script tags', () => {
 });
 
 test('preserves vendor assets in unquoted and CSS references', () => {
-  const react = '/** @license React react.development.js */';
+  const react = trustedReact();
   const result = canonicalizeMaterializedRuntimeDocument({
     html: '<img src=react><script src="react"></script>' +
       '<style>.x{background:url(react)}</style>',

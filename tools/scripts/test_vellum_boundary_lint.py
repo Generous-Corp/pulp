@@ -49,6 +49,18 @@ def main() -> int:
         if valid.returncode != 0:
             print(valid.stdout, valid.stderr, file=sys.stderr)
             return 1
+        manifest_path = root / "tools/import-design/pulp-package.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for escaped_root in (str(root.parent), "../outside"):
+            manifest["root"] = escaped_root
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            invalid_root = run(root)
+            if invalid_root.returncode != 2 or "root must stay beneath" not in invalid_root.stderr:
+                print("manifest-root negative control did not fail closed", file=sys.stderr)
+                print(invalid_root.stdout, invalid_root.stderr, file=sys.stderr)
+                return 1
+        manifest["root"] = "tools/import-design"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         # Planted violation: this must turn the same instrument red.  A test
         # that only checks the current tree would let the boundary silently rot.
         write(root / "tools/import-design/planted.cpp", '#include "core/view/src/private.hpp"\n')
@@ -56,6 +68,20 @@ def main() -> int:
         if invalid.returncode == 0 or "private core/view include" not in invalid.stderr:
             print("boundary negative control did not fail closed", file=sys.stderr)
             print(invalid.stdout, invalid.stderr, file=sys.stderr)
+            return 1
+        write(root / "tools/ui-build/planted-dynamic.ts",
+              'const load = () => import("../../core/view/src/private.js");\n')
+        dynamic = run(root)
+        if dynamic.returncode == 0 or "private core/view module reference" not in dynamic.stderr:
+            print("dynamic import negative control did not fail closed", file=sys.stderr)
+            print(dynamic.stdout, dynamic.stderr, file=sys.stderr)
+            return 1
+        write(root / "packages/pulp-react/planted-require.js",
+              'const privateView = require("../../core/view/src/private.js");\n')
+        require = run(root)
+        if require.returncode == 0 or "private core/view module reference" not in require.stderr:
+            print("require negative control did not fail closed", file=sys.stderr)
+            print(require.stdout, require.stderr, file=sys.stderr)
             return 1
         print("vellum_boundary_contract_verified=valid-current;planted-private-include")
         return 0

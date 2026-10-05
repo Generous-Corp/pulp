@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,6 +46,49 @@ export function Other() {
         first = self._report("export function Knob() { return <button data-pulp-action=\"x\">x</button>; }\n")
         second = self._report("export function Knob() { return <button data-pulp-action=\"x\">x</button>; }\n")
         self.assertEqual(json.dumps(first, sort_keys=True), json.dumps(second, sort_keys=True))
+
+    def test_missing_or_empty_fixture_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing = lint_source(root / "missing")
+            self.assertFalse(missing["ok"])
+            self.assertEqual(missing["findings"][0]["code"], "missing-source-root")
+
+            empty = root / "empty"
+            empty.mkdir()
+            report = lint_source(empty)
+            self.assertFalse(report["ok"])
+            self.assertEqual(report["findings"][0]["code"], "empty-source-root")
+
+    def test_cli_negative_control_rejects_missing_and_empty_fixture(self):
+        lint = Path(__file__).with_name("clean_output_lint.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing = subprocess.run(
+                [sys.executable, str(lint), str(root / "missing")],
+                text=True, capture_output=True, check=False)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("missing-source-root", missing.stdout)
+
+            empty = root / "empty"
+            empty.mkdir()
+            result = subprocess.run(
+                [sys.executable, str(lint), str(empty), "--json"],
+                text=True, capture_output=True, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(json.loads(result.stdout)["findings"][0]["code"],
+                             "empty-source-root")
+
+    def test_gates_runs_lint_when_fixture_directory_is_missing(self):
+        gates = Path(__file__).parents[3] / "tools/scripts/gates.sh"
+        text = gates.read_text(encoding="utf-8")
+        start = text.index("# ── 0e. clean-output source fixture")
+        end = text.index("# ── 1. skill-sync", start)
+        block = text[start:end]
+        self.assertIn('if [ ! -f "$CLEAN_OUTPUT_LINT" ]; then', block)
+        self.assertIn('"$PYTHON" "$CLEAN_OUTPUT_LINT" "$ROOT/tools/ui-build/lint/fixtures/clean"', block)
+        self.assertNotIn('&& [ -d "$ROOT/tools/ui-build/lint/fixtures/clean" ]', block)
+        self.assertIn("fail=1", block)
 
 
 if __name__ == "__main__":
