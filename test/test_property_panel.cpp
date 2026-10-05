@@ -45,8 +45,8 @@ std::filesystem::path scratch_props_file(const std::string& tag) {
     const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
     auto dir = std::filesystem::temp_directory_path() / "pulp-property-panel-tests";
     std::filesystem::create_directories(dir);
-    auto path = dir / (tag + "-" + std::to_string(pid) + "-" + std::to_string(tick) + "-"
-                       + std::to_string(counter.fetch_add(1)) + ".json");
+    auto path = dir / (tag + "-" + std::to_string(pid) + "-" + std::to_string(tick) + "-" +
+                       std::to_string(counter.fetch_add(1)) + ".json");
     std::filesystem::remove(path);
     return path;
 }
