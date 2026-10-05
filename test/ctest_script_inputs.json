@@ -6336,7 +6336,8 @@
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
     "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
-    "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs"
+    "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs",
+    "tools/scripts/tmp_leak_guard.py"
    ],
    "kind": "node"
   },
@@ -8021,7 +8022,8 @@
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
-    "tools/scripts/test_script_test_inputs.py"
+    "tools/scripts/test_script_test_inputs.py",
+    "tools/scripts/tmp_leak_guard.py"
    ],
    "kind": "python"
   },
@@ -8548,6 +8550,14 @@
    "entry": "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
    "inputs": [
     "tools/scripts/verify_timeline_transaction_launcher_complexity.py"
+   ],
+   "kind": "python"
+  },
+  "tmp-leak-guard-selftest": {
+   "entry": "tools/scripts/test_tmp_leak_guard.py",
+   "inputs": [
+    "tools/scripts/test_tmp_leak_guard.py",
+    "tools/scripts/tmp_leak_guard.py"
    ],
    "kind": "python"
   },

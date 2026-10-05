@@ -10,7 +10,10 @@ import sys
 import tempfile
 import unittest
 
-GUARD = Path(__file__).with_name("tmp_leak_guard.py")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tmp_leak_guard  # noqa: E402
+
+GUARD = Path(tmp_leak_guard.__file__)
 
 
 class TmpLeakGuardTest(unittest.TestCase):
