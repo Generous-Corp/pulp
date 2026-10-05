@@ -1004,7 +1004,7 @@ pulp_test_data(pulp-test-forge-descriptor-audit PATHS docs/status/forge-catalog.
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-coreaudio-native-lifetime NONE) # fork without exec
+pulp_test_spawns(pulp-test-coreaudio-native-lifetime NONE REASON "forks itself without exec and loads nothing the tree builds")
 
 # pulp-test-host loads PulpGain.clap and PulpSynth.clap when examples are
 # built (the edges and paths are added in the top-level CMakeLists.txt, after
@@ -1014,7 +1014,11 @@ pulp_test_spawns(pulp-test-coreaudio-native-lifetime NONE) # fork without exec
 # fake bundles in a scratch directory; pulp-test-group-app-host loads the
 # in-process built-in instrument.
 if(NOT PULP_BUILD_EXAMPLES)
-    pulp_test_spawns(pulp-test-host NONE)
-    pulp_test_spawns(pulp-test-host-regression NONE)
+    pulp_test_spawns(pulp-test-host NONE REASON "without examples its bundle cases skip, it loads only system or temp plugins, nothing the tree builds")
+    pulp_test_spawns(pulp-test-host-regression NONE REASON "without examples it loads only fake bundles in a scratch directory, nothing the tree builds")
 endif()
-pulp_test_spawns(pulp-test-group-app-host NONE)
+pulp_test_spawns(pulp-test-group-app-host NONE REASON "loads the in-process built-in instrument, nothing the tree builds as a separate bundle")
+
+# Reviewed plugin-loader calls (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-plugin-manager-panel NONE REASON "drops rows whose paths under /plugins, /p and /nonexistent do not exist, so the loader loads nothing the tree builds")
+pulp_test_spawns(pulp-test-host-signal-graph NONE REASON "adds in-memory PluginSlot instances and one PluginInfo whose path /tmp/not-a-plugin.clap does not exist, so it loads nothing the tree builds")

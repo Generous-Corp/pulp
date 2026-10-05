@@ -2218,9 +2218,13 @@ fails when a definition names `$<TARGET_FILE:x>` without an edge to x.
 include, comments stripped, for process API calls and for runtime loads
 (`PluginSlot::load`, the CLAP bundle scanner, `dlopen` and its shim,
 `LoadLibrary`, `CFBundle`). One with no edge and no reviewed
-`pulp_test_spawns(<test> NONE)` (it starts only system tools, a fork of
+`pulp_test_spawns(<test> NONE REASON "<why>")` (it starts only system tools, a fork of
 itself, or an in-process plugin) is `spawns: undeclared`, and the shadow
-never skips it. Pass a built artifact's path in from
+never skips it. The REASON is required at configure time and must state a
+claim; a NONE test that reads a build-path environment variable or walks a
+build directory also needs a review in `tools/ci/spawn_none_build_path_reviews.json`.
+A public function that reaches a loader must itself be in `LOAD_APIS` or in
+`tools/ci/load_api_exemptions.json` with the mechanism that covers it. Pass a built artifact's path in from
 CMake (`$<TARGET_FILE:x>`, or the bundle path beside its edge); never find it
 by a path relative to the working directory. pulp-test-host's PulpSynth case
 did that and silently skipped for its whole life. The scan cannot see a

@@ -43,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -423,7 +424,8 @@ def spawn_evidence(repo: Repo) -> None:
     ev = repo.build / "test" / "test-data"
     ev.mkdir(parents=True, exist_ok=True)
     row = lambda src, runtime=(), none=False, defines=(): {
-        "sources": [src], "tree_defines": list(defines), "runtime_targets": list(runtime), "spawns_none": none}
+        "sources": [src], "tree_defines": list(defines), "runtime_targets": list(runtime), "spawns_none": none,
+        "spawns_none_reason": "runs the system git, nothing the tree builds" if none else None}
     (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
         "pulp-test-edge": row("test/test_edge.cpp", runtime=["pulp-cli"]),
         "pulp-test-reviewed": row("test/test_reviewed.cpp", none=True),
@@ -546,10 +548,102 @@ class SpawnScanTests(unittest.TestCase):
 
     def test_every_listed_loader_still_exists_in_core_host(self) -> None:
         host = "\n".join((HERE.parents[1] / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
-                         for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp"))
+                         for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp", "node_pack.hpp",
+                                      "signal_graph_runtime.hpp", "graph_serializer.hpp"))
         for api in sti.LOAD_APIS:
             name = re.sub(r"\\s\*\\\($", "", api).split("::")[-1]
             self.assertRegex(host, r"\b%s\s*\(" % re.escape(name), api)
+
+
+class NoneReviewTests(unittest.TestCase):
+    """A pulp_test_spawns(NONE) review states a claim, and one whose sources
+    name a build path is confirmed by its owner in data."""
+
+    def review(self, sources: dict[str, str], reason: str = "runs the system git, nothing the tree builds",
+               reviews: dict[str, str] | None = None) -> list[tuple[str, str, set[str]]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            for rel, text in sources.items():
+                write(repo.root, rel, text)
+            if reviews is not None:
+                write(repo.root, sti.NONE_BUILD_PATH_REVIEWS.as_posix(),
+                      json.dumps({"schema": "pulp-spawn-none-build-path-reviews/v1", "reviews": reviews}))
+            ev = repo.build / "test" / "test-data"
+            ev.mkdir(parents=True)
+            (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+                "pulp-test-r": {"sources": sorted(sources), "tree_defines": [], "runtime_targets": [],
+                                "spawns_none": True, "spawns_none_reason": reason}}}), encoding="utf-8")
+            return sti.none_review_problems(repo.root, repo.build)
+
+    def test_a_plain_review_passes(self) -> None:
+        # Control: a reviewed test whose sources name no build path.
+        self.assertEqual(self.review({"test/r.cpp": 'auto out = run("git status");\n'}), [])
+
+    def test_a_review_must_state_a_claim(self) -> None:
+        for reason in ("legacy", "predates the rule", "TODO", " "):
+            with self.subTest(reason=reason):
+                kinds = [k for k, _, _ in self.review({"test/r.cpp": ""}, reason=reason)]
+                self.assertEqual(kinds, ["NONE review states no claim"])
+
+    def test_a_build_path_needs_the_owners_confirmation(self) -> None:
+        for text in ('const char* b = std::getenv("PULP_BUILD_DIR");\n',
+                     'const char* p = getenv("PATH");\n',
+                     'for (auto& e : fs::directory_iterator("build/tools")) {}\n'):
+            with self.subTest(text=text):
+                problems = self.review({"test/r.cpp": text})
+                self.assertEqual([k for k, _, _ in problems], ["NONE review names a build path"])
+        # Not a build path: a home or source variable, a walk with no build literal.
+        self.assertEqual(self.review({"test/r.cpp": 'getenv("HOME"); getenv("PULP_SOURCE_DIR");\n'
+                                                      'fs::directory_iterator(tmp);\n'}), [])
+        confirmed = self.review({"test/r.cpp": 'getenv("PULP_BUILD_DIR");\n'},
+                                reviews={"pulp-test-r": "the test points PULP_BUILD_DIR at a temp dir"})
+        self.assertEqual(confirmed, [])
+
+    def test_a_review_for_a_test_no_longer_reviewed_is_stale(self) -> None:
+        problems = self.review({"test/r.cpp": ""}, reviews={"pulp-test-gone": "x"})
+        self.assertEqual([(k, n) for k, n, _ in problems], [("stale NONE build-path review", "pulp-test-gone")])
+
+
+class LoaderCoverageTests(unittest.TestCase):
+    """Every public core/host function that reaches a plugin or module loader
+    is one LOAD_APIS can see called, or is exempt with its covering mechanism."""
+
+    def host(self, files: dict[str, str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, "core/host/include/pulp/host/api.hpp",
+                  "void* dl_open(const char* path, int flags);\nint public_load(const char* p);\n"
+                  "int wrap(const char* p);\n")
+            for rel, text in files.items():
+                write(root, rel, text)
+            return sti.loader_coverage(root)
+
+    def test_the_live_tree_is_covered(self) -> None:
+        # Control: on this tree every loader is listed or exempt.
+        self.assertEqual(sti.loader_coverage(HERE.parents[1]), [])
+
+    def test_a_deleted_load_api_is_reported(self) -> None:
+        live = [api for api in sti.LOAD_APIS if not api.startswith("load_node_pack")]
+        self.assertEqual(len(live), len(sti.LOAD_APIS) - 1)
+        with mock.patch.object(sti, "LOAD_APIS", tuple(live)):
+            missing = sti.loader_coverage(HERE.parents[1])
+        self.assertEqual([m.split(" ")[0] for m in missing], ["load_node_pack"])
+
+    def test_a_public_loader_outside_load_apis_is_reported(self) -> None:
+        missing = self.host({"core/host/src/a.cpp": "int public_load(const char* p) { return dlopen(p, 0) != 0; }\n"})
+        self.assertEqual(missing, ["public_load (core/host/src/a.cpp)"])
+
+    def test_a_public_wrapper_of_an_internal_loader_is_reported(self) -> None:
+        missing = self.host({"core/host/src/a.cpp":
+                             "static int internal_open(const char* p) { return dlopen(p, 0) != 0; }\n"
+                             "int wrap(const char* p) { return internal_open(p); }\n"})
+        self.assertEqual(missing, ["wrap (core/host/src/a.cpp)"])
+        # The same wrapper, exempt with its covering mechanism, passes.
+        covered = self.host({"core/host/src/a.cpp":
+                             "static int internal_open(const char* p) { return dlopen(p, 0) != 0; }\n"
+                             "int wrap(const char* p) { return internal_open(p); }\n",
+                             sti.LOAD_API_EXEMPTIONS.as_posix(): json.dumps({"exemptions": {"wrap": "edge"}})})
+        self.assertEqual(covered, [])
 
 
 class CompiledDataTests(unittest.TestCase):
