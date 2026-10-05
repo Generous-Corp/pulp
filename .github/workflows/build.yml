@@ -3250,6 +3250,11 @@ jobs:
     name: ${{ github.event_name == 'merge_group' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true' || needs.protected-receipt-reuse.outputs.macos_reused == 'true') && 'macos' || 'macos-merge-unused' }}
     needs: [resolve-provider, classify, protected-receipt-reuse]
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    # actions: write lets the verdict cancel this run when a dependency was
+    # cancelled rather than failed (tools/ci/macos_merge_group_bootstrap.sh).
+    permissions:
+      actions: write
+      contents: read
     if: >-
       !inputs.local_proof
       && !cancelled()
@@ -3259,51 +3264,23 @@ jobs:
           || needs.classify.outputs.native_build_required != 'true'
           || needs.protected-receipt-reuse.outputs.macos_reused == 'true')
     steps:
+      - name: Check out the bootstrap verdict
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/macos_merge_group_bootstrap.sh
+          sparse-checkout-cone-mode: false
+
       - name: macOS merge-group bootstrap (required when native leg is absent)
-        run: |
-          set -euo pipefail
-          if [ "${{ needs.resolve-provider.result }}" != "success" ]; then
-            echo "provider resolution did not succeed — failing macos gate closed"
-            exit 1
-          fi
-          if [ "${{ needs.classify.result }}" != "success" ]; then
-            echo "classify did not succeed — failing macos gate closed"
-            exit 1
-          fi
-          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ]; then
-            if [ "${{ needs.protected-receipt-reuse.result }}" != "success" ] \
-              || [ "${{ needs.protected-receipt-reuse.outputs.macos_reused }}" != "true" ]; then
-              echo "protected receipt decision unavailable — failing macos gate closed"
-              exit 1
-            fi
-            echo "Exact-tree protected PR receipt revalidated for this merge group — macos gate ✓"
-            REASON="an exact-tree protected receipt from an earlier run was reused"
-          else
-            echo "Skip-safe merge group — macos gate ✓ (native matrix omitted)"
-            REASON="the merge group changed no native build input, so the matrix was skipped"
-          fi
-          # A green `macos` here is indistinguishable from a real one in the
-          # checks list, and reasoning from it as though the suite passed has
-          # already cost hours. Say so in the job's own output.
-          {
-            echo "### ⚠️ macos gate passed WITHOUT running the test suite"
-            echo
-            echo "This check is green because **$REASON**, not because any test"
-            echo "executed. No ctest run happened in this job — it has no build"
-            echo "and no test step. Do not read it as evidence that the suite"
-            echo "passes on this tree."
-            echo
-            echo "To find a run where the suite actually executed:"
-            echo '```'
-            echo "python3 tools/scripts/gate_suite_executed.py --run-id <run-id>"
-            echo '```'
-          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          echo "::notice title=macos gate did not run the suite::$REASON"
-          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ]; then
-            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"receipt-reused"}'
-          else
-            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
-          fi
+        env:
+          PROVIDER_RESULT: ${{ needs.resolve-provider.result }}
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          NATIVE_REQUIRED: ${{ needs.classify.outputs.native_build_required }}
+          RECEIPT_RESULT: ${{ needs.protected-receipt-reuse.result }}
+          RECEIPT_REUSED: ${{ needs.protected-receipt-reuse.outputs.macos_reused }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/macos_merge_group_bootstrap.sh
       # A `macos` check that ran no suite still belongs in the replay history
       # (receipt reuse and skip-safe groups are what a policy's coverage is
       # measured against), so it writes a record with no tests and says why.

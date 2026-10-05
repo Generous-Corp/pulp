@@ -3182,6 +3182,18 @@ matrix child exists, the corresponding bootstrap is inactive and uses an
 `tools/scripts/test_required_macos_alias.py` and
 `tools/scripts/test_windows_runner_policy.py` pin both ownership paths.
 
+The merge-group bootstrap's verdict lives in
+`tools/ci/macos_merge_group_bootstrap.sh`. A provider or classifier result of
+`failure`, `skipped` or none fails `macos` closed. A `cancelled` one does not:
+when GitHub never assigns a hosted runner to the preamble, or the queue
+re-batches, failing closed turned infrastructure into a red required check, and
+the queue ejected the PR, re-batched, and met the same wait (2026-10-05, during
+a hosted-runner assignment incident). The bootstrap instead cancels its own run
+(`actions: write`) so `macos` reads cancelled, and fails closed only if that
+cancellation has not taken hold within two minutes; it never passes on a
+dependency that did not succeed. `tools/ci/test_macos_merge_group_bootstrap.py`
+runs the script against stub results.
+
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
 stdin script, so a wedged checkout volume can freeze the routing probe even
