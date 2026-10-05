@@ -125,6 +125,7 @@ class MinimumLeadProxyEvaluator {
   public:
     static constexpr std::uint64_t diagnostic_minimum_samples = 1000;
     static constexpr std::uint64_t authoritative_minimum_samples = 100000;
+    static constexpr std::uint32_t diagnostic_lead_blocks = 1;
     // Diagnostic admission still describes the complete campaign cell shape;
     // an external reducer owns the authoritative 100,000-sample acceptance.
     static constexpr std::uint32_t required_slots_mask = 0x1e; // 2,4,8,16
@@ -140,6 +141,11 @@ class MinimumLeadProxyEvaluator {
 
     explicit MinimumLeadProxyEvaluator(const MinimumLeadProxyAdmission& admission) noexcept
         : admission_(admission) {}
+
+    MinimumLeadProxyEvaluator(const MinimumLeadProxyEvaluator&) = delete;
+    MinimumLeadProxyEvaluator& operator=(const MinimumLeadProxyEvaluator&) = delete;
+    MinimumLeadProxyEvaluator(MinimumLeadProxyEvaluator&&) = delete;
+    MinimumLeadProxyEvaluator& operator=(MinimumLeadProxyEvaluator&&) = delete;
 
     void observe(const MinimumLeadProxySample& s) noexcept {
         saturating_increment(receipt_.sample_count);
@@ -242,7 +248,7 @@ class MinimumLeadProxyEvaluator {
         auto out = receipt_;
         out.admission_valid =
             admission_.sample_rate != 0 && admission_.block_size != 0 &&
-            admission_.requested_lead_blocks != 0 &&
+            admission_.requested_lead_blocks == diagnostic_lead_blocks &&
             admission_.pipeline_depth > admission_.requested_lead_blocks &&
             admission_.provider_slots != 0 && admission_.max_inflight != 0 && checked_capacity() &&
             admission_.max_inflight <= admission_.capacity && admission_.batch_size != 0 &&
@@ -251,7 +257,9 @@ class MinimumLeadProxyEvaluator {
             admission_.identity.provider != 0 && admission_.identity.executable != 0 &&
             admission_.identity.model != 0 && admission_.identity.resident_plan != 0 &&
             admission_.identity.raw_hashes_authenticated && admission_.cell_id != 0 &&
-            admission_.admission_epoch != 0 &&
+            admission_.admission_epoch != 0 && admission_.contention_level != 0 &&
+            admission_.contention_level <= 2 && admission_.thermal_level != 0 &&
+            admission_.thermal_level <= 2 && expected_cell_id() == admission_.cell_id &&
             admission_.observer_capacity >= diagnostic_minimum_samples &&
             admission_.slots_mask == required_slots_mask &&
             admission_.leads_mask == required_leads_mask && admission_.cold_runs >= 5 &&
@@ -272,7 +280,8 @@ class MinimumLeadProxyEvaluator {
                        out.sequence_gaps == 0 && out.generation_mismatches == 0 &&
                        out.identity_mismatches == 0 && out.observer_overflow == 0 &&
                        out.callback_deadline_misses == 0 && out.gpu_completed == out.sample_count &&
-                       out.cpu_fallback == 0;
+                       out.cpu_fallback == 0 && out.late_or_dropped == 0 &&
+                       out.predictor_underestimates == 0;
         // This proxy never owns campaign acceptance. An external reducer must
         // authenticate the complete matrix and may consume this diagnostic receipt.
         out.authoritative_campaign = false;
@@ -305,6 +314,10 @@ class MinimumLeadProxyEvaluator {
         return admission_.requested_lead_blocks <=
                    std::numeric_limits<std::uint32_t>::max() - admission_.provider_slots &&
                admission_.capacity == admission_.provider_slots + admission_.requested_lead_blocks;
+    }
+
+    std::uint64_t expected_cell_id() const noexcept {
+        return static_cast<std::uint64_t>(admission_.sample_rate) * 1000u + admission_.block_size;
     }
 
     static IdInsertResult insert_id(std::array<std::uint64_t, bounded_id_capacity>& table,

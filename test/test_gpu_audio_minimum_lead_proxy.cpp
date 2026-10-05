@@ -20,7 +20,7 @@ MinimumLeadProxyAdmission admission() {
             .provider_resources_resident = true,
             .cpu_fallback_prepared = true,
             .identity = {1, 2, 3, 4, true},
-            .cell_id = 64000,
+            .cell_id = 48000064,
             .contention_level = 1,
             .thermal_level = 1,
             .observer_capacity = MinimumLeadProxyEvaluator::diagnostic_minimum_samples,
@@ -275,6 +275,56 @@ TEST_CASE("minimum lead proxy rejects sequential dispatch and missing synchroniz
     auto a = admission();
     a.fused_or_coalesced_dispatch = false;
     a.observer_single_owner = false;
+    MinimumLeadProxyEvaluator e(a);
+    e.observe(sample(0));
+    CHECK_FALSE(e.finish().admission_valid);
+}
+
+TEST_CASE("minimum lead proxy completion rejects late drop and predictor failures") {
+    auto late = run(sample(0));
+    CHECK(late.complete);
+    auto s = sample(0);
+    s.late = true;
+    late = run(s);
+    CHECK(late.late_or_dropped > 0);
+    CHECK_FALSE(late.complete);
+
+    s = sample(0);
+    s.prediction.observed_ns = 200;
+    s.prediction.deadline_ns = 300;
+    const auto under = run(s);
+    CHECK(under.predictor_underestimates > 0);
+    CHECK_FALSE(under.complete);
+}
+
+TEST_CASE("minimum lead proxy binds cell dimensions and environment levels") {
+    auto a = admission();
+    a.cell_id = 64000;
+    MinimumLeadProxyEvaluator wrong_cell(a);
+    wrong_cell.observe(sample(0));
+    CHECK_FALSE(wrong_cell.finish().admission_valid);
+
+    a = admission();
+    a.contention_level = 0;
+    MinimumLeadProxyEvaluator no_contention(a);
+    no_contention.observe(sample(0));
+    CHECK_FALSE(no_contention.finish().admission_valid);
+
+    a = admission();
+    a.thermal_level = 3;
+    MinimumLeadProxyEvaluator excess_thermal(a);
+    excess_thermal.observe(sample(0));
+    CHECK_FALSE(excess_thermal.finish().admission_valid);
+}
+
+TEST_CASE("minimum lead proxy is noncopyable and enforces one-block policy") {
+    static_assert(!std::is_copy_constructible_v<MinimumLeadProxyEvaluator>);
+    static_assert(!std::is_move_constructible_v<MinimumLeadProxyEvaluator>);
+    static_assert(!std::is_copy_assignable_v<MinimumLeadProxyEvaluator>);
+    static_assert(!std::is_move_assignable_v<MinimumLeadProxyEvaluator>);
+
+    auto a = admission();
+    a.requested_lead_blocks = 2;
     MinimumLeadProxyEvaluator e(a);
     e.observe(sample(0));
     CHECK_FALSE(e.finish().admission_valid);
