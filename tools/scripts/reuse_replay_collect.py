@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -1443,6 +1444,84 @@ def load_graph(build_dir: Path | None, pickle_path: Path | None):
     deps = shadow.parse_ninja_deps(subprocess.run(["ninja", "-C", str(build_dir), "-t", "deps"], check=True,
                                                   capture_output=True, text=True).stdout)
     return shadow.Graph(build_dir, edges, deps)
+
+
+def same_bytes_evidence(corpus_dir: Path, corpus, rows: list[dict], gh: "GitHub | None" = None) -> list[dict]:
+    """For each false-skip row (a skipped test that failed in its group):
+    whether it is a same-bytes nondeterministic failure. It qualifies only
+    when the test's executable has the same sha256 in the head run the
+    policy read and in the group, and some third run passed the same test
+    on those same bytes. The scorer still counts every row; this is the
+    evidence a read-back may net out, each row naming its witness run."""
+    collector = Collector.__new__(Collector)
+    collector.cache, collector.gh = corpus_dir / "cache", gh
+    records: dict[str, dict | None] = {}
+
+    def digest(run_id: str, test_id: str) -> str | None:
+        run_id = str(run_id)
+        if run_id not in records:
+            try:
+                records[run_id] = collector.reuse_record(run_id)
+            except Exception:   # an unfetchable record is no evidence, never a match
+                records[run_id] = None
+        rec = records[run_id] or {}
+        exe = (rec.get("executables") or {}).get(test_id)
+        return (rec.get("binaries") or {}).get(exe) if exe else None
+
+    pairs = {str(p.get("group_run_id")): p for p in corpus.pairs}
+    out = []
+    for row in rows:
+        pair = pairs.get(str(row["group_run_id"])) or {}
+        head = pair.get("source_key_head_run_id") or next((h["run_id"] for h in pair.get("heads") or []), None)
+        head_digest = digest(head, row["test_id"]) if head else None
+        group_digest = digest(row["group_run_id"], row["test_id"])
+        witness = None
+        if head_digest and head_digest == group_digest:
+            for run_id in sorted(corpus.runs, key=lambda r: corpus.runs[r].get("created_at") or ""):
+                if run_id in (str(head), str(row["group_run_id"])):
+                    continue
+                path = corpus_dir / "tests" / f"{run_id}.jsonl.gz"
+                if not path.exists():
+                    continue
+                passed = False
+                with gzip.open(path, "rt", encoding="utf-8") as handle:
+                    for line in handle:
+                        if row["test_id"] in line:   # cheap prefilter before parsing 20k rows
+                            t = json.loads(line)
+                            if t.get("test_id") == row["test_id"]:
+                                passed = t.get("outcome") == "pass"
+                                break
+                if passed and digest(run_id, row["test_id"]) == group_digest:
+                    witness = run_id
+                    break
+        out.append(dict(row, head_run_id=head, head_digest=head_digest, group_digest=group_digest,
+                        witness_run_id=witness, qualifies=witness is not None))
+    return out
+
+
+def ancestry(repo: Path, repository: str, gh: "GitHub | None" = None) -> Callable[[str, str], bool | None]:
+    """`contains(commit, checkout)` for `cutoff_after`: the local clone's
+    answer through any shallow grafts, else the API's compare status, else
+    None. A partial clone often lacks merge-queue commits, so the local
+    answer alone would leave groups unknown."""
+    empty = Path(tempfile.gettempdir()) / "reuse-replay-empty-shallow"
+    empty.write_text("")
+    env = {**os.environ, "GIT_SHALLOW_FILE": str(empty), "GIT_NO_LAZY_FETCH": "1"}
+    client: list = [gh]
+
+    def contains(commit: str, checkout: str) -> bool | None:
+        rc = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", commit, checkout],
+                            capture_output=True, env=env).returncode
+        if rc in (0, 1):
+            return rc == 0
+        if client[0] is None:
+            client[0] = GitHub(repository, None)
+        try:
+            status = client[0].json(f"repos/{repository}/compare/{commit}...{checkout}").get("status")
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError):
+            return None
+        return {"ahead": True, "identical": True, "behind": False, "diverged": False}.get(status)
+    return contains
 
 
 def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root: Path, graph_build_dir: Path,

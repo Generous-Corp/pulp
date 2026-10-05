@@ -84,6 +84,121 @@ def corpus(tests: list[dict], **pair_kw) -> rpr.Corpus:
     return rpr.Corpus([group(), head()], [pair(**pair_kw)], tests={"g1": tests})
 
 
+class CutoffTests(unittest.TestCase):
+    FIX = "f1x"
+
+    @staticmethod
+    def corpus(checkouts):
+        runs = [group(run_id=f"g{i}", checkout_sha=sha, created_at=f"2026-10-0{i}T12:00:00Z")
+                for i, sha in enumerate(checkouts, start=1)]
+        return rpr.Corpus(runs + [head()], [])
+
+    def contains(self, after_fix):
+        return lambda commit, checkout: after_fix.get(checkout)
+
+    def test_the_cutoff_is_the_first_group_containing_the_fix(self):
+        c = self.corpus(["a", "b", "c", "d"])
+        cut = rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": True, "c": True, "d": True}))
+        self.assertEqual((cut["since"], cut["group_run_id"], cut["groups_after"]),
+                         ("2026-10-02T12:00:00Z", "g2", 3))
+
+    def test_a_later_group_without_the_fix_leaves_no_time_window(self):
+        c = self.corpus(["a", "b", "c"])
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "do not contain it.*g3"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": True, "c": False}))
+
+    def test_an_unknown_answer_is_not_a_no(self):
+        c = self.corpus(["a", "b"])
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "cannot tell.*g1"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": None, "b": True}))
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "no merge group"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": False}))
+
+    def test_the_cli_derives_since_from_the_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "c"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(run_id="g1", checkout_sha="old", created_at="2026-10-01T12:00:00Z"),
+                                                     group(run_id="g2", checkout_sha="new", created_at="2026-10-05T12:00:00Z"),
+                                                     head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [KeyBlindTests.pair(1, ["test/old-miss"]) | {"group_run_id": "g1"},
+                                                     KeyBlindTests.pair(2, []) | {"group_run_id": "g2"}])
+            listed = Path(tmp) / "list.json"
+            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}))
+            argv = ["key-blind", "--corpus", str(corpus), "--list", str(listed)]
+            answers = {"old": False, "new": True}
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX]), 0)
+            self.assertIn("since 2026-10-05T12:00:00Z: first group containing f1x is run g2", out.getvalue())
+            answers["new"] = None
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX]), 2)
+            self.assertIn("CUTOFF UNPROVEN", err.getvalue())
+            answers["new"] = True
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX, "--since", "2026-10-01"]), 2)
+            self.assertIn("exclusive", err.getvalue())
+
+
+class SameBytesTests(unittest.TestCase):
+    T = "a test"
+
+    def run_with(self, digests, outcomes):
+        """digests: run -> sha of the test's executable (None: no record);
+        outcomes: run -> the test's outcome in that run's rows."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runs = [group(run_id="g1", created_at="2026-10-05T12:00:00Z"), head(run_id="p1")]
+            runs += [head(run_id=r, created_at=f"2026-10-0{i}T00:00:00Z") for i, r in enumerate(("w1", "w2"), 1)]
+            for run_id, outcome in outcomes.items():
+                rpr.write_jsonl(root / "tests" / f"{run_id}.jsonl.gz", [t("other"), t(self.T, outcome)])
+            corpus = rpr.Corpus(runs, [dict(pair(), source_key_head_run_id="p1")])
+            records = {r: None if d is None else {"executables": {self.T: "test/x"}, "binaries": {"test/x": d}}
+                       for r, d in digests.items()}
+            row = {"pr": 1, "group_run_id": "g1", "test_id": self.T, "outcome": "fail", "attempts": 2, "reason": "r"}
+            with mock.patch.object(rrc.Collector, "reuse_record", lambda self, run_id: records.get(run_id)):
+                (out,) = rrc.same_bytes_evidence(root, corpus, [row])
+            return out
+
+    def test_identical_bytes_and_a_third_run_passing_on_them_qualifies(self):
+        out = self.run_with({"p1": "aa", "g1": "aa", "w1": "bb", "w2": "aa"},
+                            {"p1": "pass", "g1": "fail", "w1": "pass", "w2": "pass"})
+        self.assertEqual((out["qualifies"], out["witness_run_id"]), (True, "w2"))   # w1 passed on other bytes
+
+    def test_bytes_that_moved_do_not_qualify(self):
+        out = self.run_with({"p1": "aa", "g1": "cc", "w1": "cc"}, {"p1": "pass", "g1": "fail", "w1": "pass"})
+        self.assertEqual((out["qualifies"], out["witness_run_id"]), (False, None))
+
+    def test_the_head_pass_alone_is_not_a_witness(self):
+        out = self.run_with({"p1": "aa", "g1": "aa", "w1": "aa"}, {"p1": "pass", "g1": "fail", "w1": "fail"})
+        self.assertEqual(out["qualifies"], False)
+
+    def test_a_missing_record_is_no_evidence(self):
+        out = self.run_with({"p1": None, "g1": "aa", "w1": "aa"}, {"p1": "pass", "g1": "fail", "w1": "pass"})
+        self.assertEqual((out["head_digest"], out["qualifies"]), (None, False))
+
+    def test_score_reports_the_line_and_still_fails_on_every_false_skip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "c"
+            rpr.write_jsonl(root / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(root / "pairs.jsonl", [pair()])
+            rpr.write_jsonl(root / "tests" / "g1.jsonl.gz", [t("skills-doc-sync", "fail", 2), t("other")])
+            evidence = lambda corpus_dir, corpus, rows, gh=None: [dict(r, head_run_id="p1", head_digest="aa",
+                                                                         group_digest="aa", witness_run_id="w",
+                                                                         qualifies=True) for r in rows]
+            argv = ["score", "--corpus", str(root), "--policy", "inert-drift"]
+            with mock.patch.object(rrc, "same_bytes_evidence", evidence), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv + ["--same-bytes"]), 1)
+            self.assertIn("same-bytes nondeterministic 1 of 1 false skips (net 0)", out.getvalue())
+            self.assertIn("witness w", out.getvalue())
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv), 1)
+            self.assertNotIn("same-bytes", out.getvalue())
+
+
 class KeyBlindTests(unittest.TestCase):
     @staticmethod
     def pair(pr, unreached, content_keyed=True):
