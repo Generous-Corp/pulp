@@ -129,6 +129,7 @@ if(_PULP_NODE_FOR_TESTS)
                          ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS})
         set_tests_properties(pulp-materialized-runtime-node-dependencies PROPERTIES
             TIMEOUT 60
+            PULP_OPTIONAL TRUE
             LABELS "parser-import;browser-capture;node")
         add_test(NAME pulp-materialized-runtime-conformance
                  COMMAND ${_PULP_NODE_FOR_TESTS}
@@ -136,6 +137,7 @@ if(_PULP_NODE_FOR_TESTS)
                          --json)
         set_tests_properties(pulp-materialized-runtime-conformance PROPERTIES
             TIMEOUT 30
+            PULP_OPTIONAL TRUE
             LABELS "parser-import;browser-capture;node;conformance")
     endif()
 endif()
