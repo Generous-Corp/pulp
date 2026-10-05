@@ -594,6 +594,8 @@ def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[
         "would_skip_count": len(selection["would_skip"]),
         "sampled_count": len(selection["sampled_executables"]),
         "reasons": manifest.get("reasons"),
+        # The build directory every step was given, for the host's rederive.
+        "build_dir": bound_build,
     }
 
 

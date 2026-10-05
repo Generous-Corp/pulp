@@ -1961,6 +1961,7 @@ class ExecutableReuseTest(unittest.TestCase):
             self.assertEqual(pick[4], str(build))
             build_dirs = [argv[argv.index("--build-dir") + 1] for argv in steps if "--build-dir" in argv]
             self.assertEqual(build_dirs, [str(build), str(build)])  # codemodel and keys
+            self.assertEqual(derived["build_dir"], str(build))
 
     def test_derives_from_base_code_after_a_fresh_reconfigure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
