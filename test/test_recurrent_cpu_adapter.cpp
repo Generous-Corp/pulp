@@ -3,6 +3,7 @@
 
 #include "detail/neural_processor.hpp"
 #include "detail/recurrent_cpu_adapter.hpp"
+#include "harness/rt_contract_probe.hpp"
 #include "harness/scoped_rt_process_probe.hpp"
 
 #include <algorithm>
@@ -29,6 +30,7 @@ struct SyntheticKernel {
     std::array<float, 4 * kHidden> scratch{};
     bool prepared = false;
     bool fail_once = false;
+    bool fail_release_once = false;
     std::size_t prepare_calls = 0;
     std::size_t reset_calls = 0;
     std::size_t release_calls = 0;
@@ -99,12 +101,26 @@ bool quiesce_kernel(void*) noexcept {
 bool release_kernel(void* opaque) noexcept {
     auto& kernel = *static_cast<SyntheticKernel*>(opaque);
     ++kernel.release_calls;
+    if (kernel.fail_release_once) {
+        kernel.fail_release_once = false;
+        return false;
+    }
     kernel.prepared = false;
     kernel.reset_state();
     return true;
 }
 
-StreamingModelSpec make_spec(RecurrentFamily family, std::uint32_t sample_rate = 48000) {
+#if defined(_MSC_VER)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+std::byte* planted_allocation() {
+    return new std::byte[17];
+}
+
+StreamingModelSpec make_spec(RecurrentFamily family, std::uint32_t sample_rate = 48000,
+                             std::uint32_t block_size = 32) {
     const RecurrentCpuShape shape{.family = family,
                                   .input_size = 1,
                                   .hidden_size = kHidden,
@@ -119,7 +135,7 @@ StreamingModelSpec make_spec(RecurrentFamily family, std::uint32_t sample_rate =
             .input_channels = 1,
             .output_channels = 1,
             .sample_rate = sample_rate,
-            .block_size = 32,
+            .block_size = block_size,
             .feature_rate = sample_rate,
             .intrinsic_latency_samples = 0,
             .receptive_field_samples = 1,
@@ -256,6 +272,77 @@ TEST_CASE("recurrent CPU adapter retries failed preparation and releases idempot
     CHECK(adapter.release());
 }
 
+TEST_CASE("recurrent CPU adapter keeps active state across failed replacement and changed reprepare",
+          "[gpu_audio][neural][recurrent][lifecycle]") {
+    const auto old_spec = make_spec(RecurrentFamily::Lstm, 48000);
+    SyntheticKernel old_kernel{.family = RecurrentFamily::Lstm};
+    RecurrentCpuAdapter old_adapter(old_spec, make_shape(RecurrentFamily::Lstm), make_kernel(old_kernel));
+    const auto old_context = StreamingPrepareContext{.spec = &old_adapter.spec(),
+                                                      .artifact_id = "synthetic-recurrent-old",
+                                                      .artifact_hash = "synthetic-weights-old",
+                                                      .max_frames = 32};
+    REQUIRE(old_adapter.prepare(old_context));
+    const auto prepare_calls = old_kernel.prepare_calls;
+
+    auto malformed_context = old_context;
+    malformed_context.artifact_hash = {};
+    CHECK_FALSE(old_adapter.prepare(malformed_context));
+    CHECK(old_kernel.prepared);
+    CHECK(old_kernel.prepare_calls == prepare_calls);
+
+    std::array<float, 1> input{1.0f};
+    std::array<float, 1> output{};
+    const float* input_channels[] = {input.data()};
+    float* output_channels[] = {output.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 1);
+    auto out = pulp::audio::BufferView<float>(output_channels, 1, 1);
+    old_adapter.process_cpu(in, out, 1, {.epoch = 1, .sequence = 0});
+    CHECK(output[0] != 0.0f);
+
+    const auto new_spec = make_spec(RecurrentFamily::Lstm, 96000, 64);
+    SyntheticKernel new_kernel{.family = RecurrentFamily::Lstm};
+    RecurrentCpuAdapter new_adapter(new_spec, make_shape(RecurrentFamily::Lstm), make_kernel(new_kernel));
+    const auto new_context = StreamingPrepareContext{.spec = &new_adapter.spec(),
+                                                      .artifact_id = "synthetic-recurrent-new",
+                                                      .artifact_hash = "synthetic-weights-new",
+                                                      .max_frames = 64};
+    CHECK_FALSE(old_adapter.prepare(new_context));
+    CHECK(old_kernel.prepared);
+    REQUIRE(old_adapter.quiesce());
+    REQUIRE(old_adapter.release());
+    CHECK_FALSE(old_kernel.prepared);
+    REQUIRE(new_adapter.prepare(new_context));
+    CHECK(new_kernel.prepared);
+    CHECK_FALSE(old_kernel.prepared);
+    REQUIRE(new_adapter.release());
+}
+
+TEST_CASE("recurrent CPU adapter release preserves state for a retry",
+          "[gpu_audio][neural][recurrent][lifecycle]") {
+    const auto spec = make_spec(RecurrentFamily::Gru);
+    SyntheticKernel kernel{.family = RecurrentFamily::Gru, .fail_release_once = true};
+    RecurrentCpuAdapter adapter(spec, make_shape(RecurrentFamily::Gru), make_kernel(kernel));
+    const auto context = StreamingPrepareContext{.spec = &adapter.spec(),
+                                                 .artifact_id = "synthetic-recurrent",
+                                                 .artifact_hash = "synthetic-weights",
+                                                 .max_frames = 32};
+    REQUIRE(adapter.prepare(context));
+    CHECK_FALSE(adapter.release());
+    CHECK(kernel.prepared);
+
+    std::array<float, 1> input{1.0f};
+    std::array<float, 1> output{};
+    const float* input_channels[] = {input.data()};
+    float* output_channels[] = {output.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 1);
+    auto out = pulp::audio::BufferView<float>(output_channels, 1, 1);
+    adapter.process_cpu(in, out, 1, {.epoch = 1, .sequence = 0});
+    CHECK(kernel.hidden != std::array<float, kHidden>{});
+    REQUIRE(adapter.release());
+    CHECK_FALSE(kernel.prepared);
+    CHECK(adapter.release());
+}
+
 TEST_CASE("recurrent CPU adapter reset and NeuralProcessor reprepare lifecycle",
           "[gpu_audio][neural][recurrent][lifecycle]") {
     const auto spec = make_spec(RecurrentFamily::Gru);
@@ -306,7 +393,7 @@ TEST_CASE("recurrent CPU adapter rejects noncausal and malformed shapes",
     CHECK_FALSE(malformed.prepare(context_for(malformed)));
 }
 
-TEST_CASE("recurrent CPU adapter rejects alias and oversized buffers without advancing state",
+TEST_CASE("recurrent CPU adapter rejects alias, partial overlap, and oversized buffers without advancing state",
           "[gpu_audio][neural][recurrent][validation]") {
     const auto spec = make_spec(RecurrentFamily::Gru);
     SyntheticKernel kernel{.family = RecurrentFamily::Gru};
@@ -324,6 +411,15 @@ TEST_CASE("recurrent CPU adapter rejects alias and oversized buffers without adv
     auto alias_out = pulp::audio::BufferView<float>(alias_output, 1, 32);
     adapter.process_cpu(alias_in, alias_out, 32, {.epoch = 1, .sequence = 0});
     CHECK(kernel.hidden == std::array<float, kHidden>{});
+
+    std::array<float, 33> partially_overlapped{};
+    const float* partial_input[] = {partially_overlapped.data()};
+    float* partial_output[] = {partially_overlapped.data() + 1};
+    const auto partial_in = pulp::audio::BufferView<const float>(partial_input, 1, 32);
+    auto partial_out = pulp::audio::BufferView<float>(partial_output, 1, 32);
+    adapter.process_cpu(partial_in, partial_out, 32, {.epoch = 1, .sequence = 1});
+    CHECK(kernel.hidden == std::array<float, kHidden>{});
+    CHECK(kernel.cell == std::array<float, kHidden>{});
 
     std::array<float, 33> input{};
     std::array<float, 33> output;
@@ -355,9 +451,28 @@ TEST_CASE("recurrent CPU adapter process has no realtime allocations",
     const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 64);
     auto out = pulp::audio::BufferView<float>(output_channels, 1, 64);
     {
+        pulp::test::RtContractProbe events;
         pulp::test::ScopedRtProcessProbe probe;
         adapter.process_cpu(in, out, 64, {.epoch = 1, .sequence = 0});
         CHECK(probe.allocation_count() == 0);
+        CHECK(events.allocation_count() == 0);
+        CHECK(events.allocated_bytes() == 0);
+        CHECK(events.lock_events() == 0);
+        CHECK(events.blocking_events() == 0);
     }
     REQUIRE(adapter.release());
+}
+
+TEST_CASE("recurrent CPU adapter RT probe catches planted negatives",
+          "[gpu_audio][neural][recurrent][realtime][negative]") {
+    pulp::test::RtContractProbe events;
+    auto* planted = planted_allocation();
+    pulp::test::rt_contract_probe_record_allocation(17);
+    delete[] planted;
+    pulp::test::rt_contract_probe_record_lock();
+    pulp::test::rt_contract_probe_record_blocking();
+    CHECK(events.allocation_count() == 1);
+    CHECK(events.allocated_bytes() == 17);
+    CHECK(events.lock_events() == 1);
+    CHECK(events.blocking_events() == 1);
 }

@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 namespace pulp::gpu_audio::detail {
@@ -74,8 +75,11 @@ class RecurrentCpuAdapter final : public StreamingModel {
     }
 
     bool prepare(const StreamingPrepareContext& context) noexcept override {
-        prepared_ = false;
-        max_frames_ = 0;
+        // A live instance owns the kernel state. Validation or a replacement
+        // attempt must never tear down that state implicitly; the owner must
+        // quiesce and release it before preparing a new configuration.
+        if (prepared_ || cleanup_required_)
+            return false;
         if (!valid_recurrent_cpu_shape(shape_) || recurrent_state_bytes(shape_) == 0 ||
             !valid_streaming_prepare_context(context) || context.spec != &spec_ ||
             context.max_frames > kMaxSupportedFrames || spec_.input_channels != 1 ||
@@ -89,7 +93,7 @@ class RecurrentCpuAdapter final : public StreamingModel {
         if (!kernel_.prepare(kernel_.state, context)) {
             // A failed preparation may have reserved partial state. Release is
             // idempotent by contract so the next transaction can retry.
-            (void)kernel_.release(kernel_.state);
+            cleanup_required_ = !kernel_.release(kernel_.state);
             return false;
         }
         max_frames_ = context.max_frames;
@@ -101,7 +105,7 @@ class RecurrentCpuAdapter final : public StreamingModel {
                      std::uint32_t frames, StreamingBlockStamp) noexcept override {
         if (!prepared_ || input.num_channels() != 1 || output.num_channels() != 1 ||
             frames > max_frames_ || input.num_samples() < frames || output.num_samples() < frames ||
-            input.channel_ptr(0) == output.channel_ptr(0)) {
+            buffers_overlap(input.channel_ptr(0), output.channel_ptr(0), frames)) {
             output.clear();
             return;
         }
@@ -118,23 +122,42 @@ class RecurrentCpuAdapter final : public StreamingModel {
     }
 
     bool release() noexcept override {
+        if (!prepared_ && !cleanup_required_)
+            return true;
         if (kernel_.release == nullptr)
             return false;
         if (!kernel_.release(kernel_.state))
             return false;
         prepared_ = false;
         max_frames_ = 0;
+        cleanup_required_ = false;
         return true;
     }
 
   private:
     static constexpr std::uint32_t kMaxSupportedFrames = 4096;
 
+    static bool buffers_overlap(const float* input, float* output,
+                                std::uint32_t frames) noexcept {
+        if (frames == 0)
+            return false;
+        const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+        const auto input_begin = reinterpret_cast<std::uintptr_t>(input);
+        const auto output_begin = reinterpret_cast<std::uintptr_t>(output);
+        const auto max_address = std::numeric_limits<std::uintptr_t>::max();
+        if (bytes > max_address - input_begin || bytes > max_address - output_begin)
+            return true;
+        const auto input_end = input_begin + bytes;
+        const auto output_end = output_begin + bytes;
+        return input_begin < output_end && output_begin < input_end;
+    }
+
     StreamingModelSpec spec_;
     RecurrentCpuShape shape_;
     RecurrentCpuKernel kernel_;
     std::uint32_t max_frames_ = 0;
     bool prepared_ = false;
+    bool cleanup_required_ = false;
 };
 
 } // namespace pulp::gpu_audio::detail
