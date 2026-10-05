@@ -128,6 +128,45 @@ echo "== a lock held by a live run is never reclaimed"
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== a live owner on this host keeps its lock past the age bound"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"
+    UPSTREAM="$tmp/upstream"; OUT="$tmp/out"
+    make_upstream "$UPSTREAM"
+    export FETCHCONTENT_CACHE_ROOT="$tmp/cache"
+    SOURCE_CACHE_LOCK_STALE_SECONDS=1
+    lock="$FETCHCONTENT_CACHE_ROOT/.dep-v1.lock"
+    mkdir -p "$lock"
+    sleep 60 &
+    holder=$!
+    trap 'kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; rm -rf "$tmp"' EXIT
+    owner="$(printf 'pid=%s\nhost=%s\nstarted=%s' "$holder" "$(source_cache_host)" 1)"
+    printf '%s\n' "$owner" > "$lock/owner"
+
+    check "$(run_bounded 4 prime)" "timeout" "a slow live owner is still waited on"
+    check "$(grep -c 'Reclaiming' "$OUT")" "0" "age alone never takes a live same-host lock"
+    check "$(cat "$lock/owner")" "$owner" "the live owner's lock is untouched"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== an owner on another host is reclaimed by age"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    UPSTREAM="$tmp/upstream"; OUT="$tmp/out"
+    make_upstream "$UPSTREAM"
+    export FETCHCONTENT_CACHE_ROOT="$tmp/cache"
+    SOURCE_CACHE_LOCK_STALE_SECONDS=60
+    mkdir -p "$FETCHCONTENT_CACHE_ROOT/.dep-v1.lock"
+    printf 'pid=%s\nhost=%s\nstarted=%s\n' "$$" "some-other-host" 1 \
+        > "$FETCHCONTENT_CACHE_ROOT/.dep-v1.lock/owner"
+    check "$(run_bounded 30 prime)" "0" "priming finishes"
+    check "$(grep -c 'liveness cannot be checked here' "$OUT")" "1" \
+        "the reclaim says liveness was unknowable"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo "== an owner-less lock is reclaimed only once it is older than the bound"
 (
     load_setup_lib

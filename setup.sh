@@ -427,8 +427,9 @@ wgpu_runtime_url_name() {
 # `.<dir>.complete` written LAST, so a directory that a killed run left empty or
 # half-written never reads as ready.
 
-# A live priming run can legitimately hold its lock for a long three.js clone;
-# past this bound the lock is treated as abandoned even if its owner is unknown.
+# Only for a lock whose owner's liveness cannot be checked from this host (an
+# owner on another machine, an unreadable pid, or no owner record): past this
+# bound it is treated as abandoned. A live owner on this host is never reclaimed.
 SOURCE_CACHE_LOCK_STALE_SECONDS="${PULP_SOURCE_CACHE_LOCK_STALE_SECONDS:-7200}"
 
 source_cache_host() {
@@ -459,12 +460,15 @@ reclaim_stale_source_cache_lock() {
         pid="$(source_cache_owner_field "$owner" pid)"
         host="$(source_cache_owner_field "$owner" host)"
         started="$(source_cache_owner_field "$owner" started)"
-        if [ "$host" = "$(source_cache_host)" ] && [[ "$pid" =~ ^[0-9]+$ ]] \
-            && ! source_cache_pid_alive "$pid"; then
-            reason="its owner (pid $pid) is no longer running"
+        if [ "$host" = "$(source_cache_host)" ] && [[ "$pid" =~ ^[0-9]+$ ]]; then
+            # Liveness is knowable here, so it alone decides: a slow priming run
+            # on a loaded host keeps its lock however long it takes.
+            source_cache_pid_alive "$pid" \
+                || reason="its owner (pid $pid) is no longer running"
         elif [[ "$started" =~ ^[0-9]+$ ]] \
             && [ $((now - started)) -ge "$SOURCE_CACHE_LOCK_STALE_SECONDS" ]; then
-            reason="it has been held for $((now - started))s, past the ${SOURCE_CACHE_LOCK_STALE_SECONDS}s bound"
+            # Another host, or an unreadable pid: age is the only evidence.
+            reason="it has been held for $((now - started))s, past the ${SOURCE_CACHE_LOCK_STALE_SECONDS}s bound, by an owner whose liveness cannot be checked here"
         fi
     elif [ -n "$(find "$lockdir" -maxdepth 0 -mmin "+$stale_minutes" 2>/dev/null)" ]; then
         # The owner record is written just after mkdir, so a lock without one is
