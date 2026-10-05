@@ -387,7 +387,7 @@ def _git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
     command = ["git", "-C", str(root), *args]
     if stdin is None:
         return subprocess.run(command, check=True, capture_output=True).stdout
-    # Keep both sides out of pipes. `git cat-file --batch` can emit a large
+    # Keep both sides out of pipes.  `git cat-file --batch` can emit a large
     # response before consuming all object IDs; feeding it through
     # subprocess.run(input=...) or capturing its response through a pipe can
     # then deadlock when either pipe fills.
