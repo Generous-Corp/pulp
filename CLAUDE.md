@@ -1071,6 +1071,9 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - A user reports an AU editor opening in stages in Logic (small/placeholder, then empty, then the UI) and you need the stages a host window actually showed out of process, and how long the host waited for the view. → `tools/editor-open/editor_open_oop_probe.sh`
   - ⚠ **Cannot see:** Reads back the host's own window with CGWindowListCreateImage, which must run in the logged-in GUI session (hence --gui-session over ssh) and has read back only the host backdrop on a macOS 27 host while the editor was demonstrably drawing; a run whose every image is host-empty proves the instrument blind, not the editor. It sees what is composited, not why — pair it with a trace from the plug-in process (~/.config/pulp/trace-autostart in a traced build).
 
+**import-validation**
+- Validate a Chromium DevTools Protocol browser-render receipt before comparing an imported native render. → `tools/import-validation/verify_browser_fidelity_receipt.py`
+
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
