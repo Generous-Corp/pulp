@@ -71,4 +71,16 @@ inline std::filesystem::path make_unique_temp_dir(
     throw std::runtime_error("make_unique_temp_dir: no free name under " + parent.string());
 }
 
+// A temp FILE path no other process or call is handed:
+// <temp>/<prefix>-<pid>-<serial><suffix>. Nothing is created. A process id is
+// reused only after its owner exits, so a same-named file can only be a
+// finished run's leftover, never a concurrent case's file.
+inline std::filesystem::path unique_temp_path(
+    std::string_view prefix, std::string_view suffix = {},
+    const std::filesystem::path& parent = std::filesystem::temp_directory_path()) {
+    static std::atomic<std::uint64_t> serial{0};
+    return parent / (unique_temp_dir_name(prefix, current_process_id(), serial.fetch_add(1)) +
+                     std::string(suffix));
+}
+
 }  // namespace pulp::test
