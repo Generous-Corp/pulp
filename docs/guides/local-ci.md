@@ -7211,3 +7211,13 @@ tests did. The GPU-audio SDK upload is a contract downstream consumers rely
 on, so a failed first attempt is retried once after a 90-second pause with
 `overwrite: true` (the reset can land after the artifact record exists), and
 the job still fails if that retry fails.
+
+### The GPU provenance hydration step is bounded
+
+`Hydrate bounded GPU provenance commits` in `build.yml` reconnects a shallow
+checkout with one `git fetch --unshallow` per candidate event ref. The script gives
+all of those fetches a shared 300 s budget and treats a fetch that runs past it like
+an unfetchable ref (a WARN, then its fail-closed ancestry checks decide). The step
+also carries `timeout-minutes: 10`. Before this, a stalled fetch held the required
+`macos` gate for 43 minutes with no output and no build.
+

@@ -1424,6 +1424,10 @@ jobs:
 
       - name: Hydrate bounded GPU provenance commits
         shell: bash
+        # p99 45 s. The script bounds its history fetch to 300 s and then
+        # defers to its ancestry checks, so this cap only catches a hang
+        # outside the fetch rather than holding the gate for the job's limit.
+        timeout-minutes: 10
         run: |
           python3 tools/scripts/hydrate_gpu_provenance_commits.py
           # What checkout and hydration stored locally: the repository bytes
