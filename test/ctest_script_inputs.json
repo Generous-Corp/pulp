@@ -2684,7 +2684,6 @@
   "pulp-test-project-package",
   "pulp-test-pulp-node-v1",
   "pulp-test-real-plugin-runner-cache",
-  "pulp-test-recurrent-cpu-adapter",
   "pulp-test-reed-waveguide-loop",
   "pulp-test-relative-point",
   "pulp-test-reload-controller",
