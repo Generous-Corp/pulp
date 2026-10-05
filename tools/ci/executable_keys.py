@@ -35,6 +35,9 @@ What a key cannot see is made an always_run reason, never a guess:
     commit_bound       the executable embeds the commit
     key_blind          its bytes have changed while its key did not (the
                        replay's key-blind list)
+    audit_uncovered    the last clean read audit of main did not observe it
+                       (a macOS-only test, or no clean audit was handed in), so
+                       nothing has shown its declared data is all it reads
     shared_link        its link names a shared library the build produced,
                        whose content reaches it without changing its inputs
                        (link_members.shared_scope); not modelled, so it runs
@@ -462,9 +465,25 @@ def registrations(ctest: dict | None, build_dir: Path | None) -> dict[str, list[
     return out
 
 
+READ_AUDIT_SCHEMA = "pulp-read-audit/v1"
+
+
+def audit_covered(report: dict | None) -> frozenset[str] | None:
+    """Executable names the read audit observed reading only what they
+    declare, from its report (tools/ci/read_audit.py's read-audit.json), or
+    None when the report cannot vouch for any: absent, another schema, a
+    verdict other than clean, or no published covered set."""
+    if not isinstance(report, dict) or report.get("schema") != READ_AUDIT_SCHEMA:
+        return None
+    s0 = report.get("stage0") or {}
+    if s0.get("verdict") != "clean" or not isinstance(s0.get("covered"), list):
+        return None
+    return frozenset(str(n) for n in s0["covered"])
+
+
 def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None, head_codemodel: dict | None,
             ctest: dict | None, build_dir: Path | None, toolchain: dict | None,
-            key_blind_path: Path | None = None) -> dict:
+            key_blind_path: Path | None = None, *, audited: frozenset[str] | None) -> dict:
     """The key manifest's `executables` and a count per always_run reason.
     Pure over its inputs and the two git trees."""
     ancestor = subprocess.run(["git", "-C", str(source_root), "merge-base", "--is-ancestor", base_sha, head_sha],
@@ -519,6 +538,10 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             "commit_bound" if target.get("commit_bound") or base_target.get("commit_bound") else
             "key_blind" if artifact in key_blind else
             "shared_link" if BUILD + artifact in shared_loaders else
+            # Only an executable runs its own reads; a module's reads are its
+            # loader's, which this same rule covers.
+            "audit_uncovered" if kind == "executable" and (audited is None
+                                                           or os.path.basename(artifact) not in audited) else
             "environment" if any(environment_bound(t) or ALWAYS_RUN_NAME_RE.search(t["name"] or "")
                                  for t in tests) else
             "unrecorded" if paths is None else
@@ -570,6 +593,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--toolchain-json", type=Path,
                     help="the head toolchain key ({os, arch} plus reuse_record.toolchain_identity's fields "
                          "without `target`); computed from --build-dir when absent")
+    ap.add_argument("--audit-report", type=Path,
+                    help="read-audit.json of the last clean read audit of main, fetched by the planner; "
+                         "absent or not clean, every executable is audit_uncovered")
     ap.add_argument("--out", type=Path)
     a = ap.parse_args(argv[1:])
     if a.print_toolchain:
@@ -586,14 +612,18 @@ def main(argv: list[str]) -> int:
                                    check=True, capture_output=True, text=True).stdout.strip()
     base_sha, head_sha = rev(a.base_sha), rev(a.head_sha)
     toolchain = read(a.toolchain_json) if a.toolchain_json else probe_toolchain(a.build_dir)
+    audit = read(a.audit_report)
     body = compute(a.source_root, base_sha, head_sha, record, read(a.head_codemodel), read(a.ctest_json),
-                   a.build_dir, toolchain)
+                   a.build_dir, toolchain, audited=audit_covered(audit))
     manifest = {"schema": SCHEMA,
                 "producer": {"base_sha": base_sha, "head_sha": head_sha,
                              "code_paths": list(KEY_CODE_PATHS), "code_sha256": code_digest(a.source_root, base_sha),
                              "base_record_run_id": a.base_record_run_id, "base_record_sha256": record_digest,
                              "toolchain": toolchain,
-                             "base_record_image": (record or {}).get("image")},
+                             "base_record_image": (record or {}).get("image"),
+                             "audit_report_sha256": (hashlib.sha256(a.audit_report.read_bytes()).hexdigest()
+                                                     if a.audit_report and a.audit_report.is_file() else None),
+                             "audit_commit": (audit or {}).get("commit")},
                 **body}
     a.out.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print(f"executable-keys: {len(body['executables'])} entries; {body['reasons']}")

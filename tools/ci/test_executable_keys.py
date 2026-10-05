@@ -24,6 +24,8 @@ IDENTITY = {"compiler_id": "AppleClang", "compiler_version": "21.0.0.21000111",
             "sdk_version": "26.4", "sdk_build": "25E236", "deployment_target": "13.4", "env": {"CC": "unset"}}
 TOOLCHAIN = {"os": "Darwin", "arch": "arm64", **{k: v for k, v in IDENTITY.items() if k != "target"}}
 EXE, OTHER, MOD = "test/pulp-test-a", "test/pulp-test-b", "test/plug.so"
+# The read audit observed both test executables (a clean audit's covered set).
+ALL_AUDITED = frozenset({"pulp-test-a", "pulp-test-b"})
 # Enough declared readers that the data scan proves it saw something.
 KNOWN_READERS = {f"pulp-test-k{i}": {"data": "declared", "inputs": [f"test/fixtures/k{i}"],
                                      "detected_sources": ["test/k.cpp"]}
@@ -111,12 +113,13 @@ class Fixture:
                                                           **self.job_extra}))
 
     def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN,
-             key_blind: Path | None = None) -> dict:
+             key_blind: Path | None = None,
+             audited: frozenset | None = ALL_AUDITED) -> dict:
         self.write_record()
         rec = ek.load_record(self.record)[0] if record else None
         cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": self.head_targets}
         return ek.compute(self.root, self.base, head, rec, cm, self.ctest, self.build, toolchain,
-                          key_blind)["executables"]
+                          key_blind, audited=audited)["executables"]
 
 
 class KeyTests(unittest.TestCase):
@@ -384,6 +387,25 @@ class KeyTests(unittest.TestCase):
         keys = self.fx.keys(head)
         self.assertEqual({e["always_run"] for e in keys.values()}, {"base_unrecorded"})
 
+    def test_an_executable_the_read_audit_did_not_observe_always_runs(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        keys = self.fx.keys(head, audited=frozenset({"pulp-test-b"}))  # a macOS-only test, say
+        self.assertTrue(self.equal(keys, EXE))
+        self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"], keys[MOD]["always_run"]),
+                         ("audit_uncovered", None, None))
+        # No clean audit handed in: no executable may be keyed on its data.
+        keys = self.fx.keys(head, audited=None)
+        self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"]), ("audit_uncovered",) * 2)
+
+    def test_only_a_clean_audit_report_vouches_for_its_covered_set(self):
+        report = {"schema": ek.READ_AUDIT_SCHEMA, "stage0": {"verdict": "clean", "covered": ["pulp-test-a"]}}
+        self.assertEqual(ek.audit_covered(report), {"pulp-test-a"})
+        for bad in (None, {**report, "schema": "pulp-read-audit/v9"},
+                    {**report, "stage0": {"verdict": "findings", "covered": ["pulp-test-a"]}},
+                    {**report, "stage0": {"verdict": "incomplete", "covered": ["pulp-test-a"]}},
+                    {**report, "stage0": {"verdict": "clean"}}):
+            self.assertIsNone(ek.audit_covered(bad), bad)
+
     def test_the_checked_in_key_blind_list_is_readable(self):
         self.assertIsInstance(ek.load_key_blind(ek.KEY_BLIND_LIST), frozenset)
 
@@ -403,11 +425,20 @@ class ManifestTests(unittest.TestCase):
             out = Path(tmp) / "keys.json"
             tc = Path(tmp) / "tc.json"
             tc.write_text(json.dumps(TOOLCHAIN))
+            audit = Path(tmp) / "read-audit.json"
+            audit.write_text(json.dumps({"schema": ek.READ_AUDIT_SCHEMA, "commit": "c0ffee",
+                                         "stage0": {"verdict": "clean", "covered": ["pulp-test-a", "pulp-test-b"]}}))
             argv = ["x", "--source-root", str(fx.root), "--base-sha", fx.base, "--head-sha", head,
                     "--base-record", str(fx.record), "--base-record-run-id", "42", "--head-codemodel", str(cm),
-                    "--build-dir", str(fx.build), "--toolchain-json", str(tc), "--out", str(out)]
+                    "--build-dir", str(fx.build), "--toolchain-json", str(tc), "--audit-report", str(audit),
+                    "--out", str(out)]
+            # Without the audit report every executable is unvouched for.
+            self.assertEqual(ek.main([a for a in argv if a not in ("--audit-report", str(audit))]), 0)
+            self.assertEqual(json.loads(out.read_text())["reasons"], {"audit_uncovered": 2, "keyed": 1})
             self.assertEqual(ek.main(argv), 0)
             doc = json.loads(out.read_text())
+            self.assertEqual((doc["producer"]["audit_commit"], len(doc["producer"]["audit_report_sha256"])),
+                             ("c0ffee", 64))
             self.assertEqual(doc["schema"], ek.SCHEMA)
             producer = doc["producer"]
             self.assertEqual((producer["base_sha"], producer["head_sha"], producer["base_record_run_id"]),
@@ -437,10 +468,11 @@ class ManifestTests(unittest.TestCase):
             fx.write_record()
             cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}
             rec = ek.load_record(fx.record)[0]
-            keyed = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, fx.build, TOOLCHAIN)["executables"]
+            keyed = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, fx.build, TOOLCHAIN,
+                               audited=ALL_AUDITED)["executables"]
             self.assertIsNone(keyed[EXE]["always_run"])                        # control: same spelling keys
             other = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, Path(tmp) / "elsewhere",
-                               TOOLCHAIN)["executables"]
+                               TOOLCHAIN, audited=ALL_AUDITED)["executables"]
             self.assertEqual({e["always_run"] for e in other.values()}, {"inventory_unmatched"})
             self.assertEqual({e["base_key"] for e in other.values()}, {None})
 
