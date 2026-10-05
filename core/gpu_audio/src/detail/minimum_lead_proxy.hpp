@@ -47,6 +47,7 @@ struct MinimumLeadProxyAdmission {
     bool fused_or_coalesced_dispatch = false;
     bool observer_single_owner = false;
     bool observer_synchronized_handoff = false;
+    bool worker_offline_single_owner = false;
 };
 
 struct MinimumLeadProxyPrediction {
@@ -126,23 +127,29 @@ class MinimumLeadProxyEvaluator {
     static constexpr std::uint64_t authoritative_minimum_samples = 100000;
     static constexpr std::size_t bounded_id_capacity = 131072;
     static constexpr bool uses_bounded_id_storage = true;
+    static constexpr std::uint64_t worst_case_probe_budget = bounded_id_capacity * 3;
+
+    // Worker/offline only: this private reducer is intentionally >3 MiB and
+    // may probe three bounded tables on every observation. It must be
+    // constructed and consumed by one worker, or through an explicit offline
+    // synchronized handoff; it is never an audio-callback object.
 
     explicit MinimumLeadProxyEvaluator(const MinimumLeadProxyAdmission& admission) noexcept
         : admission_(admission) {}
 
     void observe(const MinimumLeadProxySample& s) noexcept {
-        ++receipt_.sample_count;
+        saturating_increment(receipt_.sample_count);
         receipt_.evaluated_lead_blocks = admission_.requested_lead_blocks;
         receipt_.cell_id = admission_.cell_id;
         if (admission_.observer_capacity != 0 &&
             receipt_.sample_count > admission_.observer_capacity)
-            ++receipt_.observer_overflow;
+            saturating_increment(receipt_.observer_overflow);
         if (s.gpu_completed)
-            ++receipt_.gpu_completed;
+            saturating_increment(receipt_.gpu_completed);
         if (s.cpu_fallback_delivered)
-            ++receipt_.cpu_fallback;
+            saturating_increment(receipt_.cpu_fallback);
         if (s.late || s.dropped)
-            ++receipt_.late_or_dropped;
+            saturating_increment(receipt_.late_or_dropped);
 
         const bool ids =
             s.admission_id != 0 && s.terminal_id != 0 && s.delivery_id != 0 &&
@@ -150,8 +157,9 @@ class MinimumLeadProxyEvaluator {
             s.delivery_generation == s.generation && s.admission_sequence == s.sequence &&
             s.terminal_sequence == s.sequence && s.delivery_sequence == s.sequence &&
             s.admission_epoch == admission_.admission_epoch;
-        if (!ids || !s.terminal_present || !s.delivery_present || s.generation == 0)
-            ++receipt_.missing_evidence;
+        if (!ids || !s.terminal_present || !s.delivery_present || s.generation == 0 ||
+            s.sequence == std::numeric_limits<std::uint64_t>::max())
+            saturating_increment(receipt_.missing_evidence);
         const auto admission_result =
             insert_id(admission_ids_, s.admission_id, 0x9e3779b97f4a7c15ULL);
         const auto terminal_result = insert_id(terminal_ids_, s.terminal_id, 0xc2b2ae3d27d4eb4fULL);
@@ -164,22 +172,22 @@ class MinimumLeadProxyEvaluator {
                 saturating_increment(receipt_.id_storage_overflow);
         }
         if (!s.identity.raw_hashes_authenticated)
-            ++receipt_.missing_evidence;
+            saturating_increment(receipt_.missing_evidence);
         if (s.identity.provider != admission_.identity.provider ||
             s.identity.executable != admission_.identity.executable ||
             s.identity.model != admission_.identity.model ||
             s.identity.resident_plan != admission_.identity.resident_plan)
-            ++receipt_.identity_mismatches;
+            saturating_increment(receipt_.identity_mismatches);
         if (s.generation != 0 && expected_generation_ != 0 && s.generation != expected_generation_)
-            ++receipt_.generation_mismatches;
+            saturating_increment(receipt_.generation_mismatches);
         if (s.admission_generation != s.generation || s.terminal_generation != s.generation ||
             s.delivery_generation != s.generation)
-            ++receipt_.generation_mismatches;
+            saturating_increment(receipt_.generation_mismatches);
         if (seen_sequence_ && s.sequence != next_sequence_) {
             if (s.sequence < next_sequence_)
-                ++receipt_.duplicate_records;
+                saturating_increment(receipt_.duplicate_records);
             else
-                ++receipt_.sequence_gaps;
+                saturating_increment(receipt_.sequence_gaps);
         }
         if (s.generation != 0 && expected_generation_ == 0)
             expected_generation_ = s.generation;
@@ -188,27 +196,32 @@ class MinimumLeadProxyEvaluator {
             seen_sequence_ = true;
         }
         if (s.gpu_completed == s.cpu_fallback_delivered)
-            ++receipt_.missing_evidence;
+            saturating_increment(receipt_.missing_evidence);
         if (s.dropped != s.late)
-            ++receipt_.missing_evidence;
+            saturating_increment(receipt_.missing_evidence);
         if (!s.callback_timing_available || s.callback_duration_ns > s.callback_budget_ns)
-            ++receipt_.callback_deadline_misses;
+            saturating_increment(receipt_.callback_deadline_misses);
 
         const auto& p = s.prediction;
         if (p.available && p.version != 0 && p.provenance != 0) {
-            ++receipt_.prediction_samples;
+            saturating_increment(receipt_.prediction_samples);
             const auto error = p.observed_ns >= p.predicted_ns ? p.observed_ns - p.predicted_ns
                                                                : p.predicted_ns - p.observed_ns;
             if (receipt_.prediction_abs_error_max_ns == Receipt::unavailable ||
                 error > receipt_.prediction_abs_error_max_ns)
                 receipt_.prediction_abs_error_max_ns = error;
-            const auto allowance = p.bound_ns + p.uncertainty_ns + p.safety_reserve_ns;
-            if (p.observed_ns > p.predicted_ns && p.observed_ns - p.predicted_ns > allowance)
-                ++receipt_.predictor_underestimates;
-            if (p.safety_reserve_ns == 0 || p.predicted_ns + allowance > p.deadline_ns ||
+            std::uint64_t allowance = 0;
+            std::uint64_t predicted_bound = 0;
+            const bool arithmetic_valid = checked_add(p.bound_ns, p.uncertainty_ns, allowance) &&
+                                          checked_add(allowance, p.safety_reserve_ns, allowance) &&
+                                          checked_add(p.predicted_ns, allowance, predicted_bound);
+            if (arithmetic_valid && p.observed_ns > p.predicted_ns &&
+                p.observed_ns - p.predicted_ns > allowance)
+                saturating_increment(receipt_.predictor_underestimates);
+            if (!arithmetic_valid || p.safety_reserve_ns == 0 || predicted_bound > p.deadline_ns ||
                 p.deadline_ns < p.observed_ns || p.provenance != admission_.identity.model) {
-                ++receipt_.missing_evidence;
-                ++receipt_.invalid_predictions;
+                saturating_increment(receipt_.missing_evidence);
+                saturating_increment(receipt_.invalid_predictions);
             } else {
                 const auto margin = p.deadline_ns - p.observed_ns;
                 if (receipt_.prediction_margin_min_ns == Receipt::unavailable ||
@@ -216,8 +229,8 @@ class MinimumLeadProxyEvaluator {
                     receipt_.prediction_margin_min_ns = margin;
             }
         } else {
-            ++receipt_.missing_evidence;
-            ++receipt_.invalid_predictions;
+            saturating_increment(receipt_.missing_evidence);
+            saturating_increment(receipt_.invalid_predictions);
         }
     }
 
@@ -227,8 +240,7 @@ class MinimumLeadProxyEvaluator {
             admission_.sample_rate != 0 && admission_.block_size != 0 &&
             admission_.requested_lead_blocks != 0 &&
             admission_.pipeline_depth > admission_.requested_lead_blocks &&
-            admission_.provider_slots != 0 && admission_.max_inflight != 0 &&
-            admission_.capacity == admission_.provider_slots + admission_.requested_lead_blocks &&
+            admission_.provider_slots != 0 && admission_.max_inflight != 0 && checked_capacity() &&
             admission_.max_inflight <= admission_.capacity && admission_.batch_size != 0 &&
             admission_.batch_size <= admission_.provider_slots && admission_.true_batch_semantics &&
             admission_.provider_resources_resident && admission_.cpu_fallback_prepared &&
@@ -238,7 +250,8 @@ class MinimumLeadProxyEvaluator {
             admission_.admission_epoch != 0 &&
             admission_.observer_capacity >= diagnostic_minimum_samples &&
             admission_.fused_or_coalesced_dispatch &&
-            (admission_.observer_single_owner || admission_.observer_synchronized_handoff);
+            (admission_.observer_single_owner || admission_.observer_synchronized_handoff) &&
+            admission_.worker_offline_single_owner;
         out.prediction_valid = out.prediction_samples == out.sample_count &&
                                out.sample_count != 0 &&
                                out.prediction_margin_min_ns != Receipt::unavailable &&
@@ -249,18 +262,11 @@ class MinimumLeadProxyEvaluator {
                        out.generation_mismatches == 0 && out.identity_mismatches == 0 &&
                        out.observer_overflow == 0 && out.callback_deadline_misses == 0 &&
                        out.gpu_completed == out.sample_count && out.cpu_fallback == 0;
-        out.authoritative_campaign = out.sample_count >= authoritative_minimum_samples &&
-                                     admission_.slots_mask == 0x1e &&
-                                     admission_.leads_mask == 0x0f && admission_.cold_runs == 5 &&
-                                     admission_.steady_runs == 5 &&
-                                     admission_.validated_cell_denominator == out.sample_count &&
-                                     admission_.quiet_coverage && admission_.ui_coverage &&
-                                     admission_.gpu_contention_coverage &&
-                                     admission_.overload_coverage && admission_.thermal_coverage;
-        out.diagnostic_only = !out.authoritative_campaign;
-        out.accepted = out.authoritative_campaign && out.complete && out.admission_valid &&
-                       out.prediction_valid && admission_.requested_lead_blocks == 1 &&
-                       out.late_or_dropped == 0;
+        // This proxy never owns campaign acceptance. An external reducer must
+        // authenticate the complete matrix and may consume this diagnostic receipt.
+        out.authoritative_campaign = false;
+        out.diagnostic_only = true;
+        out.accepted = false;
         return out;
     }
 
@@ -276,6 +282,19 @@ class MinimumLeadProxyEvaluator {
     std::array<std::uint64_t, bounded_id_capacity> admission_ids_{};
     std::array<std::uint64_t, bounded_id_capacity> terminal_ids_{};
     std::array<std::uint64_t, bounded_id_capacity> delivery_ids_{};
+
+    static bool checked_add(std::uint64_t a, std::uint64_t b, std::uint64_t& out) noexcept {
+        if (b > std::numeric_limits<std::uint64_t>::max() - a)
+            return false;
+        out = a + b;
+        return true;
+    }
+
+    bool checked_capacity() const noexcept {
+        return admission_.requested_lead_blocks <=
+                   std::numeric_limits<std::uint32_t>::max() - admission_.provider_slots &&
+               admission_.capacity == admission_.provider_slots + admission_.requested_lead_blocks;
+    }
 
     static IdInsertResult insert_id(std::array<std::uint64_t, bounded_id_capacity>& table,
                                     std::uint64_t id, std::uint64_t salt) noexcept {

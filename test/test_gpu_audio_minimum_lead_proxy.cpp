@@ -36,7 +36,8 @@ MinimumLeadProxyAdmission admission() {
             .overload_coverage = true,
             .thermal_coverage = true,
             .fused_or_coalesced_dispatch = true,
-            .observer_single_owner = true};
+            .observer_single_owner = true,
+            .worker_offline_single_owner = true};
 }
 MinimumLeadProxySample sample(std::uint64_t n) {
     return {.generation = 7,
@@ -95,6 +96,9 @@ TEST_CASE("minimum lead proxy rejects missing per-sample IDs") {
     auto s = sample(0);
     s.delivery_id = 0;
     auto r = run(s);
+    CHECK(r.missing_evidence > 0);
+    CHECK_FALSE(r.complete);
+    r = run(sample(UINT64_MAX));
     CHECK(r.missing_evidence > 0);
     CHECK_FALSE(r.complete);
 }
@@ -167,6 +171,12 @@ TEST_CASE("minimum lead proxy validates slots lead capacity and true batch") {
     MinimumLeadProxyEvaluator e(a);
     e.observe(sample(0));
     CHECK_FALSE(e.finish().admission_valid);
+    a = admission();
+    a.provider_slots = UINT32_MAX;
+    a.capacity = UINT32_MAX;
+    MinimumLeadProxyEvaluator wrapped(a);
+    wrapped.observe(sample(0));
+    CHECK_FALSE(wrapped.finish().admission_valid);
 }
 TEST_CASE("minimum lead proxy requires explicit cell scope") {
     auto a = admission();
@@ -209,6 +219,15 @@ TEST_CASE("minimum lead proxy rejects bound beyond deadline and zero safety") {
     s.prediction.bound_ns = 150;
     s.prediction.safety_reserve_ns = 0;
     auto r = run(s);
+    CHECK_FALSE(r.prediction_valid);
+    s = sample(0);
+    s.prediction.bound_ns = UINT64_MAX;
+    r = run(s);
+    CHECK_FALSE(r.prediction_valid);
+    s = sample(0);
+    s.prediction.predicted_ns = UINT64_MAX;
+    s.prediction.bound_ns = 1;
+    r = run(s);
     CHECK_FALSE(r.prediction_valid);
 }
 TEST_CASE("minimum lead proxy rejects unauthenticated sample identity") {
