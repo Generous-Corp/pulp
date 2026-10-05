@@ -5,12 +5,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    tomllib = None
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -458,6 +464,22 @@ class ManifestTests(unittest.TestCase):
             doc = json.loads(out.read_text())
             self.assertNotEqual(doc["producer"]["base_record_sha256"], first)
             self.assertEqual(doc["reasons"], {"toolchain_unknown": 3})
+
+    @unittest.skipIf(tomllib is None, "tomllib unavailable; cannot read .shipyard/config.toml")
+    def test_the_configured_rederive_command_parses_with_this_key_code(self):
+        # Shipyard re-derives with the base's command against the base's key
+        # code, so every flag the config passes must be one this copy accepts.
+        with (HERE.parents[1] / ".shipyard" / "config.toml").open("rb") as handle:
+            config = tomllib.load(handle)
+        command = config["targets"]["mac"]["changed_surface_selection"]["executable_reuse"]["rederive"][0]
+        self.assertEqual(command[:3], ["python3", "-I", "tools/ci/executable_keys.py"])
+        argv = ["x"] + [re.sub(r"\{[a-z_]+\}", "v", arg) for arg in command[3:]]
+        self.assertIn("--audit-report", argv)
+
+        class Parsed(Exception):
+            pass
+        with mock.patch.object(ek, "load_record", side_effect=Parsed), self.assertRaises(Parsed):
+            ek.main(argv)
 
     def test_registrations_match_the_build_dir_as_a_string(self):
         # The host re-deriving a manifest holds copies, not the build tree:

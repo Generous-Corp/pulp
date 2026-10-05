@@ -593,7 +593,7 @@ that failed to write never changes the lane's verdict; read the run log's last
 
 `[targets.mac.changed_surface_selection.executable_reuse]` makes Shipyard copy
 `derivation_paths` from the protected base into a bare directory and run the
-key code there with `python3 -I`. Three mistakes do not error at configure
+key code there with `python3 -I`. Four mistakes do not error at configure
 time; they make every keyed run fail to derive or every re-derivation refuse:
 
 - **A new import in the key code must join `derivation_paths` in the same
@@ -612,6 +612,13 @@ time; they make every keyed run fail to derive or every re-derivation refuse:
   Shipyard predates `executable_reuse` cannot parse the policy at all, so the
   changed-surface plan falls back to full on every PR. Bump the pinned
   Shipyard on the lane hosts before the table lands on main.
+- **A new flag in the `rederive` command lands with the key code that accepts
+  it.** The host re-derives with the base's command against the base's copy,
+  so `--audit-report {audit_report}` on a main whose `executable_keys.py`
+  lacks the argument makes argparse exit 2 on every re-derivation, and the
+  second refusal turns `PULP_REUSE_LIVE` off.
+  `test_the_configured_rederive_command_parses_with_this_key_code` parses the
+  configured command with the same copy's parser.
 
 ## Performance lanes report; they never gate
 
