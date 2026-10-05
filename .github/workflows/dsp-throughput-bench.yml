@@ -38,10 +38,10 @@ jobs:
         run: |
           set -euo pipefail
           re='wavefolder stages retain|Transfer curve block, in-place|headphone crossfeed is channel symmetric|Particle voices match independent sample-level body oracles - float|Dynamic EQ reset and block partitions|GraphicEq response matches an independent|SignalGraph multi-path routing renders|SignalGraph multi-path oracle detects|SignalGraph multi-path routing is block|SignalGraph renders unchanged across an open|MF-3: snap_to_zero'
-          bins=$(ctest --test-dir b -N -V -R "$re" | sed -n 's/.*Test command: \([^ ]*\).*/\1/p' | sort -u)
-          echo "$bins"
-          for t in $bins; do cmake --build b --target "$(basename "$t")" --parallel 4; done
-          ctest --test-dir b -R "$re" --output-on-failure | tee eleven.txt
+          cmake --build b --parallel 4 --target pulp-test-group-dsp-rt-signal pulp-test-signal-dynamic-eq \
+            pulp-test-graphic-eq pulp-test-signal-graph-audio-parity pulp-test-denormal-null
+          ctest --test-dir b -R "$re" --output-on-failure 2>&1 | tee eleven.txt
+          grep -c "Passed" eleven.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: numeric-gcc14-on, path: eleven.txt}
@@ -89,7 +89,7 @@ jobs:
             cmake -S . -B b -DCMAKE_BUILD_TYPE=Release -DPULP_BENCHMARK=ON -DPULP_BUILD_EXAMPLES=OFF \
               -DPULP_ENABLE_GPU=OFF -DPULP_PROOF_GNU_FP_CONTRACT=$mode
             cmake --build b --target pulp-dsp-throughput-benchmark --parallel 4
-            grep -rho -- "-ffp-contract=[a-z]*" b --include=flags.make | sort | uniq -c
+            grep -rho -- "-ffp-contract=[a-z]*" b --include=flags.make | sort | uniq -c || true
             (cd b && find . -name '*.o' -print0 | sort -z | xargs -0 sha256sum) > objs-$mode.txt
             cp b/test/pulp-dsp-throughput-benchmark bench-$mode
           done
