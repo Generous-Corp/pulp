@@ -1278,8 +1278,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         # Two cases walk the whole tracked tree for configured reachability,
-        # once, shared; about 50 s on m3.
-        set_tests_properties(changed-surface-script-families-selftest PROPERTIES TIMEOUT 120)
+        # once, shared. The matcher is cached, but hosted runners can still be
+        # several times slower than the owner's machine as the script corpus
+        # grows; keep the contract bounded without making normal runs brittle.
+        set_tests_properties(changed-surface-script-families-selftest PROPERTIES TIMEOUT 300)
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
         # The lane runner's own contract: base provisioning and configure-shape

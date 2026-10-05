@@ -162,7 +162,7 @@ def seeds_reachability(script: str, native_text: str, cmake_text: str, cmake_run
 
 
 def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
-                     text: Any) -> set[str]:
+                    text: Any) -> set[str]:
     """Scripts that code outside the declared script tests can run."""
     native = [p for p in tracked if p.endswith(NATIVE_SUFFIXES)
               and not p.startswith(NON_EXECUTING_PREFIXES)]
@@ -172,13 +172,20 @@ def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
     cmake_running = "\n".join(_without_comments_and_add_tests(text(p)) for p in cmake)
     reached = {script for script in scripts
                if seeds_reachability(script, native_text, cmake_text, cmake_running, entries)}
+    # The closure walk can inspect thousands of script bodies. Compile each
+    # basename matcher once so the cost is proportional to the number of
+    # inspected bodies and scripts, rather than recompiling a regex for every
+    # pair. Keep the script path beside the matcher so discovery order stays
+    # identical to the previous implementation.
+    matchers = [(script, re.compile(r"\b" + re.escape(os.path.basename(script)[:-3]) + r"\b"))
+                for script in scripts]
     pending = sorted(reached)
     while pending:
         body = text(pending.pop())
-        for script in scripts:
+        for script, matcher in matchers:
             if script in reached:
                 continue
-            if re.search(r"\b" + re.escape(os.path.basename(script)[:-3]) + r"\b", body):
+            if matcher.search(body):
                 reached.add(script)
                 pending.append(script)
     return reached
