@@ -5070,6 +5070,24 @@ runner: the workflow handles `pull_request_target` and mints the narrowly scoped
 Vellum reader credential only after checking out and binding literal protected
 `main` controls.
 
+### `drift-fast` and the wclap job
+
+`PULP_DRIFT_FAST_RUNS_ON_JSON` (the required `drift-fast` job in
+`drift-fast.yml`) and `PULP_WCLAP_RUNS_ON_JSON` (the required "Build + prove +
+(owner-gated) deploy" job in `wclap-cloudflare.yml`) route those jobs away from
+GitHub-hosted runners. Unset, each falls back to `ubuntu-latest`, so nothing
+changes until one is set. They exist because a required check whose hosted job
+is never assigned a runner is cancelled after about fifteen minutes, and the
+merge queue ejects the group: on 2026-10-05, during a hosted-runner assignment
+incident, a group was ejected through `drift-fast` this way. Both are JSON and
+parsed, like every `*_RUNS_ON_JSON` selector. Before setting one to a
+self-hosted pool, check that pool's runner group admits the workflow:
+`pulp-trusted-build` lists its workflows (`tools/ci/verify_linux_runner_group.py`)
+and does not include `drift-fast.yml`, and it refuses `wclap-cloudflare.yml`
+outright because that workflow holds the Cloudflare deploy secret. A job routed
+to a group that does not admit its workflow is never assigned and waits
+forever.
+
 The Linux and Windows label sets include a `pulp-host-*` label that pins the
 lane to one machine, so the supervisor serving them must carry it too — GitHub
 selects a runner only when it carries every requested label. Declare the machine
