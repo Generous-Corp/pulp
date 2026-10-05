@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -284,6 +285,8 @@ GpuConvolverRawManifest raw_manifest() {
     value.channels = 2;
     value.ir_frames = 257;
     value.inflight_depth = 3;
+    value.queue_capacity = 4;
+    value.max_inflight = 2;
     value.lead_blocks = 2;
     value.deadline_ns = 1000;
     value.watchdog_ns = 2000;
@@ -1196,4 +1199,32 @@ TEST_CASE("staged async records require quiescent ownership before producer drai
     CHECK(records.front().sequence == 12);
     CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::CompletedAccepted);
     CHECK(state.take_completed().empty());
+}
+
+TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trace][p4]") {
+    GpuConvolverTrialContext context;
+    context.thermal_state = static_cast<GpuConvolverThermalState>(255);
+    REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
+}
+
+TEST_CASE("P4 receipt rejects an unsafe queue admission geometry",
+          "[gpu_audio][trace][raw][p4]") {
+    auto manifest = raw_manifest();
+    manifest.queue_capacity = manifest.lead_blocks;
+    auto terminal = raw_terminal(0);
+    auto delivery = raw_delivery(0);
+    const std::array records{terminal, delivery};
+    GpuConvolverRawTrial trial{
+        .trial_id = 1,
+        .path = GpuConvolverRawTrialPath::StagedSync,
+        .engine_id = 17,
+        .generation = 3,
+        .ui_frame_p99_ns = 100,
+        .duration_ns = 100,
+        .records = records,
+    };
+    const std::array trials{trial};
+    std::ostringstream output;
+    REQUIRE_FALSE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
+    REQUIRE(output.str().empty());
 }

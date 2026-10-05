@@ -34,13 +34,26 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
         }
         return "unknown";
     }();
+    const auto thermal = [&] {
+        switch (context.thermal_state) {
+        case GpuConvolverThermalState::Nominal: return "nominal";
+        case GpuConvolverThermalState::Warm: return "warm";
+        case GpuConvolverThermalState::Throttled: return "throttled";
+        case GpuConvolverThermalState::Unavailable: break;
+        }
+        return "unavailable";
+    }();
     output << R"({"schema":"pulp.gpu-audio.p4.trace.v1","record_kind":"trial_begin","trial_id":)"
            << context.trial_id << R"(,"pair_id":)" << context.pair_id << R"(,"path":")" << path
            << R"(","load":")" << load << R"(","block_frames":)" << context.block_frames
            << R"(,"sample_rate_hz":)" << context.sample_rate_hz << R"(,"channels":)"
            << context.channels << R"(,"ir_frames":)" << context.ir_frames << R"(,"inflight_depth":)"
-           << context.inflight_depth << R"(,"lead_blocks":)" << context.lead_blocks
-           << R"(,"deadline_ns":)" << context.deadline_ns << R"(,"watchdog_ns":)"
+           << context.inflight_depth << R"(,"queue_capacity":)" << context.queue_capacity
+           << R"(,"max_inflight":)" << context.max_inflight << R"(,"lead_blocks":)" << context.lead_blocks
+           << R"(,"workgroup_requested":)" << (context.workgroup_requested ? "true" : "false")
+           << R"(,"workgroup_joined":)" << (context.workgroup_joined ? "true" : "false")
+           << R"(,"thermal_state":")" << thermal << R"(","deadline_ns":)" << context.deadline_ns
+           << R"(,"watchdog_ns":)"
            << context.watchdog_ns << "}\n";
 
     for (std::size_t ordinal = 0; ordinal < records.size(); ++ordinal) {

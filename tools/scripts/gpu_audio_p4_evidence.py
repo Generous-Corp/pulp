@@ -611,6 +611,27 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             "quiet", "graphite_ui", "gpu_contention", "overload"
         }:
             errors.append("line 1: row.load is invalid")
+        # New P4 scheduling fields are required as a complete set when emitted;
+        # legacy receipts remain readable for historical evidence.
+        scheduling_fields = {"queue_capacity", "max_inflight", "thermal_state",
+                             "workgroup_requested", "workgroup_joined"}
+        if scheduling_fields.intersection(row):
+            for field in ("queue_capacity", "max_inflight"):
+                if not _integer_at_least(row.get(field), 1):
+                    errors.append(f"line 1: row.{field} must be a positive integer")
+            if (isinstance(row.get("queue_capacity"), int) and isinstance(row.get("lead_blocks"), int)
+                    and row["queue_capacity"] <= row["lead_blocks"]):
+                errors.append("line 1: row.queue_capacity must exceed row.lead_blocks")
+            if (isinstance(row.get("max_inflight"), int) and isinstance(row.get("queue_capacity"), int)
+                    and isinstance(row.get("lead_blocks"), int)
+                    and row["max_inflight"] > row["queue_capacity"] - row["lead_blocks"]):
+                errors.append("line 1: row.max_inflight exceeds available queue depth")
+            if row.get("thermal_state") not in {"unavailable", "nominal", "warm", "throttled"}:
+                errors.append("line 1: row.thermal_state is invalid")
+            if not isinstance(row.get("workgroup_requested"), bool) or not isinstance(row.get("workgroup_joined"), bool):
+                errors.append("line 1: row.workgroup fields must be boolean")
+            elif row["workgroup_requested"] and not row["workgroup_joined"]:
+                errors.append("line 1: requested workgroup must be joined")
         if (isinstance(row.get("deadline_ns"), int) and isinstance(row.get("watchdog_ns"), int)
                 and row["watchdog_ns"] <= row["deadline_ns"]):
             errors.append("line 1: row.watchdog_ns must be greater than row.deadline_ns")

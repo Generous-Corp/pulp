@@ -53,10 +53,15 @@ struct GpuConvolverRawManifest {
     std::uint32_t channels = 0;
     std::uint32_t ir_frames = 0;
     std::uint32_t inflight_depth = 0;
+    std::uint32_t queue_capacity = 0;
+    std::uint32_t max_inflight = 0;
     std::uint32_t lead_blocks = 0;
     std::uint64_t deadline_ns = 0;
     std::uint64_t watchdog_ns = 0;
     GpuConvolverTrialLoad load = GpuConvolverTrialLoad::Quiet;
+    GpuConvolverThermalState thermal_state = GpuConvolverThermalState::Unavailable;
+    bool workgroup_requested = false;
+    bool workgroup_joined = false;
 
     std::string confirmation_campaign_id;
     std::string confirmation_summary_sha256;
@@ -125,6 +130,22 @@ inline const char* load_name(GpuConvolverTrialLoad load) noexcept {
         return "overload";
     }
     return "unknown";
+}
+
+inline bool valid_thermal_state(GpuConvolverThermalState state) noexcept {
+    return state == GpuConvolverThermalState::Unavailable ||
+           state == GpuConvolverThermalState::Nominal || state == GpuConvolverThermalState::Warm ||
+           state == GpuConvolverThermalState::Throttled;
+}
+
+inline const char* thermal_state_name(GpuConvolverThermalState state) noexcept {
+    switch (state) {
+    case GpuConvolverThermalState::Nominal: return "nominal";
+    case GpuConvolverThermalState::Warm: return "warm";
+    case GpuConvolverThermalState::Throttled: return "throttled";
+    case GpuConvolverThermalState::Unavailable: break;
+    }
+    return "unavailable";
 }
 
 inline const char* path_name(GpuConvolverRawTrialPath path) noexcept {
@@ -289,9 +310,11 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
         manifest.expected_matched_pairs == 0 || manifest.bootstrap_resamples < 100 ||
         !manifest.paced || manifest.block_frames == 0 || manifest.sample_rate_hz == 0 ||
         manifest.channels == 0 || manifest.ir_frames == 0 || manifest.inflight_depth == 0 ||
-        manifest.expected_blocks_per_trial == 0 || manifest.lead_blocks == 0 ||
-        manifest.deadline_ns == 0 || manifest.watchdog_ns <= manifest.deadline_ns ||
-        !valid_load(manifest.load))
+        manifest.expected_blocks_per_trial == 0 || manifest.queue_capacity <= manifest.lead_blocks ||
+        manifest.max_inflight == 0 || manifest.max_inflight > manifest.queue_capacity - manifest.lead_blocks ||
+        manifest.lead_blocks == 0 || manifest.deadline_ns == 0 || manifest.watchdog_ns <= manifest.deadline_ns ||
+        !valid_load(manifest.load) || !valid_thermal_state(manifest.thermal_state) ||
+        (manifest.workgroup_requested && !manifest.workgroup_joined))
         return false;
     bool has_o3 = false;
     bool has_ndebug = false;
@@ -585,8 +608,12 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
              << raw_writer_detail::load_name(manifest.load) << R"(","block_frames":)"
              << manifest.block_frames << R"(,"sample_rate_hz":)" << manifest.sample_rate_hz
              << R"(,"channels":)" << manifest.channels << R"(,"ir_frames":)" << manifest.ir_frames
-             << R"(,"inflight_depth":)" << manifest.inflight_depth << R"(,"lead_blocks":)"
-             << manifest.lead_blocks << R"(,"deadline_ns":)" << manifest.deadline_ns
+             << R"(,"inflight_depth":)" << manifest.inflight_depth << R"(,"queue_capacity":)"
+             << manifest.queue_capacity << R"(,"max_inflight":)" << manifest.max_inflight
+             << R"(,"lead_blocks":)" << manifest.lead_blocks << R"(,"workgroup_requested":)"
+             << (manifest.workgroup_requested ? "true" : "false") << R"(,"workgroup_joined":)"
+             << (manifest.workgroup_joined ? "true" : "false") << R"(,"thermal_state":")"
+             << raw_writer_detail::thermal_state_name(manifest.thermal_state) << R"(","deadline_ns":)" << manifest.deadline_ns
              << R"(,"watchdog_ns":)" << manifest.watchdog_ns << "}\n";
         std::map<std::string, std::uint32_t> terminal_counts{
             {"cancelled_teardown", 0}, {"completed", 0},        {"device_lost", 0},
@@ -692,8 +719,12 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
                   << R"(,"row":{"block_frames":)" << manifest.block_frames
                   << R"(,"sample_rate_hz":)" << manifest.sample_rate_hz << R"(,"channels":)"
                   << manifest.channels << R"(,"ir_frames":)" << manifest.ir_frames
-                  << R"(,"inflight_depth":)" << manifest.inflight_depth << R"(,"lead_blocks":)"
-                  << manifest.lead_blocks << R"(,"deadline_ns":)" << manifest.deadline_ns
+                  << R"(,"inflight_depth":)" << manifest.inflight_depth << R"(,"queue_capacity":)"
+                  << manifest.queue_capacity << R"(,"max_inflight":)" << manifest.max_inflight
+                  << R"(,"lead_blocks":)" << manifest.lead_blocks << R"(,"workgroup_requested":)"
+                  << (manifest.workgroup_requested ? "true" : "false") << R"(,"workgroup_joined":)"
+                  << (manifest.workgroup_joined ? "true" : "false") << R"(,"thermal_state":")"
+                  << raw_writer_detail::thermal_state_name(manifest.thermal_state) << R"(","deadline_ns":)" << manifest.deadline_ns
                   << R"(,"watchdog_ns":)" << manifest.watchdog_ns << R"(,"load":")"
                   << raw_writer_detail::load_name(manifest.load) << R"("})";
     if (manifest.campaign == "default") {
