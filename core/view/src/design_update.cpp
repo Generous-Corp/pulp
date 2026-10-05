@@ -60,9 +60,10 @@ BindingShape binding_shape(const IRNode& node) {
     shape.meter = has_nonempty_attribute(node, "pulpMeterSource") ||
                   has_nonempty_attribute(node, "pulpMeterChannel") ||
                   has_nonempty_attribute(node, "pulpMeterValueKey");
-    shape.value = has_nonempty_attribute(node, "pulpValueKey") ||
-                  has_nonempty_attribute(node, "pulpInitialValue") ||
-                  has_nonempty_attribute(node, "pulpPlaceholder");
+    // The value key selects the binding family. Initial text and placeholder
+    // are payload values on that family, so changing either must remain an
+    // in-place update rather than recreating the native control.
+    shape.value = has_nonempty_attribute(node, "pulpValueKey");
     shape.action = has_nonempty_attribute(node, "pulpHostAction") ||
                    has_nonempty_attribute(node, "pulpPayloadContract");
 
