@@ -15,8 +15,8 @@
     "no_named_forge_consumer"
   ],
   "local_probe": {
-    "checked_at": "2026-10-03",
-    "rechecked_parent_head": "5ea08fd82495687c8e23c85de1a7d4ff429809a8",
+    "checked_at": "2026-10-05",
+    "rechecked_parent_head": "5215f37c8b0d7ab3bea1d2f6513f5435fc2101c9",
     "status": "unavailable",
     "checked_paths": [
       "/Users/danielraffel/.pulp/magenta",
@@ -39,12 +39,12 @@
     ],
     "forge_catalog_rows_for_spectr_gpu_nam": 0,
     "closure": "closed_without_catalog_promotion",
-    "parent_head_kind": "historical_probe_head",
-    "rechecked_against_current_main": false,
-    "provenance_note": "The probe was recorded on the historical parent head above; it is retained as unavailable-artifact evidence and is not a current-main validation."
+    "parent_head_kind": "current_protected_origin_main",
+    "rechecked_against_current_main": true,
+    "provenance_note": "The metadata-only closure was rechecked against the protected origin/main head above; unavailable-artifact evidence remains historical and does not claim product execution."
   },
   "metadata_audit": {
-    "origin_main": "5ea08fd82495687c8e23c85de1a7d4ff429809a8",
+    "origin_main": "5215f37c8b0d7ab3bea1d2f6513f5435fc2101c9",
     "prior_receipt_parent_was_stale": "8b10d5ada01466d39de2d519811e7c74bc5b0340",
     "gpu_nam_consumer_checkout": {
       "path": "/Users/danielraffel/Code/pulp-gpu-nam",
