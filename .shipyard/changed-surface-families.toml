@@ -43,7 +43,6 @@ paths = [
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
-  "tools/scripts/gpu_audio_provider_identity.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
   "tools/scripts/install_shipyard_token_check.py",
