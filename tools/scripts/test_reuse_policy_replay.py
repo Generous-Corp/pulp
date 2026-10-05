@@ -20,8 +20,10 @@ Run:
 """
 from __future__ import annotations
 
+import gzip
 import io
 import json
+import datetime as dt
 import os
 import subprocess
 import urllib.error
@@ -970,7 +972,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v7"
+        cache = corpus / "cache" / "record-v8"
         cache.mkdir(parents=True)
         # group-a is rebuilt but its bytes came out the same (over-approximation);
         # group-b's bytes changed but nothing in the drift reaches it: the
@@ -1013,7 +1015,7 @@ class RecordedGraphTests(unittest.TestCase):
             rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
             rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
             rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
-            cache = corpus / "cache" / "record-v7"
+            cache = corpus / "cache" / "record-v8"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": {"test/group-c": "3"}}),
                              ("g1", {"link": self.link, "executables": {"ta": "test/group-a"},
@@ -1050,7 +1052,7 @@ class RecordedGraphTests(unittest.TestCase):
             link = dict(self.link)
             if recorded:
                 link["test/plug.so"] = {"objects": [], "members": {"core/liba.a": ["b.cpp.o"]}}
-            cache = corpus / "cache" / "record-v7"
+            cache = corpus / "cache" / "record-v8"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": None}),
                              ("g1", {"link": link, "executables": {"ta": "test/group-a"}, "binaries": None})):
@@ -1077,7 +1079,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v7"
+        cache = corpus / "cache" / "record-v8"
         cache.mkdir(parents=True)
         recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
                 "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
@@ -1111,7 +1113,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
         targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
                    for n in ("group-a", "group-b", "group-c")}
-        cache = corpus / "cache" / "record-v7"
+        cache = corpus / "cache" / "record-v8"
         cache.mkdir(parents=True)
         common = {"targets": targets, "binaries": None, "generated_headers": headers}
         recs = {"p1": {**common, "link": None, "executables": None, "digest_schema": head_schema,
@@ -1198,12 +1200,15 @@ class RecordedGraphTests(unittest.TestCase):
         model = {"schema": "pulp-codemodel-digest/v2", "generated_headers": "ninja-deps",
                  "commit_bound_declared": ["stamp"],
                  "targets": {"z": {"type": "EXECUTABLE", "artifacts": ["<build>/test/z"], "commit_bound": True},
-                             "y": {"type": "EXECUTABLE", "artifacts": ["<build>/test/y"], "commit_bound": False}}}
+                             "y": {"type": "EXECUTABLE", "artifacts": ["<build>/test/y"], "commit_bound": False},
+                             # A plugin bundle declared commit-bound: its marker embeds the build nonce.
+                             "plug": {"type": "MODULE_LIBRARY", "artifacts": ["<build>/AU/P.component/Contents/MacOS/P"],
+                                      "commit_bound": True}}}
         rows = [{"test_id": "x case", "executable": "<build>/test/x", "commit_bound": True},
                 {"test_id": "y", "executable": "<build>/test/y", "commit_bound": False}]
         rec = self.record_from({"codemodel-abc.json": json.dumps(model),
                                 "tests.jsonl": "\n".join(json.dumps(r) for r in rows)})
-        self.assertEqual(rec["declared_commit_bound"], ["test/x", "test/z"])
+        self.assertEqual(rec["declared_commit_bound"], ["AU/P.component/Contents/MacOS/P", "test/x", "test/z"])
         self.assertTrue(rrc.content_keyed(rec))
         self.assertFalse(rrc.content_keyed(dict(rec, generated_headers="unavailable")))
 
@@ -1377,6 +1382,52 @@ class ScriptInputsTests(unittest.TestCase):
             self.assertIsNone(c.input_list_at("d" * 40))
             self.assertEqual(len(attempts), 2)                    # the failure was not cached
             self.assertFalse((Path(tmp) / "script-inputs" / f"{'d' * 40}.json.gz").exists())
+
+
+class RunListingTests(unittest.TestCase):
+    def collector(self, tmp, pages):
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.cache = Path(tmp)
+        calls = []
+        gh = mock.Mock()
+        gh.repository = "o/r"
+
+        def json_(path):
+            calls.append(path)
+            return {"workflow_runs": pages.pop(0) if pages else []}
+        gh.json = json_
+        c.gh = gh
+        return c, calls
+
+    def listed(self, day):
+        return {"id": 1, "head_sha": "s", "head_branch": "b", "created_at": f"{day}T12:00:00Z", "updated_at": None,
+                "status": "completed", "conclusion": "success", "event": "pull_request", "run_attempt": 1, "path": "p"}
+
+    def test_a_recent_or_empty_day_is_not_cached(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        old = (now - dt.timedelta(days=5)).date().isoformat()
+        recent = (now - dt.timedelta(days=1)).date().isoformat()
+        with tempfile.TemporaryDirectory() as tmp:
+            for day, pages, kept in ((old, [[self.listed(old)]], True), (recent, [[self.listed(recent)]], False),
+                                     (old, [[], []], False)):
+                c, calls = self.collector(tmp, pages)
+                (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").unlink(missing_ok=True)
+                start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
+                c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
+                self.assertEqual((Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists(), kept, (day, pages))
+
+    def test_a_cached_empty_day_is_asked_again(self):
+        old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).date().isoformat()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runs" / f"pull_request-{old}.json.gz"
+            path.parent.mkdir(parents=True)
+            with gzip.open(path, "wt") as fh:
+                json.dump([], fh)                      # what a bad afternoon left behind
+            c, calls = self.collector(tmp, [[self.listed(old)]])
+            start = dt.datetime.fromisoformat(old + "T00:00:00+00:00")
+            runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
+            self.assertEqual(len(runs), 1)
+            self.assertEqual(len(calls), 1)
 
 
 class GraftTests(unittest.TestCase):
