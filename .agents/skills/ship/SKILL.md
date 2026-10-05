@@ -175,6 +175,13 @@ the receipts. A consumer `package.sh` that *deletes* them first is both
 redundant and lossy: it destroys build provenance the installer would have
 sealed into the bundle.
 
+`deep_sign()` also walks `Contents/Helpers` before sealing a bundle. Products
+may carry nested helper apps there, including their own executables and
+`*.dylib` files. Those files must receive the same Developer ID identity,
+hardened runtime, and secure timestamp as the containing product; signing only
+`Contents/Resources`, `Contents/MacOS`, or `Contents/Frameworks` produces a
+package that builds locally but is rejected by Apple notarization.
+
 **Secrets live OUTSIDE the repo** (never committed), in
 `~/.config/pulp/secrets/` (override dir with `$PULP_SECRETS_DIR`):
 - `keychain.env` — `PULP_SIGN_KEYCHAIN`, `PULP_SIGN_KEYCHAIN_PW`, `PULP_SIGN_P12`,
