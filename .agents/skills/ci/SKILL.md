@@ -4039,11 +4039,19 @@ The fix is a literal `--parallel 4` on those hosted 4-core legs, the same as
 annotations ("The job has exceeded the maximum execution time"), not by grepping
 the log, which also matches the workflow's own comments about `timeout-minutes`.
 On a PR the `windows` check is an Ubuntu aggregate that compiles and tests nothing
+<<<<<<< HEAD
 on Windows (see `docs/guides/test-lanes.md`). The nightly's Windows Test step runs
 after a Build that finished with errors, not only after a clean one: MSBuild keeps
 building the other projects, so the targets that built are tested and the broken
 ones read "Not Run". The job stays red because Build failed; do not read a Windows
 ctest summary in a red nightly as a green build.
+=======
+on Windows (see `docs/guides/test-lanes.md`).
+The nightly's Linux legs carry the same setup as `build.yml`'s Linux leg (an
+`origin/main` fetch for the agent-capability checks, the visual-analysis Python set,
+lavapipe on both architectures). A test that passes in `build.yml` and fails only in
+the nightly is usually a missing setup step there, not a platform bug.
+>>>>>>> origin/pr-9629
 
 Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
 and its `tracking-issues` job find-or-creates a per-platform issue on failure,
