@@ -1,17 +1,17 @@
-#include <catch2/catch_test_macros.hpp>
 #include "support/thread_progress.hpp"
 #include "support/unique_temp_dir.hpp"
-#include <chrono>
-#include <pulp/view/script_engine.hpp>
+#include <atomic>
+#include <catch2/catch_test_macros.hpp>
 #include <choc/platform/choc_FileWatcher.h>
-#include <fstream>
-#include <thread>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <pulp/view/script_engine.hpp>
 #include <string>
-#include <atomic>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 

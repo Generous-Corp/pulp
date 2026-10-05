@@ -1,12 +1,12 @@
-#include <catch2/catch_test_macros.hpp>
-#include <pulp/platform/child_process.hpp>
-#include <miniz.h>
 #include "envelope_merge.hpp"
 #include "fig_lane.hpp"
 #include "node_runtime.hpp"
 #include "render_artifact_path.hpp"
 #include "support/isolated_pulp_home.hpp"
 #include "support/unique_temp_dir.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <miniz.h>
+#include <pulp/platform/child_process.hpp>
 
 #include <iostream>
 

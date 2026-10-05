@@ -14,10 +14,10 @@
 
 #include "test_cli_shellout_util.hpp"
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/import_detect.hpp"
 #include "tools/cli/import_emit.hpp"
 #include "tools/cli/import_emit_scan.hpp"
-#include "support/unique_temp_dir.hpp"
 
 #include <pulp/platform/child_process.hpp>
 

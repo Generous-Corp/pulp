@@ -1,11 +1,11 @@
 #pragma once
 
+#include "unique_temp_dir.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
-#include "unique_temp_dir.hpp"
 
 namespace pulp_test_cli {
 

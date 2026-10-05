@@ -13,9 +13,9 @@
 // well as a moving one on the frame where they agree — so the pointer is
 // rendered at several values and asserted to have MOVED.
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_knob_sprites.hpp"
 #include "tools/import-design/import_png_codec.hpp"
-#include "support/unique_temp_dir.hpp"
 
 #include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/view/design_codegen.hpp>

@@ -29,13 +29,14 @@ struct ScratchParent {
 // The two numeric fields after the prefix: <prefix>-<pid>-<serial>.
 bool split_name(const std::string& name, const std::string& prefix, std::uint64_t& pid,
                 std::uint64_t& serial) {
-    if (name.rfind(prefix + "-", 0) != 0) return false;
+    if (name.rfind(prefix + "-", 0) != 0)
+        return false;
     std::istringstream rest(name.substr(prefix.size() + 1));
     char dash = 0;
     return static_cast<bool>(rest >> pid >> dash >> serial) && dash == '-' && rest.eof();
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("make_unique_temp_dir creates a new directory named for its process and call",
           "[test-support][temp-dir]") {
@@ -78,9 +79,11 @@ TEST_CASE("make_unique_temp_dir is unique across threads", "[test-support][temp-
                 made[t].push_back(make_unique_temp_dir("thread", parent.path));
         });
     }
-    for (auto& worker : workers) worker.join();
+    for (auto& worker : workers)
+        worker.join();
     std::set<fs::path> all;
-    for (const auto& list : made) all.insert(list.begin(), list.end());
+    for (const auto& list : made)
+        all.insert(list.begin(), list.end());
     REQUIRE(all.size() == static_cast<std::size_t>(threads * calls));
 }
 
@@ -114,7 +117,8 @@ TEST_CASE("make_unique_temp_dir is unique across processes running at once",
         std::getline(lines, line);
         int count = 0;
         while (std::getline(lines, line)) {
-            if (line.empty()) continue;
+            if (line.empty())
+                continue;
             const fs::path dir = line;
             ++count;
             REQUIRE(fs::is_directory(dir));

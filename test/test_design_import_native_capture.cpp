@@ -5,9 +5,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <filesystem>
 #include <fstream>
-#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::view;
 namespace fs = std::filesystem;

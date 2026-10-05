@@ -6,11 +6,11 @@
 #include <pulp/host/scan_blacklist.hpp>
 #include <pulp/host/scanner.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::host;
 namespace fs = std::filesystem;

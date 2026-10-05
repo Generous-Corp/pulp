@@ -2,19 +2,19 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <ctime>
 #include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -379,8 +379,7 @@ TEST_CASE("post-spawn input stays off argv environment and filesystem",
 #ifndef _WIN32
 TEST_CASE("post-spawn input honors a pinned working-directory descriptor",
           "[child_process][standard-input][working-directory]") {
-    const auto working_directory =
-        pulp::test::make_unique_temp_dir("pulp-child-input-descriptor");
+    const auto working_directory = pulp::test::make_unique_temp_dir("pulp-child-input-descriptor");
 
     const auto descriptor = ::open(working_directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     REQUIRE(descriptor >= 0);

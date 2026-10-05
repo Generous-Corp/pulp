@@ -1,5 +1,5 @@
-#include "tools/cli/sdk_distribution_guard.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "tools/cli/sdk_distribution_guard.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 

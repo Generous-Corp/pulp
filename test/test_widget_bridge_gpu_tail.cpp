@@ -1,5 +1,5 @@
-#include "widget_bridge_test_support.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "widget_bridge_test_support.hpp"
 
 template <typename Body>
 static std::string capture_widget_bridge_stderr(Body&& body) {

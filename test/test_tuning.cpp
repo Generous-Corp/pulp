@@ -11,6 +11,7 @@
 #include <pulp/midi/scala_tuning.hpp>
 #endif
 
+#include "support/unique_temp_dir.hpp"
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -19,7 +20,6 @@
 #include <limits>
 #include <memory>
 #include <string>
-#include "support/unique_temp_dir.hpp"
 
 using Catch::Approx;
 

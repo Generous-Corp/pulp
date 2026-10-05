@@ -24,6 +24,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -35,7 +36,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::view;
 namespace fs = std::filesystem;

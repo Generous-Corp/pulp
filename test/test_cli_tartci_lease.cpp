@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/cli_common.hpp"
 #include "tools/cli/shell_quote.hpp"
 #include "tools/cli/tartci_lease.hpp"
-#include "support/unique_temp_dir.hpp"
 
 #include <algorithm>
 #include <chrono>

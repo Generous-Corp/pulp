@@ -2,17 +2,17 @@
 // Covers: harness happy path, report generation, MIDI control surface,
 // missing validator graceful degradation, and state round-trips.
 
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
-#include <pulp/format/validation_harness.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include "support/unique_temp_dir.hpp"
+#include <pulp/format/validation_harness.hpp>
 #if !defined(_WIN32)
 #include <sys/stat.h>
 #endif

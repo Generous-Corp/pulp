@@ -1,6 +1,6 @@
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/local_sdk_profile.hpp"
 #include "tools/cli/ship_tracing_guard.hpp"
-#include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 

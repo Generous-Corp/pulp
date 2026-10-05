@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
+#include "support/unique_temp_dir.hpp"
+#include <pulp/platform/child_process.hpp>
 #include <pulp/ship/codesign.hpp>
 #include <pulp/ship/installer.hpp>
-#include <pulp/platform/child_process.hpp>
-#include "support/unique_temp_dir.hpp"
 
 namespace fs = std::filesystem;
 using Catch::Matchers::ContainsSubstring;

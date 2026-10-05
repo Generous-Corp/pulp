@@ -17,6 +17,7 @@
 #include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -26,7 +27,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::audio;
 using Catch::Matchers::WithinAbs;

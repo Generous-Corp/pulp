@@ -12,10 +12,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "tools/cli/import_detect.hpp"
-#include "tools/cli/import_spi.hpp"
 #include "support/portable_env.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "tools/cli/import_detect.hpp"
+#include "tools/cli/import_spi.hpp"
 
 #include <pulp/platform/child_process.hpp>
 

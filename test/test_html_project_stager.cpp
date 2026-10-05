@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-#include "tools/import-design/html_project_stager.hpp"
+#include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_workspace.hpp"
 #include "tools/import-design/claude_html_dependencies.hpp"
-#include "support/unique_temp_dir.hpp"
+#include "tools/import-design/html_project_stager.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 

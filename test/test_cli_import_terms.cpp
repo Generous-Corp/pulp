@@ -18,8 +18,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "tools/cli/import_terms.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "tools/cli/import_terms.hpp"
 
 #include <pulp/platform/child_process.hpp>
 

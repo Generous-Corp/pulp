@@ -1,11 +1,11 @@
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/theme.hpp>
-#include <fstream>
-#include <filesystem>
 #include <utility>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::view;
 

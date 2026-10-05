@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <catch2/catch_test_macros.hpp>
 
-#include "tools/import-design/browser_capture_backend.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "tools/import-design/browser_capture_backend.hpp"
 
 #include <algorithm>
 #include <chrono>

@@ -51,20 +51,20 @@ inline std::string unique_temp_dir_name(std::string_view prefix, std::uint64_t p
 // Creates a new, empty directory under `parent` (the system temp directory by
 // default) and returns its path. Throws std::runtime_error if none can be
 // created.
-inline std::filesystem::path make_unique_temp_dir(
-    std::string_view prefix,
-    const std::filesystem::path& parent = std::filesystem::temp_directory_path()) {
+inline std::filesystem::path
+make_unique_temp_dir(std::string_view prefix,
+                     const std::filesystem::path& parent = std::filesystem::temp_directory_path()) {
     static std::atomic<std::uint64_t> serial{0};
     std::filesystem::create_directories(parent);
     const auto pid = current_process_id();
     for (int attempt = 0; attempt < 1000; ++attempt) {
-        const auto candidate =
-            parent / unique_temp_dir_name(prefix, pid, serial.fetch_add(1));
+        const auto candidate = parent / unique_temp_dir_name(prefix, pid, serial.fetch_add(1));
         std::error_code ec;
-        if (std::filesystem::create_directory(candidate, ec)) return candidate;
+        if (std::filesystem::create_directory(candidate, ec))
+            return candidate;
         if (ec) {
-            throw std::runtime_error("make_unique_temp_dir: cannot create " +
-                                     candidate.string() + ": " + ec.message());
+            throw std::runtime_error("make_unique_temp_dir: cannot create " + candidate.string() +
+                                     ": " + ec.message());
         }
         // Already exists: another run's leftover. Never share it; take the next.
     }
@@ -75,12 +75,12 @@ inline std::filesystem::path make_unique_temp_dir(
 // <temp>/<prefix>-<pid>-<serial><suffix>. Nothing is created. A process id is
 // reused only after its owner exits, so a same-named file can only be a
 // finished run's leftover, never a concurrent case's file.
-inline std::filesystem::path unique_temp_path(
-    std::string_view prefix, std::string_view suffix = {},
-    const std::filesystem::path& parent = std::filesystem::temp_directory_path()) {
+inline std::filesystem::path
+unique_temp_path(std::string_view prefix, std::string_view suffix = {},
+                 const std::filesystem::path& parent = std::filesystem::temp_directory_path()) {
     static std::atomic<std::uint64_t> serial{0};
     return parent / (unique_temp_dir_name(prefix, current_process_id(), serial.fetch_add(1)) +
                      std::string(suffix));
 }
 
-}  // namespace pulp::test
+} // namespace pulp::test

@@ -10,8 +10,8 @@
 // user hits on day one.
 
 #include "../tools/cli/json_parser.hpp"
-#include "test_cli_shellout_helpers.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "test_cli_shellout_helpers.hpp"
 
 #include <optional>
 #include <thread>

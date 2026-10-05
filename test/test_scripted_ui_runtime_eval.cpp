@@ -1,13 +1,13 @@
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/widgets.hpp>
-#include <chrono>
-#include <filesystem>
-#include <fstream>
 #include <string>
-#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::state;
 using namespace pulp::view;

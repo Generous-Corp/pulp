@@ -1,17 +1,17 @@
-#include <catch2/catch_test_macros.hpp>
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_approx.hpp>
-#include <pulp/midi/midi.hpp>
-#include <pulp/midi/mpe_buffer.hpp>
-#include <pulp/midi/device.hpp>
-#include <pulp/midi/midi_file.hpp>
-#include <pulp/midi/midi_message_sequence.hpp>
-#include <pulp/midi/ump_buffer.hpp>
-#include <pulp/midi/ump_conversion.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include "support/unique_temp_dir.hpp"
+#include <pulp/midi/device.hpp>
+#include <pulp/midi/midi.hpp>
+#include <pulp/midi/midi_file.hpp>
+#include <pulp/midi/midi_message_sequence.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
+#include <pulp/midi/ump_buffer.hpp>
+#include <pulp/midi/ump_conversion.hpp>
 
 using namespace pulp::midi;
 using Catch::Approx;

@@ -1,9 +1,9 @@
+#include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_import_cli.hpp"
 #include "tools/import-design/browser_import_cli_internal.hpp"
 #include "tools/import-design/browser_import_session.hpp"
 #include "tools/import-design/import_png_codec.hpp"
 #include "tools/import-design/sprite_skins.hpp"
-#include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>

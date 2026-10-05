@@ -17,10 +17,10 @@ namespace fs = std::filesystem;
 // the `project_detail` helpers (`bump_one`, `parse_bump_options`, ...) plus
 // the public `cmd_project` dispatcher without shelling out, so it includes
 // every TU in the family.
-#include "../tools/cli/cmd_project_common.cpp"
-#include "../tools/cli/cmd_project_bump.cpp"
-#include "../tools/cli/cmd_project_undo.cpp"
 #include "../tools/cli/cmd_project.cpp"
+#include "../tools/cli/cmd_project_bump.cpp"
+#include "../tools/cli/cmd_project_common.cpp"
+#include "../tools/cli/cmd_project_undo.cpp"
 #include "support/unique_temp_dir.hpp"
 
 // The shared helpers and option types now live in this private

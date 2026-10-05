@@ -3,11 +3,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/scan_blacklist.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <thread>
-#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::host;
 namespace fs = std::filesystem;

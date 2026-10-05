@@ -7,8 +7,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "tools/cli/upgrade_install.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "tools/cli/upgrade_install.hpp"
 
 #include <algorithm>
 #include <filesystem>

@@ -15,13 +15,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
-#include "support/unique_temp_dir.hpp"
 
 #ifndef PULP_ISOLATED_SCANNER_REAL_WORKER
 #error "PULP_ISOLATED_SCANNER_REAL_WORKER must point at the pulp-scan-worker binary"

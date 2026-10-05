@@ -1,13 +1,13 @@
-#include <catch2/catch_test_macros.hpp>
-#include <pulp/canvas/canvas.hpp>
-#include <pulp/view/file_browser.hpp>
+#include "support/unique_temp_dir.hpp"
 #include <algorithm>
+#include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/view/file_browser.hpp>
 #include <string>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 using pulp::canvas::DrawCommand;
 using pulp::canvas::RecordingCanvas;

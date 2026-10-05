@@ -6,8 +6,8 @@
 // tmpdir, binary_exists guard, and ProcessResult stdout/exit_code
 // assertions.
 
-#include "test_cli_shellout_helpers.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "test_cli_shellout_helpers.hpp"
 
 #ifndef PULP_TEST_CONTROL_HEALTH_ENABLED
 #define PULP_TEST_CONTROL_HEALTH_ENABLED 0

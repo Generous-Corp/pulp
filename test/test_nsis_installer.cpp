@@ -2,9 +2,9 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <pulp/ship/installer.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <filesystem>
 #include <fstream>
-#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::ship;
 using Catch::Matchers::ContainsSubstring;

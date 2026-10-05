@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <catch2/catch_test_macros.hpp>
 
-#include "tools/import-design/node_runtime.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "tools/import-design/node_runtime.hpp"
 
 #include <algorithm>
 #include <cstdlib>

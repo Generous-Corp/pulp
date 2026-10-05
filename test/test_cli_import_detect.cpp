@@ -14,9 +14,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "tools/import-design/import_detect.hpp"
-#include "tools/cli/json_parser.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "tools/cli/json_parser.hpp"
+#include "tools/import-design/import_detect.hpp"
 
 #include <filesystem>
 #include <fstream>

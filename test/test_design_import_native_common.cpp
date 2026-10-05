@@ -1,5 +1,5 @@
-#include "../core/view/src/design_import_native_common.hpp"
 #include "../core/view/src/design_import_internal.hpp"
+#include "../core/view/src/design_import_native_common.hpp"
 #include "../core/view/src/design_ir_helpers.hpp"
 #include "support/unique_temp_dir.hpp"
 

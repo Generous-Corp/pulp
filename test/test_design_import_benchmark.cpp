@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -9,7 +10,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 namespace fs = std::filesystem;
 using namespace pulp::platform;
