@@ -9,6 +9,22 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09110"></a>
+## [0.911.0] - 2026-10-05
+
+- codex/neural package b 20261005 ([#9575](https://github.com/Generous-Corp/pulp/pull/9575))
+- release/version bump ([#9574](https://github.com/Generous-Corp/pulp/pull/9574))
+- fix/pub04 summary guard 20261005 ([#9568](https://github.com/Generous-Corp/pulp/pull/9568))
+- fix/families shared seed predicate ([#9567](https://github.com/Generous-Corp/pulp/pull/9567))
+- test/keyed proof a ([#9565](https://github.com/Generous-Corp/pulp/pull/9565))
+- feat/confirm failure test logs ([#9548](https://github.com/Generous-Corp/pulp/pull/9548))
+- codex/gpu audio skill contracts 20261004 ([#9564](https://github.com/Generous-Corp/pulp/pull/9564))
+- docs/android profile emulator guidance 20261005 ([#9552](https://github.com/Generous-Corp/pulp/pull/9552))
+- release/version bump ([#9566](https://github.com/Generous-Corp/pulp/pull/9566))
+- fix/installer sign contents helpers ([#9561](https://github.com/Generous-Corp/pulp/pull/9561))
+- fix/prewarm tests deterministic ([#9559](https://github.com/Generous-Corp/pulp/pull/9559))
+- codex/spectr metadata final 20261005 r5 ([#9560](https://github.com/Generous-Corp/pulp/pull/9560))
+
 <a id="v09100"></a>
 ## [0.910.0] - 2026-10-05
 
@@ -9783,6 +9799,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.911.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.911.0
 [0.910.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.910.0
 [0.909.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.909.0
 [0.908.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.908.0
