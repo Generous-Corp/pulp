@@ -214,6 +214,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge_input.cpp
     src/hot_reload.cpp
     src/scripted_ui.cpp
+    src/scripted_ui_prewarm.cpp
 )
 
 # Design-import authoring cluster (PULP_ENABLE_DESIGN_IMPORT).

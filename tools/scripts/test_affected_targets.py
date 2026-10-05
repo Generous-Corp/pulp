@@ -5,7 +5,8 @@ A synthetic CMake file-API reply, Makefile depfiles, and CTest inventory stand
 in for a configured build directory, so every rule of the selector is exercised
 without CMake: source→target, header→targets through the dependency database,
 companion tests by name, `add_dependencies` edges, fixture edges, the empty
-diff, and the fallback-to-all threshold.
+diff, and the fallback-to-all threshold. Each fixture is written to its own
+temporary directory, so cases share no state.
 """
 
 from __future__ import annotations

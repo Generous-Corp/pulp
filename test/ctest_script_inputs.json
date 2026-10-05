@@ -2087,18 +2087,8 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
-  "pulp-gpu-audio-coreaudio-workgroup-benchmark",
-  "pulp-gpu-audio-p4-matched-convolution-benchmark",
-  "pulp-gpu-audio-p4-raw-screening",
-  "pulp-gpu-dawn-shared-io-provider-probe",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
-  "pulp-gpu-same-device-paired-probe",
-  "pulp-gpu-same-device-storage-probe",
-  "pulp-gpu-shared-io-convolution-session-probe",
-  "pulp-gpu-shared-io-paced-convolution-probe",
-  "pulp-gpu-shared-io-private-convolution-probe",
-  "pulp-gpu-shared-spectral-probe",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -2209,6 +2199,7 @@
   "pulp-test-cli-shellout-pr",
   "pulp-test-cli-shellout-scan-projects",
   "pulp-test-cli-ship-shellout",
+  "pulp-test-cli-shipyard-pin",
   "pulp-test-cli-skew-banner",
   "pulp-test-cli-swap-pack",
   "pulp-test-cli-tartci-lease",
@@ -2281,6 +2272,7 @@
   "pulp-test-dsl-processor",
   "pulp-test-dsp-runtime-no-alloc",
   "pulp-test-edit-history",
+  "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
@@ -6378,50 +6370,6 @@
     "tools/import-design/material_audit.test.mjs"
    ],
    "kind": "node"
-  },
-  "pulp-gpu-audio-provider-identity": {
-   "entry": "tools/scripts/gpu_audio_provider_identity.py",
-   "inputs": [
-    "external/skia-build",
-    "tools/deps/manifest.json",
-    "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-shared-io-provider-identity": {
-   "entry": "tools/scripts/gpu_audio_provider_identity.py",
-   "inputs": [
-    "external/skia-build",
-    "tools/deps/manifest.json",
-    "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-shared-io-provider-lifecycle": {
-   "entry": "test/verify_gpu_dawn_shared_io_provider.py",
-   "inputs": [
-    "test/verify_gpu_dawn_shared_io_provider.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-vellum-d15-source": {
-   "entry": "test/test_gpu_dawn_vellum_d15_source.py",
-   "inputs": [
-    "core/gpu_audio/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
-    "test/cmake/render_gpu_surface_tests.cmake",
-    "test/test_gpu_dawn_vellum_d15_source.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-shared-io-paced-convolution-probe": {
-   "entry": "test/verify_gpu_shared_io_paced_convolution.py",
-   "inputs": [
-    "test/verify_gpu_shared_io_paced_convolution.py"
-   ],
-   "kind": "python"
   },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
