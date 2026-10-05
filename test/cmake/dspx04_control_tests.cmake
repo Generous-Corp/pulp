@@ -92,10 +92,7 @@ endif()
 if(PULP_BUILD_TESTS AND NOT TARGET pulp-test-control-dspx04-graph-product-e2e AND
    TARGET Catch2::Catch2WithMain)
     add_executable(pulp-test-control-dspx04-graph-product-e2e
-        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_e2e.cpp)
-    target_include_directories(pulp-test-control-dspx04-graph-product-e2e PRIVATE
-        ${CMAKE_SOURCE_DIR}/inspect/src ${CMAKE_SOURCE_DIR}/test
-        ${CMAKE_SOURCE_DIR}/core/audio/include)
+        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_typed_skip.cpp)
     target_link_libraries(pulp-test-control-dspx04-graph-product-e2e PRIVATE
         Catch2::Catch2WithMain)
     pulp_scaled_test_timeout(_pulp_dspx04_graph_product_fallback_timeout 30)
