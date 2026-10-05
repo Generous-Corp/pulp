@@ -405,6 +405,76 @@ else
     printf '  ok   no stash directory is left behind\n'
 fi
 
+# ── Each phase's test output is kept, and shown when the verdict is bad ─────
+#
+# A verdict nobody can audit is how a good test gets rewritten: the output of
+# the phase that decided it must survive the run. The test here prints a marker
+# naming the value it saw, so the log shown can be matched to its phase.
+make_log_project() {
+    local root="$1" value="$2" check_value="$3"
+    mkdir -p "$root"
+    printf '%s\n' "$value" > "$root/value.txt"
+    if [ "$check_value" = "checks" ]; then
+        printf '%s\n' 'v=$(cat value.txt); echo "log-marker saw $v"; [ "$v" = 42 ]' > "$root/check.sh"
+    else
+        printf '%s\n' 'v=$(cat value.txt); echo "log-marker saw $v"; exit 0' > "$root/check.sh"
+    fi
+    ( cd "$root" \
+      && git init -q . \
+      && git config user.email t@example.com \
+      && git config user.name test \
+      && git add -A \
+      && git commit -qm fixture ) >/dev/null 2>&1
+}
+
+run_log_under_test() {
+    ( cd "$1" && "$UNDER_TEST" \
+        --file value.txt \
+        --break "perl -pi -e 's/42/7/'" \
+        --no-build \
+        --test "sh check.sh" ) 2>&1
+}
+
+contains() {
+    local what="$1" needle="$2" haystack="$3"
+    case "$haystack" in
+        *"$needle"*) printf '  ok   %s\n' "$what" ;;
+        *) printf '  FAIL %s (no "%s" in output)\n' "$what" "$needle"
+           FAILURES=$((FAILURES + 1)) ;;
+    esac
+}
+lacks() {
+    local what="$1" needle="$2" haystack="$3"
+    case "$haystack" in
+        *"$needle"*) printf '  FAIL %s (unexpected "%s" in output)\n' "$what" "$needle"
+                     FAILURES=$((FAILURES + 1)) ;;
+        *) printf '  ok   %s\n' "$what" ;;
+    esac
+}
+
+make_log_project "$TMP/log-vacuous" 42 ignores
+OUT="$(run_log_under_test "$TMP/log-vacuous")"; RC=$?
+check "a vacuous test with logs is still NOT CONFIRMED" 1 "$RC"
+contains "NOT CONFIRMED names the broken phase's log" "test output (broken): " "$OUT"
+contains "NOT CONFIRMED shows what the broken run printed" "| log-marker saw 7" "$OUT"
+BROKEN_LOG="$(printf '%s\n' "$OUT" | sed -n 's/^confirm-failure: test output (broken): //p')"
+check "the broken phase's log is kept on disk" "log-marker saw 7" "$(cat "$BROKEN_LOG" 2>/dev/null)"
+
+make_log_project "$TMP/log-baseline" 7 checks
+OUT="$(run_log_under_test "$TMP/log-baseline")"; RC=$?
+check "a test failing before the edit is still INCONCLUSIVE" 2 "$RC"
+contains "INCONCLUSIVE names the baseline phase's log" "test output (baseline): " "$OUT"
+contains "INCONCLUSIVE shows what the baseline run printed" "| log-marker saw 7" "$OUT"
+
+make_log_project "$TMP/log-covered" 42 checks
+OUT="$(run_log_under_test "$TMP/log-covered")"; RC=$?
+check "a covering test with logs is still CONFIRMED" 0 "$RC"
+contains "CONFIRMED names the log directory" "test output: " "$OUT"
+lacks "CONFIRMED prints no test output" "| log-marker" "$OUT"
+LOG_DIR="$(printf '%s\n' "$OUT" | sed -n 's/^confirm-failure: test output: //p')"
+check "CONFIRMED keeps one log per phase" "baseline.log broken.log restored.log" \
+    "$(for phase in baseline broken restored; do [ -f "$LOG_DIR/$phase.log" ] && printf '%s.log ' "$phase"; done | sed 's/ $//')"
+
 # The tree must be left exactly as it was found, whatever the verdict.
 if git -C "$TMP/uncovered" diff --quiet; then
     printf '  ok   the tree is restored after a NOT CONFIRMED run\n'
