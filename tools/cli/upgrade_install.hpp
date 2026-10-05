@@ -470,30 +470,30 @@ inline std::string browser_capture_runtime_install_name() {
 // apart silently, and the failure lands at capture time as a module that
 // cannot resolve rather than at install time as a short manifest.
 inline constexpr std::string_view browser_capture_runtime_files[]{
-        "browser_process.mjs",
-        "capture.mjs",
-        "health.mjs",
-        "interaction_executor.mjs",
-        "interaction_plan.mjs",
-        "interaction_plan_protocol.json",
-        "lifecycle.mjs",
-        "materialized_layout_bindings.mjs",
-        "materialized_coordinate_space.mjs",
-        "materialized_paint_bindings.mjs",
-        "materialized_text_bindings.mjs",
-        "network_dependencies.mjs",
-        // The capture imports this for the per-node platform-font answer; an
-        // upgraded install missing it fails module resolution at capture time,
-        // not at install time, so the break surfaces as a broken import rather
-        // than a broken upgrade.
-        "platform_fonts.mjs",
-        "renderers.mjs",
-        "security.mjs",
-        "semantics.mjs",
-        "settle.mjs",
-        "tokens.mjs",
-        "vendor_payload.mjs",
-    };
+    "browser_process.mjs",
+    "capture.mjs",
+    "health.mjs",
+    "interaction_executor.mjs",
+    "interaction_plan.mjs",
+    "interaction_plan_protocol.json",
+    "lifecycle.mjs",
+    "materialized_layout_bindings.mjs",
+    "materialized_coordinate_space.mjs",
+    "materialized_paint_bindings.mjs",
+    "materialized_text_bindings.mjs",
+    "network_dependencies.mjs",
+    // The capture imports this for the per-node platform-font answer; an
+    // upgraded install missing it fails module resolution at capture time,
+    // not at install time, so the break surfaces as a broken import rather
+    // than a broken upgrade.
+    "platform_fonts.mjs",
+    "renderers.mjs",
+    "security.mjs",
+    "semantics.mjs",
+    "settle.mjs",
+    "tokens.mjs",
+    "vendor_payload.mjs",
+};
 
 inline bool has_any_exec_bit(const fs::path& path) {
 #ifdef _WIN32
