@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shared_io_arena.hpp"
+#include "shared_io_execution_predictor.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +22,7 @@ class SharedIoComputePlan {
     struct SubmitToken {
         SharedIoSlotLedger::SlotToken slot;
         std::uint64_t deadline_ns = 0;
+        std::uint64_t submitted_ns = 0;
     };
     struct Completion {
         SubmitToken token;
@@ -38,6 +40,9 @@ class SharedIoComputePlan {
         std::uint64_t misses = 0;
         std::uint64_t late_completions = 0;
         std::uint64_t high_water_in_flight = 0;
+        std::uint64_t prediction_samples = 0;
+        std::uint64_t prediction_refusals = 0;
+        bool prediction_enabled = false;
         // The shared Dawn provider has no timestamp-query/occupancy certificate yet.
         bool gpu_timing_available = false;
         bool occupancy_available = false;
@@ -51,6 +56,18 @@ class SharedIoComputePlan {
     bool prepare(SharedIoArenaProvider& provider, const Config& config);
     bool prepare(SharedIoArenaProvider& provider, const Config& config,
                  std::unique_ptr<SharedIoPreparedProgram> program);
+    // Explicit opt-in. The default policy preserves the existing admission
+    // behavior and records no predictor-based refusal.
+    void set_prediction_policy(SharedIoExecutionPredictor::Config config) noexcept {
+        predictor_.configure(config);
+        predictor_.reset();
+        telemetry_.prediction_samples = 0;
+        telemetry_.prediction_refusals = 0;
+        telemetry_.prediction_enabled = config.enabled;
+    }
+    SharedIoExecutionPredictor::Estimate prediction_estimate() const noexcept {
+        return predictor_.estimate();
+    }
     bool prepared() const noexcept {
         return arena_.prepared();
     }
@@ -111,6 +128,7 @@ class SharedIoComputePlan {
 
     SharedIoArena arena_;
     SharedIoArenaProvider* provider_ = nullptr;
+    SharedIoExecutionPredictor predictor_;
     std::vector<Pending> pending_;
     std::vector<Completion> completions_;
     std::size_t completion_read_ = 0;
