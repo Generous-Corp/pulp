@@ -581,6 +581,35 @@ class FormatIsAsked(unittest.TestCase):
 
 
 
+class BundleCopyTest(unittest.TestCase):
+    def _bundle(self, root: pathlib.Path) -> pathlib.Path:
+        bundle = root / "Thing.clap"
+        (bundle / "Contents" / "MacOS").mkdir(parents=True)
+        (bundle / "Contents" / "MacOS" / "Thing").write_text("binary")
+        (bundle / "Contents" / "Current").symlink_to("MacOS")
+        return bundle
+
+    def test_off_macos_the_bundle_is_copied_without_ditto(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(pathlib.Path(tmp))
+            dst = pathlib.Path(tmp) / "scan" / "Thing.clap"
+            with mock.patch.object(rs.sys, "platform", "linux"), \
+                    mock.patch.object(rs.subprocess, "run") as run:
+                rs.copy_bundle_preserving_signature(bundle, dst)
+            run.assert_not_called()
+            self.assertEqual((dst / "Contents" / "MacOS" / "Thing").read_text(), "binary")
+            self.assertTrue((dst / "Contents" / "Current").is_symlink())
+
+    def test_on_macos_the_bundle_is_copied_with_ditto(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(pathlib.Path(tmp))
+            dst = pathlib.Path(tmp) / "Thing.clap"
+            with mock.patch.object(rs.sys, "platform", "darwin"), \
+                    mock.patch.object(rs.subprocess, "run") as run:
+                rs.copy_bundle_preserving_signature(bundle, dst.with_name("copy.clap"))
+            run.assert_called_once_with(["ditto", str(bundle), str(dst.with_name("copy.clap"))], check=True)
+
+
 class DoesNotWreckSomebodysReaper(unittest.TestCase):
     """This harness ships in Pulp. It must be safe on a machine someone uses.
 
