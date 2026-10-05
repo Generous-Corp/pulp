@@ -168,11 +168,15 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
 /// chrome layout. The min_* fields propagate end-to-end so platform
 /// hosts (e.g. macOS `setContentMinSize:`) can clamp interactive resize
 /// to the processor's declared minimum. (closes #1362)
+/// `background_rgb` is the editor's own colour
+/// (`ViewBridge::editor_background_rgb()`); it has no default so a caller
+/// cannot open the window on the framework colour by omission.
 inline view::WindowOptions make_standalone_window_options(
     const ViewSize& size_hints,
     const StandaloneEditorChrome& chrome,
     std::string title,
-    bool use_gpu) {
+    bool use_gpu,
+    std::uint32_t background_rgb) {
     const float extra_h = chrome.extra_window_height() > 0.0f
         ? chrome.extra_window_height() : 0.0f;
     view::WindowOptions opts;
@@ -190,6 +194,9 @@ inline view::WindowOptions make_standalone_window_options(
         opts.min_height = static_cast<float>(size_hints.min_height) + extra_h;
     opts.resizable = true;
     opts.use_gpu = use_gpu;
+    // The window opens on the editor's own colour (Processor::editor_background(),
+    // resolved by ViewBridge), never the framework default or the platform's.
+    opts.background_rgb = background_rgb;
     return opts;
 }
 

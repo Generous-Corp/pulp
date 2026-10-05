@@ -83,6 +83,7 @@ target_sources(pulp-format-core PRIVATE
     src/descriptor_validation.cpp
     src/native_core_processor.cpp
     src/transport_quantizer.cpp
+    src/editor_prewarm.cpp
 )
 
 target_sources(pulp-format-view PRIVATE

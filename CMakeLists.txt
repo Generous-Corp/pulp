@@ -763,6 +763,11 @@ if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/screenshot)
 endif()
 
+# ── Editor-open probe (out-of-process AU editor stages) ───────────────────
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/editor-open)
+endif()
+
 # ── Appearance Audit Tool ─────────────────────────────────────────────────
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/appearance)

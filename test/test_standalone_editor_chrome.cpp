@@ -2042,7 +2042,7 @@ TEST_CASE("make_standalone_window_options propagates min_* from ViewSize",
     hints.min_width = 800;
     hints.min_height = 600;
 
-    auto opts = make_standalone_window_options(hints, chrome, "Plug — Standalone", false);
+    auto opts = make_standalone_window_options(hints, chrome, "Plug — Standalone", false, pulp::view::kEditorHostClearRgb);
 
     REQUIRE(opts.title == "Plug — Standalone");
     REQUIRE(opts.width == Catch::Approx(1320.0f));
@@ -2051,6 +2051,24 @@ TEST_CASE("make_standalone_window_options propagates min_* from ViewSize",
     REQUIRE(opts.min_height == Catch::Approx(600.0f));
     REQUIRE(opts.resizable);
     REQUIRE_FALSE(opts.use_gpu);
+}
+
+TEST_CASE("make_standalone_window_options opens the window on the editor background",
+          "[standalone][chrome][first-frame]") {
+    auto editor_root = std::make_unique<View>();
+    auto chrome = make_standalone_editor_chrome(
+        std::move(editor_root),
+        StandaloneConfig{.show_settings_tab = false},
+        nullptr, nullptr, nullptr, {});
+    pulp::format::ViewSize hints;
+    hints.preferred_width = 990;
+    hints.preferred_height = 645;
+
+    auto opts = make_standalone_window_options(hints, chrome, "Plug", true, 0x05070A);
+    CHECK(opts.background_rgb == 0x05070Au);
+    auto plain = make_standalone_window_options(hints, chrome, "Plug", true,
+                                                pulp::view::kEditorHostClearRgb);
+    CHECK(plain.background_rgb == pulp::view::kEditorHostClearRgb);
 }
 
 TEST_CASE("make_standalone_window_options leaves min_* at zero when unset",
@@ -2067,7 +2085,7 @@ TEST_CASE("make_standalone_window_options leaves min_* at zero when unset",
     hints.preferred_width = 600;
     hints.preferred_height = 400;
 
-    auto opts = make_standalone_window_options(hints, chrome, "X", true);
+    auto opts = make_standalone_window_options(hints, chrome, "X", true, pulp::view::kEditorHostClearRgb);
 
     REQUIRE(opts.min_width == Catch::Approx(0.0f));
     REQUIRE(opts.min_height == Catch::Approx(0.0f));
@@ -2091,7 +2109,7 @@ TEST_CASE("make_standalone_window_options extends min_height when chrome adds ro
     hints.min_width = 800;
     hints.min_height = 600;
 
-    auto opts = make_standalone_window_options(hints, chrome, "Plug", false);
+    auto opts = make_standalone_window_options(hints, chrome, "Plug", false, pulp::view::kEditorHostClearRgb);
 
     // Preferred height = preferred_height + chrome.extra_window_height()
     REQUIRE(opts.height == Catch::Approx(860.0f));  // preferred_height + 0 chrome
@@ -2112,7 +2130,7 @@ TEST_CASE("standalone Settings menu routes the standard chord before host fallba
         std::move(editor_root), StandaloneConfig{.show_settings_tab = true},
         nullptr, nullptr, nullptr, {});
     pulp::format::ViewSize hints;
-    auto options = make_standalone_window_options(hints, chrome, "Plug", false);
+    auto options = make_standalone_window_options(hints, chrome, "Plug", false, pulp::view::kEditorHostClearRgb);
     add_standalone_settings_menu_command(options, chrome);
 
     REQUIRE(options.menu_commands.size() == 1);
@@ -2147,7 +2165,7 @@ TEST_CASE("standalone custom Settings route is projected without built-in chrome
         std::move(editor_root), StandaloneConfig{.show_settings_tab = false},
         nullptr, nullptr, nullptr, {});
     pulp::format::ViewSize hints;
-    auto options = make_standalone_window_options(hints, chrome, "Plug", false);
+    auto options = make_standalone_window_options(hints, chrome, "Plug", false, pulp::view::kEditorHostClearRgb);
     add_standalone_settings_menu_command(options, chrome);
 
     REQUIRE(chrome.settings_panel() == nullptr);
@@ -2162,7 +2180,7 @@ TEST_CASE("standalone without settings ownership omits Settings menu",
         std::make_unique<View>(), StandaloneConfig{.show_settings_tab = false},
         nullptr, nullptr, nullptr, {});
     pulp::format::ViewSize hints;
-    auto options = make_standalone_window_options(hints, chrome, "Plug", false);
+    auto options = make_standalone_window_options(hints, chrome, "Plug", false, pulp::view::kEditorHostClearRgb);
     add_standalone_settings_menu_command(options, chrome);
 
     REQUIRE(options.menu_commands.empty());

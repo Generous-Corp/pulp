@@ -981,7 +981,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // Build WindowOptions from the bridge's cached ViewSize hints so
     // min_width/min_height propagate to platform window hosts that honor them.
     auto opts = detail::make_standalone_window_options(
-        size_hints, chrome, desc.name + " — Standalone", use_gpu);
+        size_hints, chrome, desc.name + " — Standalone", use_gpu,
+        bridge->editor_background_rgb());
     detail::add_standalone_settings_menu_command(opts, chrome);
     // Sparkle auto-update, when the app embeds it via pulp_add_sparkle().
     const auto updater_plan = detail::plan_standalone_updater(

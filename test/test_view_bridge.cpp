@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
+#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
@@ -14,6 +15,7 @@
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/scripted_ui_prewarm.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/window_host.hpp>
@@ -696,6 +698,96 @@ class FirstFrameRecordingHost final : public view::PluginViewHost {
 };
 
 } // namespace
+
+namespace {
+
+// A plug-in that declares what its editor evaluates on open.
+class PrewarmingProcessor : public StubProcessor {
+public:
+    std::string bundle_id = "com.acme.prewarm";
+    bool editor = true;
+    int prewarm_asks = 0;
+    format::PluginDescriptor descriptor() const override {
+        return {"Prewarm", "Acme", bundle_id, "1.0.0", format::PluginCategory::Effect};
+    }
+    bool has_editor() const override { return editor; }
+    EditorPrewarm editor_prewarm() const override {
+        ++const_cast<PrewarmingProcessor*>(this)->prewarm_asks;
+        static const std::string runtime = [] {
+            std::string code = "var __prewarmHook = 0;\n";
+            while (code.size() < 8 * 1024) code += "__prewarmHook += 1; // editor runtime stand-in\n";
+            return code;
+        }();
+        return {{runtime}, {}};
+    }
+};
+
+std::vector<std::string> g_scheduled_scripts;
+void record_prewarm(const format::Processor::EditorPrewarm& request) {
+    for (const auto script : request.scripts) g_scheduled_scripts.emplace_back(script);
+}
+
+} // namespace
+
+TEST_CASE("Editor prewarm: an instantiated plug-in's editor scripts are requested once per bundle",
+          "[view_bridge][editor-open][editor-prewarm]") {
+    // Adapters call request_editor_prewarm() when a host instantiates the
+    // plug-in; it must reach the scheduler once per plug-in per process, and
+    // never when the environment blocks editors or the plug-in has none.
+    ScopedEnvVar ci("CI"), headless("PULP_HEADLESS"), test_mode("PULP_TEST_MODE"),
+        disabled("PULP_DISABLE_PLUGIN_EDITOR"), prewarm("PULP_EDITOR_PREWARM");
+    ci.unset(); headless.unset(); test_mode.unset(); disabled.unset(); prewarm.unset();
+    format::detail::reset_editor_prewarm_requests_for_tests();
+    g_scheduled_scripts.clear();
+    format::set_editor_prewarm_scheduler(&record_prewarm);
+
+    PrewarmingProcessor first;
+    CHECK(format::request_editor_prewarm(first));
+    REQUIRE(g_scheduled_scripts.size() == 1);
+    CHECK(g_scheduled_scripts[0].rfind("var __prewarmHook", 0) == 0);
+
+    // A second instance of the same plug-in is not asked again.
+    PrewarmingProcessor second;
+    CHECK_FALSE(format::request_editor_prewarm(second));
+    CHECK(second.prewarm_asks == 0);
+    CHECK(g_scheduled_scripts.size() == 1);
+
+    // A plug-in without an editor, and any plug-in under a headless/CI
+    // environment or PULP_EDITOR_PREWARM=0, is never asked.
+    PrewarmingProcessor no_editor;
+    no_editor.bundle_id = "com.acme.no-editor";
+    no_editor.editor = false;
+    CHECK_FALSE(format::request_editor_prewarm(no_editor));
+    CHECK(no_editor.prewarm_asks == 0);
+    PrewarmingProcessor in_ci;
+    in_ci.bundle_id = "com.acme.in-ci";
+    ci.set("1");
+    CHECK_FALSE(format::request_editor_prewarm(in_ci));
+    ci.unset();
+    prewarm.set("0");
+    CHECK_FALSE(format::request_editor_prewarm(in_ci));
+    prewarm.unset();
+    CHECK(in_ci.prewarm_asks == 0);
+    CHECK(g_scheduled_scripts.size() == 1);
+
+    // Restore the view layer's scheduler: the request reaches the background
+    // worker, which compiles the declared script into the bytecode cache.
+    format::set_editor_prewarm_scheduler(nullptr);
+    CHECK_FALSE(format::request_editor_prewarm(in_ci));
+    format::detail::reset_editor_prewarm_requests_for_tests();
+    view::clear_script_bytecode_cache();
+    format::set_editor_prewarm_scheduler(&format::detail::view_editor_prewarm_scheduler);
+    PrewarmingProcessor viewed;
+    viewed.bundle_id = "com.acme.viewed";
+    const auto before = view::scripted_ui_prewarm_stats();
+    CHECK(format::request_editor_prewarm(viewed));
+    REQUIRE(view::wait_for_scripted_ui_prewarm(std::chrono::seconds(20)));
+    CHECK(view::scripted_ui_prewarm_stats().scripts_compiled == before.scripts_compiled + 1);
+    CHECK(view::script_bytecode_cached(
+        view::WidgetBridge::loaded_script_source(std::string(viewed.editor_prewarm().scripts[0]))));
+    format::detail::reset_editor_prewarm_requests_for_tests();
+    view::clear_script_bytecode_cache();
+}
 
 TEST_CASE("Editor close: a processor's session is released before an unattached root is destroyed",
           "[view_bridge][scripted-ui][editor-open][lifetime]") {

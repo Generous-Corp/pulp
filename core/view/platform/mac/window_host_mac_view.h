@@ -28,6 +28,10 @@
 // delegates it to MacGpuWindowHost, which may pin an authored design viewport;
 // letting both paths lay out would expose a transient window-sized tree.
 @property (nonatomic, assign) BOOL hostOwnsRootLayout;
+/// The window's own background, 0xRRGGBB (WindowOptions::background_rgb): the
+/// fill under the tree and, for the GPU view, the backing layer's colour
+/// shown before the first Metal frame. Defaults to the framework default.
+@property (nonatomic, assign) uint32_t backgroundRGB;
 // Inverse design-viewport transform applied to every window-space input
 // point before hit_test. Set by WindowHost::set_design_viewport; nil
 // when no design viewport is in effect (identity).

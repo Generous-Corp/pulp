@@ -944,16 +944,16 @@ CanvasWidget::NativeGpuTextureFrame WidgetBridge::describe_native_texture_frame(
     return frame;
 }
 
+// ";void 0" makes the eval result undefined, not the last expression value:
+// elements reference each other (_parentElement <-> _children), which would
+// recurse forever in CHOC's toChocValue().
+std::string WidgetBridge::loaded_script_source(const std::string& code) { return code + "\n;void 0"; }
+
 void WidgetBridge::load_script(const std::string& code) {
     // DOM mutation methods are installed by the constructor's prelude chain
-    // (`web_compat_dom_ops`). The JS-side idempotency guard makes re-eval a
-    // no-op, so callers that load multiple scripts do not need bridge-local
-    // "first time" state.
-    //
-    // Append ";void 0" so the eval result is undefined, not the last
-    // expression value. Elements have circular references (_parentElement
-    // ↔ _children) which cause infinite recursion in CHOC's toChocValue().
-    eval_or_throw(engine_, "user_script", code + "\n;void 0");
+    // (`web_compat_dom_ops`); its JS-side idempotency guard makes re-eval a
+    // no-op, so callers loading several scripts need no "first time" state.
+    eval_or_throw(engine_, "user_script", loaded_script_source(code));
     // __pulpRuntimeSettle__ may be called by runtime-import code during the
     // evaluation above. Its native callback only records this budget; drain it
     // now that the outer QuickJS evaluation has returned, so startup remains
