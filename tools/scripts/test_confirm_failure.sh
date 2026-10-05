@@ -77,6 +77,8 @@ run_under_test() {
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# Every run's kept logs land under $TMP and vanish with it.
+export TMPDIR="$TMP"
 
 echo "confirm_failure.sh"
 
@@ -452,8 +454,12 @@ lacks() {
     esac
 }
 
+log_dirs() { find "$TMP" -maxdepth 1 -name 'confirm-failure.*' -type d | wc -l | tr -d ' '; }
+
 make_log_project "$TMP/log-vacuous" 42 ignores
+BEFORE="$(log_dirs)"
 OUT="$(run_log_under_test "$TMP/log-vacuous")"; RC=$?
+check "a NOT CONFIRMED run keeps exactly one log directory" "$((BEFORE + 1))" "$(log_dirs)"
 check "a vacuous test with logs is still NOT CONFIRMED" 1 "$RC"
 contains "NOT CONFIRMED names the broken phase's log" "test output (broken): " "$OUT"
 contains "NOT CONFIRMED shows what the broken run printed" "| log-marker saw 7" "$OUT"
@@ -467,12 +473,19 @@ contains "INCONCLUSIVE names the baseline phase's log" "test output (baseline): 
 contains "INCONCLUSIVE shows what the baseline run printed" "| log-marker saw 7" "$OUT"
 
 make_log_project "$TMP/log-covered" 42 checks
+BEFORE="$(log_dirs)"
 OUT="$(run_log_under_test "$TMP/log-covered")"; RC=$?
 check "a covering test with logs is still CONFIRMED" 0 "$RC"
-contains "CONFIRMED names the log directory" "test output: " "$OUT"
+check "a CONFIRMED run leaves no log directory behind" "$BEFORE" "$(log_dirs)"
+lacks "CONFIRMED prints no log path" "test output" "$OUT"
 lacks "CONFIRMED prints no test output" "| log-marker" "$OUT"
+
+make_log_project "$TMP/log-kept" 42 checks
+OUT="$( ( cd "$TMP/log-kept" && "$UNDER_TEST" --file value.txt \
+    --break "perl -pi -e 's/42/7/'" --no-build --test "sh check.sh" --keep-logs ) 2>&1)"
+check "--keep-logs does not change the verdict" 0 "$?"
 LOG_DIR="$(printf '%s\n' "$OUT" | sed -n 's/^confirm-failure: test output: //p')"
-check "CONFIRMED keeps one log per phase" "baseline.log broken.log restored.log" \
+check "--keep-logs keeps one log per phase" "baseline.log broken.log restored.log" \
     "$(for phase in baseline broken restored; do [ -f "$LOG_DIR/$phase.log" ] && printf '%s.log ' "$phase"; done | sed 's/ $//')"
 
 # The tree must be left exactly as it was found, whatever the verdict.
