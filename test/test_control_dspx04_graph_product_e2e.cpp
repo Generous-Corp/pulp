@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <set>
@@ -96,8 +97,13 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     auto launch = choc::value::createObject("");
     launch.addMember("inventory_id",
                      choc::value::createString(prepared_data["inventory_id"].getString()));
+    // The product fixture is a headless control host. Force the standalone
+    // driver onto Pulp's deterministic null device so preflight reaches the
+    // broker-owned control host without depending on CI audio hardware.
+    REQUIRE(setenv("PULP_AUDIO_DEVICE", "null", 1) == 0);
     const auto launched =
         management.manage("host-launch", choc::json::toString(launch, false), 10s);
+    REQUIRE(unsetenv("PULP_AUDIO_DEVICE") == 0);
     INFO(launched.explanation);
     INFO(launched.data_json);
     REQUIRE(launched.status_id == "launched");
