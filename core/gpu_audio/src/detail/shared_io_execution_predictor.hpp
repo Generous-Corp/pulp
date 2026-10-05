@@ -89,14 +89,17 @@ class SharedIoExecutionPredictor final {
     }
 
     // Returns true when a new submission can fit before its explicit deadline.
-    // A zero deadline is the established non-deadline/offline path.
+    // A zero deadline is the established non-deadline/offline path. An
+    // An enabled nonzero-deadline policy fails closed until enough successful
+    // observations exist. Callers can use the established zero-deadline
+    // offline/warm-up path to collect calibration samples.
     bool admit(std::uint64_t now_ns, std::uint64_t deadline_ns) const noexcept {
         if (!config_.enabled || deadline_ns == 0)
             return true;
+        if (deadline_ns <= now_ns)
+            return false;
         const auto prediction = estimate();
         if (!prediction.ready)
-            return true;
-        if (deadline_ns <= now_ns)
             return false;
         return prediction.conservative_ns <= deadline_ns - now_ns;
     }
