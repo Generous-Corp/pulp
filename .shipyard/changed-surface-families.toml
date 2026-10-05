@@ -4856,6 +4856,7 @@ tests = [
   "prepush-format-gate-wiring",
   "prepush-gate-output",
   "prepush-refresh-push",
+  "pulp-ui-clean-output-lint-negative-contract",
   "queue-batch-attribute-selftest",
   "read-audit-selftest",
   "reuse-policy-replay-selftest",
