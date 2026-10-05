@@ -1200,6 +1200,42 @@ TEST_CASE("ChildProcessManager cleanup is safe from exit callback",
     REQUIRE(manager.active_count() == 0);
 }
 
+TEST_CASE("ChildProcessManager launches a child that exits as soon as it connects",
+          "[events][child-process][ipc]") {
+    // A child that connects, reports ready and exits at once can finish before
+    // the server thread completes the accept. Its connection is real, so every
+    // launch must succeed and deliver the exit code.
+    const auto fixture = connected_child_fixture_path();
+    REQUIRE_FALSE(fixture.empty());
+
+    constexpr int kLaunches = 100;
+    int failed_launches = 0;
+    int delivered = 0;
+    for (int i = 0; i < kLaunches; ++i) {
+        ChildProcessManager manager;
+        std::mutex mutex;
+        std::condition_variable cv;
+        int callback_code = -1;
+        manager.on_child_exit = [&](ConnectedChildProcess*, int code) {
+            std::lock_guard<std::mutex> lock(mutex);
+            callback_code = code;
+            cv.notify_all();
+        };
+
+        auto* child = manager.launch(fixture, {"--exit-code", "29", "--exit-at-once"});
+        if (child == nullptr) {
+            ++failed_launches;
+            continue;
+        }
+        std::unique_lock<std::mutex> lock(mutex);
+        if (cv.wait_for(lock, std::chrono::seconds(5), [&] { return callback_code != -1; }) &&
+            callback_code == 29)
+            ++delivered;
+    }
+    CHECK(failed_launches == 0);
+    CHECK(delivered == kLaunches);
+}
+
 TEST_CASE("ChildProcessManager cleans up completed connected children",
           "[events][child-process][ipc]") {
     const auto fixture = connected_child_fixture_path();

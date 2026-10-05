@@ -26,6 +26,9 @@ int main(int argc, char** argv) {
     int hold_ms = 0;
     bool abrupt_exit = false;
     bool wait_for_exit_message = false;
+    // Exit as soon as "ready" is sent, so the parent's handshake can still be
+    // in flight when the child is already gone.
+    bool exit_at_once = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg(argv[i]);
@@ -39,6 +42,8 @@ int main(int argc, char** argv) {
             abrupt_exit = true;
         } else if (arg == "--wait-for-exit-message") {
             wait_for_exit_message = true;
+        } else if (arg == "--exit-at-once") {
+            exit_at_once = true;
         }
     }
 
@@ -74,7 +79,7 @@ int main(int argc, char** argv) {
             return 67;
     } else if (hold_ms > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(hold_ms));
-    } else {
+    } else if (!exit_at_once) {
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
     }
 
