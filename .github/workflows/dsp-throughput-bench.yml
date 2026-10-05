@@ -12,6 +12,10 @@ on:
         description: Seconds of audio per repetition
         required: false
         default: '2'
+      only:
+        description: all, or checks (skip the bench jobs)
+        required: false
+        default: all
 
 concurrency:
   group: dsp-throughput-bench-${{ github.ref }}
@@ -48,6 +52,7 @@ jobs:
 
   bench:
     name: g++-14 bench ${{ matrix.mode }}
+    if: github.event.inputs.only != 'checks'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     strategy:
