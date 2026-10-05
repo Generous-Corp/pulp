@@ -1320,3 +1320,15 @@ finds the source already cached is not a hit (hits count evaluations only).
 Only the QuickJS backend has a bytecode cache; with a JSC or V8 default the
 prewarm is a no-op. Bytecode stays in memory, never on disk (QuickJS does not
 validate untrusted bytecode).
+
+## Testing a wait on an in-flight compile without timing
+
+To test that `evaluate_script()` waits for a precompile that is still running,
+do not give `precompile_scripts()` a head start and hope it is still compiling:
+on a loaded runner a small script finishes first, the evaluation reads a cached
+entry, and `waits` stays 0. Install `detail::set_precompile_claim_hook_for_tests()`
+instead. It runs on the precompile's thread after the source is claimed and
+before it is compiled, so the hook can hold the compile in flight until
+`script_bytecode_cache_stats().waits` shows the evaluation waiting. Bound every
+wait in such a test (the hook's and the main thread's) so a regression fails
+instead of hanging, and clear the hook afterwards.

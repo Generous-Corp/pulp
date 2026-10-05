@@ -51,6 +51,11 @@ Audit and campaign start **read-only**: record evidence before editing anything.
 
 Then prove it can fail: break the fix and watch the test go red with
 `tools/scripts/confirm_failure.sh` (see CLAUDE.md, "Confirm the failure").
+Before acting on a NOT CONFIRMED or INCONCLUSIVE verdict, read the phase log it
+prints (`test output (broken|baseline|restored): <path>` and its tail): it shows
+whether the test actually ran the case you meant, so a bad verdict is checked
+against evidence before a good test gets rewritten. `--break` runs with the file
+path appended, and a `--test` that starts with `sh` needs `--subject <binary>`.
 
 ## Junk patterns
 

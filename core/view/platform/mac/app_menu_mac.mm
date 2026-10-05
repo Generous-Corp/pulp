@@ -54,6 +54,16 @@ NSEventModifierFlags modifier_mask(std::uint16_t modifiers) {
 
 } // namespace
 
+static NSString* application_name() {
+    NSBundle* bundle = [NSBundle mainBundle];
+    for (NSString* key in @[ @"CFBundleDisplayName", @"CFBundleName" ]) {
+        id value = [bundle objectForInfoDictionaryKey:key];
+        if ([value isKindOfClass:[NSString class]] && [(NSString*)value length] > 0)
+            return (NSString*)value;
+    }
+    return [[NSProcessInfo processInfo] processName];
+}
+
 void install_application_menu(const std::vector<WindowOptions::MenuCommand>& commands,
                               std::function<void()> quit_action) {
     NSMenu* menu_bar = [[[NSMenu alloc] init] autorelease];
@@ -63,6 +73,7 @@ void install_application_menu(const std::vector<WindowOptions::MenuCommand>& com
 
     NSMenu* app_menu = [[[NSMenu alloc] init] autorelease];
     [app_item setSubmenu:app_menu];
+    NSString* app_name = application_name();
 
     // Builds the item and wires its target. representedObject retains the
     // target for exactly as long as the item, so no separate ownership.
@@ -78,14 +89,43 @@ void install_application_menu(const std::vector<WindowOptions::MenuCommand>& com
         [item setRepresentedObject:target];
         [menu addItem:item];
     };
+    // AppKit's own application actions, sent straight to NSApp.
+    auto add_app_action = [app_menu](NSString* title, SEL action, NSString* key,
+                                     NSEventModifierFlags modifiers) {
+        NSMenuItem* item = [[[NSMenuItem alloc] initWithTitle:title action:action
+                                                keyEquivalent:key] autorelease];
+        [item setKeyEquivalentModifierMask:modifiers];
+        [item setTarget:NSApp];
+        [app_menu addItem:item];
+    };
+    auto is_app_command = [](const WindowOptions::MenuCommand& command,
+                             WindowOptions::MenuCommand::AppMenuSection section) {
+        return command.menu.empty() && !command.title.empty() && command.action &&
+               command.app_menu_section == section;
+    };
+    using Section = WindowOptions::MenuCommand::AppMenuSection;
 
-    // App-menu commands come first so they sit ABOVE Quit, which macOS expects
-    // to be the last item. A separator divides them from Quit, and is only
-    // added when something precedes it — a leading separator renders as a
-    // stray rule in an otherwise single-item menu.
+    // The standard macOS application menu:
+    //   About <App>
+    //   [after_about commands, e.g. Check for Updates…]
+    //   ---
+    //   [app commands, e.g. Settings…]   (and its rule, only when present)
+    //   ---
+    //   Services ▸
+    //   ---
+    //   Hide <App> / Hide Others / Show All
+    //   ---
+    //   Quit <App>                        (always last)
+    add_app_action([@"About " stringByAppendingString:app_name],
+                   @selector(orderFrontStandardAboutPanel:), @"", 0);
+    for (const auto& command : commands)
+        if (is_app_command(command, Section::after_about))
+            add_item(app_menu, command);
+    [app_menu addItem:[NSMenuItem separatorItem]];
+
     bool app_menu_has_commands = false;
     for (const auto& command : commands) {
-        if (!command.menu.empty() || command.title.empty() || !command.action)
+        if (!is_app_command(command, Section::commands))
             continue;
         add_item(app_menu, command);
         app_menu_has_commands = true;
@@ -93,11 +133,28 @@ void install_application_menu(const std::vector<WindowOptions::MenuCommand>& com
     if (app_menu_has_commands)
         [app_menu addItem:[NSMenuItem separatorItem]];
 
+    NSMenu* services = [[[NSMenu alloc] initWithTitle:@"Services"] autorelease];
+    NSMenuItem* services_item = [[[NSMenuItem alloc] initWithTitle:@"Services"
+                                                            action:nil
+                                                     keyEquivalent:@""] autorelease];
+    [services_item setSubmenu:services];
+    [app_menu addItem:services_item];
+    [NSApp setServicesMenu:services];
+    [app_menu addItem:[NSMenuItem separatorItem]];
+
+    add_app_action([@"Hide " stringByAppendingString:app_name], @selector(hide:), @"h",
+                   NSEventModifierFlagCommand);
+    add_app_action(@"Hide Others", @selector(hideOtherApplications:), @"h",
+                   NSEventModifierFlagCommand | NSEventModifierFlagOption);
+    add_app_action(@"Show All", @selector(unhideAllApplications:), @"", 0);
+    [app_menu addItem:[NSMenuItem separatorItem]];
+
     PulpMenuCommandTarget* quit_target = [[[PulpMenuCommandTarget alloc] init] autorelease];
     quit_target->action = std::move(quit_action);
-    NSMenuItem* quit_item = [[[NSMenuItem alloc] initWithTitle:@"Quit"
-                                                        action:@selector(performMenuCommand:)
-                                                 keyEquivalent:@"q"] autorelease];
+    NSMenuItem* quit_item =
+        [[[NSMenuItem alloc] initWithTitle:[@"Quit " stringByAppendingString:app_name]
+                                    action:@selector(performMenuCommand:)
+                             keyEquivalent:@"q"] autorelease];
     [quit_item setTarget:quit_target];
     [quit_item setRepresentedObject:quit_target];
     [app_menu addItem:quit_item];

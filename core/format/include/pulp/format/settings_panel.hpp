@@ -25,6 +25,8 @@ struct SettingsPanelCallbacks {
     std::function<void(bool play, bool loop)> on_file_transport;
 };
 
+class AppUpdatesSettingsView;
+
 /// Audio/MIDI Settings panel with two tabs.
 /// Audio tab: device selectors, sample rate, buffer size, input meters, test signal.
 /// MIDI tab: port list with hotplug detection.
@@ -112,6 +114,10 @@ private:
 
     // MIDI tab widgets
     view::ListBox* midi_list_ = nullptr;
+
+    // Updates tab, when the app can update itself (owned by tab_panel_).
+    AppUpdatesSettingsView* updates_view_ = nullptr;
+    int updates_poll_count_ = 0;
 
     // Cached device info for mapping combo indices to IDs
     std::vector<audio::DeviceInfo> output_devices_;

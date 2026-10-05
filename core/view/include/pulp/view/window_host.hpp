@@ -29,13 +29,20 @@ struct WindowOptions {
     struct MenuCommand {
         /// Top-level menu to place this command under. Leave EMPTY to place it
         /// in the application menu — the one titled after the app itself,
-        /// where it appears above Quit. Any other value names (and creates on
+        /// laid out About, [after_about], Settings…/app commands, Services,
+        /// Hide…, Quit. Any other value names (and creates on
         /// first use) a menu-bar submenu such as "Window" or "View".
         std::string menu;
         std::string title;
         KeyCode key = KeyCode::unknown;
         std::uint16_t modifiers = kModNone;
         std::function<void()> action;
+        /// Where an application-menu command (empty `menu`) sits. `commands`
+        /// is the app's own group (Settings…, …) between the About block and
+        /// Services; `after_about` places it directly under "About <App>",
+        /// where macOS apps put "Check for Updates…". Ignored for named menus.
+        enum class AppMenuSection : std::uint8_t { commands, after_about };
+        AppMenuSection app_menu_section = AppMenuSection::commands;
     };
 
     std::string title = "Pulp";

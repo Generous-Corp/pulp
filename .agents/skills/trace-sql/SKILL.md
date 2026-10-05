@@ -667,6 +667,15 @@ that no usable due result was available, not why it was unavailable.
 scheduled/encode/submit/GPU timestamps stay unavailable. Do not label either span
 GPU execution time or infer scheduler latency from it alone.
 
+The audio block view also projects nullable `batch_id`, `microbatch_size`,
+model-family/hash, provider identity hashes, and predictor/version/calibration
+fields from terminal and delivery records. Use the session `claim_*` flags when
+making a batching, model/provider identity, or predictor claim: the view emits
+explicit `missing_*` issues for any incomplete claimed block and flags
+terminal/delivery one-sided omissions or mismatches. Historical schema-2 rows
+with no claim flags remain compatible; missing metadata is unavailable, never
+zero. `deadline_margin_ns` is signed, so negative values are valid.
+
 `gpu.audio.ownership` is a non-sequence event. If destruction cannot establish
 physical release, it records `physical_release_complete=false` and
 `unresolved_channel_count`, the number of channel releases that returned false.

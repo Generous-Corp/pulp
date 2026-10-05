@@ -149,6 +149,18 @@ def _without_comments_and_add_tests(cmake: str) -> str:
     return "".join(kept)
 
 
+def seeds_reachability(script: str, native_text: str, cmake_text: str, cmake_running: str,
+                       entries: set[str]) -> bool:
+    """Whether code outside the declared script tests names `script` directly:
+    native code at all, CMake anywhere for a script that is no test's entry,
+    and CMake outside add_test and comments for one that is (a custom command
+    or a configure-time call still runs it). native_reachable() and the
+    static Prediction both decide their seeds here, so they cannot disagree."""
+    name = os.path.basename(script)
+    return name in native_text or (name in cmake_text and script not in entries) \
+        or (script in entries and name in cmake_running)
+
+
 def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
                      text: Any) -> set[str]:
     """Scripts that code outside the declared script tests can run."""
@@ -157,15 +169,9 @@ def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
     cmake = [p for p in tracked if p.endswith(CMAKE_SUFFIXES) and not p.startswith(NON_EXECUTING_PREFIXES)]
     native_text = "\n".join(text(p) for p in native)
     cmake_text = "\n".join(text(p) for p in cmake)
-    # A declared test's entry is still run by CMake when it is also named
-    # outside add_test, by a custom command or a configure-time call.
     cmake_running = "\n".join(_without_comments_and_add_tests(text(p)) for p in cmake)
-    reached = set()
-    for script in scripts:
-        name = os.path.basename(script)
-        if name in native_text or (name in cmake_text and script not in entries) \
-                or (script in entries and name in cmake_running):
-            reached.add(script)
+    reached = {script for script in scripts
+               if seeds_reachability(script, native_text, cmake_text, cmake_running, entries)}
     pending = sorted(reached)
     while pending:
         body = text(pending.pop())
@@ -415,11 +421,12 @@ class Prediction:
         snap.load(native + cmake + self.scripts)
         self.native_text = "\n".join(snap.text(p) for p in native)
         self.cmake_text = "\n".join(snap.text(p) for p in cmake)
+        self.cmake_running = "\n".join(_without_comments_and_add_tests(snap.text(p)) for p in cmake)
         self.memo: dict[str, bool] = {}
 
     def _seed(self, script: str) -> bool:
-        name = os.path.basename(script)
-        return name in self.native_text or (name in self.cmake_text and script not in self.entries)
+        return seeds_reachability(script, self.native_text, self.cmake_text, self.cmake_running,
+                                  self.entries)
 
     def reached(self, script: str) -> bool:
         """native_reachable() for one script, walked backwards: it is reached

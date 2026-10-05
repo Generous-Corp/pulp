@@ -20,6 +20,19 @@ SELECT s.id AS slice_id, s.ts, s.name, s.dur, t.upid,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.lead_blocks') AS INT) AS lead_blocks,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.pipeline_depth') AS INT) AS pipeline_depth,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.provider_slots') AS INT) AS provider_slots,
+  EXTRACT_ARG(s.arg_set_id, 'debug.batch_id') AS batch_id,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.microbatch_size') AS INT), -1) AS microbatch_size,
+  EXTRACT_ARG(s.arg_set_id, 'debug.model_family') AS model_family,
+  EXTRACT_ARG(s.arg_set_id, 'debug.model_hash') AS model_hash,
+  EXTRACT_ARG(s.arg_set_id, 'debug.provider_id') AS provider_id,
+  EXTRACT_ARG(s.arg_set_id, 'debug.provider_source_hash') AS provider_source_hash,
+  EXTRACT_ARG(s.arg_set_id, 'debug.provider_executable_hash') AS provider_executable_hash,
+  EXTRACT_ARG(s.arg_set_id, 'debug.predictor_version') AS predictor_version,
+  EXTRACT_ARG(s.arg_set_id, 'debug.predictor_calibration') AS predictor_calibration,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.claim_batching') AS INT) AS claim_batching,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.claim_model_identity') AS INT) AS claim_model_identity,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.claim_provider_identity') AS INT) AS claim_provider_identity,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.claim_prediction') AS INT) AS claim_prediction,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.success_stride') AS INT) AS success_stride,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.capture_admissions') AS INT) AS capture_admissions,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_clock_mapped') AS INT) AS gpu_clock_mapped,
@@ -51,7 +64,9 @@ SELECT s.id AS slice_id, s.ts, s.name, s.dur, t.upid,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.pre_submit_ns') AS INT), -1) AS pre_submit_ns,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.submit_to_observed_ns') AS INT), -1) AS submit_to_observed_ns,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.scheduled_to_observed_ns') AS INT), -1) AS scheduled_to_observed_ns,
-  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_elapsed_ns') AS INT), -1) AS gpu_elapsed_ns
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_elapsed_ns') AS INT), -1) AS gpu_elapsed_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.predicted_ns') AS INT), -1) AS predicted_ns,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.deadline_margin_ns') AS INT) AS deadline_margin_ns
 FROM slice s
 LEFT JOIN thread_track tt ON tt.id = s.track_id
 LEFT JOIN thread t ON t.utid = tt.utid
@@ -126,6 +141,21 @@ SELECT i.*, COALESCE(d.ts, t.ts) AS ts,
          AS output_eligible,
        t.gpu_terminal, t.gpu_reason, t.outcome, d.delivery, d.delivery_reason,
        COALESCE(NULLIF(d.delivery_reason, 'none'), t.gpu_reason) AS reason,
+       COALESCE(t.batch_id, d.batch_id) AS batch_id,
+       COALESCE(t.microbatch_size, d.microbatch_size) AS microbatch_size,
+       COALESCE(t.model_family, d.model_family) AS model_family,
+       COALESCE(t.model_hash, d.model_hash) AS model_hash,
+       COALESCE(t.provider_id, d.provider_id) AS provider_id,
+       COALESCE(t.provider_source_hash, d.provider_source_hash) AS provider_source_hash,
+       COALESCE(t.provider_executable_hash, d.provider_executable_hash) AS provider_executable_hash,
+       COALESCE(t.predictor_version, d.predictor_version) AS predictor_version,
+       COALESCE(t.predictor_calibration, d.predictor_calibration) AS predictor_calibration,
+       COALESCE(t.predicted_ns, d.predicted_ns) AS predicted_ns,
+       COALESCE(t.deadline_margin_ns, d.deadline_margin_ns) AS deadline_margin_ns,
+       COALESCE(t.claim_batching, d.claim_batching) AS claim_batching,
+       COALESCE(t.claim_model_identity, d.claim_model_identity) AS claim_model_identity,
+       COALESCE(t.claim_provider_identity, d.claim_provider_identity) AS claim_provider_identity,
+       COALESCE(t.claim_prediction, d.claim_prediction) AS claim_prediction,
        t.callback_ingress_ns, t.ingress_to_worker_ns, t.worker_to_observed_ns,
        t.admission_ns, t.encode_ns, t.submit_call_ns, t.pre_submit_ns,
        t.submit_to_observed_ns, t.scheduled_to_observed_ns,
@@ -186,6 +216,107 @@ WHERE admissions_enqueued IS NULL OR admissions_enqueued < 0
    OR enqueued IS NULL OR enqueued < 0
    OR dropped IS NULL OR dropped < 0
    OR drained IS NULL OR drained < 0
+UNION ALL
+SELECT 'invalid_prediction_or_identity_metadata' AS issue, upid, engine_id, generation
+FROM pulp_gpu_audio_events
+WHERE (batch_id IS NOT NULL AND (microbatch_size IS NULL OR microbatch_size <= 0))
+   OR (batch_id IS NULL AND microbatch_size IS NOT NULL)
+   OR ((model_family IS NULL) != (model_hash IS NULL))
+   OR ((provider_id IS NULL) != (provider_source_hash IS NULL)
+       OR (provider_id IS NULL) != (provider_executable_hash IS NULL))
+   OR ((predicted_ns IS NULL) != (deadline_margin_ns IS NULL)
+       OR (predicted_ns IS NULL) != (predictor_version IS NULL)
+       OR (predicted_ns IS NULL) != (predictor_calibration IS NULL))
+   OR predicted_ns < 0
+GROUP BY upid, engine_id, generation
+UNION ALL
+SELECT 'missing_batch_metadata' AS issue, s.upid, s.engine_id, s.generation
+FROM pulp_gpu_audio_sessions s
+WHERE s.claim_batching = 1
+  AND EXISTS (
+    SELECT 1 FROM pulp_gpu_audio_blocks b
+    WHERE b.upid = s.upid AND b.engine_id = s.engine_id
+      AND b.generation = s.generation
+      AND (b.batch_id IS NULL OR b.microbatch_size IS NULL OR b.microbatch_size <= 0))
+GROUP BY s.upid, s.engine_id, s.generation
+UNION ALL
+SELECT 'missing_model_identity' AS issue, s.upid, s.engine_id, s.generation
+FROM pulp_gpu_audio_sessions s
+WHERE s.claim_model_identity = 1
+  AND EXISTS (
+    SELECT 1 FROM pulp_gpu_audio_blocks b
+    WHERE b.upid = s.upid AND b.engine_id = s.engine_id
+      AND b.generation = s.generation
+      AND (b.model_family IS NULL OR b.model_hash IS NULL))
+GROUP BY s.upid, s.engine_id, s.generation
+UNION ALL
+SELECT 'missing_provider_identity' AS issue, s.upid, s.engine_id, s.generation
+FROM pulp_gpu_audio_sessions s
+WHERE s.claim_provider_identity = 1
+  AND EXISTS (
+    SELECT 1 FROM pulp_gpu_audio_blocks b
+    WHERE b.upid = s.upid AND b.engine_id = s.engine_id
+      AND b.generation = s.generation
+      AND (b.provider_id IS NULL
+           OR b.provider_source_hash IS NULL
+           OR b.provider_executable_hash IS NULL))
+GROUP BY s.upid, s.engine_id, s.generation
+UNION ALL
+SELECT 'missing_prediction_metadata' AS issue, s.upid, s.engine_id, s.generation
+FROM pulp_gpu_audio_sessions s
+WHERE s.claim_prediction = 1
+  AND EXISTS (
+    SELECT 1 FROM pulp_gpu_audio_blocks b
+    WHERE b.upid = s.upid AND b.engine_id = s.engine_id
+      AND b.generation = s.generation
+      AND (b.predicted_ns IS NULL
+           OR b.deadline_margin_ns IS NULL
+           OR b.predictor_version IS NULL
+           OR b.predictor_calibration IS NULL))
+GROUP BY s.upid, s.engine_id, s.generation
+UNION ALL
+SELECT 'metadata_identity_mismatch' AS issue, t.upid, t.engine_id, t.generation
+FROM pulp_gpu_audio_terminals t
+JOIN pulp_gpu_audio_deliveries d USING (upid, engine_id, generation, sequence)
+JOIN pulp_gpu_audio_sessions s USING (upid, engine_id, generation)
+WHERE (t.batch_id IS NOT NULL AND d.batch_id IS NOT NULL AND t.batch_id != d.batch_id)
+   OR (s.claim_batching = 1 AND ((t.batch_id IS NULL) != (d.batch_id IS NULL)))
+   OR (t.microbatch_size IS NOT NULL AND d.microbatch_size IS NOT NULL
+       AND t.microbatch_size != d.microbatch_size)
+   OR (s.claim_batching = 1 AND ((t.microbatch_size IS NULL) != (d.microbatch_size IS NULL)))
+   OR (t.model_family IS NOT NULL AND d.model_family IS NOT NULL
+       AND t.model_family != d.model_family)
+   OR (s.claim_model_identity = 1 AND ((t.model_family IS NULL) != (d.model_family IS NULL)))
+   OR (t.model_hash IS NOT NULL AND d.model_hash IS NOT NULL
+       AND t.model_hash != d.model_hash)
+   OR (s.claim_model_identity = 1 AND ((t.model_hash IS NULL) != (d.model_hash IS NULL)))
+   OR (t.provider_id IS NOT NULL AND d.provider_id IS NOT NULL
+       AND t.provider_id != d.provider_id)
+   OR (s.claim_provider_identity = 1 AND ((t.provider_id IS NULL) != (d.provider_id IS NULL)))
+   OR (t.provider_source_hash IS NOT NULL AND d.provider_source_hash IS NOT NULL
+       AND t.provider_source_hash != d.provider_source_hash)
+   OR (s.claim_provider_identity = 1
+       AND ((t.provider_source_hash IS NULL) != (d.provider_source_hash IS NULL)))
+   OR (t.provider_executable_hash IS NOT NULL AND d.provider_executable_hash IS NOT NULL
+       AND t.provider_executable_hash != d.provider_executable_hash)
+   OR (s.claim_provider_identity = 1
+       AND ((t.provider_executable_hash IS NULL) != (d.provider_executable_hash IS NULL)))
+   OR (t.predictor_version IS NOT NULL AND d.predictor_version IS NOT NULL
+       AND t.predictor_version != d.predictor_version)
+   OR (s.claim_prediction = 1
+       AND ((t.predictor_version IS NULL) != (d.predictor_version IS NULL)))
+   OR (t.predictor_calibration IS NOT NULL AND d.predictor_calibration IS NOT NULL
+       AND t.predictor_calibration != d.predictor_calibration)
+   OR (s.claim_prediction = 1
+       AND ((t.predictor_calibration IS NULL) != (d.predictor_calibration IS NULL)))
+   OR (t.predicted_ns IS NOT NULL AND d.predicted_ns IS NOT NULL
+       AND t.predicted_ns != d.predicted_ns)
+   OR (s.claim_prediction = 1 AND ((t.predicted_ns IS NULL) != (d.predicted_ns IS NULL)))
+   OR (t.deadline_margin_ns IS NOT NULL AND d.deadline_margin_ns IS NOT NULL
+       AND t.deadline_margin_ns != d.deadline_margin_ns)
+   OR (s.claim_prediction = 1
+       AND ((t.deadline_margin_ns IS NULL) != (d.deadline_margin_ns IS NULL)))
+GROUP BY t.upid, t.engine_id, t.generation
 UNION ALL
 SELECT 'queue_dropped' AS issue, upid, engine_id, generation FROM pulp_gpu_audio_counters WHERE dropped > 0
 UNION ALL

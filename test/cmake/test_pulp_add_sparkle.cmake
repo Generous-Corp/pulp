@@ -5,6 +5,9 @@
 #     document-type helper ran before or after the call,
 #   * a non-app target (a plug-in bundle) is refused,
 #   * a private-key-shaped value or a plain-http feed is refused,
+#   * automatic installation is off unless AUTOMATIC_INSTALL ON, and the
+#     RELEASES_URL / INSTALLER facts the Settings note reads land in the
+#     plist (a bad INSTALLER or a non-https RELEASES_URL is refused),
 #   * with FETCHCONTENT_FULLY_DISCONNECTED ON and no pre-supplied distribution,
 #     configure refuses instead of downloading; PULP_SPARKLE_DIST_DIR and a
 #     hash-verified PULP_SPARKLE_ARCHIVE both satisfy it offline.
@@ -97,6 +100,50 @@ foreach(_name after_doc_types before_doc_types)
         message(FATAL_ERROR "${_name}: generated Info.plist lacks SUPublicEDKey (${_got})")
     endif()
 endforeach()
+
+# Defaults: no update facts declared, automatic installation off.
+file(READ "${FIXTURE_DIR}/after_doc_types/PulpSparkle/App-Info.plist.in" _t)
+foreach(_absent "PulpUpdatesReleasesURL" "PulpUpdatesInstaller")
+    string(FIND "${_t}" "${_absent}" _at)
+    if(NOT _at EQUAL -1)
+        message(FATAL_ERROR "defaults: ${_absent} written without being declared:\n${_t}")
+    endif()
+endforeach()
+string(FIND "${_t}" "<key>SUAllowsAutomaticUpdates</key>\n\t<false/>" _at)
+if(_at EQUAL -1)
+    message(FATAL_ERROR "defaults: automatic installation is not off by default:\n${_t}")
+endif()
+
+_fixture(update_facts "pulp_add_sparkle(App FEED_URL \"https://e.com/a.xml\" PUBLIC_ED_KEY \"${_key}\"
+    RELEASES_URL \"https://github.com/me/app/releases\" INSTALLER package
+    AUTOMATIC_INSTALL ON DIST_DIR \"${_dist}\")")
+if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR "update_facts: configure failed:\n${_log}")
+endif()
+set(_plist "${FIXTURE_DIR}/update_facts/App.app/Contents/Info.plist")
+foreach(_pair "PulpUpdatesReleasesURL=https://github.com/me/app/releases"
+              "PulpUpdatesInstaller=package" "SUAllowsAutomaticUpdates=true")
+    string(REPLACE "=" ";" _kv "${_pair}")
+    list(GET _kv 0 _k)
+    list(GET _kv 1 _want)
+    execute_process(COMMAND plutil -extract "${_k}" raw "${_plist}"
+        RESULT_VARIABLE _prc OUTPUT_VARIABLE _got OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _prc EQUAL 0 OR NOT _got STREQUAL _want)
+        message(FATAL_ERROR "update_facts: ${_k} is '${_got}', want '${_want}'")
+    endif()
+endforeach()
+
+_fixture(installer_refused "pulp_add_sparkle(App FEED_URL \"https://e.com/a.xml\" PUBLIC_ED_KEY \"${_key}\"
+    INSTALLER dmg DIST_DIR \"${_dist}\")")
+if(_rc EQUAL 0 OR NOT _log MATCHES "INSTALLER must be package or app")
+    message(FATAL_ERROR "installer_refused: an unknown INSTALLER was accepted:\n${_log}")
+endif()
+
+_fixture(releases_http_refused "pulp_add_sparkle(App FEED_URL \"https://e.com/a.xml\" PUBLIC_ED_KEY \"${_key}\"
+    RELEASES_URL \"http://e.com/releases\" DIST_DIR \"${_dist}\")")
+if(_rc EQUAL 0 OR NOT _log MATCHES "RELEASES_URL must be an https")
+    message(FATAL_ERROR "releases_http_refused: a plain-http RELEASES_URL was accepted:\n${_log}")
+endif()
 
 _fixture(plugin_refused
     "pulp_add_sparkle(Plug FEED_URL \"https://e.com/a.xml\" PUBLIC_ED_KEY \"${_key}\" DIST_DIR \"${_dist}\")")

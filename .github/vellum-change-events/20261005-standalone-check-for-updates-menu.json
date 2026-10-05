@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261005-standalone-check-for-updates-menu",
+  "kind": "change",
+  "created_at": "2026-10-05T00:51:04Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "window_host.hpp: WindowOptions::MenuCommand gains a defaulted app_menu_section field (commands | after_about) so the macOS standalone application menu can place Check for Updates directly under About. Additive and defaulted: every existing aggregate and designated initializer keeps its meaning, and the field is ignored for named menus. It exists for Pulp's standalone plug-in host's Sparkle updater (pulp_add_sparkle), which is Pulp-specific audio app integration; no retained-UI kernel behaviour, view-tree, layout or render authority moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "build/test/pulp-test-group-core-standalone \"[updates],[updater]\"",
+    "build/test/pulp-test-group-view-host-mac \"[menu]\""
+  ],
+  "disposition": "pulp-only"
+}

@@ -587,6 +587,21 @@ Hidden overlays count for nothing — and
 screen, so a dialog that stays mounted while closed cannot hold the DAW's
 keyboard.
 
+### Standalone-only Settings rows: ask a runtime service, not a build flag
+
+The editor's code is compiled once and linked into every format, so a Settings
+row that must appear only in the standalone (e.g. **Check for Updates**) cannot
+key off a compile-time define or the bundle type. Ask a process-wide service
+the standalone installs before it opens the editor: for updates,
+`pulp::format::app_update_status().available` (native) or the
+`pulp_updates_get` EditorBridge message registered by
+`pulp::format::add_app_update_handlers()` (JS; `useAppUpdates()` in
+`@pulp/react`). A plug-in has no service, answers `available: false`, and the
+row never renders. An editor bundled against an SDK without the handlers gets
+"unknown message type", which the client also reads as unavailable. The
+standalone sets the service before `ViewBridge::open()`, so even the first
+render sees it. Guide: `docs/guides/app-updates.md`.
+
 ## `release_view()` — for containers that own the view
 
 `TabPanel::add_tab` and similar widgets take `std::unique_ptr<view::View>`.

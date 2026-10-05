@@ -103,6 +103,34 @@ Run `python3 tools/scripts/test_gpu_audio_p4_evidence.py` when changing this
 tool. A valid capture or passing schema test is not a physical performance
 verdict, and one paired row cannot authorize a product default.
 
+### Model-family and scheduling receipts
+
+The model-neutral neural runtime plan defines the intended architecture and
+the boundary for future TCN, recurrent, compact-SSM, and Mamba work:
+<https://github.com/danielraffel/pulp-planning/blob/main/research/2026-10-01-neural-audio-mlx-first-program-plan.md>.
+The GPU-audio receipt contract remains model-agnostic, but every workload must
+identify its model family and prove its own state semantics. A WaveNet/NAM
+receipt does not establish TCN, LSTM/GRU, compact-SSM, or Mamba support.
+
+For each model family, retain an independent CPU oracle and cover state
+continuity across block boundaries, reset, reprepare, model swap, device loss,
+and CPU fallback. Causal TCNs must cover receptive-field warmup and block
+alignment; LSTM/GRU must cover hidden/cell reset; compact SSM/Mamba must cover
+state/cache continuity and explicit reset. Keep Mamba behind the compact-SSM
+gate until it has its own parity and scheduling receipts.
+
+The realtime campaign is a complete matrix over `slots × lead × batch` (or an
+explicitly documented unsupported cell). Each row binds sample rate, block
+size, intrinsic latency, transport lead, provider/engine/model identities,
+microbatch size, predicted execution time, deadline margin, observed
+completion-to-deadline tails, GPU delivery, late/drop/miss, and CPU fallback
+counts. Compare every accelerated row with a CPU-only control and a positive
+saturation/late/drop control. Missing timing, identity, or predictor fields
+make that row unavailable; they cannot be interpreted as zero cost or a pass.
+Keep the receipt at the same Release binary and host as the raw logs and
+benchmark executable. Use the proxy-first-eval template for minimum-lead
+claims and report intrinsic processor latency separately from transport lead.
+
 ```bash
 # Build + run the whole harness (Release — Debug is meaningless for DSP timing/levels)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

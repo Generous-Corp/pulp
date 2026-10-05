@@ -9,6 +9,7 @@
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/js_engine.hpp>
 #include <atomic>
+#include <functional>
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
@@ -577,6 +578,29 @@ void clear_script_bytecode_cache() {
     ScriptBytecodeCache::instance().clear();
 }
 
+namespace detail {
+namespace {
+std::mutex& precompile_hook_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+std::function<void(const std::string&)>& precompile_hook() {
+    static std::function<void(const std::string&)> hook;
+    return hook;
+}
+}  // namespace
+
+void set_precompile_claim_hook_for_tests(std::function<void(const std::string&)> hook) {
+    std::lock_guard<std::mutex> lock(precompile_hook_mutex());
+    precompile_hook() = std::move(hook);
+}
+
+std::function<void(const std::string&)> precompile_claim_hook_for_tests() {
+    std::lock_guard<std::mutex> lock(precompile_hook_mutex());
+    return precompile_hook();
+}
+}  // namespace detail
+
 std::size_t precompile_scripts(const std::vector<std::string>& sources,
                                const std::atomic<bool>* cancel) {
     auto& cache = ScriptBytecodeCache::instance();
@@ -596,6 +620,8 @@ std::size_t precompile_scripts(const std::vector<std::string>& sources,
             continue;  // already compiled, or another thread is compiling it
         }
         ClaimGuard guard(cache, code);
+        if (auto hook = detail::precompile_claim_hook_for_tests())
+            hook(code);  // holding the claim, before compiling
         if (!backend) {
             backend.emplace();
             set_quickjs_stack_size(*backend, 1024 * 1024);

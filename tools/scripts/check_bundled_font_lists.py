@@ -13,7 +13,7 @@ runtime. It is a COMPILE error:
 
     error: no member named 'Jost_Regular_ttf' in namespace 'pulp_bundled_fonts'
 
-and it surfaces only in the web lane, which nobody runs locally — so it is
+and it surfaces only in the web lane, which nobody runs locally, so it is
 found by CI, on a PR about something else entirely. That is exactly how adding
 Jost to the desktop list broke the web build.
 

@@ -144,6 +144,8 @@ export type {
 
 // ── Re-export the mock bridge for downstream tests ─────────────────
 export { createMockBridge } from './bridge.js';
+export { appUpdatesClient, useAppUpdates, APP_UPDATES_UNAVAILABLE } from './app-updates.js';
+export type { AppUpdateStatus, AppUpdateInstaller, AppUpdatesClient, AppUpdatesActions, EditorDispatch } from './app-updates.js';
 export type { MockBridge, MockBridgeCall } from './bridge.js';
 
 // ── Keyboard shortcuts ─────────────────────────────────────────────
