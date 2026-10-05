@@ -114,21 +114,31 @@ def decode_selection_receipt(
         "workflow_digest",
     }
     full = isinstance(receipt, dict) and "disposition" in receipt
+    version = receipt.get("schema_version") if isinstance(receipt, dict) else None
+    # v3 carries the executable-reuse binding out of band: only its sha256 is
+    # in the receipt, and the binding itself is a file in the result
+    # directory (resolve_executable_reuse). v2 and earlier carry it inline.
+    reuse_key = "executable_reuse_sha256" if version == 3 else "executable_reuse"
     if full:
         # A full plan selects nothing: the runner runs the configured stages
         # and derives the executable-keyed selection beside them.
-        if set(receipt) != identity | {"disposition", "executable_reuse"} \
-                or receipt["disposition"] != "full" or receipt["schema_version"] != 2:
+        if version not in (2, 3) or set(receipt) != identity | {"disposition", reuse_key} \
+                or receipt["disposition"] != "full":
             raise SelectionExecutionError("full selection receipt has an unexpected schema")
-        validate_executable_reuse_binding(receipt["executable_reuse"])
     required = identity | {"selected_tests_digest", "selected_tests"}
-    if isinstance(receipt, dict) and receipt.get("schema_version") == 2:
+    if version in (2, 3):
         required.update({"selected_build_targets_digest", "selected_build_targets"})
-    if not full and (not isinstance(receipt, dict) or set(receipt) - {"executable_reuse"} != required):
+    if version == 3:
+        required.add(reuse_key)
+    if not full and (not isinstance(receipt, dict) or set(receipt) - {"executable_reuse"} != required
+                     or (version == 3 and "executable_reuse" in receipt)):
         raise SelectionExecutionError("selection receipt has an unexpected schema")
-    if not full and "executable_reuse" in receipt:
+    if "executable_reuse" in receipt:
         validate_executable_reuse_binding(receipt["executable_reuse"])
-    if receipt["schema_version"] not in (1, 2):
+    if version == 3 and not (isinstance(receipt[reuse_key], str)
+                             and re.fullmatch(r"[0-9a-f]{64}", receipt[reuse_key])):
+        raise SelectionExecutionError("selection receipt executable_reuse_sha256 is invalid")
+    if receipt["schema_version"] not in (1, 2, 3):
         raise SelectionExecutionError("selection receipt schema version is unsupported")
     if not isinstance(receipt["pull_request"], int) or receipt["pull_request"] <= 0:
         raise SelectionExecutionError("selection receipt PR identity is invalid")
@@ -164,7 +174,7 @@ def decode_selection_receipt(
         raise SelectionExecutionError("selection receipt literal-test digest mismatch")
     build_targets: list[str] = []
     build_target_payload = b""
-    if receipt["schema_version"] == 2:
+    if receipt["schema_version"] >= 2:
         build_targets_value = receipt["selected_build_targets"]
         if not isinstance(build_targets_value, list) or not all(
             isinstance(target, str) for target in build_targets_value
@@ -405,6 +415,48 @@ def validate_executable_reuse_binding(binding: Any) -> None:
             raise SelectionExecutionError("selection receipt executable_reuse.candidates is invalid")
     if not 1 <= binding["sample_percent"] <= 100:
         raise SelectionExecutionError("selection receipt executable_reuse.sample_percent is invalid")
+
+
+# Where a v3 plan's binding is written, beside the result receipts.
+EXECUTABLE_REUSE_BINDING_FILE = "executable-reuse-binding.json"
+
+
+def resolve_executable_reuse(receipt: dict[str, Any]) -> tuple[dict | None, str | None, str | None]:
+    """The plan's executable-reuse binding as (binding, problem, sha256).
+
+    v2 carries it inline. v3 names its sha256 and Shipyard writes the bytes to
+    the result directory. A v3 binding that is missing, unreadable, does not
+    hash to the named digest or does not validate gives a problem instead of a
+    refusal: the run goes on unkeyed, exactly as before reuse existed, and the
+    receipt says why."""
+    if "executable_reuse" in receipt:
+        return receipt["executable_reuse"], None, None
+    digest = receipt.get("executable_reuse_sha256")
+    if digest is None:
+        return None, None, None
+    result_dir = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
+    if not result_dir:
+        return None, "no result directory", digest
+    try:
+        raw = (Path(result_dir) / EXECUTABLE_REUSE_BINDING_FILE).read_bytes()
+    except FileNotFoundError:
+        return None, f"{EXECUTABLE_REUSE_BINDING_FILE} is missing", digest
+    except OSError as error:
+        return None, f"{EXECUTABLE_REUSE_BINDING_FILE} is unreadable: {error}", digest
+    if hashlib.sha256(raw).hexdigest() != digest:
+        return None, "digest mismatch", digest
+    try:
+        binding = json.loads(raw)
+        validate_executable_reuse_binding(binding)
+    except (UnicodeDecodeError, json.JSONDecodeError, SelectionExecutionError) as error:
+        return None, f"invalid: {error}", digest
+    return binding, None, digest
+
+
+def unbound_reuse(mode: str, problem: str, digest: str | None) -> dict[str, Any]:
+    """The executable_reuse block of a run whose binding could not be used."""
+    return {"mode": mode, "bound": None, "binding_sha256": digest,
+            "derived": {"status": f"error: binding {problem}", **UNKNOWN_UNREACHED}}
 
 
 class DerivationError(Exception):
@@ -1411,7 +1463,7 @@ def run_full_fallback(
     selection_schema = identity[2]["schema_version"]
     full_build_result: int | None = None
     full_build_seconds: float | None = None
-    if selection_schema == 2:
+    if selection_schema >= 2:
         full_build_started = time.monotonic()
         full_build_result = subprocess.run(build_argv(build_dir), shell=False).returncode
         full_build_seconds = time.monotonic() - full_build_started
@@ -1451,9 +1503,10 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
     if not result_dir_value or not Path(result_dir_value).is_absolute():
         raise SelectionExecutionError("a keyed full run requires an absolute result receipt directory")
     result_dir = Path(result_dir_value)
-    binding = receipt["executable_reuse"]
-    derived = derive_executable_reuse(binding, receipt["head_sha"], build_dir, result_dir,
-                                      base_sha=receipt["base_sha"])
+    binding, problem, digest = resolve_executable_reuse(receipt)
+    derived = (derive_executable_reuse(binding, receipt["head_sha"], build_dir, result_dir,
+                                       base_sha=receipt["base_sha"])
+               if binding is not None else unbound_reuse("keyed_full_shadow", problem, digest)["derived"])
     args._changed_surface_full_authority_started = True
     env = {**os.environ, **STAGE_ENV}
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
@@ -1512,6 +1565,7 @@ def run_keyed_full(args: argparse.Namespace, build_dir: Path, receipt: dict[str,
         "failure_coverage": "not_compared",
         "graduation_eligible": False,
         "executable_reuse": {"mode": "keyed_full_shadow", "bound": binding, "derived": derived,
+                             **({"binding_sha256": digest} if digest else {}),
                              **(measured or UNMEASURED_SKIPS)},
     })
     return returncode
@@ -1554,9 +1608,12 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     base = base_projection(selection_receipt["base_sha"], policy, build_dir)
     compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
     executable_reuse = None
-    binding = selection_receipt.get("executable_reuse")
-    if binding is not None and os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR"):
+    binding, problem, digest = resolve_executable_reuse(selection_receipt)
+    if problem is not None:
+        executable_reuse = unbound_reuse("keyed_bounded_shadow", problem, digest)
+    elif binding is not None and os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR"):
         executable_reuse = {"mode": "keyed_bounded_shadow", "bound": binding,
+                            **({"binding_sha256": digest} if digest else {}),
                             "derived": derive_executable_reuse(
             binding, selection_receipt["head_sha"], build_dir,
             Path(os.environ["SHIPYARD_CHANGED_SURFACE_RESULT_DIR"]), base_sha=selection_receipt["base_sha"])}
@@ -1589,7 +1646,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
         except inventory.InventoryError as error:
             if (
                 not compare_full
-                or selection_receipt["schema_version"] != 2
+                or selection_receipt["schema_version"] < 2
                 or "has no unambiguous command" not in str(error)
             ):
                 raise
@@ -1599,14 +1656,14 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             if not placeholders:
                 raise
             prebuild_unbuilt_placeholder_count = len(placeholders)
-            if selection_receipt["schema_version"] == 2:
+            if selection_receipt["schema_version"] >= 2:
                 validate_build_target_projection(
                     build_dir=build_dir,
                     selected_tests=[],
                     selected_build_targets=selected_build_targets,
                 )
         if (
-            selection_receipt["schema_version"] == 2
+            selection_receipt["schema_version"] >= 2
             and not prebuild_unbuilt_placeholder_count
         ):
             validate_build_target_projection(
@@ -1617,7 +1674,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
         verification_seconds = time.monotonic() - verification_started
         selected_build_result: int | None = None
         selected_build_seconds: float | None = None
-        if selection_receipt["schema_version"] == 2:
+        if selection_receipt["schema_version"] >= 2:
             selected_build_started = time.monotonic()
             selected_build_result = subprocess.run(
                 build_argv(build_dir, selected_build_targets), shell=False
@@ -1665,7 +1722,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
         full_seconds: float | None = None
         if compare_full:
             args._changed_surface_full_authority_started = True
-            if selection_receipt["schema_version"] == 2:
+            if selection_receipt["schema_version"] >= 2:
                 full_build_started = time.monotonic()
                 full_build_result = subprocess.run(build_argv(build_dir), shell=False).returncode
                 full_build_seconds = time.monotonic() - full_build_started
@@ -1711,7 +1768,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     full_attempts = lane_reuse_record.keep_last_test_log(build_dir, reuse_out, "full")
             else:
                 full_result = full_build_result
-        elif selection_receipt["schema_version"] == 2 and selected_result == 0:
+        elif selection_receipt["schema_version"] >= 2 and selected_result == 0:
             selected_result = clear_build_sentinel(build_dir)
         full_build_timing = full_build_timing_fields(
             selected_build_seconds, full_build_seconds

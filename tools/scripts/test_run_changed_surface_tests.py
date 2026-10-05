@@ -1688,6 +1688,70 @@ class BaseInventoryTest(unittest.TestCase):
 
 
 
+class OutOfBandBindingTest(unittest.TestCase):
+    """A v3 plan names its executable-reuse binding by sha256; the binding is
+    a file in the result directory, read and verified by the runner."""
+
+    FIXTURE = Path(__file__).resolve().parent / "fixtures/changed_surface/proof-b-selection-receipt.json"
+
+    def binding(self) -> dict:
+        def candidate(i: int) -> dict:
+            run = str(37000000000 + i)
+            return {"run_id": run, "record_sha256": "a" * 64, "commit": "b" * 40,
+                    "record_path": f"/Users/ci/Library/Application Support/shipyard/reuse-records/pulp/{run}"}
+        return {"candidates": [candidate(i) for i in range(3)], "rules_digest": "c" * 64,
+                "derivation_code_dir": "/Users/ci/Library/Application Support/shipyard/derivation/pulp/f85a50",
+                "derivation_code_sha256": "d" * 64, "sample_seed": "e" * 64, "sample_percent": 5,
+                "build_dir": "/Volumes/Workshop/Code/agent-worktrees/pulp-keyed-proof-b/build"}
+
+    def test_proof_b_plans_keyed_only_with_the_binding_out_of_band(self) -> None:
+        # Proof PR B's real selection (96 tests, 3 build targets).
+        receipt = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual((len(receipt["selected_tests"]), receipt["schema_version"]), (96, 2))
+        raw = json.dumps(self.binding(), sort_keys=True, separators=(",", ":")).encode()
+        inline = {**receipt, "executable_reuse": self.binding()}
+        v3 = {**receipt, "schema_version": 3, "executable_reuse_sha256": hashlib.sha256(raw).hexdigest()}
+        # Control: inline, the keyed plan is over the execution limit and refused.
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "safe execution limit"):
+            runner.decode_selection_receipt(*encode_receipt(inline))
+        names, _, targets, _, decoded = runner.decode_selection_receipt(*encode_receipt(v3))
+        self.assertEqual((len(names), len(targets)), (96, 3))
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / runner.EXECUTABLE_REUSE_BINDING_FILE).write_bytes(raw)
+            with mock.patch.dict(os.environ, {"SHIPYARD_CHANGED_SURFACE_RESULT_DIR": directory}):
+                self.assertEqual(runner.resolve_executable_reuse(decoded),
+                                 (self.binding(), None, v3["executable_reuse_sha256"]))
+
+    def test_v3_shape_is_exact(self) -> None:
+        receipt = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
+        v3 = {**receipt, "schema_version": 3, "executable_reuse_sha256": "0" * 64}
+        for bad in ({k: v for k, v in v3.items() if k != "executable_reuse_sha256"},
+                    {**v3, "executable_reuse_sha256": "X" * 64},
+                    {**v3, "executable_reuse": self.binding()},
+                    {**receipt, "executable_reuse_sha256": "0" * 64}):
+            with self.subTest(keys=sorted(set(bad) ^ set(v3))), self.assertRaises(runner.SelectionExecutionError):
+                runner.decode_selection_receipt(*encode_receipt(bad))
+        full = {k: v for k, v in v3.items() if not k.startswith("selected_")}
+        runner.decode_selection_receipt(*encode_receipt({**full, "disposition": "full"}))
+
+    def test_a_missing_or_altered_binding_fails_open(self) -> None:
+        raw = json.dumps(self.binding(), sort_keys=True, separators=(",", ":")).encode()
+        digest = hashlib.sha256(raw).hexdigest()
+        receipt = {"executable_reuse_sha256": digest}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / runner.EXECUTABLE_REUSE_BINDING_FILE
+            with mock.patch.dict(os.environ, {"SHIPYARD_CHANGED_SURFACE_RESULT_DIR": directory}):
+                self.assertEqual(runner.resolve_executable_reuse(receipt),
+                                 (None, f"{runner.EXECUTABLE_REUSE_BINDING_FILE} is missing", digest))
+                path.write_bytes(raw.replace(b'"sample_percent":5', b'"sample_percent":6'))
+                self.assertEqual(runner.resolve_executable_reuse(receipt), (None, "digest mismatch", digest))
+                path.write_bytes(raw)
+                self.assertEqual(runner.resolve_executable_reuse(receipt)[0], self.binding())  # control
+        self.assertEqual(runner.unbound_reuse("keyed_bounded_shadow", "digest mismatch", digest),
+                         {"mode": "keyed_bounded_shadow", "bound": None, "binding_sha256": digest,
+                          "derived": {"status": "error: binding digest mismatch", **runner.UNKNOWN_UNREACHED}})
+
+
 class LaneEnvironmentTest(unittest.TestCase):
     def test_the_lane_environment_does_not_reach_these_tests(self) -> None:
         self.assertEqual(sorted(k for k in os.environ if k.startswith("SHIPYARD_")), [])
@@ -2048,7 +2112,7 @@ class KeyedFullTest(unittest.TestCase):
                   mock.patch.object(runner, "derive_executable_reuse", side_effect=derive),
                   mock.patch.object(runner.subprocess, "run", side_effect=execute),
                   mock.patch.object(runner, "ctest_payload", return_value={"tests": [{"name": "a1"}, {"name": "b1"}]})):
-                code = runner.run_keyed_full(args, build, self.receipt())
+                code = runner.run_keyed_full(args, build, getattr(self, "v3_receipt", None) or self.receipt())
             receipt = json.loads(sorted(results.glob("result-*.json"))[-1].read_text())
             return code, calls, receipt
 
@@ -2106,6 +2170,20 @@ class KeyedFullTest(unittest.TestCase):
                          {"status": "error: base refused", **runner.UNKNOWN_UNREACHED})
         self.assertIsNone(receipt["executable_reuse"]["false_skip_count"])
         self.assertEqual(receipt["full_returncode"], 0)
+
+    def test_a_v3_full_plan_with_an_altered_binding_still_runs_the_full_suite(self) -> None:
+        receipt = self.receipt()
+        receipt.pop("executable_reuse")
+        receipt.update(schema_version=3, executable_reuse_sha256="b" * 64)
+        self.v3_receipt = receipt
+        code, calls, result = self.run_full()
+        self.assertEqual(code, 0)
+        self.assertNotIn("derive", calls)
+        self.assertEqual([c[0][1:3] for c in calls[:1]], [["cmake", "--build"]])  # the build ran first
+        self.assertEqual(result["executable_reuse"]["derived"]["status"],
+                         f"error: binding {runner.EXECUTABLE_REUSE_BINDING_FILE} is missing")
+        self.assertEqual(result["executable_reuse"]["binding_sha256"], "b" * 64)
+        self.assertEqual(result["full_returncode"], 0)
 
     def test_a_failed_build_is_the_verdict_and_skips_the_tests(self) -> None:
         code, calls, receipt = self.run_full(build_rc=2)
@@ -2276,7 +2354,8 @@ class SelectedLegPipelineTest(unittest.TestCase):
     def run_pipeline(self, late_registration: bool = False, failures: dict | None = None,
                      allowlist: tuple[list[str], str] | None = None,
                      reuse: dict | None = None,
-                     derived_files: dict | None = None) -> tuple[int, list[str], dict]:
+                     derived_files: dict | str | None = None,
+                     reuse_sha: str | None = None) -> tuple[int, list[str], dict]:
         """`failures` maps "selected tests" / "full tests" to the names that leg
         fails; each leg writes them as ctest's JUnit report and exits 8."""
         failures = failures or {}
@@ -2329,6 +2408,9 @@ class SelectedLegPipelineTest(unittest.TestCase):
             receipt = selection_receipt(["smoke", "core"], ["tool"])
             if reuse is not None:
                 receipt["executable_reuse"] = reuse
+            if reuse_sha is not None:
+                receipt["schema_version"] = 3
+                receipt["executable_reuse_sha256"] = reuse_sha
             def derived(binding, head, build_dir, result_dir, *, base_sha):
                 if derived_files == "error":
                     return {"status": "error: base refused"}
@@ -2408,6 +2490,18 @@ class SelectedLegPipelineTest(unittest.TestCase):
         reuse = failed["executable_reuse"]
         self.assertEqual({k: reuse[k] for k in runner.UNMEASURED_SKIPS}, runner.UNMEASURED_SKIPS)
         self.assertEqual(reuse["derived"], {"status": "error: base refused", **runner.UNKNOWN_UNREACHED})
+
+    def test_a_v3_plan_whose_binding_file_is_missing_runs_unkeyed(self) -> None:
+        code, steps, result = self.run_pipeline(reuse_sha="a" * 64)
+        self.assertEqual(code, 0)
+        self.assertEqual(steps, ["selected build", "selected tests", "full build", "full tests"])
+        self.assertEqual(result["comparison_verdict"], "matched_pass")
+        self.assertEqual(self.derive_calls, [])  # nothing was derived from an absent binding
+        reuse = result["executable_reuse"]
+        self.assertEqual((reuse["bound"], reuse["binding_sha256"]), (None, "a" * 64))
+        self.assertEqual(reuse["derived"]["status"],
+                         f"error: binding {runner.EXECUTABLE_REUSE_BINDING_FILE} is missing")
+        self.assertIsNone(reuse["false_skips"])
 
     LANE_REDS = ({"lane-red": "2026-10-17"}, "f" * 64)
 
