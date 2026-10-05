@@ -15,8 +15,10 @@
 // MIDI routing kernels).
 
 namespace {
-constexpr std::size_t kib(std::size_t n) { return n * 1024; }
-}  // namespace
+constexpr std::size_t kib(std::size_t n) {
+    return n * 1024;
+}
+} // namespace
 
 static_assert(sizeof(pulp::state::Snapshot) <= kib(100));
 static_assert(sizeof(pulp::playback::ProgramWireAutomationConsumer) <= kib(100));

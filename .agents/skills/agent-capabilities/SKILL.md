@@ -1590,17 +1590,15 @@ origin/main)`; it reports whether the counters themselves need to move (often
 they do not), and `agent_capability_manifest.py --check` plus
 `sequencer_exposure_check.py --base origin/main` confirm both ledgers.
 
-## A contract major bump: read the history's last entry, not `--check`
+## A contract change reaches the history only on the following `--write`
 
-Moving `midi.channel-routing`, `midi.note-range-filtering` and
-`midi.keyboard-split` to major 2 (construction and release became `control`
-when the routers started allocating their ledger) took three `--write` runs:
-the fingerprint refusal, then "manifest changed without a manifest_revision
-increase", then success. That successful run reported writing
-`contract-history.json`, yet the file was byte-identical to the base and its
-last entry still said major 1, while `--check` reported `fresh`. One more
-`--write`, started from the base history, appended the entry (84 to 85
-entries). For a real contract movement, confirm
-`entries[-1].manifest.capabilities[<key>].contract_version` shows the new
-version before shipping, and make sure the file differs from the base by
-exactly one entry.
+`updated_history_entries` appends the manifest that was on disk BEFORE the
+write (and only when it differs from the last entry), not the manifest being
+written. So the first `--write` of a contract change re-records the base state,
+appends nothing, and still reports writing `contract-history.json`; `--check`
+says `fresh`. Moving the MIDI routers to major 2 showed it: from a base history
+the first `--write` left 84 entries ending at major 1, and a second `--write`
+produced 85 ending at major 2. Until the tool records the current manifest
+itself, confirm `entries[-1].manifest.capabilities[<key>].contract_version`
+shows the new version and that the file differs from the base by exactly one
+entry before shipping.

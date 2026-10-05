@@ -1000,7 +1000,7 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::ChannelRouter", target="Pulp::midi",
-            header_fingerprint="sha256:70191a956928e660931a9f297f123222fccc48a5c33c563e303e2b2f7cb88039",
+            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::ChannelRouter",
@@ -1034,7 +1034,7 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::NoteRangeFilter", target="Pulp::midi",
-            header_fingerprint="sha256:70191a956928e660931a9f297f123222fccc48a5c33c563e303e2b2f7cb88039",
+            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::NoteRangeFilter",
@@ -1068,7 +1068,7 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::KeyboardSplit", target="Pulp::midi",
-            header_fingerprint="sha256:70191a956928e660931a9f297f123222fccc48a5c33c563e303e2b2f7cb88039",
+            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::KeyboardSplit",

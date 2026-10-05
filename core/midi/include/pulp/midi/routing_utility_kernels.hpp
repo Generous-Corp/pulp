@@ -411,8 +411,7 @@ class ChannelRouter {
                         MidiEvent::note_off(channel, note), spec_.output_channel[channel]),
                     report);
             },
-            [&](bool midi2, std::uint8_t group, std::uint8_t channel,
-                std::uint8_t note) {
+            [&](bool midi2, std::uint8_t group, std::uint8_t channel, std::uint8_t note) {
                 const bool emitted = utility_detail::emit_ump(
                     output.ump(),
                     {routing_detail::note_off_packet(
@@ -464,8 +463,8 @@ class ChannelRouter {
             held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
-        const bool midi_drained = held_notes_->drain_midi_releases(
-            [&](std::uint8_t channel, std::uint8_t note) {
+        const bool midi_drained =
+            held_notes_->drain_midi_releases([&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(
                     output,
                     utility_detail::with_channel(
@@ -473,8 +472,7 @@ class ChannelRouter {
                     report);
             });
         const bool ump_drained = held_notes_->drain_ump_releases(
-            [&](bool midi2, std::uint8_t group, std::uint8_t channel,
-                std::uint8_t note) {
+            [&](bool midi2, std::uint8_t group, std::uint8_t channel, std::uint8_t note) {
                 const bool emitted = utility_detail::emit_ump(
                     output.ump(),
                     {routing_detail::note_off_packet(
@@ -606,8 +604,7 @@ class NoteRangeFilter {
             [&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(output, MidiEvent::note_off(channel, note), report);
             },
-            [&](bool midi2, std::uint8_t group, std::uint8_t channel,
-                std::uint8_t note) {
+            [&](bool midi2, std::uint8_t group, std::uint8_t channel, std::uint8_t note) {
                 const bool emitted = utility_detail::emit_ump(
                     output.ump(),
                     {routing_detail::note_off_packet(midi2, group, channel, note), 0});
@@ -657,14 +654,13 @@ class NoteRangeFilter {
             held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
-        const bool midi_drained = held_notes_->drain_midi_releases(
-            [&](std::uint8_t channel, std::uint8_t note) {
+        const bool midi_drained =
+            held_notes_->drain_midi_releases([&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(
                     output, MidiEvent::note_off(channel, note), report);
             });
         const bool ump_drained = held_notes_->drain_ump_releases(
-            [&](bool midi2, std::uint8_t group, std::uint8_t channel,
-                std::uint8_t note) {
+            [&](bool midi2, std::uint8_t group, std::uint8_t channel, std::uint8_t note) {
                 const bool emitted = utility_detail::emit_ump(
                     output.ump(),
                     {routing_detail::note_off_packet(midi2, group, channel, note), 0});
@@ -792,8 +788,7 @@ class KeyboardSplit {
                         is_upper ? spec_.upper_channel : spec_.lower_channel, note),
                     report);
             },
-            [&](bool midi2, std::uint8_t group, std::uint8_t,
-                std::uint8_t note) {
+            [&](bool midi2, std::uint8_t group, std::uint8_t, std::uint8_t note) {
                 const bool is_upper =
                     note > spec_.split_note ||
                     (note == spec_.split_note && spec_.split_note_is_upper);
@@ -855,8 +850,8 @@ class KeyboardSplit {
             held_notes_->retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
         }
-        const bool midi_drained = held_notes_->drain_midi_releases(
-            [&](std::uint8_t channel, std::uint8_t note) {
+        const bool midi_drained =
+            held_notes_->drain_midi_releases([&](std::uint8_t channel, std::uint8_t note) {
                 const bool is_upper =
                     note > spec_.split_note ||
                     (note == spec_.split_note && spec_.split_note_is_upper);
@@ -867,8 +862,7 @@ class KeyboardSplit {
                     report);
             });
         const bool ump_drained = held_notes_->drain_ump_releases(
-            [&](bool midi2, std::uint8_t group, std::uint8_t channel,
-                std::uint8_t note) {
+            [&](bool midi2, std::uint8_t group, std::uint8_t channel, std::uint8_t note) {
                 (void)channel;
                 const bool is_upper =
                     note > spec_.split_note ||

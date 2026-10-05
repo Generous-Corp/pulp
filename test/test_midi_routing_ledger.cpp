@@ -23,7 +23,7 @@ midi::MidiBuffer held_notes() {
     return input;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("MIDI routing kernels allocate only in their constructors",
           "[midi][utility][routing][rt-safety]") {
