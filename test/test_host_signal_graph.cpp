@@ -626,6 +626,25 @@ TEST_CASE("SignalGraph topological sort", "[host][graph]") {
     REQUIRE(pos_b < pos_c);
 }
 
+TEST_CASE("SignalGraph topological sort uses authored order for ready nodes",
+          "[host][graph][determinism]") {
+    SignalGraph graph;
+    const auto first = graph.add_gain_node("first");
+    const auto second = graph.add_gain_node("second");
+    const auto third = graph.add_gain_node("third");
+
+    // Independent nodes are observable through event and MIDI side effects,
+    // so their order follows the authored node vector rather than hash-table
+    // iteration or an incidental identity ordering.
+    REQUIRE(graph.processing_order() == std::vector<NodeId>{first, second, third});
+
+    // Removing a node compacts the authored vector while IDs remain stable.
+    // The remaining and newly authored nodes must still use vector order.
+    REQUIRE(graph.remove_node(first));
+    const auto fourth = graph.add_gain_node("fourth");
+    REQUIRE(graph.processing_order() == std::vector<NodeId>{second, third, fourth});
+}
+
 TEST_CASE("SignalGraph clear", "[host][graph]") {
     SignalGraph graph;
     graph.add_input_node(2);
