@@ -19,10 +19,10 @@ REPO = MODULE_PATH.parents[2]
 FIXTURE = REPO / "test/fixtures/perfetto-gpu/render-only.pftrace"
 
 
-def row(group, frame_ms, layout=0.0, repaints=0, layouts=0):
+def row(group, frame_ms, layout=0.0, repaints=0, layouts=0, area=0.0):
     stages = [layout] + [0.0] * (len(MODULE.STAGES) - 1)
     return "|".join([MODULE.MARKER, "frame", str(group), f"{frame_ms:.6f}"]
-                    + [f"{v:.6f}" for v in stages] + [str(repaints), str(layouts)])
+                    + [f"{v:.6f}" for v in stages] + [str(repaints), str(layouts), f"{area:.1f}"])
 
 
 class FakeProcessor:
@@ -77,6 +77,21 @@ class TraceFrameCostTests(unittest.TestCase):
         self.assertEqual(FakeProcessor(lines).run(
             "--group", "g", "--labels", "idle,knobs", "--baseline", "idle",
             "--max-p95-ms", "0.5", "--max-layout-frames", "0"), 1)
+
+    def test_damage_budget(self):
+        # Knobs repainting their own 30 x 30 boxes pass a 1 % budget on a
+        # 400 x 300 surface; the negative control -- the same frames asking
+        # for the whole surface once each -- fails it.
+        bounded = [row(0, 0.1)] * 20 + [row(1, 0.1, area=4 * 900.0)] * 20
+        self.assertEqual(FakeProcessor(bounded).run(
+            "--group", "g", "--labels", "idle,knobs", "--surface", "400x300",
+            "--max-damage-frac", "0.05"), 0)
+        whole = [row(0, 0.1)] * 20 + [row(1, 0.1, repaints=1, area=4 * 900.0)] * 20
+        self.assertEqual(FakeProcessor(whole).run(
+            "--group", "g", "--labels", "idle,knobs", "--surface", "400x300",
+            "--max-damage-frac", "0.05"), 1)
+        # A damage budget with no surface to measure against is refused.
+        self.assertEqual(FakeProcessor(bounded).run("--max-damage-frac", "0.05"), 1)
 
     def test_empty_or_truncated_capture_never_passes(self):
         self.assertEqual(FakeProcessor([]).run(), 2)

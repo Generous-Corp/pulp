@@ -16,8 +16,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/signal/crossfade.hpp>
-#include <pulp/signal/transition_mixer.hpp>
 #include <pulp/signal/processing_switch_crossfade.hpp>
+#include <pulp/signal/transition_mixer.hpp>
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/loop_reader.hpp>
@@ -225,10 +225,10 @@ TEST_CASE("crossfade: LoopRenderer wrap blend equals the shared (raw-ramp) law",
 
 namespace {
 
-using pulp::signal::ProcessingSwitchCrossfade;
-using pulp::signal::ProcessingSwitchPlan;
 using pulp::signal::plan_processing_switch;
 using pulp::signal::processing_switch_gains_at;
+using pulp::signal::ProcessingSwitchCrossfade;
+using pulp::signal::ProcessingSwitchPlan;
 
 /// A realisation with `latency` samples of pure delay that starts, as a newly
 /// built one does, with no history: its first `latency` outputs are silence.
@@ -240,15 +240,15 @@ struct DelayRealisation {
         for (int i = 0; i < n; ++i) {
             ring[write] = in[i];
             write = (write + 1) % ring.size();
-            out[i] = ring[write];  // the oldest sample: `latency` behind
+            out[i] = ring[write]; // the oldest sample: `latency` behind
         }
     }
 };
 
 struct SwitchMeasure {
-    double worst_step = 0.0;     ///< largest |x[n] - x[n-1]| from the switch on
-    double steady_step = 0.0;    ///< the same before the switch
-    std::size_t silent_run = 0;  ///< longest run of |x| < 1e-6 after the switch
+    double worst_step = 0.0;    ///< largest |x[n] - x[n-1]| from the switch on
+    double steady_step = 0.0;   ///< the same before the switch
+    std::size_t silent_run = 0; ///< longest run of |x| < 1e-6 after the switch
 };
 
 /// Run a sine through `from`, switch to a fresh `to` at `switch_at`, either
@@ -261,23 +261,30 @@ SwitchMeasure run_switch(std::size_t from_latency, std::size_t to_latency, bool 
     ProcessingSwitchCrossfade xf;
     std::vector<float> in(kTotal), out(kTotal, 0.0f), incoming(static_cast<std::size_t>(block));
     for (std::size_t n = 0; n < kTotal; ++n)
-        in[n] = static_cast<float>(0.5 * std::sin(2.0 * 3.14159265358979323846 * 440.0 * double(n) / kRate));
+        in[n] = static_cast<float>(
+            0.5 * std::sin(2.0 * 3.14159265358979323846 * 440.0 * double(n) / kRate));
     bool switched = false, done = false;
     for (std::size_t pos = 0; pos < kTotal; pos += static_cast<std::size_t>(block)) {
-        const int n = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(block), kTotal - pos));
+        const int n =
+            static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(block), kTotal - pos));
         if (!switched && pos >= kSwitchAt) {
             switched = true;
-            if (crossfade) xf.begin(plan_processing_switch(static_cast<std::int64_t>(to_latency), 0, kRate, 0.02));
-            else done = true;  // a cut: the fresh realisation is heard at once
+            if (crossfade)
+                xf.begin(
+                    plan_processing_switch(static_cast<std::int64_t>(to_latency), 0, kRate, 0.02));
+            else
+                done = true; // a cut: the fresh realisation is heard at once
         }
         float* o = out.data() + pos;
-        if (!switched || (crossfade && !done)) from.process(in.data() + pos, o, n);
+        if (!switched || (crossfade && !done))
+            from.process(in.data() + pos, o, n);
         if (switched && !done) {
             to.process(in.data() + pos, incoming.data(), n);
             float* op[] = {o};
             const float* ip[] = {incoming.data()};
             xf.mix(op, ip, 1, n);
-            if (xf.finished()) done = true;
+            if (xf.finished())
+                done = true;
         } else if (done) {
             to.process(in.data() + pos, o, n);
         }
@@ -294,7 +301,7 @@ SwitchMeasure run_switch(std::size_t from_latency, std::size_t to_latency, bool 
     return m;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("processing switch: the plan is latency + history, then the fade",
           "[crossfade][processing-switch]") {
@@ -340,7 +347,8 @@ TEST_CASE("processing switch: the schedule is warm, then TransitionMixer EqualPo
         xf.begin(plan);
         std::vector<float> out(220, 1.0f), in(220, -1.0f);
         for (std::size_t pos = 0; pos < out.size(); pos += static_cast<std::size_t>(block)) {
-            const int n = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(block), out.size() - pos));
+            const int n = static_cast<int>(
+                std::min<std::size_t>(static_cast<std::size_t>(block), out.size() - pos));
             float* op[] = {out.data() + pos};
             const float* ip[] = {in.data() + pos};
             xf.mix(op, ip, 1, n);
@@ -365,11 +373,12 @@ TEST_CASE("processing switch: no dropout and no step where a cut has both",
             const auto cut = run_switch(latencies.first, latencies.second, false, block);
             const auto faded = run_switch(latencies.first, latencies.second, true, block);
             INFO("block " << block << ", latency " << latencies.first << " -> " << latencies.second
-                 << "; cut: step " << cut.worst_step << " silent " << cut.silent_run
-                 << "; crossfade: step " << faded.worst_step << " silent " << faded.silent_run
-                 << "; steady step " << faded.steady_step);
+                          << "; cut: step " << cut.worst_step << " silent " << cut.silent_run
+                          << "; crossfade: step " << faded.worst_step << " silent "
+                          << faded.silent_run << "; steady step " << faded.steady_step);
             // Control: the cut is caught, by its dropout or by its step.
-            REQUIRE((cut.silent_run >= latencies.second - 1 || cut.worst_step > 2.0 * cut.steady_step));
+            REQUIRE(
+                (cut.silent_run >= latencies.second - 1 || cut.worst_step > 2.0 * cut.steady_step));
             // The switch: never silent, and no step. Equal power across two
             // phases of one sine is a sine whose amplitude swells by at most
             // sqrt(2) mid-fade, so its steepest slope may too -- a cut's

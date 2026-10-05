@@ -344,6 +344,17 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME skip-not-pass-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_skip_not_pass.py")
 
+    # Test fixture paths: reject __FILE__ used as a path under test/. With
+    # ccache's base_dir set, __FILE__ is relative to the build tree under
+    # Ninja, so such a path resolves only from there. The selftest proves every
+    # rejected form is reported, label uses pass, and an empty scan refuses a
+    # clean result.
+    add_test(NAME test-file-paths-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/check_test_file_paths.py"
+        --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME test-file-paths-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_test_file_paths.py")
+
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
     # -j`, which can exhaust memory / oversubscribe cores on a shared machine.

@@ -14,7 +14,9 @@ What must hold:
   build-gate (configure only) and runs the check;
 - a diff touching no declared input does not configure;
 - a current configured build is reused, not reconfigured;
-- PULP_GATES_NO_CONFIGURE=1 does not configure and says NOT CHECKED loudly;
+- PULP_GATES_NO_CONFIGURE=1 does not configure and says NOT CHECKED loudly,
+  except that a change to a surface the families check blocks FAILS: the
+  build-free prediction runs first, and the required gate would check it;
 - drift fails gates.sh and prints the exact `--write` command;
 - the same lane checks tools/ci/source_selftests.json against the registrations
   and the changed-surface script families: a selftest added without
@@ -51,8 +53,10 @@ COPIED = [
 # Stands in for changed_surface_script_families.py: its own suite covers what it
 # derives; here only the lane's handling of each exit code is under test.
 FAKE_FAMILIES = """import os, sys
-print(os.environ.get("FAKE_FAMILIES_SAYS", "changed-surface script families: OK"))
-sys.exit(int(os.environ.get("FAKE_FAMILIES_RC", "0")))
+mode = "STATIC" if "--static" in sys.argv else "FAMILIES"
+default = "changed-surface script families" + (" (static)" if mode == "STATIC" else "") + ": OK"
+print(os.environ.get(f"FAKE_{mode}_SAYS", default))
+sys.exit(int(os.environ.get(f"FAKE_{mode}_RC", "0")))
 """
 STUBS = ["tools/scripts/version_bump_check.py", "tools/scripts/skill_sync_check.py"]
 
@@ -210,7 +214,7 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertNotIn("NOT CHECKED", r.stderr)
 
     def test_opt_out_keeps_not_checked_and_says_so_loudly(self) -> None:
-        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.write("test/CMakeLists.txt", "# registrations, edited\n")
         self.commit()
         r = self.gates(PULP_GATES_NO_CONFIGURE="1")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -220,6 +224,51 @@ class GatesScriptInputsTests(unittest.TestCase):
                      "changed-surface-script-families-drift"):
             self.assertIn(f"[script-inputs] NOT CHECKED locally: {test}", r.stderr)
         self.assertIn("PASSED WITH 3 NOT CHECKED", r.stderr)
+        self.assertNotIn("(static)", r.stderr)  # no families surface touched, no prediction
+
+    def test_opt_out_on_a_families_surface_fails_instead_of_not_checked(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(PULP_GATES_NO_CONFIGURE="1")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(self.configures(), [])
+        self.assertIn("changed-surface script families (static): OK", r.stderr)
+        self.assertIn("changed-surface script families: FAILED, not verified", r.stderr)
+        self.assertIn("python3 tools/scripts/changed_surface_script_families.py --build-dir <dir> --write",
+                      r.stderr)
+        self.assertNotIn("NOT CHECKED locally: changed-surface-script-families-drift", r.stderr)
+        for test in ("script-test-inputs-drift", "source-selftest-lane-contract"):
+            self.assertIn(f"[script-inputs] NOT CHECKED locally: {test}", r.stderr)
+
+    def test_static_prediction_of_a_flip_is_reported_before_the_configured_check(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(PULP_GATES_NO_CONFIGURE="1", FAKE_STATIC_RC="1",
+                       FAKE_STATIC_SAYS="  tools/scripts/test_alpha.py: newly mapped")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("tools/scripts/test_alpha.py: newly mapped", r.stderr)
+        self.assertIn("the build-free prediction above found a mapping flip", r.stderr)
+
+    def test_the_configured_check_overrides_a_wrong_static_prediction(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_STATIC_RC="1", FAKE_STATIC_SAYS="  tools/scripts/test_alpha.py: newly mapped")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.configures()), 1)
+        self.assertIn("the configured check decides", r.stderr)
+
+    def test_families_surface_mirrors_the_generators_blocks_on(self) -> None:
+        sys.path.insert(0, str(HERE))
+        sys.path.insert(0, str(HERE.parent / "ci"))
+        import changed_surface_script_families as generator
+        import gates_script_inputs as lane
+        sample = {".shipyard/config.toml", ".shipyard/changed-surface-families.toml",
+                  "test/ctest_script_inputs.json", "tools/scripts/changed_surface_script_families.py",
+                  "tools/scripts/new_tool.py", "tools/scripts/sub/dir.py", "tools/scripts/run.sh",
+                  ".agents/skills/ci/SKILL.md", ".agents/skills/ci/notes.md", "core/x.cpp",
+                  "tools/ci/thing.py", "test/CMakeLists.txt"}
+        self.assertEqual(set(lane.families_surface(sample)),
+                         {p for p in sample if generator.blocks_on(p)})
 
     def test_hand_edited_list_fails_and_prints_the_write_command(self) -> None:
         self.write("tools/scripts/test_alpha.py", "import alpha_lib\nprint('alpha')\n")
@@ -254,13 +303,13 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertIn("python3 tools/scripts/changed_surface_script_families.py --build-dir build-gate --write",
                       r.stderr)
 
-    def test_a_families_skip_is_not_checked_not_a_pass(self) -> None:
+    def test_a_families_skip_on_a_families_surface_fails_not_passes(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
         self.commit()
         r = self.gates(FAKE_FAMILIES_RC="77", FAKE_FAMILIES_SAYS="SKIP: no codemodel reply")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("[script-inputs] NOT CHECKED locally: changed-surface-script-families-drift", r.stderr)
-        self.assertIn("PASSED WITH 1 NOT CHECKED", r.stderr)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("FAILED, not verified (changed_surface_script_families.py --check exited 77", r.stderr)
+        self.assertNotIn("NOT CHECKED locally: changed-surface-script-families-drift", r.stderr)
 
 
 class TouchReasonsTests(unittest.TestCase):

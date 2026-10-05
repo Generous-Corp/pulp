@@ -875,6 +875,10 @@ object deps, an object that is missing from `objects` or listed in `stale`
 has unknown headers. The macOS gate VM can leave Ninja STALE entries after an
 interrupted build, so treat that object as changed, never as "includes
 nothing".
+A usable link map can still hold build-produced shared libraries, and their
+loaders must never be keyed. Call `link_members.shared_scope()` and run those
+loaders (always_run `shared_link`); a new reader that skips it would reuse a
+loader whose dylib changed.
 
 ### `pulp_test_data` is a static claim; the nightly read audit measures it
 
@@ -2180,8 +2184,17 @@ executable `data: undeclared` (the shadow selects it on every change). The
 pr-fast `script-test-inputs-drift` check fails a PR head that adds a NEW
 undeclared source (one not undeclared in the base list); the backlog can only
 shrink. A test that reaches its data through its own definition
-(`PULP_REPO_ROOT`, a fixture-dir macro, `__FILE__`, a walk up from its
-working directory) declares with `NO_DEFINE` so its flags stay identical;
+(`PULP_REPO_ROOT`, a fixture-dir macro, a walk up from its working
+directory) declares with `NO_DEFINE` so its flags stay identical. Never build
+a fixture path from `__FILE__`: the self-hosted Macs set ccache `base_dir`,
+which rewrites `__FILE__` relative to the compiler's cwd (Ninja's build
+tree), so `path(__FILE__).parent_path()` becomes `../test` and resolves only
+from `build/`, never from `build/test` where ctest runs. Hosts without
+`base_dir` (GitHub runners) keep the absolute path, so only the local lanes
+fail. Use `pulp_test::fixture_root()` (`test/support/fixture_root.hpp`, which
+checks the root holds `test/` and names it and the cwd when not) with the
+`PULP_SOURCE_DIR` definition; the `test-file-paths-lint` ctest rejects
+`__FILE__` path forms under `test/`.
 `SOURCES` narrows a declaration to some of an executable's sources (a group
 or multi-source target), and `NONE` records a reviewed source whose
 `test/fixtures` text is only a comment or a temp-staged fixture. A test that
@@ -2401,6 +2414,21 @@ codemodel reply: touch `B/.cmake/api/v1/query/codemodel-v2` and reconfigure).
 the diff touches a Python file under `tools/`, `test/cmake/`, a skill doc or one
 of the generated files, configuring `build-gate` without compiling if no current
 build exists; any check it cannot run is listed NOT CHECKED, never passed.
+
+The families check also has a build-free half, because a fresh worktree has no
+codemodel reply and twice a new `tools/scripts/test_*.py` reached the required
+gate unregistered (`tools/scripts/<script>.py: newly mapped`, ~40 min later).
+`changed_surface_script_families.py --static --base origin/main` predicts each
+added, removed or re-read script's mapping from the committed script-inputs list
+at the merge base and at HEAD, and blocks a mapping flip the families file does
+not carry. It runs in the pre-push hook (about a second) and first in the
+`gates.sh` lane; the configured `--check` decides when the two disagree. When
+`gates.sh` cannot run the configured check (`PULP_GATES_NO_CONFIGURE=1`, a
+failed configure, a skip) and the diff touches a surface the families check
+blocks (a top-level `tools/scripts/*.py`, a skill doc, the script-inputs list,
+the generator, the config or the families file), it FAILS with the commands to
+run instead of reporting NOT CHECKED. Your own new script needs the
+regeneration too.
 
 ## An `a2t-scope-history-headroom` warning means: schedule the re-pin
 
@@ -7294,6 +7322,14 @@ To install Shipyard locally for the first time:
 ./tools/install-shipyard.sh --status  # show installed vs pinned version
 export PATH="$HOME/.local/bin:$PATH"  # add ~/.local/bin to PATH (one-time)
 ```
+
+In a workflow, give the step that runs `install-shipyard.sh` a token
+(`env: GITHUB_TOKEN: ${{ github.token }}`). Under `GITHUB_ACTIONS=true` the
+wrapper refuses to run without `GITHUB_TOKEN` or `SHIPYARD_GITHUB_TOKEN`:
+the upstream installer's release lookup is otherwise anonymous, and shared
+hosted-runner IPs exhaust the 60/hour limit on busy days (HTTP 403 in
+"Install pinned Shipyard"). `install_shipyard_token_check.py` in
+`workflow-lint.yml` catches a tokenless step before it runs.
 
 The public Pulp installer intentionally does not install Shipyard or GitHub
 CLI (`gh`). Ordinary Pulp users can create, build, run, and upgrade projects

@@ -148,6 +148,13 @@ LogCallback ScriptedUiSession::engine_log_callback() {
 }
 
 ScriptedUiSession::~ScriptedUiSession() {
+    release_root();
+    store_.flush_deferred_gesture_releases();
+}
+
+void ScriptedUiSession::release_root() noexcept {
+    if (root_released_) return;
+    root_released_ = true;
     // A caller that evaluated and never pumped a frame still owes the realm
     // reset. Destroying the session destroys the realm either way, so this is
     // not what contains the evaluated code — it is what stops a reset FAILURE
@@ -198,7 +205,15 @@ ScriptedUiSession::~ScriptedUiSession() {
     if (has_runtime_realms)
         accessibility_retain_until_retired(
             root_, runtime_realm_teardown_owner_);
-    store_.flush_deferred_gesture_releases();
+    // Drop the session's own hold now, while the root exists: the retired
+    // engines and bridges reference it, and a session can outlive its root
+    // once this has run. An accessibility lease that still needs them keeps
+    // its own reference.
+    runtime_realm_teardown_owner_.reset();
+    // Nothing may evaluate into, or reload over, a realm whose root is gone.
+    runtime_realm_quarantined_ = true;
+    document_load_pending_ = false;
+    reloader_.reset();
 }
 
 // Late-attach of the host's GpuSurface. Hosts (e.g. au_view_controller_ios.mm)

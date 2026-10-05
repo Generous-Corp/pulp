@@ -66,6 +66,11 @@ struct SpectralFrameEngineConfig {
     /// false only for split-API callers that map frame ordinals to stream time
     /// themselves and rely on frame k analysing input [k * hop, k * hop + fft).
     bool full_overlap_stream_start = true;
+    /// process() only: run each channel's inverse transform and overlap-add
+    /// at its own point in the hop after the frame (the latency already
+    /// leaves a hop of slack) instead of all in the callback that completed
+    /// the frame. Bit-identical output; false restores the single burst.
+    bool defer_synthesis = true;
 };
 
 inline constexpr int kSpectralFrameEngineMinimumFftSize = 256;
@@ -294,11 +299,24 @@ public:
                  int num_samples,
                  Fn&& on_frames) {
         assert(num_samples <= config_.max_block);
+        // Deferred resynthesis. A frame that completes at input sample F is
+        // first read at output sample F + analysis_hop (the latency is
+        // fft_size + analysis_hop), so its inverse transforms and overlap-add
+        // can wait up to a hop. Each channel's runs in the first callback at
+        // or past its own due point inside that hop, spreading what used to
+        // land whole in the callback that completed the frame; whatever is
+        // still pending runs before the next frame (analyze() flushes).
+        // Same arithmetic in the same order: output is bit-identical.
+        run_due_synthesis_(samples_fed_ + num_samples);
         analyze(in, num_samples, [&](std::complex<SampleType>* const* frames,
                                      int bins) {
             on_frames(frames, bins);
-            synthesize_frame(frames, config_.analysis_hop);
+            if (config_.defer_synthesis)
+                begin_deferred_synthesis_(frames);
+            else
+                synthesize_frame(frames, config_.analysis_hop);
         });
+        run_due_synthesis_(samples_fed_);
         // Fixed-latency read: the first latency_samples() outputs are zeros;
         // afterwards every output pops exactly one final ring sample, so the
         // input→output delay is constant regardless of block size or phase.
@@ -350,6 +368,7 @@ public:
             done += run;
 
             if (samples_fed_ == next_frame_at_) {
+                flush_deferred_synthesis_();
                 next_frame_at_ += config_.analysis_hop;
                 emit_frame(on_frames);
             }
@@ -364,33 +383,9 @@ public:
     /// before stream position 0 is discarded.
     void synthesize_frame(std::complex<SampleType>* const* frames, int synthesis_hop) {
         assert(synthesis_hop > 0 && synthesis_hop <= config_.max_synthesis_hop);
-        const int n = config_.fft_size;
-        // Pre-stream samples of a frame that starts before position 0 are
-        // never read, so they are never written: the ring slots they would
-        // alias stay clean for the real stream.
-        const int skip =
-            synth_pos_ < 0 ? static_cast<int>(std::min<std::int64_t>(-synth_pos_, n)) : 0;
-        for (int ch = 0; ch < config_.channels; ++ch) {
-            for (int k = 0; k < num_bins_; ++k) {
-                freq_buf_[static_cast<size_t>(k)] = frames[ch][k];
-                if (k > 0 && k < n / 2)
-                    freq_buf_[static_cast<size_t>(n - k)] = std::conj(frames[ch][k]);
-            }
-            fft_.inverse(freq_buf_.data());
-            SampleType* ring =
-                output_ring_.data() + static_cast<size_t>(ch) * ring_size_;
-            for (int i = skip; i < n; ++i) {
-                const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
-                ring[idx] += freq_buf_[static_cast<size_t>(i)].real() * window_[static_cast<size_t>(i)];
-            }
-        }
-        for (int i = skip; i < n; ++i) {
-            const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
-            norm_ring_[idx] += window_[static_cast<size_t>(i)] * window_[static_cast<size_t>(i)];
-        }
-        synth_pos_ += synthesis_hop;
-        // Samples before the start of the frame just written are final.
-        available_ = std::max(available_, synth_pos_ - synthesis_hop);
+        for (int ch = 0; ch < config_.channels; ++ch)
+            synthesize_channel_(frames, ch);
+        finish_synthesis_(synthesis_hop);
     }
 
     /// Split API — number of final (fully overlapped) output samples that
@@ -427,13 +422,85 @@ public:
         available_ = 0;
         read_pos_ = 0;
         out_count_ = 0;
+        deferred_frames_ = nullptr;
+        deferred_next_channel_ = 0;
     }
 
 private:
+  // One channel of synthesize_frame(): inverse transform and overlap-add.
+  // Pre-stream samples of a frame that starts before position 0 are never
+  // read, so they are never written: the ring slots they would alias stay
+  // clean for the real stream.
+  void synthesize_channel_(std::complex<SampleType>* const* frames, int ch) {
+      const int n = config_.fft_size;
+      const int skip =
+          synth_pos_ < 0 ? static_cast<int>(std::min<std::int64_t>(-synth_pos_, n)) : 0;
+      for (int k = 0; k < num_bins_; ++k) {
+          freq_buf_[static_cast<size_t>(k)] = frames[ch][k];
+          if (k > 0 && k < n / 2)
+              freq_buf_[static_cast<size_t>(n - k)] = std::conj(frames[ch][k]);
+      }
+      fft_.inverse(freq_buf_.data());
+      SampleType* ring = output_ring_.data() + static_cast<size_t>(ch) * ring_size_;
+      for (int i = skip; i < n; ++i) {
+          const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
+          ring[idx] += freq_buf_[static_cast<size_t>(i)].real() * window_[static_cast<size_t>(i)];
+      }
+  }
+
+  // The rest of synthesize_frame(): the shared normalization ring, then
+  // advance the synthesis position.
+  void finish_synthesis_(int synthesis_hop) {
+      const int n = config_.fft_size;
+      const int skip =
+          synth_pos_ < 0 ? static_cast<int>(std::min<std::int64_t>(-synth_pos_, n)) : 0;
+      for (int i = skip; i < n; ++i) {
+          const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
+          norm_ring_[idx] += window_[static_cast<size_t>(i)] * window_[static_cast<size_t>(i)];
+      }
+      synth_pos_ += synthesis_hop;
+      // Samples before the start of the frame just written are final.
+      available_ = std::max(available_, synth_pos_ - synthesis_hop);
+  }
+
+  void begin_deferred_synthesis_(std::complex<SampleType>* const* frames) {
+      deferred_frames_ = frames;
+      deferred_next_channel_ = 0;
+      deferred_frame_at_ = samples_fed_;
+  }
+
+  // Run every deferred channel whose due point is before `fed`.
+  void run_due_synthesis_(std::int64_t fed) {
+      const int channels = config_.channels;
+      while (deferred_frames_ != nullptr) {
+          const std::int64_t due =
+              deferred_frame_at_ + static_cast<std::int64_t>(config_.analysis_hop) *
+                                       (deferred_next_channel_ + 1) / (channels + 1);
+          if (due > fed)
+              return;
+          step_deferred_synthesis_();
+      }
+  }
+
+  void step_deferred_synthesis_() {
+      synthesize_channel_(deferred_frames_, deferred_next_channel_);
+      if (++deferred_next_channel_ == config_.channels) {
+          finish_synthesis_(config_.analysis_hop);
+          deferred_frames_ = nullptr;
+      }
+  }
+
+  void flush_deferred_synthesis_() {
+      while (deferred_frames_ != nullptr)
+          step_deferred_synthesis_();
+  }
+
     // Pop one final sample (all channels) into out[..][i], normalizing by
     // the accumulated squared synthesis window and clearing the slot.
     void pop_one(SampleType* const* out, int i) {
-        assert(read_pos_ < available_);
+        // A frame whose synthesis is deferred is final for its first hop
+        // before available_ (conservative by a hop) says so.
+        assert(read_pos_ < available_ + config_.analysis_hop);
         const auto idx = static_cast<size_t>(read_pos_ & ring_mask_);
         // Floor only the stream-start partial-overlap region, which exists
         // only without full-overlap stream start. Elsewhere per-sample
@@ -499,6 +566,12 @@ private:
     std::int64_t available_ = 0;   // final samples high-water mark
     std::int64_t read_pos_ = 0;    // absolute read position
     std::int64_t out_count_ = 0;   // samples emitted by process()
+    // process()'s deferred resynthesis: the frame group awaiting it (the
+    // engine's own frame buffers, untouched until the next frame), the next
+    // channel to synthesize, and the input sample the frame completed at.
+    std::complex<SampleType>* const* deferred_frames_ = nullptr;
+    int deferred_next_channel_ = 0;
+    std::int64_t deferred_frame_at_ = 0;
 };
 
 using SpectralFrameEngine = SpectralFrameEngineT<float>;

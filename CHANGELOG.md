@@ -9,6 +9,61 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09080"></a>
+## [0.908.0] - 2026-10-05
+
+- fix/scripted session teardown uaf ([#9523](https://github.com/Generous-Corp/pulp/pull/9523))
+- release/version bump ([#9543](https://github.com/Generous-Corp/pulp/pull/9543))
+- codex/neural status 20261004 r5 ([#9538](https://github.com/Generous-Corp/pulp/pull/9538))
+- fix/changed surface test env hermetic ([#9537](https://github.com/Generous-Corp/pulp/pull/9537))
+
+<a id="v09072"></a>
+## [0.907.2] - 2026-10-04
+
+- codex/pulp sdk 0.907.2 20261004 ([#9530](https://github.com/Generous-Corp/pulp/pull/9530))
+- test/changed surface proof6 ([#9480](https://github.com/Generous-Corp/pulp/pull/9480))
+- feature/editor script prewarm ([#9511](https://github.com/Generous-Corp/pulp/pull/9511))
+- codex/wave3 c2 signal headers 20261004 ([#9491](https://github.com/Generous-Corp/pulp/pull/9491))
+- fix/installer au cache refresh 20261004 ([#9519](https://github.com/Generous-Corp/pulp/pull/9519))
+- codex/c2 competitive json followup 20261004 ([#9514](https://github.com/Generous-Corp/pulp/pull/9514))
+- fix/explicit productsign keychain 20261004 ([#9509](https://github.com/Generous-Corp/pulp/pull/9509))
+- feature/executable reuse config ([#9471](https://github.com/Generous-Corp/pulp/pull/9471))
+- fix/standalone first frame brand ([#9504](https://github.com/Generous-Corp/pulp/pull/9504))
+- feature/modulated value display ([#9493](https://github.com/Generous-Corp/pulp/pull/9493))
+- ci/reviewed scanners data ([#9505](https://github.com/Generous-Corp/pulp/pull/9505))
+- fix/productsign keychain partition 20261004 ([#9503](https://github.com/Generous-Corp/pulp/pull/9503))
+- feature/audio glitch trace ([#9501](https://github.com/Generous-Corp/pulp/pull/9501))
+- fix/pr pin floor ([#9489](https://github.com/Generous-Corp/pulp/pull/9489))
+- fix/p3 unreached artifact ([#9500](https://github.com/Generous-Corp/pulp/pull/9500))
+
+<a id="v09071"></a>
+## [0.907.1] - 2026-10-04
+
+- codex/dawn depth gate 20261004 ([#9502](https://github.com/Generous-Corp/pulp/pull/9502))
+- codex/gpu audio p2 impl 20261004 ([#9494](https://github.com/Generous-Corp/pulp/pull/9494))
+- release/version bump ([#9498](https://github.com/Generous-Corp/pulp/pull/9498))
+- codex/modelstore product gate 20261004 ([#9497](https://github.com/Generous-Corp/pulp/pull/9497))
+- ci/key blind ratchet ([#9467](https://github.com/Generous-Corp/pulp/pull/9467))
+- codex/c2 competitive json 20261004 ([#9495](https://github.com/Generous-Corp/pulp/pull/9495))
+- codex/mlx named model gate 20261004 ([#9492](https://github.com/Generous-Corp/pulp/pull/9492))
+- feat/reuse record usable flags ([#9478](https://github.com/Generous-Corp/pulp/pull/9478))
+- feature/processing switch crossfade ([#9490](https://github.com/Generous-Corp/pulp/pull/9490))
+- codex/b6 window host 20261004 ([#9487](https://github.com/Generous-Corp/pulp/pull/9487))
+- feat/p3 reuse trip fields ([#9483](https://github.com/Generous-Corp/pulp/pull/9483))
+- codex/neural docs staleness 20261004 ([#9488](https://github.com/Generous-Corp/pulp/pull/9488))
+- feat/reuse record module identity ([#9484](https://github.com/Generous-Corp/pulp/pull/9484))
+- chore/shipyard pin 0.269.0 ([#9481](https://github.com/Generous-Corp/pulp/pull/9481))
+- codex/neural status reconcile2 20261004 ([#9486](https://github.com/Generous-Corp/pulp/pull/9486))
+- release/version bump ([#9485](https://github.com/Generous-Corp/pulp/pull/9485))
+- fix/patch lang unique names ([#9482](https://github.com/Generous-Corp/pulp/pull/9482))
+- codex/phase5 inventory 20261004 ([#9464](https://github.com/Generous-Corp/pulp/pull/9464))
+- codex/b3 skia alignment 20261004 ([#9455](https://github.com/Generous-Corp/pulp/pull/9455))
+- feat/s2 executable selection ([#9460](https://github.com/Generous-Corp/pulp/pull/9460))
+- fix/test link objc stubs small ([#9477](https://github.com/Generous-Corp/pulp/pull/9477))
+- release/version bump ([#9479](https://github.com/Generous-Corp/pulp/pull/9479))
+- test/register unrun tool tests ([#9472](https://github.com/Generous-Corp/pulp/pull/9472))
+- fix/changed surface notrun and registration ([#9453](https://github.com/Generous-Corp/pulp/pull/9453))
+
 <a id="v09070"></a>
 ## [0.907.0] - 2026-10-04
 
@@ -9711,6 +9766,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.908.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.908.0
+[0.907.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.907.2
+[0.907.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.907.1
 [0.907.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.907.0
 [0.906.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.906.1
 [0.906.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.906.0

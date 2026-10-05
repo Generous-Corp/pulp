@@ -1255,20 +1255,33 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual(got, [True, False, True, False, False])
 
     def test_a_link_record_the_reader_cannot_vouch_for_is_no_record(self):
-        # An unknown schema, a kind the replay does not model (a shared library
-        # changes what loads without changing the loader's map) or an
-        # unrecorded link all read as "no link record", so every executable
-        # falls back to the blunt rules instead of trusting part of the map.
+        # An unknown schema, an unknown kind, shared libraries recorded without
+        # the links that name them (before v4) or an unrecorded link all read as
+        # "no link record", so every executable falls back to the blunt rules
+        # instead of trusting part of the map.
         def links(schema="pulp-link-members/v3", kind="module", **extra):
             return json.dumps({"schema": schema, "members": {}, "unreadable": 0, **extra,
                                "executables": {"<build>/p.so": {"kind": kind, "objects": ["<build>/p.o"],
                                                                 "archives": {}}}})
         # Held for the whole test: record_from keys its cache on id(files).
         files = [{"link-members-a.json": doc} for doc in (
-            links(), links("pulp-link-members/v4"), links(None), links(kind="shared"), links(unrecorded=1))]
+            links(), links("pulp-link-members/v99"), links(None), links(kind="framework"),
+            links(kind="shared"), links(unrecorded=1))]
         self.assertEqual(self.record_from(files[0])["link"], {"p.so": {"objects": ["p.o"], "members": {}}})
         for f in files[1:]:
             self.assertIsNone(self.record_from(f)["link"], f)
+
+    def test_a_shared_library_loader_is_left_out_of_the_link_map(self):
+        # v4 names who loads a build-produced shared library. The record stays
+        # usable; the loader reads unrecorded and the library is no executable.
+        doc = json.dumps({"schema": "pulp-link-members/v4", "members": {}, "unreadable": 0, "unrecorded": 0,
+                          "executables": {
+                              "<build>/libs.dylib": {"kind": "shared", "objects": ["<build>/s.o"], "archives": {}},
+                              "<build>/loader": {"kind": "executable", "objects": ["<build>/l.o"], "archives": {},
+                                                 "shared": ["<build>/libs.dylib"]},
+                              "<build>/plain": {"kind": "executable", "objects": ["<build>/q.o"], "archives": {}}}})
+        files = {"link-members-a.json": doc}
+        self.assertEqual(self.record_from(files)["link"], {"plain": {"objects": ["q.o"], "members": {}}})
 
 
 class SourceKeyPolicyTests(unittest.TestCase):

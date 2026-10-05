@@ -150,6 +150,31 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertNotEqual(self.family_for(generated, "tools/scripts/test_entry.py"), [])
         self.assertEqual(self.family_for(generated, "tools/scripts/codegen.py"), [])
 
+    def test_a_test_entry_cmake_also_runs_stays_unmapped(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_tool.py", "")
+        self.write("tools/scripts/tool.py", "")
+        self.write("tools/scripts/test_quiet.py", "")
+        self.write("tools/scripts/quiet.py", "")
+        self.write("tools/scripts/hashed.py", "")
+        self.write("test/cmake/tests.cmake",
+                   "add_test(NAME tool-selftest COMMAND python3 tools/scripts/tool.py --self-test)\n"
+                   "add_custom_command(TARGET probe PRE_LINK COMMAND python3 tools/scripts/tool.py)\n"
+                   "# tools/scripts/quiet.py is only described here\n"
+                   'add_test(NAME quiet COMMAND python3 tools/scripts/quiet.py "#not-a-comment")\n'
+                   'add_test(NAME hashed COMMAND python3 tools/scripts/hashed.py)\n'
+                   'add_custom_command(OUTPUT x COMMAND echo "#1" && python3 tools/scripts/hashed.py)\n')
+        self.script_test("tool-selftest", "tools/scripts/tool.py", [])
+        self.script_test("quiet", "tools/scripts/quiet.py", [])
+        self.script_test("hashed", "tools/scripts/hashed.py", [])
+        generated = self.generate()
+        # A link step runs tool.py, so a change to it must plan the full suite.
+        self.assertEqual(self.family_for(generated, "tools/scripts/tool.py"), [])
+        # A quoted "#" is not a comment: the script after it is still seen.
+        self.assertEqual(self.family_for(generated, "tools/scripts/hashed.py"), [])
+        # Control: an entry CMake names only in add_test and a comment maps.
+        self.assertNotEqual(self.family_for(generated, "tools/scripts/quiet.py"), [])
+
     def test_reader_running_a_build_product_selects_its_producer_target(self) -> None:
         self.add_whole_tree()
         self.write("tools/scripts/test_tool.py", "")
@@ -295,6 +320,105 @@ class DriftCheckTest(FamilyFixture):
     def test_drift_is_advisory_for_unrelated_changes_and_in_merge_groups(self) -> None:
         self.assertEqual(self.check(["core/view/src/widgets.cpp", "docs/guides/local-ci.md"]), 0)
         self.assertEqual(self.check(["tools/scripts/test_a.py"], merge_group=True), 0)
+
+
+class StaticCheckTest(FamilyFixture):
+    """`--static` blocks a script the change maps or unmaps without a regenerated
+    families file, with no configured build, and stays quiet otherwise."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        for key, value in (("user.email", "t@example.com"), ("user.name", "t")):
+            subprocess.run(["git", "-C", str(self.root), "config", key, value], check=True)
+        self.add_whole_tree()
+        self.write("tools/scripts/test_a.py", "")
+        self.script_test("a-selftest", "tools/scripts/test_a.py")
+        self.regenerate()
+        self.commit("base")
+        subprocess.run(["git", "-C", str(self.root), "branch", "base"], check=True)
+
+    def regenerate(self) -> None:
+        self.write(str(families.FAMILIES_FILE), families.render(list(self.generate().values())))
+
+    def commit(self, message: str) -> None:
+        self.write("test/ctest_script_inputs.json",
+                   json.dumps({"schema": "pulp-ctest-script-inputs/v1", "tests": self.declared,
+                               "executables": {}}))
+        subprocess.run(["git", "-C", str(self.root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "-q", "-m", message], check=True)
+
+    def static(self) -> tuple[list[str], list[str], int]:
+        return families.static_drift(self.root, "base")
+
+    def static_exit(self) -> int:
+        # A merge-group job's environment would make the verdict advisory.
+        saved = families.script_test_inputs.advisory_here
+        families.script_test_inputs.advisory_here = lambda: False
+        try:
+            return families.main(["--repo-root", str(self.root), "--static", "--base", "base"])
+        finally:
+            families.script_test_inputs.advisory_here = saved
+
+    def add_script_test(self) -> None:
+        self.write("tools/scripts/new_check.py", "")
+        self.write("tools/scripts/test_new_check.py", "import new_check\n")
+        self.script_test("new-check-selftest", "tools/scripts/test_new_check.py",
+                         ["tools/scripts/new_check.py"])
+
+    def test_a_new_script_test_without_a_regeneration_blocks(self) -> None:
+        self.add_script_test()
+        self.commit("add a script test, families file untouched")
+        blocking, _advisory, _n = self.static()
+        self.assertEqual(blocking, ["tools/scripts/new_check.py: newly mapped",
+                                    "tools/scripts/test_new_check.py: newly mapped"])
+        self.assertEqual(self.static_exit(), 1)
+
+    def test_the_same_change_with_the_file_regenerated_passes(self) -> None:
+        self.add_script_test()
+        self.regenerate()
+        self.commit("add a script test and regenerate")
+        self.assertEqual(self.static()[0], [])
+        self.assertEqual(self.static_exit(), 0)
+
+    def test_a_removed_script_without_a_regeneration_blocks(self) -> None:
+        (self.root / "tools/scripts/test_a.py").unlink()
+        del self.declared["a-selftest"]
+        self.tests = [t for t in self.tests if t["name"] != "a-selftest"]
+        self.commit("remove a script test, families file untouched")
+        self.assertEqual(self.static()[0], ["tools/scripts/test_a.py: no longer mapped"])
+
+    def test_a_script_native_code_names_stays_unmapped_and_does_not_block(self) -> None:
+        self.write("tools/scripts/runner.py", "import new_check\n")
+        self.write("tools/cli/run.sh", "python3 tools/scripts/runner.py\n")
+        self.write("tools/scripts/new_check.py", "")
+        self.script_test("runner-selftest", "tools/scripts/runner.py", ["tools/scripts/new_check.py"])
+        self.regenerate()
+        generated_paths = (self.root / families.FAMILIES_FILE).read_text()
+        self.assertNotIn("tools/scripts/new_check.py", generated_paths)  # reached through runner.py
+        self.commit("a script a shell script runs")
+        self.assertEqual(self.static()[0], [])
+
+    def test_a_mapping_the_prediction_cannot_see_is_cancelled_by_the_base(self) -> None:
+        # The fixture blocks the mapping only in the configured generator; the
+        # prediction cannot see fixtures, and disagrees at the base as at HEAD.
+        self.write("tools/scripts/test_fixture.py", "")
+        self.script_test("fixture-selftest", "tools/scripts/test_fixture.py", fixtures=["setup"])
+        self.regenerate()
+        self.commit("a fixture reader")
+        subprocess.run(["git", "-C", str(self.root), "branch", "-f", "base"], check=True)
+        self.write("tools/scripts/test_fixture.py", "# edited\n")
+        self.commit("edit it")
+        self.assertEqual(self.static()[0], [])
+
+    def test_an_unrelated_change_examines_nothing(self) -> None:
+        self.write("core/x.cpp", "int x;\n")
+        self.commit("native only")
+        self.assertEqual(self.static(), ([], [], 0))
+
+    def test_the_rendered_file_reads_back_without_tomllib(self) -> None:
+        self.add_script_test()
+        text = families.render(list(self.generate().values()))
+        self.assertEqual(families._parse_rendered(text), tomllib.loads(text)["families"])
 
 
 if __name__ == "__main__":

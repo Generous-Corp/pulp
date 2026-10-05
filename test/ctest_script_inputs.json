@@ -1402,7 +1402,6 @@
   "pulp-test-group-app-view": {
    "data": "declared",
    "detected_sources": [
-    "test/test_design_tool_layout.cpp",
     "test/test_ios_foundation.cpp"
    ],
    "inputs": [
@@ -8309,6 +8308,20 @@
    "entry": "tools/scripts/test_tart_home_resolution.py",
    "inputs": [
     "tools/scripts/test_tart_home_resolution.py"
+   ],
+   "kind": "python"
+  },
+  "test-file-paths-lint": {
+   "entry": "tools/scripts/check_test_file_paths.py",
+   "inputs": [
+    "tools/scripts/check_test_file_paths.py"
+   ],
+   "kind": "python"
+  },
+  "test-file-paths-lint-selftest": {
+   "entry": "tools/scripts/test_check_test_file_paths.py",
+   "inputs": [
+    "tools/scripts/test_check_test_file_paths.py"
    ],
    "kind": "python"
   },

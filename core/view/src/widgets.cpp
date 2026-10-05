@@ -464,23 +464,25 @@ void Knob::paint(canvas::Canvas& canvas) {
     float radius = std::min(cx, cy) * 0.8f;
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
     bool captured_indicator_drawn = false;
+    // One indicator: every body style points at the value PLAYING, which is
+    // the modulated value while a modulator moves this knob and the base
+    // otherwise. The base is marked separately (paint_modulated_marker).
+    const float shown = has_modulated_ ? modulated_ : value_;
+    const float shown_pos = skew() == 1.0f ? shown : std::pow(shown, skew());
     const auto draw_captured_indicator = [&](float pointer_radius) {
         const auto color = ind_color_authored_
             ? ind_color_
             : resolve_color("knob.thumb", ind_color_);
-        draw_knob_captured_pointer(
-            canvas, cx, cy,
-            ind_r_in_ * pointer_radius,
-            ind_r_out_ * pointer_radius,
-            std::max(1.5f, ind_width_ * pointer_radius),
-            color, value_, ind_phase_rad_,
-            ind_outline_color_, ind_outline_width_);
+        draw_knob_captured_pointer(canvas, cx, cy, ind_r_in_ * pointer_radius,
+                                   ind_r_out_ * pointer_radius,
+                                   std::max(1.5f, ind_width_ * pointer_radius), color, shown,
+                                   ind_phase_rad_, ind_outline_color_, ind_outline_width_);
         captured_indicator_drawn = true;
     };
 
     // ── Sprite strip path: designer-created filmstrip ─────────────────────
     if (sprite_strip_ && sprite_strip_->loaded()) {
-        int frame = sprite_strip_->frame_for_value(value_);
+        int frame = sprite_strip_->frame_for_value(shown);
         int fx, fy;
         sprite_strip_->frame_offset(frame, fx, fy);
         float fw = static_cast<float>(sprite_strip_->frame_width());
@@ -575,14 +577,14 @@ void Knob::paint(canvas::Canvas& canvas) {
                 // pointer over the now-clean disc.
                 draw_captured_indicator(notch_r);
             } else {
-                draw_knob_indicator_notch(canvas, cx, cy, notch_r, notch_r, value_);
+                draw_knob_indicator_notch(canvas, cx, cy, notch_r, notch_r, shown);
             }
         }
         // Fall through to draw labels on top
     }
     // ── Declarative schema path: JSON defines appearance as data ──────────
     else if (!widget_schema_.empty()) {
-        render_schema(canvas, widget_schema_, b.width, b.height, value_, *this);
+        render_schema(canvas, widget_schema_, b.width, b.height, shown, *this);
         // Fall through to draw labels on top
     }
     // ── Custom shader path: replaces body/track/fill, keeps labels/glow ──
@@ -590,8 +592,7 @@ void Knob::paint(canvas::Canvas& canvas) {
     // FAILURE falls through to the normal body branches below (not a blank
     // widget); on success the shader painted the body and we skip them.
     else if (has_custom_shader() &&
-             draw_custom_shader_body(canvas, *this, *this, b.width, b.height,
-                                     value_, shader_time)) {
+             draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time)) {
         // Shader painted the body; fall through to draw labels and value text.
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──
@@ -693,7 +694,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         //    single-frame sprite-body path). Extent rides the inner radius;
         //    stroke widths scale from the chrome body radius.
         if (!has_captured_indicator_)
-            draw_knob_indicator_notch(canvas, cx, cy, inner_r, body_r, value_);
+            draw_knob_indicator_notch(canvas, cx, cy, inner_r, body_r, shown);
     } else {
         // ── Default C++ paint path — Ink & Signal knob ───────────────────
         // Solid raised body disc + full track ring + thick value arc + a
@@ -705,7 +706,11 @@ void Knob::paint(canvas::Canvas& canvas) {
         // per-source rings fit in the band outside it (within full_r).
         float ring_r = mod_rings_.empty() ? (full_r - arc_w * 0.5f) : (full_r * 0.64f);
         float body_r = ring_r - arc_w * 0.5f - 2.0f;     // disc inside the ring
-        float value_angle = start_angle + position_for_value() * (end_angle - start_angle);
+        float value_angle = start_angle + shown_pos * (end_angle - start_angle);
+        // While modulated the one value arc and pointer show the played value
+        // in the modulation colour, so the control never reads as two.
+        const auto modulation_color =
+            resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
 
         // Hover glow ring (drawn behind everything)
         float glow = hover_glow_.value();
@@ -739,8 +744,10 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.set_line_cap(canvas::LineCap::round);
         canvas.stroke_arc(cx, cy, ring_r, start_angle, end_angle);
 
-        // Value arc (accent)
-        auto fill_color = resolve_color("knob.arc", canvas::Color::rgba8(100, 150, 255));
+        // Value arc (accent; the modulation colour while modulated)
+        auto fill_color = has_modulated_
+                              ? modulation_color
+                              : resolve_color("knob.arc", canvas::Color::rgba8(100, 150, 255));
         canvas.set_stroke_color(fill_color);
         canvas.stroke_arc(cx, cy, ring_r, start_angle, value_angle);
 
@@ -750,7 +757,9 @@ void Knob::paint(canvas::Canvas& canvas) {
         float dot_x = cx + dot_rad * std::cos(value_angle);
         float dot_y = cy + dot_rad * std::sin(value_angle);
         if (!has_captured_indicator_) {
-            auto thumb_color = resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
+            auto thumb_color =
+                has_modulated_ ? modulation_color
+                               : resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
             canvas.set_fill_color(thumb_color);
             canvas.fill_circle(dot_x, dot_y, dot_r);
         }
@@ -805,9 +814,9 @@ void Knob::paint(canvas::Canvas& canvas) {
     if (has_captured_indicator_ && !captured_indicator_drawn && !loaded_sprite)
         draw_captured_indicator(std::min(b.width, b.height) * 0.5f);
 
-    // The played value a modulator is moving this knob to (display only; see
-    // set_modulated_value). Drawn over every body style at the stock ring's
-    // geometry, below the label and value text.
+    // The base a modulator is moving this knob around (display only; see
+    // set_modulated_value): a small tick on the stock ring's geometry, drawn
+    // over every body style, below the label and value text.
     if (has_modulated_) {
         const float full_r = std::min(cx, cy) - 3.0f;
         const float arc_w = std::max(3.0f, full_r * 0.13f);
@@ -830,55 +839,51 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 11.0f);
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text(format_(value_), cx, cy + 4);
+        // The value playing; the base while the user drags it.
+        canvas.fill_text(format_(has_modulated_ && !gesture_active_ ? modulated_ : value_), cx,
+                         cy + 4);
     }
 }
 
 void Knob::paint_modulated_marker(canvas::Canvas& canvas, float cx, float cy, float ring_r,
                                   float arc_w) {
-    const float s = skew();
-    const float played_pos = s == 1.0f ? modulated_ : std::pow(modulated_, s);
+    // The base: a short notch across the ring, quieter than the pointer, so
+    // the control reads as one value (the pointer) plus where it returns to.
     const float base_a = start_angle + position_for_value() * (end_angle - start_angle);
-    const float play_a = start_angle + played_pos * (end_angle - start_angle);
-    const auto color = resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
+    const auto thumb = resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
+    const float half = arc_w * 0.5f + 2.0f;
+    const float c = std::cos(base_a), sn = std::sin(base_a);
+    // The tick is the resolved thumb token at 85 % alpha.
+    const auto tick = canvas::Color::rgba(thumb.r, thumb.g, thumb.b, 0.85f); // token-lint:allow
+    canvas.set_stroke_color(tick);
     canvas.set_line_cap(canvas::LineCap::round);
-    if (std::abs(play_a - base_a) > 1e-3f) {
-        canvas.set_stroke_color(color);
-        canvas.set_line_width(std::max(2.0f, arc_w * 0.6f));
-        canvas.stroke_arc(cx, cy, ring_r, std::min(base_a, play_a), std::max(base_a, play_a));
-    }
-    canvas.set_fill_color(color);
-    canvas.fill_circle(cx + ring_r * std::cos(play_a), cy + ring_r * std::sin(play_a),
-                       std::max(2.0f, arc_w * 0.55f));
+    canvas.set_line_width(std::max(1.5f, arc_w * 0.3f));
+    canvas.stroke_line(cx + (ring_r - half) * c, cy + (ring_r - half) * sn,
+                       cx + (ring_r + half) * c, cy + (ring_r + half) * sn);
 }
 
 // ── Fader ────────────────────────────────────────────────────────────────────
 
 void Fader::paint_modulated_marker(canvas::Canvas& canvas) {
+    // The base: a short tick across the track, quieter than the thumb, which
+    // sits at the value playing (see paint()).
     const auto b = local_bounds();
     const bool vert = orientation_ == Orientation::vertical;
     const float length = vert ? b.height : b.width;
     const float cross = (vert ? b.width : b.height) * 0.5f;
-    const auto at = [&](float position) {
-        return vert ? (1.0f - position) * length : position * length;
-    };
-    const float played = at(skew_ == 1.0f ? modulated_ : std::pow(modulated_, skew_));
-    const float base = at(position_for_value());
-    const auto color = resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
-    canvas.set_stroke_color(color);
+    const float p = position_for_value();
+    const float base = vert ? (1.0f - p) * length : p * length;
+    const auto thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
+    // The tick is the resolved thumb token at 85 % alpha.
+    const auto tick = canvas::Color::rgba(thumb.r, thumb.g, thumb.b, 0.85f); // token-lint:allow
+    canvas.set_stroke_color(tick);
     canvas.set_line_cap(canvas::LineCap::round);
-    canvas.set_line_width(2.5f);
-    if (std::abs(played - base) > 0.5f) {
-        if (vert)
-            canvas.stroke_line(cross, base, cross, played);
-        else
-            canvas.stroke_line(base, cross, played, cross);
-    }
-    const float half = std::min(cross * 0.8f, 8.0f);
+    canvas.set_line_width(1.5f);
+    const float half = std::min(cross * 0.8f, 6.0f);
     if (vert)
-        canvas.stroke_line(cross - half, played, cross + half, played);
+        canvas.stroke_line(cross - half, base, cross + half, base);
     else
-        canvas.stroke_line(played, cross - half, played, cross + half);
+        canvas.stroke_line(base, cross - half, base, cross + half);
 }
 
 void Fader::paint(canvas::Canvas& canvas) {
@@ -958,7 +963,14 @@ void Fader::paint(canvas::Canvas& canvas) {
     bool vert = orientation_ == Orientation::vertical;
     float track_length = vert ? b.height : b.width;
     float track_width = vert ? b.width : b.height;
-    const float pos = position_for_value();
+    // One thumb: it sits at the value PLAYING (the modulated value while a
+    // modulator moves this fader, else the base) in the modulation colour;
+    // the base is a quiet tick (paint_modulated_marker).
+    const float shown = has_modulated_ ? modulated_ : value_;
+    const float pos = has_modulated_ ? (skew_ == 1.0f ? modulated_ : std::pow(modulated_, skew_))
+                                     : position_for_value();
+    const auto modulation_color =
+        resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
 
     // A static captured travel band already includes the authored track,
     // ticks, border and other non-value-dependent chrome. Its body plus the
@@ -968,7 +980,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         // The captured body was painted above; the moving indicator is the
         // final compositing layer below.
     } else if (sprite_strip_ && sprite_strip_->loaded()) {
-        int frame = sprite_strip_->frame_for_value(value_);
+        int frame = sprite_strip_->frame_for_value(shown);
         int fx, fy;
         sprite_strip_->frame_offset(frame, fx, fy);
         size_t frame_bytes = static_cast<size_t>(sprite_strip_->frame_width() *
@@ -988,10 +1000,9 @@ void Fader::paint(canvas::Canvas& canvas) {
             canvas.restore();
         }
     } else if (!widget_schema_.empty()) {
-        render_schema(canvas, widget_schema_, b.width, b.height, value_, *this);
-    } else if (has_custom_shader() &&
-               draw_custom_shader_body(canvas, *this, *this, b.width, b.height,
-                                       value_, shader_time)) {
+        render_schema(canvas, widget_schema_, b.width, b.height, shown, *this);
+    } else if (has_custom_shader() && draw_custom_shader_body(canvas, *this, *this, b.width,
+                                                              b.height, shown, shader_time)) {
         // Shader painted the body; a draw-time failure falls through below.
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal: thin track only, no fill, no thumb (matches design tools) ──
@@ -1056,9 +1067,10 @@ void Fader::paint(canvas::Canvas& canvas) {
         }
 
         // Fill (value portion)
-        auto fill_color = has_skin_fill_
-            ? fill_color_
-            : resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
+        auto fill_color = has_modulated_ ? modulation_color
+                          : has_skin_fill_
+                              ? fill_color_
+                              : resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         canvas.set_fill_color({fill_color.r, fill_color.g, fill_color.b, fill_color.a});
 
         if (vert) {
@@ -1075,13 +1087,13 @@ void Fader::paint(canvas::Canvas& canvas) {
         // replaces only this slab; track and fill above remain native and
         // value-driven, so the result is still a working fader rather than a
         // static screenshot.
-        auto thumb_color = has_skin_thumb_
-            ? thumb_color_
-            : resolve_color(
-                  "control.thumb",
-                  has_skin_thumb_fallback_
-                      ? thumb_fallback_color_
-                      : canvas::Color::rgba8(220, 220, 220));
+        auto thumb_color =
+            has_modulated_ ? modulation_color
+            : has_skin_thumb_
+                ? thumb_color_
+                : resolve_color("control.thumb", has_skin_thumb_fallback_
+                                                     ? thumb_fallback_color_
+                                                     : canvas::Color::rgba8(220, 220, 220));
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
 
         if (!has_captured_indicator_art() &&
@@ -1336,6 +1348,15 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
     auto thumb_color = active && has_accent_color_
         ? canvas::Color::rgba8(248, 248, 248) // token-lint:allow -- Chromium accented-range keyline material
         : theme_thumb;
+    // One thumb: while modulated, the fill and thumb sit at the value
+    // playing in the modulation colour; the base is a tick (below).
+    auto keyline_color = thumb_color;
+    if (has_modulated_) {
+        const auto modulation =
+            resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
+        fill_color = modulation;
+        thumb_color = modulation;
+    }
 
     // Track thickness — typical HTML range visuals sit in 4..6px.
     float track_thick = std::min(track_thickness_,
@@ -1344,9 +1365,8 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
 
     // Normalized position along the track, taking the (possibly-collapsed)
     // [min,max] range and the skew curve into account.
-    float lo = min_;
-    float hi = std::max(min_, max_);
-    float t = value_to_position_();
+    const float base_t = value_to_position_();
+    float t = has_modulated_ ? (skew_ == 1.0f ? modulated_ : std::pow(modulated_, skew_)) : base_t;
 
     // Background track.
     canvas.set_fill_color(track_color);
@@ -1378,7 +1398,7 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
     // border), so draw it only for an enabled accented range. A disabled
     // range remains the neutral unoutlined home-screen control.
     if (active && has_accent_color_) {
-        canvas.set_stroke_color(thumb_color);
+        canvas.set_stroke_color(keyline_color);
         canvas.set_line_width(1.0f);
         if (horiz) {
             float ty = (b.height - track_thick) * 0.5f;
@@ -1418,6 +1438,24 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
                                  hy - thumb_major * 0.5f,
                                  thumb_minor, thumb_major,
                                  thumb_minor * 0.5f);
+    }
+
+    // The base a modulator moves this slider around: a quiet tick across the
+    // track, on top of the thumb so it stays visible under it.
+    if (has_modulated_) {
+        canvas.set_stroke_color(theme_thumb);
+        canvas.set_line_cap(canvas::LineCap::round);
+        canvas.set_line_width(1.5f);
+        const float half = track_thick * 0.5f + 3.0f;
+        if (horiz) {
+            const float usable = std::max(0.0f, b.width - thumb_major);
+            const float bx = thumb_major * 0.5f + base_t * usable;
+            canvas.stroke_line(bx, b.height * 0.5f - half, bx, b.height * 0.5f + half);
+        } else {
+            const float usable = std::max(0.0f, b.height - thumb_major);
+            const float by = thumb_major * 0.5f + (1.0f - base_t) * usable;
+            canvas.stroke_line(b.width * 0.5f - half, by, b.width * 0.5f + half, by);
+        }
     }
 }
 

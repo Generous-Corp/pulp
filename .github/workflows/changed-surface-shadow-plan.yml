@@ -44,6 +44,10 @@ jobs:
       - name: Install pinned Shipyard
         continue-on-error: true
         shell: bash
+        env:
+          # Authenticates the installer's release lookup; anonymous calls from
+          # shared runner IPs hit the 60/hour API limit (HTTP 403).
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           ./tools/install-shipyard.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"

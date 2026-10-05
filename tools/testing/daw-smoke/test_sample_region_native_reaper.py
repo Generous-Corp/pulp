@@ -5,6 +5,20 @@ class DriverShape(unittest.TestCase):
  def test_missing_bundles_do_not_pass(self):
   with tempfile.TemporaryDirectory() as d: self.assertNotEqual(m.main(['--out',d]),0)
  def test_lua_is_checked_in(self): self.assertTrue(m.LUA.is_file())
+ def test_serialized_coefficient_guard_accepts_expected_value(self):
+  with tempfile.NamedTemporaryFile('w', suffix='.rpp') as f:
+   # PULP header at offset 0, version/count at offsets 4/8, id/value at 12.
+   import base64, struct
+   blob=b'PULP'+struct.pack('<IIIf', 1, 1, 2901, 0.5)
+   f.write('<VST "x"\n"'+base64.b64encode(blob).decode()+'"\n>\n'); f.flush()
+   self.assertEqual(m.serialized_coefficient_guard(f.name)[0], True)
+ def test_serialized_coefficient_guard_rejects_stale_value(self):
+  with tempfile.NamedTemporaryFile('w', suffix='.rpp') as f:
+   import base64, struct
+   blob=b'PULP'+struct.pack('<IIIf', 1, 1, 2901, -0.1570800096)
+   f.write('<VST "x"\n"'+base64.b64encode(blob).decode()+'"\n>\n'); f.flush()
+   ok, value, reason=m.serialized_coefficient_guard(f.name)
+   self.assertFalse(ok); self.assertAlmostEqual(value, -0.1570800096, places=6); self.assertIn('expected', reason)
  def test_loaded_au_chunk_decodes_format_identity(self):
   chunk='<AU "AU: Sample Region Allpass (Pulp)" "Pulp: Sample Region Allpass" "" 1635083896 1399996784 1349872752\\n'
   identity=m.parse_loaded_fx_chunk('au',chunk)

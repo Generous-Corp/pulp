@@ -757,3 +757,39 @@ TEST_CASE("AutoUi sync ignores unmatched widget identifiers",
 
     REQUIRE_THAT(orphan_ptr->value(), WithinAbs(0.25f, 0.001f));
 }
+
+namespace {
+Knob* auto_ui_knob(View& view, std::string_view name) {
+    if (auto* k = dynamic_cast<Knob*>(&view); k && view.id() == name)
+        return k;
+    for (std::size_t i = 0; i < view.child_count(); ++i)
+        if (auto* k = auto_ui_knob(*view.child_at(i), name))
+            return k;
+    return nullptr;
+}
+} // namespace
+
+TEST_CASE("AutoUi knobs follow automation and show host modulation with no plugin code",
+          "[view][auto-ui][parameter-binding][modulation]") {
+    StateStore store;
+    store.add_parameter({.id = 7, .name = "Cutoff", .unit = "", .range = {0.0f, 100.0f, 50.0f}});
+    auto root = AutoUi::build(store);
+    auto* knob = auto_ui_knob(*root, "Cutoff");
+    REQUIRE(knob != nullptr);
+    std::vector<ParamID> begins;
+    store.set_gesture_callbacks([&](ParamID id) { begins.push_back(id); }, [](ParamID) {});
+
+    // Automation playback turns the knob (the editor's UI tick pumps).
+    store.set_value(7, 80.0f);
+    store.pump_listeners();
+    REQUIRE_THAT(knob->value(), WithinAbs(0.8f, 1e-5f));
+
+    // A host's CLAP modulation is drawn as the played value; nothing writes.
+    REQUIRE_FALSE(knob->has_modulated_value());
+    store.set_mod_offset(7, -40.0f);
+    store.pump_listeners();
+    REQUIRE(knob->has_modulated_value());
+    REQUIRE_THAT(knob->modulated_display_value(), WithinAbs(0.4f, 1e-5f));
+    REQUIRE(store.get_value(7) == 80.0f);
+    REQUIRE(begins.empty());
+}

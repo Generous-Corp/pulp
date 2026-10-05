@@ -263,6 +263,28 @@ The pull is **silent** — it writes the element directly and does not re-emit
 Embedding Pulp views in your own host? Call `sync_from_host_params()` from your own
 UI tick to get the same behavior.
 
+### Bind once: automation, playback and modulation
+
+`bind_parameter(widget, store, id)` (C++), `bindWidgetToParam(id, name)` (a
+scripted editor) and AutoUi give every bound control, with no other code:
+
+- **Automation recording** -- a drag is one host gesture; a toggle, checkbox,
+  button, combo or stepper change is one complete gesture.
+- **Playback animation** -- automation and preset loads move the control on the
+  UI tick, silently (no gesture, no write back).
+- **Host modulation** -- a CLAP host's parameter modulation moves a continuous
+  control's one indicator (Knob, Fader, RangeSlider, each XYPad axis) to the
+  value playing, in the `knob.modulation` colour, with the base as a quiet
+  tick. Discrete controls show their base.
+
+A plugin's **own** modulation is opt-in: publish what an internal modulator
+plays with `StateStore::set_display_modulation(id, plain)` (real-time safe,
+display only, never written to the host) and every bound control shows it. A
+scripted UI that draws its own controls subscribes with
+`onParamChanged(name, p => ...)` and draws from `p.playing` (normalized, `null`
+when nothing modulates) and `p.normalized` (the base). Modulation menus,
+routing and override prompts stay the plugin's own UI.
+
 > ### ⚠️ Pick exactly ONE path — wiring both double-writes
 >
 > There are two ways a control's value can reach the host, and they are **not**
