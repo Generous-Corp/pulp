@@ -46,30 +46,37 @@ bool custom_type_matches_node_shape(const CustomNodeType& type, const GraphNode&
 std::vector<NodeId> processing_order_for(const std::vector<GraphNode>& nodes,
                                          const std::vector<Connection>& connections) {
     std::unordered_map<NodeId, int> in_degree;
-    for (const auto& n : nodes)
+    std::unordered_map<NodeId, std::size_t> authoring_index;
+    authoring_index.reserve(nodes.size());
+    for (std::size_t index = 0; index < nodes.size(); ++index) {
+        const auto& n = nodes[index];
         in_degree[n.id] = 0;
+        authoring_index[n.id] = index;
+    }
     for (const auto& c : connections) {
         if (c.feedback)
             continue;
         in_degree[c.dest_node]++;
     }
     // Keep the compiled runtime plan independent of unordered-map iteration
-    // and edge discovery order. NodeId is the compact execution identity and
-    // therefore the stable ready-queue key for equivalent authoring graphs.
-    std::priority_queue<NodeId, std::vector<NodeId>, std::greater<NodeId>> queue;
+    // and edge discovery order. Authoring position is the semantic tie-break
+    // for independent nodes; NodeId is an identity token and may outlive a
+    // node's position after removals or future ID allocation changes.
+    using ReadyNode = std::pair<std::size_t, NodeId>;
+    std::priority_queue<ReadyNode, std::vector<ReadyNode>, std::greater<ReadyNode>> queue;
     for (const auto& [id, deg] : in_degree)
         if (deg == 0)
-            queue.push(id);
+            queue.push({authoring_index.at(id), id});
     std::vector<NodeId> order;
     while (!queue.empty()) {
-        auto current = queue.top();
+        const auto current = queue.top().second;
         queue.pop();
         order.push_back(current);
         for (const auto& c : connections) {
             if (c.feedback)
                 continue;
             if (c.source_node == current && --in_degree[c.dest_node] == 0)
-                queue.push(c.dest_node);
+                queue.push({authoring_index.at(c.dest_node), c.dest_node});
         }
     }
     return order;
