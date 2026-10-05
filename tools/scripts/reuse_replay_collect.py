@@ -147,6 +147,7 @@ def parse_job_log(lines: Iterable[str]) -> dict:
 API = "https://api.github.com"
 REPOSITORY = "Generous-Corp/pulp"
 WORKFLOW = "build.yml"
+RUN_LISTING_SETTLE_DAYS = 2
 QUEUE_BRANCH_RE = re.compile(r"^gh-readonly-queue/[^/]+/pr-(?P<pr>\d+)-(?P<base>[0-9a-f]{40})$")
 REUSE_RECORD_ARTIFACT = "reuse-record-macos"
 # The first merge-group and PR-head jobs that write a reuse record (the
@@ -274,6 +275,11 @@ def record_platform(job: dict | None) -> str:
     return "unknown"
 
 
+class ListingShort(RuntimeError):
+    """A run listing came back shorter than the API's own total_count for
+    the same query, after one retry."""
+
+
 class Collector:
     def __init__(self, gh: GitHub, out: Path, repo: Path, workers: int) -> None:
         self.gh = gh
@@ -303,22 +309,47 @@ class Collector:
         return value
 
     def list_runs(self, event: str, since: dt.datetime, until: dt.datetime) -> list[dict]:
-        today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+        # A day's listing is cached only once it has settled: GitHub's
+        # created-date filter has returned an empty page for a busy day a few
+        # hours after it ended, and a cached empty day silently drops every
+        # pair that needed one of its runs. An empty listing is never cached.
+        settled = (dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=RUN_LISTING_SETTLE_DAYS)).isoformat()
         runs: list[dict] = []
         for day in _days(since, until):
             def fetch(day=day) -> list[dict]:
-                rows, page = [], 1
+                rows, page, total = [], 1, None
                 while True:
                     doc = self.gh.json(f"repos/{self.gh.repository}/actions/workflows/{WORKFLOW}/runs"
                                        f"?event={event}&created={day}&per_page=100&page={page}")
+                    if total is None:
+                        total = doc.get("total_count")
                     batch = doc.get("workflow_runs", [])
                     rows += [{k: r.get(k) for k in ("id", "head_sha", "head_branch", "created_at",
                                                     "updated_at", "status", "conclusion", "event",
                                                     "run_attempt", "path")} for r in batch]
                     if len(batch) < 100 or page >= 10:
-                        return rows
+                        break
                     page += 1
-            rows = self._cached(f"runs/{event}-{day}.json.gz", fetch, keep=day < today)
+                # A listing shorter than the count the API states for the same
+                # query silently drops every pair needing one of the missing
+                # runs. The first page's count is the floor: runs created
+                # while the pages are read only add to it.
+                listed = len({r["id"] for r in rows})
+                if not isinstance(total, int) or listed < total:
+                    raise ListingShort(f"{event} runs created {day}: listed {listed} of total_count {total} "
+                                       f"after page {page}" + (" (the 10-page cap)" if page >= 10 else ""))
+                return rows
+            name = f"runs/{event}-{day}.json.gz"
+            try:
+                rows = self._cached(name, fetch, keep=day <= settled)
+            except ListingShort as err:
+                print(f"collect: {err}; asking again", file=sys.stderr)
+                rows = self._cached(name, fetch, keep=day <= settled)
+            if not rows:
+                # Never let an empty listing stand in for the day: drop it
+                # and ask again, uncached.
+                (self.cache / name).unlink(missing_ok=True)
+                rows = self._cached(name, fetch, keep=False)
             runs += [r for r in rows if since <= _parse_time(r["created_at"]) <= until]
         return runs
 
@@ -493,13 +524,13 @@ class Collector:
             declared = None
             if bound_known and model is not None and isinstance(model.get("commit_bound_declared"), list):
                 declared = sorted(bound_exes | {a.removeprefix("<build>/") for t in (model.get("targets") or {}).values()
-                                                if t.get("commit_bound") and t.get("type") == "EXECUTABLE"
+                                                if t.get("commit_bound") and t.get("type") in ("EXECUTABLE", "MODULE_LIBRARY")
                                                 for a in t.get("artifacts") or []})
             return {"targets": targets, "link": link, "executables": tests, "binaries": binaries,
                     "digest_schema": None if model is None else model.get("schema"),
                     "generated_headers": None if model is None else model.get("generated_headers"),
                     "declared_commit_bound": declared, "deps": recorded_deps(deps_doc)}
-        return self._cached(f"record-v7/{run_id}.json.gz", fetch)
+        return self._cached(f"record-v8/{run_id}.json.gz", fetch)
 
     def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
         """The per-target codemodel digests a run recorded, or None."""

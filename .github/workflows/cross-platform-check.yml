@@ -53,7 +53,7 @@ jobs:
     name: Linux build + test
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       PULP_BUILD_DIR: build-linux
     steps:
@@ -113,7 +113,12 @@ jobs:
 
       - name: Build
         shell: bash
-        run: cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-linux.log
+        # A literal --parallel 4, as build.yml's hosted Windows leg uses: these
+        # are ephemeral 4-core GitHub-hosted runners that share with nobody,
+        # so the host build governor has nothing to divide. Without it the
+        # default generators build serially (Makefiles `make -j1`, Visual
+        # Studio MSBuild one project at a time) and every leg hit its timeout.
+        run: cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4 2>&1 | tee build-linux.log
 
       - name: Test
         shell: bash
@@ -193,7 +198,12 @@ jobs:
 
       - name: Build
         shell: bash
-        run: cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-linux.log
+        # A literal --parallel 4, as build.yml's hosted Windows leg uses: these
+        # are ephemeral 4-core GitHub-hosted runners that share with nobody,
+        # so the host build governor has nothing to divide. Without it the
+        # default generators build serially (Makefiles `make -j1`, Visual
+        # Studio MSBuild one project at a time) and every leg hit its timeout.
+        run: cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4 2>&1 | tee build-linux.log
 
       - name: Test
         shell: bash
@@ -228,7 +238,7 @@ jobs:
     name: Windows build + test
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       PULP_BUILD_DIR: build-windows
     steps:
@@ -274,9 +284,21 @@ jobs:
 
       - name: Build
         shell: bash
-        run: cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-windows.log
+        # A literal --parallel 4, as build.yml's hosted Windows leg uses: these
+        # are ephemeral 4-core GitHub-hosted runners that share with nobody,
+        # so the host build governor has nothing to divide. Without it the
+        # default generators build serially (Makefiles `make -j1`, Visual
+        # Studio MSBuild one project at a time) and every leg hit its timeout.
+        id: build
+        run: cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4 2>&1 | tee build-windows.log
 
       - name: Test (UTF-8 code page wrapped)
+        # Runs after a build that finished with errors, not only after a clean
+        # one. MSBuild keeps building the other projects when one fails, so a
+        # single broken test target used to skip every Windows test; now the
+        # targets that built are tested and the broken ones report "Not Run".
+        # The job stays red either way, because the Build step failed.
+        if: ${{ !cancelled() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
         # Windows needs a UTF-8 console code page so ctest's child
         # processes receive filter args (test names with em-dashes)
         # without CP-1252 mangling — mirrors build.yml's Windows test

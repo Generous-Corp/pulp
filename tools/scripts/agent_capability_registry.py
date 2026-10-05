@@ -87,6 +87,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
+    "pulp/signal/tempo_delay_wrapper.hpp": "Pulp::signal",
     "pulp/signal/freeze_hold.hpp": "Pulp::signal",
     "pulp/signal/headphone_crossfeed.hpp": "Pulp::signal",
     "pulp/signal/lfsr.hpp": "Pulp::signal",

@@ -56,6 +56,13 @@ SELECT s.id AS slice_id, s.ts, s.name, s.dur, t.upid,
   EXTRACT_ARG(s.arg_set_id, 'debug.cpu_clock') AS cpu_clock,
   EXTRACT_ARG(s.arg_set_id, 'debug.event_time') AS event_time,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.callback_ingress_ns') AS INT), -1) AS callback_ingress_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.callback_start_ns') AS INT), -1) AS callback_start_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.callback_end_ns') AS INT), -1) AS callback_end_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.result_visible_ns') AS INT), -1) AS result_visible_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.delivery_decision_ns') AS INT), -1) AS delivery_decision_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.admission_timestamp_ns') AS INT), -1) AS admission_timestamp_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.terminal_ns') AS INT), -1) AS terminal_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.retirement_ns') AS INT), -1) AS retirement_ns,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.ingress_to_worker_ns') AS INT), -1) AS ingress_to_worker_ns,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.worker_to_observed_ns') AS INT), -1) AS worker_to_observed_ns,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.admission_ns') AS INT), -1) AS admission_ns,
@@ -97,6 +104,19 @@ GROUP BY upid, engine_id, generation, sequence, gpu_terminal, outcome;
 
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_audio_deliveries AS
 SELECT * FROM pulp_gpu_audio_events WHERE name = 'gpu.audio.delivery';
+
+-- Lossless lifecycle evidence. Keep one row per emitted event, including
+-- duplicate identities, so integrity views can report rather than collapse
+-- producer history. Use pulp_gpu_audio_blocks for a joined convenience view.
+CREATE OR REPLACE PERFETTO VIEW pulp_gpu_audio_lifecycle_records AS
+SELECT upid, engine_id, generation, sequence, name AS lifecycle_event,
+       slice_id, ts, dur, gpu_terminal, delivery, outcome, reason,
+       gpu_reason, delivery_reason, admission_timestamp_ns, admission_ns,
+       terminal_ns, delivery_decision_ns,
+       retirement_ns, callback_start_ns, callback_end_ns, result_visible_ns
+FROM pulp_gpu_audio_events
+WHERE name IN ('gpu.audio.admission', 'gpu.audio.terminal',
+               'gpu.audio.eligible', 'gpu.audio.delivery', 'gpu.audio.recovery');
 
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_audio_recoveries AS
 SELECT * FROM pulp_gpu_audio_events WHERE name = 'gpu.audio.recovery';

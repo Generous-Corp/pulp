@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-spawn-scan-loader-coverage-watch",
+  "created_at": "2026-10-05T08:32:43Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Test-manifest only: test/cmake/design_import_native_codegen_tests.cmake, design_import_runtime_bridge_tests.cmake, design_import_view_widget_tests.cmake and cli_import_tool_tests.cmake replace bare pulp_test_spawns(<test> NONE) with NONE REASON \"...\", add reasoned NONE declarations for tests the extended LOAD_APIS scan now flags, and give pulp-test-cli-project-command a real spawn edge to pulp-mcp. No test source, importer, Chromium capture, renderer, DesignIR, or packaging code changes; the declarations only feed the changed-surface spawn classification, so no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/test_pulp_test_data_cmake.py",
+    "python3 tools/scripts/test_script_test_inputs.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

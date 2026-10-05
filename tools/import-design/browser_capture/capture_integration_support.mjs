@@ -5,7 +5,9 @@
 // cold Chrome launch or a bounded settle, not on CPU.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { access } from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 import { inflateSync } from "node:zlib";
 
@@ -114,6 +116,42 @@ export function rgbaPixel(png, x, y) {
   return channels;
 }
 
+// The browser `pulp tool install chrome-for-testing` installed, resolved the
+// way the C++ capture backend resolves it (browser_discovery.cpp): the
+// executable named by <PULP_HOME or ~/.pulp>/tools/chrome-for-testing/
+// current.json, which must sit under <version>/<platform>/ inside that root.
+export function managedBrowser(environment = process.env) {
+  const home = environment.PULP_HOME
+    || (environment.HOME ? path.join(environment.HOME, ".pulp") : "");
+  if (!home) return "";
+  const root = path.join(home, "tools", "chrome-for-testing");
+  let current;
+  try {
+    current = JSON.parse(readFileSync(path.join(root, "current.json"), "utf8"));
+  } catch {
+    return "";
+  }
+  const { schema, version, platform, executable } = current ?? {};
+  if (schema !== 1 || typeof version !== "string" || typeof platform !== "string"
+      || typeof executable !== "string" || !executable || path.isAbsolute(executable)) {
+    return "";
+  }
+  const parts = path.normalize(executable).split(path.sep);
+  if (parts.length < 3 || parts[0] !== version || parts[1] !== platform
+      || parts.includes("..")) {
+    return "";
+  }
+  const candidate = path.join(root, executable);
+  try {
+    if (!statSync(candidate).isFile()) return "";
+    const realRoot = realpathSync(root);
+    if (!realpathSync(candidate).startsWith(realRoot + path.sep)) return "";
+  } catch {
+    return "";
+  }
+  return candidate;
+}
+
 export function browserCandidates(environment = process.env) {
   // Match the product and documented CI selection contract. The required
   // macOS gate installs a pinned Chrome-for-Testing build here. An explicit
@@ -130,6 +168,9 @@ export function browserCandidates(environment = process.env) {
     // Retain the test-only legacy override for local callers that already use
     // it when the canonical product setting is absent.
     environment.PULP_BROWSER,
+    // The pinned build a developer installed, before any mutable system
+    // browser, so a local run measures the same Chrome as the product.
+    managedBrowser(environment),
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/usr/bin/google-chrome",

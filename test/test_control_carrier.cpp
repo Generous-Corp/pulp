@@ -17,6 +17,8 @@
 #include <membership.h>
 #include <sys/acl.h>
 #endif
+#else
+#include <process.h>
 #endif
 
 using namespace pulp::inspect;

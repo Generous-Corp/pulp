@@ -314,7 +314,11 @@ if(PULP_HAS_CLAP)
     # gate reads — avoids the split-TU problem that produced "96% local
     # / 62% CI" reports.
     add_executable(pulp-test-clap-midi-events test_clap_midi_events.cpp)
-    target_sources(pulp-test-clap-midi-events PRIVATE $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
+    # rt_intercept_test_support.cpp defines RtAllocationProbe on UNIX; elsewhere
+    # the plain probe provides it, as the other host tests that use it do.
+    target_sources(pulp-test-clap-midi-events PRIVATE
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
     target_link_libraries(pulp-test-clap-midi-events PRIVATE pulp::format clap Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
     target_compile_definitions(pulp-test-clap-midi-events PRIVATE PULP_CLAP_GUI=1 $<$<BOOL:${UNIX}>:PULP_CLAP_PROCESS_RT_TRAP_TESTS=1>)
     catch_discover_tests(pulp-test-clap-midi-events)
@@ -726,7 +730,7 @@ unset(_pulp_core_only_links)
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-nsis-installer NONE)           # makensis
+pulp_test_spawns(pulp-test-nsis-installer NONE REASON "runs the system makensis, nothing the tree builds")
 
 # The MCP server tests read the root CMakeLists.txt (pulp_compat), the server's
 # own source (a tool-list contract), the generated timeline tool schema, the

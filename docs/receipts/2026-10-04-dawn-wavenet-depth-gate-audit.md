@@ -12,6 +12,11 @@ transaction or any GPU-NAM source.
 The audit was rebased onto protected `origin/main` at
 [`df6f3076f909fee587d32a01cff3477617591785`](https://github.com/Generous-Corp/pulp/commit/df6f3076f909fee587d32a01cff3477617591785).
 
+> **Historical audit snapshot.** This audit records the Dawn depth gate at the
+> protected base above; it is not a current-head status receipt. For current
+> coordination and acceptance state, see the [neural audio program status](../status/neural-audio-program-status-20261004.md)
+> and the [neural real-time competitive proof plan](../reports/neural-competitive-proof-plan-20261003.md).
+
 ## Current production depth
 
 `GpuWaveNetRealtimeNode::Impl::valid_config()` requires
