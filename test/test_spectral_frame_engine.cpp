@@ -6,15 +6,16 @@
 // latency, no allocation after prepare(), reset determinism, and the
 // variable-synthesis-hop split API used by time-scale processors.
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <pulp/signal/spectral_frame_engine.hpp>
-#include <atomic>
 #include <cmath>
 #include <complex>
 #include <cstdlib>
 #include <limits>
 #include <new>
+#include <pulp/signal/rt_work_counter.hpp>
+#include <pulp/signal/spectral_frame_engine.hpp>
 #include <vector>
 
 using namespace pulp::signal;
@@ -465,4 +466,92 @@ TEST_CASE("SpectralFrameEngine split API stretches DC cleanly at a larger synthe
     // Hann^2 at this hop is not COLA by itself.
     REQUIRE_THAT(lo, WithinAbs(1.0f, 1e-3f));
     REQUIRE_THAT(hi, WithinAbs(1.0f, 1e-3f));
+}
+
+// ── process() resynthesizes inside the hop of slack ────────────────────────
+//
+// A frame completed at input sample F is first read at output F + hop, so
+// process() defers each channel's inverse transform into that hop instead of
+// doing all of them in the callback that completed the frame. These pin that
+// the output is exactly the immediate resynthesis, and that no callback does
+// the whole frame's transform work.
+
+TEST_CASE("SpectralFrameEngine process() equals immediate resynthesis exactly",
+          "[signal][spectral-frame-engine]") {
+    // Deferred (the default) against defer_synthesis = false, the frame's
+    // whole resynthesis in the callback that completed it: identical samples
+    // for any channel count and host block size, with a frame callback that
+    // edits the spectrum. Control: the edit changes the output.
+    const auto render = [](int channels, int block, bool defer, float gain) {
+        SpectralFrameEngineConfig config;
+        config.fft_size = 2048;
+        config.analysis_hop = 512;
+        config.channels = channels;
+        config.max_block = 1024;
+        config.defer_synthesis = defer;
+        SpectralFrameEngine engine;
+        engine.prepare(config);
+        const int total = 24000;
+        std::vector<std::vector<float>> in(static_cast<size_t>(channels),
+                                           std::vector<float>(total)),
+            out = in;
+        for (int ch = 0; ch < channels; ++ch)
+            for (int i = 0; i < total; ++i)
+                in[size_t(ch)][size_t(i)] = static_cast<float>(
+                    0.4 * std::sin(0.013 * i * (ch + 1)) + 0.2 * std::sin(0.31 * i + ch));
+        for (int pos = 0; pos < total; pos += block) {
+            const int n = std::min(block, total - pos);
+            std::vector<const float*> bi(static_cast<size_t>(channels));
+            std::vector<float*> bo(static_cast<size_t>(channels));
+            for (int ch = 0; ch < channels; ++ch) {
+                bi[size_t(ch)] = in[size_t(ch)].data() + pos;
+                bo[size_t(ch)] = out[size_t(ch)].data() + pos;
+            }
+            engine.process(bi.data(), bo.data(), n, [&](std::complex<float>* const* frames, int) {
+                for (int ch = 0; ch < channels; ++ch)
+                    for (int k = 3; k < 7; ++k)
+                        frames[ch][k] *= gain;
+            });
+        }
+        return out;
+    };
+    for (int channels : {1, 2, 3}) {
+        for (int block : {1, 7, 32, 512, 1024}) {
+            INFO("channels " << channels << ", block " << block);
+            REQUIRE(render(channels, block, true, 0.5f) == render(channels, block, false, 0.5f));
+        }
+        REQUIRE(render(channels, 32, true, 0.5f) != render(channels, 32, true, 0.25f));
+    }
+}
+
+TEST_CASE("SpectralFrameEngine process() spreads a frame's inverse transforms over the hop",
+          "[signal][spectral-frame-engine][rt-cost]") {
+    // At a 32-sample buffer the callback that completes a frame runs its two
+    // forward transforms; each inverse runs alone later in the hop. Control:
+    // defer_synthesis = false puts all four in that one callback.
+    REQUIRE(pulp::signal::rt::kWorkCountersEnabled);
+    const auto worst_ffts = [](bool defer) {
+        SpectralFrameEngineConfig config;
+        config.fft_size = 8192;
+        config.analysis_hop = 2048;
+        config.channels = 2;
+        config.max_block = 32;
+        config.defer_synthesis = defer;
+        SpectralFrameEngine engine;
+        engine.prepare(config);
+        std::vector<float> l(32), r(32), ol(32), orr(32);
+        const float* in[2] = {l.data(), r.data()};
+        float* out[2] = {ol.data(), orr.data()};
+        std::uint64_t worst = 0;
+        for (int b = 0; b < 2048; ++b) {
+            for (int i = 0; i < 32; ++i)
+                l[size_t(i)] = r[size_t(i)] = std::sin(0.01f * float(b * 32 + i));
+            pulp::signal::rt::RtWorkCounter counter;
+            engine.process(in, out, 32, [](std::complex<float>* const*, int) {});
+            worst = std::max(worst, counter.delta().fft);
+        }
+        return worst;
+    };
+    CHECK(worst_ffts(false) == 4);
+    CHECK(worst_ffts(true) == 2);
 }
