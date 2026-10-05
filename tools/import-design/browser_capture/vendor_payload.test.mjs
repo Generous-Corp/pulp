@@ -36,12 +36,21 @@ test("rejects marker collisions that are not trusted runtime payloads", () => {
 });
 
 test("pins the supported vendor identities to exact SHA-256 digests", () => {
+  const reactSha =
+    "28348fef6cb0ed8b2ceeb22deaf824428fd13875d84c73d38f77dd216fc24e7f";
+  const reactDomSha =
+    "f9044a5e9c39db8bb1a204dff924e526ec0a621e695bb69de1035811be8709e4";
+  const babelSha =
+    "2623a9e22809915ce789b4461154e277ddce520d5a4320c14d44332a5d0dcea0";
+  assert.equal(SUPPORTED_VENDOR_PAYLOAD_SHA256.react, reactSha);
+  assert.equal(SUPPORTED_VENDOR_PAYLOAD_SHA256["react-dom"], reactDomSha);
+  assert.equal(SUPPORTED_VENDOR_PAYLOAD_SHA256.babel, babelSha);
   assert.equal(trustedVendorPayloadDigest(
-    "react", SUPPORTED_VENDOR_PAYLOAD_SHA256.react), true);
+    "react", reactSha), true);
   assert.equal(trustedVendorPayloadDigest(
-    "react-dom", SUPPORTED_VENDOR_PAYLOAD_SHA256["react-dom"]), true);
+    "react-dom", reactDomSha), true);
   assert.equal(trustedVendorPayloadDigest(
-    "babel", SUPPORTED_VENDOR_PAYLOAD_SHA256.babel), true);
+    "babel", babelSha), true);
   assert.equal(trustedVendorPayloadDigest(
     "react", "0".repeat(64)), false);
   assert.equal(trustedVendorPayloadDigest(
