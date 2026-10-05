@@ -166,6 +166,34 @@ TEST_CASE("content-hash alternate namespace preserves source type",
             *root.alternate_frames[1].stable_anchor_id);
 }
 
+TEST_CASE("content-hash alternate descendants avoid ordinary collisions and retain state identity",
+          "[view][import][anchors][alternate]") {
+    IRNode root = make_node("frame");
+    // Match the alternate child at the same hash depth with an ordinary
+    // descendant. Before descendant namespace propagation both hash inputs
+    // were {button, empty role, Play, depth=2, sigIndex=0}.
+    root.children.push_back(make_node("group", "ordinary"));
+    root.children[0].children.push_back(make_node("button", "Play"));
+
+    IRNode first = make_node("frame", "state one");
+    first.children.push_back(make_node("button", "Play"));
+    IRNode second = make_node("frame", "state two");
+    second.children.push_back(make_node("button", "Play"));
+    root.alternate_frames.push_back(std::move(first));
+    root.alternate_frames.push_back(std::move(second));
+
+    assign_anchors(root, AnchorStrategy::content_hash);
+
+    const auto& ordinary = root.children[0].children[0].stable_anchor_id;
+    const auto& first_state = root.alternate_frames[0].children[0].stable_anchor_id;
+    const auto& second_state = root.alternate_frames[1].children[0].stable_anchor_id;
+    REQUIRE(ordinary.has_value());
+    REQUIRE(first_state.has_value());
+    REQUIRE(second_state.has_value());
+    CHECK(*ordinary != *first_state);
+    CHECK(*first_state == *second_state);
+}
+
 TEST_CASE("nested alternate frames receive deterministic path anchors",
           "[view][import][anchors][alternate]") {
     IRNode root = make_node("frame");

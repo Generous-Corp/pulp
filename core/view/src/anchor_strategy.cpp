@@ -195,7 +195,7 @@ std::string compute_anchor_id_with_type(const IRNode& node, std::string_view par
 
 void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child_index,
           std::size_t depth, AnchorStrategy strategy, std::string_view adapter_name, IRNode* parent,
-          std::size_t sig_index, bool alternate_axis = false) {
+          std::size_t sig_index, bool alternate_axis = false, bool inside_alternate = false) {
     // For path strategy: count earlier siblings with the same tag.
     std::size_t sibling_tag_index = 0;
     if (parent != nullptr && strategy == AnchorStrategy::path) {
@@ -207,18 +207,23 @@ void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child
     }
 
     // Alternate frames are a second, ordered identity axis on the owning node,
-    // rather than descendants in the rendered tree. Give their roots a
-    // reserved namespace so a captured state cannot collide with an ordinary
-    // child that happens to have the same type/path or content. Adapter IDs
-    // remain source-authored and therefore keep the same identity across
-    // states; only path and content-hash fallbacks need the marker.
+    // rather than descendants in the rendered tree. Give their roots and
+    // content-hash descendants a reserved namespace so a captured state cannot
+    // collide with an ordinary child that happens to have the same content.
+    // The descendant marker intentionally omits the alternate index: equivalent
+    // controls in different captured states retain one tweak/binding identity.
+    // Adapter IDs remain source-authored and therefore keep the same identity
+    // across states; path anchors are already scoped by their alternate root.
     // Keep the namespace marker separate from the source type for content
     // hashes. A synthetic `@alternate` tag alone would make two alternate
-    // roots with different source types collide when their text/role match.
-    // Path anchors intentionally use the compact `@alternate[index]` form.
+    // roots or descendants with different source types collide when their
+    // text/role match. Path anchors intentionally use the compact
+    // `@alternate[index]` form for roots only.
     std::string alternate_tag;
-    if (alternate_axis && strategy != AnchorStrategy::adapter) {
-        alternate_tag = strategy == AnchorStrategy::path ? "@alternate" : "@alternate/" + node.type;
+    if (strategy == AnchorStrategy::path && alternate_axis) {
+        alternate_tag = "@alternate";
+    } else if (strategy == AnchorStrategy::content_hash && inside_alternate) {
+        alternate_tag = "@alternate/" + node.type;
     }
 
     // Preserve any pre-existing anchor (e.g. from an authored override).
@@ -249,7 +254,7 @@ void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child
             ++n;
         }
         walk(c, child_parent_anchor, i, depth + 1, strategy, adapter_name, &node, child_sig_index,
-             false);
+             false, inside_alternate);
     }
 
     // Alternate frames are ordered by capture/swap index. Their own roots use
@@ -268,7 +273,7 @@ void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child
             ++n;
         }
         walk(frame, strategy == AnchorStrategy::path ? *node.stable_anchor_id : std::string_view{},
-             i, depth + 1, strategy, adapter_name, &node, frame_sig_index, true);
+             i, depth + 1, strategy, adapter_name, &node, frame_sig_index, true, true);
     }
 }
 
@@ -292,7 +297,7 @@ void assign_anchors(IRNode& root,
                     std::string_view adapter_name) {
     walk(root, /*parent_anchor=*/{}, /*parent_child_index=*/0, /*depth=*/0, strategy, adapter_name,
          /*parent=*/nullptr, /*sig_index=*/0,
-         /*alternate_axis=*/false);
+         /*alternate_axis=*/false, /*inside_alternate=*/false);
 }
 
 AnchorStrategy default_anchor_strategy(DesignSource source) {
