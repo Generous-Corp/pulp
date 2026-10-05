@@ -6381,6 +6381,7 @@
   "pulp-materialized-runtime-conformance": {
    "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
    "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
    ],
@@ -6389,6 +6390,7 @@
   "pulp-materialized-runtime-node-dependencies": {
    "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
    "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
     "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
@@ -6464,6 +6466,7 @@
   "pulp-ui-clean-output-lint-negative-contract": {
    "entry": "tools/ui-build/lint/test_clean_output_lint.py",
    "inputs": [
+    "tools/scripts/gates.sh",
     "tools/ui-build/lint/clean_output_lint.py",
     "tools/ui-build/lint/test_clean_output_lint.py"
    ],

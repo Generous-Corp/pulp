@@ -38,7 +38,8 @@ IRNode make_node(std::string type, std::string text = {}, std::string role = {},
 std::size_t count_anchored(const IRNode& node) {
     std::size_t n = (node.stable_anchor_id && !node.stable_anchor_id->empty()) ? 1 : 0;
     for (const auto& c : node.children) n += count_anchored(c);
-    for (const auto& f : node.alternate_frames) n += count_anchored(f);
+    for (const auto& f : node.alternate_frames)
+        n += count_anchored(f);
     return n;
 }
 
@@ -46,14 +47,16 @@ std::size_t count_anchored(const IRNode& node) {
 void collect_anchors(const IRNode& node, std::vector<std::string>& out) {
     if (node.stable_anchor_id) out.push_back(*node.stable_anchor_id);
     for (const auto& c : node.children) collect_anchors(c, out);
-    for (const auto& f : node.alternate_frames) collect_anchors(f, out);
+    for (const auto& f : node.alternate_frames)
+        collect_anchors(f, out);
 }
 
 // Recursive total node count.
 std::size_t count_nodes(const IRNode& node) {
     std::size_t n = 1;
     for (const auto& c : node.children) n += count_nodes(c);
-    for (const auto& f : node.alternate_frames) n += count_nodes(f);
+    for (const auto& f : node.alternate_frames)
+        n += count_nodes(f);
     return n;
 }
 
@@ -142,8 +145,7 @@ TEST_CASE("content-hash alternate roots are distinct and deterministic",
 
     REQUIRE(a.alternate_frames[0].stable_anchor_id.has_value());
     REQUIRE(a.alternate_frames[1].stable_anchor_id.has_value());
-    REQUIRE(*a.alternate_frames[0].stable_anchor_id !=
-            *a.alternate_frames[1].stable_anchor_id);
+    REQUIRE(*a.alternate_frames[0].stable_anchor_id != *a.alternate_frames[1].stable_anchor_id);
     REQUIRE(a.alternate_frames[0].stable_anchor_id == b.alternate_frames[0].stable_anchor_id);
     REQUIRE(a.alternate_frames[1].stable_anchor_id == b.alternate_frames[1].stable_anchor_id);
 }
@@ -168,8 +170,7 @@ TEST_CASE("nested alternate frames receive deterministic path anchors",
           "[view][import][anchors][alternate]") {
     IRNode root = make_node("frame");
     root.alternate_frames.push_back(make_node("frame", "state"));
-    root.alternate_frames[0].alternate_frames.push_back(
-        make_node("frame", "nested state"));
+    root.alternate_frames[0].alternate_frames.push_back(make_node("frame", "nested state"));
 
     assign_anchors(root, AnchorStrategy::path);
 
@@ -188,8 +189,7 @@ TEST_CASE("pre-existing alternate anchors are preserved and scope descendants",
     assign_anchors(root, AnchorStrategy::path);
 
     REQUIRE(root.alternate_frames[0].stable_anchor_id == "authored-state");
-    REQUIRE(root.alternate_frames[0].children[0].stable_anchor_id ==
-            "authored-state/button[0]");
+    REQUIRE(root.alternate_frames[0].children[0].stable_anchor_id == "authored-state/button[0]");
 }
 
 TEST_CASE("alternate anchor stability follows strategy semantics on reorder",
@@ -218,8 +218,7 @@ TEST_CASE("alternate anchor stability follows strategy semantics on reorder",
             path_b.alternate_frames[0].stable_anchor_id);
     REQUIRE(path_a.alternate_frames[1].stable_anchor_id ==
             path_b.alternate_frames[1].stable_anchor_id);
-    REQUIRE(path_a.alternate_frames[0].text_content !=
-            path_b.alternate_frames[0].text_content);
+    REQUIRE(path_a.alternate_frames[0].text_content != path_b.alternate_frames[0].text_content);
 
     IRNode hash_a = build(false);
     IRNode hash_b = build(true);
@@ -235,8 +234,7 @@ TEST_CASE("adapter anchors cover alternate frames without changing source identi
           "[view][import][anchors][alternate]") {
     IRNode root = make_node("frame", {}, {}, "root");
     root.alternate_frames.push_back(make_node("frame", "state", {}, "state:1"));
-    root.alternate_frames[0].children.push_back(
-        make_node("button", "Play", {}, "button:1"));
+    root.alternate_frames[0].children.push_back(make_node("button", "Play", {}, "button:1"));
 
     assign_anchors(root, AnchorStrategy::adapter, "figma");
 

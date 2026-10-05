@@ -79,10 +79,11 @@ struct GraphAuthoringReceipt {
     std::uint64_t graph_identity = 0;
     std::uint64_t generation = 0;
 
-    bool valid() const noexcept { return graph_identity != 0; }
+    bool valid() const noexcept {
+        return graph_identity != 0;
+    }
 
-    friend bool operator==(const GraphAuthoringReceipt&, const GraphAuthoringReceipt&) =
-        default;
+    friend bool operator==(const GraphAuthoringReceipt&, const GraphAuthoringReceipt&) = default;
 };
 
 enum class GraphAuthoringReceiptStatus : std::uint8_t {
@@ -368,8 +369,7 @@ public:
     // only; PreparedTopologyEdit remains the publication boundary and performs
     // its own stale-base check at commit().
     GraphAuthoringReceipt authoring_receipt() const;
-    GraphAuthoringReceiptStatus validate_authoring_receipt(
-        GraphAuthoringReceipt receipt) const;
+    GraphAuthoringReceiptStatus validate_authoring_receipt(GraphAuthoringReceipt receipt) const;
 
     // Check if connecting would create a cycle
     bool would_create_cycle(NodeId source, NodeId dest) const;

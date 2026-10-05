@@ -21,8 +21,8 @@ GraphAuthoringReceipt SignalGraph::authoring_receipt() const {
     return {diagnostic_graph_identity_, authoring_generation_};
 }
 
-GraphAuthoringReceiptStatus SignalGraph::validate_authoring_receipt(
-    GraphAuthoringReceipt receipt) const {
+GraphAuthoringReceiptStatus
+SignalGraph::validate_authoring_receipt(GraphAuthoringReceipt receipt) const {
     GraphMutationLock lock(*this);
     if (receipt.graph_identity != diagnostic_graph_identity_)
         return GraphAuthoringReceiptStatus::WrongGraph;
