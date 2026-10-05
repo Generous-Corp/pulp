@@ -1,0 +1,31 @@
+{
+  "schema": "pulp.spectr-gpu-nam-forge-controls.v1",
+  "node": { "type_id": "spectr.gpu_nam", "version": 1 },
+  "model": {
+    "model_id": "nam/default-clean-v1",
+    "provider": "pulp-gpu-nam",
+    "checkpoint_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "license": "MIT",
+    "redistributable": true
+  },
+  "execution": {
+    "sample_rate_hz": 48000,
+    "block_size": 512,
+    "latency_samples": 512,
+    "fallback": "cpu",
+    "fallback_primed": true
+  },
+  "receipt": {
+    "receipt_id": "spectr-gpu-nam-20261002:clean-v1",
+    "source_revision": "0123456789abcdef0123456789abcdef01234567",
+    "provider_identity": "metal:apple:m3:gpu-nam-provider-v1",
+    "observed_path": "gpu",
+    "status": "pass",
+    "artifact_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+  },
+  "exposure": {
+    "status": "metadata_only",
+    "catalog_registered": false,
+    "named_consumer": null
+  }
+}
