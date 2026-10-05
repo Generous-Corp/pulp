@@ -11,6 +11,16 @@ EXPECTED_BUNDLE_ID='com.pulp.sample-region-allpass'
 ROOT=Path(__file__).resolve().parent
 LUA=ROOT/'sample_region_native_reaper.lua'
 
+def overall_status(results):
+    """Preserve hard failures in the packet summary instead of hiding them."""
+    statuses = [result.get('status') for result in results]
+    if statuses and all(status == 'passed' for status in statuses):
+        return 'passed'
+    if any(status == 'failed' for status in statuses):
+        return 'failed'
+    return 'inconclusive'
+
+
 def receipt_verdict(receipt):
     import importlib.util
     spec=importlib.util.spec_from_file_location('sample_region_native_smoke', ROOT/'sample_region_native_smoke.py')
@@ -497,6 +507,6 @@ def main(argv=None):
                                    f"residual={rec.get('render_envelope_residual')})")
         receipt=a.out/f'{fmt}-receipt.log'; receipt.write_text('[sample-region-f4] '+json.dumps(rec)+'\n')
         results.append(rec)
-    summary={'packet':'PKT-F4-01','acceptance':'PUB-04','results':results,'status':'passed' if all(r.get('status')=='passed' for r in results) else 'inconclusive'}
+    summary={'packet':'PKT-F4-01','acceptance':'PUB-04','results':results,'status':overall_status(results)}
     a.out.mkdir(parents=True,exist_ok=True); (a.out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n'); print(json.dumps(summary,indent=2)); return 0 if summary['status']=='passed' else 3
 if __name__=='__main__': raise SystemExit(main())
