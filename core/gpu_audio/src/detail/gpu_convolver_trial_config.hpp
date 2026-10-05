@@ -89,6 +89,11 @@ struct GpuConvolverTrialConfig {
     DawnSharedIoProvider::CompletionPolicy completion_policy =
         DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
     std::uint64_t completion_wait_ns = 0;
+    // Diagnostic campaign slot capacity. Zero preserves the production
+    // default. Non-zero values are accepted only by the private probe and are
+    // passed through to the prepared shared-I/O session; the public runtime
+    // ABI remains unchanged.
+    std::uint32_t slots = 0;
 };
 
 // Must be called while the node is quiescent, before the next prepare(). The

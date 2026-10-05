@@ -21,6 +21,12 @@
 #include <unordered_set>
 #include <vector>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace {
 using Clock = std::chrono::steady_clock;
 using pulp::gpu_audio::GpuAudioTransport;
@@ -31,9 +37,13 @@ struct Config {
     std::uint32_t lead = 2;
     std::uint32_t blocks = 128;
     std::uint32_t warmup = 64;
+    std::uint32_t slots = GpuConvolver::kSharedIoSlots;
     bool wake = false;
     bool corrupt_output = false;
+    bool expect_failure = false;
+    std::string run_kind = "cold";
     std::filesystem::path directory;
+    std::filesystem::path raw_jsonl;
 };
 
 constexpr auto kPostCallbackDrainTimeout = std::chrono::seconds{2};
@@ -54,25 +64,43 @@ bool parse(int argc, char** argv, Config& config) {
             return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size();
         };
         if (number("--frames=", config.frames) || number("--lead=", config.lead) ||
-            number("--blocks=", config.blocks) || number("--warmup=", config.warmup))
+            number("--blocks=", config.blocks) || number("--warmup=", config.warmup) ||
+            number("--slots=", config.slots))
             continue;
         if (argument == "--wake-on-write")
             config.wake = true;
         else if (argument == "--negative-control")
             config.corrupt_output = true;
+        else if (argument == "--expect-failure")
+            config.expect_failure = true;
+        else if (argument.starts_with("--run-kind="))
+            config.run_kind = argument.substr(11);
         else if (argument.starts_with("--output-dir="))
             config.directory = argument.substr(13);
+        else if (argument.starts_with("--raw-jsonl="))
+            config.raw_jsonl = argument.substr(12);
         else
             return false;
     }
     return (config.frames == 32 || config.frames == 64 || config.frames == 128) &&
            (config.lead == 1 || config.lead == 2 || config.lead == 4 || config.lead == 8) &&
-           config.blocks > 0 && config.blocks <= kMaximumMeasuredBlocks && config.warmup <= 4096;
+           (config.slots == 2 || config.slots == 4 || config.slots == 8 || config.slots == 16) &&
+           (config.run_kind == "cold" || config.run_kind == "steady") &&
+           (!config.expect_failure || config.corrupt_output) && config.blocks > 0 &&
+           config.blocks <= kMaximumMeasuredBlocks && config.warmup <= 4096;
 }
 
 std::uint64_t nanoseconds(Clock::duration value) {
     return static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(value).count());
+}
+
+std::uint64_t process_id() noexcept {
+#if defined(_WIN32)
+    return static_cast<std::uint64_t>(::_getpid());
+#else
+    return static_cast<std::uint64_t>(::getpid());
+#endif
 }
 
 struct Record {
@@ -131,6 +159,25 @@ int run(Config config) {
     std::vector<Record> records(total_blocks);
 
     GpuConvolver node(channels, config.frames, sample_rate, ir, config.lead);
+    // A steady run launched as a fresh process cannot prove resident
+    // same-process semantics. Keep the distinction explicit and fail closed;
+    // the campaign driver must not relabel a cold process as steady.
+    if (config.run_kind == "steady") {
+        std::cout << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\","
+                     "\"status\":\"unavailable\",\"run_kind\":\"steady\","
+                     "\"steady_semantics\":\"fresh_process_unavailable\","
+                     "\"reason\":\"same_process_resident_required\"}\n";
+        return 2;
+    }
+    pulp::gpu_audio::detail::GpuConvolverTrialConfig trial_config;
+    trial_config.requested_path =
+        pulp::gpu_audio::detail::SharedIoRequest::RequireSharedHostPointer;
+    trial_config.enable_trace = true;
+    trial_config.capture_admissions = true;
+    trial_config.success_stride = 1;
+    trial_config.slots = config.slots;
+    if (!pulp::gpu_audio::detail::configure_gpu_convolver_trial(node, trial_config))
+        return 2;
     if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
         !node.configure_trace({.enabled = true,
                                .capture_admissions = true,
@@ -303,9 +350,9 @@ int run(Config config) {
                << config.lead
                // This is configured physical capacity, not an observed
                // delivery count. Keep the legacy key and expose the meaning.
-               << ",\"provider_slots\":" << GpuConvolver::kSharedIoSlots
-               << ",\"configured_provider_slots\":" << GpuConvolver::kSharedIoSlots
-               << ",\"declared_slots\":" << GpuConvolver::kSharedIoSlots
+               << ",\"provider_slots\":" << config.slots
+               << ",\"configured_provider_slots\":" << config.slots
+               << ",\"declared_slots\":" << config.slots
                << ",\"declared_lead_blocks\":" << config.lead
                << ",\"high_water_in_flight\":" << high_water_in_flight
                << ",\"retired_success\":" << retired_success
@@ -356,6 +403,10 @@ int run(Config config) {
                << ",\"wake_on_write\":" << (config.wake ? "true" : "false")
                << ",\"tracing_compiled\":" << (pulp::runtime::kTracingEnabled ? "true" : "false")
                << ",\"negative_control\":" << (config.corrupt_output ? "true" : "false")
+               << ",\"run_kind\":\"" << config.run_kind << "\""
+               << ",\"process_id\":" << process_id()
+               << ",\"same_process_resident\":false"
+               << ",\"steady_semantics\":\"fresh_process_unavailable\""
                << ",\"records_file\":\"blocks.csv\"}\n";
     };
     std::ofstream receipt(config.directory / "receipt.json");
@@ -363,9 +414,32 @@ int run(Config config) {
     receipt.flush();
     if (!receipt)
         return 2;
+    if (!config.raw_jsonl.empty()) {
+        std::ofstream raw(config.raw_jsonl);
+        if (!raw)
+            return 2;
+        raw << "{\"kind\":\"provenance\",\"schema\":\"pulp.gpu-audio.p2.raw.v1\","
+               "\"run_kind\":\"" << config.run_kind
+            << "\",\"same_process_resident\":false,\"steady_semantics\":"
+               "\"fresh_process_unavailable\",\"provider_asset_sha256\":null,"
+               "\"dawn_archive_sha256\":null,\"provenance_status\":\"unavailable\"}\n";
+        for (const auto& record : trace_records) {
+            raw << "{\"kind\":\"record\",\"trace_kind\":"
+                << static_cast<unsigned>(record.kind) << ",\"generation\":"
+                << record.generation
+                << ",\"sequence\":" << record.sequence << ",\"gpu_terminal\":"
+                << static_cast<unsigned>(record.gpu_terminal) << "}\n";
+        }
+        raw.flush();
+        if (!raw)
+            return 2;
+    }
     emit(std::cout);
     std::cerr << "artifacts: " << config.directory << '\n';
-    return correct && gpu_progress ? 0 : 1;
+    const bool passed = correct && gpu_progress;
+    if (config.expect_failure)
+        return !passed && config.corrupt_output ? 0 : 1;
+    return passed ? 0 : 1;
 }
 } // namespace
 

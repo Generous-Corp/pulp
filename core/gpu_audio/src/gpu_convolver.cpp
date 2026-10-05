@@ -90,6 +90,9 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
         return false;
     if (config.generation == 0)
         return false;
+    if (config.slots != 0 && config.slots != 2 && config.slots != 4 && config.slots != 8 &&
+        config.slots != 16)
+        return false;
     convolver.trial_requested_path_ = static_cast<std::uint8_t>(config.requested_path);
     convolver.trial_generation_ = config.generation;
     convolver.trial_configured_ = true;
@@ -98,6 +101,7 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_capture_callback_timing_ = config.capture_callback_timing;
     convolver.trial_staged_sync_reference_ = config.staged_sync_reference;
     convolver.trial_success_stride_ = std::max<std::uint32_t>(1, config.success_stride);
+    convolver.trial_slots_ = config.slots;
     convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
     convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
     return true;
@@ -274,7 +278,7 @@ bool GpuConvolver::prepare() {
                                                   .lead_blocks = latency_blocks_,
                                                   .capture_callback_timing =
                                                       trial_capture_callback_timing_},
-                                     .slots = kSharedIoSlots,
+                                     .slots = trial_slots_ != 0 ? trial_slots_ : kSharedIoSlots,
                                      .sample_rate = sample_rate_,
                                      .trace = {.success_stride = trial_success_stride_,
                                                .capture_admissions = trial_capture_admissions_,

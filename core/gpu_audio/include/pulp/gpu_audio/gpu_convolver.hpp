@@ -287,6 +287,7 @@ class GpuConvolver : public GpuAudioNode {
     bool trial_capture_callback_timing_ = false;
     bool trial_staged_sync_reference_ = false;
     std::uint32_t trial_success_stride_ = 1;
+    std::uint32_t trial_slots_ = 0;
     std::uint8_t trial_completion_policy_ = 0; // Dawn completion policy enum
     std::uint64_t trial_completion_wait_ns_ = 0;
 
