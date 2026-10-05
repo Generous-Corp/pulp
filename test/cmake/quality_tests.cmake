@@ -1249,6 +1249,10 @@ if(Python3_Interpreter_FOUND)
             ${_changed_surface_policy_args})
         add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
+        # Two cases walk the whole tracked tree (configured and static
+        # reachability, compared script by script); the source lane's default
+        # 120 s budget does not cover them.
+        set_tests_properties(changed-surface-script-families-selftest PROPERTIES TIMEOUT 300)
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
         # The lane runner's own contract: base provisioning and configure-shape

@@ -84,6 +84,23 @@ class FamilyFixture(unittest.TestCase):
 
 
 
+_LIVE: dict[str, object] = {}
+
+
+def live_reachability() -> tuple[Path, list[str], dict, set[str]]:
+    """native_reachable() over the live tree, computed once for the tests
+    that compare against it: (root, top-level scripts, declared, reached)."""
+    if not _LIVE:
+        root = Path(__file__).resolve().parents[2]
+        tracked = families.tracked_files(root)
+        declared = json.loads((root / families.SCRIPT_INPUTS).read_text(encoding="utf-8"))["tests"]
+        scripts = families.top_level_scripts(tracked)
+        reached = families.native_reachable(scripts, tracked, {e.get("entry") for e in declared.values()},
+                                            lambda rel: families.read_text(root, rel))
+        _LIVE.update(root=root, scripts=scripts, declared=declared, reached=reached)
+    return _LIVE["root"], _LIVE["scripts"], _LIVE["declared"], _LIVE["reached"]
+
+
 class GeneratedFamiliesTest(FamilyFixture):
     def test_script_maps_to_exactly_its_readers_and_the_whole_tree_family(self) -> None:
         self.add_whole_tree()
@@ -115,12 +132,7 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertNotEqual(self.family_for(generated, "tools/scripts/test_runner.py"), [])
 
     def test_the_static_predictor_agrees_with_native_reachable_on_the_live_tree(self) -> None:
-        root = Path(__file__).resolve().parents[2]
-        tracked = families.tracked_files(root)
-        declared = json.loads((root / families.SCRIPT_INPUTS).read_text(encoding="utf-8"))["tests"]
-        scripts = families.top_level_scripts(tracked)
-        configured = families.native_reachable(scripts, tracked, {e.get("entry") for e in declared.values()},
-                                               lambda rel: families.read_text(root, rel))
+        root, scripts, declared, configured = live_reachability()
         prediction = families.Prediction(families.Snapshot(root, "HEAD", {}), declared)
         self.assertTrue(configured)  # control: something is reachable, so both sides were read
         self.assertEqual({s for s in scripts if prediction.reached(s)}, configured)
@@ -129,12 +141,7 @@ class GeneratedFamiliesTest(FamilyFixture):
         # A script body that names a path makes it reachable, so a list of
         # reviewed paths kept in a reachable script would unmap them all. The
         # list lives in tools/ci data; the runner's own test stays mappable.
-        root = Path(__file__).resolve().parents[2]
-        tracked = families.tracked_files(root)
-        declared = json.loads((root / families.SCRIPT_INPUTS).read_text(encoding="utf-8"))["tests"]
-        entries = {e.get("entry") for e in declared.values()}
-        reached = families.native_reachable(families.top_level_scripts(tracked), tracked, entries,
-                                            lambda rel: families.read_text(root, rel))
+        _, _, _, reached = live_reachability()
         # Control: the scanner test itself is reachable, so the walk did run.
         self.assertIn("tools/scripts/test_wide_non_native.py", reached)
         self.assertNotIn("tools/scripts/test_run_changed_surface_tests.py", reached)
