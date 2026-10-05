@@ -356,6 +356,19 @@ class GeneratedFamiliesTest(FamilyFixture):
     def test_the_families_file_is_what_the_gate_widening_treats_as_selection_only(self) -> None:
         self.assertEqual(str(families.FAMILIES_FILE), wide_non_native.SELECTOR_FAMILIES_FILE)
 
+    def test_optional_environment_tests_are_excluded_from_the_generated_family(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/optional_test.py", "")
+        self.script_test("optional-selftest", "tools/scripts/optional_test.py",
+                         labels=["browser-capture"])
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": True})
+        self.write("tools/scripts/required_test.py", "")
+        self.script_test("required-selftest", "tools/scripts/required_test.py",
+                         labels=["browser-capture"])
+        generated = self.generate()
+        self.assertEqual(generated["script-surface-environment-bound"]["tests"],
+                         ["required-selftest"])
+
     def test_no_whole_tree_test_refuses_to_bound_anything(self) -> None:
         self.write("tools/scripts/test_alone.py", "")
         self.script_test("alone-selftest", "tools/scripts/test_alone.py")
