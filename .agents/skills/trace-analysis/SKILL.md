@@ -397,6 +397,13 @@ grounds the analysis in Pulp's real seams and names the specific traps:
 | a live editor (meters, analyzer, modulation) that feels sluggish mid-stroke, after release, or during zoom; classifying the worst frame gaps | `references/ui_jank_playbook.md` (+ `references/ui_jank.sql`) |
 | standalone vs plugin-in-DAW vs iOS/iPadOS AUv3 vs Android/Oboe vs Simulator; sample-position args, thread naming, atrace interleave | `references/hints_crossplatform.md` |
 
+GPU-audio scheduling extensions may annotate nullable batch, model, provider,
+and execution-prediction metadata. Read the companion hint before treating a
+lead or batching result as a claim: session `claim_*` flags opt into
+fail-closed `missing_*` checks, and absent historical schema-2 fields remain
+unavailable rather than zero. A negative deadline margin is valid signed
+slack; only NULL means that prediction metadata was not emitted.
+
 ### 8. Answer in plain English (L1) — never surface SQL
 Return: **root cause** (one or two sentences), **chain of evidence** (numbered,
 each tied to what a span/query showed), and a **concrete fix**. Give magnitudes
