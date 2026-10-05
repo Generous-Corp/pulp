@@ -869,6 +869,41 @@ class GateProfileTests(unittest.TestCase):
                 self.assertIn("refusing to write", proc.stderr)
 
 
+class GatePlatformTests(unittest.TestCase):
+    def cache(self, repo: Repo, CMAKE_SYSTEM_NAME: str) -> None:
+        # Where CMake records it: not CMakeCache.txt, but CMakeSystem.cmake.
+        write(repo.root / "build", "CMakeFiles/4.3.3/CMakeSystem.cmake",
+              f'set(CMAKE_SYSTEM_NAME "{CMAKE_SYSTEM_NAME}")\n')
+
+    def run_tool(self, repo: Repo, *args: str) -> subprocess.CompletedProcess:
+        inv = repo.root / "build" / "inv.json"
+        inv.parent.mkdir(parents=True, exist_ok=True)
+        inv.write_text(json.dumps(repo.inventory()), encoding="utf-8")
+        return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
+                               "--build-dir", str(repo.root / "build"), "--inventory-json", str(inv), *args],
+                              capture_output=True, text=True, timeout=60, env=tool_env(event=None, strict=False))
+
+    def test_another_platform_skips_by_name_and_never_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.cache(repo, CMAKE_SYSTEM_NAME="Darwin")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            # A Linux configure registers tests the macOS-written list cannot have.
+            self.cache(repo, CMAKE_SYSTEM_NAME="Linux")
+            write(repo.root, "tools/scripts/newmod.py", "")
+            write(repo.root, "tools/scripts/test_alpha.py", "import alpha_lib\nimport newmod\n")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, sti.SKIP_EXIT, proc.stdout + proc.stderr)
+            self.assertIn("SKIPPED: CMAKE_SYSTEM_NAME=Linux", proc.stdout)
+            self.assertIn("this is a skip, not a pass", proc.stdout)
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("refusing to write: CMAKE_SYSTEM_NAME=Linux", proc.stderr)
+            # Control: the same drift on the gate's platform still fails.
+            self.cache(repo, CMAKE_SYSTEM_NAME="Darwin")
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 1)
+
+
 class ScanScopeTests(unittest.TestCase):
     def test_walking_up_to_the_checkout_is_a_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
