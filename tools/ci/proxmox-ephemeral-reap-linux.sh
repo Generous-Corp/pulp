@@ -158,35 +158,70 @@ probe_value() {
     printf '%s\n' "$probe" | sed -n "s/^${key}=//p"
 }
 
-fence_runner() {
-    local registration_api="$1" rid="$2" runner_name="$3" probe record _ name status busy labels label
+gh_api() {
     env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
-        -u GITHUB_ENTERPRISE_TOKEN HOME=/root \
-        "$GH_CLI" api --method PUT \
-        "${registration_api}/actions/runners/${rid}/labels" \
-        -f 'labels[]=pulp-shutdown-fenced' >/dev/null || return 1
-    for probe in 1 2; do
-        record="$(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
-            -u GITHUB_ENTERPRISE_TOKEN HOME=/root \
-            "$GH_CLI" api "${registration_api}/actions/runners/${rid}" \
-            --jq '[.id,.name,.status,.busy,([.labels[].name] | join(","))] | @tsv')" \
-            || return 1
-        IFS=$'\t' read -r _ name status busy labels <<< "$record"
-        [ "$name" = "$runner_name" ] && [ "$busy" = false ] \
-            && { [ "$status" = online ] || [ "$status" = offline ]; } || return 1
-        case ",$labels," in
-            *,pulp-shutdown-fenced,*) ;;
-            *) return 1 ;;
+        -u GITHUB_ENTERPRISE_TOKEN HOME=/root "$GH_CLI" api "$@"
+}
+
+# Dispatch fence for an idle JIT runner: deregistration itself.
+#
+# A JIT runner's labels come from its JIT configuration and are read-only, so a
+# fence that replaces labels can never remove the routing labels and can never
+# prove anything; it left every idle orphan unreclaimable. GitHub refuses to
+# delete a runner while it is running a job, so a DELETE that succeeds proves no
+# job held the runner at that instant, and no job can be assigned to a runner
+# that no longer exists. The 404 alone could also mean the wrong id was read, so
+# the fence also requires that no in-progress job in the repository names the
+# runner. Every step is logged; any step that cannot be proved leaves the clone.
+#
+# deregister_fence <vmid> <registration_api> <rid> <runner_name>
+deregister_fence() {
+    local id="$1" registration_api="$2" rid="$3" runner_name="$4"
+    local record name busy output run_ids run_id job_runners
+    record="$(gh_api "${registration_api}/actions/runners/${rid}" \
+        --jq '[.id,.name,.busy] | @tsv' 2>/dev/null)" \
+        || { log "SKIP $id — JIT fence 1/4: runner ${rid} cannot be read"; return 1; }
+    IFS=$'\t' read -r _ name busy <<< "$record"
+    [ "$name" = "$runner_name" ] \
+        || { log "SKIP $id — JIT fence 1/4: runner ${rid} is ${name}, not ${runner_name}"; return 1; }
+    [ "$busy" = false ] \
+        || { log "SKIP $id — JIT fence 1/4: runner ${rid} is busy; leaving it this pass"; return 1; }
+    log "FENCE $id 1/4 read runner ${rid} ${runner_name} busy=false"
+
+    if ! output="$(gh_api --method DELETE "${registration_api}/actions/runners/${rid}" 2>&1)"; then
+        case "$output" in
+            *[Bb]usy*|*"running a job"*|*"HTTP 422"*)
+                log "SKIP $id — JIT fence 2/4: GitHub refused to deregister runner ${rid} because it is busy; leaving it this pass" ;;
+            *)
+                log "SKIP $id — JIT fence 2/4: deregistering runner ${rid} failed" ;;
         esac
-        IFS=',' read -r -a observed_labels <<< "$labels"
-        for label in "${observed_labels[@]}"; do
-            case "$label" in
-                self-hosted|Linux|X64|pulp-shutdown-fenced) ;;
-                *) return 1 ;;
-            esac
-        done
-        [ "$probe" = 2 ] || sleep 2
+        return 1
+    fi
+    log "FENCE $id 2/4 deregistered runner ${rid}"
+
+    if output="$(gh_api "${registration_api}/actions/runners/${rid}" 2>&1)"; then
+        log "SKIP $id — JIT fence 3/4: runner ${rid} still exists after deregistration"
+        return 1
+    fi
+    case "$output" in
+        *"HTTP 404"*|*"Not Found"*) ;;
+        *) log "SKIP $id — JIT fence 3/4: runner ${rid} lookup failed for a reason other than 404"; return 1 ;;
+    esac
+    run_ids="$(gh_api --paginate "repos/${REPO}/actions/runs?status=in_progress&per_page=100" \
+        --jq '.workflow_runs[].id' 2>/dev/null)" \
+        || { log "SKIP $id — JIT fence 3/4: in-progress runs cannot be listed"; return 1; }
+    for run_id in $run_ids; do
+        valid_uint "$run_id" \
+            || { log "SKIP $id — JIT fence 3/4: invalid run id"; return 1; }
+        job_runners="$(gh_api --paginate "repos/${REPO}/actions/runs/${run_id}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.status == "in_progress") | .runner_name // empty' 2>/dev/null)" \
+            || { log "SKIP $id — JIT fence 3/4: jobs of run ${run_id} cannot be listed"; return 1; }
+        if printf '%s\n' "$job_runners" | grep -Fxq -- "$runner_name"; then
+            log "SKIP $id — JIT fence 3/4: in-progress job in run ${run_id} names ${runner_name}"
+            return 1
+        fi
     done
+    log "FENCE $id 3/4 runner ${rid} returns 404 and no in-progress job names ${runner_name}"
 }
 
 valid_uint "$BASE" && valid_uint "$MAX" && valid_uint "$MIN_STALE_SECONDS" \
@@ -335,17 +370,22 @@ for id in $(seq "$BASE" "$MAX"); do
         || { log "SKIP $id — clone generation, ownership, or keep disposition changed before mutation"; flock -u 9; continue; }
 
     if [ "$cleanup_state" = idle-listener ]; then
-        fence_runner "$registration_api" "$rid" "$runner_name" \
-            || { log "SKIP $id — dispatch fence could not be proved"; flock -u 9; continue; }
+        deregister_fence "$id" "$registration_api" "$rid" "$runner_name" \
+            || { flock -u 9; continue; }
+        # The registration is gone; nothing below may wait on or delete it.
+        registration_present=0
         probe="$(guest_probe "$ip" 2>/dev/null)" \
             || { log "SKIP $id — post-fence guest state cannot be proved"; flock -u 9; continue; }
+        # A deregistered listener may already have exited, so the listener count
+        # is not part of the proof; no worker and an untouched _work are.
+        post_listeners="$(probe_value "$probe" listener_count)"
         [ "$(probe_value "$probe" identity)" = "$runner_name" ] \
-            && [ "$(probe_value "$probe" listener_count)" = 1 ] \
+            && { [ "$post_listeners" = 0 ] || [ "$post_listeners" = 1 ]; } \
             && [ "$(probe_value "$probe" worker_count)" = 0 ] \
             && [ "$(probe_value "$probe" configurer_count)" = 0 ] \
-            && [ "$(probe_value "$probe" jitconfig)" = true ] \
             && [ "$(probe_value "$probe" work_entries)" = 0 ] \
             || { log "SKIP $id — post-fence guest proof changed"; flock -u 9; continue; }
+        log "FENCE $id 4/4 guest is still idle; destroying clone"
     fi
     if [ "$vm_status" = "status: running" ]; then
         "$QM" stop "$id" >/dev/null 2>&1 || true

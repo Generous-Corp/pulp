@@ -441,10 +441,23 @@ The supervisor publishes a root-owned per-generation lease while it owns a
 clone. `pulp-ephemeral-reap.timer` is the crash-recovery backstop: after one
 hour it considers only an ownerless Pulp slot, then requires the exact GitHub
 registration to be idle, one `Runner.Listener --jitconfig`, no worker or
-configuration process, and an empty `_work`. Execution first replaces all
-routing labels with a shutdown fence, proves the idle state twice, stops and
-deregisters the runner, and rechecks the unchanged VM config under the VMID
-allocation lock before destroy. Missing, duplicate, unreachable, busy, or
+configuration process, and an empty `_work`. Execution rechecks the unchanged
+VM config under the VMID allocation lock, then fences dispatch by deregistering
+the runner, and logs each of the four steps as `FENCE <vmid> n/4`:
+
+1. Read the runner and require `busy=false`.
+2. `DELETE` the registration. GitHub refuses to delete a runner that is running
+   a job, so a refusal leaves the clone for the next pass, and a success proves
+   no job held it.
+3. Require the runner to return 404, and require that no in-progress job in the
+   repository names it. The second check guards against a 404 that only means
+   the wrong id was read.
+4. Re-probe the guest for no worker and an untouched `_work`, then destroy it.
+
+A label fence cannot work here: a JIT runner's labels are read-only, so
+replacing them never removes a routing label. The supervisor's own shutdown
+uses the same deregistration fence, and hands a runner GitHub reports busy to
+its deferred cleanup. Missing, duplicate, unreachable, busy, or
 otherwise ambiguous evidence always preserves the VM. Run
 `pulp-ephemeral-reap.sh` without arguments for a non-mutating report.
 After a controller reboot leaves an `onboot=0` clone stopped, recovery accepts

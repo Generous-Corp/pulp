@@ -43,7 +43,7 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
             "configurer_count",
             "jitconfig",
             "work_entries",
-            "pulp-shutdown-fenced",
+            "deregister_fence",
             "config_digest",
             "clone generation, ownership, or keep disposition changed before mutation",
             "supervisor lease is active or ambiguous",
@@ -269,6 +269,180 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("registration is not idle and offline", result.stdout)
         self.assertNotIn("destroy 200", operations)
+
+
+FAKE_GH_FENCE = """#!/bin/bash
+# Stateful GitHub API fake for the JIT deregistration fence.
+echo "$*" >> "$FENCE_OPS"
+args="$*"
+name="$FENCE_RUNNER"
+case "$args" in
+  *"--method DELETE"*"/actions/runners/17"*)
+    case "$FENCE_DELETE" in
+      ok) : > "$FENCE_STATE/deleted"; exit 0 ;;
+      busy) echo "gh: Bad request - Runner $name is still running a job (HTTP 422)" >&2; exit 1 ;;
+      *) echo "gh: Server Error (HTTP 500)" >&2; exit 1 ;;
+    esac ;;
+  *"orgs/Generous-Corp/actions/runners?per_page=100"*)
+    [ -e "$FENCE_STATE/deleted" ] || printf '17\t%s\tonline\tfalse\n' "$name" ;;
+  *"repos/Generous-Corp/pulp/actions/runners?per_page=100"*) : ;;
+  *"/actions/runners/17"*)
+    if [ -e "$FENCE_STATE/deleted" ]; then
+      case "$FENCE_AFTER" in
+        404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+        exists) printf '17\t%s\tfalse\n' "$name" ;;
+        *) echo "gh: Server Error (HTTP 502)" >&2; exit 1 ;;
+      esac
+    else
+      printf '17\t%s\t%s\n' "$name" "$FENCE_BUSY"
+    fi ;;
+  *"actions/runs?status=in_progress"*) echo 901 ;;
+  *"actions/runs/901/jobs"*) [ -z "$FENCE_JOB_RUNNER" ] || echo "$FENCE_JOB_RUNNER" ;;
+  *) exit 2 ;;
+esac
+"""
+
+
+class JitDeregistrationFenceTests(unittest.TestCase):
+    """--yes on an idle JIT orphan: read, deregister, verify 404 + no job, destroy."""
+
+    GENERATION = "pulp-ci-ephemeral-200-generation"
+
+    def _run(
+        self,
+        *,
+        busy: str = "false",
+        delete: str = "ok",
+        after: str = "404",
+        job_runner: str = "",
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = pathlib.Path(tmp_name)
+            vm_configs = tmp / "qemu"
+            leases = tmp / "leases"
+            state = tmp / "state"
+            for directory in (vm_configs, leases, state):
+                directory.mkdir()
+            description = (
+                f"description: pulp-runner-generation={self.GENERATION}"
+                ";pulp-runner-scope=orgs/Generous-Corp\n"
+            )
+            (vm_configs / "200.conf").write_text(f"name: pulp-ci-ephemeral-200\n{description}")
+            os.utime(vm_configs / "200.conf", (1, 1))
+            operations = tmp / "operations"
+            qm = tmp / "qm"
+            qm.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    echo "qm $*" >> {operations}
+                    case "$1:$2" in
+                      status:200) if [ -e {state}/stopped ]; then echo 'status: stopped'; else echo 'status: running'; fi ;;
+                      stop:200) : > {state}/stopped ;;
+                      config:200) printf 'name: pulp-ci-ephemeral-200\\n{description}' ;;
+                      guest:cmd) echo '{{"ip-address" : "192.168.86.251"}}' ;;
+                    esac
+                    """
+                )
+            )
+            ssh = tmp / "ssh"
+            ssh.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    cat <<'EOF'
+                    identity={self.GENERATION}
+                    listener_count=1
+                    worker_count=0
+                    configurer_count=0
+                    jitconfig=true
+                    work_entries=0
+                    EOF
+                    """
+                )
+            )
+            ghapp = tmp / "ghapp"
+            ghapp.write_text(FAKE_GH_FENCE)
+            for executable in (qm, ssh, ghapp):
+                executable.chmod(0o755)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PULP_REAPER_CLONE_BASE": "200",
+                    "PULP_REAPER_CLONE_MAX": "200",
+                    "PULP_REAPER_MIN_STALE_SECONDS": "1",
+                    "PULP_REAPER_VM_CONFIG_DIR": str(vm_configs),
+                    "PULP_REAPER_LEASE_DIR": str(leases),
+                    "PULP_REAPER_VMID_LOCK": str(tmp / "vmid.lock"),
+                    "PULP_REAPER_FIREWALL_DIR": str(tmp),
+                    "PULP_REAPER_QM": str(qm),
+                    "PULP_REAPER_SSH": str(ssh),
+                    "PULP_REAPER_GH_CLI": str(ghapp),
+                    "PULP_REAPER_TEST_MODE": "1",
+                    "FENCE_OPS": str(operations),
+                    "FENCE_STATE": str(state),
+                    "FENCE_RUNNER": self.GENERATION,
+                    "FENCE_BUSY": busy,
+                    "FENCE_DELETE": delete,
+                    "FENCE_AFTER": after,
+                    "FENCE_JOB_RUNNER": job_runner,
+                }
+            )
+            result = subprocess.run(
+                ["/bin/bash", str(REAPER), "--yes"],
+                capture_output=True, text=True, env=env, timeout=60,
+            )
+            return result, operations.read_text() if operations.exists() else ""
+
+    def test_idle_jit_orphan_is_reaped_through_all_four_logged_steps(self) -> None:
+        result, operations = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for step in ("FENCE 200 1/4", "FENCE 200 2/4", "FENCE 200 3/4", "FENCE 200 4/4"):
+            self.assertIn(step, result.stdout)
+        self.assertIn("REAP 200", result.stdout)
+        self.assertNotIn("labels", operations)
+        self.assertLess(operations.index("--method DELETE"), operations.index("qm stop 200"))
+        self.assertLess(operations.index("actions/runs?status=in_progress"), operations.index("qm stop 200"))
+        self.assertIn("qm destroy 200 --purge", operations)
+        self.assertEqual(operations.count("--method DELETE"), 1, operations)
+
+    def test_step_one_busy_runner_is_left_without_deregistration(self) -> None:
+        result, operations = self._run(busy="true")
+        self.assertIn("JIT fence 1/4", result.stdout)
+        self.assertNotIn("--method DELETE", operations)
+        self.assertNotIn("qm stop 200", operations)
+
+    def test_step_two_busy_refusal_leaves_the_clone_this_pass(self) -> None:
+        result, operations = self._run(delete="busy")
+        self.assertIn("JIT fence 2/4: GitHub refused to deregister runner 17 because it is busy", result.stdout)
+        self.assertNotIn("qm stop 200", operations)
+        self.assertNotIn("qm destroy", operations)
+
+    def test_step_two_other_failure_leaves_the_clone(self) -> None:
+        result, operations = self._run(delete="error")
+        self.assertIn("JIT fence 2/4: deregistering runner 17 failed", result.stdout)
+        self.assertNotIn("qm stop 200", operations)
+
+    def test_step_three_requires_a_404_after_deregistration(self) -> None:
+        for after, message in (
+            ("exists", "still exists after deregistration"),
+            ("502", "failed for a reason other than 404"),
+        ):
+            with self.subTest(after=after):
+                result, operations = self._run(after=after)
+                self.assertIn(message, result.stdout)
+                self.assertNotIn("qm stop 200", operations)
+
+    def test_step_three_wrong_id_control_an_in_progress_job_naming_the_runner(self) -> None:
+        result, operations = self._run(job_runner=self.GENERATION)
+        self.assertIn("in-progress job in run 901 names", result.stdout)
+        self.assertNotIn("qm stop 200", operations)
+        self.assertNotIn("qm destroy", operations)
+
+    def test_an_unrelated_in_progress_job_does_not_block(self) -> None:
+        result, operations = self._run(job_runner="some-other-runner")
+        self.assertIn("REAP 200", result.stdout)
+        self.assertIn("qm destroy 200 --purge", operations)
 
 
 if __name__ == "__main__":
