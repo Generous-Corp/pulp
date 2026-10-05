@@ -7,6 +7,7 @@
 #include <sstream>
 #include <string>
 #include <filesystem>
+
 #include "support/fixture_root.hpp"
 
 // Read a file into a string

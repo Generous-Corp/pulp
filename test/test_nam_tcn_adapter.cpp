@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+
 #include "support/fixture_root.hpp"
 
 using namespace pulp::gpu_audio::detail;

@@ -39,6 +39,7 @@
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp_tooling/gpu_probe/probe_result.hpp>
+
 #include "support/fixture_root.hpp"
 
 namespace {

@@ -33,4 +33,4 @@ inline std::filesystem::path fixture_root() {
 }
 #endif
 
-}  // namespace pulp_test
+} // namespace pulp_test

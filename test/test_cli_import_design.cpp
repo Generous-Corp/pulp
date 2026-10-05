@@ -33,6 +33,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
 #include "support/fixture_root.hpp"
 
 using namespace pulp::view;
