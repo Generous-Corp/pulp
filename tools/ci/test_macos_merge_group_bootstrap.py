@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().with_name("macos_merge_group_bootstrap.sh")
+SCRIPT = Path(__file__).resolve().parents[2] / "tools/ci/macos_merge_group_bootstrap.sh"
 
 
 def run(provider: str, classify: str, *, native: str = "false", receipt: str = "",
