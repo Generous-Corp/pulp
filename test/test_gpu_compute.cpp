@@ -33,9 +33,11 @@ constexpr const char* kNoGpu =
 // software adapter, saying which one; every smaller route still runs there.
 std::string software_adapter(const GpuCompute& compute) {
     const auto caps = compute.capabilities();
-    if (caps.adapter_type != "cpu") return {};
-    return "software adapter " + (caps.name.empty() ? std::string("(unnamed)") : caps.name) +
-           " (" + caps.backend + "): the maximum-block grid-stride dispatch outruns the "
+    if (caps.adapter_type != "cpu")
+        return {};
+    return "software adapter " + (caps.name.empty() ? std::string("(unnamed)") : caps.name) + " (" +
+           caps.backend +
+           "): the maximum-block grid-stride dispatch outruns the "
            "2 s blocking read-back deadline on a CPU rasterizer";
 }
 
@@ -852,13 +854,14 @@ TEST_CASE("GpuCompute additive synth matches a CPU reference across workgroup si
 TEST_CASE("GpuCompute additive synth grid-strides past the workgroup cap",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
-    if (const auto why = software_adapter(*compute); !why.empty()) SKIP(why);
+    if (!compute || !compute->initialize_standalone())
+        SKIP(kNoGpu);
+    if (const auto why = software_adapter(*compute); !why.empty())
+        SKIP(why);
 
     constexpr float SR = 48000.0f;
     constexpr double TWO_PI = 6.28318530717958647692;
-    auto cpu_add = [&](const std::vector<float>& parts, uint32_t P, uint32_t s,
-                       float t0) {
+    auto cpu_add = [&](const std::vector<float>& parts, uint32_t P, uint32_t s, float t0) {
         const double t = (static_cast<double>(t0) + s) / SR;
         double acc = 0.0;
         for (uint32_t i = 0; i < P; ++i) {
@@ -867,7 +870,7 @@ TEST_CASE("GpuCompute additive synth grid-strides past the workgroup cap",
         }
         return static_cast<float>(acc);
     };
-    const std::vector<float> parts = {55.0f, 1.0f, 0.0f};  // one partial
+    const std::vector<float> parts = {55.0f, 1.0f, 0.0f}; // one partial
 
     // Grid-stride path (cooperative): a block whose serial dispatch would exceed
     // the 65535 workgroup-per-dimension cap routes to the cooperative kernel,
@@ -996,22 +999,21 @@ TEST_CASE("GpuCompute modal strike matches a CPU reference across workgroup size
     }
 }
 
-
-TEST_CASE("GpuCompute modal strike grid-strides past the workgroup cap",
-          "[render][gpu][compute]") {
+TEST_CASE("GpuCompute modal strike grid-strides past the workgroup cap", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
-    if (const auto why = software_adapter(*compute); !why.empty()) SKIP(why);
+    if (!compute || !compute->initialize_standalone())
+        SKIP(kNoGpu);
+    if (const auto why = software_adapter(*compute); !why.empty())
+        SKIP(why);
 
     constexpr float SR = 48000.0f;
     constexpr double TWO_PI = 6.28318530717958647692;
-    auto cpu_modal = [&](const std::vector<float>& modes, uint32_t M, uint32_t s,
-                         float t0) {
+    auto cpu_modal = [&](const std::vector<float>& modes, uint32_t M, uint32_t s, float t0) {
         const double t = (static_cast<double>(t0) + s) / SR;
         double acc = 0.0;
         for (uint32_t i = 0; i < M; ++i) {
-            const double f = modes[i * 4], a = modes[i * 4 + 1],
-                         d = modes[i * 4 + 2], ph = modes[i * 4 + 3];
+            const double f = modes[i * 4], a = modes[i * 4 + 1], d = modes[i * 4 + 2],
+                         ph = modes[i * 4 + 3];
             acc += a * std::exp(-d * t) * std::sin(TWO_PI * f * t + ph);
         }
         return static_cast<float>(acc);
