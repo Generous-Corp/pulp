@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "purpose": "Clock-only temp keys that remain on purpose, by file. Counts may only shrink: a file with more sites than listed fails as a new clock-only key, and one with fewer fails until its count here is lowered (or its entry deleted at zero).",
+  "sites": {
+    "test/test_cli_timeline.cpp": {
+      "count": 1,
+      "reason": "sequencer-owned path: changing it needs a pending sequencer-exposure row, so it moves to the helper with the next timeline change that carries one"
+    },
+    "test/test_timeline_agent.cpp": {
+      "count": 1,
+      "reason": "sequencer-owned path: changing it needs a pending sequencer-exposure row, so it moves to the helper with the next timeline change that carries one"
+    },
+    "test/test_timeline_cli_offline_render.cpp": {
+      "count": 1,
+      "reason": "sequencer-owned path: changing it needs a pending sequencer-exposure row, so it moves to the helper with the next timeline change that carries one"
+    }
+  }
+}

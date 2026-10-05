@@ -21,7 +21,6 @@
 #include <string>
 #include <system_error>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 #ifndef _WIN32
 #include <sys/wait.h>
@@ -41,8 +40,10 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
 class TempDirectory {
   public:
     TempDirectory() {
-        path_ = pulp::test::make_unique_temp_dir("pulp-cli-timeline");
-        REQUIRE(std::filesystem::is_directory(path_));
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        path_ =
+            std::filesystem::temp_directory_path() / ("pulp-cli-timeline-" + std::to_string(nonce));
+        REQUIRE(std::filesystem::create_directories(path_));
     }
 
     ~TempDirectory() {

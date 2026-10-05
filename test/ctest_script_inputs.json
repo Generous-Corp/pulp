@@ -3729,6 +3729,7 @@
   "clock-only-temp-key-guard-selftest": {
    "entry": "tools/scripts/test_clock_only_temp_key_guard.py",
    "inputs": [
+    "tools/scripts/clock_only_temp_key_guard.json",
     "tools/scripts/clock_only_temp_key_guard.py",
     "tools/scripts/test_clock_only_temp_key_guard.py"
    ],

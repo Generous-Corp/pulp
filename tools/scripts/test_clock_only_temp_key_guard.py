@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -64,19 +65,47 @@ class ScanTests(unittest.TestCase):
             found, seen = guard.scan(Path(td))
             self.assertEqual([(str(p), line) for p, line in found], [("test/test_x.cpp", 3)])
             self.assertEqual(seen, 1)
-            self.assertEqual(guard.main(["--root", td]), 1)
+            self.assertEqual(guard.main(["--root", td, "--ledger", str(Path(td) / "none.json")]), 1)
         fixed = 'auto path = pulp::test::make_unique_temp_dir("x");\nauto t = fs::temp_directory_path();\n'
         with repo({"test/test_x.cpp": fixed}) as td:
-            self.assertEqual(guard.main(["--root", td]), 0)
+            self.assertEqual(guard.main(["--root", td, "--ledger", str(Path(td) / "none.json")]), 0)
 
     def test_no_temp_paths_is_an_instrument_failure_not_a_pass(self) -> None:
         with repo({"test/test_x.cpp": "int main() {}\n"}) as td:
-            self.assertEqual(guard.main(["--root", td]), 2)
+            self.assertEqual(guard.main(["--root", td, "--ledger", str(Path(td) / "none.json")]), 2)
 
     def test_this_checkout_is_clean(self) -> None:
         found, seen = guard.scan(Path(__file__).resolve().parents[2])
         self.assertGreater(seen, 100)
-        self.assertEqual(found, [])
+        self.assertEqual(guard.judge(found, guard.load_ledger(guard.LEDGER)), [])
+
+
+class LedgerTests(unittest.TestCase):
+    def test_every_listed_file_says_why(self) -> None:
+        ledger = Path(__file__).resolve().parents[2] / "tools/scripts/clock_only_temp_key_guard.json"
+        self.assertEqual(ledger, guard.LEDGER)
+        for name, entry in json.loads(ledger.read_text())["sites"].items():
+            with self.subTest(name=name):
+                self.assertGreater(entry["count"], 0)
+                self.assertGreater(len(entry["reason"]), 20)
+
+    def run_with(self, files: dict[str, str], counts: dict[str, int]) -> int:
+        with repo(files) as td:
+            ledger = Path(td) / "ledger.json"
+            ledger.write_text(json.dumps({"schema": 1, "sites": {
+                name: {"count": count, "reason": "r"} for name, count in counts.items()}}))
+            return guard.main(["--root", td, "--ledger", str(ledger)])
+
+    def test_a_listed_site_passes_and_a_new_one_beside_it_fails(self) -> None:
+        self.assertEqual(self.run_with({"test/test_x.cpp": CLOCK_ONLY}, {"test/test_x.cpp": 1}), 0)
+        self.assertEqual(self.run_with({"test/test_x.cpp": CLOCK_ONLY + CLOCK_ONLY},
+                                       {"test/test_x.cpp": 1}), 1)
+        self.assertEqual(self.run_with({"test/test_y.cpp": CLOCK_ONLY},
+                                       {"test/test_x.cpp": 1}), 1)
+
+    def test_a_count_that_shrank_must_be_lowered(self) -> None:
+        fixed = 'auto p = pulp::test::make_unique_temp_dir("x");\nauto t = fs::temp_directory_path();\n'
+        self.assertEqual(self.run_with({"test/test_x.cpp": fixed}, {"test/test_x.cpp": 1}), 1)
 
 
 if __name__ == "__main__":

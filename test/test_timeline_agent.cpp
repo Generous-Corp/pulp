@@ -21,7 +21,6 @@
 #include <string_view>
 #include <system_error>
 #include <vector>
-#include "support/unique_temp_dir.hpp"
 
 using Catch::Matchers::WithinAbs;
 using namespace pulp;
@@ -37,8 +36,10 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
 class TempDirectory {
   public:
     TempDirectory() {
-        path_ = pulp::test::make_unique_temp_dir("pulp-timeline-agent");
-        REQUIRE(std::filesystem::is_directory(path_));
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        path_ = std::filesystem::temp_directory_path() /
+                ("pulp-timeline-agent-" + std::to_string(nonce));
+        REQUIRE(std::filesystem::create_directories(path_));
     }
 
     ~TempDirectory() {
