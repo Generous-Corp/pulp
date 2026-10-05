@@ -80,6 +80,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "scripts"))
 import affected_tests_shadow as ats  # noqa: E402
 import protected_merge_receipt as pmr  # noqa: E402
+from always_run_names import ALWAYS_RUN_NAME_RE  # noqa: E402,F401  (shared with the executable keys)
 
 SCHEMA = "pulp-test-receipts-shadow/v1"
 RECEIPT_SCHEMA = "pulp-test-receipts/v1"
@@ -97,10 +98,10 @@ READ_BUDGET_SECS = 120.0
 POLICY_PATHS = pmr.POLICY_PATHS + (
     "tools/ci/ctest_gate_args.py",
     "tools/ci/test_receipts_shadow.py",
+    "tools/ci/always_run_names.py",
 )
 ALWAYS_RUN_LABELS = frozenset({"pr-fast", "gpu", "gpu-health", "gpu-probe", "host", "lint",
                                "docs", "ci", "drift"})
-ALWAYS_RUN_NAME_RE = re.compile(r"drift|census|registry|sync|guard|lint|inventory|probe", re.I)
 # Tracked files whose content only reaches a compiled test through its own
 # bytes (so the binary hash already covers them), or that nothing reads at
 # run time. Everything else is the runtime surface.

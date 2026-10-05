@@ -496,5 +496,64 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual([p for p in ek.KEY_CODE_PATHS if not (repo / p).is_file()], [])
 
 
+class KeyCodeClosureTests(unittest.TestCase):
+    """The digests that decide when a plan must select everything cover what
+    the key code reads, and nothing else: a file the key code does not import
+    makes every base that moved it look like a policy change."""
+
+    REPO = HERE.parents[1]
+    ENTRY_POINTS = ("tools/ci/executable_keys.py", "tools/ci/executable_selection.py")
+    # Named by the config but not imported by the key code: the adapter that
+    # runs the selection.
+    ADAPTER = ("tools/scripts/run_changed_surface_tests.py",)
+
+    def closure(self) -> set[str]:
+        """Repo-relative Python files the entry points import, transitively,
+        resolved as the scripts resolve them (tools/ci, then tools/scripts)."""
+        import ast
+        seen, todo = set(), list(self.ENTRY_POINTS)
+        while todo:
+            rel = todo.pop()
+            if rel in seen:
+                continue
+            seen.add(rel)
+            for node in ast.walk(ast.parse((self.REPO / rel).read_text(encoding="utf-8"))):
+                names = ([a.name for a in node.names] if isinstance(node, ast.Import) else
+                         [node.module] if isinstance(node, ast.ImportFrom) and node.module and not node.level else [])
+                for name in names:
+                    for root in ("tools/ci", "tools/scripts"):
+                        candidate = f"{root}/{name.split('.')[0]}.py"
+                        if (self.REPO / candidate).is_file():
+                            todo.append(candidate)
+                            break
+        return seen
+
+    def derivation_paths(self) -> list[str]:
+        import tomllib
+        config = tomllib.loads((self.REPO / ".shipyard" / "config.toml").read_text(encoding="utf-8"))
+        return config["targets"]["mac"]["changed_surface_selection"]["executable_reuse"]["derivation_paths"]
+
+    def test_the_closure_reaches_the_shared_name_pattern(self):
+        # Control: an empty or partial closure would pass every check below.
+        closure = self.closure()
+        self.assertIn("tools/ci/always_run_names.py", closure)
+        self.assertIn("tools/scripts/gate_common.py", closure)
+        self.assertGreaterEqual(len(closure), 10)
+
+    def test_the_derivation_paths_are_the_closure_plus_the_adapter(self):
+        python = sorted(p for p in self.derivation_paths() if p.endswith(".py"))
+        self.assertEqual(python, sorted(self.closure() | set(self.ADAPTER)))
+
+    def test_the_key_code_digest_names_only_files_the_key_code_reads(self):
+        closure = self.closure()
+        self.assertEqual([p for p in ek.KEY_CODE_PATHS if p.endswith(".py") and p not in closure], [])
+
+    def test_the_receipts_shadow_is_in_neither(self):
+        # Its edits moved the policy digest on bases that changed nothing the
+        # keys read; the keys use only the name pattern it shares.
+        self.assertNotIn("tools/ci/test_receipts_shadow.py", ek.KEY_CODE_PATHS)
+        self.assertNotIn("tools/ci/test_receipts_shadow.py", self.derivation_paths())
+
+
 if __name__ == "__main__":
     unittest.main()
