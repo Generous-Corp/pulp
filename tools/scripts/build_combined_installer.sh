@@ -243,7 +243,7 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
   fi
   # Contents/lib too: a staged helper's rpath can point outside MacOS/, and an
   # unsigned dylib anywhere in the bundle fails notarization.
-  for _libdir in "$b/Contents/MacOS" "$b/Contents/lib" "$b/Contents/Frameworks"; do
+  for _libdir in "$b/Contents/MacOS" "$b/Contents/lib" "$b/Contents/Frameworks" "$b/Contents/Helpers"; do
     [[ -d "$_libdir" ]] || continue
     find "$_libdir" -name "*.dylib" -print0 2>/dev/null | while IFS= read -r -d '' d; do
       codesign --force --options runtime --timestamp -s "$APP_ID" "$d"; done

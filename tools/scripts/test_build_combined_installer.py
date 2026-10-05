@@ -443,6 +443,7 @@ class CombinedInstallerTest(unittest.TestCase):
                     executable = helper / "Capture Helper"
                     executable.write_text("fixture helper\n")
                     executable.chmod(0o755)
+                    (helper / "libcapture.dylib").write_bytes(b"fixture dylib\n")
                 args.extend(("--app", title, str(bundle)))
                 if title in (scripted_apps or set()):
                     scripts = tmp / f"{title}-scripts"
@@ -688,9 +689,12 @@ class CombinedInstallerTest(unittest.TestCase):
             return hits[0]
 
         helper = index_of("Contents/Helpers/Capture Helper.app/Contents/MacOS/Capture Helper")
+        helper_dylib = index_of("Contents/Helpers/Capture Helper.app/Contents/MacOS/libcapture.dylib")
         app = index_of("Fixture.app")
+        self.assertLess(helper_dylib, app)
         self.assertLess(helper, app)
         self.assertIn("--options runtime --timestamp", lines[helper])
+        self.assertIn("--options runtime --timestamp", lines[helper_dylib])
 
     def test_apps_are_pinned_to_applications_instead_of_relocated(self) -> None:
         xml, relocation = self._run_installer(
