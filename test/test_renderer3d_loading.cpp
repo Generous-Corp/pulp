@@ -168,7 +168,7 @@ TEST_CASE("Renderer3D can request Dawn null backend for API-only probes",
     REQUIRE(result.width == config.width);
     REQUIRE(result.height == config.height);
     REQUIRE_FALSE(result.fallback_adapter_requested);
-    REQUIRE_FALSE(result.success);   // it submitted, but it drew nothing
+    REQUIRE_FALSE(result.success); // it submitted, but it drew nothing
 }
 
 TEST_CASE("Renderer3D renders parsed SceneData offscreen", "[render][scene3d][gpu]") {
