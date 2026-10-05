@@ -2547,6 +2547,18 @@ jobs:
           test -d "$SDK_ARTIFACT_DIR/include/pulp/gpu_audio"
           test -s "$SDK_ARTIFACT_DIR/lib/libpulp-gpu-audio.a"
           source_sha="$(git rev-parse HEAD)"
+          # cmake --install copies the SDK payload but deliberately does not
+          # mint distribution provenance. Stamp the exact release contract
+          # before archiving so downstream consumers fail closed on malformed
+          # or unmarked SDKs instead of discovering the problem at configure
+          # time.
+          python3 tools/scripts/sdk_provenance.py stamp \
+            --prefix "$SDK_ARTIFACT_DIR" \
+            --build-dir "$PULP_BUILD_DIR" \
+            --source-dir "$GITHUB_WORKSPACE" \
+            --release-tag "v$(tr -d '[:space:]' < "$SDK_ARTIFACT_DIR/version.txt")" \
+            --source-sha "$source_sha" \
+            --platform darwin-arm64
           python3 - "$SDK_ARTIFACT_DIR" "$SDK_ARTIFACT_RECEIPT" "$source_sha" <<'PY'
           import hashlib
           import json
