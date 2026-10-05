@@ -329,6 +329,19 @@ TEST_CASE("minimum lead proxy is noncopyable and enforces one-block policy") {
     e.observe(sample(0));
     CHECK_FALSE(e.finish().admission_valid);
 }
+
+TEST_CASE("minimum lead proxy keeps bounded ID storage off the stack") {
+    CHECK(sizeof(MinimumLeadProxyEvaluator) < 4096);
+    MinimumLeadProxyEvaluator first(admission());
+    MinimumLeadProxyEvaluator second(admission());
+    MinimumLeadProxyEvaluator third(admission());
+    first.observe(sample(0));
+    second.observe(sample(0));
+    third.observe(sample(0));
+    CHECK(first.finish().id_storage_overflow == 0);
+    CHECK(second.finish().id_storage_overflow == 0);
+    CHECK(third.finish().id_storage_overflow == 0);
+}
 TEST_CASE("minimum lead proxy requires authoritative matrix and denominator") {
     auto a = admission();
     a.validated_cell_denominator = 99999;

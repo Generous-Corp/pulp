@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <new>
 
 namespace pulp::gpu_audio::detail {
 
@@ -140,7 +142,8 @@ class MinimumLeadProxyEvaluator {
     // synchronized handoff; it is never an audio-callback object.
 
     explicit MinimumLeadProxyEvaluator(const MinimumLeadProxyAdmission& admission) noexcept
-        : admission_(admission) {}
+        : admission_(admission),
+          id_storage_(new (std::nothrow) std::uint64_t[bounded_id_capacity * 3]()) {}
 
     MinimumLeadProxyEvaluator(const MinimumLeadProxyEvaluator&) = delete;
     MinimumLeadProxyEvaluator& operator=(const MinimumLeadProxyEvaluator&) = delete;
@@ -170,10 +173,11 @@ class MinimumLeadProxyEvaluator {
         if (!ids || !s.terminal_present || !s.delivery_present || s.generation == 0 ||
             s.sequence == std::numeric_limits<std::uint64_t>::max())
             saturating_increment(receipt_.missing_evidence);
-        const auto admission_result =
-            insert_id(admission_ids_, s.admission_id, 0x9e3779b97f4a7c15ULL);
-        const auto terminal_result = insert_id(terminal_ids_, s.terminal_id, 0xc2b2ae3d27d4eb4fULL);
-        const auto delivery_result = insert_id(delivery_ids_, s.delivery_id, 0x165667b19e3779f9ULL);
+        const auto admission_result = insert_id(id_table(0), s.admission_id, 0x9e3779b97f4a7c15ULL);
+        const auto terminal_result =
+            insert_id(id_table(bounded_id_capacity), s.terminal_id, 0xc2b2ae3d27d4eb4fULL);
+        const auto delivery_result =
+            insert_id(id_table(bounded_id_capacity * 2), s.delivery_id, 0x165667b19e3779f9ULL);
         const auto results = {admission_result, terminal_result, delivery_result};
         for (const auto result : results) {
             if (result == IdInsertResult::duplicate)
@@ -299,9 +303,7 @@ class MinimumLeadProxyEvaluator {
     std::uint64_t expected_generation_ = 0;
     std::uint64_t next_sequence_ = 0;
     bool seen_sequence_ = false;
-    std::array<std::uint64_t, bounded_id_capacity> admission_ids_{};
-    std::array<std::uint64_t, bounded_id_capacity> terminal_ids_{};
-    std::array<std::uint64_t, bounded_id_capacity> delivery_ids_{};
+    std::unique_ptr<std::uint64_t[]> id_storage_;
 
     static bool checked_add(std::uint64_t a, std::uint64_t b, std::uint64_t& out) noexcept {
         if (b > std::numeric_limits<std::uint64_t>::max() - a)
@@ -320,8 +322,14 @@ class MinimumLeadProxyEvaluator {
         return static_cast<std::uint64_t>(admission_.sample_rate) * 1000u + admission_.block_size;
     }
 
-    static IdInsertResult insert_id(std::array<std::uint64_t, bounded_id_capacity>& table,
-                                    std::uint64_t id, std::uint64_t salt) noexcept {
+    std::uint64_t* id_table(std::size_t offset) const noexcept {
+        return id_storage_ ? id_storage_.get() + offset : nullptr;
+    }
+
+    static IdInsertResult insert_id(std::uint64_t* table, std::uint64_t id,
+                                    std::uint64_t salt) noexcept {
+        if (table == nullptr)
+            return IdInsertResult::overflow;
         if (id == 0)
             return IdInsertResult::duplicate;
         auto hash = id ^ salt;
