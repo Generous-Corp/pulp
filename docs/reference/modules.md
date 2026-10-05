@@ -954,6 +954,7 @@ a working convolution and would hide the bug. Assert
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | Diffusion Network | `diffusion_network.hpp` | Fixed-capacity wet-only true-stereo Schroeder cascade with transactional configuration, deterministic decorrelation, and an energy-preserving width matrix |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
+| Tempo Delay Wrapper | `tempo_delay_wrapper.hpp` | Prepared wet-only stereo tempo delay with owned fractional history, bounded feedback/crossfeed, transactional BeatDivision targets, and fixed-read-head retiming |
 | [Reverse Buffer](reverse-buffer.md) | `reverse_buffer.hpp` | Prepared fixed-capacity streaming window reversal with transactional configuration, explicit raw or raised-cosine boundaries, hard-bypass state, startup latency, and finite tail |
 | [Early Reflections](early-reflections.md) | `early_reflections.hpp` | Fixed-capacity true-stereo caller-authored taps with fractional timing, equal-power pan/width routing, transactional publication, and explicit peak-normalized or raw headroom |
 | Beat Repeat Kernel | `beat_repeat_kernel.hpp` | Zero-latency tempo-map-quantized capture of exact recent dry history with bounded repeat, gate, forward/reverse/alternate playback, direct `trigger`/`stop`/`seek` gesture controls, and click-safe transitions. Pitch is not included: it remains gated on an interpolated immutable-span reader that does not duplicate the capture buffer. |
@@ -2374,6 +2375,8 @@ plug-ins, wire them into a DAG, and process audio through the chain.
 | Scanner | `pulp/host/scanner.hpp` | Walk system plug-in paths; return `PluginInfo` |
 | PluginSlot | `pulp/host/plugin_slot.hpp` | Uniform load/prepare/process interface over every format |
 | SignalGraph | `pulp/host/signal_graph.hpp` | DAG topology, retained in-process `ProcessorNodeInstance` insertion, and topological sort |
+| Custom-node descriptor registry | `pulp/host/custom_node_type.hpp` | Versioned custom-node identity, lifecycle/callback admission, deterministic metadata enumeration, and graph reachability. See [DSPX-01 descriptor contract](../guides/dspx01-descriptor-registry.md) |
+| Sample-region proof | `pulp/host/sample_region_proof.hpp` | Typed bounded resource proof and hostile parser-shape refusal for sample-region descriptors. See [sample-granular graphs](../guides/sample-granular-graphs.md) |
 | Custom-node diagnostics | `pulp/host/custom_node_diagnostics.hpp` | Bounded owned reports from an actual graph instance, qualified by graph generation and serialized against lifecycle changes. See [query contract](../guides/custom-node-diagnostics.md) |
 | Bake | `pulp/host/baked_graph_processor.hpp` | Freeze a lowerable `SignalGraph` into an optimized `BakedGraphProcessor` (bit-identical to the live graph). `bake()` is the in-process (trusted) path |
 | Baked codec | `pulp/host/baked_codec.hpp` | Signed on-disk `.pulpbake` artifact: `write_baked_signed` + verify-before-parse `load_baked` (Ed25519 trust-set, bounded parse). See [signal-graph](signal-graph.md#baking-a-graph-to-a-shippable-artifact) |

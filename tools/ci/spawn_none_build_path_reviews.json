@@ -1,0 +1,7 @@
+{
+  "schema": "pulp-spawn-none-build-path-reviews/v1",
+  "reason": "pulp_test_spawns(<test> NONE) reviews whose sources name a build path (a build-directory or binary environment variable, or a directory walk beside a build path); each is confirmed by the test's owner with why that path never holds an artifact this tree builds",
+  "reviews": {
+    "pulp-test-cli-mac-runtime-validators": "every case builds its MacValidatorEnv from StubEnv::build (test/test_cli_mac_runtime_validators.cpp:32-49), which injects find_executable and run_capture, and the test never calls make_default_env, so default_find_executable's PATH walk (tools/cli/mac_runtime_validators.cpp:63) is never reached"
+  }
+}

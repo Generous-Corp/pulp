@@ -2218,9 +2218,13 @@ fails when a definition names `$<TARGET_FILE:x>` without an edge to x.
 include, comments stripped, for process API calls and for runtime loads
 (`PluginSlot::load`, the CLAP bundle scanner, `dlopen` and its shim,
 `LoadLibrary`, `CFBundle`). One with no edge and no reviewed
-`pulp_test_spawns(<test> NONE)` (it starts only system tools, a fork of
+`pulp_test_spawns(<test> NONE REASON "<why>")` (it starts only system tools, a fork of
 itself, or an in-process plugin) is `spawns: undeclared`, and the shadow
-never skips it. Pass a built artifact's path in from
+never skips it. The REASON is required at configure time and must state a
+claim; a NONE test that reads a build-path environment variable or walks a
+build directory also needs a review in `tools/ci/spawn_none_build_path_reviews.json`.
+A public function that reaches a loader must itself be in `LOAD_APIS` or in
+`tools/ci/load_api_exemptions.json` with the mechanism that covers it. Pass a built artifact's path in from
 CMake (`$<TARGET_FILE:x>`, or the bundle path beside its edge); never find it
 by a path relative to the working directory. pulp-test-host's PulpSynth case
 did that and silently skipped for its whole life. The scan cannot see a
@@ -4024,6 +4028,22 @@ macOS dominates *cost* (it bills at ~10x Linux per minute), Windows dominates
 *occupancy*. Moving Windows off the per-merge path buys queue throughput, not a
 smaller invoice — and the macOS gate is the thing to protect, precisely because
 it is both the expensive lane and the only required one.
+
+**The nightly is the only Windows ctest lane, and until it built in parallel it
+never got there.** All 140 runs from 2026-05-21 to 2026-10-04 ended cancelled or
+failed; the Windows job never succeeded. The Build steps passed no parallel level,
+so the default generators built serially (Makefiles `make -j1`; Visual Studio
+MSBuild one project at a time) and hit `timeout-minutes` inside Build every night.
+The fix is a literal `--parallel 4` on those hosted 4-core legs, the same as
+`build.yml`'s hosted Windows leg. Read a cancelled nightly from the check-run
+annotations ("The job has exceeded the maximum execution time"), not by grepping
+the log, which also matches the workflow's own comments about `timeout-minutes`.
+On a PR the `windows` check is an Ubuntu aggregate that compiles and tests nothing
+on Windows (see `docs/guides/test-lanes.md`). The nightly's Windows Test step runs
+after a Build that finished with errors, not only after a clean one: MSBuild keeps
+building the other projects, so the targets that built are tested and the broken
+ones read "Not Run". The job stays red because Build failed; do not read a Windows
+ctest summary in a red nightly as a green build.
 
 Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
 and its `tracking-issues` job find-or-creates a per-platform issue on failure,
@@ -11610,3 +11630,15 @@ Two rules follow, and they generalise past this step:
 When adding any step to a required gate, ask whether it can fail because a
 service outside this fleet is down. If it can, you have handed the merge queue
 to someone else's uptime.
+
+## An unbounded network call in the required gate is a defect on sight
+
+A step that waits on the network with no timeout turns one stalled connection into a
+red required gate with nothing built: `hydrate_gpu_provenance_commits.py`'s
+`git fetch --unshallow` once held the `macos` gate for 43 minutes with no output
+(1 of 766 runs). Bound the call itself (that script now shares a 300 s budget across
+its fetches and then lets its fail-closed checks decide) and give the step a
+`timeout-minutes` above that budget. When measuring how often a step hangs, query
+jobs with `filter=all`: the jobs API defaults to the latest attempt, which hides the
+cancelled attempt you are looking for.
+

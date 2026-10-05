@@ -2,6 +2,9 @@
 
 #include "streaming_model.hpp"
 
+#include <cstdint>
+#include <limits>
+
 namespace pulp::gpu_audio::detail {
 
 /// Bridge for a stateful single-channel causal-convolution kernel supplied by a
@@ -27,8 +30,11 @@ class NamTcnStreamingAdapter final : public StreamingModel {
     }
 
     bool prepare(const StreamingPrepareContext& context) noexcept override {
-        prepared_ = false;
-        max_frames_ = 0;
+        // A live instance owns the kernel state.  Validation or a replacement
+        // attempt must never tear down that state implicitly; the owner must
+        // quiesce and release it before preparing a new configuration.
+        if (prepared_ || cleanup_required_)
+            return false;
         if (spec_.input_channels != 1 || spec_.output_channels != 1 ||
             !valid_streaming_prepare_context(context) || context.spec != &spec_ ||
             kernel_.state == nullptr || kernel_.prepare == nullptr || kernel_.process == nullptr ||
@@ -36,18 +42,23 @@ class NamTcnStreamingAdapter final : public StreamingModel {
             return false;
         }
 
-        if (!kernel_.prepare(kernel_.state, context))
+        if (!kernel_.prepare(kernel_.state, context)) {
+            // A failed preparation may have reserved partial state. Release is
+            // idempotent by contract so the next transaction can retry.
+            cleanup_required_ = !kernel_.release(kernel_.state);
             return false;
+        }
 
         max_frames_ = context.max_frames;
         prepared_ = true;
-        return prepared_;
+        return true;
     }
 
     void process_cpu(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
                      std::uint32_t frames, StreamingBlockStamp) noexcept override {
         if (!prepared_ || input.num_channels() != 1 || output.num_channels() != 1 ||
-            frames > max_frames_ || input.num_samples() < frames || output.num_samples() < frames) {
+            frames > max_frames_ || input.num_samples() < frames || output.num_samples() < frames ||
+            buffers_overlap(input.channel_ptr(0), output.channel_ptr(0), frames)) {
             output.clear();
             return;
         }
@@ -59,24 +70,43 @@ class NamTcnStreamingAdapter final : public StreamingModel {
     }
 
     void reset(std::uint64_t, StreamingResetReason) noexcept override {
-        if (kernel_.reset != nullptr)
+        if (prepared_ && kernel_.reset != nullptr)
             kernel_.reset(kernel_.state);
     }
 
     bool release() noexcept override {
+        if (!prepared_ && !cleanup_required_)
+            return true;
         if (kernel_.release == nullptr)
             return false;
-        const bool released = kernel_.release(kernel_.state);
-        if (released)
-            prepared_ = false;
-        return released;
+        if (!kernel_.release(kernel_.state))
+            return false;
+        prepared_ = false;
+        max_frames_ = 0;
+        cleanup_required_ = false;
+        return true;
     }
 
   private:
+    static bool buffers_overlap(const float* input, float* output, std::uint32_t frames) noexcept {
+        if (frames == 0)
+            return false;
+        const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+        const auto input_begin = reinterpret_cast<std::uintptr_t>(input);
+        const auto output_begin = reinterpret_cast<std::uintptr_t>(output);
+        const auto max_address = std::numeric_limits<std::uintptr_t>::max();
+        if (bytes > max_address - input_begin || bytes > max_address - output_begin)
+            return true;
+        const auto input_end = input_begin + bytes;
+        const auto output_end = output_begin + bytes;
+        return input_begin < output_end && output_begin < input_end;
+    }
+
     StreamingModelSpec spec_;
     NamTcnCpuKernel kernel_;
     std::uint32_t max_frames_ = 0;
     bool prepared_ = false;
+    bool cleanup_required_ = false;
 };
 
 } // namespace pulp::gpu_audio::detail

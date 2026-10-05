@@ -28,6 +28,13 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    # Private MLX validation stays tools-only/default-off. Register the test so
+    # the repository-wide test-registration guard and generated script-input
+    # manifest observe the harness on every configured platform. The test
+    # skips its optional MLX parity case when MLX is unavailable.
+    add_test(NAME mlx-named-model-harness-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")

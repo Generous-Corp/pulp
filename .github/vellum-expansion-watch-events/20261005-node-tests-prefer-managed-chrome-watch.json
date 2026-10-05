@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-node-tests-prefer-managed-chrome-watch",
+  "created_at": "2026-10-05T08:23:53Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Test-only browser selection for the Node capture suites: on a developer host they now prefer the pinned Chrome for Testing installed by pulp tool install chrome-for-testing over a mutable system Chrome, mirroring the C++ managed-browser rules. The CI rule (only PULP_DESIGN_BROWSER under GitHub Actions) is unchanged, and no capture, DesignIR, rendering or packaging code changes.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/capture.integration.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

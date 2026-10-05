@@ -8,11 +8,12 @@
 #include <windows.h>
 #else
 #include <cerrno>
-#include <pthread.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/stat.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -268,6 +269,43 @@ bool wait_for_fifo_writer(int& fd, const std::string& path,
     return false;
 }
 
+// Whether bytes are waiting in a FIFO's read end. A hangup without data is
+// not evidence that a client connected: one that died before writing never
+// did, and a FIFO's hangup state is not a reliable signal on every platform.
+bool fifo_has_data(int fd) {
+    int pending = 0;
+    return ::ioctl(fd, FIONREAD, &pending) == 0 && pending > 0;
+}
+
+// Open the reply FIFO's write end once a client reads it, as
+// wait_for_fifo_writer() does, unless the client has already written to the
+// public FIFO (`read_fd`) and gone: then its reply reader may be closed
+// before the next poll, and `half_open` is set with `fd` left at -1.
+bool wait_for_client(int& fd, bool& half_open, const std::string& reply_path, int read_fd,
+                     const std::atomic<bool>& closing) {
+    half_open = false;
+    while (!closing.load()) {
+        fd = ::open(reply_path.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) {
+            if (set_no_sigpipe(fd))
+                return true;
+            close_fd(fd);
+            fd = -1;
+            return false;
+        }
+        if (errno == EINTR)
+            continue;
+        if (errno != ENXIO)
+            return false;
+        if (fifo_has_data(read_fd)) {
+            half_open = true;
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
 ssize_t write_no_sigpipe(int fd, const uint8_t* data, size_t length) {
     sigset_t set;
     sigemptyset(&set);
@@ -347,13 +385,17 @@ bool NamedPipe::create_server(std::string_view name) {
     // server reads the public FIFO and writes the reply FIFO; the client uses
     // the opposite direction. The reply writer is opened with retries so
     // create_server() blocks until a client has opened its read side, while
-    // close() can still cancel the wait.
+    // close() can still cancel the wait. A client that wrote to the public
+    // FIFO and exited before a retry saw its reply reader still connected:
+    // the server accepts it half-open, with no write end, so its buffered
+    // messages are delivered and its exit reads as an ordinary disconnect.
     int read_fd = ::open(name_.c_str(), O_RDONLY | O_NONBLOCK);
     int write_fd = -1;
+    bool half_open = false;
     if (read_fd < 0 || !set_close_on_exec(read_fd) ||
-        !wait_for_fifo_writer(write_fd, write_name_, closing_) ||
-        !set_close_on_exec(write_fd) ||
-        !set_nonblocking(read_fd) || !set_nonblocking(write_fd)) {
+        !wait_for_client(write_fd, half_open, write_name_, read_fd, closing_) ||
+        (!half_open && !set_close_on_exec(write_fd)) || !set_nonblocking(read_fd) ||
+        (!half_open && !set_nonblocking(write_fd))) {
         close_fd(read_fd);
         close_fd(write_fd);
         cleanup_created_fifos();

@@ -921,6 +921,8 @@ def launch(patch):
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def _main(argv, resources: contextlib.ExitStack):
+    import prompt_handoff
+    argv = prompt_handoff.resolve(argv, 1)
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("prompt", help="what the module should do")

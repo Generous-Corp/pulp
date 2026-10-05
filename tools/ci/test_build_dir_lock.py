@@ -41,7 +41,7 @@ class BuildDirLockTest(unittest.TestCase):
             child = (
                 "import pathlib,sys,time; "
                 "p=pathlib.Path(sys.argv[1]); tag=sys.argv[2]; "
-                "p.open('a').write(tag+'-start\\n'); time.sleep(0.2); "
+                "p.open('a').write(tag+'-start\\n'); time.sleep(0.5); "
                 "p.open('a').write(tag+'-end\\n')"
             )
             wrapper = Path(build_dir_lock.__file__).resolve()
@@ -60,10 +60,20 @@ class BuildDirLockTest(unittest.TestCase):
                 ]
             with self.lock_root(lock_root):
                 first = subprocess.Popen(command("first"))
-                time.sleep(0.05)
+                # Spawn the contender only once the first holder is inside
+                # the lock. A fixed head start loses to interpreter start-up
+                # on a loaded runner, which lets the second process win the
+                # lock and makes a correct serialisation read as a failure.
+                deadline = time.monotonic() + 10
+                while "first-start" not in (
+                    events.read_text(encoding="utf-8") if events.exists() else ""
+                ):
+                    self.assertIsNone(first.poll(), "first holder exited early")
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.01)
                 second = subprocess.Popen(command("second"))
-                self.assertEqual(first.wait(timeout=5), 0)
-                self.assertEqual(second.wait(timeout=5), 0)
+                self.assertEqual(first.wait(timeout=10), 0)
+                self.assertEqual(second.wait(timeout=10), 0)
             self.assertEqual(
                 events.read_text(encoding="utf-8").splitlines(),
                 ["first-start", "first-end", "second-start", "second-end"],

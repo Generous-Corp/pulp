@@ -14,7 +14,7 @@
 pulp_add_test_group(pulp-test-group-sampler-audio LIBRARIES pulp::audio)
 pulp_add_test_group(pulp-test-group-sampler-host-graph
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::runtime
-              pulp::signal pulp::state)
+              pulp::signal pulp::state pulp::audio-analysis)
 pulp_add_test_group(pulp-test-group-sampler-format LIBRARIES pulp::format)
 pulp_add_test_group(pulp-test-group-sampler-timebase LIBRARIES pulp::timebase)
 pulp_add_test_group(pulp-test-group-sampler-graph-runtime LIBRARIES pulp::graph)
@@ -511,3 +511,7 @@ pulp_add_test_suite(pulp-test-processor-node-adapter
 pulp_add_test_suite(pulp-test-generated-dsp-graph-parity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_generated_dsp_graph_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# DSPX-03 retained-history policy: exact-key adoption, clear, reseed, and refusal.
+pulp_add_test_suite(pulp-test-retained-history-dspx03 GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_retained_history_dspx03.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::audio-analysis)

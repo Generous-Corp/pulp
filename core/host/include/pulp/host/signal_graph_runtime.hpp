@@ -293,6 +293,12 @@ public:
                                        float smoothing_ms = 0.0f,
                                        AutomationMix mix = AutomationMix::Replace);
 
+    /// Remove one automation or audio-rate modulation edge by its typed target.
+    /// The route kind is part of the identity so sparse and dense edges cannot
+    /// be confused by a control operation.
+    bool disconnect_modulation(NodeId src, PortIndex src_audio_port, NodeId dest,
+                               uint32_t dest_param_id, bool audio_rate);
+
     // Project an accepted graph audio-rate modulation edge into the typed
     // modulation-lane contract used by instruments, adapters, and generated
     // graphs. Returns false for non-modulation edges or unresolved metadata.

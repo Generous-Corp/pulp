@@ -6,6 +6,14 @@
 
 namespace pulp::gpu_audio::detail {
 
+namespace {
+std::uint64_t monotonic_now_ns() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+} // namespace
+
 bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config& config) {
     return prepare(provider, config, {});
 }
@@ -25,12 +33,18 @@ bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config&
     pending_.assign(config.slots, {});
     completions_.assign(static_cast<std::size_t>(config.slots) * 2 + 1, {});
     completion_read_ = completion_write_ = 0;
+    predictor_.reset();
     telemetry_ = {};
+    telemetry_.prediction_enabled = predictor_.config().enabled;
     return true;
 }
 
 std::optional<SharedIoArena::WriteLease>
 SharedIoComputePlan::acquire_input(std::uint64_t sequence, std::uint64_t deadline_ns) noexcept {
+    if (deadline_ns != 0 && !predictor_.admit(monotonic_now_ns(), deadline_ns)) {
+        ++telemetry_.prediction_refusals;
+        return std::nullopt;
+    }
     auto lease = arena_.grant_write(sequence);
     if (!lease)
         return std::nullopt;
@@ -59,6 +73,7 @@ bool SharedIoComputePlan::submit(const SubmitToken& token) noexcept {
         return false;
     }
     const auto started = std::chrono::steady_clock::now();
+    pending_[token.slot.slot].token.submitted_ns = monotonic_now_ns();
     if (!arena_.submit(token.slot)) {
         pending_[token.slot.slot].active = false;
         return false;
@@ -86,7 +101,9 @@ bool SharedIoComputePlan::reprime_when_quiescent() noexcept {
         return false;
     std::fill(pending_.begin(), pending_.end(), Pending{});
     completion_read_ = completion_write_ = 0;
+    predictor_.reset();
     telemetry_ = {};
+    telemetry_.prediction_enabled = predictor_.config().enabled;
     return true;
 }
 
@@ -102,6 +119,16 @@ void SharedIoComputePlan::record_terminal(const SharedIoSlotLedger::SlotToken& t
         return;
     const auto pending = pending_[token.slot].token;
     pending_[token.slot].active = false;
+    // Calibrate admission only from successful terminal work. Failed/device
+    // lost submissions have no stable execution-time meaning; their lifecycle
+    // receipts remain authoritative, but they must not bias the predictor.
+    if (status == SharedIoArena::CompletionStatus::RetiredSuccess && pending.submitted_ns != 0) {
+        const auto completed_ns = monotonic_now_ns();
+        if (completed_ns >= pending.submitted_ns) {
+            predictor_.observe(completed_ns - pending.submitted_ns);
+            telemetry_.prediction_samples = predictor_.estimate().samples;
+        }
+    }
     const auto next = (completion_write_ + 1) % completions_.size();
     if (next == completion_read_) {
         ++telemetry_.misses;

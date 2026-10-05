@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <compare>
 #include <cstdint>
 #include <limits>
 #include <type_traits>
@@ -89,8 +90,11 @@ TEST_CASE("Loop regions order, not merely compare", "[timebase]") {
     static_assert(earlier < later);
     static_assert(earlier <= earlier);
     REQUIRE(earlier < later);
-    REQUIRE((earlier <=> later) < 0);
-    REQUIRE((earlier <=> earlier) == 0);
+    // std::is_lt / std::is_eq rather than `(a <=> b) < 0`: Catch2 hands the
+    // literal 0 on as an int, and MSVC's ordering operators accept only a
+    // compile-time literal zero (C7595).
+    REQUIRE(std::is_lt(earlier <=> later));
+    REQUIRE(std::is_eq(earlier <=> earlier));
 
     // Disabled sorts before enabled at the same bounds, which is the field
     // order the transport already relied on to detect a loop change.
