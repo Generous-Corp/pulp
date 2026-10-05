@@ -182,6 +182,14 @@ def confirmation_fixture() -> list[dict]:
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_row_gate_rejects_max_inflight_beyond_lead_adjusted_capacity(self) -> None:
+        records = fixture()
+        records[0]["row"].update(queue_capacity=4, max_inflight=3,
+                                  thermal_state="unavailable",
+                                  workgroup_requested=False, workgroup_joined=False)
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("row.max_inflight exceeds available queue depth" in error for error in errors))
+
     def test_valid_fixture_and_summary(self) -> None:
         records = fixture()
         self.assertEqual(MODULE.validate_records(records), [])

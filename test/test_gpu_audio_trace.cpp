@@ -1214,6 +1214,9 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     context.watchdog_ns = 2000;
     context.transfer_counters_direct = context.timing_provenance_direct = true;
     REQUIRE(valid_gpu_convolver_trial_context(context));
+    context.max_inflight = 3;
+    REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
+    context.max_inflight = 2;
     context.thermal_state = static_cast<GpuConvolverThermalState>(255);
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
 }

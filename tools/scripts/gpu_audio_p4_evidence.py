@@ -622,6 +622,11 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             if (isinstance(row.get("queue_capacity"), int) and isinstance(row.get("lead_blocks"), int)
                     and row["queue_capacity"] <= row["lead_blocks"]):
                 errors.append("line 1: row.queue_capacity must exceed row.lead_blocks")
+            if (isinstance(row.get("max_inflight"), int)
+                    and isinstance(row.get("queue_capacity"), int)
+                    and isinstance(row.get("lead_blocks"), int)
+                    and row["max_inflight"] > row["queue_capacity"] - row["lead_blocks"]):
+                errors.append("line 1: row.max_inflight exceeds available queue depth")
             if row.get("thermal_state") not in {"unavailable", "nominal", "warm", "throttled"}:
                 errors.append("line 1: row.thermal_state is invalid")
             if not isinstance(row.get("workgroup_requested"), bool) or not isinstance(row.get("workgroup_joined"), bool):
