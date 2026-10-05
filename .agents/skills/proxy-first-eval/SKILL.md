@@ -66,6 +66,26 @@ A listening impression is a pointer to where to measure, not a verdict. See
 the `audio-harness` skill for the lanes and the window-floor traps (Hann cannot
 see −100 dBc; the default `OversamplerT` kind has ~7 dB alias rejection).
 
+### Realtime GPU audio
+
+| Change targets | Proxy | Source |
+|---|---|---|
+| Lower transport latency | **minimum lead blocks** meeting the delivery target; report intrinsic processor latency and transport lead separately | authenticated `gpu.audio.session` plus terminal/delivery records, grouped by block size and sample rate |
+| Batching or graph-wide scheduling | GPU delivery rate, batch/microbatch size, queue depth, and callback deadline tail at each lead | exact model/provider/engine/generation/sequence receipt rows |
+| Execution-time prediction | prediction error and calibrated deadline margin (p50/p95/p99/max), plus the lead selected from that margin | predictor version/calibration and predicted-vs-observed timing fields in the same receipt |
+| CPU fallback quality | fallback rate, late/drop/miss count, callback p99.9/max, and CPU-oracle null residual | terminal disposition, delivery disposition, callback timing, and matched CPU-only control |
+
+For a lead-reduction claim, the verdict is the smallest lead that meets the
+declared GPU-delivery target (normally at least 99% over a complete campaign)
+while preserving zero callback deadline misses through the exact CPU fallback
+contract. A faster kernel or lower wall time does not establish that verdict.
+Run the same workload at each `slots × lead × batch` cell, with a CPU-only
+control and planted saturation/late/drop controls on the same instrument. Keep
+provider, executable, model, host, Release build, sample rate, block size,
+contention state, and trial length fixed; retain raw records and state `n` per
+cell. Do not infer a TCN, LSTM, compact-SSM, or Mamba result from a WaveNet
+receipt.
+
 ### Render / import fidelity
 
 | Change targets | Proxy | Tool |
@@ -131,6 +151,17 @@ n:           <before n> / <after n>   (insufficient sample if < ...)
 Controls:    <positive control for each zero, with its count>
 Verdict:     better | worse | no change | insufficient sample
 Context:     wall time <before -> after>, load-dependent, not the verdict
+```
+
+For a GPU-audio campaign, append:
+
+```
+Workload:    <model family/id/hash, provider/source/executable identities>
+Geometry:    <sample rate, block size, slots, requested lead, batch size>
+Latency:     intrinsic <samples> + transport lead <blocks> = reported <samples>
+Prediction:  <version/calibration>, predicted vs observed p50/p95/p99/max, margin
+Delivery:    GPU <count/rate>, CPU fallback <count/rate>, late/drop/miss <counts>
+Control:     CPU-only + positive saturation/late/drop controls; n per cell
 ```
 
 ## Tools

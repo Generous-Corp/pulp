@@ -14,6 +14,31 @@ only after a quiescent drain/reprime. It is not live-recovery support.
 `gpu.audio.counters` has separate admission counts and aggregate counts for
 terminal, eligible, delivery, and recovery records, including queue losses.
 
+Expanded scheduling receipts may also carry `batch_id`, `microbatch_size`,
+`model_family`, `model_hash`, `provider_id`, `provider_source_hash`,
+`provider_executable_hash`, `predicted_ns`, `deadline_margin_ns`,
+`predictor_version`, and `predictor_calibration`. These are nullable for
+historical schema-2 captures. A campaign that claims batching, model-family
+support, provider authenticity, or prediction quality must fail closed when
+the corresponding identity group is absent or only partially present; it must
+not coerce missing values to zero or infer them from a generic engine name.
+Opt into those checks on the session row with `claim_batching`,
+`claim_model_identity`, `claim_provider_identity`, or `claim_prediction`; the
+SQL emits an explicit `missing_*` issue for a claimed but absent group while
+leaving historical rows with no claim flags compatible. `deadline_margin_ns` is
+a signed value, so negative slack is valid; only a NULL value means it was not
+emitted.
+Bind all fields to the same `(upid, engine_id, generation, sequence)` identity
+and retain the raw trace plus source/executable/model hashes.
+
+For lead-reduction work, compare complete `slots × lead × batch` cells on the
+same Release host and workload. Report intrinsic model latency separately from
+transport lead. Prediction error and deadline margin are CPU-clock scheduling
+evidence; they are not GPU execution time unless an authenticated GPU timer is
+available. A minimum-lead claim requires a CPU-only control and positive
+saturation/late/drop controls, with GPU delivery and exact CPU-fallback
+dispositions counted independently.
+
 Use the checked-in `pulp_gpu_audio_blocks.sql` views. Its joined block view
 reconciles actual observations by stable process `upid` and exact
 `(engine_id, generation, sequence)`; it does not synthesize terminal decisions.
