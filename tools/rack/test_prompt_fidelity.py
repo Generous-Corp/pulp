@@ -21,9 +21,11 @@ The "inconsistently" was two effects at once, both content-dependent:
     200 and the 120 used elsewhere in the same file.
 
 So this file measures three things, and NONE of them by reading source and
-hoping. The two transit boundaries are driven end to end with real processes,
-and the display helper is EXTRACTED FROM THE SHIPPING SOURCE at test time and
-compiled -- there is no copy of it here to drift out of date.
+hoping. The two transit boundaries this repository owns -- the hand-off file
+into the generator, and the generator into the model -- are driven end to end
+with real processes, and the display helper is EXTRACTED FROM THE SHIPPING
+SOURCE at test time and compiled -- there is no copy of it here to drift out of
+date.
 """
 
 from __future__ import annotations
@@ -37,7 +39,6 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 SHELL_SRC = os.path.join(ROOT, "forge-seam", "modular", "modular_shell.cpp")
-ENGINE_SRC = os.path.join(ROOT, "forge-seam", "modular", "process_engine.cpp")
 
 sys.path.insert(0, HERE)
 
@@ -73,9 +74,7 @@ def compile_probe(body: str, main: str, out: str) -> str | None:
     src = out + ".cpp"
     with open(src, "w", encoding="utf-8") as f:
         f.write("#include <cstdio>\n#include <cstdlib>\n#include <cstddef>\n"
-                "#include <cerrno>\n#include <cstring>\n#include <filesystem>\n"
-                "#include <fstream>\n#include <sstream>\n#include <string>\n"
-                "#include <fcntl.h>\n#include <unistd.h>\n\n")
+                "#include <fstream>\n#include <sstream>\n#include <string>\n\n")
         f.write(body + "\n\n" + main + "\n")
     r = subprocess.run(["clang++", "-std=c++20", "-O1", "-o", out, src],
                        capture_output=True, text=True)
@@ -85,7 +84,14 @@ def compile_probe(body: str, main: str, out: str) -> str | None:
     return out
 
 
-# ── boundary 1: what a person typed -> the generator's argv ─────────────────
+# ── boundary 1: the hand-off file -> the generator's argv ────────────────────
+#
+# The app writes the prompt to a file and starts the generator with
+# `--prompt-file PATH` in the prompt's place; an argument of its own would hit
+# Linux's 128 KiB per-argument limit and macOS's 1 MiB argv limit. The app half,
+# ProcessEngine, ships in the Forge repository and is tested there against
+# these same tools. This half checks that what the file holds is what the
+# generator reads, for every awkward byte pattern and well past both limits.
 
 CASES = {
     "plain ascii":      lambda n: b"a" * n,
@@ -100,127 +106,48 @@ CASES = {
 LENGTHS = [100, 4000, 64000, 200000, 2 * 1024 * 1024]
 
 
-def check_shell_boundary() -> tuple:
-    """The prompt must reach the generator's argv byte for byte.
+def check_prompt_file_boundary() -> tuple:
+    """The prompt file must reach the generator's argv byte for byte.
 
-    Builds the EXACT command ProcessEngine::start runs -- `generation_command`,
-    `write_prompt_file` and `shell_quote` extracted from the shipping source
-    and compiled, not re-implemented -- and runs it through `/bin/sh -c` the
-    way the engine does. The stand-in generator resolves `--prompt-file` with
-    the shipping `prompt_handoff`, so both halves of the hand-off are the real
-    ones.
-
-    The longest case is 2 MiB on purpose. When the prompt was itself an
-    argument, Linux refused anything over 128 KiB and macOS anything over
-    1 MiB with E2BIG, so the command never started; that length fails the old
-    form on both platforms.
+    Runs a stand-in generator as a real process that resolves `--prompt-file`
+    with the shipping `prompt_handoff`, exactly as patch.py build does, and
+    records the length and sha256 of the prompt it ended up with.
     """
     bad, ran = 0, 1
     work = tempfile.mkdtemp(prefix="prompt-fidelity-")
-    command_main = """
-int main(int argc, char** argv) {
-    std::ifstream f(argv[1], std::ios::binary);
-    std::stringstream ss; ss << f.rdbuf();
-    const std::string prompt_path = prompt_path_for(argv[2]);
-    const std::string failure = write_prompt_file(prompt_path, ss.str());
-    if (!failure.empty()) {
-        std::fprintf(stderr, "%s\\n", failure.c_str());
-        return 3;
-    }
-    const std::string command = generation_command(
-        "claude", "a-model", "medium", argv[3], " build ", prompt_path, argv[2]);
-    std::fwrite(command.data(), 1, command.size(), stdout);
-    return 0;
-}
-"""
-    body = "\n\n".join(extract(ENGINE_SRC, sig) for sig in (
-        "std::string shell_quote(", "std::string prompt_path_for(",
-        "std::string write_prompt_file(", "std::string generation_command("))
-    probe = compile_probe(body, command_main, os.path.join(work, "command"))
-    if not probe:
-        return 1, ran
-
     recorder = os.path.join(work, "recorder.py")
     with open(recorder, "w") as f:
         f.write("import hashlib, os, sys\n"
                 f"sys.path.insert(0, {HERE!r})\n"
                 "import prompt_handoff\n"
                 "argv = prompt_handoff.resolve(sys.argv, 2)\n"
-                "b = os.fsencode(argv[2]) if len(argv) > 2 else b''\n"
+                "b = os.fsencode(argv[2])\n"
                 "open(os.environ['RECORD_TO'], 'w').write("
                 "f'{len(b)} {hashlib.sha256(b).hexdigest()}')\n")
-
     losses = []
     for name, make in CASES.items():
         for n in LENGTHS:
             want = make(n)
-            raw = os.path.join(work, "in.bin")
-            with open(raw, "wb") as f:
+            prompt = os.path.join(work, "run.prompt")
+            with open(prompt, "wb") as f:
                 f.write(want)
-            log = os.path.join(work, "run.log")
-            built = subprocess.run([probe, raw, log, recorder], capture_output=True)
-            if built.returncode != 0:
-                losses.append(f"{name}@{len(want)}B -> {built.stderr.decode()[:80]}")
-                continue
             rec = os.path.join(work, "rec.txt")
             if os.path.exists(rec):
                 os.remove(rec)
-            try:
-                subprocess.run(["/bin/sh", "-c", built.stdout.decode("utf-8", "surrogateescape")],
-                               capture_output=True, cwd=work,
-                               env=dict(os.environ, RECORD_TO=rec))
-            except OSError as exc:
-                losses.append(f"{name}@{len(want)}B -> did not start: {exc}")
-                continue
+            subprocess.run([sys.executable, "-u", recorder, "build", "--prompt-file", prompt],
+                           capture_output=True, env=dict(os.environ, RECORD_TO=rec))
             got = open(rec).read().split() if os.path.exists(rec) else None
             if not got or int(got[0]) != len(want) or \
                     got[1] != hashlib.sha256(want).hexdigest():
-                losses.append(f"{name}@{len(want)}B -> "
-                              f"{got[0] if got else 'never arrived'}")
-            elif os.path.exists(os.path.join(work, "run.prompt")):
+                losses.append(f"{name}@{len(want)}B -> {got[0] if got else 'never arrived'}")
+            elif os.path.exists(prompt):
                 losses.append(f"{name}@{len(want)}B -> the prompt file was left behind")
     if losses:
         bad += 1
         print(f"  WRONG  the prompt does not survive the hand-off: {losses[:6]}")
     else:
-        print(f"  ok     {len(CASES) * len(LENGTHS)} prompts up to "
-              f"{max(LENGTHS):,} bytes reach the generator byte for byte, "
-              f"and the hand-off file is gone afterwards")
-
-    # A NUL cannot be carried as text the generator reads back unchanged, so
-    # the engine refuses it by name and writes nothing.
-    ran += 1
-    raw = os.path.join(work, "nul.bin")
-    with open(raw, "wb") as f:
-        f.write(b"before\0after")
-    log = os.path.join(work, "nul.log")
-    refused = subprocess.run([probe, raw, log, recorder], capture_output=True)
-    if refused.returncode != 3 or b"NUL" not in refused.stderr or \
-            os.path.exists(os.path.join(work, "nul.prompt")):
-        bad += 1
-        print("  WRONG  a prompt with a NUL byte was not refused, or left a file")
-    else:
-        print("  ok     a prompt with a NUL byte is refused by name and writes nothing")
-
-    # A leftover hand-off file at the same path is replaced, never reused.
-    ran += 1
-    stale = os.path.join(work, "stale.prompt")
-    with open(stale, "w") as f:
-        f.write("a previous run's request")
-    raw = os.path.join(work, "fresh.bin")
-    with open(raw, "wb") as f:
-        f.write(b"this run's request")
-    replaced = subprocess.run([probe, raw, os.path.join(work, "stale.log"), recorder],
-                              capture_output=True)
-    content = open(stale, "rb").read() if os.path.exists(stale) else b""
-    mode = os.stat(stale).st_mode & 0o777 if os.path.exists(stale) else None
-    if replaced.returncode != 0 or content != b"this run's request" or mode != 0o600:
-        bad += 1
-        print(f"  WRONG  a stale prompt file was not replaced by a private one "
-              f"(content {content[:30]!r}, mode {oct(mode) if mode else None})")
-    else:
-        print("  ok     a stale prompt file is replaced by this run's, readable "
-              "only by its owner")
+        print(f"  ok     {len(CASES) * len(LENGTHS)} prompts up to {max(LENGTHS):,} bytes "
+              f"reach the generator byte for byte, and the hand-off file is gone")
     return bad, ran
 
 
@@ -405,7 +332,7 @@ int main() {
 
 def main() -> int:
     bad, ran = 0, 0
-    for check in (check_shell_boundary, check_model_boundary,
+    for check in (check_prompt_file_boundary, check_model_boundary,
                   check_echo_is_character_safe):
         b, r = check()
         bad += b

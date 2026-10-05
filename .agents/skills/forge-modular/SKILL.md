@@ -29,19 +29,20 @@ misses it fails at the compiler after the model has already been called.
 
 ## The prompt reaches the generator by file, never as an argument
 
-`ProcessEngine::submit` writes the request to `<run>.prompt` beside the run's
-log (0600, created exclusively) and starts `patch.py build` / `generate.py`
-with `--prompt-file PATH` where the prompt used to be. `prompt_handoff.resolve()`
-puts the text back into argv at that position and deletes the file, so the rest
-of each tool reads argv exactly as before. Do not move the prompt back onto the
-command line: Linux refuses any single argument over 128 KiB and macOS refuses
-argv plus the environment over 1 MiB, and both fail with E2BIG before the tool
-starts. A stub generator in a test must read `--prompt-file`, not
-`sys.argv[2]`. A prompt with a NUL byte is refused by name, never truncated. A
-file a run never read is removed on launch failure, on Stop, and by the next
-claimed submit. `test_prompt_fidelity.py` drives the extracted shipping command
-builder with prompts up to 2 MiB, and the old one-argument form fails it on
-both platforms.
+Linux refuses any single argument over 128 KiB and macOS refuses argv plus the
+environment over 1 MiB, and both fail with E2BIG before the tool starts, so a
+long request cannot travel on the generator's command line. `patch.py build`
+and `generate.py` therefore accept `--prompt-file PATH` in the prompt's place:
+`prompt_handoff.resolve()` puts the file's text back into argv at that position
+(decoded as CPython decodes argv), deletes the file, and refuses a NUL byte. A
+positional prompt still works from the command line.
+
+The app half lives in the Forge repository, not here: Forge's
+`src/process_engine.cpp` is the shipping ProcessEngine, and Pulp's
+`forge-seam/modular/` copy is an older staging snapshot that no build uses.
+Change the engine in Forge, and test the app-to-generator boundary there
+against these tools. A stub generator in a Forge test must read
+`--prompt-file`, not `sys.argv[2]`, once the engine passes it.
 
 ## A run that fails still has to hand something over
 

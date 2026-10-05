@@ -48,91 +48,6 @@ std::string wire_model_for(const forge::ModelSelection& selection) {
     return selection.model;
 }
 
-/// Where a run's prompt is handed over: beside its log, as `<stem>.prompt`.
-std::string prompt_path_for(const std::string& log_path) {
-    return std::filesystem::path(log_path).replace_extension(".prompt").string();
-}
-
-/// Hand the prompt to the generator through a file rather than its argv.
-///
-/// An argv string has hard limits a prompt does not: Linux refuses any single
-/// argument over 128 KiB (MAX_ARG_STRLEN) and macOS refuses argv plus the
-/// environment over 1 MiB, so a long prompt failed exec with E2BIG before the
-/// generator ever ran. The file is created exclusively and readable only by
-/// this user. Whatever sits at the path already is a previous run's leftover
-/// (the caller holds the generation claim, so no generator is alive to read
-/// it) and is removed, never reused. An embedded NUL is refused: argv could
-/// not carry one either, and cutting the prompt there would quietly build
-/// from a different request. Returns an error message, or empty on success.
-std::string write_prompt_file(const std::string& path, const std::string& prompt) {
-    if (prompt.find('\0') != std::string::npos)
-        return "the prompt contains a NUL byte, which cannot be handed to the generator";
-    ::unlink(path.c_str());
-    const int fd = ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
-    if (fd < 0)
-        return "could not create the prompt file: " + std::string(std::strerror(errno));
-    std::size_t written = 0;
-    while (written < prompt.size()) {
-        const ssize_t n = ::write(fd, prompt.data() + written, prompt.size() - written);
-        if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) {
-            const std::string why = std::strerror(errno);
-            ::close(fd);
-            ::unlink(path.c_str());
-            return "could not write the prompt file: " + why;
-        }
-        written += static_cast<std::size_t>(n);
-    }
-    if (::close(fd) != 0) {
-        const std::string why = std::strerror(errno);
-        ::unlink(path.c_str());
-        return "could not write the prompt file: " + why;
-    }
-    return {};
-}
-
-/// The `/bin/sh -c` command that runs one generation.
-///
-/// The prompt is not in it: the tool reads `--prompt-file` and removes the
-/// file, so the command's size no longer depends on what the person typed.
-std::string generation_command(const std::string& provider, const std::string& wire_model,
-                               const std::string& reasoning_effort, const std::string& script,
-                               const std::string& verb, const std::string& prompt_path,
-                               const std::string& log_path) {
-    // -u, because Python BLOCK-BUFFERS stdout when it is not a terminal.
-    //
-    // The transcript is redirected to a file, so without this nothing reaches
-    // the log until 4-8KB has accumulated or the process exits. BuildMonitor
-    // tails that file to drive the stage list, so a run that was working
-    // perfectly showed an empty log, no stage, and no elapsed time for
-    // minutes: observed at 4m50s into a generation with a 0-byte log and a
-    // healthy python. Indistinguishable, from the outside, from a run that
-    // died on the first line -- which is the reading it invites.
-    const std::string bootstrap =
-        "import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])";
-    std::ostringstream cmd;
-    cmd << "exec /usr/bin/env "
-        << "-u FORGE_CLAUDE_MODEL -u FORGE_CODEX_MODEL "
-        << "-u FORGE_CLAUDE_REASONING_EFFORT "
-        << "-u FORGE_CODEX_REASONING_EFFORT "
-        << "FORGE_MODEL_PROVIDER=" << shell_quote(provider) << " "
-        << (provider == "codex" ? "FORGE_CODEX_MODEL=" : "FORGE_CLAUDE_MODEL=")
-        << shell_quote(wire_model) << " "
-        << (provider == "codex"
-                ? "FORGE_CODEX_REASONING_EFFORT=" + shell_quote(reasoning_effort) + " "
-                : "FORGE_CLAUDE_REASONING_EFFORT=" + shell_quote(reasoning_effort) + " ")
-        // The bootstrap makes the retained root the leader of a private
-        // session/process group before patch.py can spawn the model CLI. Stop
-        // can therefore freeze and signal the whole owned group atomically.
-        << "python3 -c " << shell_quote(bootstrap)
-        << " python3 -u " << shell_quote(script) << verb
-        << "--prompt-file " << shell_quote(prompt_path)
-        // Truncate: BuildMonitor treats a shrinking file as a new run, so the
-        // transcript starts clean rather than replaying the previous build.
-        << " > " << shell_quote(log_path) << " 2>&1";
-    return cmd.str();
-}
-
 }  // namespace
 
 struct ProcessEngine::RunState {
@@ -145,7 +60,6 @@ struct ProcessEngine::RunState {
     std::shared_ptr<pulp::platform::ChildProcess> child;
     std::string expected_script;
     std::string log_path;
-    std::string prompt_path;
     std::string provider;
 };
 
@@ -297,11 +211,6 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode,
                            const forge::ModelSelection& model) {
     error_.clear();
     artifact_.clear();
-    if (prompt.find('\0') != std::string::npos) {
-        error_ = "the prompt contains a NUL byte, which cannot be handed to the generator";
-        release_generation_claim();
-        return;
-    }
 
     // A log of this run's own, beside the one the last run used. Sharing one
     // file let two overlapping generations overwrite each other — see
@@ -383,36 +292,43 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode,
     const std::string wire_model = wire_model_for(model);
     const std::string reasoning_effort(
         forge::to_string(forge::Settings::instance().effort()));
-
-    // The prompt travels by file. While this engine holds the generation
-    // claim no generator is alive, so any hand-off file still beside the logs
-    // belongs to a run that never read it (it died first, or was stopped
-    // before it got there): remove it rather than leave the text on disk.
-    const std::string prompt_path = prompt_path_for(log_path_);
-    if (claimed_by_this_.load(std::memory_order_acquire)) {
-        std::error_code ec;
-        const auto dir = std::filesystem::path(prompt_path).parent_path();
-        for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
-            if (entry.path().extension() == ".prompt")
-                std::filesystem::remove(entry.path(), ec);
-    }
-    if (const std::string failure = write_prompt_file(prompt_path, prompt);
-        !failure.empty()) {
-        error_ = failure;
-        release_generation_claim();
-        return;
-    }
-    {
-        std::lock_guard lock(run_state_->details_mutex);
-        run_state_->prompt_path = prompt_path;
-    }
+    std::ostringstream cmd;
     // The processor, not the editor view, owns this non-blocking ChildProcess.
     // It therefore remains alive across editor-window closure, while the
     // engine destructor explicitly cancels its retained PID on app/plugin
     // teardown, so quitting cannot leave an agent running.
-    const std::string command = generation_command(model.provider_id, wire_model,
-                                                   reasoning_effort, script, verb,
-                                                   prompt_path, log_path_);
+    // -u, because Python BLOCK-BUFFERS stdout when it is not a terminal.
+    //
+    // The transcript is redirected to a file, so without this nothing reaches
+    // the log until 4-8KB has accumulated or the process exits. BuildMonitor
+    // tails that file to drive the stage list, so a run that was working
+    // perfectly showed an empty log, no stage, and no elapsed time for
+    // minutes: observed at 4m50s into a generation with a 0-byte log and a
+    // healthy python. Indistinguishable, from the outside, from a run that
+    // died on the first line -- which is the reading it invites.
+    const std::string bootstrap =
+        "import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])";
+    cmd << "exec /usr/bin/env "
+        << "-u FORGE_CLAUDE_MODEL -u FORGE_CODEX_MODEL "
+        << "-u FORGE_CLAUDE_REASONING_EFFORT "
+        << "-u FORGE_CODEX_REASONING_EFFORT "
+        << "FORGE_MODEL_PROVIDER=" << shell_quote(model.provider_id) << " "
+        << (model.provider_id == "codex" ? "FORGE_CODEX_MODEL="
+                                           : "FORGE_CLAUDE_MODEL=")
+        << shell_quote(wire_model) << " "
+        << (model.provider_id == "codex"
+                ? "FORGE_CODEX_REASONING_EFFORT=" +
+                      shell_quote(reasoning_effort) + " "
+                : "FORGE_CLAUDE_REASONING_EFFORT=" +
+                      shell_quote(reasoning_effort) + " ")
+        // The bootstrap makes the retained root the leader of a private
+        // session/process group before patch.py can spawn the model CLI. Stop
+        // can therefore freeze and signal the whole owned group atomically.
+        << "python3 -c " << shell_quote(bootstrap)
+        << " python3 -u " << shell_quote(script) << verb << shell_quote(prompt)
+        // Truncate: BuildMonitor treats a shrinking file as a new run, so the
+        // transcript starts clean rather than replaying the previous build.
+        << " > " << shell_quote(log_path_) << " 2>&1";
     // On a worker, not the UI thread. Even backgrounded, this forks a shell and
     // touches tools_dir_ -- which may live on a removable, network-backed or
     // TCC-gated volume, where either can block for seconds. That is what made
@@ -422,7 +338,7 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode,
         claimed_by_this_.exchange(false, std::memory_order_acq_rel);
     auto state = run_state_;
     const auto working_dir = tools_dir_;
-    std::thread([command, prompt_path, working_dir, releases_claim, state]() {
+    std::thread([command = cmd.str(), working_dir, releases_claim, state]() {
         auto child = std::make_shared<pulp::platform::ChildProcess>();
         pulp::platform::ProcessOptions opts;
         opts.working_directory = working_dir;
@@ -438,7 +354,6 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode,
                              std::memory_order_release);
             state->launch_state.store(1, std::memory_order_release);
         } else {
-            ::unlink(prompt_path.c_str());  // nothing will ever read it
             state->launch_state.store(2, std::memory_order_release);
             std::string provider;
             {
@@ -526,13 +441,6 @@ void ProcessEngine::cancel_run(const std::shared_ptr<RunState>& state,
     }
     if (::kill(pid, 0) == 0) ::kill(-pgid, SIGKILL);
     state->pid.store(0, std::memory_order_release);
-    // A run stopped before its tool read the prompt leaves the file behind.
-    std::string prompt_path;
-    {
-        std::lock_guard lock(state->details_mutex);
-        prompt_path = state->prompt_path;
-    }
-    if (!prompt_path.empty()) ::unlink(prompt_path.c_str());
 
     append_terminal(state, "generation cancelled by user");
 }

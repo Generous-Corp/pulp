@@ -9195,7 +9195,7 @@ TEST_CASE("the process engine resolves display aliases to provider model ids",
     std::filesystem::create_directories(dir, ec);
     { std::ofstream f(dir / "patch.py");
       f << "import os, pathlib, sys\n"
-           "pathlib.Path(open(sys.argv[sys.argv.index('--prompt-file') + 1], encoding='utf-8').read()).write_text('|'.join([\n"
+           "pathlib.Path(sys.argv[2]).write_text('|'.join([\n"
            " os.environ.get('FORGE_MODEL_PROVIDER', ''),\n"
            " os.environ.get('FORGE_CODEX_MODEL', ''),\n"
            " os.environ.get('FORGE_CLAUDE_MODEL', ''),\n"
@@ -9203,7 +9203,7 @@ TEST_CASE("the process engine resolves display aliases to provider model ids",
            " os.environ.get('FORGE_CLAUDE_REASONING_EFFORT', '')]))\n"; }
     { std::ofstream f(dir / "generate.py");
       f << "import os, pathlib, sys\n"
-           "pathlib.Path(open(sys.argv[sys.argv.index('--prompt-file') + 1], encoding='utf-8').read()).write_text('|'.join([\n"
+           "pathlib.Path(sys.argv[1]).write_text('|'.join([\n"
            " os.environ.get('FORGE_MODEL_PROVIDER', ''),\n"
            " os.environ.get('FORGE_CODEX_MODEL', ''),\n"
            " os.environ.get('FORGE_CLAUDE_MODEL', ''),\n"
@@ -9263,7 +9263,7 @@ TEST_CASE("Stop kills the exact owned generator tree and leaves a decoy",
       f << "import os, pathlib, subprocess, sys, time\n"
            "child = subprocess.Popen([sys.executable, '-c', "
            "'import time; time.sleep(30)'])\n"
-           "pathlib.Path(open(sys.argv[sys.argv.index('--prompt-file') + 1], encoding='utf-8').read()).write_text(f'{os.getpid()} {child.pid}')\n"
+           "pathlib.Path(sys.argv[2]).write_text(f'{os.getpid()} {child.pid}')\n"
            "time.sleep(30)\n"; }
     { std::ofstream f(dir / "generate.py"); f << "pass\n"; }
 
@@ -9317,7 +9317,7 @@ TEST_CASE("destroying the process engine stops its owned generator",
       f << "import os, pathlib, subprocess, sys, time\n"
            "child = subprocess.Popen([sys.executable, '-c', "
            "'import time; time.sleep(30)'])\n"
-           "pathlib.Path(open(sys.argv[sys.argv.index('--prompt-file') + 1], encoding='utf-8').read()).write_text(f'{os.getpid()} {child.pid}')\n"
+           "pathlib.Path(sys.argv[2]).write_text(f'{os.getpid()} {child.pid}')\n"
            "time.sleep(30)\n"; }
     { std::ofstream f(dir / "generate.py"); f << "pass\n"; }
 
@@ -9403,56 +9403,6 @@ TEST_CASE("generator probe ignores itself and finds both generator commands",
     }
 
     CHECK_FALSE(engine.generator_running());
-    std::filesystem::remove_all(dir, ec);
-}
-
-TEST_CASE("a prompt handed to a generator that never reads it is not left behind",
-          "[build][prompt][process]") {
-    std::error_code ec;
-    const auto dir = std::filesystem::temp_directory_path() / "fm-prompt-handoff";
-    std::filesystem::remove_all(dir, ec);
-    std::filesystem::create_directories(dir, ec);
-    // Exits without reading --prompt-file, like a tool that dies on start-up.
-    for (const char* t : {"generate.py", "patch.py"}) {
-        std::ofstream f(dir / t);
-        f << "import sys; sys.exit(0)\n";
-    }
-    const auto prompt_of = [](const std::string& log) {
-        return std::filesystem::path(log).replace_extension(".prompt");
-    };
-
-    forge_modular::ProcessEngine engine(dir.string(), (dir / "last-run.log").string());
-    REQUIRE(engine.try_claim_generation());
-    engine.submit("the first request", true, {.provider_id = "claude", .model = "claude-opus-5"});
-    REQUIRE(engine.last_error().empty());
-    const auto first = prompt_of(engine.log_path());
-    CHECK(std::filesystem::exists(first));
-    // Private to this user: it holds what the person typed.
-    CHECK((std::filesystem::status(first).permissions() & std::filesystem::perms::all) ==
-          (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
-    for (int i = 0; i < 200 && engine.generator_running(); ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    // The next claimed run finds the unread file and removes it.
-    REQUIRE(engine.try_claim_generation());
-    engine.submit("the second request", true, {.provider_id = "claude", .model = "claude-opus-5"});
-    REQUIRE(engine.last_error().empty());
-    CHECK_FALSE(std::filesystem::exists(first));
-    CHECK(std::filesystem::exists(prompt_of(engine.log_path())));
-    for (int i = 0; i < 200 && engine.generator_running(); ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    // A NUL is refused by name, before any log or prompt file is made.
-    const auto logs_before = std::distance(std::filesystem::directory_iterator(dir / "runs"),
-                                           std::filesystem::directory_iterator{});
-    REQUIRE(engine.try_claim_generation());
-    engine.submit(std::string("before\0after", 12), true,
-                  {.provider_id = "claude", .model = "claude-opus-5"});
-    CHECK(engine.last_error().find("NUL") != std::string::npos);
-    CHECK(std::distance(std::filesystem::directory_iterator(dir / "runs"),
-                        std::filesystem::directory_iterator{}) == logs_before);
-    CHECK(engine.try_claim_generation());  // the refusal released the claim
-    engine.release_generation_claim();
     std::filesystem::remove_all(dir, ec);
 }
 
