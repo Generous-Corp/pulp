@@ -363,7 +363,10 @@ class JitDeregistrationFenceTests(unittest.TestCase):
             )
             ghapp = tmp / "ghapp"
             ghapp.write_text(FAKE_GH_FENCE)
-            for executable in (qm, ssh, ghapp):
+            # macOS has no flock(1); the lock's own semantics are not under test.
+            flock = tmp / "flock"
+            flock.write_text("#!/bin/sh\nexit 0\n")
+            for executable in (qm, ssh, ghapp, flock):
                 executable.chmod(0o755)
             env = os.environ.copy()
             env.update(
@@ -386,6 +389,7 @@ class JitDeregistrationFenceTests(unittest.TestCase):
                     "FENCE_DELETE": delete,
                     "FENCE_AFTER": after,
                     "FENCE_JOB_RUNNER": job_runner,
+                    "PATH": f"{tmp}:{os.environ['PATH']}",
                 }
             )
             result = subprocess.run(
