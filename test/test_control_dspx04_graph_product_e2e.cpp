@@ -9,8 +9,8 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
-#include <string>
 #include <set>
+#include <string>
 
 TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
           "[inspect][control][dspx-04][e2e]") {
@@ -103,9 +103,12 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     // The product fixture is a real standalone control host. Keep CI's parent
     // environment from forcing the child into screenshot-only headless mode,
     // while retaining the deterministic null audio device for CI hardware.
-    const std::array<const char*, 6> child_environment = {
-        "CI", "PULP_HEADLESS", "PULP_TEST_MODE", "PULP_SCREENSHOT",
-        "PULP_SCREENSHOT_PATH", "PULP_SCREENSHOT_KEEP_AUDIO"};
+    const std::array<const char*, 6> child_environment = {"CI",
+                                                          "PULP_HEADLESS",
+                                                          "PULP_TEST_MODE",
+                                                          "PULP_SCREENSHOT",
+                                                          "PULP_SCREENSHOT_PATH",
+                                                          "PULP_SCREENSHOT_KEEP_AUDIO"};
     std::array<std::optional<std::string>, 6> saved_environment;
     for (std::size_t index = 0; index < child_environment.size(); ++index) {
         if (const auto* value = std::getenv(child_environment[index]))
