@@ -57,8 +57,16 @@ FLOOR = 2
 #   STUB_HOLDER_PIDS   comma-separated pids to report as lease holders
 #   STUB_FLOOR_AVAILABLE floor_available_cores to report; unset → omitted
 #   STUB_ACQUIRE_ERROR any value → `leases acquire` prints it to stderr, exits 2
+#   STUB_PAD_BYTES     N → every answer carries a trailing line of N bytes
+#                      after the lines a reader matches first (tartci prints
+#                      indented, multi-line JSON), so a reader that stops at
+#                      its match leaves its writer to die of SIGPIPE
 STUB = r"""#!/usr/bin/env bash
 [ -n "${STUB_FAIL_ALL:-}" ] && exit 3
+PAD=""
+if [ -n "${STUB_PAD_BYTES:-}" ]; then
+  PAD="$(head -c "${STUB_PAD_BYTES}" /dev/zero | tr '\0' x)"
+fi
 if [ "$1" = "host-profile" ]; then
   [ -n "${STUB_PROFILE_JOBS:-}" ] || exit 1
   echo "TARTCI_AGENT_QOS=${STUB_AGENT_QOS:-normal}"
@@ -70,6 +78,7 @@ if [ "$1" = "host-profile" ]; then
     echo "TARTCI_INTERACTIVE_WAIT_SECS=0"
     echo "TARTCI_BACKGROUND_QOS=${STUB_AGENT_QOS:-normal}"
   fi
+  [ -n "$PAD" ] && echo "TARTCI_PADDING=$PAD"
   exit 0
 fi
 if [ "$1" = "leases" ] && [ "$2" = "status" ]; then
@@ -118,7 +127,7 @@ if [ "$1" = "leases" ] && [ "$2" = "acquire" ]; then
     grant="${STUB_CLASS_GRANT:-0}"
     [ "$grant" -gt "$cores" ] && grant="$cores"
     if [ "$grant" -ge 1 ] && [ "$grant" -ge "${min:-1}" ]; then
-      printf '{"ok":true,"floor":false,"lease":{"lease_size_cores":%s}}\n' "$grant"
+      printf '{"ok":true,"floor":false,"lease":{"lease_size_cores":%s},\n"pad":"%s"}\n' "$grant" "$PAD"
       exit 0
     fi
     echo '{"ok":false,"reason":"capacity_exceeded"}'
@@ -128,12 +137,12 @@ if [ "$1" = "leases" ] && [ "$2" = "acquire" ]; then
     # An older tartci rejects the unknown flag the way argparse does.
     [ -n "${STUB_NO_FLOOR_FLAG:-}" ] && { echo "unrecognized arguments: --allow-floor" >&2; exit 2; }
     if [ -n "${STUB_MAX_GRANT:-}" ] && [ "$cores" -le "${STUB_MAX_GRANT}" ]; then
-      printf '{"ok":true,"floor":false,"qos":null,"lease":{"lease_size_cores":%s}}\n' "$cores"
+      printf '{"ok":true,"floor":false,"qos":null,"lease":{"lease_size_cores":%s},\n"pad":"%s"}\n' "$cores" "$PAD"
       exit 0
     fi
     if [ -n "${STUB_FLOOR_GRANT:-}" ]; then
       printf '{"ok":true,"floor":true,"qos":"%s","lease":{"floor":true,' "${STUB_FLOOR_QOS:-background}"
-      printf '"lease_size_cores":%s,"requested_cores":%s}}\n' "${STUB_FLOOR_GRANT}" "$cores"
+      printf '"lease_size_cores":%s,"requested_cores":%s},\n"pad":"%s"}\n' "${STUB_FLOOR_GRANT}" "$cores" "$PAD"
       exit 0
     fi
     echo '{"ok":false,"reason":"capacity_exceeded"}'
@@ -187,7 +196,7 @@ class GovernedBuildTests(unittest.TestCase):
                   "PULP_GOVERNED_BUILD_WAIT_SECS",
                   "STUB_GOVERNOR", "STUB_INTERACTIVE_JOBS", "STUB_INTERACTIVE_MIN",
                   "STUB_CLASS_GRANT", "STUB_AGENT_QOS", "STUB_ARGS_LOG",
-                  "STUB_ACQUIRE_ERROR",
+                  "STUB_ACQUIRE_ERROR", "STUB_PAD_BYTES",
                   "TARTCI_GUEST_CORES", "TARTCI_GUEST_MEM_MB"):
             env.pop(k, None)
         # The cases below pin the class-less lease contract, which is what a
@@ -302,6 +311,28 @@ class GovernedBuildTests(unittest.TestCase):
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
                       STUB_FLOOR_GRANT=str(self.AGENT_FLOOR))
         self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
+
+    # A reader that stops at its first match (grep -q, awk {exit}) closes the
+    # pipe while a `printf ... |` writer may still be writing; under pipefail
+    # the writer's SIGPIPE (141) becomes the pipeline's status, so a MATCH read
+    # as a miss. 256 KiB of trailing padding outruns any pipe buffer, which
+    # makes that deterministic instead of a race on a fast host.
+    PAD = str(256 * 1024)
+
+    def test_a_long_floor_grant_is_still_read_as_a_floor_grant(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR), STUB_FLOOR_QOS="utility",
+                      PULP_TARTCI_TASKPOLICY="0", STUB_PAD_BYTES=self.PAD)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), self.AGENT_FLOOR, r.stderr)
+        self.assertIn("agent-floor lease", r.stderr)
+        self.assertIn("TASKPOLICY=-c", r.stdout, r.stderr)
+
+    def test_a_long_host_profile_still_sizes_the_lease(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS), STUB_PAD_BYTES=self.PAD)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), PROFILE_JOBS, r.stderr)
 
     def test_agent_floor_runs_at_the_granted_utility_qos(self) -> None:
         """A host with agent_floor_qos = "utility" gets a utility clamp, not -b."""
@@ -1538,6 +1569,12 @@ class BuildClassTests(unittest.TestCase):
         missing = self._run(PULP_TARTCI_BIN="/nonexistent/tartci",
                             PATH="/usr/bin:/bin")
         self.assertIn("tartci not found", missing.stderr)
+
+    def test_a_long_class_grant_is_still_read_as_granted(self) -> None:
+        r = self._run_class("interactive", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+                            STUB_CLASS_GRANT="6", STUB_PAD_BYTES=str(256 * 1024))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("interactive lease acquired", r.stderr)
 
     def test_unknown_class_runs_interactive_and_says_so(self) -> None:
         r = self._run_class("urgent", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
