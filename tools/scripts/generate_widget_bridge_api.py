@@ -288,6 +288,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "getText": "(id: string) => string",
     "getThemeJson": "() => string",
     "getValue": "(id: string) => number",
+    "setModulatedValue": "(id: string, value: number | null) => void",
     "importDesignTokens": "(json: string) => void",
     "layout": "() => void",
     "loadFont": "(path: string) => boolean",

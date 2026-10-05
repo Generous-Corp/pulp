@@ -35,6 +35,8 @@
 #                                                   must not be able to skip)
 #     [--app-scripts "Title" DIR]...      (repeatable; a pkgbuild --scripts
 #                                          directory for the app of that title)
+#     [--plugin-scripts KIND "Title" DIR] (repeatable; a pkgbuild --scripts
+#                                          directory for one plugin format)
 #     [--content "Title" "Desc" DEST SRCDIR]...  (repeatable; installs SRCDIR's
 #                                                 contents to DEST, e.g. sample
 #                                                 models/IRs into Application Support)
@@ -63,6 +65,7 @@ declare -a C_TITLE C_DESC C_DEST C_SRC  # content: title + description + install
 declare -a A_GROUP                      # apps: plugin name to nest under ("" = top level)
 declare -a PT_NAME PT_TITLE             # product display titles: bundle name -> title
 declare -a S_TITLE S_DIR                 # app script directories: title -> directory
+declare -a PS_KIND PS_TITLE PS_DIR PS_MATCHED  # plugin script directories
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -87,6 +90,8 @@ while [[ $# -gt 0 ]]; do
       A_GROUP+=("$2"); A_TITLE+=("$3"); A_PATH+=("$4")
       if [[ "${5:-}" == --* || -z "${5:-}" ]]; then A_ENT+=(""); shift 4; else A_ENT+=("$5"); shift 5; fi;;
     --app-scripts) S_TITLE+=("$2"); S_DIR+=("$3"); shift 3;;
+    --plugin-scripts)
+      PS_KIND+=("$2"); PS_TITLE+=("$3"); PS_DIR+=("$4"); PS_MATCHED+=(0); shift 4;;
     --content) C_TITLE+=("$2"); C_DESC+=("$3"); C_DEST+=("$4"); C_SRC+=("$5"); shift 5;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
@@ -418,6 +423,23 @@ for ((i=0; i<${#C_TITLE[@]}; i++)); do
 done
 MANIFEST_TEXT="${MANIFEST_TEXT}${MANIFEST_RECEIPTS}"
 
+for ((i=0; i<${#PS_KIND[@]}; i++)); do
+  case "${PS_KIND[$i]}" in
+    au|vst3|clap) ;;
+    *) echo "invalid plugin script format: ${PS_KIND[$i]}" >&2; exit 2;;
+  esac
+  [[ -n "${PS_TITLE[$i]}" ]] || {
+    echo "plugin script title must not be empty" >&2; exit 2; }
+  [[ -d "${PS_DIR[$i]}" ]] || {
+    echo "missing plugin scripts dir: ${PS_DIR[$i]}" >&2; exit 2; }
+  for hook in preinstall postinstall; do
+    if [[ -f "${PS_DIR[$i]}/$hook" && ! -x "${PS_DIR[$i]}/$hook" ]]; then
+      echo "plugin scripts/$hook is not executable — it would ship and never run" >&2
+      exit 2
+    fi
+  done
+done
+
 echo "== plugins =="
 for ((i=0; i<${#P_KIND[@]}; i++)); do
   k="${P_KIND[$i]}"; p="${P_PATH[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
@@ -433,12 +455,27 @@ for ((i=0; i<${#P_KIND[@]}; i++)); do
   fi
   cid="plugin-${plugin_idx}-${k}"                       # unique per plugin+format
   f="${pname}.${k}.pkg"
+  SCRIPT_ARGS=()
+  for ((s=0; s<${#PS_KIND[@]}; s++)); do
+    [[ "${PS_KIND[$s]}" == "$k" && "${PS_TITLE[$s]}" == "$pname" ]] || continue
+    SCRIPT_ARGS=(--scripts "${PS_DIR[$s]}")
+    PS_MATCHED[$s]=1
+    echo "  scripts: ${PS_DIR[$s]}"
+    break
+  done
   pkgbuild --component "$p" --identifier "com.pulp.$NAME.$cid.pkg" --version "$VERSION" \
+    "${SCRIPT_ARGS[@]+${SCRIPT_ARGS[@]}}" \
     --install-location "$(plugin_dir "$k")" "$STAGE/comp/$f" >/dev/null
   case "$k" in au) d="Logic, GarageBand";; vst3) d="Most DAWs";; clap) d="REAPER, Bitwig";; esac
   add_ref "$cid" "$(echo "$k" | tr a-z A-Z)" "$d" "$f"
   PLUGIN_ENTRIES="${PLUGIN_ENTRIES}${plugin_idx}	${pname}	${cid}
 "
+done
+for ((i=0; i<${#PS_KIND[@]}; i++)); do
+  [[ "${PS_MATCHED[$i]}" == 1 ]] || {
+    echo "plugin scripts selector matched no plugin: ${PS_KIND[$i]} ${PS_TITLE[$i]}" >&2
+    exit 2
+  }
 done
 
 echo "== apps → /Applications =="
@@ -614,7 +651,16 @@ _unsigned_pkg="$STAGE/$NAME-$VERSION-unsigned.pkg"
 productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" \
   ${RESOURCE_ARGS:+--resources "$STAGE/resources"} \
   "$_unsigned_pkg" >/dev/null
-productsign --sign "$INST_ID" "$_unsigned_pkg" "$PKG" >/dev/null
+# Bind productsign to the exact keychain that the unattended doctor authorized.
+# A bare productsign can ignore the user search-list ordering in an SSH or GUI
+# session and fall through to a locked login keychain, producing
+# CSSMERR_CSP_NO_USER_INTERACTION even though the doctor probe passed.
+[[ -n "${PULP_SIGN_KEYCHAIN:-}" ]] || {
+  echo "[installer] ERROR: PULP_SIGN_KEYCHAIN is required for productsign" >&2
+  exit 1
+}
+productsign --sign "$INST_ID" --keychain "$PULP_SIGN_KEYCHAIN" \
+  "$_unsigned_pkg" "$PKG" >/dev/null
 rm -f "$_unsigned_pkg"
 if [[ "$NOTARIZE" == 1 ]]; then
   _notarized=0

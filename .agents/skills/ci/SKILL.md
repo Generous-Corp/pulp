@@ -589,6 +589,30 @@ in place), so the first lane run on an old worktree is a cold build. A record
 that failed to write never changes the lane's verdict; read the run log's last
 `=== reuse-record: ... ===` line to know whether one exists.
 
+### Keyed shadow runs: three things that silently break every derivation
+
+`[targets.mac.changed_surface_selection.executable_reuse]` makes Shipyard copy
+`derivation_paths` from the protected base into a bare directory and run the
+key code there with `python3 -I`. Three mistakes do not error at configure
+time; they make every keyed run fail to derive or every re-derivation refuse:
+
+- **A new import in the key code must join `derivation_paths` in the same
+  change.** The bare copy holds only the listed files. `test_receipts_shadow`
+  pulls in `affected_tests_shadow` and `tools/scripts/protected_merge_receipt`,
+  which is how the list grew past the obvious five. Check the closure by
+  copying exactly the listed files from the branch into a temp dir and running
+  `python3 -I tools/ci/executable_keys.py --print-toolchain --build-dir /nonexistent`
+  and `python3 -I tools/ci/executable_selection.py --help` there.
+- **`load_record` must digest a record in byte order of its relative paths**
+  (`a.b` before `a/b`), as Shipyard's `record_digest` does. Sorting `Path`
+  objects orders by parts and gives a different digest on any record whose
+  names straddle `.` and `/`; every derivation then refuses "not the record
+  Shipyard bound". The shared fixture's value is `e35428c1…88fb`.
+- **Shipyard reads this table with `deny_unknown_fields`.** A host whose
+  Shipyard predates `executable_reuse` cannot parse the policy at all, so the
+  changed-surface plan falls back to full on every PR. Bump the pinned
+  Shipyard on the lane hosts before the table lands on main.
+
 ## Performance lanes report; they never gate
 
 `dsp-throughput-bench.yml` (weekly + `workflow_dispatch`) is the model for any

@@ -244,12 +244,19 @@ struct MaterializedDocumentCacheStats {
     std::uint64_t verifies = 0;  ///< full decode + verification passes run
     std::uint64_t hits = 0;      ///< calls served from an earlier verification
     std::uint64_t rejected = 0;  ///< inputs that failed verification
+    std::uint64_t waits = 0;     ///< lookups that waited for an in-flight verification
     std::size_t entries = 0;
     std::size_t bytes = 0;       ///< input + decoded asset bytes held
 };
 MaterializedDocumentCacheStats materialized_document_cache_stats();
 /// Drop every kept document (tests; a host that wants the memory back).
 void clear_materialized_document_cache();
+
+/// The whole scripts a live editor evaluates when it imports `bundle` at run
+/// time (`__pulpRuntimeImport__`): each JavaScript asset payload and each
+/// `text/javascript` inline script, byte-identical to what the payload
+/// pipeline hands `evaluate_script()`. A prewarm compiles exactly these.
+std::vector<std::string> runtime_import_whole_scripts(const ClaudeBundle& bundle);
 
 /// Normalize a constrained v0.dev React TSX export into the runtime-import
 /// bundle payload shape. Accepts either a bare single-file TSX component or

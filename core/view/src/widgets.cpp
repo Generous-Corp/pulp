@@ -805,6 +805,16 @@ void Knob::paint(canvas::Canvas& canvas) {
     if (has_captured_indicator_ && !captured_indicator_drawn && !loaded_sprite)
         draw_captured_indicator(std::min(b.width, b.height) * 0.5f);
 
+    // The played value a modulator is moving this knob to (display only; see
+    // set_modulated_value). Drawn over every body style at the stock ring's
+    // geometry, below the label and value text.
+    if (has_modulated_) {
+        const float full_r = std::min(cx, cy) - 3.0f;
+        const float arc_w = std::max(3.0f, full_r * 0.13f);
+        const float ring_r = mod_rings_.empty() ? (full_r - arc_w * 0.5f) : (full_r * 0.64f);
+        paint_modulated_marker(canvas, cx, cy, ring_r, arc_w);
+    }
+
     // Label below (always drawn, even with shader)
     if (show_label_ && !label_.empty()) {
         auto text_color = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 150));
@@ -824,7 +834,52 @@ void Knob::paint(canvas::Canvas& canvas) {
     }
 }
 
+void Knob::paint_modulated_marker(canvas::Canvas& canvas, float cx, float cy, float ring_r,
+                                  float arc_w) {
+    const float s = skew();
+    const float played_pos = s == 1.0f ? modulated_ : std::pow(modulated_, s);
+    const float base_a = start_angle + position_for_value() * (end_angle - start_angle);
+    const float play_a = start_angle + played_pos * (end_angle - start_angle);
+    const auto color = resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
+    canvas.set_line_cap(canvas::LineCap::round);
+    if (std::abs(play_a - base_a) > 1e-3f) {
+        canvas.set_stroke_color(color);
+        canvas.set_line_width(std::max(2.0f, arc_w * 0.6f));
+        canvas.stroke_arc(cx, cy, ring_r, std::min(base_a, play_a), std::max(base_a, play_a));
+    }
+    canvas.set_fill_color(color);
+    canvas.fill_circle(cx + ring_r * std::cos(play_a), cy + ring_r * std::sin(play_a),
+                       std::max(2.0f, arc_w * 0.55f));
+}
+
 // ── Fader ────────────────────────────────────────────────────────────────────
+
+void Fader::paint_modulated_marker(canvas::Canvas& canvas) {
+    const auto b = local_bounds();
+    const bool vert = orientation_ == Orientation::vertical;
+    const float length = vert ? b.height : b.width;
+    const float cross = (vert ? b.width : b.height) * 0.5f;
+    const auto at = [&](float position) {
+        return vert ? (1.0f - position) * length : position * length;
+    };
+    const float played = at(skew_ == 1.0f ? modulated_ : std::pow(modulated_, skew_));
+    const float base = at(position_for_value());
+    const auto color = resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
+    canvas.set_stroke_color(color);
+    canvas.set_line_cap(canvas::LineCap::round);
+    canvas.set_line_width(2.5f);
+    if (std::abs(played - base) > 0.5f) {
+        if (vert)
+            canvas.stroke_line(cross, base, cross, played);
+        else
+            canvas.stroke_line(base, cross, played, cross);
+    }
+    const float half = std::min(cross * 0.8f, 8.0f);
+    if (vert)
+        canvas.stroke_line(cross - half, played, cross + half, played);
+    else
+        canvas.stroke_line(played, cross - half, played, cross + half);
+}
 
 void Fader::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
@@ -1135,6 +1190,9 @@ void Fader::paint(canvas::Canvas& canvas) {
                 thumb_x, thumb_y, thumb_w, thumb_h);
         });
     }
+
+    if (has_modulated_)
+        paint_modulated_marker(canvas);
 
     // Label
     if (!label_.empty()) {

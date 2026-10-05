@@ -114,6 +114,30 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertEqual(self.family_for(generated, "tools/scripts/shared.py"), [])
         self.assertNotEqual(self.family_for(generated, "tools/scripts/test_runner.py"), [])
 
+    def test_the_live_tree_keeps_a_reviewed_scanner_list_out_of_script_bodies(self) -> None:
+        # A script body that names a path makes it reachable, so a list of
+        # reviewed paths kept in a reachable script would unmap them all. The
+        # list lives in tools/ci data; the runner's own test stays mappable.
+        root = Path(__file__).resolve().parents[2]
+        tracked = families.tracked_files(root)
+        declared = json.loads((root / families.SCRIPT_INPUTS).read_text(encoding="utf-8"))["tests"]
+        entries = {e.get("entry") for e in declared.values()}
+        reached = families.native_reachable(families.top_level_scripts(tracked), tracked, entries,
+                                            lambda rel: families.read_text(root, rel))
+        # Control: the scanner test itself is reachable, so the walk did run.
+        self.assertIn("tools/scripts/test_wide_non_native.py", reached)
+        self.assertNotIn("tools/scripts/test_run_changed_surface_tests.py", reached)
+
+    def test_a_reachable_script_naming_a_test_unmaps_it(self) -> None:
+        # The negative control for the live check above: the same naming,
+        # inside a reachable script, does unmap.
+        self.add_whole_tree()
+        self.write("tools/scripts/scanner.py", 'REVIEWED = {"tools/scripts/test_quiet.py": "ok"}\n')
+        self.write("tools/cli/cmd_scan.cpp", 'auto s = "tools/scripts/scanner.py";\n')
+        self.write("tools/scripts/test_quiet.py", "")
+        self.script_test("quiet-selftest", "tools/scripts/test_quiet.py", [])
+        self.assertEqual(self.family_for(self.generate(), "tools/scripts/test_quiet.py"), [])
+
     def test_cmake_may_name_a_script_only_as_a_declared_test_entry(self) -> None:
         self.add_whole_tree()
         self.write("tools/scripts/test_entry.py", "")

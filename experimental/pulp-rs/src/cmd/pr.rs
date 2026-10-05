@@ -245,14 +245,39 @@ fn enforce_pin(root: &Path, shipyard: &Path) -> Result<()> {
     let Some(actual) = capture_shipyard_version(shipyard) else {
         return Ok(());
     };
-    if actual == pinned {
+    if pin_accepts(&pinned, &actual) {
         return Ok(());
     }
 
     Err(CliError::Other(format!(
-        "pulp pr: shipyard version pin mismatch.\n\n  pinned in tools/shipyard.toml : {pinned}\n  shipyard --version            : {actual}\n  resolved from                 : {}",
+        "pulp pr: shipyard version pin mismatch.\n\n  pinned in tools/shipyard.toml : {pinned} (the minimum, same major)\n  shipyard --version            : {actual}\n  resolved from                 : {}",
         shipyard.display()
     )))
+}
+
+/// Whether an installed Shipyard satisfies the pin. The pin is a floor:
+/// the fleet rolls out every release, and the pin records the oldest one
+/// the repository's configuration parses under. Any release at or above it
+/// within the same major passes; one below it, or under another major,
+/// does not. A version that does not parse as `[v]MAJOR.MINOR.PATCH` must
+/// equal the pin exactly.
+#[must_use]
+pub fn pin_accepts(pinned: &str, installed: &str) -> bool {
+    match (semver_triple(pinned), semver_triple(installed)) {
+        (Some(pin), Some(have)) => have.0 == pin.0 && have >= pin,
+        _ => pinned == installed,
+    }
+}
+
+fn semver_triple(version: &str) -> Option<(u64, u64, u64)> {
+    let core = version.strip_prefix('v').unwrap_or(version);
+    let mut parts = core.split('.');
+    let triple = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    parts.next().is_none().then_some(triple)
 }
 
 fn capture_shipyard_version(shipyard_bin: &Path) -> Option<String> {
@@ -488,17 +513,43 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn enforce_pin_rejects_mismatched_version() {
+    fn enforce_pin_rejects_a_version_below_the_pin() {
+        let td = tempfile::tempdir().unwrap();
+        let tools = td.path().join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::write(tools.join("shipyard.toml"), "version = \"v0.46.0\"\n").unwrap();
+        let fake_shipyard = write_fake_shipyard(td.path(), "shipyard, version 0.45.9");
+        let err = enforce_pin(td.path(), &fake_shipyard).unwrap_err();
+        let rendered = err.to_string();
+        assert!(rendered.contains("shipyard version pin mismatch"));
+        assert!(rendered.contains("v0.46.0"));
+        assert!(rendered.contains("v0.45.9"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn enforce_pin_accepts_a_newer_release_of_the_same_major() {
         let td = tempfile::tempdir().unwrap();
         let tools = td.path().join("tools");
         std::fs::create_dir_all(&tools).unwrap();
         std::fs::write(tools.join("shipyard.toml"), "version = \"v0.46.0\"\n").unwrap();
         let fake_shipyard = write_fake_shipyard(td.path(), "shipyard, version 0.47.0");
-        let err = enforce_pin(td.path(), &fake_shipyard).unwrap_err();
-        let rendered = err.to_string();
-        assert!(rendered.contains("shipyard version pin mismatch"));
-        assert!(rendered.contains("v0.46.0"));
-        assert!(rendered.contains("v0.47.0"));
+        enforce_pin(td.path(), &fake_shipyard).unwrap();
+    }
+
+    #[test]
+    fn the_pin_is_a_floor_within_its_major() {
+        assert!(pin_accepts("v0.269.1", "v0.269.1"), "equal");
+        assert!(pin_accepts("v0.269.1", "v0.269.2"), "higher patch");
+        assert!(pin_accepts("v0.269.1", "v0.270.0"), "higher minor");
+        assert!(!pin_accepts("v0.269.1", "v0.269.0"), "lower patch");
+        assert!(!pin_accepts("v0.269.1", "v0.268.9"), "lower minor");
+        assert!(!pin_accepts("v0.269.1", "v1.0.0"), "a newer major");
+        assert!(!pin_accepts("v1.2.0", "v0.300.0"), "an older major");
+        assert!(pin_accepts("0.269.1", "v0.269.1"), "the v prefix is optional");
+        assert!(!pin_accepts("v0.269.1", "v0.269.1-rc1"), "unparsed must match exactly");
+        assert!(!pin_accepts("v0.269.1", "v0.269.1.4"), "four parts are not a release version");
+        assert!(pin_accepts("nightly", "nightly"), "unparsed equal passes");
     }
 
     #[test]

@@ -25,6 +25,16 @@ tools:
   availability: always
   skill: prototype-loop
   docs: reference/cli.md#affected
+- name: editor-open-oop-probe
+  path: tools/editor-open/editor_open_oop_probe.sh
+  category: editor-open
+  use_when: A user reports an AU editor opening in stages in Logic (small/placeholder, then empty, then the UI) and you need the stages a host window actually showed out of process, and how long the host waited for the view.
+  invocation: bash tools/editor-open/editor_open_oop_probe.sh --gui-session -- --sub SpOt --fresh-instance --follow --no-anim --opens 3 --out /tmp/oop
+  inputs: An AU v2 component installed where AUHostingService finds it (~/Library/Audio/Plug-Ins/Components; use a development identity and remove it afterwards), its 4-char subtype/manufacturer, and the editor's declared background.
+  outputs: Per open, the view-controller latency (how long a DAW shows its own placeholder before it has a view), every distinct host-window image classified (host-empty, empty-bg, wrong-size, partial, ui-host-animating, ui-converging, ui), the stage sequence, a non-UI-frame count and gate, optional PNGs.
+  availability: always
+  skill: view-bridge
+  caveat: Reads back the host's own window with CGWindowListCreateImage, which must run in the logged-in GUI session (hence --gui-session over ssh) and has read back only the host backdrop on a macOS 27 host while the editor was demonstrably drawing; a run whose every image is host-empty proves the instrument blind, not the editor. It sees what is composited, not why — pair it with a trace from the plug-in process (~/.config/pulp/trace-autostart in a traced build).
 - name: audio-quality-lab
   path: tools/audio/quality-lab
   category: audio
@@ -37,6 +47,23 @@ tools:
   install: pulp tool install audio-quality-lab
   skill: audio-harness
   docs: guides/audio-quality-lab.md
+- name: audio-glitch-trace
+  path: tools/audio/glitch_trace.py
+  category: audio
+  use_when: A render clicks or drops out and you need the sample, the host block that rendered it, and the
+    work inside that block -- or per-block time against the deadline -- from one command.
+  invocation: python3 tools/audio/glitch_trace.py --wav <out.wav> --trace <out.pftrace>
+  inputs: A rendered WAV and the Perfetto trace captured during the same render, whose per-block `process`
+    slices carry `stream_pos` and `frames` args (the trace is optional; without it only the WAV is scored).
+  outputs: Clicks (whitened-residual spikes, dB over the local residual) and dropouts (5 ms windows below the
+    preceding level), each joined to its block's wall time, deadline and nested slices; block-time p50/p99/max
+    and deadline misses. Exit 1 when it finds events.
+  cannot_see: Reference-free, so a transient the material carries (a drum hit) also scores; read it against
+    an unedited render of the same material. An offline render cannot drop a buffer, so a deadline miss is
+    reported as the block that WOULD drop one at that buffer size, not as audio damage.
+  availability: always
+  skill: audio-harness
+  docs: guides/audio-inspector.md
 - name: audio-render
   path: tools/cli/cmd_audio.cpp
   category: audio

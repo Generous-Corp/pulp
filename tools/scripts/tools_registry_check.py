@@ -66,6 +66,7 @@ CATEGORY_ORDER = [
     "audio",
     "build",
     "build-speed",
+    "editor-open",
 ]
 
 CATEGORY_BLURB = {
@@ -76,6 +77,7 @@ CATEGORY_BLURB = {
     "audio": "prove what the audio actually did",
     "build": "build and test only what a diff touches",
     "build-speed": "measure build, gate and merge-queue speed",
+    "editor-open": "measure what a host shows while a plug-in editor opens",
 }
 
 

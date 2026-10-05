@@ -119,6 +119,9 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_PLAYBACK_SOURCES}
     ${_PULP_WCLAP_WAV_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
+    # clap_init() requests the editor prewarm; with no view layer here no
+    # scheduler is ever installed, so the request is a no-op, but it must link.
+    ${_PULP_WCLAP_ROOT}/core/format/src/editor_prewarm.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_remote_controls.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_note_name.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/processor_f64.cpp

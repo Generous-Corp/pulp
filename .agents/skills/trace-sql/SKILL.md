@@ -7,6 +7,7 @@ requires:
   - .agents/skills/trace-sql/pulp_frames_over_budget.sql
   - .agents/skills/trace-sql/pulp_xruns.sql
   - .agents/skills/trace-sql/pulp_layout_vs_paint.sql
+  - .agents/skills/trace-sql/pulp_frame_stage_cost.sql
   - .agents/skills/trace-sql/pulp_motion_join.sql
   - .agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql
   - .agents/skills/trace-sql/pulp_gpu_health_transitions.sql
@@ -114,6 +115,7 @@ hand each time. Each `.sql` file carries a header comment explaining its shape.
 | `pulp_frames_over_budget` | frames past the vsync budget (fn takes a budget) | `--preset frames-over-budget` |
 | `pulp_xruns` | xrun / deadline-miss instant events | `pulp trace xruns` |
 | `pulp_layout_vs_paint` | frame-pipeline cost split, one row per stage | `pulp trace layout-vs-paint` |
+| `pulp_frame_stage_cost(name)` | per frame: stage SELF time (layout/canvas/js/text/state/render), whole-surface repaint requests, layout passes | `tools/scripts/trace_frame_cost.py` |
 | `pulp_motion_join` | frames joined to their motion `trace_id` | `--preset motion-join` |
 | `pulp_gpu_startup_breakdown` | ranked startup GPU/render stages | `pulp trace gpu-startup` |
 | `pulp_gpu_health_transitions` | health/device-loss evidence | `pulp trace gpu-health` |
@@ -677,3 +679,16 @@ counters or an empty trace cannot substitute for actual records.
 
 See `docs/guides/gpu-audio-wavenet-trace.md` for the capture contract and current
 physical NAM measurement boundaries.
+
+## Traces from an out-of-process host, and prewarm proof
+
+A traced build reads `~/.config/pulp/trace-autostart` when `PULP_TRACE_PATH`
+is not in its environment (AUHostingService inherits none). A
+`PULP_TRACE_PATH` ending in `/` writes one file per process,
+`<process>-<pid>.pftrace`, so a host and its service never overwrite each
+other — load the service's file, not the host's, for the editor's spans. The
+background prewarm runs on its own thread, so key on the thread when proving
+it: `script_precompile` / `scripted_ui_prewarm` on the worker, and only
+`script_bytecode_read` (no `script_compile`) for the same script inside
+`editor_first_frame` on the main thread. Join `slice` → `thread_track` →
+`thread` (stable `utid`) rather than assuming one track per process.

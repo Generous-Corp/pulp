@@ -115,6 +115,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
         self.autoresizesSubviews = YES;
         self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         _deferredClickAlive = std::make_shared<std::atomic<bool>>(true);
+        _backgroundRGB = pulp::view::mac_host::kHostClearRgb;
     }
     return self;
 }
@@ -1284,9 +1285,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
 
-    canvas.set_fill_color(pulp::canvas::Color::rgba8(
-        pulp::view::mac_host::kHostClearR, pulp::view::mac_host::kHostClearG,
-        pulp::view::mac_host::kHostClearB));
+    canvas.set_fill_color(pulp::canvas::Color::hex(self.backgroundRGB));
     canvas.fill_rect(0, 0,
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
@@ -1482,19 +1481,16 @@ public:
             // create_configured_window; identical for the GPU host.
             window_ = create_configured_window(options);
 
-            // NSWindow's default backgroundColor is
-            // [NSColor windowBackgroundColor] which is white in macOS
-            // light-mode. AppKit composites this beneath the contentView
-            // on dirty-rect repaints, even when the contentView is opaque.
-            // Set the window backgroundColor to match PulpView's clear color
-            // so any compositing race / partial-paint window shows dark, not
-            // white. Belt-and-suspenders alongside PulpView isOpaque=YES.
-            // CPU-host-specific: the GPU host clears via its Metal frame.
-            [window_ setBackgroundColor:pulp::view::mac_host::ns_host_clear_color()];
+            // AppKit composites the window's backgroundColor (white in light
+            // mode by default) beneath the content on dirty-rect repaints, so
+            // it is the window's declared background (WindowOptions), as is
+            // the view's fill; both hosts do this.
+            [window_ setBackgroundColor:pulp::view::mac_host::ns_color_from_rgb(options.background_rgb)];
 
             options_initially_hidden_ = options.initially_hidden;
 
             view_ = [[PulpView alloc] initWithFrame:frame];
+            view_.backgroundRGB = options.background_rgb;
             view_.rootView = &root_;
             view_.frameClock = &frame_clock_;
             view_.framePump = &frame_pump_;
@@ -1765,9 +1761,12 @@ public:
             window_ = create_configured_window(options);
 
             options_initially_hidden_ = options.initially_hidden;
+            background_rgb_ = options.background_rgb;  // see MacWindowHost
+            [window_ setBackgroundColor:mac_host::ns_color_from_rgb(background_rgb_)];
 
             // Create CAMetalLayer-backed view
             metal_view_ = [[PulpMetalView alloc] initWithFrame:frame];
+            metal_view_.backgroundRGB = background_rgb_;
             metal_view_.rootView = &root_;
             metal_view_.frameClock = &frame_clock_;
             metal_view_.repaintBlock = ^{
@@ -2322,6 +2321,7 @@ private:
     id key_monitor_ = nil;                                       // NSEvent app key monitor
     std::function<bool(const pulp::view::KeyEvent&)> app_key_handler_;
     bool options_initially_hidden_ = false;
+    uint32_t background_rgb_ = mac_host::kHostClearRgb;  // WindowOptions::background_rgb
     bool foreground_role_adopted_ = false;
     std::vector<WindowOptions::MenuCommand> menu_commands_;
 
@@ -2664,8 +2664,7 @@ private:
             canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
         }
 
-        canvas.set_fill_color(canvas::Color::rgba8(
-            mac_host::kHostClearR, mac_host::kHostClearG, mac_host::kHostClearB));
+        canvas.set_fill_color(canvas::Color::hex(background_rgb_));
         canvas.fill_rect(0, 0, width_, height_);
 
         if (has_viewport) {

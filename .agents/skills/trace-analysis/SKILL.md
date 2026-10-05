@@ -271,6 +271,50 @@ Where an uninstrumented subsystem's cost still shows up: inside whatever
 That tells you a frame was expensive; it cannot tell you which work inside it
 was responsible.
 
+## Per-frame cost of an animated UI, in one command
+
+For "is this animation cheap?" -- a modulated knob, a meter, a plot an LFO
+moves -- the answer is per frame and per stage, split by scenario, and it has a
+helper. Capture with your own frame span around each frame's work (or use the
+host's `frame` / `plugin_editor_frame`) and a scenario span around each run,
+then:
+
+```bash
+tools/scripts/trace_frame_cost.py --trace cap.pftrace --frame modctl_frame \
+    --group modctl_scenario --labels idle,knobs,morph,bands \
+    --baseline idle --max-p95-ms 1.5 --max-layout-frames 0     # exit 1 on breach
+```
+
+It prints frame p50/p95/max, each stage's p95 by SELF time (so a js span
+wrapping canvas work is not counted twice), whole-surface repaint requests per
+frame and the frames that ran a layout pass; `--json` for a machine. It exits 2
+when the frame span never fired or the ring wrapped, never reporting an empty
+table as a pass. The SQL is `pulp_frame_stage_cost` in the trace-sql stdlib.
+
+What to read, in order:
+1. **Frames that ran layout** -- a value tick that writes a size or a React
+   commit shows here first; it should be 0 for a modulated control.
+2. **Frame p95 over the baseline** -- the cost the animation adds.
+3. **`repaint/f`** -- whole-surface requests per frame. A frame-drive with
+   zero bounded damage usually means the bridge's own repaint request
+   (`repaint_request` → `view_repaint_request`) or a bounded request escalated
+   by `View::request_repaint(Rect)` (render transform, filter or scroll on an
+   ancestor -- a design-viewport scale is one). Find who asked:
+   `SELECT p.name, a.display_value, COUNT(*) FROM slice s JOIN slice p ON
+   s.parent_id = p.id LEFT JOIN args a ON a.arg_set_id = p.arg_set_id WHERE
+   s.name = 'view_repaint_request' GROUP BY 1, 2 ORDER BY 3 DESC` -- the
+   `js_native` parent's `debug.fn` names the bridge call (`setSvgPath`, ...).
+
+Pair the trace with the headless count gate (`FrameCostProbe`, view-bridge
+skill, checklist item 8) and its negative control. Getting a traced build:
+`pulp sdk install --local --profile trace` or a downstream's own trace-SDK
+script; verify it by symbol count before trusting an empty capture
+(`nm lib/libpulp-perfetto.a | grep -c " T "` in the thousands, `nm
+lib/libpulp-view-core.a | grep -ci perfetto` non-zero), and note that a
+`PULP_TRACE_SCOPE_NAMED` with a category Pulp does not define
+(`core/runtime/include/pulp/runtime/trace.hpp`) only fails to COMPILE in a
+traced build -- a release SDK hides it.
+
 ## The investigation protocol
 
 ### 1. Keep a chain-of-evidence scratchpad
@@ -344,6 +388,7 @@ grounds the analysis in Pulp's real seams and names the specific traps:
 | Symptom | Hints file |
 |---|---|
 | xruns, per-node DSP cost, deadline miss, "meter calm but one node dominates", jitter/denormals | `references/hints_dsp.md` |
+| "it clicks / drops out here": a glitch in a render joined to the block that rendered it, block time vs deadline | `references/hints_dsp.md` ("Block time against the deadline"), `tools/audio/glitch_trace.py` |
 | dropped frames vs vsync budget, layout-vs-paint, `TextShaper::prepare` re-runs, dirty-rect churn, GPU-submit stalls | `references/hints_frame.md` |
 | QuickJS bridge dispatch cost, a JS callback invalidating layout | `references/hints_js.md` |
 | Dawn submit/present stalls, Graphite record cost, per-pass GPU time | `references/hints_gpu.md` |
@@ -492,6 +537,70 @@ Fingerprints and what they mean:
   with `console.log` from a `setTimeout`) instead of trace spans.
 - `getLayoutBoxMetrics` counts are a symptom, not the cost; measure the
   commit (see `getLayoutRect` coalescing in view-bridge).
+
+### Getting a traced SDK, and proving it is one
+
+A plug-in or app only emits spans when it links a `PULP_TRACING=ON` SDK. Build
+one from the exact source you are measuring (a clean checkout at the release
+tag, or a committed branch — the build snapshots the commit, not the working
+tree):
+
+```bash
+git -C <pulp-checkout> checkout --detach v0.907.0     # or your committed branch
+cd <pulp-checkout> && PULP_BUILD_JOBS=4 caffeinate -u -d -i \
+  pulp sdk install --local --profile trace --print-path
+# -> ~/.pulp/sdk-dev/trace-v1/darwin-arm64/<source-sha>/<fingerprint>
+```
+
+On a busy host the governor refuses a full-width request ("could not acquire
+build capacity"); `PULP_BUILD_JOBS=4` asks for a share it can grant. Then prove
+it, by symbol count, not by the profile name:
+`nm <prefix>/lib/libpulp-perfetto.a | grep -c perfetto` (thousands) and
+`nm <prefix>/lib/libpulp-view-script.a | grep -c perfetto` (non-zero; a
+release SDK prints 0). Point the plug-in at it with
+`-DPulp_DIR=<prefix>/lib/cmake/Pulp`. A plug-in whose sources name a category
+the SDK does not declare (`PULP_TRACE_SCOPE_NAMED("audio", …)` — the list is
+the `perfetto::Category(...)` block in `pulp/runtime/trace.hpp`) compiles in a
+release build and fails only here, with
+`kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_<line>`; lint category
+literals against that header in the plug-in's own tests.
+
+### Editor open out of process (AUHostingService), with spans
+
+Logic runs AU v2 plug-ins in AUHostingService, which inherits no environment.
+With a traced build, write `~/.config/pulp/trace-autostart`:
+
+```
+PULP_TRACE_PATH=/Users/<me>/traces/oop/
+PULP_TRACE_SECONDS=11
+PULP_TRACE_RING_KB=262144
+```
+
+then drive opens with `tools/editor-open/editor_open_oop_probe.sh` (fresh
+instance per open; `--gui-session` over ssh) and read
+`/Users/<me>/traces/oop/AUHostingServiceXPC_arrow-<pid>.pftrace`. Keep the
+flush (`PULP_TRACE_SECONDS`) inside the probe's run: the service exits with its
+last client. Delete the file afterwards — every traced Pulp process records
+while it exists. The probe's "view controller N ms" is the host's placeholder
+time; the trace says what filled it. Order of work inside it:
+`spectr_editor_create`-style app spans (create_view), then `editor_first_frame`
+→ `scripted_ui_document_load` (→ `script_compile` | `script_bytecode_read`,
+`script_execute`, `runtime_import_verify`, the app's bind span) →
+`plugin_editor_frame` (`gpu_submit`, `first_frame_gpu_wait`). A cold
+`gpu_submit` or `first_frame_gpu_wait` of hundreds of ms on the first open of
+a newly built/installed binary is Metal compiling shaders for that binary;
+re-run in a new process before attributing it to the editor. Counted, not
+timed, the prewarm proof is `script_compile` with no `script_precompile` before
+it (not prewarmed) versus `script_precompile` on another thread and only
+`script_bytecode_read` inside the factory (prewarmed):
+
+```sql
+SELECT t.name AS thread, s.name, COUNT(*) n, ROUND(SUM(s.dur)/1e6,1) ms
+FROM slice s JOIN thread_track tt ON s.track_id = tt.id JOIN thread t USING (utid)
+WHERE s.name IN ('script_precompile','script_compile','script_bytecode_read',
+                 'runtime_import_verify','scripted_ui_prewarm')
+GROUP BY 1, 2 ORDER BY 1, 2;
+```
 
 ### First-frame colour recipe: what did the editor show before its UI?
 

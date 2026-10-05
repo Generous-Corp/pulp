@@ -40,7 +40,19 @@ public:
 
     /// Set the path-data string. Re-parses immediately. Empty string
     /// clears the widget.
+    ///
+    /// A hot path: a script animating a path (a knob needle, a modulation
+    /// marker, a meter trace) calls this every frame. An unchanged string is
+    /// a no-op, and a change repaints only the union of the old and new
+    /// painted extents (paint_extent()), never the whole surface and never
+    /// the layout.
     void set_path(std::string data);
+
+    /// Conservative local-space box of everything paint() draws: the path's
+    /// control-point hull mapped through the viewBox transform, inflated for
+    /// the stroke (miter joins included) and anti-aliasing. Empty when the
+    /// widget paints nothing (no path, no fill and no stroke, or no size).
+    Rect paint_extent() const;
 
     /// Set the source coordinate space the path was authored in. The
     /// widget scales path coords from this box to its own bounds with
@@ -145,6 +157,8 @@ public:
 
 private:
     void reparse();
+    /// Repaint what changed between @p before and the current paint_extent().
+    void repaint_extent_change(const Rect& before);
 
     std::string path_data_;
     std::vector<SvgPathSegment> segments_;

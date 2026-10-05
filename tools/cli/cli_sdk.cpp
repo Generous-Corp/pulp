@@ -24,6 +24,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <thread>
@@ -793,6 +794,37 @@ std::string read_pinned_shipyard_version(const fs::path& root) {
         return rhs;
     }
     return {};
+}
+
+namespace {
+
+// [v]MAJOR.MINOR.PATCH, digits only, exactly three parts.
+std::optional<std::array<unsigned long long, 3>> semver_triple(const std::string& version) {
+    std::string core = version;
+    if (!core.empty() && core.front() == 'v') core.erase(0, 1);
+    std::array<unsigned long long, 3> parts{};
+    std::size_t start = 0;
+    for (std::size_t i = 0; i < 3; ++i) {
+        auto end = core.find('.', start);
+        if ((i < 2) != (end != std::string::npos)) return std::nullopt;
+        auto field = core.substr(start, i < 2 ? end - start : std::string::npos);
+        if (field.empty() || field.size() > 18 ||
+            field.find_first_not_of("0123456789") != std::string::npos) {
+            return std::nullopt;
+        }
+        parts[i] = std::stoull(field);
+        start = end + 1;
+    }
+    return parts;
+}
+
+}  // namespace
+
+bool shipyard_pin_accepts(const std::string& pinned, const std::string& installed) {
+    auto pin = semver_triple(pinned);
+    auto have = semver_triple(installed);
+    if (!pin || !have) return pinned == installed;
+    return (*have)[0] == (*pin)[0] && *have >= *pin;
 }
 
 std::vector<std::string> read_opt_in_shipyard_targets(const fs::path& root) {

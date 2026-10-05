@@ -4,6 +4,7 @@
 // with the Pulp StateStore during processing
 
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
@@ -696,6 +697,7 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     auto desc = processor_->descriptor();
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
+    request_editor_prewarm(*processor_);
 
     // Wire the MPE sidecar when the plug-in opts in. configure() binds the
     // tracker's callbacks once here on the host thread (never on the audio
