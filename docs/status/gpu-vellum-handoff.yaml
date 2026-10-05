@@ -467,16 +467,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/view.cpp",
           "state": "pulp-owned-retained",
-          "revision": "4687d85dc3222c75d888879ca48c5e70ce001118",
-          "object_id": "c6a3e3133bbdd38571866aad9cd72d5024f634b2",
+          "revision": "b9088f16dd3198fb31791e96a1d5cfab375e995c",
+          "object_id": "958f29cd4039b6b79010dc087c0d6af3f83f7b5d",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "6902f01784d13dfcd0c66cb698a36c2f7410afd0",
-          "object_id": "74d06b2080a581c60584b6ea4ce82302b2145061",
+          "revision": "974c5b4e2f5e76a32c5cb9e8a328e8241b929d84",
+          "object_id": "a63a36fe4fb0a76343df187924c4d00d6e226092",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "7dc3898ea4672e7315974319652f0c91f45898ae",
-          "object_id": "1ca75abf321a884b8a4250f40adb8614bc8b934d",
+          "revision": "5215f37c8b0d7ab3bea1d2f6513f5435fc2101c9",
+          "object_id": "527176bf8a2fa37dcc59d364f1c9fc6603906f88",
           "object_type": "blob"
         },
         {
