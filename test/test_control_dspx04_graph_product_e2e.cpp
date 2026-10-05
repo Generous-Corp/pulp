@@ -90,14 +90,12 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     INFO(prepared.data_json);
     REQUIRE(prepared.status_id == "prepared");
     const auto prepared_data = choc::json::parse(prepared.data_json);
-    REQUIRE(prepared_data["schema"].getString() ==
-            "pulp.control.host-prepare-installed.v1");
+    REQUIRE(prepared_data["schema"].getString() == "pulp.control.host-prepare-installed.v1");
     REQUIRE(prepared_data["host_id"].getString() == "dspx04-graph-product");
     REQUIRE_FALSE(prepared_data["inventory_id"].getString().empty());
     auto launch = choc::value::createObject("");
     launch.addMember("inventory_id",
-                     choc::value::createString(
-                         prepared_data["inventory_id"].getString()));
+                     choc::value::createString(prepared_data["inventory_id"].getString()));
     const auto launched =
         management.manage("host-launch", choc::json::toString(launch, false), 10s);
     INFO(launched.explanation);
@@ -105,10 +103,8 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     REQUIRE(launched.status_id == "launched");
     const auto launch_data = choc::json::parse(launched.data_json);
     REQUIRE(launch_data["schema"].getString() == "pulp.control.host-launch.v1");
-    REQUIRE(launch_data["inventory_id"].getString() ==
-            prepared_data["inventory_id"].getString());
-    const auto replay =
-        management.manage("host-launch", choc::json::toString(launch, false), 10s);
+    REQUIRE(launch_data["inventory_id"].getString() == prepared_data["inventory_id"].getString());
+    const auto replay = management.manage("host-launch", choc::json::toString(launch, false), 10s);
     CHECK(replay.status_id == "inventory_unavailable");
     const auto identity = wait_for_instance(management, "dev.pulp.test.dspx04-graph-product");
     const std::string instance(identity["instance_id"].getString());
@@ -210,15 +206,15 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     // bound preserves graph state when a dense batch reaches the executor.
     REQUIRE(refused.stdout_output.find("invalid-request") != std::string::npos);
 
-    const auto unbound = run(cli, root.runtime,
-                             {"control", "call", "--instance", "instance-unbound",
-                              "dev.pulp.graph/modulation-route.edit@1", "--params",
-                              R"({"commands":[{"kind":"remove","source":1,"source_port":0,"destination":2,"parameter_id":7}]})",
-                              "--json", "--grant", develop_grant});
+    const auto unbound = run(
+        cli, root.runtime,
+        {"control", "call", "--instance", "instance-unbound",
+         "dev.pulp.graph/modulation-route.edit@1", "--params",
+         R"({"commands":[{"kind":"remove","source":1,"source_port":0,"destination":2,"parameter_id":7}]})",
+         "--json", "--grant", develop_grant});
     CHECK(unbound.exit_code != 0);
-    const bool unbound_refused =
-        unbound.stdout_output.find("not-found") != std::string::npos ||
-        unbound.stdout_output.find("unavailable") != std::string::npos;
+    const bool unbound_refused = unbound.stdout_output.find("not-found") != std::string::npos ||
+                                 unbound.stdout_output.find("unavailable") != std::string::npos;
     CHECK(unbound_refused);
 
     auto revoke = choc::value::createObject("");
@@ -228,10 +224,11 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     CHECK_FALSE(revoked.status_id.empty());
     const auto revoked_call = run(
         cli, root.runtime,
-        std::vector<std::string>{"control", "call", "--instance", std::string(instance),
-                                 "dev.pulp.graph/modulation-route.edit@1", "--params",
-                                 R"({"commands":[{"kind":"remove","source":1,"source_port":0,"destination":2,"parameter_id":7}]})",
-                                 "--json", "--grant", develop_grant});
+        std::vector<std::string>{
+            "control", "call", "--instance", std::string(instance),
+            "dev.pulp.graph/modulation-route.edit@1", "--params",
+            R"({"commands":[{"kind":"remove","source":1,"source_port":0,"destination":2,"parameter_id":7}]})",
+            "--json", "--grant", develop_grant});
     CHECK(revoked_call.exit_code != 0);
     CHECK_FALSE(revoked_call.stdout_output.empty());
 #else
