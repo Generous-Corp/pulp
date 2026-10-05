@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cerrno>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -28,6 +29,18 @@
 #endif
 
 namespace pulp::import_design::browser_capture {
+
+int probe_timeout_from_environment(int fallback_ms) {
+    const char* value = std::getenv("PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS");
+    if (value == nullptr || *value == '\0') return fallback_ms;
+    char* end = nullptr;
+    errno = 0;
+    const long parsed = std::strtol(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' || parsed <= 0 ||
+        parsed > std::numeric_limits<int>::max())
+        return fallback_ms;
+    return static_cast<int>(parsed);
+}
 
 namespace {
 
@@ -364,9 +377,20 @@ Diagnostic discovery_diagnostic(
             "runtime-discovery"};
     }
     if (has_failure(BrowserProbeFailure::capture_capability_unavailable)) {
+        // The probe's own reason leads, not only the Checked list at the end:
+        // callers that keep the first few hundred characters of this message
+        // must still be able to tell a slow probe from a missing capability.
+        std::string reason;
+        for (const auto& probe : probes)
+            if (probe.failure_kind == BrowserProbeFailure::capture_capability_unavailable &&
+                !probe.failure.empty()) {
+                reason = probe.failure;
+                break;
+            }
         return {
             "browser-capability-unavailable",
-            "Chrome or Chromium does not provide the required headless capture capabilities.",
+            "Chrome or Chromium does not provide the required headless capture capabilities" +
+                (reason.empty() ? std::string(".") : " (" + reason + ")."),
             "browser-discovery"};
     }
     if (has_failure(BrowserProbeFailure::browser_incompatible)) {
@@ -641,7 +665,8 @@ BrowserProbeResult probe_browser(
     if (process.timed_out) {
         result.failure_kind =
             BrowserProbeFailure::capture_capability_unavailable;
-        result.failure = "browser CDP capability probe timed out";
+        result.failure = "browser CDP capability probe timed out after " +
+                         std::to_string(options.probe_timeout_ms) + " ms";
         return result;
     }
     if (process.exit_code != 0) {
