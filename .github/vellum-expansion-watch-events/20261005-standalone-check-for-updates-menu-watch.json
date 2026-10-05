@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-standalone-check-for-updates-menu-watch",
+  "created_at": "2026-10-05T00:50:36Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds the in-app update service (pulp::format::AppUpdateService), its EditorBridge messages and @pulp/react client, and the standard macOS application-menu layout (About, Check for Updates, Services, Hide, Quit) for standalone apps. The touched @pulp/react file is a new, self-contained bridge client exported from the package index; it does not change the reconciler, host config, prop appliers, materialized-import metadata or any render/asset/backend path. No design-import, Chromium, rendering, or packaging authority moves; Pulp-only.",
+  "tests": [
+    "build/test/pulp-test-group-core-standalone \"[updates],[updater]\"",
+    "build/test/pulp-test-group-view-host-mac \"[menu]\"",
+    "npx vitest run test/app-updates.test.ts (in packages/pulp-react)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
