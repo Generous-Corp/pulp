@@ -194,6 +194,16 @@ shipping artifact.
 
 ## Gotchas (each cost real time)
 
+- **Windows: `LNK2019 __imp_CompareObjectHandles` from `dawn_combined.lib(SharedFenceD3D12.cpp.obj)`.**
+  Dawn's D3D12 shared fence calls `CompareObjectHandles`, which `kernel32.lib` does
+  not import. Microsoft's docs name `Kernelbase.lib`, but the Windows SDK on the
+  hosted runners has no such file (`LNK1181: cannot open input file 'kernelbase.lib'`
+  on every target that links Skia), so `FindSkia.cmake` adds the `onecore` umbrella
+  import library next to `dxguid` on the `skia::skia` interface. A target that links
+  Dawn through its own path needs the same. Dawn calls it directly, so a runtime
+  `GetProcAddress` lookup would mean patching Dawn. It surfaces only in targets that pull in the D3D12 device path (GPU compute,
+  headless surface, renderer3d), which is why other Windows targets link fine.
+
 - **A failed `fetch_skia_for_release.py` is not always a bad pin.** The pinned
   archive is a few hundred megabytes from a release CDN, fetched fresh on lanes
   with no warm cache, so a single transient 5xx or dropped connection there fails

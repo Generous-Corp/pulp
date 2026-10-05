@@ -74,10 +74,19 @@ class SignalGraph::PreparedTopologyEdit {
                                       const std::string& name);
     bool remove_node(NodeId id);
     bool connect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
+    bool connect_automation(NodeId source, PortIndex source_port, NodeId dest,
+                            uint32_t dest_param_id, float range_lo, float range_hi,
+                            float smoothing_ms = 0.0f, AutomationMix mix = AutomationMix::Replace);
+    bool connect_audio_rate_modulation(NodeId source, PortIndex source_port, NodeId dest,
+                                       uint32_t dest_param_id, float range_lo, float range_hi,
+                                       float smoothing_ms = 0.0f,
+                                       AutomationMix mix = AutomationMix::Replace);
     bool connect_feedback(NodeId source, PortIndex source_port, NodeId dest,
                           PortIndex dest_port);
     bool connect_midi(NodeId source, NodeId dest);
     bool disconnect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
+    bool disconnect_modulation(NodeId source, PortIndex source_port, NodeId dest,
+                               uint32_t dest_param_id, bool audio_rate);
     bool set_node_gain(NodeId id, float linear_gain);
 
     SampleRegionResult declare_sample_region(SampleRegionDefinition definition);

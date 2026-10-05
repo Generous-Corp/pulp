@@ -456,6 +456,7 @@
       "pulp/host/offline_signal_graph_host.hpp",
       "pulp/host/parameter_event_queue.hpp",
       "pulp/host/plugin_slot.hpp",
+      "pulp/host/processor_signal_graph_binding.hpp",
       "pulp/host/sample_region_authoring.hpp",
       "pulp/host/sample_region_parameters.hpp",
       "pulp/host/sample_region_plan.hpp",
@@ -466,6 +467,7 @@
       "pulp/host/scanner.hpp",
       "pulp/host/signal_graph.hpp",
       "pulp/host/signal_graph_connection.hpp",
+      "pulp/host/signal_graph_control.hpp",
       "pulp/host/signal_graph_execution_snapshot.hpp",
       "pulp/host/signal_graph_execution_status.hpp",
       "pulp/host/signal_graph_executor_routing.hpp",
@@ -1474,6 +1476,7 @@
       "pulp/inspect/control_sequencer_state_executor.hpp",
       "pulp/inspect/control_sequencer_transport_executor.hpp",
       "pulp/inspect/control_service.hpp",
+      "pulp/inspect/control_signal_graph_executor.hpp",
       "pulp/inspect/control_standalone_host.hpp",
       "pulp/inspect/control_standalone_ui_adapter.hpp",
       "pulp/inspect/control_state_read_executor.hpp",
@@ -1541,11 +1544,15 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 72,
+        "installed_target_count": 73,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 99
+            "closure_node_count": 100
+          },
+          {
+            "exported_as": "Pulp::inspect-graph-runtime",
+            "closure_node_count": 93
           },
           {
             "exported_as": "Pulp::inspect-sample-region-runtime",
@@ -3697,6 +3704,157 @@
             "pulp-platform"
           ]
         },
+        "inspect-graph-runtime": {
+          "target": "pulp-inspect-graph-runtime",
+          "exported_as": "Pulp::inspect-graph-runtime",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "inspect",
+          "closure": {
+            "node_count": 93,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-bundled-fonts",
+              "pulp-canvas",
+              "pulp-events",
+              "pulp-format",
+              "pulp-format-core",
+              "pulp-format-view",
+              "pulp-foundation",
+              "pulp-graph",
+              "pulp-host",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-native-components",
+              "pulp-platform",
+              "pulp-playback",
+              "pulp-render",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-simd",
+              "pulp-state",
+              "pulp-timebase",
+              "pulp-timeline",
+              "pulp-timeline-editor",
+              "pulp-tool-gpu-health-model",
+              "pulp-view-core",
+              "pulp-view-script"
+            ],
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "ausdk",
+              "clap",
+              "everest",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-inspect-control",
+              "pulp-inspect-graph-runtime",
+              "pulp-inspect-protocol",
+              "pulp-inspect-runtime",
+              "pulp-tracing",
+              "skia::skia",
+              "vst3-sdk",
+              "webgpu",
+              "yaml-cpp",
+              "yogacore"
+            ]
+          },
+          "external_dependencies": {
+            "count": 66,
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "ausdk",
+              "clap",
+              "everest",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-inspect-control",
+              "pulp-inspect-graph-runtime",
+              "pulp-inspect-protocol",
+              "pulp-inspect-runtime",
+              "pulp-tracing",
+              "skia::skia",
+              "vst3-sdk",
+              "webgpu",
+              "yaml-cpp",
+              "yogacore"
+            ],
+            "prebuilt_archives": [
+              "libdawn_combined.a",
+              "libjsonreader.a",
+              "libskia.a",
+              "libskottie.a",
+              "libskparagraph.a",
+              "libskresources.a",
+              "libsksg.a",
+              "libskshaper.a",
+              "libskunicode_core.a",
+              "libskunicode_icu.a",
+              "libsvg.a"
+            ],
+            "imported_targets": [],
+            "frameworks": [
+              "AVFoundation",
+              "Accelerate",
+              "AppKit",
+              "AudioToolbox",
+              "AudioUnit",
+              "Carbon",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreGraphics",
+              "CoreHaptics",
+              "CoreMIDI",
+              "CoreMedia",
+              "CoreServices",
+              "CoreText",
+              "CoreVideo",
+              "ForceFeedback",
+              "Foundation",
+              "GameController",
+              "IOKit",
+              "IOSurface",
+              "ImageIO",
+              "Metal",
+              "MetalKit",
+              "QuartzCore",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm",
+              "m",
+              "objc"
+            ]
+          },
+          "public_headers": {
+            "roots": [
+              "inspect/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "pulp-host",
+            "pulp-inspect-runtime"
+          ]
+        },
         "inspect-offline-runtime": {
           "target": "pulp-inspect-offline-runtime",
           "exported_as": "Pulp::inspect-offline-runtime",
@@ -4278,7 +4436,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 99,
+            "node_count": 100,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4326,6 +4484,7 @@
               "pulp-inspect",
               "pulp-inspect-authoring",
               "pulp-inspect-control",
+              "pulp-inspect-graph-runtime",
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
               "pulp-inspect-sample-region-runtime",
@@ -4341,7 +4500,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 71,
+            "count": 72,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4359,6 +4518,7 @@
               "pulp-inspect",
               "pulp-inspect-authoring",
               "pulp-inspect-control",
+              "pulp-inspect-graph-runtime",
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
               "pulp-inspect-sample-region-runtime",
@@ -4432,6 +4592,7 @@
           "direct_dependencies": [
             "pulp-format",
             "pulp-inspect",
+            "pulp-inspect-graph-runtime",
             "pulp-inspect-runtime",
             "pulp-inspect-sample-region-runtime",
             "pulp-inspect-ui-runtime"

@@ -3792,6 +3792,17 @@ appear as `T` (defined) with **zero** `U` entries, and the binary should run —
 argument form: it is `pulp-cpp version`, not `pulp-cpp pulp version`, and
 `pulp-cpp sdk` rather than `sdk --help`.
 
+### Never probe a pid with `os.kill(pid, 0)` on Windows
+
+On Windows `os.kill(pid, 0)` is `os.kill(pid, signal.CTRL_C_EVENT)`: Python calls
+`GenerateConsoleCtrlEvent`, which sends Ctrl+C to every process on the console
+instead of testing `pid`. A liveness probe in a ctest-run script killed the whole
+Windows ctest run that way (`0xC000013A`, "Terminate batch job (Y/N)?"). The
+CLI-side scripts that probe a pid (`tools/ci/build_dir_lock.py`,
+`tools/scripts/live_build_check.py`) take an `os.name == "nt"` route that opens the
+process with `PROCESS_QUERY_LIMITED_INFORMATION` and reads `STILL_ACTIVE`; copy
+that, not the POSIX `os.kill`, into any new Python that probes a pid.
+
 ## Untrusted paths go through `pulp::runtime::is_safe_relative_path`
 
 An archive entry, manifest member, template path or registry location that the

@@ -50,6 +50,16 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
            "dev.pulp.telemetry/subscribe@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
             target_link_libraries(${target}_Standalone PRIVATE ${_PULP_CONTROL_INSPECT_TARGET})
         endif()
+        if("dev.pulp.graph/modulation-route.edit@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
+            set(_control_graph_authority_factory_source
+                "${CMAKE_CURRENT_BINARY_DIR}/${target}_standalone_graph_authority_factory.cpp")
+            file(GENERATE OUTPUT "${_control_graph_authority_factory_source}" CONTENT
+                "#include <pulp/host/processor_signal_graph_binding.hpp>\n#include <pulp/inspect/control_standalone_host.hpp>\nnamespace { [[maybe_unused]] const bool pulp_control_graph_authority_factory_installed = pulp::inspect::detail::install_standalone_signal_graph_authority_factory(&pulp::host::create_processor_signal_graph_authority); }\n")
+            target_sources(${target}_Standalone PRIVATE
+                "${_control_graph_authority_factory_source}")
+            target_link_libraries(${target}_Standalone PRIVATE pulp::host)
+        endif()
+
         if("dev.pulp.runtime/evaluate@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
             set(_control_runtime_eval_factory_source
                 "${CMAKE_CURRENT_BINARY_DIR}/${target}_standalone_runtime_eval_factory.cpp")
@@ -77,6 +87,11 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             "${_control_host_entry}")
         target_link_libraries(${target}_ControlHost PRIVATE
             ${target}_Core ${_standalone_target} ${_PULP_CONTROL_STANDALONE_TARGET})
+        if("dev.pulp.graph/modulation-route.edit@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
+            target_sources(${target}_ControlHost PRIVATE
+                "${_control_graph_authority_factory_source}")
+            target_link_libraries(${target}_ControlHost PRIVATE pulp::host)
+        endif()
         if("dev.pulp.ui/capture@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
            "dev.pulp.ui/input@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
             target_link_libraries(${target}_ControlHost PRIVATE ${_PULP_CONTROL_UI_TARGET})

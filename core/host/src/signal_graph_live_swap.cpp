@@ -158,6 +158,8 @@ const char* live_swap_reason_name(LiveSwapFallbackReason reason) {
     case LiveSwapFallbackReason::LoadFailed: return "LoadFailed";
     case LiveSwapFallbackReason::PrepareFailed: return "PrepareFailed";
     case LiveSwapFallbackReason::StateRestoreFailed: return "StateRestoreFailed";
+    case LiveSwapFallbackReason::HistoryRefused:
+        return "HistoryRefused";
     case LiveSwapFallbackReason::StateTooLarge: return "StateTooLarge";
     case LiveSwapFallbackReason::ShapeMismatch: return "ShapeMismatch";
     case LiveSwapFallbackReason::LatencyChanged: return "LatencyChanged";
@@ -367,6 +369,41 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
         return fail_swap_edit_locked_(LiveSwapFallbackReason::StateRestoreFailed,
                                       id,
                                       "replacement plugin rejected the live state");
+    }
+
+    // DSP history is distinct from preset state.  Carry it only for an exact
+    // history key; Refuse is the fail-closed mode for cells whose algorithm,
+    // sample-rate/latency contract, or state schema cannot be proven equal.
+    const auto history_mode = policy.retained_history.mode;
+    if (history_mode == RetainedHistoryMode::Reseed) {
+        if (!loaded->reseed_dsp_state(policy.retained_history.reseed)) {
+            return fail_swap_edit_locked_(LiveSwapFallbackReason::HistoryRefused, id,
+                                          "replacement DSP cannot accept the requested reseed");
+        }
+    } else if (history_mode == RetainedHistoryMode::Adopt ||
+               history_mode == RetainedHistoryMode::Crossfade ||
+               history_mode == RetainedHistoryMode::Refuse) {
+        const auto old_key = n->plugin->retained_history_key();
+        const auto new_key = loaded->retained_history_key();
+        const bool compatible = !old_key.empty() && old_key == new_key;
+        auto dsp_state =
+            compatible ? n->plugin->serialize_dsp_state() : std::vector<std::uint8_t>{};
+        if (dsp_state.size() > policy.retained_history.max_bytes) {
+            return fail_swap_edit_locked_(LiveSwapFallbackReason::HistoryRefused, id,
+                                          "retained DSP history exceeds the policy limit");
+        }
+        const bool restore_failed =
+            compatible && !dsp_state.empty() && !loaded->restore_dsp_state(dsp_state);
+        if (history_mode == RetainedHistoryMode::Refuse &&
+            (!compatible || dsp_state.empty() || restore_failed)) {
+            return fail_swap_edit_locked_(
+                LiveSwapFallbackReason::HistoryRefused, id,
+                "retained DSP history identity or restore is incompatible");
+        }
+        if (history_mode != RetainedHistoryMode::Refuse && restore_failed) {
+            return fail_swap_edit_locked_(LiveSwapFallbackReason::HistoryRefused, id,
+                                          "replacement DSP rejected compatible retained history");
+        }
     }
 
     StagedReplacement staged;
