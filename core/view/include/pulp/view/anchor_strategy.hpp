@@ -20,7 +20,10 @@
 /// but otherwise leaves the tree alone. It visits both the rendered `children`
 /// axis and the ordered `alternate_frames` axis. Alternate roots use a reserved
 /// `@alternate[index]` path namespace and an `@alternate/<type>` content-hash
-/// namespace; adapter identities continue to use their source node IDs.
+/// namespace. Content-hash descendants under an alternate root carry the same
+/// marker without the frame index, so equivalent controls across captured
+/// states retain one identity while ordinary children cannot collide. Adapter
+/// identities continue to use their source node IDs.
 /// Adapters call assign_anchors() in the final stage of their parse path.
 /// The `@alternate` namespace is reserved for this walker. Adapter strategies
 /// assume the source supplies unique node IDs; this low-level API preserves
