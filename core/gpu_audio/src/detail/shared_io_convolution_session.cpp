@@ -177,8 +177,10 @@ void SharedIoConvolutionSession::trace_admit(SharedIoSlotLedger::SlotToken token
     slot.record.gpu_work_admitted = true;
     if (config_.active_path == SharedIoPath::SharedHostPointer)
         slot.record.transfer_counters_available = true;
-    // Admission begins at the actual physical input lease. Callback time is
-    // intentionally unavailable: the callback never reads a diagnostic clock.
+    // Admission begins at the actual physical input lease acquired by this
+    // worker, immediately before encoding. This is not a requested schedule
+    // time. Callback time is intentionally unavailable: the callback never
+    // reads a diagnostic clock.
     slot.record.set(SharedIoTraceStage::Scheduled, trace_now_ns());
     slot.record.set(SharedIoTraceStage::WorkerEntry, trace_now_ns());
     (void)trace_recorder_->publish_admission(token.preparation_epoch, token.stream_sequence);
