@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09140"></a>
+## [0.914.0] - 2026-10-05
+
+- release/version bump ([#9637](https://github.com/Generous-Corp/pulp/pull/9637))
+- codex/p4 host scheduling after p3 20261005 ([#9620](https://github.com/Generous-Corp/pulp/pull/9620))
+- ci/delist objc stubs key blind ([#9634](https://github.com/Generous-Corp/pulp/pull/9634))
+- fix/hydrate unshallow fetch timeout ([#9632](https://github.com/Generous-Corp/pulp/pull/9632))
+- codex/gpu batching prediction 20261005 ([#9631](https://github.com/Generous-Corp/pulp/pull/9631))
+- ci/nightly windows test after partial build ([#9626](https://github.com/Generous-Corp/pulp/pull/9626))
+- fix/governed build grep sigpipe ([#9633](https://github.com/Generous-Corp/pulp/pull/9633))
+- codex/gpu audio minlead sr 20261005 ([#9582](https://github.com/Generous-Corp/pulp/pull/9582))
+- codex/nam tcn lifecycle 20261005 ([#9622](https://github.com/Generous-Corp/pulp/pull/9622))
+
 <a id="v09131"></a>
 ## [0.913.1] - 2026-10-05
 
@@ -9841,6 +9854,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.914.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.914.0
 [0.913.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.913.1
 [0.913.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.913.0
 [0.912.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.912.0
