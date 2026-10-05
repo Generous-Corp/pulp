@@ -11414,6 +11414,12 @@ apart, the PyPI pin, hosted runner — is asserted by
 which also RUNS each shell caller's block against a stub `format_changed.sh`
 (exit 0/1/3, knob unset/0/1) so the blocking default is behaviour, not text.
 
+`--check` must agree with the rewrite mode, or a blocking gate becomes one the
+fix cannot clear. It once read the formatter's output through `$(...)`, which
+strips trailing newlines, so every touched file ending in a blank line read
+dirty while `format_changed.sh` left it alone; it now keeps the output
+byte-for-byte (`tools/scripts/test_format_changed.sh` pins that case).
+
 ### Its `--lines` output is not always what clang-format would produce
 
 Running the fixer the failure message tells you to run can make a file **less**

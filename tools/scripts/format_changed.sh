@@ -227,12 +227,16 @@ printf 'SCANNED\n' > "$report"
         # its exit status behind diff's, so a formatter that died would be
         # reported as "every line of your file is misformatted" — an
         # infrastructure failure wearing a formatting verdict's clothes.
-        formatted="$("$bin" --style=file $ranges "$f" 2>/dev/null)" || {
+        # The trailing x survives the command substitution, which would
+        # otherwise strip the file's trailing blank lines and report every file
+        # that ends in one as dirty, a verdict the rewrite mode never clears.
+        formatted="$("$bin" --style=file $ranges "$f" 2>/dev/null && printf x)" || {
             echo "FAILED $f"
             echo "TOUCHED $f"
             continue
         }
-        if ! printf '%s\n' "$formatted" | diff -u --label "a/$f" --label "b/$f" "$f" - ; then
+        formatted="${formatted%x}"
+        if ! printf '%s' "$formatted" | diff -u --label "a/$f" --label "b/$f" "$f" - ; then
             echo "DIRTY $f"
         fi
         echo "TOUCHED $f"
