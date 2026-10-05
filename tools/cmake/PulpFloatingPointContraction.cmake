@@ -20,10 +20,17 @@
 #                       /fp:contract is given, so nothing is added.
 # A target that owns a stricter contract (a cross-compiler byte golden) still
 # overrides this target-locally; a target option comes after this one.
+# Proof-only knob: the GCC mode, or "default" for no flag at all.
+set(PULP_PROOF_GNU_FP_CONTRACT "off" CACHE STRING "proof: GCC -ffp-contract mode")
+if(PULP_PROOF_GNU_FP_CONTRACT STREQUAL "default")
+    set(_pulp_gnu_fp "")
+else()
+    set(_pulp_gnu_fp "-ffp-contract=${PULP_PROOF_GNU_FP_CONTRACT}")
+endif()
 if(NOT MSVC)  # clang-cl takes MSVC's spelling and default
     add_compile_options(
-        "$<$<COMPILE_LANG_AND_ID:C,GNU>:-ffp-contract=off>"
-        "$<$<COMPILE_LANG_AND_ID:CXX,GNU>:-ffp-contract=off>"
+        "$<$<COMPILE_LANG_AND_ID:C,GNU>:${_pulp_gnu_fp}>"
+        "$<$<COMPILE_LANG_AND_ID:CXX,GNU>:${_pulp_gnu_fp}>"
         "$<$<COMPILE_LANG_AND_ID:C,AppleClang,Clang>:-ffp-contract=on>"
         "$<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang>:-ffp-contract=on>"
         "$<$<COMPILE_LANG_AND_ID:OBJC,AppleClang,Clang>:-ffp-contract=on>"

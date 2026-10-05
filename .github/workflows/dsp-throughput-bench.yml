@@ -1,26 +1,11 @@
 name: DSP Throughput Benchmark (advisory)
 
-# Tracked, never gated. Builds `pulp-dsp-throughput-benchmark` (Release,
-# `-DPULP_BENCHMARK=ON`) on an arm64 macOS and an x86-64 Linux runner, runs it,
-# and uploads the `pulp-bench-sections/1` JSON plus a `bench_diff.py` markdown
-# summary. No step compares a number against a threshold: DSP timing on shared
-# runners is evidence, not a verdict, so this workflow is never a required
-# check and never fails on a slow result.
-#
-# Per-host baselines live outside this repository; download the artifact and
-# run `tools/scripts/bench_diff.py <baseline.json> <artifact.json>` to compare.
-# The job summary renders the run against itself so the table is readable in
-# the Actions UI.
-#
-# Triggers: weekly on main, and on demand:
-#   ghapp workflow run dsp-throughput-bench.yml --ref <branch>
+# PROOF BRANCH ONLY: -ffp-contract option-4 proofs on aarch64 GCC.
 
 permissions:
   contents: read
 
 on:
-  schedule:
-    - cron: '17 9 * * 1'
   workflow_dispatch:
     inputs:
       seconds:
@@ -33,78 +18,84 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  numeric:
+    name: g++-14 on, 11 numeric tests
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+        with: {submodules: false, lfs: false}
+      - uses: ./.github/actions/install-linux-build-deps
+      - run: sudo apt-get install -y g++-14
+      - run: ./setup.sh --ci --deps-only
+      - name: Configure g++-14 -ffp-contract=on
+        run: |
+          CC=gcc-14 CXX=g++-14 cmake -S . -B b -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF -DPULP_PROOF_GNU_FP_CONTRACT=on
+          grep -c -- "-ffp-contract=on" b/CMakeFiles/*.dir/flags.make b/core/signal/CMakeFiles/*/flags.make 2>/dev/null | head -3 || true
+          grep -m1 CMAKE_CXX_COMPILER: b/CMakeCache.txt
+      - name: Build and run the eleven
+        run: |
+          set -euo pipefail
+          re='wavefolder stages retain|Transfer curve block, in-place|headphone crossfeed is channel symmetric|Particle voices match independent sample-level body oracles - float|Dynamic EQ reset and block partitions|GraphicEq response matches an independent|SignalGraph multi-path routing renders|SignalGraph multi-path oracle detects|SignalGraph multi-path routing is block|SignalGraph renders unchanged across an open|MF-3: snap_to_zero'
+          bins=$(ctest --test-dir b -N -V -R "$re" | sed -n 's/.*Test command: \([^ ]*\).*/\1/p' | sort -u)
+          echo "$bins"
+          for t in $bins; do cmake --build b --target "$(basename "$t")" --parallel 4; done
+          ctest --test-dir b -R "$re" --output-on-failure | tee eleven.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: numeric-gcc14-on, path: eleven.txt}
+
   bench:
-    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
-    name: DSP throughput (${{ matrix.label }})
+    name: g++-14 bench ${{ matrix.mode }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - label: macos-arm64
-            runs_on: macos-15
-          - label: linux-x86_64
-            runs_on: ubuntu-latest
-    runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 60
-    env:
-      SECONDS_PER_REP: ${{ github.event.inputs.seconds || '2' }}
+        mode: [on, default, "off"]
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: false
-          lfs: false
-
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-linux-build-deps
-
-      - name: Bootstrap repository dependencies
-        run: ./setup.sh --ci --deps-only
-
-      - name: Configure (Release, benchmarks on)
-        shell: bash
+        with: {submodules: false, lfs: false}
+      - uses: ./.github/actions/install-linux-build-deps
+      - run: sudo apt-get install -y g++-14
+      - run: ./setup.sh --ci --deps-only
+      - name: Configure and build
         run: |
-          set -euo pipefail
-          cmake -S . -B build-bench \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DPULP_BENCHMARK=ON \
-            -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_GPU=OFF
-          grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' build-bench/CMakeCache.txt
-
-      - name: Build
-        run: >-
-          tools/ci/governed-build.sh cmake --build build-bench
-          --target pulp-dsp-throughput-benchmark
-
+          CC=gcc-14 CXX=g++-14 cmake -S . -B b -DCMAKE_BUILD_TYPE=Release -DPULP_BENCHMARK=ON \
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF -DPULP_PROOF_GNU_FP_CONTRACT=${{ matrix.mode }}
+          cmake --build b --target pulp-dsp-throughput-benchmark --parallel 4
       - name: Run
-        shell: bash
+        run: |
+          ./b/test/pulp-dsp-throughput-benchmark --seconds 2 --commit "${GITHUB_SHA}" \
+            --host "gcc14-${{ matrix.mode }}" --json "bench-gcc14-${{ matrix.mode }}.json" > /dev/null
+      - uses: actions/upload-artifact@v4
+        with: {name: "bench-gcc14-${{ matrix.mode }}", path: "bench-gcc14-${{ matrix.mode }}.json"}
+
+  gcc13-identity:
+    name: g++-13 on vs off object identity
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with: {submodules: false, lfs: false}
+      - uses: ./.github/actions/install-linux-build-deps
+      - run: ./setup.sh --ci --deps-only
+      - name: Build the benchmark twice, on and off, same build dir
         run: |
           set -euo pipefail
-          out="dsp-throughput-${{ matrix.label }}.json"
-          ./build-bench/test/pulp-dsp-throughput-benchmark \
-            --seconds "${SECONDS_PER_REP}" \
-            --commit "${GITHUB_SHA}" \
-            --host "github-${{ matrix.label }}" \
-            --json "${out}" | tee "dsp-throughput-${{ matrix.label }}.txt"
-          python3 - "${out}" <<'PY'
-          import json, sys
-          doc = json.load(open(sys.argv[1]))
-          assert doc["schema"] == "pulp-bench-sections/1", doc.get("schema")
-          assert doc["optimized"] and doc["ndebug"], "benchmark binary is not a Release build"
-          assert doc["sections"], "no sections recorded"
-          PY
-          python3 tools/scripts/bench_diff.py --format markdown "${out}" "${out}" \
-            > "dsp-throughput-${{ matrix.label }}.md"
-          cat "dsp-throughput-${{ matrix.label }}.md" >> "${GITHUB_STEP_SUMMARY}"
-
-      - name: Upload results
+          g++ --version | head -1
+          for mode in on off; do
+            cmake -S . -B b -DCMAKE_BUILD_TYPE=Release -DPULP_BENCHMARK=ON -DPULP_BUILD_EXAMPLES=OFF \
+              -DPULP_ENABLE_GPU=OFF -DPULP_PROOF_GNU_FP_CONTRACT=$mode
+            cmake --build b --target pulp-dsp-throughput-benchmark --parallel 4
+            grep -rho -- "-ffp-contract=[a-z]*" b --include=flags.make | sort | uniq -c
+            (cd b && find . -name '*.o' -print0 | sort -z | xargs -0 sha256sum) > objs-$mode.txt
+            cp b/test/pulp-dsp-throughput-benchmark bench-$mode
+          done
+          wc -l objs-on.txt objs-off.txt
+          if diff -q objs-on.txt objs-off.txt; then echo "OBJECTS IDENTICAL"; else diff objs-on.txt objs-off.txt | head -40; echo "OBJECTS DIFFER: $(diff objs-on.txt objs-off.txt | grep -c '^<')"; fi
+          sha256sum bench-on bench-off
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dsp-throughput-${{ matrix.label }}
-          path: |
-            dsp-throughput-${{ matrix.label }}.json
-            dsp-throughput-${{ matrix.label }}.txt
-            dsp-throughput-${{ matrix.label }}.md
-          if-no-files-found: warn
+        with: {name: gcc13-identity, path: "objs-*.txt"}
