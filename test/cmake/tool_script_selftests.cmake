@@ -10,8 +10,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/audio/test_glitch_trace.py")
     set_tests_properties(audio-glitch-trace-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     # macos_merge_group_bootstrap.sh: the merge-group `macos` verdict. A failed
-    # or missing dependency fails closed; a cancelled one cancels the run so the
-    # queue re-batches instead of ejecting the PR.
+    # or missing dependency fails closed; a cancelled classify (never given a
+    # runner) is classified in-job, and the verdict proceeds on that answer.
     add_test(NAME macos-merge-group-bootstrap-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_macos_merge_group_bootstrap.py")
     set_tests_properties(macos-merge-group-bootstrap-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
