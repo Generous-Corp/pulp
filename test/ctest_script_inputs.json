@@ -6378,22 +6378,6 @@
    ],
    "kind": "shell"
   },
-  "pulp-ui-clean-output-lint": {
-   "entry": "tools/ui-build/lint/clean_output_lint.py",
-   "inputs": [
-    "tools/ui-build/lint/clean_output_lint.py",
-    "tools/ui-build/lint/fixtures/clean"
-   ],
-   "kind": "python"
-  },
-  "pulp-ui-clean-output-lint-negative-contract": {
-   "entry": "tools/ui-build/lint/test_clean_output_lint.py",
-   "inputs": [
-    "tools/ui-build/lint/clean_output_lint.py",
-    "tools/ui-build/lint/test_clean_output_lint.py"
-   ],
-   "kind": "python"
-  },
   "pulp-materialized-runtime-conformance": {
    "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
    "inputs": [
@@ -6468,6 +6452,22 @@
     "test/test_ctest_timeout_kills_wedged.sh"
    ],
    "kind": "shell"
+  },
+  "pulp-ui-clean-output-lint": {
+   "entry": "tools/ui-build/lint/clean_output_lint.py",
+   "inputs": [
+    "tools/ui-build/lint/clean_output_lint.py",
+    "tools/ui-build/lint/fixtures/clean"
+   ],
+   "kind": "python"
+  },
+  "pulp-ui-clean-output-lint-negative-contract": {
+   "entry": "tools/ui-build/lint/test_clean_output_lint.py",
+   "inputs": [
+    "tools/ui-build/lint/clean_output_lint.py",
+    "tools/ui-build/lint/test_clean_output_lint.py"
+   ],
+   "kind": "python"
   },
   "pulp-uninstaller-contract": {
    "entry": "tools/scripts/test_pulp_uninstall.py",
@@ -8674,13 +8674,6 @@
    ],
    "kind": "python"
   },
-  "vellum-trusted-merge-selftest": {
-   "entry": "tools/scripts/test_vellum_trusted_merge.py",
-   "inputs": [
-    "tools/scripts/test_vellum_trusted_merge.py"
-   ],
-   "kind": "python"
-  },
   "vellum-boundary-lint": {
    "entry": "tools/scripts/vellum_boundary_lint.py",
    "inputs": [
@@ -8700,6 +8693,13 @@
     "tools/scripts/test_vellum_boundary_lint.py",
     "tools/ui-build",
     "tools/ui-build/pulp-package.json"
+   ],
+   "kind": "python"
+  },
+  "vellum-trusted-merge-selftest": {
+   "entry": "tools/scripts/test_vellum_trusted_merge.py",
+   "inputs": [
+    "tools/scripts/test_vellum_trusted_merge.py"
    ],
    "kind": "python"
   },
