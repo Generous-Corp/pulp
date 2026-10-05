@@ -1453,6 +1453,7 @@ class RunListingTests(unittest.TestCase):
         # test says otherwise).
         c = rrc.Collector.__new__(rrc.Collector)
         c.cache = Path(tmp)
+        c.listing_shortfalls = []
         calls = []
         gh = mock.Mock()
         gh.repository = "o/r"
@@ -1519,12 +1520,18 @@ class RunListingTests(unittest.TestCase):
             self.assertIn(f"pull_request runs created {day}: listed 1 of total_count 2", str(caught.exception))
             self.assertFalse((Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists())
 
-    def test_a_short_listing_that_is_whole_when_asked_again_is_used(self):
+    def test_a_short_listing_that_is_whole_when_asked_again_is_used_and_recorded(self):
         day = self.old_day()
         with tempfile.TemporaryDirectory() as tmp:
             whole = [self.listed(day, 1), self.listed(day, 2)]
-            runs, calls, cached = self.listing(tmp, day, [[self.listed(day)], whole], totals=[2, 2])
+            c, calls = self.collector(tmp, [[self.listed(day)], whole], [2, 2])
+            start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
+            runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
+            cached = (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists()
             self.assertEqual(([r["id"] for r in runs], len(calls), cached), ([1, 2], 2, True))
+            self.assertEqual(c.listing_shortfalls, [{"event": "pull_request", "day": day, "listed": 1,
+                                                     "total_count": 2, "page": 1,
+                                                     "whole_when_asked_again": True}])
 
     def test_a_truncated_later_page_fails(self):
         day = self.old_day()
@@ -1553,8 +1560,22 @@ class RunListingTests(unittest.TestCase):
             with self.assertRaises(rrc.ListingShort):
                 self.listing(tmp, day, [[self.listed(day)], [self.listed(day)]], totals=[None, None])
 
+    def test_the_cli_reports_a_recovered_shortfall(self):
+        manifest = {"merge_groups": 1, "pairs_with_head_run": 1, "record_coverage": {},
+                    "listing_shortfalls": [{"event": "pull_request", "day": "2026-10-05", "listed": 1,
+                                            "total_count": 2, "page": 1, "whole_when_asked_again": True}]}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc, "GitHub"), \
+                mock.patch.object(rrc.Collector, "collect", return_value=manifest), \
+                mock.patch("sys.stdout", new_callable=io.StringIO), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = rpr.main(["collect", "--since", "2026-10-05", "--out", str(Path(tmp) / "c")])
+        self.assertEqual(code, 0)
+        self.assertIn("instrument event: pull_request runs created 2026-10-05 listed 1 of total_count 2",
+                      stderr.getvalue())
+
     def test_the_cli_exits_non_zero_naming_the_day(self):
-        err = rrc.ListingShort("pull_request runs created 2026-10-05: listed 1 of total_count 2 after page 1")
+        err = rrc.ListingShort("pull_request", "2026-10-05", 1, 2, 1)
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(rrc, "GitHub"), \
                 mock.patch.object(rrc.Collector, "collect", side_effect=err), \

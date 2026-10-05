@@ -838,6 +838,9 @@ def main(argv: list[str]) -> int:
         print(f"collect: record coverage: {cov.get('without_record')} of {cov.get('executed_jobs')} executed macOS jobs "
               f"since {cov.get('since')} published no reuse record (expected 0); "
               f"{cov.get('interrupted_jobs')} jobs lost their runner before the record step", file=sys.stderr)
+        for row in manifest.get("listing_shortfalls") or []:
+            print(f"collect: instrument event: {row['event']} runs created {row['day']} listed {row['listed']} of "
+                  f"total_count {row['total_count']}; whole when asked again", file=sys.stderr)
         if manifest["merge_groups"] == 0 or manifest["pairs_with_head_run"] == 0:
             print("collect: CONTROL FAILED: no merge groups or no PR-head pairs in the window; "
                   "the instrument is broken, not the history", file=sys.stderr)

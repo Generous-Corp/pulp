@@ -277,7 +277,12 @@ def record_platform(job: dict | None) -> str:
 
 class ListingShort(RuntimeError):
     """A run listing came back shorter than the API's own total_count for
-    the same query, after one retry."""
+    the same query."""
+
+    def __init__(self, event: str, day: str, listed: int, total: Any, page: int) -> None:
+        self.row = {"event": event, "day": day, "listed": listed, "total_count": total, "page": page}
+        super().__init__(f"{event} runs created {day}: listed {listed} of total_count {total} after page {page}"
+                         + (" (the 10-page cap)" if page >= 10 else ""))
 
 
 class Collector:
@@ -290,6 +295,7 @@ class Collector:
         self.cache.mkdir(parents=True, exist_ok=True)
         self._git_lock = threading.Lock()
         self._commit_cache: dict[str, dict | None] = {}
+        self.listing_shortfalls: list[dict] = []
 
     # -- cached reads ------------------------------------------------------
     def _cached(self, name: str, fetch: Callable[[], Any], keep: bool = True) -> Any:
@@ -336,15 +342,19 @@ class Collector:
                 # while the pages are read only add to it.
                 listed = len({r["id"] for r in rows})
                 if not isinstance(total, int) or listed < total:
-                    raise ListingShort(f"{event} runs created {day}: listed {listed} of total_count {total} "
-                                       f"after page {page}" + (" (the 10-page cap)" if page >= 10 else ""))
+                    raise ListingShort(event, day, listed, total, page)
                 return rows
             name = f"runs/{event}-{day}.json.gz"
             try:
                 rows = self._cached(name, fetch, keep=day <= settled)
             except ListingShort as err:
+                # An instrument event either way: recorded in the manifest
+                # when the second answer is whole, fatal when it is not.
                 print(f"collect: {err}; asking again", file=sys.stderr)
+                event_row = dict(err.row, whole_when_asked_again=False)
+                self.listing_shortfalls.append(event_row)
                 rows = self._cached(name, fetch, keep=day <= settled)
+                event_row["whole_when_asked_again"] = True
             if not rows:
                 # Never let an empty listing stand in for the day: drop it
                 # and ask again, uncached.
@@ -897,6 +907,7 @@ class Collector:
             "rejected_runs": sum(1 for r in runs.values() if r["rejected"]),
             "record_coverage": self.record_coverage(groups + [r for r in heads_listing
                                                               if since <= _parse_time(r["created_at"]) <= until]),
+            "listing_shortfalls": self.listing_shortfalls,
             "api_calls": self.gh.calls,
         }
         (self.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
