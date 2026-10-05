@@ -8,7 +8,7 @@
   "capability_families": [
     "render-assets-and-backends"
   ],
-  "rationale": "Record that a Windows link fix crosses the render-assets-and-backends selector (tools/cmake/FindSkia.cmake). Dawn's prebuilt D3D12 SharedFence object calls CompareObjectHandles, which only Kernelbase.lib imports, so every Windows target that pulls in Dawn's D3D12 device path failed to link. The skia::skia imported target now lists kernelbase next to dxguid on WIN32 only. No renderer, backend selection, Skia/Dawn pin, shader, asset, painter, canvas or Vellum-owned source changes; macOS, Linux and Android link lines are unchanged, and no existing test's verdict changes. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "rationale": "Record that a Windows link fix crosses the render-assets-and-backends selector (tools/cmake/FindSkia.cmake). Dawn's prebuilt D3D12 SharedFence object calls CompareObjectHandles, which kernel32.lib does not import, so every Windows target that pulls in Dawn's D3D12 device path failed to link. The skia::skia imported target now lists the onecore umbrella import library next to dxguid on WIN32 only (the hosted Windows SDK has no kernelbase.lib). No renderer, backend selection, Skia/Dawn pin, shader, asset, painter, canvas or Vellum-owned source changes; macOS, Linux and Android link lines are unchanged, and no existing test's verdict changes. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
   "tests": [
     "pulp-test-gpu-compute",
     "pulp-test-headless-surface",
