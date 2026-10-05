@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_set>
@@ -286,6 +287,56 @@ int run(Config config) {
             ++late_completions;
     }
 
+    // The raw lifecycle census is intentionally narrower than the callback
+    // trace.  Callback priming and CPU-only fallback positions produce
+    // delivery records without a provider admission; retaining those rows in
+    // the GPU census would make an authenticated admission/terminal/delivery
+    // identity multiset impossible.  Keep fallback deliveries for admitted
+    // identities, and keep aggregate callback fallback counters in the
+    // summary receipt separately.
+    const auto trace_identity = [](std::uint64_t generation,
+                                   std::uint64_t sequence) {
+        return std::to_string(generation) + ":" + std::to_string(sequence);
+    };
+    std::unordered_set<std::string> admission_identities;
+    bool raw_census_valid = true;
+    for (const auto& admission : trace_admissions) {
+        if (!admission_identities.insert(trace_identity(admission.generation, admission.sequence))
+                 .second)
+            raw_census_valid = false;
+    }
+    std::unordered_set<std::string> terminal_identities;
+    std::unordered_set<std::string> delivery_identities;
+    std::vector<const pulp::gpu_audio::detail::SharedIoTraceRecord*> raw_lifecycle_records;
+    raw_lifecycle_records.reserve(trace_records.size());
+    for (const auto& record : trace_records) {
+        if (record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
+            record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Delivery)
+            continue;
+        const auto identity = trace_identity(record.generation, record.sequence);
+        if (!admission_identities.contains(identity)) {
+            // Eligible/recovery and callback-only delivery rows are not part
+            // of the provider admission lifecycle census.
+            continue;
+        }
+        raw_lifecycle_records.push_back(&record);
+        if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal) {
+            if (!record.valid() || !record.admission_identity_matched ||
+                record.gpu_terminal ==
+                    pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None ||
+                !terminal_identities.insert(identity).second)
+                raw_census_valid = false;
+        } else {
+            if (record.delivery == pulp::gpu_audio::detail::SharedIoDeliveryDisposition::None ||
+                !record.callback_timing_available ||
+                !delivery_identities.insert(identity).second)
+                raw_census_valid = false;
+        }
+    }
+    raw_census_valid = raw_census_valid &&
+                       terminal_identities.size() == admission_identities.size() &&
+                       delivery_identities.size() == admission_identities.size();
+
     if (config.corrupt_output)
         output[0][static_cast<std::size_t>(config.warmup + config.lead) * config.frames] += 1.0f;
 
@@ -362,7 +413,7 @@ int run(Config config) {
     const bool provider_authenticated = provider_identity.authenticated &&
                                         provider_identity.native_runtime_authenticated &&
                                         engine_id != 0;
-    const bool receipt_authenticated = gpu_progress && provider_authenticated;
+    const bool receipt_authenticated = gpu_progress && provider_authenticated && raw_census_valid;
     const auto emit = [&](std::ostream& stream) {
         const auto executable_sha =
             pulp::runtime::sha256_file_hex(config.executable, 512ull * 1024ull * 1024ull)
@@ -495,19 +546,19 @@ int run(Config config) {
                 << ",\"generation\":" << admission.generation << ",\"sequence\":"
                 << admission.sequence << "}\n";
         }
-        for (const auto& record : trace_records) {
+        for (const auto* record : raw_lifecycle_records) {
             raw << "{\"kind\":\"record\",\"trace_kind\":"
-                << static_cast<unsigned>(record.kind) << ",\"engine_id\":" << engine_id
-                << ",\"generation\":" << record.generation << ",\"sequence\":"
-                << record.sequence << ",\"valid_stages\":" << record.valid_stages
-                << ",\"gpu_terminal\":" << static_cast<unsigned>(record.gpu_terminal)
+                << static_cast<unsigned>(record->kind) << ",\"engine_id\":" << engine_id
+                << ",\"generation\":" << record->generation << ",\"sequence\":"
+                << record->sequence << ",\"valid_stages\":" << record->valid_stages
+                << ",\"gpu_terminal\":" << static_cast<unsigned>(record->gpu_terminal)
                 << ",\"admission_identity_matched\":"
-                << (record.admission_identity_matched ? "true" : "false")
-                << ",\"delivery\":" << static_cast<unsigned>(record.delivery)
+                << (record->admission_identity_matched ? "true" : "false")
+                << ",\"delivery\":" << static_cast<unsigned>(record->delivery)
                 << ",\"callback_timing_available\":"
-                << (record.callback_timing_available ? "true" : "false")
-                << ",\"callback_end_ns\":" << record.callback_end_ns
-                << ",\"result_visible_ns\":" << record.result_visible_ns << "}\n";
+                << (record->callback_timing_available ? "true" : "false")
+                << ",\"callback_end_ns\":" << record->callback_end_ns
+                << ",\"result_visible_ns\":" << record->result_visible_ns << "}\n";
         }
         raw.flush();
         if (!raw)
