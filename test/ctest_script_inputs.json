@@ -5845,6 +5845,14 @@
    ],
    "kind": "python"
   },
+  "import-validation-browser-fidelity-receipt-selftest": {
+   "entry": "tools/import-validation/test_verify_browser_fidelity_receipt.py",
+   "inputs": [
+    "tools/import-validation/test_verify_browser_fidelity_receipt.py",
+    "tools/import-validation/verify_browser_fidelity_receipt.py"
+   ],
+   "kind": "python"
+  },
   "import-validation-diff-against-reference-regions-selftest": {
    "entry": "tools/import-validation/test_diff_against_reference_regions.py",
    "inputs": [
