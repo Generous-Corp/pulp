@@ -12,7 +12,8 @@ host's OS floor instead of Pulp's.
 Run standalone via `cmake -P`. Asserts the correct per-host outcome:
   * macOS   — CMAKE_OSX_DEPLOYMENT_TARGET pinned to the macos-arm64 floor
   * Windows — CMAKE_CXX_FLAGS carries _WIN32_WINNT from the windows-x64 floor
-  * Linux   — PULP_LINUX_GLIBC_FLOOR exposed from the linux-x64 floor
+  * Linux   — PULP_LINUX_GLIBC_FLOOR exposed from the linux-x64 floor for
+              x86_64, and not exposed for aarch64, whose floor is unknown
 ]]
 
 cmake_minimum_required(VERSION 3.24)
@@ -76,18 +77,38 @@ elseif(CMAKE_HOST_WIN32)
     message(STATUS "min-OS consumer pin (Windows): _WIN32_WINNT=${_winnt} present in flags. OK.")
 
 else()
-    # Linux (and any other host): no compile-time pin — the module exposes the
-    # declared glibc floor for CI/packaging; the artifact is verified post-link.
-    string(JSON _floor ERROR_VARIABLE _e GET "${_json}" platforms linux-x64 floor)
+    # Linux (and any other host): no compile-time pin. The module exposes the
+    # declared glibc floor of the architecture being built, and none for an
+    # architecture whose floor min_os.json leaves unknown, so an x64 floor is
+    # never projected onto ARM64. Both architectures are checked on any host.
     include("${_repo_root}/tools/cmake/PulpMinOs.cmake")
-    if(NOT DEFINED PULP_LINUX_GLIBC_FLOOR OR PULP_LINUX_GLIBC_FLOOR STREQUAL "")
-        message(FATAL_ERROR
-            "Consumer note regressed (Linux): PULP_LINUX_GLIBC_FLOOR not exposed "
-            "after including PulpMinOs.cmake.")
-    endif()
-    if(NOT PULP_LINUX_GLIBC_FLOOR STREQUAL "${_floor}")
-        message(FATAL_ERROR
-            "Linux floor wrong: expected ${_floor} but got ${PULP_LINUX_GLIBC_FLOOR}.")
-    endif()
-    message(STATUS "min-OS consumer note (Linux): glibc floor ${PULP_LINUX_GLIBC_FLOOR}. OK.")
+    foreach(_case IN ITEMS "x86_64|linux-x64" "aarch64|linux-arm64")
+        string(REPLACE "|" ";" _case "${_case}")
+        list(GET _case 0 _arch)
+        list(GET _case 1 _key)
+        string(JSON _floor ERROR_VARIABLE _e GET "${_json}" platforms ${_key} floor)
+        set(PULP_LINUX_ARCH "${_arch}")
+        unset(PULP_LINUX_GLIBC_FLOOR)
+        unset(PULP_LINUX_GLIBC_FLOOR CACHE)
+        _pulp_min_os_note_linux()
+        if(NOT _e STREQUAL "NOTFOUND" OR _floor STREQUAL "" OR _floor STREQUAL "null")
+            if(DEFINED PULP_LINUX_GLIBC_FLOOR AND NOT PULP_LINUX_GLIBC_FLOOR STREQUAL "")
+                message(FATAL_ERROR
+                    "Linux floor projected: ${_key} declares no floor, but "
+                    "PULP_LINUX_GLIBC_FLOOR is ${PULP_LINUX_GLIBC_FLOOR}.")
+            endif()
+            message(STATUS "min-OS consumer note (Linux ${_arch}): no declared floor, none exposed. OK.")
+        else()
+            if(NOT DEFINED PULP_LINUX_GLIBC_FLOOR OR PULP_LINUX_GLIBC_FLOOR STREQUAL "")
+                message(FATAL_ERROR
+                    "Consumer note regressed (Linux ${_arch}): PULP_LINUX_GLIBC_FLOOR not "
+                    "exposed after including PulpMinOs.cmake.")
+            endif()
+            if(NOT PULP_LINUX_GLIBC_FLOOR STREQUAL "${_floor}")
+                message(FATAL_ERROR
+                    "Linux floor wrong (${_arch}): expected ${_floor} but got ${PULP_LINUX_GLIBC_FLOOR}.")
+            endif()
+            message(STATUS "min-OS consumer note (Linux ${_arch}): glibc floor ${PULP_LINUX_GLIBC_FLOOR}. OK.")
+        endif()
+    endforeach()
 endif()
