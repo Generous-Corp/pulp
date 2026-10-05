@@ -1,0 +1,42 @@
+{
+  "schema": "pulp.android.surface-runtime.b3.heapprofd-receipt.v1",
+  "status": "ATTRIBUTION_INCONCLUSIVE",
+  "issue": "https://github.com/Generous-Corp/pulp/issues/9550",
+  "source_commit": "c3593404628bde30ddeac7959b23365a73c13d3c",
+  "apk_sha256": "f3b0f28ee8397dd808c80a7b4e87c2d15b3be2aeeca1c9ce0cf0b6775117a1bd",
+  "trace_sha256": "b4d7947dac53b4c7d9274a325050f7a88021fb8a04504f1f2ec0684d4857fa59",
+  "trace_bytes": 1544269,
+  "host": "Apple Silicon macOS arm64",
+  "avd": "Pulp_Profile_API35",
+  "image": "system-images;android-35;google_apis;arm64-v8a",
+  "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys",
+  "properties": {
+    "ro.build.type": "userdebug",
+    "ro.debuggable": "1",
+    "heapprofd": "/system/bin/heapprofd present but shell ls is SELinux-denied",
+    "traced": "running",
+    "traced_probes": "running"
+  },
+  "trace_config": {
+    "data_source": "android.heapprofd",
+    "process_cmdline": "com.pulp.app",
+    "sampling_interval_bytes": 4096,
+    "duration_ms": 30000
+  },
+  "cycles": 5,
+  "native_heap_pss_kb": [
+    30060,
+    26168,
+    26336,
+    26580,
+    30924
+  ],
+  "unreachable_bytes": 40,
+  "allocation_analysis": "Perfetto trace processor found no positive net callsite allocation above 1 MiB. Largest retained callsites were Android UI renderer/framework stacks; Pulp stacks were small (8 KiB sampled allocations in pulp::canvas::SkiaCanvas::fill_text).",
+  "conclusion": "The profile path works, but this run does not reproduce the prior monotonic 12 MiB-per-cycle slope or identify a Pulp/Skia/Dawn owner. Keep issue open pending a current-origin/main baseline and a matched before/after receipt.",
+  "commands": [
+    "adb shell perfetto --txt -c - -o /data/misc/perfetto-traces/pulp-b3-5cycle.trace",
+    "adb shell dumpsys meminfo com.pulp.app",
+    "adb shell dumpsys meminfo --unreachable com.pulp.app"
+  ]
+}
