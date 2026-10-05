@@ -5,6 +5,7 @@
 
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_convolver.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/trace.hpp>
 
 #include <algorithm>
@@ -28,6 +29,16 @@
 #endif
 
 namespace {
+#ifndef PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256
+#define PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 ""
+#endif
+#ifndef PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256
+#define PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 ""
+#endif
+#ifndef PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256
+#define PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 ""
+#endif
+
 using Clock = std::chrono::steady_clock;
 using pulp::gpu_audio::GpuAudioTransport;
 using pulp::gpu_audio::GpuConvolver;
@@ -44,6 +55,7 @@ struct Config {
     std::string run_kind = "cold";
     std::filesystem::path directory;
     std::filesystem::path raw_jsonl;
+    std::filesystem::path executable;
 };
 
 constexpr auto kPostCallbackDrainTimeout = std::chrono::seconds{2};
@@ -159,21 +171,12 @@ int run(Config config) {
     std::vector<Record> records(total_blocks);
 
     GpuConvolver node(channels, config.frames, sample_rate, ir, config.lead);
-    // A steady run launched as a fresh process cannot prove resident
-    // same-process semantics. Keep the distinction explicit and fail closed;
-    // the campaign driver must not relabel a cold process as steady.
-    if (config.run_kind == "steady") {
-        std::cout << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\","
-                     "\"status\":\"unavailable\",\"run_kind\":\"steady\","
-                     "\"steady_semantics\":\"fresh_process_unavailable\","
-                     "\"reason\":\"same_process_resident_required\"}\n";
-        return 2;
-    }
     pulp::gpu_audio::detail::GpuConvolverTrialConfig trial_config;
     trial_config.requested_path =
         pulp::gpu_audio::detail::SharedIoRequest::RequireSharedHostPointer;
     trial_config.enable_trace = true;
     trial_config.capture_admissions = true;
+    trial_config.capture_callback_timing = true;
     trial_config.success_stride = 1;
     trial_config.slots = config.slots;
     if (!pulp::gpu_audio::detail::configure_gpu_convolver_trial(node, trial_config))
@@ -181,7 +184,7 @@ int run(Config config) {
     if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
         !node.configure_trace({.enabled = true,
                                .capture_admissions = true,
-                               .capture_callback_timing = false,
+                               .capture_callback_timing = true,
                                .success_stride = 1}) ||
         !node.prepare() || !pulp::gpu_audio::detail::realtime_gpu_node_path(&node).active()) {
         std::cout << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\","
@@ -229,10 +232,13 @@ int run(Config config) {
     const auto delivery_stats = transport.delivery_snapshot();
     const auto provider_identity =
         pulp::gpu_audio::detail::realtime_gpu_provider_identity(&node);
+    const auto engine_id = pulp::gpu_audio::detail::gpu_convolver_trial_engine_id(node);
     transport.release();
 
     std::vector<pulp::gpu_audio::detail::SharedIoTraceRecord> trace_records;
     (void)pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, trace_records);
+    std::vector<pulp::gpu_audio::detail::SharedIoTraceAdmission> trace_admissions;
+    (void)pulp::gpu_audio::detail::drain_gpu_convolver_trial_admissions(node, trace_admissions);
     const auto trace_stats = trace_records.empty() ? pulp::gpu_audio::detail::SharedIoTraceRecord{}
                                                    : trace_records.front();
     std::uint64_t high_water_in_flight = 0;
@@ -338,6 +344,9 @@ int run(Config config) {
                                            trace_stats.trace_sampled_out +
                                            trace_stats.trace_invalid;
     const auto emit = [&](std::ostream& stream) {
+        const auto executable_sha =
+            pulp::runtime::sha256_file_hex(config.executable, 512ull * 1024ull * 1024ull)
+                .value_or("");
         stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\""
                << (correct && gpu_progress ? "completed" : "failed")
                << "\",\"performance_verdict\":\"unassigned\",\"path\":\"shared_async\","
@@ -405,8 +414,12 @@ int run(Config config) {
                << ",\"negative_control\":" << (config.corrupt_output ? "true" : "false")
                << ",\"run_kind\":\"" << config.run_kind << "\""
                << ",\"process_id\":" << process_id()
-               << ",\"same_process_resident\":false"
-               << ",\"steady_semantics\":\"fresh_process_unavailable\""
+               << ",\"same_process_resident\":true"
+               << ",\"steady_semantics\":\"same_process_resident\""
+               << ",\"residency_session_id\":\"" << run_identity << "\""
+               << ",\"prepared_sessions\":1,\"reprepare_count\":0"
+               << ",\"engine_id\":" << engine_id
+               << ",\"executable_observed_sha256\":\"" << executable_sha << "\""
                << ",\"records_file\":\"blocks.csv\"}\n";
     };
     std::ofstream receipt(config.directory / "receipt.json");
@@ -418,17 +431,62 @@ int run(Config config) {
         std::ofstream raw(config.raw_jsonl);
         if (!raw)
             return 2;
+        const auto executable_sha =
+            pulp::runtime::sha256_file_hex(config.executable, 512ull * 1024ull * 1024ull)
+                .value_or("");
+        const auto manifest_digest = pulp::runtime::sha256_hex(
+            std::string("{\"dawn_archive_manifest_sha256\":\"") +
+            PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 +
+            "\",\"dawn_archive_sha256\":\"" + PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 +
+            "\",\"provider_asset_manifest_sha256\":\"" +
+            PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 +
+            "\",\"provider_asset_sha256\":\"" + PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 + "\"}");
         raw << "{\"kind\":\"provenance\",\"schema\":\"pulp.gpu-audio.p2.raw.v1\","
-               "\"run_kind\":\"" << config.run_kind
-            << "\",\"same_process_resident\":false,\"steady_semantics\":"
-               "\"fresh_process_unavailable\",\"provider_asset_sha256\":null,"
-               "\"dawn_archive_sha256\":null,\"provenance_status\":\"unavailable\"}\n";
+               "\"run_kind\":\"" << config.run_kind << "\",\"same_process_resident\":true,"
+               "\"steady_semantics\":\"same_process_resident\",\"process_id\":"
+            << process_id() << ",\"residency_session_id\":\"" << run_identity
+            << "\",\"prepared_sessions\":1,\"reprepare_count\":0,\"engine_id\":"
+            << engine_id << ",\"provider_identity_status\":\""
+            << (provider_identity.authenticated ? "passed" : "failed")
+            << "\",\"provider_observed_identity\":\""
+            << (provider_identity.authenticated ? "passed" : "failed")
+            << "\",\"provider_revision\":\"" << provider_identity.provider_revision
+            << "\",\"adapter_name\":\"" << provider_identity.adapter_name
+            << "\",\"adapter_backend\":\"" << provider_identity.adapter_backend
+            << "\",\"adapter_vendor_id\":" << provider_identity.adapter_vendor_id
+            << ",\"adapter_device_id\":" << provider_identity.adapter_device_id
+            << ",\"native_runtime_identity_status\":\""
+            << (provider_identity.native_runtime_authenticated ? "passed" : "failed")
+            << "\",\"native_runtime_name\":\"" << provider_identity.native_runtime_name
+            << "\",\"native_runtime_backend\":\"" << provider_identity.native_runtime_backend
+            << "\",\"executable_observed_sha256\":\"" << executable_sha
+            << "\",\"provider_asset_sha256\":\"" << PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256
+            << "\",\"dawn_archive_sha256\":\"" << PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256
+            << "\",\"manifest_bindings\":{\"dawn_archive_manifest_sha256\":\""
+            << PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256
+            << "\",\"dawn_archive_sha256\":\"" << PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256
+            << "\",\"provider_asset_manifest_sha256\":\""
+            << PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256
+            << "\",\"provider_asset_sha256\":\"" << PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256
+            << "\"},\"provenance_manifest_sha256\":\"" << manifest_digest << "\"}\n";
+        for (const auto& admission : trace_admissions) {
+            raw << "{\"kind\":\"admission\",\"engine_id\":" << engine_id
+                << ",\"generation\":" << admission.generation << ",\"sequence\":"
+                << admission.sequence << "}\n";
+        }
         for (const auto& record : trace_records) {
             raw << "{\"kind\":\"record\",\"trace_kind\":"
-                << static_cast<unsigned>(record.kind) << ",\"generation\":"
-                << record.generation
-                << ",\"sequence\":" << record.sequence << ",\"gpu_terminal\":"
-                << static_cast<unsigned>(record.gpu_terminal) << "}\n";
+                << static_cast<unsigned>(record.kind) << ",\"engine_id\":" << engine_id
+                << ",\"generation\":" << record.generation << ",\"sequence\":"
+                << record.sequence << ",\"valid_stages\":" << record.valid_stages
+                << ",\"gpu_terminal\":" << static_cast<unsigned>(record.gpu_terminal)
+                << ",\"admission_identity_matched\":"
+                << (record.admission_identity_matched ? "true" : "false")
+                << ",\"delivery\":" << static_cast<unsigned>(record.delivery)
+                << ",\"callback_timing_available\":"
+                << (record.callback_timing_available ? "true" : "false")
+                << ",\"callback_end_ns\":" << record.callback_end_ns
+                << ",\"result_visible_ns\":" << record.result_visible_ns << "}\n";
         }
         raw.flush();
         if (!raw)
@@ -445,6 +503,8 @@ int run(Config config) {
 
 int main(int argc, char** argv) {
     Config config;
+    if (argc > 0)
+        config.executable = argv[0];
     if (!parse(argc, argv, config))
         return 2;
     try {

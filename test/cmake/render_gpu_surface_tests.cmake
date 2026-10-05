@@ -446,6 +446,30 @@
                     ../core/gpu_audio/src)
                 add_dependencies(pulp-gpu-shared-io-paced-convolution-probe
                     pulp-gpu-dawn-shared-io-provider-probe)
+                # Carry the exact provider bindings already authenticated for
+                # pulp-gpu-audio into the private campaign probe. Empty values
+                # remain explicit and fail closed in its raw receipt.
+                get_target_property(_pulp_paced_asset_sha pulp-gpu-audio
+                    PULP_PROVIDER_asset_sha256)
+                get_target_property(_pulp_paced_archive_sha pulp-gpu-audio
+                    PULP_PROVIDER_dawn_archive_sha256)
+                set(_pulp_paced_manifest_sha "")
+                get_target_property(_pulp_paced_configure_receipt pulp-gpu-audio
+                    PULP_PROVIDER_configure_receipt)
+                if(_pulp_paced_configure_receipt AND
+                   EXISTS "${_pulp_paced_configure_receipt}")
+                    file(READ "${_pulp_paced_configure_receipt}" _pulp_paced_identity_json)
+                    string(JSON _pulp_paced_manifest_sha ERROR_VARIABLE
+                        _pulp_paced_manifest_error GET "${_pulp_paced_identity_json}"
+                        manifest_sha256)
+                    if(_pulp_paced_manifest_error)
+                        set(_pulp_paced_manifest_sha "")
+                    endif()
+                endif()
+                target_compile_definitions(pulp-gpu-shared-io-paced-convolution-probe PRIVATE
+                    PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256="${_pulp_paced_asset_sha}"
+                    PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256="${_pulp_paced_archive_sha}"
+                    PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256="${_pulp_paced_manifest_sha}")
                 add_test(NAME pulp-gpu-shared-io-paced-convolution-probe
                     COMMAND "${Python3_EXECUTABLE}"
                         "${PROJECT_SOURCE_DIR}/test/verify_gpu_shared_io_paced_convolution.py"

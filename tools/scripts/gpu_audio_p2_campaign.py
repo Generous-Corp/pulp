@@ -60,6 +60,10 @@ def _positive_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _nonnegative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _validate_provider_identity(provenance: dict[str, Any]) -> None:
     """Require observed native provider identity, never metadata-only labels."""
 
@@ -75,9 +79,10 @@ def _validate_provider_identity(provenance: dict[str, Any]) -> None:
         # SHA-256 here would reject the existing 40-character Dawn revision.
         if not re.fullmatch(r"[0-9a-fA-F]{40}", provenance.get("provider_revision", "")):
             raise RuntimeError("raw provenance provider_revision is not an immutable revision")
-    for field in ("adapter_vendor_id", "adapter_device_id"):
-        if not _positive_integer(provenance.get(field)):
-            raise RuntimeError(f"raw provenance {field} must be a non-zero observed ID")
+    if not _positive_integer(provenance.get("adapter_vendor_id")):
+        raise RuntimeError("raw provenance adapter_vendor_id must be a non-zero observed ID")
+    if not _nonnegative_integer(provenance.get("adapter_device_id")):
+        raise RuntimeError("raw provenance adapter_device_id must be a non-negative observed ID")
 
     # The native runtime identity is intentionally accepted in either the
     # structured form emitted by new probes or the flat compatibility form.
@@ -179,7 +184,7 @@ def validate_receipt(receipt: dict, slots: int, lead: int, expected_run_kind: st
         or (isinstance(receipt.get("native_runtime"), dict)
             and receipt["native_runtime"].get("identity_status") == "passed"),
         "provider_ids": _positive_integer(receipt.get("adapter_vendor_id"))
-        and _positive_integer(receipt.get("adapter_device_id")),
+        and _nonnegative_integer(receipt.get("adapter_device_id")),
     }
     failed = [name for name, ok in required.items() if not ok]
     if failed:

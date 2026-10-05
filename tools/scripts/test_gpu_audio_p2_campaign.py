@@ -80,6 +80,11 @@ class P2CampaignContractTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             campaign.validate_identity_rows(changed, expected_sha)
 
+    def test_observed_device_id_zero_is_allowed(self):
+        rows = self._rows()
+        rows[0]["adapter_device_id"] = 0
+        campaign.validate_identity_rows(rows, rows[0]["executable_observed_sha256"])
+
     def test_delivery_disposition_must_match_terminal_census(self):
         rows = self._rows()
         expected_sha = rows[0]["executable_observed_sha256"]

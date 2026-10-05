@@ -54,6 +54,49 @@ bool expected_dawn_revision_available() noexcept {
 } // namespace
 #endif
 
+namespace {
+constexpr std::uint8_t kTrialPathMask = 0x07;
+constexpr std::uint8_t kTrialSlotsShift = 3;
+
+std::uint8_t encode_trial_path_and_slots(detail::SharedIoRequest path,
+                                         std::uint32_t slots) noexcept {
+    std::uint8_t slot_code = 0;
+    switch (slots) {
+    case 2:
+        slot_code = 1;
+        break;
+    case 4:
+        slot_code = 2;
+        break;
+    case 8:
+        slot_code = 3;
+        break;
+    case 16:
+        slot_code = 4;
+        break;
+    default:
+        break;
+    }
+    return static_cast<std::uint8_t>(path) |
+           static_cast<std::uint8_t>(slot_code << kTrialSlotsShift);
+}
+
+std::uint32_t decode_trial_slots(std::uint8_t encoded) noexcept {
+    switch (encoded >> kTrialSlotsShift) {
+    case 1:
+        return 2;
+    case 2:
+        return 4;
+    case 3:
+        return 8;
+    case 4:
+        return 16;
+    default:
+        return 0;
+    }
+}
+} // namespace
+
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
     : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response), kLatencyBlocks) {
@@ -93,7 +136,10 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     if (config.slots != 0 && config.slots != 2 && config.slots != 4 && config.slots != 8 &&
         config.slots != 16)
         return false;
-    convolver.trial_requested_path_ = static_cast<std::uint8_t>(config.requested_path);
+    // Preserve the public class layout while carrying this private probe-only
+    // capacity alongside the existing private path selector.
+    convolver.trial_requested_path_ =
+        encode_trial_path_and_slots(config.requested_path, config.slots);
     convolver.trial_generation_ = config.generation;
     convolver.trial_configured_ = true;
     convolver.trial_enable_trace_ = config.enable_trace;
@@ -101,7 +147,6 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_capture_callback_timing_ = config.capture_callback_timing;
     convolver.trial_staged_sync_reference_ = config.staged_sync_reference;
     convolver.trial_success_stride_ = std::max<std::uint32_t>(1, config.success_stride);
-    convolver.trial_slots_ = config.slots;
     convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
     convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
     return true;
@@ -150,6 +195,38 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
 #else
     (void)convolver;
     return false;
+#endif
+}
+
+bool drain_gpu_convolver_trial_admissions(
+    GpuConvolver& convolver, std::vector<SharedIoTraceAdmission>& admissions) noexcept {
+    admissions.clear();
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (!convolver.shared_io_ || !convolver.shared_io_->session)
+        return false;
+    try {
+        if (convolver.shared_io_->session->prepared() && !convolver.shared_io_->session->release())
+            return false;
+        admissions = convolver.shared_io_->session->take_last_closed_trace_admissions();
+        return !admissions.empty();
+    } catch (...) {
+        admissions.clear();
+        return false;
+    }
+#else
+    (void)convolver;
+    return false;
+#endif
+}
+
+std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver& convolver) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (!convolver.shared_io_ || !convolver.shared_io_->session)
+        return 0;
+    return convolver.shared_io_->session->provider_diagnostics().engine_id;
+#else
+    (void)convolver;
+    return 0;
 #endif
 }
 
@@ -214,7 +291,9 @@ bool GpuConvolver::prepare() {
     init_fallback();
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_);
+    auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_ &
+                                                                kTrialPathMask);
+    const auto trial_slots = decode_trial_slots(trial_requested_path_);
     // Diagnostic trial configuration is deliberately authoritative when it is
     // present. Normal SDK callers use the public host-only policy below.
     if (!trial_configured_) {
@@ -278,7 +357,7 @@ bool GpuConvolver::prepare() {
                                                   .lead_blocks = latency_blocks_,
                                                   .capture_callback_timing =
                                                       trial_capture_callback_timing_},
-                                     .slots = trial_slots_ != 0 ? trial_slots_ : kSharedIoSlots,
+                                     .slots = trial_slots != 0 ? trial_slots : kSharedIoSlots,
                                      .sample_rate = sample_rate_,
                                      .trace = {.success_stride = trial_success_stride_,
                                                .capture_admissions = trial_capture_admissions_,
