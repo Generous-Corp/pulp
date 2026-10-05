@@ -4044,6 +4044,10 @@ after a Build that finished with errors, not only after a clean one: MSBuild kee
 building the other projects, so the targets that built are tested and the broken
 ones read "Not Run". The job stays red because Build failed; do not read a Windows
 ctest summary in a red nightly as a green build.
+The nightly's Linux legs carry the same setup as `build.yml`'s Linux leg (an
+`origin/main` fetch for the agent-capability checks, the visual-analysis Python set,
+lavapipe on both architectures). A test that passes in `build.yml` and fails only in
+the nightly is usually a missing setup step there, not a platform bug.
 
 Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
 and its `tracking-issues` job find-or-creates a per-platform issue on failure,
