@@ -231,8 +231,7 @@ int run(Config config) {
     }
     const auto transport_stats = transport.stats();
     const auto delivery_stats = transport.delivery_snapshot();
-    const auto provider_identity =
-        pulp::gpu_audio::detail::realtime_gpu_provider_identity(&node);
+    const auto provider_identity = pulp::gpu_audio::detail::realtime_gpu_provider_identity(&node);
     const auto engine_id = pulp::gpu_audio::detail::gpu_convolver_trial_engine_id(node);
     // Stop new GPU admissions, then advance the callback timeline through the
     // configured lead window so the final admitted sequence receives its typed
@@ -243,8 +242,7 @@ int run(Config config) {
         return 2;
     std::vector<float> flush_input(static_cast<std::size_t>(channels) * config.frames, 0.0f);
     std::vector<float> flush_output(flush_input.size(), 0.0f);
-    const float* flush_inputs[channels] = {flush_input.data(),
-                                           flush_input.data() + config.frames};
+    const float* flush_inputs[channels] = {flush_input.data(), flush_input.data() + config.frames};
     float* flush_outputs[channels] = {flush_output.data(), flush_output.data() + config.frames};
     pulp::audio::BufferView<const float> flush_in(flush_inputs, channels, config.frames);
     pulp::audio::BufferView<float> flush_out(flush_outputs, channels, config.frames);
@@ -294,8 +292,7 @@ int run(Config config) {
     // identity multiset impossible.  Keep fallback deliveries for admitted
     // identities, and keep aggregate callback fallback counters in the
     // summary receipt separately.
-    const auto trace_identity = [](std::uint64_t generation,
-                                   std::uint64_t sequence) {
+    const auto trace_identity = [](std::uint64_t generation, std::uint64_t sequence) {
         return std::to_string(generation) + ":" + std::to_string(sequence);
     };
     std::unordered_set<std::string> admission_identities;
@@ -328,8 +325,7 @@ int run(Config config) {
                 raw_census_valid = false;
         } else {
             if (record.delivery == pulp::gpu_audio::detail::SharedIoDeliveryDisposition::None ||
-                !record.callback_timing_available ||
-                !delivery_identities.insert(identity).second)
+                !record.callback_timing_available || !delivery_identities.insert(identity).second)
                 raw_census_valid = false;
         }
     }
@@ -448,8 +444,7 @@ int run(Config config) {
                << ",\"trace_dropped\":" << trace_stats.trace_dropped
                << ",\"trace_sampled_out\":" << trace_stats.trace_sampled_out
                << ",\"trace_invalid\":" << trace_stats.trace_invalid
-               << ",\"gpu_receipt_authenticated\":"
-               << (receipt_authenticated ? "true" : "false")
+               << ",\"gpu_receipt_authenticated\":" << (receipt_authenticated ? "true" : "false")
                << ",\"provider_identity_status\":";
         json_string(stream, provider_identity.authenticated ? "passed" : "failed");
         stream << ",\"provider_observed_identity\":";
@@ -468,8 +463,7 @@ int run(Config config) {
         json_string(stream, provider_identity.native_runtime_name);
         stream << ",\"native_runtime_backend\":";
         json_string(stream, provider_identity.native_runtime_backend);
-        stream
-               << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
+        stream << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
                << ",\"miss_blocks\":" << transport_stats.miss_blocks
                << ",\"late_completions\":" << late_completions << ",\"run_identity\":\""
                << run_identity << "\""
@@ -485,13 +479,12 @@ int run(Config config) {
                << ",\"tracing_compiled\":" << (pulp::runtime::kTracingEnabled ? "true" : "false")
                << ",\"negative_control\":" << (config.corrupt_output ? "true" : "false")
                << ",\"run_kind\":\"" << config.run_kind << "\""
-               << ",\"process_id\":" << process_id()
-               << ",\"same_process_resident\":true"
+               << ",\"process_id\":" << process_id() << ",\"same_process_resident\":true"
                << ",\"steady_semantics\":\"same_process_resident\""
                << ",\"residency_session_id\":\"" << run_identity << "\""
                << ",\"prepared_sessions\":1,\"reprepare_count\":0"
-               << ",\"engine_id\":" << engine_id
-               << ",\"executable_observed_sha256\":\"" << executable_sha << "\""
+               << ",\"engine_id\":" << engine_id << ",\"executable_observed_sha256\":\""
+               << executable_sha << "\""
                << ",\"records_file\":\"blocks.csv\"}\n";
     };
     std::ofstream receipt(config.directory / "receipt.json");
@@ -508,17 +501,18 @@ int run(Config config) {
                 .value_or("");
         const auto manifest_digest = pulp::runtime::sha256_hex(
             std::string("{\"dawn_archive_manifest_sha256\":\"") +
-            PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 +
-            "\",\"dawn_archive_sha256\":\"" + PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 +
-            "\",\"provider_asset_manifest_sha256\":\"" +
-            PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 +
-            "\",\"provider_asset_sha256\":\"" + PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 + "\"}");
+            PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 + "\",\"dawn_archive_sha256\":\"" +
+            PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 + "\",\"provider_asset_manifest_sha256\":\"" +
+            PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 + "\",\"provider_asset_sha256\":\"" +
+            PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 + "\"}");
         raw << "{\"kind\":\"provenance\",\"schema\":\"pulp.gpu-audio.p2.raw.v1\","
-               "\"run_kind\":\"" << config.run_kind << "\",\"same_process_resident\":true,"
+               "\"run_kind\":\""
+            << config.run_kind
+            << "\",\"same_process_resident\":true,"
                "\"steady_semantics\":\"same_process_resident\",\"process_id\":"
             << process_id() << ",\"residency_session_id\":\"" << run_identity
-            << "\",\"prepared_sessions\":1,\"reprepare_count\":0,\"engine_id\":"
-            << engine_id << ",\"provider_identity_status\":\""
+            << "\",\"prepared_sessions\":1,\"reprepare_count\":0,\"engine_id\":" << engine_id
+            << ",\"provider_identity_status\":\""
             << (provider_identity.authenticated ? "passed" : "failed")
             << "\",\"provider_observed_identity\":\""
             << (provider_identity.authenticated ? "passed" : "failed")
@@ -535,22 +529,21 @@ int run(Config config) {
             << "\",\"provider_asset_sha256\":\"" << PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256
             << "\",\"dawn_archive_sha256\":\"" << PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256
             << "\",\"manifest_bindings\":{\"dawn_archive_manifest_sha256\":\""
-            << PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256
-            << "\",\"dawn_archive_sha256\":\"" << PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256
-            << "\",\"provider_asset_manifest_sha256\":\""
-            << PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256
-            << "\",\"provider_asset_sha256\":\"" << PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256
-            << "\"},\"provenance_manifest_sha256\":\"" << manifest_digest << "\"}\n";
+            << PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 << "\",\"dawn_archive_sha256\":\""
+            << PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 << "\",\"provider_asset_manifest_sha256\":\""
+            << PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 << "\",\"provider_asset_sha256\":\""
+            << PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 << "\"},\"provenance_manifest_sha256\":\""
+            << manifest_digest << "\"}\n";
         for (const auto& admission : trace_admissions) {
             raw << "{\"kind\":\"admission\",\"engine_id\":" << engine_id
-                << ",\"generation\":" << admission.generation << ",\"sequence\":"
-                << admission.sequence << "}\n";
+                << ",\"generation\":" << admission.generation
+                << ",\"sequence\":" << admission.sequence << "}\n";
         }
         for (const auto* record : raw_lifecycle_records) {
-            raw << "{\"kind\":\"record\",\"trace_kind\":"
-                << static_cast<unsigned>(record->kind) << ",\"engine_id\":" << engine_id
-                << ",\"generation\":" << record->generation << ",\"sequence\":"
-                << record->sequence << ",\"valid_stages\":" << record->valid_stages
+            raw << "{\"kind\":\"record\",\"trace_kind\":" << static_cast<unsigned>(record->kind)
+                << ",\"engine_id\":" << engine_id << ",\"generation\":" << record->generation
+                << ",\"sequence\":" << record->sequence
+                << ",\"valid_stages\":" << record->valid_stages
                 << ",\"gpu_terminal\":" << static_cast<unsigned>(record->gpu_terminal)
                 << ",\"admission_identity_matched\":"
                 << (record->admission_identity_matched ? "true" : "false")

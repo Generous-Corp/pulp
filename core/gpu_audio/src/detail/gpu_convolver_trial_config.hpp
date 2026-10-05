@@ -99,8 +99,8 @@ struct GpuConvolverTrialConfig {
 // Quiescent diagnostic drain for the complete admission census. This remains
 // private/default-off and is intentionally separate from terminal records so
 // consumers can prove admission/terminal/delivery identity multisets.
-bool drain_gpu_convolver_trial_admissions(
-    GpuConvolver&, std::vector<SharedIoTraceAdmission>&) noexcept;
+bool drain_gpu_convolver_trial_admissions(GpuConvolver&,
+                                          std::vector<SharedIoTraceAdmission>&) noexcept;
 
 // Quiescent diagnostic identity accessor. Zero means the prepared trace did
 // not expose an authenticated engine identity and must fail closed.

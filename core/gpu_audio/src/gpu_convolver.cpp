@@ -291,8 +291,8 @@ bool GpuConvolver::prepare() {
     init_fallback();
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_ &
-                                                                kTrialPathMask);
+    auto requested_path =
+        static_cast<detail::SharedIoRequest>(trial_requested_path_ & kTrialPathMask);
     const auto trial_slots = decode_trial_slots(trial_requested_path_);
     // Diagnostic trial configuration is deliberately authoritative when it is
     // present. Normal SDK callers use the public host-only policy below.
