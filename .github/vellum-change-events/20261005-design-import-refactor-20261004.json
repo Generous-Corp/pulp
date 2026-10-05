@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "20261005-design-import-refactor-20261004",
+  "kind": "change",
+  "created_at": "2026-10-05T02:36:30Z",
+  "slices": [
+    "design-schema-compiler"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); native alternate-frame identity now receives deterministic anchors while remaining outside the audio/UI authority boundary.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-design-import-anchors",
+    "ctest --test-dir build -R pulp-test-design-update",
+    "ctest --test-dir build -R pulp-test-graph-runtime-plan",
+    "ctest --test-dir build -R pulp-test-graph-serializer",
+    "ctest --test-dir build -R pulp-test-host-signal-graph",
+    "ctest --test-dir build -R pulp-test-widget-bridge-canvas2d",
+    "node --test packages/pulp-react/test/bridge-batch.test.ts",
+    "node --test tools/import-design/browser_capture/vendor_payload.test.mjs",
+    "node --test tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+    "python3 tools/scripts/test_vellum_boundary_lint.py",
+    "python3 tools/ui-build/lint/test_clean_output_lint.py"
+  ],
+  "disposition": "pulp-only"
+}

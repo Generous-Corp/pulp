@@ -147,20 +147,16 @@ std::string content_hash_signature_key(const IRNode& node) {
 // strategies. The alternate-frame walker uses this to add a reserved namespace
 // without copying the full IRNode (which can include an entire descendant
 // subtree and asset metadata).
-std::string compute_anchor_id_with_type(const IRNode& node,
-                                        std::string_view parent_anchor,
-                                        std::size_t sibling_tag_index_for_path,
-                                        std::size_t depth,
+std::string compute_anchor_id_with_type(const IRNode& node, std::string_view parent_anchor,
+                                        std::size_t sibling_tag_index_for_path, std::size_t depth,
                                         std::size_t sig_index_for_content_hash,
-                                        AnchorStrategy strategy,
-                                        std::string_view adapter_name,
+                                        AnchorStrategy strategy, std::string_view adapter_name,
                                         std::string_view type_override = {}) {
     if (strategy == AnchorStrategy::adapter) {
         // Caller must populate source_node_id before invoking the adapter
         // strategy. If they didn't, fall back to content-hash so we always
         // produce an anchor and keep the import pipeline alive.
-        if (node.source_node_id && !node.source_node_id->empty() &&
-            !adapter_name.empty()) {
+        if (node.source_node_id && !node.source_node_id->empty() && !adapter_name.empty()) {
             std::string out;
             out.reserve(adapter_name.size() + 1 + node.source_node_id->size());
             out.append(adapter_name);
@@ -172,14 +168,15 @@ std::string compute_anchor_id_with_type(const IRNode& node,
         // path always supplies both fields.
     }
 
-    const std::string_view tag = type_override.empty() ? std::string_view(node.type)
-                                                        : type_override;
+    const std::string_view tag =
+        type_override.empty() ? std::string_view(node.type) : type_override;
     if (strategy == AnchorStrategy::path) {
         std::string seg(tag);
         seg.push_back('[');
         seg += std::to_string(sibling_tag_index_for_path);
         seg.push_back(']');
-        if (parent_anchor.empty()) return seg;
+        if (parent_anchor.empty())
+            return seg;
         std::string out;
         out.reserve(parent_anchor.size() + 1 + seg.size());
         out.append(parent_anchor);
@@ -191,26 +188,21 @@ std::string compute_anchor_id_with_type(const IRNode& node,
     // content_hash (default + adapter fallback)
     std::string role = node_role(node);
     std::string text = normalize_text(node.text_content);
-    std::string input = stable_stringify_content_hash_input(
-        tag, role, text, depth, sig_index_for_content_hash);
+    std::string input =
+        stable_stringify_content_hash_input(tag, role, text, depth, sig_index_for_content_hash);
     return fnv1a_base36(input);
 }
 
-void walk(IRNode& node,
-          std::string_view parent_anchor,
-          std::size_t parent_child_index,
-          std::size_t depth,
-          AnchorStrategy strategy,
-          std::string_view adapter_name,
-          IRNode* parent,
-          std::size_t sig_index,
-          bool alternate_axis = false) {
+void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child_index,
+          std::size_t depth, AnchorStrategy strategy, std::string_view adapter_name, IRNode* parent,
+          std::size_t sig_index, bool alternate_axis = false) {
     // For path strategy: count earlier siblings with the same tag.
     std::size_t sibling_tag_index = 0;
     if (parent != nullptr && strategy == AnchorStrategy::path) {
         const auto& siblings = alternate_axis ? parent->alternate_frames : parent->children;
         for (std::size_t i = 0; i < parent_child_index && i < siblings.size(); ++i) {
-            if (siblings[i].type == node.type) ++sibling_tag_index;
+            if (siblings[i].type == node.type)
+                ++sibling_tag_index;
         }
     }
 
@@ -226,16 +218,14 @@ void walk(IRNode& node,
     // Path anchors intentionally use the compact `@alternate[index]` form.
     std::string alternate_tag;
     if (alternate_axis && strategy != AnchorStrategy::adapter) {
-        alternate_tag = strategy == AnchorStrategy::path
-            ? "@alternate"
-            : "@alternate/" + node.type;
+        alternate_tag = strategy == AnchorStrategy::path ? "@alternate" : "@alternate/" + node.type;
     }
 
     // Preserve any pre-existing anchor (e.g. from an authored override).
     if (!node.stable_anchor_id || node.stable_anchor_id->empty()) {
         node.stable_anchor_id = compute_anchor_id_with_type(
-            node, parent_anchor, alternate_axis ? parent_child_index : sibling_tag_index,
-            depth, sig_index, strategy, adapter_name, alternate_tag);
+            node, parent_anchor, alternate_axis ? parent_child_index : sibling_tag_index, depth,
+            sig_index, strategy, adapter_name, alternate_tag);
     }
     if (!node.anchor_strategy || node.anchor_strategy->empty()) {
         node.anchor_strategy = std::string(strategy_name(strategy));
@@ -258,8 +248,8 @@ void walk(IRNode& node,
             child_sig_index = n;
             ++n;
         }
-        walk(c, child_parent_anchor, i, depth + 1, strategy, adapter_name,
-             &node, child_sig_index, false);
+        walk(c, child_parent_anchor, i, depth + 1, strategy, adapter_name, &node, child_sig_index,
+             false);
     }
 
     // Alternate frames are ordered by capture/swap index. Their own roots use
@@ -277,8 +267,7 @@ void walk(IRNode& node,
             frame_sig_index = n;
             ++n;
         }
-        walk(frame,
-             strategy == AnchorStrategy::path ? *node.stable_anchor_id : std::string_view{},
+        walk(frame, strategy == AnchorStrategy::path ? *node.stable_anchor_id : std::string_view{},
              i, depth + 1, strategy, adapter_name, &node, frame_sig_index, true);
     }
 }
@@ -294,17 +283,15 @@ std::string compute_anchor_id(const IRNode& node,
                               std::size_t sig_index_for_content_hash,
                               AnchorStrategy strategy,
                               std::string_view adapter_name) {
-    return compute_anchor_id_with_type(node, parent_anchor,
-                                       sibling_tag_index_for_path, depth,
-                                       sig_index_for_content_hash, strategy,
-                                       adapter_name);
+    return compute_anchor_id_with_type(node, parent_anchor, sibling_tag_index_for_path, depth,
+                                       sig_index_for_content_hash, strategy, adapter_name);
 }
 
 void assign_anchors(IRNode& root,
                     AnchorStrategy strategy,
                     std::string_view adapter_name) {
-    walk(root, /*parent_anchor=*/{}, /*parent_child_index=*/0, /*depth=*/0,
-         strategy, adapter_name, /*parent=*/nullptr, /*sig_index=*/0,
+    walk(root, /*parent_anchor=*/{}, /*parent_child_index=*/0, /*depth=*/0, strategy, adapter_name,
+         /*parent=*/nullptr, /*sig_index=*/0,
          /*alternate_axis=*/false);
 }
 
