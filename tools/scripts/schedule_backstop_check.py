@@ -17,7 +17,10 @@ this check holds every listed workflow to what the dispatcher assumes:
   (the dispatcher sends none, so a dispatched run must behave like a scheduled
   one);
 * it keeps an hourly-or-faster ``schedule`` cron, and the manifest's
-  ``cadence_minutes`` equals the longest gap between that cron's firings;
+  ``cadence_minutes`` equals the longest gap between that cron's firings; or
+  it keeps exactly one daily cron (a fixed minute and hour) and is listed at
+  1440, because a daily check that counts consecutive days cannot afford a
+  dropped cron (the read audit's Stage 0 streak);
 * it declares a top-level ``concurrency`` group, so a dispatch that overlaps a
   late scheduled run cannot pile up;
 * no job names a self-hosted runner label (the dispatcher must never add load
@@ -51,6 +54,7 @@ MANIFEST = ".github/schedule-backstop.json"
 WORKFLOWS = ".github/workflows"
 SCHEMA_VERSION = 1
 SELF_HOSTED_MARKERS = ("self-hosted", "pulp-build-vm", "pulp-gate")
+DAILY_MINUTES = 1440
 
 
 def _on_block(doc):
@@ -89,19 +93,39 @@ def hourly_cadence(cron: str) -> int | None:
     return max(gaps)
 
 
-def schedule_cadence(doc) -> int | None:
-    """Cadence of the workflow's combined hourly-or-faster crons, if any."""
+def _crons(doc) -> list[str]:
     on = _on_block(doc)
     if not isinstance(on, dict) or not isinstance(on.get("schedule"), list):
-        return None
+        return []
+    return [row["cron"] for row in on["schedule"] if isinstance(row, dict) and isinstance(row.get("cron"), str)]
+
+
+def schedule_cadence(doc) -> int | None:
+    """Cadence of the workflow's combined hourly-or-faster crons, if any."""
     minutes: set[int] = set()
-    for row in on["schedule"]:
-        cron = row.get("cron") if isinstance(row, dict) else None
-        if isinstance(cron, str) and hourly_cadence(cron) is not None:
+    for cron in _crons(doc):
+        if hourly_cadence(cron) is not None:
             minutes |= _minutes(cron.split()[0]) or set()
     if not minutes:
         return None
     return hourly_cadence(",".join(str(m) for m in sorted(minutes)) + " * * * *")
+
+
+def is_daily(cron: str) -> bool:
+    """A cron that fires once a day: a fixed minute and hour, every day."""
+    fields = cron.split()
+    return (len(fields) == 5 and fields[2:] == ["*", "*", "*"]
+            and fields[0].isdigit() and int(fields[0]) < 60 and fields[1].isdigit() and int(fields[1]) < 24)
+
+
+def listed_cadence(doc) -> int | None:
+    """The cadence a manifest row must state: the hourly cadence, else 1440 for
+    a workflow whose only cron is one daily firing."""
+    hourly = schedule_cadence(doc)
+    if hourly is not None:
+        return hourly
+    crons = _crons(doc)
+    return DAILY_MINUTES if len(crons) == 1 and is_daily(crons[0]) else None
 
 
 def _dispatch_inputs(doc):
@@ -140,9 +164,9 @@ def check_workflow(path: str, cadence: object) -> list[str]:
         for key, spec in inputs.items():
             if isinstance(spec, dict) and spec.get("required") is True and "default" not in spec:
                 violations.append(f"{name}: dispatch input '{key}' is required with no default")
-    actual = schedule_cadence(doc)
+    actual = listed_cadence(doc)
     if actual is None:
-        violations.append(f"{name}: has no hourly-or-faster schedule cron")
+        violations.append(f"{name}: has neither an hourly-or-faster cron nor exactly one daily cron")
     elif actual != cadence:
         violations.append(
             f"{name}: manifest cadence_minutes={cadence} but its cron fires every {actual} min"
@@ -183,8 +207,9 @@ def check(root: str) -> list[str]:
         if not isinstance(file, str) or "/" in file or file in named:
             violations.append(f"{MANIFEST}: workflow file {file!r} is not a unique bare name")
             continue
-        if type(cadence) is not int or not 1 <= cadence <= 60:
-            violations.append(f"{MANIFEST}: {file} cadence_minutes must be an integer in 1..60")
+        if type(cadence) is not int or not (1 <= cadence <= 60 or cadence == DAILY_MINUTES):
+            violations.append(f"{MANIFEST}: {file} cadence_minutes must be an integer in 1..60, or "
+                              f"{DAILY_MINUTES} for a daily workflow")
             continue
         named.add(file)
         violations.extend(check_workflow(os.path.join(root, WORKFLOWS, file), cadence))

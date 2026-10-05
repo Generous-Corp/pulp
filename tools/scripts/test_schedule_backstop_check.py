@@ -103,6 +103,21 @@ class ManifestTests(unittest.TestCase):
                      [("net.yml", 30)])
         self.assertEqual(fx.violations(), [])
 
+    def test_a_daily_workflow_may_be_listed_at_1440(self):
+        fx = Fixture({"nightly.yml": workflow(cron="41 7 * * *")}, [("nightly.yml", 1440)])
+        self.assertEqual(fx.violations(), [])
+
+    def test_a_daily_listing_needs_exactly_one_daily_cron_and_1440(self):
+        cases = [
+            ({"n.yml": workflow(cron="41 7 * * *")}, [("n.yml", 60)]),       # wrong cadence
+            ({"n.yml": workflow(cron="41 7 * * 1")}, [("n.yml", 1440)]),     # weekly
+            ({"n.yml": workflow(cron="41 */6 * * *")}, [("n.yml", 1440)]),   # every six hours
+            ({"n.yml": workflow(cron="*/30 * * * *")}, [("n.yml", 1440)]),   # hourly listed as daily
+            ({"n.yml": workflow(cron="41 7 * * *")}, [("n.yml", 720)]),      # no other long cadence
+        ]
+        for workflows, listed in cases:
+            self.assertNotEqual(Fixture(workflows, listed).violations(), [], listed)
+
     def test_missing_listed_file_is_reported(self):
         fx = Fixture({}, [("gone.yml", 30)])
         self.assertTrue(any("does not exist" in v for v in fx.violations()))
@@ -121,7 +136,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertGreaterEqual(len(listed), 10)
         for name in listed:
             with open(os.path.join(REPO, check.WORKFLOWS, name)) as source:
-                self.assertIsNotNone(check.schedule_cadence(check.yaml.safe_load(source)), name)
+                self.assertIsNotNone(check.listed_cadence(check.yaml.safe_load(source)), name)
 
 
 if __name__ == "__main__":

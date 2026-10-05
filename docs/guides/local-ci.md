@@ -946,7 +946,11 @@ was unknown. Each run ends with one
 platform registers was audited, and no audited executable has a finding.
 `incomplete` means the run cannot vouch for itself. The nightly passes `--fail-on-findings`, so its
 exit follows that verdict: 0 for clean, 1 for findings, 2 for incomplete. A
-red nightly therefore means the streak of clean runs is broken.
+red nightly therefore means the streak of clean runs is broken. GitHub fires daily
+crons hours late and sometimes not at all, so the workflow is listed in
+`.github/schedule-backstop.json` at the daily cadence (1440). tartci's
+schedule backstop dispatches it whenever no run on main is a day old, so the
+streak cannot lose a day to a dropped cron.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
