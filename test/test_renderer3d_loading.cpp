@@ -124,6 +124,26 @@ TEST_CASE("GpuSurface can request the Dawn null backend for API-only probes",
     REQUIRE(gpu->height() == config.height);
 }
 
+TEST_CASE("A Null-adapter readback is never a frame, whatever bytes it holds",
+          "[render][scene3d][adapter]") {
+    // Dawn's Null adapter on Linux returns readback bytes that look like a
+    // picture (169 colours over a 32x32 target); on macOS they are zeros.
+    // Neither is a drawn frame.
+    Scene3DRenderResult result;
+    result.distinct_color_count = 169;
+    result.non_transparent_pixel_count = 206;
+    result.adapter_backend_type = "Vulkan";
+    REQUIRE(Renderer3D::readback_holds_frame(result));
+    result.adapter_backend_type = "Null";
+    REQUIRE_FALSE(Renderer3D::readback_holds_frame(result));
+    result.adapter_backend_type = "Metal";
+    result.distinct_color_count = 1;
+    REQUIRE_FALSE(Renderer3D::readback_holds_frame(result));
+    result.distinct_color_count = 169;
+    result.non_transparent_pixel_count = 0;
+    REQUIRE_FALSE(Renderer3D::readback_holds_frame(result));
+}
+
 TEST_CASE("Renderer3D can request Dawn null backend for API-only probes",
           "[render][scene3d][gpu][adapter]") {
     HardcodedCubeRenderConfig config;
@@ -148,6 +168,7 @@ TEST_CASE("Renderer3D can request Dawn null backend for API-only probes",
     REQUIRE(result.width == config.width);
     REQUIRE(result.height == config.height);
     REQUIRE_FALSE(result.fallback_adapter_requested);
+    REQUIRE_FALSE(result.success);   // it submitted, but it drew nothing
 }
 
 TEST_CASE("Renderer3D renders parsed SceneData offscreen", "[render][scene3d][gpu]") {

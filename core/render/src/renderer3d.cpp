@@ -2882,8 +2882,7 @@ void finalize_scene_result(Scene3DRenderResult& result) {
                      result.texture_uploaded &&
                      result.command_submitted &&
                      result.readback_completed &&
-                     result.distinct_color_count > 1 &&
-                     result.non_transparent_pixel_count > 0;
+                     Renderer3D::readback_holds_frame(result);
     if (!result.success && result.error.empty()) {
         result.error = "Renderer3D: SceneData render incomplete:";
         auto append_missing = [&](bool condition, const char* name) {
@@ -2904,11 +2903,18 @@ void finalize_scene_result(Scene3DRenderResult& result) {
         append_missing(result.distinct_color_count > 1, "distinct_color_count");
         append_missing(result.non_transparent_pixel_count > 0,
                        "non_transparent_pixel_count");
+        append_missing(result.adapter_backend_type != "Null", "drawing_adapter");
     }
 }
 
 } // namespace
 #endif
+
+bool Renderer3D::readback_holds_frame(const Scene3DRenderResult& result) {
+    return result.distinct_color_count > 1 &&
+           result.non_transparent_pixel_count > 0 &&
+           result.adapter_backend_type != "Null";
+}
 
 Scene3DRenderResult Renderer3D::render_hardcoded_textured_cube(
     const HardcodedCubeRenderConfig& config) {
@@ -3273,8 +3279,7 @@ fn fs_main(input: VertexOut) -> @location(0) vec4f {
                      result.texture_uploaded &&
                      result.command_submitted &&
                      result.readback_completed &&
-                     result.distinct_color_count > 1 &&
-                     result.non_transparent_pixel_count > 0;
+                     readback_holds_frame(result);
     if (!result.success && result.error.empty()) {
         result.error = "Renderer3D: hardcoded cube structural validation failed";
     }
