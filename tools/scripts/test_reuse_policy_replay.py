@@ -107,6 +107,55 @@ class KeyBlindTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rpr.key_blind_update([], {"schema": "other"})
 
+    def test_a_delisted_name_re_enters_when_a_content_keyed_pair_shows_it_unreached(self):
+        # Delisting is a reviewed edit of the list, not a property of the
+        # update: a name taken off comes back the first time the key misses
+        # it again, with the miss that brought it back as its example.
+        existing = {"schema": rpr.KEY_BLIND_SCHEMA, "executables": {
+            "test/kept": {"example": {"pr": 1, "group_run_id": "g1"}, "explained": "linker stub order"}}}
+        doc, added = rpr.key_blind_update([self.pair(5, [])], existing)
+        self.assertEqual((added, sorted(doc["executables"])), ([], ["test/kept"]))
+        doc, added = rpr.key_blind_update([self.pair(6, ["test/delisted"], content_keyed=False),
+                                           self.pair(7, ["test/delisted"])], existing)
+        self.assertEqual(added, ["test/delisted"])
+        self.assertEqual(doc["executables"]["test/delisted"],
+                         {"example": {"pr": 7, "group_run_id": "g7"}, "explained": None})
+        self.assertEqual(doc["executables"]["test/kept"]["explained"], "linker stub order")
+
+    def test_the_objc_stub_executables_are_off_the_checked_in_list_and_can_return(self):
+        # The five linked deterministically once -Wl,-objc_stubs_small was
+        # passed, so the checked-in list no longer carries them; a key miss
+        # on any of them lists it again.
+        checked_in = json.loads((rpr.REPO_ROOT / "tools" / "ci" / "key_blind_executables.json").read_text())
+        stubs = ["test/pulp-test-group-core-standalone", "test/pulp-test-settings-sections",
+                 "test/pulp-test-standalone-recording", "test/pulp-test-standalone-rt",
+                 "test/pulp-test-timeline-phase1-examples"]
+        self.assertEqual(sorted(set(stubs) & set(checked_in["executables"])), [])
+        doc, added = rpr.key_blind_update([self.pair(8, stubs)], checked_in)
+        self.assertEqual(added, stubs)
+        self.assertLessEqual(set(checked_in["executables"]), set(doc["executables"]))
+
+    def test_since_keeps_misses_older_than_a_delisting_out_of_the_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "c"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(run_id="g1", created_at="2026-10-01T12:00:00Z"),
+                                                     group(run_id="g2", created_at="2026-10-05T12:00:00Z"),
+                                                     group(run_id="g4", created_at="2026-10-03T00:00:00Z"),
+                                                     head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [
+                self.pair(1, ["test/delisted"]) | {"group_run_id": "g1"},
+                self.pair(2, []) | {"group_run_id": "g2"},
+                self.pair(3, ["test/unknown-group"]) | {"group_run_id": "g9"},
+                self.pair(4, ["test/at-cutoff"]) | {"group_run_id": "g4"}])
+            listed = Path(tmp) / "list.json"
+            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}))
+            argv = ["key-blind", "--corpus", str(corpus), "--list", str(listed)]
+            self.assertEqual(rpr.main(argv + ["--since", "2026-10-04T00:00:00Z"]), 0)
+            self.assertEqual(rpr.main(argv + ["--since", "2026-10-04"]), 0)
+            self.assertEqual(rpr.main(argv + ["--since", "2026-10-01"]), 1)   # the old miss is inside
+            self.assertEqual(rpr.main(argv + ["--since", "2026-10-03T00:00:00Z"]), 1)  # a group at the cutoff is inside
+            self.assertEqual(rpr.main(argv), 1)
+
     def test_the_cli_fails_on_a_new_entry_unless_written(self):
         with tempfile.TemporaryDirectory() as tmp:
             corpus = Path(tmp) / "c"

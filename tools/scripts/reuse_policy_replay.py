@@ -653,6 +653,19 @@ KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
 KEY_BLIND_VARIANT = "cmake-codemodel-recorded"
 
 
+def pairs_since(corpus: Corpus, since: str) -> list[dict]:
+    """The corpus's pairs whose merge group was created at or after `since`
+    (an ISO date or datetime, UTC). A pair whose group run is unknown is
+    dropped: its time cannot be shown to be inside the window."""
+    cutoff = _parse_time(since if "T" in since else since + "T00:00:00Z")
+    out = []
+    for pair in corpus.pairs:
+        created = (corpus.run(pair.get("group_run_id")) or {}).get("created_at")
+        if created and _parse_time(created) >= cutoff:
+            out.append(pair)
+    return out
+
+
 def key_blind_update(pairs: Iterable[dict], existing: dict | None) -> tuple[dict, list[str]]:
     """The key-blind list after one more corpus: every executable whose
     recorded bytes changed between a PR head and its merge group while the
@@ -789,6 +802,9 @@ def main(argv: list[str]) -> int:
     b.add_argument("--corpus", required=True, type=Path)
     b.add_argument("--list", type=Path, default=REPO_ROOT / "tools" / "ci" / "key_blind_executables.json")
     b.add_argument("--write", action="store_true", help="write the grown list (default: report only)")
+    b.add_argument("--since", default=None,
+                   help="only groups created at or after this ISO time: start after the change that "
+                        "made a delisted executable deterministic, or its older misses list it again")
     s = sub.add_parser("score", help="score policies over a corpus or the scenario fixtures")
     group = s.add_mutually_exclusive_group(required=True)
     group.add_argument("--corpus", type=Path)
@@ -842,7 +858,8 @@ def main(argv: list[str]) -> int:
 
     if a.cmd == "key-blind":
         existing = json.loads(a.list.read_text(encoding="utf-8")) if a.list.is_file() else None
-        doc, added = key_blind_update(Corpus.load(a.corpus).pairs, existing)
+        corpus = Corpus.load(a.corpus)
+        doc, added = key_blind_update(pairs_since(corpus, a.since) if a.since else corpus.pairs, existing)
         for exe in added:
             print(f"key-blind: NEW {exe}")
         print(f"key-blind: {len(doc['executables'])} listed, {len(added)} new")
@@ -862,10 +879,7 @@ def main(argv: list[str]) -> int:
 
     corpus = Corpus.load(a.corpus)
     if a.since:
-        cutoff = _parse_time(a.since if "T" in a.since else a.since + "T00:00:00Z")
-        corpus.pairs = [p for p in corpus.pairs
-                        if (corpus.run(p["group_run_id"]) or {}).get("created_at")
-                        and _parse_time(corpus.run(p["group_run_id"])["created_at"]) >= cutoff]
+        corpus.pairs = pairs_since(corpus, a.since)
     names = a.policy or [p.name for p in POLICIES.values() if p.candidate and p.decide]
     opts = {"receipt_source": a.receipt_source, "contexts": a.contexts, "min_sample": a.min_sample}
     results = []
