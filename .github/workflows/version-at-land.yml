@@ -123,6 +123,10 @@ jobs:
         # (a derived regenerator in version_at_land.py). Without the binary the
         # regenerator logs that it could not run and CHANGELOG.md falls behind.
         shell: bash
+        env:
+          # Authenticates the installer's release lookup; anonymous calls from
+          # shared runner IPs hit the 60/hour API limit (HTTP 403).
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           ./tools/install-shipyard.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"

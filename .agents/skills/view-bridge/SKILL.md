@@ -350,6 +350,24 @@ yet" cannot pass as a dark background. What only this path shows:
 - Requesting a second view controller from the same remote instance did not
   paint in a probe; instantiate a fresh unit per measured open.
 
+### A processor-owned session must not outlive the root it borrows
+
+A `ScriptedUiSession` a processor builds in `create_view()` borrows the root
+`View` that `ViewBridge` owns, and the processor normally drops it in
+`on_view_closed()`. That hook fires only for an attached view, so a view the
+host never attached (a failed attach, a harness that opens without
+`notify_attached()`) used to be destroyed while the session lived on, and the
+session's teardown later wrote into the freed root (ASan:
+heap-use-after-free in `WidgetBridge::quarantine_realm()`).
+`ViewBridge::close()` now calls `ScriptedUiSession::release_root()` on the
+processor's active session when it borrows the closing root (and the root was
+not handed off with `release_view()`, and the processor is still alive):
+the realm is quarantined and torn down while the root exists, and the session
+is left inert -- `bridge()` is null and `load()` refuses. A processor that
+recreates its editor gets a fresh session from its next `create_view()`.
+Gate: `[lifetime]` in `test/test_view_bridge.cpp`; under ASan its failure
+without the fix is the use-after-free itself.
+
 ## Lifecycle protocol — adapter author side
 
 ```
