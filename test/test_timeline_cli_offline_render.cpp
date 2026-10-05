@@ -1,4 +1,5 @@
 #include "../tools/timeline/src/timeline_agent_internal.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
@@ -13,7 +14,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -37,10 +37,8 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
 class TempDirectory {
   public:
     TempDirectory() {
-        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::filesystem::temp_directory_path() /
-                ("pulp-timeline-cli-render-" + std::to_string(nonce));
-        REQUIRE(std::filesystem::create_directories(path_));
+        path_ = pulp::test::make_unique_temp_dir("pulp-timeline-cli-render");
+        REQUIRE(std::filesystem::is_directory(path_));
     }
 
     ~TempDirectory() {

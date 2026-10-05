@@ -6,6 +6,7 @@
 #include "node_runtime.hpp"
 #include "render_artifact_path.hpp"
 #include "support/isolated_pulp_home.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <iostream>
 
@@ -128,9 +129,7 @@ ProcessResult run_import_design_in(const fs::path& cwd,
 class TempDir {
 public:
     explicit TempDir(const std::string& prefix) {
-        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
 
     ~TempDir() {
@@ -210,9 +209,7 @@ private:
 class ScopedTempRoot {
 public:
     explicit ScopedTempRoot(const std::string& prefix) {
-        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
         // std::filesystem::temp_directory_path consults TMPDIR on POSIX and
         // TMP/TEMP on Windows; set every name so both agree with `path`.
         for (const char* name : {"TMPDIR", "TMP", "TEMP"}) {

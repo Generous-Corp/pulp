@@ -6,11 +6,11 @@
 #include <pulp/host/scan_blacklist.hpp>
 #include <pulp/host/scanner.hpp>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::host;
 namespace fs = std::filesystem;
@@ -25,14 +25,7 @@ struct ScannerScratchDir {
     fs::path path;
 
     explicit ScannerScratchDir(const char* stem) {
-        path = fs::temp_directory_path()
-             / (std::string("pulp-scanner-metadata-") + stem + "-"
-                + std::to_string(std::chrono::steady_clock::now()
-                                     .time_since_epoch()
-                                     .count()));
-        std::error_code ec;
-        fs::remove_all(path, ec);
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(std::string("pulp-scanner-metadata-") + stem);
     }
 
     ~ScannerScratchDir() {

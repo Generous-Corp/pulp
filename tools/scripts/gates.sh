@@ -951,7 +951,7 @@ if [ -n "${PULP_SKIP_PREQUEUE_GUARDS:-}" ]; then
     echo "  A skip is not a pass — both still run as ctests in the required gate." >&2
 else
     prequeue_changed="$(git diff --name-only "$BASE"...HEAD 2>/dev/null || true)"
-    for prequeue_guard in catch_discover_timeout_guard.py check_skip_not_pass.py; do
+    for prequeue_guard in catch_discover_timeout_guard.py clock_only_temp_key_guard.py check_skip_not_pass.py; do
         prequeue_path="$ROOT/tools/scripts/$prequeue_guard"
         [ -f "$prequeue_path" ] || continue
         echo "" >&2

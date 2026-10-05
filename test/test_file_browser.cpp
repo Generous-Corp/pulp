@@ -2,12 +2,12 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/file_browser.hpp>
 #include <algorithm>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
+#include "support/unique_temp_dir.hpp"
 
 using pulp::canvas::DrawCommand;
 using pulp::canvas::RecordingCanvas;
@@ -18,10 +18,7 @@ namespace {
 class TempDir {
 public:
     explicit TempDir(const std::string& label) {
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = std::filesystem::temp_directory_path() /
-               ("pulp-file-browser-test-" + label + "-" + std::to_string(stamp));
-        std::filesystem::create_directories(path);
+        path = pulp::test::make_unique_temp_dir("pulp-file-browser-test-" + label);
     }
 
     ~TempDir() {

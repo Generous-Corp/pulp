@@ -21,6 +21,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include "support/unique_temp_dir.hpp"
 
 #ifndef PULP_ISOLATED_SCANNER_REAL_WORKER
 #error "PULP_ISOLATED_SCANNER_REAL_WORKER must point at the pulp-scan-worker binary"
@@ -40,14 +41,7 @@ struct ScratchDir {
     fs::path path;
 
     explicit ScratchDir(const char* stem) {
-        const auto counter =
-            std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path()
-             / (std::string("pulp-isolated-scanner-test-") + stem + "-"
-                + std::to_string(counter));
-        std::error_code ec;
-        fs::remove_all(path, ec);
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(std::string("pulp-isolated-scanner-test-") + stem);
     }
 
     ~ScratchDir() {

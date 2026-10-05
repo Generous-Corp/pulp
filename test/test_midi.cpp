@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::midi;
 using Catch::Approx;
@@ -23,9 +24,7 @@ struct TempDir {
     fs::path path;
 
     TempDir() {
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / ("pulp-midi-test-" + std::to_string(stamp));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir("pulp-midi-test");
     }
 
     ~TempDir() {

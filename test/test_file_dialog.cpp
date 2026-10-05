@@ -13,9 +13,9 @@
 
 #include <string>
 #include <vector>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include "support/unique_temp_dir.hpp"
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -43,10 +43,8 @@ TEST_CASE("FileDialog has_backend reflects native vs host-registered availabilit
 TEST_CASE("FileDialog save_copy writes while the selected destination is owned",
           "[platform][file-dialog][save-copy]") {
     namespace fs = std::filesystem;
-    const auto root = fs::temp_directory_path() /
-        ("pulp-file-dialog-save-copy-" + std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directories(root));
+    const auto root = pulp::test::make_unique_temp_dir("pulp-file-dialog-save-copy");
+    REQUIRE(fs::is_directory(root));
     const auto source = root / "source.vcv";
     const auto destination = root / "chosen.vcv";
     {

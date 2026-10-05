@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::host;
 namespace fs = std::filesystem;
@@ -16,9 +17,7 @@ namespace {
 struct TempFile {
     fs::path path;
     TempFile() {
-        auto stem = "pulp-blacklist-" + std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count());
-        path = fs::temp_directory_path() / stem;
+        path = pulp::test::unique_temp_path("pulp-blacklist");
     }
     ~TempFile() { std::error_code ec; fs::remove_all(path, ec); }
     void write(const std::string& s) {

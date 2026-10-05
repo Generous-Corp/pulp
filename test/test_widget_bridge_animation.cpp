@@ -26,6 +26,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 #include <thread>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -1347,11 +1348,7 @@ TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
-    const auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto font_path =
-        std::filesystem::temp_directory_path() /
-        ("pulp-widget-bridge-font-" + unique + ".ttf");
+    const auto font_path = pulp::test::unique_temp_path("pulp-widget-bridge-font", ".ttf");
     {
         std::ofstream out(font_path, std::ios::binary);
         out << "fake-font";

@@ -24,7 +24,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -36,6 +35,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::view;
 namespace fs = std::filesystem;
@@ -65,9 +65,7 @@ namespace {
 class TempDir {
 public:
     explicit TempDir(const std::string& prefix) {
-        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
 
     ~TempDir() {

@@ -2720,9 +2720,10 @@ amended before its first push was never on any remote ref.
 
 ## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
 
-`tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py` and
-`check_skip_not_pass.py` before every push. Both are whole-tree text scans —
-0.1s and ~2s, no build tree, no configure. The required gate already runs them
+`tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py`,
+`clock_only_temp_key_guard.py` and `check_skip_not_pass.py` before every push.
+All are whole-tree text scans of a few seconds at most, with no build tree and
+no configure. The required gate already runs them
 as ctests, so this adds no coverage; it moves *when* you find out.
 
 That timing is the whole point. A batch is main plus every entry ahead of it, so
@@ -2746,6 +2747,13 @@ What each one refuses:
   `test/cmake/character_delay_tests.cmake`. The guard honours an inline
   `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
   since the skip marker evades the thing the guard exists to catch.
+
+- **A test temp path keyed on a clock reading alone.** CTest runs cases as
+  concurrent processes, and two that read the same `steady_clock` tick share
+  the directory and read or delete each other's files (a browser-capture case
+  accepted a drifted capture this way). Use `pulp::test::make_unique_temp_dir`
+  or `unique_temp_path` from `test/support/unique_temp_dir.hpp` (pid + serial,
+  exclusive create). Escape with `clock-only-temp-key-guard: skip <reason>`.
 
 - **An unmet precondition reported as a pass.** A `SUCCEED()` / `WARN()` / bare
   `return` at the top of a case leaves it PASSING, so the suite's pass count is

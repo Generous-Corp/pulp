@@ -3,13 +3,13 @@
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/sample_asset_io.hpp>
 
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <string>
 #include <vector>
+#include "support/unique_temp_dir.hpp"
 
 using pulp::audio::AudioFileData;
 using pulp::audio::SampleAssetExporter;
@@ -21,11 +21,7 @@ using pulp::audio::SampleAssetStatus;
 namespace {
 
 std::filesystem::path unique_path(const char* suffix) {
-    static int counter = 0;
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto name = std::string("pulp_sample_asset_io_") + std::to_string(tick) + "_" +
-                std::to_string(counter++) + suffix;
-    return std::filesystem::temp_directory_path() / name;
+    return pulp::test::unique_temp_path("pulp_sample_asset_io", suffix);
 }
 
 AudioFileData make_audio(std::uint32_t sample_rate = 48000,

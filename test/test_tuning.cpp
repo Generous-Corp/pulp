@@ -12,7 +12,6 @@
 #endif
 
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -20,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include "support/unique_temp_dir.hpp"
 
 using Catch::Approx;
 
@@ -259,10 +259,7 @@ TEST_CASE("Scala tuning provider failed load leaves prior tuning intact") {
 }
 
 TEST_CASE("Scala tuning provider loads SCL and KBM files together") {
-    const auto unique_suffix = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto dir = std::filesystem::temp_directory_path() /
-        ("pulp-scala-tuning-provider-test-" + std::to_string(unique_suffix));
-    std::filesystem::create_directories(dir);
+    const auto dir = pulp::test::make_unique_temp_dir("pulp-scala-tuning-provider-test");
     const auto scl = dir / "24edo.scl";
     const auto kbm = dir / "unmapped.kbm";
     {

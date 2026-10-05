@@ -1,7 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -11,6 +10,7 @@
 #include <pulp/ship/codesign.hpp>
 #include <pulp/ship/installer.hpp>
 #include <pulp/platform/child_process.hpp>
+#include "support/unique_temp_dir.hpp"
 
 namespace fs = std::filesystem;
 using Catch::Matchers::ContainsSubstring;
@@ -21,10 +21,7 @@ struct TempDir {
     fs::path path;
 
     explicit TempDir(const char* stem) {
-        path = fs::temp_directory_path()
-             / (std::string("pulp-linux-package-") + stem + "-"
-                + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(std::string("pulp-linux-package-") + stem);
     }
 
     ~TempDir() {

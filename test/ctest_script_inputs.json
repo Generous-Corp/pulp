@@ -2166,6 +2166,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-unique-temp-dir": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-unique-temp-dir-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_unique_temp_dir.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-validation-contract": {
    "data": "declared",
    "detected_sources": [
@@ -2793,6 +2807,7 @@
   "pulp-test-transition-cost",
   "pulp-test-true-peak-limiter",
   "pulp-test-udev-monitor",
+  "pulp-test-unique-temp-dir",
   "pulp-test-unison-voice-stack",
   "pulp-test-unit-delay",
   "pulp-test-validation-contract",
@@ -2833,6 +2848,7 @@
   "pulp-test-windowing",
   "pulp-test-xcode-developer-path",
   "pulp-test-yoga-layout-bench",
+  "pulp-unique-temp-dir-fixture",
   "sample-region-allpass-consumer"
  ],
  "executables_scanned_for": [
@@ -3700,6 +3716,21 @@
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
+   ],
+   "kind": "python"
+  },
+  "clock-only-temp-key-guard": {
+   "entry": "tools/scripts/clock_only_temp_key_guard.py",
+   "inputs": [
+    "tools/scripts/clock_only_temp_key_guard.py"
+   ],
+   "kind": "python"
+  },
+  "clock-only-temp-key-guard-selftest": {
+   "entry": "tools/scripts/test_clock_only_temp_key_guard.py",
+   "inputs": [
+    "tools/scripts/clock_only_temp_key_guard.py",
+    "tools/scripts/test_clock_only_temp_key_guard.py"
    ],
    "kind": "python"
   },

@@ -16,6 +16,7 @@
 // the ship-related env vars; it restores prior values on teardown.
 
 #include "test_cli_shellout_util.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
@@ -140,10 +141,7 @@ std::string read_text_file(const fs::path& path) {
 }
 
 fs::path make_fake_project(std::string_view name, bool with_build_cache) {
-    auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto root = fs::temp_directory_path()
-        / ("pulp-ship-" + std::string(name) + "-" + std::to_string(unique));
-    fs::remove_all(root);
+    auto root = pulp::test::make_unique_temp_dir("pulp-ship-" + std::string(name));
     fs::create_directories(root / "core");
 
     {
@@ -222,12 +220,7 @@ void write_ship_config(const fs::path& home, std::string_view text) {
 //   2. `~/.config/pulp/secrets/notary.env`, which `ship notarize` layers
 //      under env/CLI values on a configured signing machine.
 fs::path make_isolated_pulp_home() {
-    auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto dir = fs::temp_directory_path()
-        / ("pulp-ship-home-" + std::to_string(stamp));
-    fs::remove_all(dir);
-    fs::create_directories(dir);
-    return dir;
+    return pulp::test::make_unique_temp_dir("pulp-ship-home");
 }
 
 struct ShipShelloutFixture {
@@ -318,9 +311,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     if (!binary_exists()) {
         SKIP("pulp binary not built");
     }
-    auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto dir = fs::temp_directory_path() / ("pulp-appcast-consumer-" + std::to_string(unique));
-    fs::create_directories(dir);
+    auto dir = pulp::test::make_unique_temp_dir("pulp-appcast-consumer");
     auto feed = dir / "appcast.xml";
     auto r = run_pulp_in(dir,
         {"ship", "appcast", "--url", "https://example.com/App-1.0.0.pkg",

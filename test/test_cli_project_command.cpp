@@ -21,6 +21,7 @@ namespace fs = std::filesystem;
 #include "../tools/cli/cmd_project_bump.cpp"
 #include "../tools/cli/cmd_project_undo.cpp"
 #include "../tools/cli/cmd_project.cpp"
+#include "support/unique_temp_dir.hpp"
 
 // The shared helpers and option types now live in this private
 // namespace; pull them in so the existing unqualified test code
@@ -38,12 +39,7 @@ struct TempDir {
     fs::path path;
 
     TempDir() {
-        auto base = fs::temp_directory_path();
-        path = base / fs::path("pulp-project-command-test-" +
-                               std::to_string(reinterpret_cast<std::uintptr_t>(this)) + "-" +
-                               std::to_string(std::chrono::steady_clock::now()
-                                                  .time_since_epoch().count()));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir("pulp-project-command-test");
         std::error_code ec;
         auto canon = fs::weakly_canonical(path, ec);
         if (!ec) path = canon;

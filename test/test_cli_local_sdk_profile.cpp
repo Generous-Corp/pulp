@@ -1,11 +1,11 @@
 #include "tools/cli/local_sdk_profile.hpp"
 #include "tools/cli/ship_tracing_guard.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <optional>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -19,10 +19,7 @@ namespace {
 struct TempDir {
     fs::path path;
     TempDir() {
-        path = fs::temp_directory_path() /
-               ("pulp-local-sdk-profile-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir("pulp-local-sdk-profile");
     }
     ~TempDir() {
         std::error_code ec;

@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "support/unique_temp_dir.hpp"
 
 namespace fs = std::filesystem;
 using namespace pulp::platform;
@@ -39,9 +40,7 @@ bool contains_key(const std::string& json, const std::string& key) {
 }
 
 fs::path unique_output_path(const std::string& lane) {
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path() /
-           ("pulp-design-import-bench-" + lane + "-" + std::to_string(tick) + ".json");
+    return pulp::test::unique_temp_path("pulp-design-import-bench-" + lane, ".json");
 }
 
 void set_env_var(const char* name, const char* value) {

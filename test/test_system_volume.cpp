@@ -8,6 +8,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include "support/unique_temp_dir.hpp"
 
 #if defined(__linux__)
 #include <sys/stat.h>
@@ -20,12 +21,7 @@ namespace {
 #if defined(__linux__)
 
 std::filesystem::path make_temp_root(const std::string& name) {
-    auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto path = std::filesystem::temp_directory_path() /
-                (name + "-" + std::to_string(stamp));
-    std::filesystem::remove_all(path);
-    std::filesystem::create_directories(path);
-    return path;
+    return pulp::test::make_unique_temp_dir(name);
 }
 
 class ScopedEnvVar {

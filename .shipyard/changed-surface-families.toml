@@ -1570,6 +1570,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-684cceaca97b"
+paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clock-only-temp-key-guard-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-e63b5716a542"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
@@ -4921,6 +4948,7 @@ paths = [
   "tools/scripts/test_clean_worktrees.py",
   "tools/scripts/test_cli_sync_check.py",
   "tools/scripts/test_cli_sync_check_extra.py",
+  "tools/scripts/test_clock_only_temp_key_guard.py",
   "tools/scripts/test_cmajor_external.py",
   "tools/scripts/test_cmake_manifest_parse.py",
   "tools/scripts/test_codecov_upload_contract.py",
@@ -5204,6 +5232,8 @@ tests = [
   "changed-surface-script-families-drift",
   "checkout-location-guard-selftest",
   "claude-md-sync-hook",
+  "clock-only-temp-key-guard",
+  "clock-only-temp-key-guard-selftest",
   "cmake-examples-reorder-init-guard",
   "cmake-ios-hostapp-bundle-guard",
   "consumption-census-contract-control-note",
@@ -5414,6 +5444,7 @@ paths = [
   "tools/scripts/test_clean_worktrees.py",
   "tools/scripts/test_cli_sync_check.py",
   "tools/scripts/test_cli_sync_check_extra.py",
+  "tools/scripts/test_clock_only_temp_key_guard.py",
   "tools/scripts/test_cmajor_external.py",
   "tools/scripts/test_cmake_manifest_parse.py",
   "tools/scripts/test_codecov_upload_contract.py",

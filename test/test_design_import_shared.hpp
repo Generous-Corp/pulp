@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::view;
 namespace fs = std::filesystem;
@@ -78,9 +79,7 @@ std::string asset_text(const ClaudeBundleAsset& asset) {
 class TempDir {
 public:
     explicit TempDir(const std::string& prefix) {
-        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
 
     ~TempDir() {

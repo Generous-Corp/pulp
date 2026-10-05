@@ -3,13 +3,13 @@
 #include "tools/import-design/browser_import_session.hpp"
 #include "tools/import-design/import_png_codec.hpp"
 #include "tools/import-design/sprite_skins.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -24,14 +24,9 @@ namespace id = pulp::import_design;
 namespace {
 
 struct TempTree {
-    fs::path root =
-        fs::temp_directory_path() /
-        ("pulp-browser-import-cli-test-" +
-         std::to_string(std::chrono::steady_clock::now()
-                            .time_since_epoch()
-                            .count()));
+    fs::path root = pulp::test::make_unique_temp_dir("pulp-browser-import-cli-test");
 
-    TempTree() { fs::create_directories(root); }
+    TempTree() = default;
     ~TempTree() {
         std::error_code ec;
         fs::remove_all(root, ec);

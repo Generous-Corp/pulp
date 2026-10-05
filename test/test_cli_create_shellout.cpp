@@ -2,6 +2,7 @@
 #include <pulp/platform/child_process.hpp>
 
 #include "test_cli_shellout_util.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -52,11 +53,7 @@ struct TempDir {
     fs::path path;
 
     explicit TempDir(const std::string& prefix) {
-        path = fs::temp_directory_path() /
-               (prefix + "-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch().count()));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
 
     ~TempDir() {

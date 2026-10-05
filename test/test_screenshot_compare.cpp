@@ -11,11 +11,11 @@
 #include <ImageIO/ImageIO.h>
 #endif
 
-#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::view;
 
@@ -38,9 +38,7 @@ std::vector<uint8_t> render_label_png(const std::string& text,
 }
 
 std::filesystem::path temp_png_path(const char* stem) {
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::filesystem::temp_directory_path() /
-           (std::string(stem) + "-" + std::to_string(tick) + ".png");
+    return pulp::test::unique_temp_path(stem, ".png");
 }
 
 void write_png_file(const std::filesystem::path& path, const std::vector<uint8_t>& png) {

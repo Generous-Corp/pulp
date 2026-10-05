@@ -17,7 +17,6 @@
 #include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/widgets.hpp>
 
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -27,6 +26,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::audio;
 using Catch::Matchers::WithinAbs;
@@ -56,13 +56,7 @@ AudioFileData make_sine(uint32_t sample_rate,
 }
 
 std::filesystem::path unique_wav_path() {
-    static int counter = 0;
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto stem = "pulp_test_thumbnail_"
-              + std::to_string(reinterpret_cast<std::uintptr_t>(&counter))
-              + "_" + std::to_string(tick)
-              + "_" + std::to_string(counter++) + ".wav";
-    return std::filesystem::temp_directory_path() / stem;
+    return pulp::test::unique_temp_path("pulp_test_thumbnail", ".wav");
 }
 
 }  // namespace
@@ -327,16 +321,8 @@ TEST_CASE("WaveformOverviewCache keeps distinct samples-per-peak entries",
 namespace {
 
 std::filesystem::path unique_cache_dir() {
-    static int counter = 0;
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto name = "pulp_test_thumbcache_"
-              + std::to_string(reinterpret_cast<std::uintptr_t>(&counter))
-              + "_" + std::to_string(tick)
-              + "_" + std::to_string(counter++);
-    auto p = std::filesystem::temp_directory_path() / name;
-    std::error_code ec;
-    std::filesystem::remove_all(p, ec);
-    return p;
+    // Only the name is reserved; the directory starts absent.
+    return pulp::test::unique_temp_path("pulp_test_thumbcache");
 }
 
 template <typename T>

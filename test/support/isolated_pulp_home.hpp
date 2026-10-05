@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include "unique_temp_dir.hpp"
 
 namespace pulp_test_cli {
 
@@ -21,10 +22,7 @@ namespace pulp_test_cli {
 class IsolatedPulpHome {
 public:
     IsolatedPulpHome() {
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        dir_ = std::filesystem::temp_directory_path() /
-               ("pulp-test-home-" + std::to_string(stamp));
-        std::filesystem::create_directories(dir_);
+        dir_ = pulp::test::make_unique_temp_dir("pulp-test-home");
         if (const char* home = std::getenv("PULP_HOME"))
             previous_home_ = home;
         link_managed_browser();

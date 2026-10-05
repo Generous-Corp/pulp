@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include "support/unique_temp_dir.hpp"
 
 using namespace pulp::state;
 using namespace pulp::view;
@@ -15,11 +16,7 @@ namespace fs = std::filesystem;
 namespace {
 
 fs::path make_temp_dir(const char* stem) {
-    const auto unique =
-        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto dir = fs::temp_directory_path() / (std::string(stem) + "-" + unique);
-    fs::create_directories(dir);
-    return dir;
+    return pulp::test::make_unique_temp_dir(stem);
 }
 void write_text(const fs::path& path, const std::string& content) {
     std::ofstream file(path);
