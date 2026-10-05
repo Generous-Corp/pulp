@@ -688,6 +688,10 @@ catch_discover_tests(pulp-test-host-signal-graph)
 pulp_add_test_suite(pulp-test-custom-node-enumeration GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)
 
+pulp_add_test_suite(pulp-test-dspx01-descriptor-registry GROUP pulp-test-group-app-host
+    SOURCES test_dspx01_descriptor_registry.cpp
+    LIBRARIES pulp::host)
+
 pulp_add_test_suite(pulp-test-sample-kernel-registry GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)
 
