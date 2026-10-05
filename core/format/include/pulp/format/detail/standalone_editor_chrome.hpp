@@ -123,7 +123,7 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
 
     // Compose plugin-contributed settings tabs after the host-owned Audio/MIDI tabs.
     for (auto& section : plugin_sections)
-        if (section.view) settings_panel->add_section(std::move(section.title), std::move(section.view));
+        if (section.view) settings_panel->add_section(std::move(section.title), section.take_view());
     // An app that can update itself gets an Updates tab (automatic-check
     // toggle, Check for Updates…, version, last check, and a note derived from
     // its declared update facts). Only the standalone installs the service.
