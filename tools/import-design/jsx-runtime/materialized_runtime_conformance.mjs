@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { canonicalizeMaterializedRuntimeDocument } from
   './materialized_runtime_canonicalization.mjs';
+import { trustedVendorPayload } from '../browser_capture/vendor_payload.mjs';
 
 const args = process.argv.slice(2);
 const value = (name, fallback) => {
@@ -81,7 +82,14 @@ const samples = [];
 let first;
 for (let index = 0; index < runs; ++index) {
   const start = performance.now();
-  const output = canonicalizeMaterializedRuntimeDocument(input);
+  // This fixture intentionally synthesizes representative vendor shapes
+  // instead of carrying the multi-megabyte production payloads.  Exercise
+  // canonicalization with its narrow shape-only test seam; capture itself
+  // still records removable assets only after the exact SHA-256 allowlist
+  // check in trustedCapturedVendorPayload.
+  const output = canonicalizeMaterializedRuntimeDocument(input, {
+    vendorPayloadTrust: trustedVendorPayload,
+  });
   const bytes = canonicalBytes(output);
   assertConformant(output);
   samples.push(performance.now() - start);
