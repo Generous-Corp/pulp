@@ -1,8 +1,9 @@
 /// @file anchor_strategy.cpp
-/// Implementation of stable_anchor_id strategies. Mirrors
-/// packages/pulp-import-ir/src/anchors.ts so the C++ and TS pipelines
-/// produce compatible anchors and the tweaks layer matches edits across
-/// either path.
+/// Implementation of stable_anchor_id strategies. The rendered `children`
+/// axis mirrors packages/pulp-import-ir/src/anchors.ts so the C++ and TS
+/// pipelines produce compatible anchors. Native C++ IR additionally carries
+/// an ordered `alternate_frames` axis; that axis is intentionally scoped to
+/// this native importer until the TS IR and its consumers grow the same field.
 ///
 /// Hash algorithm: FNV-1a 32-bit, base-36 encoded. Matches the TS hash
 /// exactly (FNV offset basis 0x811c9dc5, prime 0x01000193). The TS file
@@ -142,6 +143,59 @@ std::string content_hash_signature_key(const IRNode& node) {
     return ss.str();
 }
 
+// Compute one anchor, optionally replacing the tag used by path/content-hash
+// strategies. The alternate-frame walker uses this to add a reserved namespace
+// without copying the full IRNode (which can include an entire descendant
+// subtree and asset metadata).
+std::string compute_anchor_id_with_type(const IRNode& node,
+                                        std::string_view parent_anchor,
+                                        std::size_t sibling_tag_index_for_path,
+                                        std::size_t depth,
+                                        std::size_t sig_index_for_content_hash,
+                                        AnchorStrategy strategy,
+                                        std::string_view adapter_name,
+                                        std::string_view type_override = {}) {
+    if (strategy == AnchorStrategy::adapter) {
+        // Caller must populate source_node_id before invoking the adapter
+        // strategy. If they didn't, fall back to content-hash so we always
+        // produce an anchor and keep the import pipeline alive.
+        if (node.source_node_id && !node.source_node_id->empty() &&
+            !adapter_name.empty()) {
+            std::string out;
+            out.reserve(adapter_name.size() + 1 + node.source_node_id->size());
+            out.append(adapter_name);
+            out.push_back(':');
+            out.append(*node.source_node_id);
+            return out;
+        }
+        // Fall through to content-hash as a safety net. The normal adapter
+        // path always supplies both fields.
+    }
+
+    const std::string_view tag = type_override.empty() ? std::string_view(node.type)
+                                                        : type_override;
+    if (strategy == AnchorStrategy::path) {
+        std::string seg(tag);
+        seg.push_back('[');
+        seg += std::to_string(sibling_tag_index_for_path);
+        seg.push_back(']');
+        if (parent_anchor.empty()) return seg;
+        std::string out;
+        out.reserve(parent_anchor.size() + 1 + seg.size());
+        out.append(parent_anchor);
+        out.push_back('/');
+        out.append(seg);
+        return out;
+    }
+
+    // content_hash (default + adapter fallback)
+    std::string role = node_role(node);
+    std::string text = normalize_text(node.text_content);
+    std::string input = stable_stringify_content_hash_input(
+        tag, role, text, depth, sig_index_for_content_hash);
+    return fnv1a_base36(input);
+}
+
 void walk(IRNode& node,
           std::string_view parent_anchor,
           std::size_t parent_child_index,
@@ -149,20 +203,39 @@ void walk(IRNode& node,
           AnchorStrategy strategy,
           std::string_view adapter_name,
           IRNode* parent,
-          std::size_t sig_index) {
+          std::size_t sig_index,
+          bool alternate_axis = false) {
     // For path strategy: count earlier siblings with the same tag.
     std::size_t sibling_tag_index = 0;
     if (parent != nullptr && strategy == AnchorStrategy::path) {
-        for (std::size_t i = 0; i < parent_child_index; ++i) {
-            if (parent->children[i].type == node.type) ++sibling_tag_index;
+        const auto& siblings = alternate_axis ? parent->alternate_frames : parent->children;
+        for (std::size_t i = 0; i < parent_child_index && i < siblings.size(); ++i) {
+            if (siblings[i].type == node.type) ++sibling_tag_index;
         }
+    }
+
+    // Alternate frames are a second, ordered identity axis on the owning node,
+    // rather than descendants in the rendered tree. Give their roots a
+    // reserved namespace so a captured state cannot collide with an ordinary
+    // child that happens to have the same type/path or content. Adapter IDs
+    // remain source-authored and therefore keep the same identity across
+    // states; only path and content-hash fallbacks need the marker.
+    // Keep the namespace marker separate from the source type for content
+    // hashes. A synthetic `@alternate` tag alone would make two alternate
+    // roots with different source types collide when their text/role match.
+    // Path anchors intentionally use the compact `@alternate[index]` form.
+    std::string alternate_tag;
+    if (alternate_axis && strategy != AnchorStrategy::adapter) {
+        alternate_tag = strategy == AnchorStrategy::path
+            ? "@alternate"
+            : "@alternate/" + node.type;
     }
 
     // Preserve any pre-existing anchor (e.g. from an authored override).
     if (!node.stable_anchor_id || node.stable_anchor_id->empty()) {
-        node.stable_anchor_id = compute_anchor_id(
-            node, parent_anchor, sibling_tag_index, depth, sig_index,
-            strategy, adapter_name);
+        node.stable_anchor_id = compute_anchor_id_with_type(
+            node, parent_anchor, alternate_axis ? parent_child_index : sibling_tag_index,
+            depth, sig_index, strategy, adapter_name, alternate_tag);
     }
     if (!node.anchor_strategy || node.anchor_strategy->empty()) {
         node.anchor_strategy = std::string(strategy_name(strategy));
@@ -186,7 +259,27 @@ void walk(IRNode& node,
             ++n;
         }
         walk(c, child_parent_anchor, i, depth + 1, strategy, adapter_name,
-             &node, child_sig_index);
+             &node, child_sig_index, false);
+    }
+
+    // Alternate frames are ordered by capture/swap index. Their own roots use
+    // the reserved namespace above; descendants then recurse normally, with a
+    // path strategy naturally scoped below that alternate root. Content-hash
+    // and adapter descendants intentionally retain their existing independent
+    // identity so the same control can keep its tweak/binding across states.
+    std::unordered_map<std::string, std::size_t> alternate_sig_counts;
+    for (std::size_t i = 0; i < node.alternate_frames.size(); ++i) {
+        IRNode& frame = node.alternate_frames[i];
+        std::size_t frame_sig_index = i;
+        if (strategy == AnchorStrategy::content_hash) {
+            auto key = content_hash_signature_key(frame);
+            auto& n = alternate_sig_counts[key];
+            frame_sig_index = n;
+            ++n;
+        }
+        walk(frame,
+             strategy == AnchorStrategy::path ? *node.stable_anchor_id : std::string_view{},
+             i, depth + 1, strategy, adapter_name, &node, frame_sig_index, true);
     }
 }
 
@@ -201,56 +294,18 @@ std::string compute_anchor_id(const IRNode& node,
                               std::size_t sig_index_for_content_hash,
                               AnchorStrategy strategy,
                               std::string_view adapter_name) {
-    if (strategy == AnchorStrategy::adapter) {
-        // Caller must populate source_node_id before invoking the
-        // adapter strategy. If they didn't, fall back to content-hash so
-        // we always produce SOME anchor — better than a crash inside the
-        // import pipeline.
-        if (node.source_node_id && !node.source_node_id->empty() &&
-            !adapter_name.empty()) {
-            std::string out;
-            out.reserve(adapter_name.size() + 1 + node.source_node_id->size());
-            out.append(adapter_name);
-            out.push_back(':');
-            out.append(*node.source_node_id);
-            return out;
-        }
-        // Fall through to content-hash as a safety net. Caller-side tests
-        // assert that adapter sources populate source_node_id properly,
-        // so this branch is for defense in depth, not normal operation.
-        // (Matches TS behavior of throwing — we soft-fail instead because
-        // a missing anchor breaks the inspector silently, while a
-        // recovered anchor at least lets the pipeline finish.)
-    }
-
-    if (strategy == AnchorStrategy::path) {
-        std::string seg = node.type;
-        seg.push_back('[');
-        seg += std::to_string(sibling_tag_index_for_path);
-        seg.push_back(']');
-        if (parent_anchor.empty()) return seg;
-        std::string out;
-        out.reserve(parent_anchor.size() + 1 + seg.size());
-        out.append(parent_anchor);
-        out.push_back('/');
-        out.append(seg);
-        return out;
-    }
-
-    // content_hash (default + adapter fallback)
-    std::string tag = node.type;
-    std::string role = node_role(node);
-    std::string text = normalize_text(node.text_content);
-    std::string input = stable_stringify_content_hash_input(
-        tag, role, text, depth, sig_index_for_content_hash);
-    return fnv1a_base36(input);
+    return compute_anchor_id_with_type(node, parent_anchor,
+                                       sibling_tag_index_for_path, depth,
+                                       sig_index_for_content_hash, strategy,
+                                       adapter_name);
 }
 
 void assign_anchors(IRNode& root,
                     AnchorStrategy strategy,
                     std::string_view adapter_name) {
     walk(root, /*parent_anchor=*/{}, /*parent_child_index=*/0, /*depth=*/0,
-         strategy, adapter_name, /*parent=*/nullptr, /*sig_index=*/0);
+         strategy, adapter_name, /*parent=*/nullptr, /*sig_index=*/0,
+         /*alternate_axis=*/false);
 }
 
 AnchorStrategy default_anchor_strategy(DesignSource source) {
