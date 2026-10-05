@@ -43,9 +43,13 @@ BASE_INVENTORY_CACHE = ".changed-surface-base"
 EXCLUDE_NAME = inventory.EXCLUDED_NAME_REGEX
 EXCLUDE_LABEL = inventory.EXCLUDED_LABEL_REGEX
 MINIMUM_CTEST_VERSION = (3, 29)
-# Shipyard keeps the base64-expanded command below cmd.exe's 8,191-character
-# ceiling. Larger selections conservatively stay on the full validation path.
-MAX_SELECTED_TEST_BYTES = 4 * 1024
+# The largest decoded selection receipt the runner accepts. The bound that
+# matters is Shipyard's 8,000-unit check on the real command (under cmd.exe's
+# 8,191). A payload of P bytes costs ceil(4P/3) base64 units plus the fixed
+# command parts, measured at 198 units on a real plan (5,502 units for 3,978
+# bytes), so P <= 5,851 fits; 5,632 (7,510 + 198 = 7,708 units) leaves margin
+# for a longer digest field. Larger selections stay on the full path.
+MAX_SELECTED_TEST_BYTES = 5632
 
 
 class SelectionExecutionError(ValueError):

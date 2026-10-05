@@ -1694,12 +1694,12 @@ class OutOfBandBindingTest(unittest.TestCase):
 
     FIXTURE = Path(__file__).resolve().parent / "fixtures/changed_surface/proof-b-selection-receipt.json"
 
-    def binding(self) -> dict:
+    def binding(self, candidates: int = 3) -> dict:
         def candidate(i: int) -> dict:
             run = str(37000000000 + i)
             return {"run_id": run, "record_sha256": "a" * 64, "commit": "b" * 40,
                     "record_path": f"/Users/ci/Library/Application Support/shipyard/reuse-records/pulp/{run}"}
-        return {"candidates": [candidate(i) for i in range(3)], "rules_digest": "c" * 64,
+        return {"candidates": [candidate(i) for i in range(candidates)], "rules_digest": "c" * 64,
                 "derivation_code_dir": "/Users/ci/Library/Application Support/shipyard/derivation/pulp/f85a50",
                 "derivation_code_sha256": "d" * 64, "sample_seed": "e" * 64, "sample_percent": 5,
                 "build_dir": "/Volumes/Workshop/Code/agent-worktrees/pulp-keyed-proof-b/build"}
@@ -1708,10 +1708,12 @@ class OutOfBandBindingTest(unittest.TestCase):
         # Proof PR B's real selection (96 tests, 3 build targets).
         receipt = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
         self.assertEqual((len(receipt["selected_tests"]), receipt["schema_version"]), (96, 2))
-        raw = json.dumps(self.binding(), sort_keys=True, separators=(",", ":")).encode()
-        inline = {**receipt, "executable_reuse": self.binding()}
+        # A binding at its largest (eight candidates, the most Shipyard binds).
+        raw = json.dumps(self.binding(8), sort_keys=True, separators=(",", ":")).encode()
+        inline = {**receipt, "executable_reuse": self.binding(8)}
         v3 = {**receipt, "schema_version": 3, "executable_reuse_sha256": hashlib.sha256(raw).hexdigest()}
-        # Control: inline, the keyed plan is over the execution limit and refused.
+        self.assertLess(len(json.dumps(v3, separators=(",", ":")).encode()), runner.MAX_SELECTED_TEST_BYTES - 1500)
+        # Control: inline, that keyed plan is over the execution limit and refused.
         with self.assertRaisesRegex(runner.SelectionExecutionError, "safe execution limit"):
             runner.decode_selection_receipt(*encode_receipt(inline))
         names, _, targets, _, decoded = runner.decode_selection_receipt(*encode_receipt(v3))
@@ -1720,7 +1722,45 @@ class OutOfBandBindingTest(unittest.TestCase):
             (Path(directory) / runner.EXECUTABLE_REUSE_BINDING_FILE).write_bytes(raw)
             with mock.patch.dict(os.environ, {"SHIPYARD_CHANGED_SURFACE_RESULT_DIR": directory}):
                 self.assertEqual(runner.resolve_executable_reuse(decoded),
-                                 (self.binding(), None, v3["executable_reuse_sha256"]))
+                                 (self.binding(8), None, v3["executable_reuse_sha256"]))
+
+    def test_the_acceptance_cap_is_exact(self) -> None:
+        receipt = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
+
+        def padded_to(size: int) -> dict:
+            base = {**receipt, "selected_tests": receipt["selected_tests"] + ["x"]}
+            pad = size - len(json.dumps(base, separators=(",", ":")).encode())
+            names = receipt["selected_tests"] + ["x" * (pad + 1)]
+            literal = "".join(f"{n}\n" for n in names).encode()
+            out = {**receipt, "selected_tests": names, "selected_tests_digest": hashlib.sha256(literal).hexdigest()}
+            self.assertEqual(len(json.dumps(out, separators=(",", ":")).encode()), size)
+            return out
+        # Derived from the 8,000-unit command bound (see the constant); pinned
+        # so a change to it is a reviewed change to this test.
+        self.assertEqual(runner.MAX_SELECTED_TEST_BYTES, 5632)
+        names, *_ = runner.decode_selection_receipt(*encode_receipt(padded_to(5632)))
+        self.assertEqual(len(names), 97)
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "safe execution limit"):
+            runner.decode_selection_receipt(*encode_receipt(padded_to(5633)))
+
+    def test_a_v3_plan_with_an_inline_binding_too_is_refused(self) -> None:
+        receipt = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
+        both = {**receipt, "schema_version": 3, "executable_reuse_sha256": "0" * 64,
+                "executable_reuse": self.binding()}
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "unexpected schema"):
+            runner.decode_selection_receipt(*encode_receipt(both))
+
+    def test_a_binding_that_matches_its_digest_but_does_not_validate_runs_unkeyed(self) -> None:
+        bad = {**self.binding(), "sample_percent": 0}
+        raw = json.dumps(bad, sort_keys=True, separators=(",", ":")).encode()
+        digest = hashlib.sha256(raw).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / runner.EXECUTABLE_REUSE_BINDING_FILE).write_bytes(raw)
+            with mock.patch.dict(os.environ, {"SHIPYARD_CHANGED_SURFACE_RESULT_DIR": directory}):
+                binding, problem, got = runner.resolve_executable_reuse({"executable_reuse_sha256": digest})
+        self.assertIsNone(binding)
+        self.assertEqual(got, digest)
+        self.assertTrue(problem.startswith("invalid: "), problem)
 
     def test_v3_shape_is_exact(self) -> None:
         receipt = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
