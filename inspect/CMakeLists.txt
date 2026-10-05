@@ -176,6 +176,18 @@ if(TARGET pulp::host)
         PUBLIC pulp::inspect-runtime pulp::host)
 endif()
 
+add_library(pulp-inspect-graph-runtime
+    src/control_signal_graph_executor.cpp)
+add_library(pulp::inspect-graph-runtime ALIAS pulp-inspect-graph-runtime)
+target_include_directories(pulp-inspect-graph-runtime
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+if(TARGET pulp::host)
+    target_link_libraries(pulp-inspect-graph-runtime
+        PUBLIC pulp::inspect-runtime pulp::host)
+endif()
+
 # The canonical ordinary-Standalone host bridge is isolated from both the base
 # Standalone archive and every production-stripped plugin artifact. Only an
 # explicitly control-enabled executable links this archive and installs its
@@ -200,7 +212,7 @@ if(TARGET pulp::host)
     target_compile_definitions(pulp-inspect-standalone-runtime PRIVATE
         PULP_HAS_SAMPLE_REGION_CONTROL=1)
     target_link_libraries(pulp-inspect-standalone-runtime
-        PUBLIC pulp::inspect-sample-region-runtime)
+        PUBLIC pulp::inspect-sample-region-runtime pulp-inspect-graph-runtime)
 endif()
 
 # Exact-target UI capture/input remains an optional adapter so the common

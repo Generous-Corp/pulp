@@ -92,6 +92,9 @@ public:
     /// @note Safe to call from the audio thread.
     float get_modulated(ParamID id) const;
 
+    /// Read the canonical base-vs-offset pair without collapsing its fields.
+    BaseOffsetValue get_base_offset(ParamID id) const;
+
     /// Write a parameter's base value (lock-free).
     /// @note Safe to call from any thread.
     void set_value(ParamID id, float value);
