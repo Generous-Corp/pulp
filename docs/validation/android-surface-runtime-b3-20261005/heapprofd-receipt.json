@@ -2,7 +2,6 @@
   "schema": "pulp.android.surface-runtime.b3.heapprofd-receipt.v1",
   "status": "ATTRIBUTION_INCONCLUSIVE",
   "issue": "https://github.com/Generous-Corp/pulp/issues/9550",
-  "source_commit": "c3593404628bde30ddeac7959b23365a73c13d3c",
   "apk_sha256": "f3b0f28ee8397dd808c80a7b4e87c2d15b3be2aeeca1c9ce0cf0b6775117a1bd",
   "trace_sha256": "b4d7947dac53b4c7d9274a325050f7a88021fb8a04504f1f2ec0684d4857fa59",
   "trace_bytes": 1544269,
@@ -38,5 +37,7 @@
     "adb shell perfetto --txt -c - -o /data/misc/perfetto-traces/pulp-b3-5cycle.trace",
     "adb shell dumpsys meminfo com.pulp.app",
     "adb shell dumpsys meminfo --unreachable com.pulp.app"
-  ]
+  ],
+  "investigation_branch_commit": "c3593404628bde30ddeac7959b23365a73c13d3c",
+  "apk_source_provenance": "Existing previously built candidate APK; exact build source commit is not established. Its timestamp predates the final lifecycle-lock change; do not treat this as current branch-tip or main validation."
 }
