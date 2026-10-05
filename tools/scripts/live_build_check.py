@@ -79,7 +79,33 @@ def parse_marker(text: str) -> dict[str, str]:
     return fields
 
 
+def _windows_pid_alive(pid: int) -> bool:
+    """Process existence on Windows without os.kill.
+
+    On Windows os.kill(pid, 0) is os.kill(pid, signal.CTRL_C_EVENT): it calls
+    GenerateConsoleCtrlEvent, which delivers Ctrl+C to every process sharing the
+    console instead of probing pid, and kills the ctest run that started it.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: it exists
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == 259  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def pid_is_alive(pid: int) -> bool:
+    if os.name == "nt":
+        return _windows_pid_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
