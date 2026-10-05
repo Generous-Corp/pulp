@@ -54,7 +54,8 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
     });
 
     // setModulatedValue(id, value | null) -> the value a modulator is PLAYING
-    // on a Knob or Fader (normalized 0..1), drawn over the base value.
+    // on a Knob or Fader (normalized 0..1): its one indicator moves there and
+    // the base becomes a tick.
     // Display only: no on_change, no parameter write, a bounded repaint of
     // the control's own box (Knob::set_modulated_value). A non-number clears
     // it, so a script ends a modulation with setModulatedValue(id, null).

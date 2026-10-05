@@ -111,6 +111,9 @@ on:
       - 'tools/scripts/test_node_build_deps_step.py'
       - 'tools/scripts/test_build_fetch_resilience.py'
       - 'tools/ci/net-retry.sh'
+      - 'tools/install-shipyard.sh'
+      - 'tools/scripts/install_shipyard_token_check.py'
+      - 'tools/scripts/test_install_shipyard_token_check.py'
       - 'tools/scripts/test_android_premerge_probe.py'
       - 'tools/scripts/shell_portability_check.py'
       - 'tools/scripts/test_shell_portability_check.py'
@@ -223,6 +226,9 @@ on:
       - 'tools/scripts/test_node_build_deps_step.py'
       - 'tools/scripts/test_build_fetch_resilience.py'
       - 'tools/ci/net-retry.sh'
+      - 'tools/install-shipyard.sh'
+      - 'tools/scripts/install_shipyard_token_check.py'
+      - 'tools/scripts/test_install_shipyard_token_check.py'
       - 'tools/scripts/shell_portability_check.py'
       - 'tools/scripts/test_shell_portability_check.py'
       - 'tools/scripts/shell_portability_rules.json'
@@ -313,6 +319,17 @@ jobs:
           python3 tools/scripts/scheduled_workflow_fork_guard_check.py
           python3 tools/scripts/test_schedule_backstop_check.py
           python3 tools/scripts/schedule_backstop_check.py
+
+      - name: Shipyard installer token wiring
+        # Every step that runs tools/install-shipyard.sh must pass GITHUB_TOKEN
+        # (or SHIPYARD_GITHUB_TOKEN): the upstream installer's release lookup is
+        # anonymous otherwise, and shared runner IPs hit the API rate limit.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyyaml>=6'
+          python3 tools/scripts/test_install_shipyard_token_check.py
+          python3 tools/scripts/install_shipyard_token_check.py
 
       - name: Linux dependency and Codecov upload contracts
         shell: bash

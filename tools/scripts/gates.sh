@@ -46,7 +46,9 @@
 #     that both the required gate and the coverage lane drop)
 #   - script-test inputs (test/ctest_script_inputs.json matches the ctest
 #     inventory for scripts the diff touches; configures build-gate, no
-#     compile, when no current build exists — PULP_GATES_NO_CONFIGURE=1 opts out)
+#     compile, when no current build exists — PULP_GATES_NO_CONFIGURE=1 opts out;
+#     the changed-surface families check fails rather than NOT CHECKED when it
+#     cannot run on a change to a script, skill doc or generated file)
 #
 # Does NOT run:
 #   - local diff-coverage (slow — builds the cov target, hits ring crate
@@ -497,7 +499,9 @@ fi
 # (configure only, no compile) and runs the diff-scoped check; a diff that
 # cannot drift it costs nothing. It runs before the pr-fast lane below so that
 # lane finds the configured build too. PULP_GATES_NO_CONFIGURE=1 keeps it
-# NOT CHECKED instead of configuring.
+# NOT CHECKED instead of configuring. The families check runs a build-free
+# prediction first and, when its configured half cannot run on a change to a
+# surface it blocks, FAILS instead of NOT CHECKED (the required gate checks it).
 if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
     echo "" >&2
     echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2

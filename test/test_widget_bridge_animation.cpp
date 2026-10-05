@@ -3,25 +3,28 @@
 // (Element.animate(...) / KeyframeEffect), motion provenance, and the
 // pulp-motion-bench harness output.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <pulp/canvas/canvas.hpp>
-#include <pulp/canvas/view_effect.hpp>
-#include <pulp/view/asset_manager.hpp>
-#include <pulp/view/canvas_widget.hpp>
-#include <pulp/view/modal.hpp>
-#include <pulp/view/text_editor.hpp>
-#include <pulp/view/widget_bridge.hpp>
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/theme.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/window_host.hpp>
-#include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/pointer_dispatch.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <numbers>
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/view_effect.hpp>
+#include <pulp/view/asset_manager.hpp>
+#include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/frame_cost_probe.hpp>
+#include <pulp/view/modal.hpp>
+#include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/svg_path_widget.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pulp/view/theme.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <thread>
 
 using namespace pulp::view;
@@ -1427,4 +1430,151 @@ TEST_CASE("WidgetBridge createTextEditor uses SDK TextEditor text navigation",
     REQUIRE(field->caret_pos() == 6);
     REQUIRE(field->on_key_event(word_left));
     REQUIRE(field->caret_pos() == 0);
+}
+
+// A native message whose handler only touches things that mark their own
+// damage (an SVG path's `d`) must not add the bridge's whole-surface
+// fallback request: the path already asked for its repaint. Anything the
+// handler changes WITHOUT marking (a background colour) keeps the
+// whole-surface request, which is what makes skipping it safe.
+TEST_CASE("Native message dispatch adds no whole-surface damage when the work marked its own",
+          "[view][bridge][partial-repaint]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createCol('box', '');
+        setPosition('box', 'absolute'); setLeft('box', 10); setTop('box', 10);
+        setFlex('box', 'width', 40); setFlex('box', 'height', 40);
+        createSvgPath('needle', 'box');
+        setFlex('needle', 'width', 40); setFlex('needle', 'height', 40);
+        setSvgStroke('needle', '#ffffff'); setSvgFill('needle', 'none');
+        setSvgPath('needle', 'M 5 5 L 10 10');
+        globalThis.__step = 0;
+        globalThis.moveNeedle = function(type, payload, id) {
+            __step++;
+            setSvgPath('needle', 'M 5 5 L ' + (10 + __step) + ' 20');
+        };
+        createLabel('readout', '1/4', 'box');
+        setFlex('readout', 'width', 40); setFlex('readout', 'height', 12);
+        globalThis.moveNeedleRestyleSame = function(type, payload, id) {
+            __step++;
+            setSvgPath('needle', 'M 5 5 L ' + (10 + __step) + ' 20');
+            setBackground('box', '#202020'); setBorderRadius('box', 4);
+            setTextColor('readout', '#cdb4ff');
+        };
+        globalThis.moveNeedleAndRecolour = function(type, payload, id) {
+            __step++;
+            setSvgPath('needle', 'M 5 5 L ' + (10 + __step) + ' 20');
+            setBackground('box', __step % 2 ? '#202020' : '#303030');
+        };
+    )",
+                       "dispatch-damage");
+    root.layout_children();
+    // Positive control on the rig: the needle has a size, so its path paints.
+    auto* needle = dynamic_cast<SvgPathWidget*>(bridge.widget("needle"));
+    REQUIRE(needle != nullptr);
+    REQUIRE(needle->paint_extent().width > 0.0f);
+
+    FrameCostProbe probe(root, {400, 300});
+    const auto payload = choc::value::createObject("Tick");
+    const auto& own = probe.measure(
+        [&] { bridge.dispatch_native_message("moveNeedle", "tick", payload, "t", "test"); });
+    CHECK(own.repaint_requests > 0);
+    CHECK_FALSE(own.full_damage);
+    REQUIRE(own.has_bounds);
+    CHECK(own.damage.width < 100.0f);
+    CHECK(own.damage.height < 100.0f);
+
+    // A handler that changes nothing (it only queues a frame callback) asks
+    // for a frame, not for damage: that frame marks what it draws.
+    bridge.load_script("globalThis.queueOnly = function(type, payload, id) {"
+                       " requestAnimationFrame(function() {}); };",
+                       "dispatch-queue");
+    const auto& quiet = probe.measure(
+        [&] { bridge.dispatch_native_message("queueOnly", "tick", payload, "t", "test"); });
+    CHECK_FALSE(quiet.full_damage);
+    CHECK(quiet.repaint_requests == 0);
+    CHECK(quiet.frame_requests >= 1);
+
+    // A handler that re-applies the style the widgets already carry (a
+    // script restyling a label on every step) changed no paint beyond what
+    // it marked. The first dispatch applies the style; the rest re-apply it.
+    bridge.dispatch_native_message("moveNeedleRestyleSame", "tick", payload, "t", "test");
+    const auto& same = probe.measure([&] {
+        bridge.dispatch_native_message("moveNeedleRestyleSame", "tick", payload, "t", "test");
+    });
+    CHECK(same.repaint_requests > 0);
+    CHECK_FALSE(same.full_damage);
+
+    // Negative control: an unmarked paint change in the same handler keeps
+    // the whole-surface request.
+    const auto& mixed = probe.measure([&] {
+        bridge.dispatch_native_message("moveNeedleAndRecolour", "tick", payload, "t", "test");
+    });
+    CHECK(mixed.full_damage);
+}
+
+TEST_CASE("bindWidgetToParam shows host modulation on a scripted knob with no other code",
+          "[view][bridge][parameter-binding][modulation]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    store.add_parameter({.id = 11, .name = "Drive", .unit = "", .range = {0.0f, 1.0f, 0.5f}});
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createKnob('drive', ''); bindWidgetToParam('drive', 'Drive');",
+                       "bind-once");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("drive"));
+    REQUIRE(knob != nullptr);
+    bridge.service_frame_callbacks();
+    REQUIRE_FALSE(knob->has_modulated_value()); // nothing modulates it
+
+    store.set_mod_offset(11, 0.25f); // a CLAP host's modulation
+    bridge.service_frame_callbacks();
+    REQUIRE(knob->has_modulated_value());
+    REQUIRE(knob->modulated_display_value() == Catch::Approx(0.75f));
+    REQUIRE(knob->value() == Catch::Approx(0.5f)); // the base is untouched
+
+    store.set_mod_offset(11, 0.0f);
+    bridge.service_frame_callbacks();
+    REQUIRE_FALSE(knob->has_modulated_value());
+}
+
+TEST_CASE("onParamChanged hands a scripted UI the value playing in one field",
+          "[view][bridge][parameter-binding][modulation][bind-all]") {
+    // A UI that draws its own control (an SVG knob in React) subscribes once
+    // and draws its one indicator from `playing`: a host's modulation by
+    // default, the plugin's own published modulation when it opts in, null
+    // when nothing modulates the parameter.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    store.add_parameter({.id = 12, .name = "Mix", .unit = "", .range = {0.0f, 1.0f, 0.5f}});
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("globalThis.__seen = [];"
+                       "onParamChanged('Mix', function(p) {"
+                       "  __seen.push(p.playing === null ? 'none' : p.playing.toFixed(2)); });",
+                       "playing-field");
+    const auto seen = [&] {
+        return engine.evaluate("__seen.join(',')").getWithDefault<std::string>("");
+    };
+    bridge.service_frame_callbacks();
+    CHECK(seen().empty()); // negative: nothing modulates, nothing is reported
+
+    store.set_mod_offset(12, 0.25f); // a CLAP host
+    bridge.service_frame_callbacks();
+    CHECK(seen() == "0.75");
+
+    store.set_display_modulation(12, 0.1f); // the plugin's own LFO wins
+    bridge.service_frame_callbacks();
+    CHECK(seen() == "0.75,0.10");
+
+    store.clear_display_modulation(12);
+    store.set_mod_offset(12, 0.0f);
+    bridge.service_frame_callbacks();
+    CHECK(seen() == "0.75,0.10,none");
 }

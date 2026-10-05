@@ -19,6 +19,8 @@
 #include <stdexcept>
 #include <algorithm>
 
+#include "support/fixture_root.hpp"
+
 using namespace pulp::view;
 namespace fs = std::filesystem;
 
@@ -31,22 +33,8 @@ static std::string read_file(const fs::path& path) {
 }
 
 static std::string find_js_file(const std::string& name) {
-    // First try the source tree relative to this test file so ctest can run
-    // from a build directory without skipping the whole suite.
-    auto source_root = fs::path(__FILE__).parent_path().parent_path();
-    auto source_candidate = source_root / "examples" / "design-tool" / name;
-    if (fs::exists(source_candidate)) return source_candidate.string();
-
-    // Fallback: search upward from the current working directory.
-    auto dir = fs::current_path();
-    while (!dir.empty()) {
-        auto candidate = dir / "examples" / "design-tool" / name;
-        if (fs::exists(candidate)) return candidate.string();
-        auto parent = dir.parent_path();
-        if (parent == dir) break;
-        dir = parent;
-    }
-    return {};
+    auto candidate = pulp_test::fixture_root() / "examples" / "design-tool" / name;
+    return fs::exists(candidate) ? candidate.string() : std::string{};
 }
 
 // Ordered design-tool concern modules. The UI was split out of a single

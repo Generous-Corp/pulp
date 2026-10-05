@@ -56,7 +56,8 @@ class FrameCostProbe {
         bool full_damage = false;        ///< some request repainted the whole surface
         bool has_bounds = false;         ///< bounded damage was requested
         Rect damage{};                   ///< union of the bounded requests
-        int repaint_requests = 0;        ///< repaint() calls the frame caused
+        int repaint_requests = 0;        ///< damage-marking requests the frame caused
+        int frame_requests = 0;          ///< frames requested without damage
         std::uint64_t layout_passes = 0; ///< layout_children() calls the frame ran
     };
 
@@ -117,6 +118,7 @@ class FrameCostProbe {
         f.has_bounds = recorder_.have;
         f.damage = recorder_.uni;
         f.repaint_requests = recorder_.full + recorder_.bounded;
+        f.frame_requests = recorder_.frames_only;
         f.layout_passes = View::layout_pass_count() - layouts;
         frames_.push_back(f);
         return frames_.back();
@@ -199,7 +201,12 @@ class FrameCostProbe {
     class Recorder final : public PluginViewHost {
       public:
         explicit Recorder(Size size) : size_(size) {}
-        int full = 0, bounded = 0;
+        int full = 0, bounded = 0, frames_only = 0;
+        // A frame asked for without damage (View::request_frame()) is not a
+        // repaint request: whatever that frame changes marks its own.
+        void request_frame() override {
+            ++frames_only;
+        }
         bool have = false;
         Rect uni{};
         NativeViewHandle native_handle() override {
@@ -231,7 +238,7 @@ class FrameCostProbe {
             reset();
         }
         void reset() {
-            full = bounded = 0;
+            full = bounded = frames_only = 0;
             have = false;
             uni = {};
         }

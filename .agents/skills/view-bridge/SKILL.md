@@ -350,6 +350,24 @@ yet" cannot pass as a dark background. What only this path shows:
 - Requesting a second view controller from the same remote instance did not
   paint in a probe; instantiate a fresh unit per measured open.
 
+### A processor-owned session must not outlive the root it borrows
+
+A `ScriptedUiSession` a processor builds in `create_view()` borrows the root
+`View` that `ViewBridge` owns, and the processor normally drops it in
+`on_view_closed()`. That hook fires only for an attached view, so a view the
+host never attached (a failed attach, a harness that opens without
+`notify_attached()`) used to be destroyed while the session lived on, and the
+session's teardown later wrote into the freed root (ASan:
+heap-use-after-free in `WidgetBridge::quarantine_realm()`).
+`ViewBridge::close()` now calls `ScriptedUiSession::release_root()` on the
+processor's active session when it borrows the closing root (and the root was
+not handed off with `release_view()`, and the processor is still alive):
+the realm is quarantined and torn down while the root exists, and the session
+is left inert -- `bridge()` is null and `load()` refuses. A processor that
+recreates its editor gets a fresh session from its next `create_view()`.
+Gate: `[lifetime]` in `test/test_view_bridge.cpp`; under ASan its failure
+without the fix is the use-after-free itself.
+
 ## Lifecycle protocol — adapter author side
 
 ```
@@ -2884,6 +2902,46 @@ promise-driven modulation read, build info, the rAF hydrate, a passive effect,
 a tracing badge) became zero; ~250 ms of a warm open, and a non-default
 session (48 bands, a boosted band) mounts showing it.
 
+### 7b. Bind once: automation and playback for free, modulation display by default for host modulation
+
+A control bound to a parameter needs no other code for the host's part of
+its life. `bind_parameter(widget, store, id)` (C++), `bindWidgetToParam(id,
+name)` (a scripted editor) and AutoUi (which now binds through
+`bind_parameter`) all give:
+
+- **Gestures and recording** -- a drag is one host gesture; a toggle, button,
+  combo or stepper change is one complete gesture -- so Write/Latch/Touch
+  record it.
+- **Playback animation** -- the store's changes (automation, preset load)
+  move the control on the editor's UI tick (`StateStore::pump_listeners()`).
+- **Every control** -- Knob, Fader, RangeSlider, XYPad (two parameters, one
+  drag), Toggle, Checkbox, ToggleButton, ComboBox and DesignStepper. Playback
+  moves the control silently: it opens no gesture and writes nothing back
+  (`[bind-all]` in `test/test_parameter_edit.cpp` holds every control to
+  this, one table row each).
+- **Host modulation, shown by default** -- a CLAP host's parameter modulation
+  (the adapter's mod offset) moves a bound continuous control's one indicator
+  (Knob, Fader, RangeSlider, each XYPad axis) to the value playing; nothing
+  changes when nothing modulates the parameter. It arrives through the host,
+  so no plugin code is involved. A discrete control shows its base: a stepped
+  parameter has no position between states for a modulator to show.
+- **Scripted UIs that draw their own controls** (an SVG knob in React) get
+  the same in one subscription: `onParamChanged(name, p => ...)` delivers
+  `p.normalized` (the base) and `p.playing` (the value playing, normalized,
+  `null` when nothing modulates), and fires when either moves. Draw the one
+  indicator at `p.playing ?? p.normalized` and the base tick at
+  `p.normalized`.
+
+What is opt-in is the plugin's OWN modulation: a plugin that runs internal
+LFOs publishes what they play with `StateStore::set_display_modulation(id,
+plain)` (real-time safe, display only, never a host write; a published value
+wins over the host offset; `clear_display_modulation` ends it). Every bound
+control and every `onParamChanged` subscriber then shows it with no further
+editor code, so a plugin's own modulation publication is one call per
+modulated parameter per block, not a custom message and painter. Modulation
+menus, routing and override prompts are the plugin's own UI -- Pulp imposes
+none. A plugin that never publishes shows no internal-modulation UI.
+
 ### 8. Modulated controls: draw the played value, never write it
 
 A control a modulator moves (an internal LFO on a knob, a fader, a slider) must
@@ -2891,19 +2949,31 @@ visibly move, and must not become an automation source. One contract, the one
 `Knob::set_modulated_value` / `Fader::set_modulated_value` (bridge:
 `setModulatedValue(id, v | null)`) implement:
 
-- **The base stays the user's and stays editable.** The base pointer/thumb, the
-  value text and every gesture (`on_change`, begin/end) report the base, so a
-  drag starts from it and host automation records only the user's moves.
-- **The played value is drawn on top** (token `knob.modulation`): an arc or
-  segment from the base to the played value plus a marker at the played value.
-  Base marker + moving modulated marker is the whole visual language.
+- **The base stays the user's and stays editable.** `value()` and every
+  gesture (`on_change`, begin/end) report the base, so a drag starts from it
+  and host automation records only the user's moves.
+- **ONE indicator, at the value playing.** Two selections on one control (a
+  base needle and arc plus a second arc and needle for the played value) read
+  as two controls. While modulated, the control's single pointer and value arc
+  (a fader's single thumb and fill) sit at the value PLAYING, in the
+  modulation colour (token `knob.modulation`); the base is a quiet tick on the
+  ring or track. The value text prints the played value, and the base while
+  the user drags it (the drag moves the tick). Optionally a faint band on the
+  ring shows base ± depth. Gate it: count the value arcs and pointers a
+  modulated control paints and require one of each, with a negative control
+  that draws two and must fail (`[single-indicator]` in
+  `test/test_widget_bounded_repaint.cpp`).
 - **Modulation never writes a host lane.** It offsets around the base, and the
   base is whatever the host's automation is playing, so the control shows both
   at once. Send the modulator's *coordinate* to the editor, not a value, and
   apply it to the base the control shows, or an automated base and the LFO's
   swing drift apart.
-- **Cost: one bounded repaint per frame, no layout, no commit.** The marker
-  repaints the control's own box. In a scripted UI update an SVG path's `d`
+- **Cost: one bounded repaint per frame, no layout, no commit.** The
+  indicator repaints the control's own box. A paint setter that re-applies the
+  value a view already has (background, border, radius, a bridge
+  `setTextColor` of the same colour) is free; a real change of one is an
+  unmarked paint change and costs a whole-surface repaint, so restyle only on
+  a state change, never per frame. In a scripted UI update an SVG path's `d`
   directly (`setSvgPath`) or a canvas, never React state; `SvgPathWidget::set_path`
   repaints the union of the old and new path extents and skips an unchanged
   string, and a redrawn `CanvasWidget` repaints its own box. A label whose text

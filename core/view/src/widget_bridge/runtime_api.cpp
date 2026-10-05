@@ -85,8 +85,10 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             // Signal the host so the next paint runs and service_frame_callbacks()
             // drains the queue. Without this,
             // requestAnimationFrame queues a callback but never asks the
-            // host for a frame, so the canvas never repaints.
-            self.request_repaint();
+            // host for a frame, so the canvas never repaints. Queuing a
+            // callback changes nothing on screen, so it asks for a frame, not
+            // for damage: whatever the callback draws marks its own.
+            self.request_frame();
         }
         return choc::value::createInt32(id);
     });

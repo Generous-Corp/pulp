@@ -19,7 +19,10 @@
 //
 // Tag: [view][partial-render][issue-6262]
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <utility>
 
 #include <pulp/view/repaint_damage.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -232,7 +235,7 @@ TEST_CASE("producer maps a bounded child repaint to root space",
     REQUIRE(r.bounds.height == 60);
 }
 
-TEST_CASE("producer escalates a repaint under a scrolled container to full",
+TEST_CASE("producer maps a repaint under a scrolled container through the scroll",
           "[view][partial-render][issue-6262]") {
     auto root = std::make_unique<View>();
     root->set_bounds({0, 0, 400, 300});
@@ -248,10 +251,13 @@ TEST_CASE("producer escalates a repaint under a scrolled container to full",
     root->add_child(std::move(scroller));
 
     const auto r = request_through_producer(*root, *iptr, Rect{0, 0, 40, 40});
-    REQUIRE(r.full);
+    REQUIRE_FALSE(r.full);
+    REQUIRE(r.bounds.x == 10);
+    REQUIRE(r.bounds.y == -30); // item (10, 10) scrolled up by 40
+    REQUIRE(r.bounds.width == 40);
 }
 
-TEST_CASE("producer escalates a repaint under a transformed ancestor to full",
+TEST_CASE("producer maps a repaint under a rotated ancestor to the rotated box",
           "[view][partial-render][issue-6262]") {
     auto root = std::make_unique<View>();
     root->set_bounds({0, 0, 400, 300});
@@ -266,7 +272,27 @@ TEST_CASE("producer escalates a repaint under a transformed ancestor to full",
     root->add_child(std::move(spun));
 
     const auto r = request_through_producer(*root, *iptr, Rect{0, 0, 30, 30});
-    REQUIRE(r.full);
+    REQUIRE_FALSE(r.full);
+    // The four corners of item (10, 10, 30, 30) rotated 15 degrees about the
+    // centre of `spun` (50, 50 in its box), then placed at (50, 50).
+    const float rad = 15.0f * 3.14159265f / 180.0f;
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    for (const auto [cx, cy] : {std::pair{10.0f, 10.0f}, std::pair{40.0f, 10.0f},
+                                std::pair{10.0f, 40.0f}, std::pair{40.0f, 40.0f}}) {
+        const float px = cx - 50.0f, py = cy - 50.0f;
+        const float x = 50.0f + 50.0f + std::cos(rad) * px - std::sin(rad) * py;
+        const float y = 50.0f + 50.0f + std::sin(rad) * px + std::cos(rad) * py;
+        x0 = std::min(x0, x);
+        y0 = std::min(y0, y);
+        x1 = std::max(x1, x);
+        y1 = std::max(y1, y);
+    }
+    // Covers the rotated box (the producer pads a pixel; the snap may add one).
+    REQUIRE(r.bounds.x <= x0);
+    REQUIRE(r.bounds.y <= y0);
+    REQUIRE(r.bounds.x + r.bounds.width >= x1);
+    REQUIRE(r.bounds.y + r.bounds.height >= y1);
+    REQUIRE(r.bounds.width <= (x1 - x0) + 4.0f);
 }
 
 // ── Screenshot-equivalence harness (Skia raster) ─────────────────────────

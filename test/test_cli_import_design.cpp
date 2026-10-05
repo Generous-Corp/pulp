@@ -34,6 +34,8 @@
 #include <string>
 #include <vector>
 
+#include "support/fixture_root.hpp"
+
 using namespace pulp::view;
 using namespace pulp::platform;
 namespace fs = std::filesystem;
@@ -45,13 +47,13 @@ namespace {
 const pulp_test_cli::IsolatedPulpHome isolated_home;
 
 fs::path repo_root() {
-    // Resolve from <repo>/test → <repo>. The fixture path can also be
-    // overridden via PULP_REPO_ROOT for adversarial CI layouts (mirrors
-    // the convention pulp-test-cli-skew-banner uses).
+    // The PULP_REPO_ROOT environment variable overrides the checkout root for
+    // adversarial CI layouts (the convention pulp-test-cli-skew-banner uses);
+    // otherwise it is the PULP_REPO_ROOT definition the target compiles with.
     if (const char* env = std::getenv("PULP_REPO_ROOT"); env && *env) {
-        return fs::path(env);
+        return pulp_test::checked_checkout_root(env, "PULP_REPO_ROOT (environment)");
     }
-    return fs::path(__FILE__).parent_path().parent_path();
+    return pulp_test::checked_checkout_root(PULP_REPO_ROOT, "PULP_REPO_ROOT");
 }
 
 fs::path fixture_dir() {

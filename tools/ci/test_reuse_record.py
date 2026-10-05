@@ -668,22 +668,24 @@ class CliTests(unittest.TestCase):
         self.assertEqual(doc["headers"], ["<src>/a.cpp"])
         self.assertNotIn("object deps", proc.stdout)
 
-    def test_a_shared_library_link_is_counted_and_warns(self) -> None:
+    def test_a_shared_library_and_its_loader_leave_the_map_usable(self) -> None:
+        # A build-produced shared library no longer fails the record: its
+        # loader is counted for scoping out (always_run shared_link).
         with tempfile.TemporaryDirectory() as tmp:
             build = Path(tmp) / "build"
             (build / "link-members").mkdir(parents=True)
             (build / "link-members" / "t.objects").write_text(
-                f"# Cwd: {build}\n# Path: {build}/t\n# Object files:\n[  1] m.o\n# Sections:\n")
+                f"# Cwd: {build}\n# Path: {build}/t\n# Object files:\n[  1] m.o\n[  2] {build}/libs.dylib\n"
+                "# Sections:\n")
             (build / "link-members" / "s.objects").write_text(
                 f"# Cwd: {build}\n# Path: {build}/libs.dylib\n# Object files:\n[  1] s.o\n# Sections:\n")
             (build / "link-members" / "s.args").write_text("c++\n-dynamiclib\n")
             proc = self.run_write(tmp, "--build-dir", str(build), "--link-members", "--identity-scope", "ran")
             job = json.loads((Path(tmp) / "out" / "job.json").read_text())
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual((job["link_members"]["executables"], job["link_members"]["shared"]), (1, 1))
-        self.assertIs(job["link_members"]["usable"], False)
-        self.assertIn("::warning title=reuse-record incomplete::link members not usable for reuse: "
-                      "links of kind shared are not modelled", proc.stdout)
+        lm = job["link_members"]
+        self.assertEqual((lm["executables"], lm["shared"], lm["shared_loaders"], lm["usable"]), (1, 1, 1, True))
+        self.assertNotIn("link members not usable", proc.stdout)
 
     def test_requested_link_members_that_the_build_did_not_record_warn(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

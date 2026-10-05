@@ -45,6 +45,7 @@ paths = [
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
+  "tools/scripts/install_shipyard_token_check.py",
   "tools/scripts/iwyu_annotate.py",
   "tools/scripts/jsfx_subset.py",
   "tools/scripts/landing_watchdog.py",
@@ -154,6 +155,7 @@ paths = [
   "tools/scripts/test_host_pump_lint.py",
   "tools/scripts/test_host_quirks_staleness.py",
   "tools/scripts/test_hotspot_size_guard.py",
+  "tools/scripts/test_install_shipyard_token_check.py",
   "tools/scripts/test_ios_gate_skip_contract.py",
   "tools/scripts/test_iwyu_annotate.py",
   "tools/scripts/test_iwyu_annotate_extra.py",
@@ -1342,6 +1344,33 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "skip-not-pass-lint-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-aa13e05462bf"
+paths = ["tools/scripts/test_check_test_file_paths.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "test-file-paths-lint-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4798,6 +4827,7 @@ paths = [
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
+  "tools/scripts/install_shipyard_token_check.py",
   "tools/scripts/iwyu_annotate.py",
   "tools/scripts/jsfx_subset.py",
   "tools/scripts/landing_watchdog.py",
@@ -4878,6 +4908,7 @@ paths = [
   "tools/scripts/test_check_manifest_mirrors.py",
   "tools/scripts/test_check_sdk_complete.py",
   "tools/scripts/test_check_skip_not_pass.py",
+  "tools/scripts/test_check_test_file_paths.py",
   "tools/scripts/test_check_transient_interaction_trace.py",
   "tools/scripts/test_check_visual_python_deps.py",
   "tools/scripts/test_check_web_plugin_docs.py",
@@ -4987,6 +5018,7 @@ paths = [
   "tools/scripts/test_inspector_truth_check.py",
   "tools/scripts/test_install_sha256sums.py",
   "tools/scripts/test_install_shipyard_queue_repair.py",
+  "tools/scripts/test_install_shipyard_token_check.py",
   "tools/scripts/test_ios_gate_skip_contract.py",
   "tools/scripts/test_iwyu_annotate.py",
   "tools/scripts/test_iwyu_annotate_extra.py",
@@ -5210,6 +5242,8 @@ tests = [
   "status-tone-signal-lint",
   "status-tone-signal-lint-selftest",
   "style-dedup-table-sync",
+  "test-file-paths-lint",
+  "test-file-paths-lint-selftest",
   "timeline-mcp-drift",
   "timeline-schema-cli-drift",
   "timeline-schema-drift",
@@ -5285,6 +5319,7 @@ paths = [
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
+  "tools/scripts/install_shipyard_token_check.py",
   "tools/scripts/iwyu_annotate.py",
   "tools/scripts/jsfx_subset.py",
   "tools/scripts/landing_watchdog.py",
@@ -5365,6 +5400,7 @@ paths = [
   "tools/scripts/test_check_manifest_mirrors.py",
   "tools/scripts/test_check_sdk_complete.py",
   "tools/scripts/test_check_skip_not_pass.py",
+  "tools/scripts/test_check_test_file_paths.py",
   "tools/scripts/test_check_transient_interaction_trace.py",
   "tools/scripts/test_check_visual_python_deps.py",
   "tools/scripts/test_check_web_plugin_docs.py",
@@ -5474,6 +5510,7 @@ paths = [
   "tools/scripts/test_inspector_truth_check.py",
   "tools/scripts/test_install_sha256sums.py",
   "tools/scripts/test_install_shipyard_queue_repair.py",
+  "tools/scripts/test_install_shipyard_token_check.py",
   "tools/scripts/test_ios_gate_skip_contract.py",
   "tools/scripts/test_iwyu_annotate.py",
   "tools/scripts/test_iwyu_annotate_extra.py",

@@ -16,6 +16,10 @@ offline and deterministic: it checks the wrapper's own behavior (repair the
 queue, then delegate to the pinned tag's install.sh). Set
 INSTALL_SHIPYARD_LIVE=1 to delegate to the real upstream install.sh instead.
 
+It also covers the CI token preflight: under GitHub Actions the wrapper
+refuses to run without GITHUB_TOKEN or SHIPYARD_GITHUB_TOKEN, while a CI run
+with a token and a local run without one both proceed.
+
 Run:
     python3 tools/scripts/test_install_shipyard_queue_repair.py
 """
@@ -84,6 +88,10 @@ def _install_fixture(home: Path) -> tuple[Path, dict[str, str]]:
     env["SHIPYARD_SKIP_SMOKE"] = "1"
     # Unset XDG_STATE_HOME so Linux path falls back to ~/.local/state.
     env.pop("XDG_STATE_HOME", None)
+    # Each test states its own CI/token context; inheriting the runner's would
+    # make the outcome depend on where the suite happens to run.
+    for name in ("GITHUB_ACTIONS", "GITHUB_TOKEN", "SHIPYARD_GITHUB_TOKEN"):
+        env.pop(name, None)
     return bin_dir, env
 
 
@@ -164,6 +172,50 @@ class InstallShipyardQueueRepair(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertEqual(queue_file.read_text(), original,
                              msg="installer clobbered a healthy queue.json")
+
+
+class InstallShipyardCiTokenPreflight(unittest.TestCase):
+    """Under GitHub Actions the wrapper requires a token for the API lookup."""
+
+    def _run(self, extra: dict[str, str]) -> tuple[subprocess.CompletedProcess[str], Path]:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name)
+        _bin_dir, env = _install_fixture(home)
+        env.update(extra)
+        result = subprocess.run(
+            ["bash", str(INSTALL_SH)],
+            env=env, capture_output=True, text=True, check=False,
+        )
+        return result, home
+
+    def test_ci_without_token_refuses_before_any_download(self) -> None:
+        result, home = self._run({"GITHUB_ACTIONS": "true"})
+        self.assertEqual(result.returncode, 1, msg=result.stdout + result.stderr)
+        self.assertIn("running under GitHub Actions without a token", result.stderr)
+        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", result.stderr)
+        self.assertNotIn("stub upstream installer", result.stdout)
+        if os.environ.get("INSTALL_SHIPYARD_LIVE") != "1":
+            self.assertFalse((home / "stub-bin" / "curl-args").exists(),
+                             msg="refusal must happen before the installer is fetched")
+
+    def test_ci_with_empty_token_refuses(self) -> None:
+        result, _home = self._run({"GITHUB_ACTIONS": "true", "GITHUB_TOKEN": ""})
+        self.assertEqual(result.returncode, 1)
+
+    def test_ci_with_either_token_proceeds(self) -> None:
+        for var in ("GITHUB_TOKEN", "SHIPYARD_GITHUB_TOKEN"):
+            with self.subTest(var=var):
+                result, _home = self._run({"GITHUB_ACTIONS": "true", var: "test-token"})
+                self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+                if os.environ.get("INSTALL_SHIPYARD_LIVE") != "1":
+                    self.assertIn("stub upstream installer: reused", result.stdout)
+
+    def test_local_without_token_proceeds(self) -> None:
+        result, _home = self._run({})
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        if os.environ.get("INSTALL_SHIPYARD_LIVE") != "1":
+            self.assertIn("stub upstream installer: reused", result.stdout)
 
 
 if __name__ == "__main__":

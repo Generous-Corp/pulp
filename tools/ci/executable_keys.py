@@ -35,6 +35,9 @@ What a key cannot see is made an always_run reason, never a guess:
     commit_bound       the executable embeds the commit
     key_blind          its bytes have changed while its key did not (the
                        replay's key-blind list)
+    shared_link        its link names a shared library the build produced,
+                       whose content reaches it without changing its inputs
+                       (link_members.shared_scope); not modelled, so it runs
     environment        a registration drives a shared host resource, or is
                        one of the always-run names (drift, lint, probes, ...)
     unrecorded         the base link, an object's dependency list, or a
@@ -475,9 +478,11 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
     base_targets = (base_cm or {}).get("targets") or {}
     keyed = content_keyed(base_cm) and content_keyed(head_codemodel)
     sets = None
+    shared_loaders: frozenset[str] = frozenset()
     if record and link_members.unusable(record.get("links")) is None \
             and object_deps.unusable(record.get("deps")) is None:
         sets = InputSets(record["links"], record["deps"])
+        shared_loaders = link_members.shared_scope(record["links"])
     script_list = show(source_root, head_sha, SCRIPT_INPUTS_PATH)
     script_doc = json.loads(script_list) if script_list else None
     data_scan, spawn_scan = spawn_scan_of(script_doc, "data"), spawn_scan_of(script_doc)
@@ -513,6 +518,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             or any(not (base_targets.get(n) or {}).get("digest") for n in linked or ()) else
             "commit_bound" if target.get("commit_bound") or base_target.get("commit_bound") else
             "key_blind" if artifact in key_blind else
+            "shared_link" if BUILD + artifact in shared_loaders else
             "environment" if any(environment_bound(t) or ALWAYS_RUN_NAME_RE.search(t["name"] or "")
                                  for t in tests) else
             "unrecorded" if paths is None else

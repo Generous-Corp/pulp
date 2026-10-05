@@ -87,6 +87,17 @@ def serialized_coefficient(rpp):
     return None
 
 
+def serialized_coefficient_guard(rpp, expected=0.5, tolerance=1e-4):
+    """Return (ok, value, reason) for the pre-render serialized-state gate."""
+    value = serialized_coefficient(rpp)
+    if value is None:
+        return False, None, "serialized coefficient is missing from the saved project"
+    if abs(value - expected) > tolerance:
+        return False, value, (f"serialized coefficient is {value:.6f}, expected "
+                              f"{expected:.6f}")
+    return True, value, "serialized coefficient matches expected value"
+
+
 def _fourcc(value):
     """Decode REAPER's unsigned AU type/subtype/manufacturer fields."""
     try:
@@ -329,6 +340,20 @@ def run(fmt,bundle,out,timeout):
     # host render without synthetic audio or UI automation.
     envelope_strip=None; envelope_residual=None
     if project.exists() and not wav.exists():
+        # Refuse before invoking -renderproject when the authoring save did
+        # not serialize the intended coefficient.  Rendering a known-stale
+        # project would turn a host race into seemingly valid audio evidence.
+        guard_ok, guard_value, guard_reason = serialized_coefficient_guard(project)
+        if not guard_ok:
+            failure = {
+                'format': fmt, 'status': 'failed',
+                'reason': 'pre-render serialized-state guard failed: ' + guard_reason,
+                'serialized_coefficient': guard_value,
+                'pre_render_guard': False, 'render_skipped': True,
+                'driver_returncode': p.returncode,
+            }
+            receipt.write_text('[sample-region-f4] ' + json.dumps(failure) + '\n')
+            return failure
         # Render from a disposable copy. REAPER may rewrite the saved project
         # while the first headless instance is shutting down; editing that file
         # in place races the project writer and silently restores its default
@@ -436,6 +461,9 @@ def main(argv=None):
         code, reason = receipt_verdict(rec)
         rec['status']='passed' if code == 0 else ('failed' if code == 1 else 'inconclusive')
         rec['verdict_reason']=reason
+        if rec.get('pre_render_guard') is False:
+            rec['status'] = 'failed'
+            rec['verdict_reason'] = rec.get('reason', 'pre-render serialized-state guard failed')
         # A receipt must name the module it actually loaded. REAPER resolves a
         # saved project's FX by identity (AU: type/subtype/manufacturer; VST3:
         # filename + UID), not by the path the driver added, so a name-fallback
