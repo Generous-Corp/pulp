@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.907.0
+    VERSION 0.907.2
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -761,6 +761,11 @@ endif()
 # ── Screenshot Tool ────────────────────────────────────────────────────────
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/screenshot)
+endif()
+
+# ── Editor-open probe (out-of-process AU editor stages) ───────────────────
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/editor-open)
 endif()
 
 # ── Appearance Audit Tool ─────────────────────────────────────────────────

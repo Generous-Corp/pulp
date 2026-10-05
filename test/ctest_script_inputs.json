@@ -2199,6 +2199,7 @@
   "pulp-test-cli-shellout-pr",
   "pulp-test-cli-shellout-scan-projects",
   "pulp-test-cli-ship-shellout",
+  "pulp-test-cli-shipyard-pin",
   "pulp-test-cli-skew-banner",
   "pulp-test-cli-swap-pack",
   "pulp-test-cli-tartci-lease",
@@ -2271,6 +2272,7 @@
   "pulp-test-dsl-processor",
   "pulp-test-dsp-runtime-no-alloc",
   "pulp-test-edit-history",
+  "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
@@ -2940,6 +2942,14 @@
    ],
    "kind": "shell"
   },
+  "audio-glitch-trace-selftest": {
+   "entry": "tools/audio/test_glitch_trace.py",
+   "inputs": [
+    "tools/audio/glitch_trace.py",
+    "tools/audio/test_glitch_trace.py"
+   ],
+   "kind": "python"
+  },
   "auval-helper-worker-selftest": {
    "entry": "tools/ci/test_run_auval_component.py",
    "inputs": [
@@ -3147,6 +3157,7 @@
     "tools/ci/codemodel_digest.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
+    "tools/ci/key_blind_executables.json",
     "tools/ci/lane_reuse_record.py",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
@@ -3203,6 +3214,7 @@
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/governed-build.sh",
+    "tools/ci/key_blind_executables.json",
     "tools/ci/lane_reuse_record.py",
     "tools/cmake/PulpSparkle.cmake",
     "tools/cmake/PulpTestData.cmake",
@@ -3263,6 +3275,7 @@
     "tools/scripts/skills_doc_check.py",
     "tools/scripts/test_changed_surface_script_families.py",
     "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_run_changed_surface_tests.py",
     "tools/scripts/test_wide_non_native.py",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
@@ -6186,6 +6199,7 @@
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/install_visual_python_deps.sh",
+    "tools/ci/key_blind_executables.json",
     "tools/ci/lane_reuse_record.py",
     "tools/ci/pr_head_affected_tests.py",
     "tools/ci/source_selftests.json",
@@ -8563,6 +8577,14 @@
    ],
    "kind": "python"
   },
+  "trace-frame-cost-selftest": {
+   "entry": "tools/scripts/test_trace_frame_cost.py",
+   "inputs": [
+    "test/fixtures/perfetto-gpu/render-only.pftrace",
+    "tools/scripts/test_trace_frame_cost.py"
+   ],
+   "kind": "python"
+  },
   "trace-span-category-lint": {
    "entry": "tools/scripts/trace_span_category_lint.py",
    "inputs": [
@@ -8762,44 +8784,11 @@
     "test/CMakeLists.txt",
     "test/cmake/quality_tests.cmake",
     "tools/ci/governed-build.sh",
-    "tools/ci/source_selftests.py",
-    "tools/ci/test_drift_fast.py",
-    "tools/ci/test_source_selftests.py",
+    "tools/ci/wide_non_native_reviewed_scanners.json",
     "tools/cli/cmd_pr.cpp",
     "tools/cmake/PulpTestSuite.cmake",
-    "tools/deps/audit.py",
-    "tools/import-validation/check_agent_panel_invariants.py",
-    "tools/import/test_project_import_ir_schema.py",
-    "tools/rack/test_generate_safety.py",
-    "tools/scene3d/verify_renderer_probe_route_inventory_contract.py",
     "tools/scripts/agent_capability_manifest.py",
-    "tools/scripts/changed_surface_script_families.py",
-    "tools/scripts/check_inspector_protocol_registry.py",
-    "tools/scripts/check_skip_not_pass.py",
-    "tools/scripts/consumption_census.py",
-    "tools/scripts/consumption_census_contract.py",
-    "tools/scripts/doxygen_installed_header_check.py",
-    "tools/scripts/gate_python_imports_check.py",
-    "tools/scripts/mac_objc_source_list_guard.py",
-    "tools/scripts/msvc_string_literal_guard.py",
-    "tools/scripts/raw_this_async_check.py",
-    "tools/scripts/sample_region_compat_baseline.py",
-    "tools/scripts/script_test_inputs.py",
-    "tools/scripts/skills_doc_check.py",
-    "tools/scripts/style_dedup_table.py",
-    "tools/scripts/test_agent_capability_installed_sdk.py",
-    "tools/scripts/test_build_combined_installer.py",
-    "tools/scripts/test_classify_changes.py",
-    "tools/scripts/test_configure_check_cache.py",
-    "tools/scripts/test_consumption_census.py",
-    "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
-    "tools/scripts/test_gpu_probe_acceptance.py",
-    "tools/scripts/test_gpu_test_resource_locks.py",
-    "tools/scripts/test_run_changed_surface_tests.py",
-    "tools/scripts/test_sdk_plist_templates_installed.py",
-    "tools/scripts/test_wide_non_native.py",
-    "tools/scripts/thread_assert_check.py",
-    "tools/scripts/web_timeline_source_closure_check.py"
+    "tools/scripts/test_wide_non_native.py"
    ],
    "kind": "python"
   },

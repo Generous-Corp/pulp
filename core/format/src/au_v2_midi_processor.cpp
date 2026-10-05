@@ -9,6 +9,7 @@
 #include <AudioToolbox/AudioToolbox.h>  // kAudioUnitProperty_CocoaUI, AudioUnitCocoaViewInfo
 
 #include <pulp/format/au_v2_midi_processor.hpp>
+#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -45,6 +46,7 @@ PulpAUMidiProcessor::PulpAUMidiProcessor(AudioComponentInstance ci,
 
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
+    request_editor_prewarm(*processor_);
     // Cache the immutable descriptor once: descriptor() returns by value and
     // allocates its std::string members, so the render path must never call it.
     descriptor_ = processor_->descriptor();

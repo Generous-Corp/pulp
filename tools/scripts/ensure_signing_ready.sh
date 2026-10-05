@@ -273,7 +273,7 @@ if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
 
   # THE zero-prompt step: authorize codesign/productsign to use the private key
   # without an interactive "allow access" dialog. Idempotent.
-  if ! security set-key-partition-list -S apple-tool:,apple:,codesign: \
+  if ! security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign:,productbuild: \
        -s -k "$PULP_SIGN_KEYCHAIN_PW" "$KC" >/dev/null 2>&1; then
     err "set-key-partition-list failed — refusing prompt-capable signing"
     exit 1

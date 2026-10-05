@@ -390,17 +390,13 @@ Non-obvious things that cost real time when you don't know them:
 - **An offline render cannot hear a dropped buffer**: a DAW-only click at a transition is
   usually a per-callback cost spike; gate its operation counts (`audio-harness`).
 
-### Plugin editors open view-first
+### Plugin editors open content-first
 
-A host shows no editor until its view-creation call returns, so nothing heavy
-runs there: `ViewBridge` (via `Options::hosted_editor()`) defers a scripted
-document to the editor's second idle tick for every plug-in format. A
-processor that builds its own `ScriptedUiSession` in `create_view()` must load
-it with `load_deferrable()` and do post-load work in
-`set_document_loaded_callback()` — plain `load()` there blocks the host and
-logs a warning. Rules, gates and the measurement recipe: the
-[`view-bridge`](.agents/skills/view-bridge/SKILL.md) skill ("Editor open") and
-`trace-analysis` ("Editor-open recipe").
+`ViewBridge` mounts a scripted document inside the host's view-creation call and
+presents it as the first frame, so that call is the host's placeholder time:
+load with `load_deferrable()`, finish in `set_document_loaded_callback()`, and
+declare `Processor::editor_prewarm()` so adapters compile/verify it at
+instantiation. Rules: [`view-bridge`](.agents/skills/view-bridge/SKILL.md).
 
 ### Thread Model
 
@@ -1046,6 +1042,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Run the deterministic visual layout snapshots. → `python3 -m tools.harness.visual.runner`
 
 **audio** — prove what the audio actually did
+- A render clicks or drops out and you need the sample, the host block that rendered it, and the work inside that block -- or per-block time against the deadline -- from one command. → `tools/audio/glitch_trace.py`
 - Decide whether a DSP change made a sound WORSE — and at which timestamp. *(needs install)* → `python -m quality_lab.cli compare`
 - Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
@@ -1068,6 +1065,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Counts only records whose origin is `shadow_plan_step`. They never execute, so this measures selection, never executed bounded plans; a lane proxy must not divide by these. A head whose run uploaded nothing is counted as `missing_record`, so a low plans ÷ heads means the instrument is blind, not that plans were good.
 - Before any test-result reuse policy (receipt reuse across base drift, per-test or per-executable skips) goes live, or when changing one, its key, or a fail-closed rule — replay it over merge-queue history and read its false skips, which must be 0. → `tools/scripts/reuse_policy_replay.py collect`
   - ⚠ **Cannot see:** Replays with TODAY's classify_changes.py and today's required-context list, and reads required contexts as check-runs completed before the group, so an old head's eligibility is approximate. History records no runner image (null on both sides, so no image check applies), no recorded source keys (`source-keys` reconstructs tier-1a keys from git and ONE build graph, so pairs far from that graph's commit are approximate) and no exoneration verdicts (every final failure counts as real). A build-failed group is excluded from test scoring; `build_failures_skipped` lists the ones a build-skipping policy would have skipped. `collect` exits 1 when it finds no merge groups or no head pairs (a broken instrument, not an empty history).
+
+**editor-open** — measure what a host shows while a plug-in editor opens
+- A user reports an AU editor opening in stages in Logic (small/placeholder, then empty, then the UI) and you need the stages a host window actually showed out of process, and how long the host waited for the view. → `tools/editor-open/editor_open_oop_probe.sh`
+  - ⚠ **Cannot see:** Reads back the host's own window with CGWindowListCreateImage, which must run in the logged-in GUI session (hence --gui-session over ssh) and has read back only the host backdrop on a macOS 27 host while the editor was demonstrably drawing; a run whose every image is host-empty proves the instrument blind, not the editor. It sees what is composited, not why — pair it with a trace from the plug-in process (~/.config/pulp/trace-autostart in a traced build).
 
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`

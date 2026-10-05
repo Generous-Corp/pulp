@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261004-modulated-value-display-watch",
+  "created_at": "2026-10-04T17:34:19Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds display-only modulated-value markers to Knob/Fader, bounds SvgPathWidget::set_path and CanvasWidget redraw repaints to the painted extent / own box, marks whole-surface damage for rect-less requests on plug-in hosts, and adds a header-only FrameCostProbe test helper. Repaint scope and widget paint only: no design-import, Chromium, rendering-backend or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-widget-bounded-repaint",
+    "python3 tools/scripts/test_trace_frame_cost.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

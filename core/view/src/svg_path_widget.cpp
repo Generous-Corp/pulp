@@ -1,6 +1,10 @@
 #include <pulp/view/svg_path_widget.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
+
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cmath>
@@ -635,9 +639,84 @@ void parse_path(const std::string& data, std::vector<SvgPathSegment>& out) {
 }  // namespace
 
 void SvgPathWidget::set_path(std::string data) {
+    if (data == path_data_)
+        return;
+    const Rect before = paint_extent();
     path_data_ = std::move(data);
     reparse();
-    request_repaint();
+    repaint_extent_change(before);
+}
+
+Rect SvgPathWidget::paint_extent() const {
+    if (segments_.empty() || (!has_fill_ && !(has_stroke_ && stroke_width_ > 0)))
+        return {};
+    const auto b = local_bounds();
+    if (b.width <= 0 || b.height <= 0)
+        return {};
+    float min_x = std::numeric_limits<float>::max(), min_y = min_x;
+    float max_x = std::numeric_limits<float>::lowest(), max_y = max_x;
+    for (const auto& seg : segments_) {
+        int points = 0;
+        switch (seg.op) {
+        case SvgPathSegment::Op::move_to:
+        case SvgPathSegment::Op::line_to:
+            points = 1;
+            break;
+        case SvgPathSegment::Op::quad_to:
+            points = 2;
+            break;
+        case SvgPathSegment::Op::cubic_to:
+            points = 3;
+            break;
+        case SvgPathSegment::Op::close_path:
+            points = 0;
+            break;
+        }
+        // A Bezier lies inside the hull of its control points, so the box of
+        // every point bounds the curve.
+        for (int i = 0; i < points; ++i) {
+            min_x = std::min(min_x, seg.p[2 * i]);
+            max_x = std::max(max_x, seg.p[2 * i]);
+            min_y = std::min(min_y, seg.p[2 * i + 1]);
+            max_y = std::max(max_y, seg.p[2 * i + 1]);
+        }
+    }
+    if (!(min_x <= max_x) || !(min_y <= max_y))
+        return {};
+    // The same mapping paint() applies.
+    const float vw = viewbox_w_ > 0 ? viewbox_w_ : b.width;
+    const float vh = viewbox_h_ > 0 ? viewbox_h_ : b.height;
+    float sx = b.width / vw, sy = b.height / vh, ox = 0.0f, oy = 0.0f;
+    if (!stretch_to_bounds_) {
+        const float scale = std::min(sx, sy);
+        ox = (b.width - vw * scale) * 0.5f;
+        oy = (b.height - vh * scale) * 0.5f;
+        sx = sy = scale;
+    }
+    // A miter join reaches up to miterLimit x width / 2 past the vertex (10,
+    // the Canvas2D default); 2 more px cover anti-aliasing.
+    const float stroke = has_stroke_ ? stroke_width_ * std::max(sx, sy) : 0.0f;
+    const float pad = stroke * 5.0f + 2.0f;
+    const float x0 = ox + min_x * sx - pad, y0 = oy + min_y * sy - pad;
+    const float x1 = ox + max_x * sx + pad, y1 = oy + max_y * sy + pad;
+    if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1))
+        return local_bounds();
+    return {x0, y0, x1 - x0, y1 - y0};
+}
+
+void SvgPathWidget::repaint_extent_change(const Rect& before) {
+    const Rect after = paint_extent();
+    const bool had = before.width > 0 && before.height > 0;
+    const bool has = after.width > 0 && after.height > 0;
+    if (!had && !has)
+        return; // nothing was drawn and nothing will be
+    if (!had || !has) {
+        request_repaint(had ? before : after);
+        return;
+    }
+    const float x0 = std::min(before.x, after.x), y0 = std::min(before.y, after.y);
+    request_repaint(Rect{x0, y0, std::max(before.x + before.width, after.x + after.width) - x0,
+                         std::max(before.y + before.height, after.y + after.height) - y0});
 }
 
 void SvgPathWidget::set_viewbox(float w, float h) {

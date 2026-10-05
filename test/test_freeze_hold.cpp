@@ -997,6 +997,67 @@ LatchCost measure_latch(FreezeHold::Config config, int capture_frames) {
 
 } // namespace
 
+TEST_CASE("FreezeHold's capturing frame group takes no argument per bin",
+          "[signal][freeze][rt-cost]") {
+    // The instantaneous-frequency increment is read only at the latch, so its
+    // per-bin atan2 is taken there: a capturing frame group -- every hop while
+    // nothing is held, which is most hops -- costs no transcendental at all.
+    // Control: the latch still takes one argument per bin, so the counter sees
+    // the work where it moved to.
+    REQUIRE(pulp::signal::rt::kWorkCountersEnabled);
+    const auto config = large_config();
+    const auto bins = static_cast<std::uint64_t>(config.fft_size / 2 + 1);
+    const auto cost = measure_latch(config, 8);
+    INFO("steady trig " << cost.steady.trig << ", latch trig " << cost.latch.trig);
+    CHECK(cost.steady.trig == 0);
+    CHECK(cost.latch.trig >= bins);
+}
+
+TEST_CASE("FreezeHold's deferred increment yields the eager hold exactly",
+          "[signal][freeze]") {
+    // The argument of the same vector, taken later, is the same number: the
+    // held output equals the one an eagerly computed increment gives. The
+    // reference recomputes the newest frame's increment independently from
+    // the two newest frames and checks the hold's frequency against it.
+    auto config = large_config();
+    config.capture_frames = 8;
+    FreezeHold hold;
+    hold.prepare(config);
+    BroadbandFrames frames(config.fft_size, config.channels);
+    long f = 0;
+    for (; f < 20; ++f) hold.process_group(frames.frame(f), config.channels, frames.bins());
+    // The two frames the latch's increment comes from.
+    std::vector<std::vector<std::complex<float>>> previous(2), newest(2);
+    {
+        auto* const* p = frames.frame(f - 1);
+        for (int ch = 0; ch < 2; ++ch) previous[size_t(ch)].assign(p[ch], p[ch] + frames.bins());
+    }
+    hold.set_frozen(true);
+    auto* const* latch_frame = frames.frame(f);
+    for (int ch = 0; ch < 2; ++ch) newest[size_t(ch)].assign(latch_frame[ch], latch_frame[ch] + frames.bins());
+    hold.process_group(latch_frame, config.channels, frames.bins());
+    REQUIRE(hold.is_latched());
+    FreezeHold::Snapshot snap;
+    REQUIRE(snap.prepare(config.fft_size, config.channels, config.analysis_hop));
+    REQUIRE(hold.snapshot(snap));
+    const double two_pi = 6.28318530717958647692;
+    const double ha = config.analysis_hop;
+    int checked = 0;
+    for (int k = 1; k < frames.bins(); k += 97) {
+        std::complex<double> acc(0.0, 0.0);
+        for (int ch = 0; ch < 2; ++ch)
+            acc += std::complex<double>(newest[size_t(ch)][size_t(k)])
+                 * std::conj(std::complex<double>(previous[size_t(ch)][size_t(k)]));
+        const double omega = two_pi * k / config.fft_size;
+        double delta = std::arg(acc) - omega * ha;
+        delta -= two_pi * std::round(delta / two_pi);
+        const double expected = omega + delta / ha;
+        CHECK(snap.inst_freq[size_t(k)] == expected);
+        ++checked;
+    }
+    REQUIRE(checked > 40);
+}
+
 TEST_CASE("FreezeHold running average makes latch cost independent of capture length",
           "[signal][freeze][rt-cost]") {
     REQUIRE(pulp::signal::rt::kWorkCountersEnabled);

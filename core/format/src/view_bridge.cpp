@@ -1,6 +1,7 @@
 #include <chrono>
 #include <optional>
 #include <pulp/format/editor_idle_pump.hpp>
+#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/exceptions.hpp>
@@ -9,11 +10,37 @@
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/scripted_ui_prewarm.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
 namespace pulp::format {
+
+namespace detail {
+// The view half of editor prewarm at instantiation: format adapters (which
+// live in format-core and cannot reach the view layer) hand a processor's
+// EditorPrewarm here; it copies it and queues it on the view layer's
+// background worker.
+void view_editor_prewarm_scheduler(const Processor::EditorPrewarm& request) {
+    view::ScriptedUiPrewarmRequest copy;
+    copy.scripts.reserve(request.scripts.size());
+    for (const auto script : request.scripts) copy.scripts.emplace_back(script);
+    copy.materialized_documents.reserve(request.materialized_documents.size());
+    for (const auto document : request.materialized_documents)
+        copy.materialized_documents.emplace_back(document);
+    view::prewarm_scripted_ui(std::move(copy));
+}
+}  // namespace detail
+
 namespace {
+
+// Installed when this translation unit is loaded, which every editor-capable
+// plug-in does because its editor uses ViewBridge.
+[[maybe_unused]] const bool g_editor_prewarm_scheduler_installed = [] {
+    set_editor_prewarm_scheduler(&detail::view_editor_prewarm_scheduler);
+    return true;
+}();
+
 
 std::unique_ptr<view::View> safe_create_view(Processor& processor) noexcept {
     PULP_TRY { return processor.create_view(); }
