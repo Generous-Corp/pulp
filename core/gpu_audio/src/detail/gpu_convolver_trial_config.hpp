@@ -60,7 +60,6 @@ constexpr bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext&
            context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
            context.inflight_depth != 0 && context.queue_capacity > context.lead_blocks &&
            context.max_inflight != 0 &&
-           context.max_inflight <= context.queue_capacity - context.lead_blocks &&
            context.lead_blocks != 0 && context.deadline_ns != 0 &&
            context.watchdog_ns > context.deadline_ns && context.transfer_counters_direct &&
            context.timing_provenance_direct &&
