@@ -91,9 +91,10 @@ TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
     auto project = unique_temp_dir("pulp-pr-workflow-github-project");
     fs::create_directories(project / "core");
     write_text(project / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\n");
-    const std::vector<std::string> git_identity = {
-        "-C", project.string(), "-c", "user.name=pulp-test", "-c", "user.email=test@pulp.invalid",
-        "-c", "commit.gpgsign=false"};
+    const std::vector<std::string> git_identity = {"-C", project.string(),
+                                                   "-c", "user.name=pulp-test",
+                                                   "-c", "user.email=test@pulp.invalid",
+                                                   "-c", "commit.gpgsign=false"};
     auto git = [&](std::vector<std::string> args) {
         std::vector<std::string> full = git_identity;
         full.insert(full.end(), args.begin(), args.end());
@@ -106,15 +107,15 @@ TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
 
     // Control: on `main` the dry run refuses, which is what failed this test
     // whenever the build checkout was on `main`.
-    auto on_main = run_pulp_in_directory(project, {"pr", "--workflow", "github", "--dry-run",
-                                                   "--title", "GitHub PR Plan"});
+    auto on_main = run_pulp_in_directory(
+        project, {"pr", "--workflow", "github", "--dry-run", "--title", "GitHub PR Plan"});
     REQUIRE_FALSE(on_main.timed_out);
     REQUIRE(on_main.exit_code == 2);
     REQUIRE(on_main.stderr_output.find("refusing to run on 'main'") != std::string::npos);
 
     git({"checkout", "-q", "-b", "feature/pr-workflow-test"});
-    auto github_dry_run = run_pulp_in_directory(project, {"pr", "--workflow", "github", "--dry-run",
-                                                          "--title", "GitHub PR Plan"});
+    auto github_dry_run = run_pulp_in_directory(
+        project, {"pr", "--workflow", "github", "--dry-run", "--title", "GitHub PR Plan"});
     REQUIRE_FALSE(github_dry_run.timed_out);
     REQUIRE(github_dry_run.exit_code == 0);
     REQUIRE(github_dry_run.stderr_output.find("using github workflow via `gh`")
@@ -123,8 +124,8 @@ TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
             != std::string::npos);
     REQUIRE(github_dry_run.stdout_output.find("shipyard ship")
             == std::string::npos);
-    REQUIRE(github_dry_run.stdout_output.find("git push -u origin feature/pr-workflow-test")
-            != std::string::npos);
+    REQUIRE(github_dry_run.stdout_output.find("git push -u origin feature/pr-workflow-test") !=
+            std::string::npos);
 
     fs::remove_all(project);
     fs::remove_all(home);
