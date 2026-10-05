@@ -87,10 +87,11 @@ python3 tools/import-validation/verify_browser_fidelity_receipt.py \
   --expected-title 'Spectr — zoomable filter bank'
 ```
 
-The checker fails closed unless both launches have the same readiness marker and
-DOM summary, a non-empty `#root`, no console or network failures, identical
-screenshot SHA-256 values, and a rejected planted broken-mount control.  A
-copied receipt may use `--source` to identify the current checkout; the receipt
-still retains its original `source` as provenance.  The Spectr roundtrip accepts
-the same check through `SPECTR_BROWSER_RECEIPT` and optionally pins
+The checker fails closed unless the source bytes match the receipt's
+`sourceSha256`, both launches have the same readiness marker and DOM summary, a
+non-empty `#root`, no console or network failures, identical screenshot
+SHA-256 values, and a rejected planted broken-mount control.  A copied receipt
+may use `--source` to identify the current checkout; that file must contain the
+recorded source digest.  The Spectr roundtrip accepts the same check through
+`SPECTR_BROWSER_RECEIPT` and optionally pins
 `SPECTR_BROWSER_EXPECTED_SHA256`.
