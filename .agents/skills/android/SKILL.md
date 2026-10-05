@@ -1063,6 +1063,58 @@ Key rules:
 
 **Always use `-gpu host`** on macOS Apple Silicon. This maps Vulkan to Metal via MoltenVK, offloading rendering to the GPU.
 
+### Native-retention profiling on macOS
+
+The macOS host can run the Android profiling workflow. A Google Play system
+image is unsuitable for native-allocation attribution: the API 37 arm64 Play
+image used during the SurfaceRuntime investigation did not expose a usable
+`android.heapprofd` service or Perfetto allocation service. Do not conclude
+that Android retention is untestable on the host until a development image has
+been tried.
+
+Install the Android command-line tools and a JDK if the SDK has no
+`sdkmanager`/`avdmanager`, then install a separate Google APIs development
+image. Keep the existing Play AVD unchanged:
+
+```bash
+brew install --cask android-commandlinetools
+brew install --cask temurin
+export JAVA_HOME="$(/usr/libexec/java_home -v 27)"
+export ANDROID_SDK_ROOT="$HOME/Library/Android/sdk"
+yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
+  'platform-tools' 'emulator' \
+  'system-images;android-35;google_apis;arm64-v8a'
+printf 'no\n' | avdmanager create avd \
+  -n Pulp_Profile_API35 \
+  -k 'system-images;android-35;google_apis;arm64-v8a' \
+  -d pixel_6
+"$ANDROID_SDK_ROOT/emulator/emulator" \
+  -avd Pulp_Profile_API35 -gpu host -wipe-data
+```
+
+Verify the image empirically before running Pulp:
+
+```bash
+adb shell getprop ro.build.type          # userdebug or eng
+adb shell getprop ro.debuggable          # 1
+adb shell ls -l /system/bin/heapprofd    # must exist
+adb shell service list | grep -E 'traced|perfetto|heap'
+adb shell ps -A | grep -E 'traced|traced_probes'
+```
+
+On a suitable userdebug image, `/system/bin/heapprofd` may be protected from
+direct shell execution; use the profiling client/Perfetto path instead. Run a
+small allocation-trace smoke test first and retain the device fingerprint,
+image revision, profiler configuration, and raw trace metadata. Only then
+repeat the existing five-cycle SurfaceRuntime control and GPU runs. PSS growth
+alone is not ownership evidence, and another Play image does not satisfy this
+gate.
+
+Record the exact image and profiler result in the B3 issue before changing
+production code. If the development image still cannot produce allocation
+stacks, use a profileable physical arm64 device. The desktop refactor queue
+remains independent of this platform gate.
+
 ## JS-Scripted UI (QuickJS)
 
 The synth UI can be created entirely via JavaScript using QuickJS (via CHOC). The JS script is embedded as a C++ string literal — no APK asset loading needed:
@@ -1214,6 +1266,12 @@ yet publish per-row index metadata.
 ## Known Blockers
 
 1. **x86_64 Skia build** — Only arm64 Skia is built. Emulator runs arm64 via translation but an x86_64 build would be faster.
+
+2. **Android native-retention attribution** — The original Google Play AVD is
+   insufficient for heapprofd/Perfetto attribution. Use the separate userdebug
+   Google APIs AVD and the verification above before declaring the platform
+   blocked; if it still cannot produce allocation stacks, obtain a profileable
+   physical arm64 device. This does not block desktop refactor landing.
 
 ---
 
