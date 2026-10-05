@@ -1048,6 +1048,8 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_reap_linux.py")
         add_test(NAME proxmox-ci-host-network-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_configure_proxmox_ci_network.py")
+        add_test(NAME proxmox-ci-host-health-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_host_health.py")
     endif()
 
     # Silent-revert guard: reject a push whose diff byte-exactly restores the

@@ -7,4 +7,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/pulp-ephemeral-reap.sh --yes
+# After each pass, prove the installed CI files still match the repository and
+# no pool slot is stuck failed. A finding fails this unit, so drift surfaces in
+# `systemctl --failed` instead of running unnoticed.
+ExecStartPost=/usr/local/sbin/pulp-proxmox-host-health.sh
 User=root
