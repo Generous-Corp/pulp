@@ -62,7 +62,7 @@ def repo_root(start: Path) -> Path | None:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            cwd=start, capture_output=True, text=True, check=False,
+            cwd=start, capture_output=True, text=True, check=False, encoding="utf-8"
         )
     except OSError:
         return None
@@ -192,4 +192,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows pipes default to the ANSI code page, which cannot encode the
+    # non-ASCII marks this tool prints.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

@@ -66,6 +66,7 @@ the self-tests for the compiler-asymmetry lints:
 | `intel_canary_lint.py` | arm64-only code that drops the SSE/scalar fallback |
 | `designated_initializer_lint.py` | duplicate designators in one aggregate — legal to Clang, `C7560` on MSVC |
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
+| `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
 
 `gates.sh` runs `designated_initializer_lint.py` diff-scoped and
 `win32_include_lint.py` over `core/*/include` before a push. All are canaries,

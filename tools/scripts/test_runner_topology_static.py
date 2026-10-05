@@ -46,7 +46,7 @@ OVERFLOW = "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON"
 
 
 def _raw() -> dict:
-    return json.loads(CONTRACT.read_text())
+    return json.loads(CONTRACT.read_text(encoding="utf-8"))
 
 
 def _pinned_today(raw: dict) -> date:
@@ -73,7 +73,7 @@ def _for(rows, variable, source="expect"):
 
 
 def _class_label(event: str) -> str:
-    spec = json.loads(CONTRACT.read_text())["event_class_v2"]
+    spec = json.loads(CONTRACT.read_text(encoding="utf-8"))["event_class_v2"]
     event = st.DISPATCH_EVENT_ALIASES.get(event, event)
     return next(row["label"] for row in spec["classes"] if row["event"] == event)
 
@@ -86,7 +86,7 @@ def _class_hosts(snapshot: st.Snapshot, label: str) -> list[str]:
 def _v2_gate_registrations(host: str) -> list[st.Registration]:
     """What a new host's event-class gate lane advertises, built from the
     contract's own event_class_v2 spec rather than copied from a real host."""
-    spec = json.loads(CONTRACT.read_text())["event_class_v2"]
+    spec = json.loads(CONTRACT.read_text(encoding="utf-8"))["event_class_v2"]
     base = next(l["expect"] for l in _raw()["lanes"] if l["variable"] == spec["variable"])
     base = [label for label in base if label not in spec["omit_labels"]]
     return [st.Registration(
@@ -179,7 +179,7 @@ class RealConfig(unittest.TestCase):
     def test_release_contract_does_not_call_unsetting_a_rollback(self):
         purpose = next(l for l in _raw()["lanes"] if l["variable"] == RELEASE)["purpose"]
         self.assertIn("UNSETTING this variable is NOT a rollback", purpose)
-        guide = (REPO_ROOT / "docs" / "guides" / "local-ci.md").read_text()
+        guide = (REPO_ROOT / "docs" / "guides" / "local-ci.md").read_text(encoding="utf-8")
         self.assertNotIn("Unsetting the variable is the break-glass rollback", guide)
         self.assertIn("Unsetting the variable is not a rollback", guide)
 
@@ -206,7 +206,7 @@ class RealConfig(unittest.TestCase):
         today = _pinned_today(_raw()).isoformat()
         proc = subprocess.run(
             [sys.executable, str(CHECKER), "--mode=static", "--today", today],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("DECLARED supply", proc.stdout)
         self.assertIn("REACHABLE", proc.stdout)
@@ -330,7 +330,7 @@ class Opportunistic(unittest.TestCase):
         proc = subprocess.run(
             [sys.executable, str(CHECKER), "--mode=static",
              "--today", _pinned_today(_raw()).isoformat()],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("OPPORTUNISTIC", proc.stdout)
         self.assertIn("OPPORTUNISTIC by contract", proc.stdout)
@@ -355,12 +355,12 @@ class Reachability(unittest.TestCase):
             "self-hosted", "macOS", "ARM64", "pulp-build-vm-release-typo"]
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "runner_topology.json"
-            path.write_text(json.dumps(raw))
+            path.write_text(json.dumps(raw), encoding="utf-8")
             proc = subprocess.run(
                 [sys.executable, str(CHECKER), "--mode=static", "--contract", str(path),
                  "--snapshot", str(SNAPSHOT), "--workflows-dir", str(WORKFLOWS),
                  "--today", _pinned_today(raw).isoformat()],
-                capture_output=True, text=True)
+                capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("UNSERVED", proc.stdout)
 
@@ -397,7 +397,7 @@ class Reachability(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             wf = Path(tmp) / "reuse.yml"
             wf.write_text("name: Reuse\non:\n  workflow_call:\njobs:\n"
-                          "  a:\n    runs-on: ${{ fromJSON(vars.PULP_X_RUNS_ON_JSON) }}\n")
+                          "  a:\n    runs-on: ${{ fromJSON(vars.PULP_X_RUNS_ON_JSON) }}\n", encoding="utf-8")
             self.assertEqual(st.consuming_workflows("PULP_X_RUNS_ON_JSON", Path(tmp)),
                              [("reuse.yml", None)])
 
@@ -412,7 +412,7 @@ class ObservedSupply(unittest.TestCase):
         self.snapshot = st.load_snapshot(SNAPSHOT)
         self.in_repo = [r for r in self.snapshot.registrations if r.repo == REPO]
         self.records = gate.parse_service_records(
-            json.loads(JOBS_FIXTURE.read_text())["jobs"])
+            json.loads(JOBS_FIXTURE.read_text(encoding="utf-8"))["jobs"])
         self.now = max(r.completed_at for r in self.records if r.completed_at)
         self.since = self.now - gate.timedelta(hours=720)
         self.required = st.required_registrations(
@@ -513,7 +513,7 @@ class Overrides(unittest.TestCase):
         after = date.fromordinal(expires.toordinal() + 1).isoformat()
         proc = subprocess.run(
             [sys.executable, str(CHECKER), "--mode=static", "--today", after],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("override-expired", proc.stdout)
 

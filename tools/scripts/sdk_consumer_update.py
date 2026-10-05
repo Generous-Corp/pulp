@@ -83,7 +83,7 @@ def load_yaml(path: Path) -> dict:
         raise SystemExit(
             "PyYAML is required to parse the consumer registry.\n"
             "Install it with:  python3 -m pip install pyyaml")
-    return yaml.safe_load(path.read_text()) or {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def detect_pins(text: str, filename: str) -> list[tuple[str, str]]:
@@ -134,7 +134,7 @@ def plan_repo_update(checkout: Path,
         f = checkout / fname
         if not f.exists():
             continue
-        text = f.read_text()
+        text = f.read_text(encoding="utf-8")
         current = detect_pins(text, fname)
         _, changes = rewrite_pins(text, fname, new_version)
         if current or changes:
@@ -150,10 +150,10 @@ def apply_repo_update(checkout: Path, new_version: str) -> list[str]:
         f = checkout / fname
         if not f.exists():
             continue
-        text = f.read_text()
+        text = f.read_text(encoding="utf-8")
         new_text, changes = rewrite_pins(text, fname, new_version)
         if changes and new_text != text:
-            f.write_text(new_text)
+            f.write_text(new_text, encoding="utf-8")
             changed.append(fname)
     return changed
 
@@ -173,7 +173,7 @@ def buildable_consumers(consumers: dict, only: set[str] | None) -> list[dict]:
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8")
     return p.returncode, (p.stdout + p.stderr)
 
 
@@ -367,4 +367,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Windows pipes default to the ANSI code page, which cannot encode the
+    # non-ASCII marks this tool prints.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

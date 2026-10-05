@@ -3445,6 +3445,7 @@
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_run_changed_surface_tests.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],
@@ -3522,6 +3523,7 @@
     "tools/scripts/test_ios_compile_gate_legs.py",
     "tools/scripts/test_prepush_gate_supervisor.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],
@@ -8108,6 +8110,7 @@
     "tools/scripts/test_prepush_gate_supervisor.py",
     "tools/scripts/test_reuse_policy_replay.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],

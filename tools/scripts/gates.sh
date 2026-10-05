@@ -118,6 +118,7 @@ CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 LIVE_BUILD_CHECK="$ROOT/tools/scripts/live_build_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
+TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 SCHEDULE_BACKSTOP="$ROOT/tools/scripts/schedule_backstop_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
@@ -695,6 +696,14 @@ if [ -f "$WIN32_INCLUDE_LINT" ]; then
     echo "" >&2
     echo "▸ win32 include lint (MSVC C2589 min/max leak)" >&2
     if ! "$PYTHON" "$WIN32_INCLUDE_LINT" --root "$ROOT" >&2; then
+        fail=1
+    fi
+fi
+
+if [ -f "$TEXT_ENCODING_LINT" ]; then
+    echo "" >&2
+    echo "▸ text-encoding lint (Python text I/O names its encoding; per-file ratchet)" >&2
+    if ! "$PYTHON" "$TEXT_ENCODING_LINT" --root "$ROOT" --base "$(git -C "$ROOT" merge-base "$BASE" HEAD)" >&2; then
         fail=1
     fi
 fi
