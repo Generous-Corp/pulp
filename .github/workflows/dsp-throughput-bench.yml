@@ -44,6 +44,8 @@ jobs:
             runs_on: macos-15
           - label: linux-x86_64
             runs_on: ubuntu-latest
+          - label: linux-aarch64
+            runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 60
     env:
