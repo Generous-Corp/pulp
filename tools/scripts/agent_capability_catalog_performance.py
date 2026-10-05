@@ -44,7 +44,7 @@ EXPORTS = [
                 include="pulp/format/processor.hpp",
                 qualified_name="pulp::format::Processor::process_block",
                 target="Pulp::format",
-                header_fingerprint="sha256:07a9475d8cb82d042429c8dcaa2d49f7aad80962b0b9258213a8eb1cb540ce57",
+                header_fingerprint="sha256:095202e7161b1c2a1d8e408ee90e616a7a7f3f7ccb9ff3e62060f5a1aed88aa5",
                 address_expression=(
                     "static_cast<bool (pulp::format::Processor::*)("
                     "pulp::format::ProcessBlock&)>(&pulp::format::Processor::process_block)"

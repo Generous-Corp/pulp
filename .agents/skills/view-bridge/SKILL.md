@@ -114,6 +114,48 @@ host's own window setup no longer overlaps the mount. Keep cutting the mount
 (see "Editor-open cost of a materialized document" in `import-design` and the
 `trace-analysis` editor-open recipe), do not go back to view-first.
 
+### What the host shows while it waits: the placeholder is the factory's time
+
+Logic opens its plug-in window before it has the editor and shows its own
+placeholder (the plug-in's name on an empty window) until the AU's view
+arrives; out of process that is the remote view controller's latency, i.e.
+instantiation-to-view plus everything inside `-uiViewForAudioUnit:withSize:`.
+With content-first that call holds the mount, so a long mount reads as a long
+placeholder instead of an empty editor — one stage instead of three, but the
+same work. Measured (Spectr on Pulp 0.907, AUHostingService, fresh instance per
+open): view controller cold ~0.9–1.0 s, warm ~0.25–0.46 s; inside the
+service a cold `editor_first_frame` of 716 ms was the document (370: compile
+106, execute 166, bind 52) plus frame 0 (344, of which 301 the GPU finishing
+it — the first open of a newly installed binary pays Metal's shader compiles;
+the per-binary shader cache makes later processes ~30 ms). What the plug-in
+controls is the factory's critical path; the placeholder's look and size are
+the host's.
+
+**Prewarm at instantiation.** `Processor::editor_prewarm()` returns views of
+the scripts the editor evaluates whole (a bundled UI runtime, design/help
+scripts) and the inputs it passes to `__pulpRuntimeImport__(text,
+'materialized-browser')`, byte-identical to what an open evaluates. Every
+format adapter (AU v2 effect/instrument/MIDI processor, AU v3, VST3, CLAP)
+calls `request_editor_prewarm()` right after the host instantiates the
+processor: once per plug-in bundle per process, never under
+`PULP_HEADLESS`/`PULP_TEST_MODE`/`CI`/`PULP_DISABLE_PLUGIN_EDITOR` or
+`PULP_EDITOR_PREWARM=0`, and the work runs on one background worker (8 MB
+stack, user-initiated QoS) that compiles the scripts into the bytecode cache
+and decodes + verifies the documents into the materialized-document cache
+(`view::prewarm_scripted_ui`). An editor that opens while a script or document
+is still in flight waits for that result instead of doing it again, so a host
+that opens the editor immediately after insert loses nothing. It removes the
+cold `script_compile` (~105–145 ms for a 1.6 MB runtime), the inline-script
+compiles (~20 ms) and `runtime_import_verify` (~24 ms) from the factory; it
+does not touch per-open work (`script_execute`, the bind, layout, frame 0).
+Rules: return static data (embedded assets) — the views must outlive the
+plug-in image; keep `editor_prewarm()` cheap (it runs on the host's
+instantiation thread); a request that is already cached costs a lookup. The
+worker is joined at teardown, so a scanner that instantiates and exits may wait
+for at most one in-flight compile. Format-core cannot link the view layer, so
+the scheduler is a function pointer `view_bridge.cpp` installs at static
+initialization; a plug-in with no editor code never installs it.
+
 What a processor that builds its own `ScriptedUiSession` in `create_view()`
 must do (unchanged):
 
@@ -191,6 +233,20 @@ older view-first open it filled the whole window for the length of the mount.
   enough: the backing layer (seeded before the view can join a window), the
   frame fill under the tree, and the letterbox bars around a pinned viewport
   (visible after the UI is up when the host's aspect differs).
+- The standalone app window follows the same contract through
+  `WindowOptions::background_rgb`: `make_standalone_window_options()` takes
+  `bridge.editor_background_rgb()` (no default, so a caller cannot drop it),
+  and both macOS window hosts paint it as the NSWindow's backgroundColor, the
+  content layer's colour (GPU host) and the fill under the tree. Before this
+  the GPU standalone window kept AppKit's default (white in light mode) and
+  the framework navy layer. Gate: `test_window_host_first_frame_macos.mm`
+  (hidden windows, both hosts, window + layer + back-buffer frame, with an
+  undeclared control). A host app that builds its own `WindowOptions` for an
+  editor must set it too.
+- The pinned Skia's Graphite error colour (`sk_error`) is RED
+  (`half4(1,0,0,1)`), not magenta: a magenta image in a Pulp frame is not a
+  Graphite paint-key failure. Prove where a colour came from by reading back
+  presented drawables and the host's own window, not by its hue.
 - Do not paint a poster/snapshot of the UI instead — not a default-state
   poster (wrong knob positions, band counts and spectrum for the user's
   session, then a jump to the real ones: a different flash, not none), and not
@@ -272,8 +328,25 @@ yet" cannot pass as a dark background. What only this path shows:
   can show for a frame while the remote content and the host converge on one
   size; classify that separately from an off-brand colour.
 - `launchctl setenv` does not reach AUHostingService, so `PULP_TRACE_PATH`
-  cannot start a trace in the plug-in process there; measure OOP from the host
-  window and use the in-process probe for spans.
+  in an environment cannot start a trace in the plug-in process there. A
+  traced build also reads `~/.config/pulp/trace-autostart`
+  (`PULP_TRACE_PATH=/some/dir/` — a trailing `/` writes
+  `<process>-<pid>.pftrace` per process — plus optional `PULP_TRACE_SECONDS`,
+  `PULP_TRACE_RING_KB`); delete the file when done. Set `PULP_TRACE_SECONDS`
+  shorter than the probe run (e.g. 11): the service is torn down with its last
+  client and never reaches a later flush. AUHostingService's `$TMPDIR` is
+  `/var/folders/<..>/T/AUHostingService/` (tens of thousands of entries on a
+  developer Mac — what a per-open temp sweep pays).
+- The probe is `tools/editor-open/editor_open_oop_probe.sh` (classifier in
+  `editor_open_stages.hpp`, tested by `pulp-test-editor-open-stages`). Over
+  ssh, pass `--gui-session`: an ssh session reaches neither the user's
+  registered Audio Units (`invalidComponentID`) nor the window server's
+  composite. `launchctl asuser` needs root and `open -W --stdout` fails with
+  -10810, so the wrapper app redirects its own output. A run whose every image
+  is `host-empty` (the probe says BLIND and exits 3) while the plug-in's trace shows frames being presented is a
+  blind instrument (seen on a macOS 27 host), not an editor that drew nothing;
+  the view-controller latency it prints is still valid. On a host whose login
+  shell is zsh, `log` is a builtin — read the unified log with `/usr/bin/log`.
 - Requesting a second view controller from the same remote instance did not
   paint in a probe; instantiate a fresh unit per measured open.
 
@@ -2795,6 +2868,44 @@ example (Spectr, AU v2, M5 Max): six post-mount commits (two from one
 promise-driven modulation read, build info, the rAF hydrate, a passive effect,
 a tracing badge) became zero; ~250 ms of a warm open, and a non-default
 session (48 bands, a boosted band) mounts showing it.
+
+### 8. Modulated controls: draw the played value, never write it
+
+A control a modulator moves (an internal LFO on a knob, a fader, a slider) must
+visibly move, and must not become an automation source. One contract, the one
+`Knob::set_modulated_value` / `Fader::set_modulated_value` (bridge:
+`setModulatedValue(id, v | null)`) implement:
+
+- **The base stays the user's and stays editable.** The base pointer/thumb, the
+  value text and every gesture (`on_change`, begin/end) report the base, so a
+  drag starts from it and host automation records only the user's moves.
+- **The played value is drawn on top** (token `knob.modulation`): an arc or
+  segment from the base to the played value plus a marker at the played value.
+  Base marker + moving modulated marker is the whole visual language.
+- **Modulation never writes a host lane.** It offsets around the base, and the
+  base is whatever the host's automation is playing, so the control shows both
+  at once. Send the modulator's *coordinate* to the editor, not a value, and
+  apply it to the base the control shows, or an automated base and the LFO's
+  swing drift apart.
+- **Cost: one bounded repaint per frame, no layout, no commit.** The marker
+  repaints the control's own box. In a scripted UI update an SVG path's `d`
+  directly (`setSvgPath`) or a canvas, never React state; `SvgPathWidget::set_path`
+  repaints the union of the old and new path extents and skips an unchanged
+  string, and a redrawn `CanvasWidget` repaints its own box. A label whose text
+  a modulator steps (a band count) is painted through `textContent`, never by
+  notifying a component that owns the toolbar.
+
+Gate it with `pulp/view/frame_cost_probe.hpp`: `FrameCostProbe` attaches a
+recording plug-in host to the root and records, per frame, the damage requested
+(bounded rect or whole surface), the layout passes run and the wall time;
+`FrameCostProbe::check()` holds that to a `Budget`, optionally relative to an
+unmodulated baseline. Pair it with a negative control that forces a whole-tree
+invalidation per frame and must fail, and a positive control (frames painted),
+or a probe that cannot see damage passes every budget
+(`test/test_widget_bounded_repaint.cpp`). Damage is counted per request, so a
+host that clips to bounded damage would paint exactly what the probe reports;
+the macOS plug-in host still repaints in full, so on that host the win is the
+avoided layout and commit, and the bound is what a partial-repaint host uses.
 
 ## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
 

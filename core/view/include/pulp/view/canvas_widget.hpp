@@ -491,8 +491,14 @@ private:
             [this](const std::weak_ptr<RepaintObserver>& weak) {
                 auto observer = weak.lock();
                 if (!observer) return true;
+                // Bounded to the canvas's own box: paint() clips every
+                // replay to the widget bounds (or a layer of the same size),
+                // so a redrawn canvas cannot touch a pixel outside them. A
+                // whole-surface request here made every animating canvas --
+                // an analyzer, a modulated plot -- repaint the editor's
+                // static chrome each frame on a partial-repaint host.
                 if (observer->owner && observer->stream == recorded_commands_.get())
-                    observer->owner->request_repaint();
+                    observer->owner->request_repaint_self(1.0f);
                 return false;
             }), observers.end());
     }

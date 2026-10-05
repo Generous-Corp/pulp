@@ -1384,3 +1384,16 @@ the definition. The minimal `class View {}` / `class AraDocumentController {}`
 completions in that file are kept because the TU stands in for the whole view
 and ARA layers in a link that has neither, not because returning nullptr would
 otherwise fail to compile.
+
+## The WebCLAP module compiles its own adapter subset, so new adapter calls need their source here
+
+`tools/cmake/PulpWclap.cmake` builds `clap_adapter.cpp` into the wasm module
+from an explicit source list and does not link `pulp-format-core` (nor
+`pulp::runtime`). A call the CLAP adapter gains into another format-core
+translation unit links natively and fails only here, as a `wasm-ld: undefined
+symbol` in the `Build WebCLAP module` step of the required
+`Build + prove + (owner-gated) deploy` check — `request_editor_prewarm()` in
+`editor_prewarm.cpp` was one. Add that source to `_PULP_WCLAP_CORE_SOURCES`
+(keep it free of view-layer dependencies; the editor prewarm is a no-op here
+because no view scheduler is installed). There is no local wasm toolchain on
+the Macs by default, so this gate is usually first seen in CI.
