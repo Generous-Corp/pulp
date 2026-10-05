@@ -8,6 +8,12 @@
 namespace pulp::view {
 enum class DesignUpdateKind { retained, moved, inserted, removed };
 
+// A keyed node is retained or moved only while its materialization shape is
+// compatible. If the same stable anchor changes node type, render lane, widget
+// kind, or binding topology, the planner emits a removed/inserted pair so a
+// caller cannot reuse a stale native view or binding. Binding names themselves
+// remain mutable values and do not force recreation.
+
 struct DesignChildUpdate {
     DesignUpdateKind kind = DesignUpdateKind::retained;
     std::string key;

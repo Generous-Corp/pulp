@@ -9,6 +9,15 @@ IRNode node(const char* key) {
     out.stable_anchor_id = key;
     return out;
 }
+
+void require_recreated(const DesignChildUpdatePlan& plan, const char* key) {
+    REQUIRE(plan.keyed);
+    REQUIRE(plan.updates.size() == 2);
+    CHECK(plan.updates[0].kind == DesignUpdateKind::removed);
+    CHECK(plan.updates[0].key == key);
+    CHECK(plan.updates[1].kind == DesignUpdateKind::inserted);
+    CHECK(plan.updates[1].key == key);
+}
 } // namespace
 
 TEST_CASE("keyed design updates retain identity across reorder and batch blocks",
@@ -44,4 +53,72 @@ TEST_CASE("ambiguous anchors fail closed to positional planning", "[view][import
     CHECK(plan.updates[0].kind == DesignUpdateKind::removed);
     CHECK(plan.updates[1].kind == DesignUpdateKind::removed);
     CHECK(plan.updates[2].kind == DesignUpdateKind::inserted);
+}
+
+TEST_CASE("compatible keyed changes retain the existing materialization shape",
+          "[view][import][update]") {
+    auto old_node = node("control");
+    auto new_node = old_node;
+    old_node.attributes["pulpParamKey"] = "filter.cutoff";
+    new_node.attributes["pulpParamKey"] = "filter.resonance";
+    new_node.style.opacity = 0.75f;
+
+    const auto plan = plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                std::span<const IRNode>(&new_node, 1));
+    REQUIRE(plan.keyed);
+    REQUIRE(plan.updates.size() == 1);
+    CHECK(plan.updates.front().kind == DesignUpdateKind::retained);
+    CHECK(plan.updates.front().key == "control");
+}
+
+TEST_CASE("same-anchor shape changes recreate instead of reusing stale controls",
+          "[view][import][update]") {
+    SECTION("node type") {
+        auto old_node = node("control");
+        auto new_node = old_node;
+        new_node.type = "button";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "control");
+    }
+
+    SECTION("render mode") {
+        auto old_node = node("control");
+        auto new_node = old_node;
+        new_node.render_mode = NodeRenderMode::faithful_svg;
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "control");
+    }
+
+    SECTION("audio widget") {
+        auto old_node = node("control");
+        auto new_node = old_node;
+        new_node.audio_widget = AudioWidgetType::knob;
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "control");
+    }
+
+    SECTION("binding topology") {
+        auto old_node = node("control");
+        auto new_node = old_node;
+        old_node.attributes["pulpParamKey"] = "gain";
+        new_node.attributes["pulpParamKeyX"] = "pan.x";
+        new_node.attributes["pulpParamKeyY"] = "pan.y";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "control");
+    }
+
+    SECTION("interactive overlay kind") {
+        auto old_node = node("control");
+        auto new_node = old_node;
+        old_node.interactive_elements.push_back({});
+        new_node.interactive_elements.push_back({});
+        new_node.interactive_elements.front().kind = InteractiveElementKind::fader;
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "control");
+    }
 }
