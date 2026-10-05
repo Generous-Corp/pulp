@@ -85,6 +85,40 @@ TEST_CASE("SignalGraph add and remove nodes", "[host][graph]") {
     REQUIRE(graph.node(input) == nullptr);
 }
 
+TEST_CASE("SignalGraph authoring receipts reject stale and cross-graph edits",
+          "[host][graph][lineage]") {
+    SignalGraph graph;
+    const auto initial = graph.authoring_receipt();
+    REQUIRE(initial.valid());
+    REQUIRE(graph.validate_authoring_receipt(initial) ==
+            GraphAuthoringReceiptStatus::Current);
+
+    // A mutation advances the receipt even before a new audio snapshot is
+    // prepared.  A caller holding the old receipt must not mistake the compact
+    // NodeId space for a stable authoring identity.
+    const auto node = graph.add_gain_node("Imported gain");
+    REQUIRE(node != 0);
+    REQUIRE(graph.validate_authoring_receipt(initial) ==
+            GraphAuthoringReceiptStatus::Stale);
+    const auto after_add = graph.authoring_receipt();
+    REQUIRE(after_add.graph_identity == initial.graph_identity);
+    REQUIRE(after_add.generation != initial.generation);
+    REQUIRE(graph.validate_authoring_receipt(after_add) ==
+            GraphAuthoringReceiptStatus::Current);
+
+    SignalGraph other_graph;
+    REQUIRE(other_graph.validate_authoring_receipt(initial) ==
+            GraphAuthoringReceiptStatus::WrongGraph);
+
+    // clear() intentionally recycles NodeIds for compact runtime arrays.  The
+    // graph identity + generation pair still makes a pre-clear receipt stale.
+    graph.clear();
+    const auto recycled = graph.add_gain_node("Recycled gain");
+    REQUIRE(recycled == node);
+    REQUIRE(graph.validate_authoring_receipt(after_add) ==
+            GraphAuthoringReceiptStatus::Stale);
+}
+
 TEST_CASE("SignalGraph registers and processes custom nodes",
           "[host][graph][node-abi]") {
     SignalGraph graph;
