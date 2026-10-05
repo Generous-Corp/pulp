@@ -1,10 +1,12 @@
 #pragma once
 
 /// @file anchor_strategy.hpp
-/// Stable-anchor-id assignment for design-import IR nodes. Mirrors the
-/// TS-side @pulp/import-ir/src/anchors.ts strategy so the C++ and TS
-/// import pipelines produce compatible anchors and the tweaks layer
-/// (pulp-tweaks.json) works for either path.
+/// Stable-anchor-id assignment for design-import IR nodes. The rendered
+/// `children` axis mirrors the TS-side @pulp/import-ir/src/anchors.ts strategy
+/// so the C++ and TS import pipelines produce compatible anchors and the
+/// tweaks layer (pulp-tweaks.json) works for either path. Native C++ IR also
+/// carries an ordered `alternate_frames` axis; that axis is scoped to this
+/// native importer until the TS IR and its consumers grow the same field.
 ///
 /// Three strategies are supported:
 ///   • content-hash — used by stitch / v0 / claude / generic HTML.
@@ -15,8 +17,14 @@
 ///                    native IDs). "<adapter>:<source_node_id>".
 ///
 /// The walker is purely traversal-shaped — it mutates IRNode::stable_anchor_id
-/// but otherwise leaves the tree alone. Adapters call assign_anchors() in
-/// the final stage of their parse path.
+/// but otherwise leaves the tree alone. It visits both the rendered `children`
+/// axis and the ordered `alternate_frames` axis. Alternate roots use a reserved
+/// `@alternate[index]` path namespace and an `@alternate/<type>` content-hash
+/// namespace; adapter identities continue to use their source node IDs.
+/// Adapters call assign_anchors() in the final stage of their parse path.
+/// The `@alternate` namespace is reserved for this walker. Adapter strategies
+/// assume the source supplies unique node IDs; this low-level API preserves
+/// duplicate authored IDs rather than silently rewriting source identity.
 
 #include <pulp/view/design_import.hpp>
 #include <string>
