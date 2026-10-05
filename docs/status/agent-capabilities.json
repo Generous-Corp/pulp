@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 70,
+  "manifest_revision": 71,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 64
+        "capabilities": 65
       },
       "timebase": {
         "state": "partial",
@@ -6985,6 +6985,67 @@
       "contract_digest": "sha256:5c38ee6ffadc37a1003b10ab09464e7ccf2756905adf9586ec5d83573eda16d3"
     },
     {
+      "key": "signal.tempo-delay-wrapper",
+      "domain": "signal",
+      "status": "experimental",
+      "rt_class": "mixed",
+      "summary": "Prepared stereo tempo delay with owned history, bounded feedback, and fixed-head retiming.",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates bounded stereo history",
+        "process": "audio",
+        "reset": "audio",
+        "release": "control"
+      },
+      "state_model": "Prepared left/right fractional histories, bounded feedback/crossfeed, and transactional tempo targets.",
+      "seed_model": "none",
+      "input_domain": "finite stereo audio plus bounded sample or BeatDivision delay targets",
+      "output_domain": "wet-only stereo audio with sample-synchronous delayed output",
+      "units": [
+        "samples",
+        "beats per minute",
+        "linear amplitude",
+        "normalized amount"
+      ],
+      "latency": "zero direct-path algorithmic latency",
+      "tail": "configured delay when feedback is zero; unbounded while feedback is active",
+      "scheduling": "sample-synchronous fixed-head crossfade; invariant under callback partitioning",
+      "determinism": {
+        "repeatability": "tolerance_bounded",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/tempo_delay_wrapper.hpp",
+          "qualified_name": "pulp::signal::TempoDelayWrapper",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:5d2806536f2cde98a14d3c61d018a20d4382c4ee259c3443db8940e6c557da15"
+    },
+    {
       "key": "signal.tilt-eq",
       "domain": "signal",
       "summary": "Multi-channel tilt equalizer trading low- against high-shelf gain around a pivot frequency from a single control.",
@@ -8674,14 +8735,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 114,
+    "total": 115,
     "by_domain": {
       "audio": 9,
       "midi": 16,
       "music": 7,
       "offline": 0,
       "sequence": 2,
-      "signal": 64,
+      "signal": 65,
       "timebase": 11,
       "timeline": 5
     }
@@ -15040,6 +15101,39 @@
               "initialized()",
               "transition_active()",
               "remaining_transition_samples()",
+              "sample_rate()",
+              "maximum_delay_samples()",
+              "current_delay_samples()",
+              "target_delay_samples()"
+            ],
+            "enums": []
+          }
+        ],
+        "tempo_delay_wrapper.hpp": [
+          {
+            "class": "TempoDelayWrapperProcessResult",
+            "qualified_name": "pulp::signal::TempoDelayWrapperProcessResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "TempoDelayWrapper",
+            "qualified_name": "pulp::signal::TempoDelayWrapper",
+            "template": null,
+            "methods": [
+              "prepare(double sample_rate, std::size_t maximum_delay_samples, TempoDelayWrapperInterpolation interpolation = TempoDelayWrapperInterpolation::lagrange3, std::uint32_t transition_samples = 64)",
+              "process(float* left, float* right, std::size_t frame_count)",
+              "reset()",
+              "set_delay_samples(double samples)",
+              "set_delay_samples(double left_samples, double right_samples)",
+              "set_tempo(timebase::BeatDivision division, double beats_per_minute)",
+              "set_feedback(double feedback)",
+              "set_crossfeed(double crossfeed)",
+              "prepared()",
+              "initialized()",
               "sample_rate()",
               "maximum_delay_samples()",
               "current_delay_samples()",

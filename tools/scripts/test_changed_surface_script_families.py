@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import tempfile
 import tomllib
@@ -101,6 +102,20 @@ def live_reachability() -> tuple[Path, list[str], dict, set[str]]:
                                             lambda rel: families.read_text(root, rel))
         _LIVE.update(root=root, scripts=scripts, declared=declared, reached=reached)
     return _LIVE["root"], _LIVE["scripts"], _LIVE["declared"], _LIVE["reached"]
+
+
+class NamesStemTest(unittest.TestCase):
+    def test_the_word_set_answers_exactly_what_the_whole_word_regex_does(self) -> None:
+        texts = ["import foo_bar", "x = foo_barbaz", "foo_bar.run()", "foo_bar", "a-foo_bar-b",
+                 "_foo_bar", "foo_bar_", "'tools/scripts/foo_bar.py'", "foo\nbar", "", "café foo_bar",
+                 "foo-bar is a path", "use foo-bar.py", "xfoo-bar"]
+        stems = ["foo_bar", "foo", "bar", "foo-bar", "caf", "x"]
+        for text in texts:
+            words = families.word_set(text)
+            for stem in stems:
+                with self.subTest(text=text, stem=stem):
+                    self.assertEqual(families.names_stem(stem, text, words),
+                                     re.search(r"\b" + re.escape(stem) + r"\b", text) is not None)
 
 
 class GeneratedFamiliesTest(FamilyFixture):

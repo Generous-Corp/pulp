@@ -5,6 +5,12 @@ Protected base: `origin/main` at `ff83c0e9fd147dc143af7228eac0e3298e84b35f`
 Worktree: `/Users/danielraffel/Code/pulp-neural-package-b-20261005`  
 Scope: benchmark/test receipt only; no manifest or runtime source changes.
 
+> **Historical audit snapshot.** This receipt records the package-B benchmark
+> at the protected base above; it is not a current-head status receipt. For
+> current coordination and acceptance state, see the [neural audio program
+> status](../status/neural-audio-program-status-20261004.md) and the [neural
+> real-time competitive proof plan](neural-competitive-proof-plan-20261003.md).
+
 ## Reproduction
 
 The governed build was run with:

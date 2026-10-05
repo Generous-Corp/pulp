@@ -1,0 +1,10 @@
+{
+  "schema": "pulp-load-api-exemptions/v1",
+  "reason": "public core/host functions that reach a plugin or module loader but are not in script_test_inputs.LOAD_APIS; each names the mechanism that covers a test that calls it",
+  "exemptions": {
+    "PluginScanner::scan": "the member name is too generic to scan sources for; the bundles a scanner test opens reach its spawn closure through add_dependencies or pulp_test_spawns edges",
+    "SignalGraph::PreparedTopologyEdit::add_owned_builtin_plugin_node": "refuses any slot that is not PluginFormat::BuiltIn and adopts it through add_plugin_node's slot overload, which loads nothing; it never reaches PluginSlot::load",
+    "SignalGraph::load_live_swap_plugin_locked_": "a private member of SignalGraph (signal_graph_runtime.hpp), reached only through SignalGraph's own swap entry points and PluginSlot::load, which LOAD_APIS lists",
+    "dlopen": "the Windows shim of the platform dlopen in dl_shim.hpp; SPAWN_SIGNAL matches the dlopen name itself"
+  }
+}

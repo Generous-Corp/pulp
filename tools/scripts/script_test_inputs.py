@@ -197,12 +197,32 @@ def outside_gate_profile(inventory: dict, root: Path, scope: dict[str, str] | No
 
 
 class Walker:
+    """Resolves one tree. A build_list() run shares one Walker across every
+    test, so it memoizes what a file says (its imports, its literal paths)
+    and whether a path is in the repo: the tree does not change mid-run."""
+
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
+        self._in_repo_memo: dict[Path, bool] = {}
+        self._imports_memo: dict[Path, list[tuple] | None] = {}
+        self._literals_memo: dict[Path, list[Path]] = {}
 
     # -- resolution helpers -------------------------------------------------
     def _in_repo(self, p: Path) -> bool:
-        return _rel(p, self.root) is not None and p.exists()
+        if p not in self._in_repo_memo:
+            self._in_repo_memo[p] = self._probe_in_repo(p)
+        return self._in_repo_memo[p]
+
+    def _probe_in_repo(self, p: Path) -> bool:
+        if _rel(p, self.root) is None:
+            return False
+        # A test argument is probed as a path, and some are not paths at all:
+        # a PASS_REGULAR_EXPRESSION or a long key=value list can exceed the
+        # file-name limit, which stat() reports as an error, not "absent".
+        try:
+            return p.exists()
+        except OSError:
+            return False
 
     def python_module_candidates(self, name: str, search: list[Path]) -> list[Path]:
         parts = name.split(".")
@@ -212,15 +232,19 @@ class Walker:
             out.append(base.joinpath(*parts) / "__init__.py")
         return out
 
-    def walk_python(self, entry: Path, search: list[Path], seen: set[Path]) -> None:
-        if entry in seen or not self._in_repo(entry):
-            return
-        seen.add(entry)
+    def python_imports(self, entry: Path) -> list[tuple] | None:
+        """The file's imports in source order, or None when it does not parse:
+        ("rel", candidate paths) for a relative import, every one of which is
+        walked, and ("abs", module names) for an absolute one, resolved against
+        the search path of whichever test reaches the file."""
+        if entry in self._imports_memo:
+            return self._imports_memo[entry]
         try:
             tree = ast.parse(entry.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
-            return
-        local_search = [entry.parent] + search
+            self._imports_memo[entry] = None
+            return None
+        imports: list[tuple] = []
         for node in ast.walk(tree):
             names: list[str] = []
             if isinstance(node, ast.Import):
@@ -231,16 +255,33 @@ class Walker:
                     for _ in range(node.level - 1):
                         base = base.parent
                     mod = node.module or ""
-                    for cand in self.python_module_candidates(mod, [base]) if mod else [base / "__init__.py"]:
-                        self.walk_python(cand, search, seen)
+                    cands = list(self.python_module_candidates(mod, [base]) if mod else [base / "__init__.py"])
                     for a in node.names:
-                        for cand in self.python_module_candidates((mod + "." if mod else "") + a.name, [base]):
-                            self.walk_python(cand, search, seen)
+                        cands += self.python_module_candidates((mod + "." if mod else "") + a.name, [base])
+                    imports.append(("rel", cands))
                     continue
                 names = [node.module] if node.module else []
                 # `from pkg import mod`: the alias may be a submodule file.
                 names += [f"{node.module}.{a.name}" for a in node.names] if node.module else []
-            for name in names:
+            if names:
+                imports.append(("abs", names))
+        self._imports_memo[entry] = imports
+        return imports
+
+    def walk_python(self, entry: Path, search: list[Path], seen: set[Path]) -> None:
+        if entry in seen or not self._in_repo(entry):
+            return
+        seen.add(entry)
+        imports = self.python_imports(entry)
+        if imports is None:
+            return
+        local_search = [entry.parent] + search
+        for kind, items in imports:
+            if kind == "rel":
+                for cand in items:
+                    self.walk_python(cand, search, seen)
+                continue
+            for name in items:
                 for cand in self.python_module_candidates(name, local_search):
                     if self._in_repo(cand):
                         self.walk_python(cand, search, seen)
@@ -286,6 +327,12 @@ class Walker:
         self.literal_paths(entry, seen)
 
     def literal_paths(self, entry: Path, seen: set[Path]) -> None:
+        if entry not in self._literals_memo:
+            self._literals_memo[entry] = self._literal_paths(entry)
+        seen.update(self._literals_memo[entry])
+
+    def _literal_paths(self, entry: Path) -> list[Path]:
+        found: list[Path] = []
         text = entry.read_text(encoding="utf-8", errors="replace")
         for m in LITERAL_RE.finditer(text):
             rel = m.group("p")
@@ -295,7 +342,8 @@ class Walker:
                 continue
             cand = self.root / rel
             if cand.exists():
-                seen.add(cand)
+                found.append(cand)
+        return found
 
 
 def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str]]:
@@ -332,13 +380,14 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
-def inputs_for(test: dict, root: Path, build_dir: Path | None = None) -> dict | None:
+def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
+               walker: Walker | None = None, tracked: set[str] | None = None) -> dict | None:
     props = {p["name"]: p["value"] for p in test.get("properties", [])}
     wd = Path(props.get("WORKING_DIRECTORY") or root)
     kind, entry, args = classify(test.get("command") or [], root)
     if kind == "undeclarable":
         return None
-    w = Walker(root)
+    w = walker or Walker(root)
     seen: set[Path] = set()
     search = [wd, root / "tools" / "scripts", root / "tools" / "ci"]
     env = props.get("ENVIRONMENT") or []
@@ -372,7 +421,8 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None) -> dict | 
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
                 seen.add(cand)
-    tracked = tracked_paths(root)
+    if tracked is None:
+        tracked = tracked_paths(root)
     rels = sorted({r for r in (_rel(p, root) for p in seen) if r and r != "." and is_tracked(r, tracked)})
     entry_rel = f"{BINARY_DIR_TOKEN}/{generated}" if generated is not None else _rel(entry, root)
     return {"kind": kind, "entry": entry_rel, "inputs": rels}
@@ -397,7 +447,7 @@ WALK_UP = re.compile(r'current_path\(\)\s*/\s*(?:"\.\./\.\.|"\.\."\s*/\s*"\.\.")
 # entry points. A compiled test whose sources (or the test/ headers they
 # include) call one runs something at run time; whether that something is a
 # program this repo builds is what its spawn edges, or a reviewed
-# pulp_test_spawns(NONE), say.
+# pulp_test_spawns(NONE REASON ...), say.
 SPAWN_CLASSES = ("ChildProcess", "ChildProcessManager", "ConnectedChildProcess")
 # And its free functions that run a program.
 SPAWN_FUNCTIONS = ("exec",)
@@ -405,7 +455,71 @@ SPAWN_FUNCTIONS = ("exec",)
 # scanner calls that open bundles from disk, and the dlopen shim. PluginSlot alone is an interface that
 # tests implement in memory, so only its loader counts.
 LOAD_APIS = (r"PluginSlot::load\s*\(", r"scan_clap_bundle\s*\(", r"scan_vst3_bundle\s*\(",
-             r"scan_lv2_bundle\s*\(", r"scan_directory\s*\(", r"scan_audio_units\s*\(", r"dl_open\s*\(")
+             r"scan_lv2_bundle\s*\(", r"scan_directory\s*\(", r"scan_audio_units\s*\(", r"dl_open\s*\(",
+             r"load_node_pack\s*\(", r"add_plugin_node\s*\(", r"add_plugin_node_from_drop\s*\(",
+             r"GraphSerializer::from_json\s*\(")
+# Public core/host functions that reach a loader but are not in LOAD_APIS,
+# each with the mechanism that covers a test calling it (loader_coverage).
+LOAD_API_EXEMPTIONS = Path("tools/ci/load_api_exemptions.json")
+_PLATFORM_LOADER = re.compile(r"(?<![\w.>])(?:::)?(?:dlopen|LoadLibrary(?:Ex)?[AW]?|CFBundleCreate\w*"
+                              r"|CFBundleLoadExecutable\w*)\s*\(")
+_FUNCTION_DEFINITION = re.compile(
+    r"(?<![\w:~])((?:\w+::)*~?\w+)\s*\(((?:[^;{}()]|\([^()]*\))*)\)\s*"
+    r"(?:(?:const|noexcept|override|final)\s*)*(?:->\s*[^{;]+)?\{")
+_NOT_A_FUNCTION = frozenset({"if", "for", "while", "switch", "catch", "return", "sizeof", "defined"})
+_HOST_SOURCES = (".cpp", ".cc", ".mm", ".hpp", ".h")
+
+
+def _definitions(root: Path, prefix: str) -> list[tuple[str, str, str]]:
+    """(qualified name, file, body) for every function defined under prefix."""
+    out = []
+    for path in sorted((root / prefix).rglob("*")):
+        if path.suffix not in _HOST_SOURCES or not path.is_file():
+            continue
+        text = strip_c_comments(path.read_text(encoding="utf-8", errors="replace"))
+        for match in _FUNCTION_DEFINITION.finditer(text):
+            name = match.group(1)
+            if name in _NOT_A_FUNCTION:
+                continue
+            end, depth = match.end(), 1
+            while end < len(text) and depth:
+                depth += {"{": 1, "}": -1}.get(text[end], 0)
+                end += 1
+            out.append((name, path.relative_to(root).as_posix(), text[match.end():end]))
+    return out
+
+
+def loader_coverage(root: Path) -> list[str]:
+    """Public core/host functions that reach a plugin or module loader but
+    that LOAD_APIS cannot see called, and are not exempt.
+
+    The seeds are the platform loaders, dl_open, every LOAD_APIS function and
+    every core/host function whose own body calls a platform loader (public
+    or not, so a public wrapper of an internal loader is caught). A function
+    is public when it is defined in, or its name is declared in, a header
+    under core/host/include. One level, by name: a public function whose
+    body calls a seed must match a LOAD_APIS pattern or be exempt."""
+    definitions = _definitions(root, "core/host")
+    direct = {name for name, _, body in definitions if _PLATFORM_LOADER.search(body)}
+    seed_names = sorted({name.split("::")[-1] for name in direct} | {"dl_open"})
+    seed_call = re.compile(r"(?<![\w])(?:%s)\s*\(" % "|".join(map(re.escape, seed_names)))
+    load_apis = [re.compile(r"\b" + api) for api in LOAD_APIS]
+    headers = "\n".join(strip_c_comments(p.read_text(encoding="utf-8", errors="replace"))
+                        for p in sorted((root / "core/host/include").rglob("*.hpp")))
+    exempt = set((_read_json(root / LOAD_API_EXEMPTIONS) or {}).get("exemptions") or {})
+    missing, seen = [], set()
+    for name, rel, body in definitions:
+        short = name.split("::")[-1]
+        public = rel.startswith("core/host/include/") or re.search(r"\b%s\s*\(" % re.escape(short), headers)
+        if not public or name in seen:
+            continue
+        if not (_PLATFORM_LOADER.search(body) or seed_call.search(body) or any(a.search(body) for a in load_apis)):
+            continue
+        seen.add(name)
+        if any(a.search(name + "(") or a.search(short + "(") for a in load_apis) or name in exempt:
+            continue
+        missing.append(f"{name} ({rel})")
+    return sorted(missing)
 SPAWN_SIGNAL = re.compile(
     r"\b(?:%s)\b" % "|".join(SPAWN_CLASSES)
     + r"|(?<![\w.>])(?:%s)\s*\(" % "|".join(SPAWN_FUNCTIONS)
@@ -627,6 +741,59 @@ def spawn_state(root: Path, rec: dict, exe: str = "",
     return ("undeclared" if unmatched else state), spawning, unmatched
 
 
+# pulp_test_spawns(<test> NONE REASON "...") reviews that a test starts and
+# loads nothing this tree builds. A build artifact can still reach such a test
+# without an edge when its sources name a build path: an environment variable
+# that names a build directory or binary, or a directory walk beside a literal
+# build path. Those reviews must be confirmed by the test's owner, in data.
+NONE_BUILD_PATH_REVIEWS = Path("tools/ci/spawn_none_build_path_reviews.json")
+_GETENV = re.compile(r'\bgetenv\s*\(\s*"([^"]+)"')
+_BUILD_ENV = re.compile(r"BUILD|BINARY|_BIN$|OUT(?:PUT)?_DIR|ARTIFACT|^PATH$")
+_DIR_WALK = re.compile(r"\bdirectory_iterator\b|\bglob\s*\(")
+_BUILD_LITERAL = re.compile(r'"[^"\n]*(?:\bbuild(?:-[\w.-]+)?/|CMAKE_BINARY_DIR)[^"\n]*"')
+_PLACEHOLDER_REASON = re.compile(r"\b(?:legacy|predates|todo|tbd|unknown)\b", re.I)
+
+
+def none_build_path_signals(root: Path, sources: list[str]) -> list[str]:
+    """How a NONE-reviewed test's sources could reach a build artifact."""
+    found = []
+    for src in sources:
+        path = root / src
+        if not path.is_file():
+            continue
+        text = strip_c_comments(path.read_text(encoding="utf-8", errors="replace"))
+        names = sorted({n for n in _GETENV.findall(text) if _BUILD_ENV.search(n)})
+        if names:
+            found.append(f"{src}: getenv {', '.join(names)}")
+        literal = _BUILD_LITERAL.search(text)
+        if literal and _DIR_WALK.search(text):
+            found.append(f"{src}: walks a directory and names {literal.group(0)}")
+    return found
+
+
+def none_review_problems(root: Path, build_dir: Path | None) -> list[tuple[str, str, set[str]]]:
+    """NONE reviews whose reason is no claim, or whose sources name a build
+    path without an owner's confirmation in NONE_BUILD_PATH_REVIEWS."""
+    index = test_executables(build_dir) or {}
+    reviews = (_read_json(root / NONE_BUILD_PATH_REVIEWS) or {}).get("reviews") or {}
+    problems = []
+    for exe, rec in sorted(index.items()):
+        if not rec.get("spawns_none"):
+            continue
+        target = rec.get("target", exe)
+        reason = rec.get("spawns_none_reason") or ""
+        if not reason.strip() or _PLACEHOLDER_REASON.search(reason):
+            problems.append(("NONE review states no claim", f"{target}: {reason!r}", set()))
+        signals = none_build_path_signals(root, list(rec.get("sources") or []))
+        if signals and target not in reviews:
+            problems.append(("NONE review names a build path", f"{target}: {'; '.join(signals)}",
+                             set(rec.get("sources") or [])))
+    for target in sorted(set(reviews) - {rec.get("target", exe) for exe, rec in index.items()
+                                          if rec.get("spawns_none")}):
+        problems.append(("stale NONE build-path review", target, {NONE_BUILD_PATH_REVIEWS.as_posix()}))
+    return problems
+
+
 def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
     """`kind: compiled` entries from the configure-time evidence, or None when
     the build directory carries none (a tree configured before the helper)."""
@@ -721,6 +888,7 @@ def base_list(root: Path, base: str | None) -> dict | None:
 def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> dict:
     tests = {}
     excluded = outside_gate_profile(inventory, root)
+    walker, tracked = Walker(root), tracked_paths(root)
     for t in inventory.get("tests", []):
         name = t.get("name", "")
         if not name or name.endswith("_NOT_BUILT") or name in excluded:
@@ -728,7 +896,7 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         cmd = t.get("command") or []
         if cmd and _rel(Path(cmd[0]), root) is None and not os.path.basename(cmd[0]).startswith(INTERPRETERS):
             continue  # a compiled test binary or a tool outside the repo: the graph owns it
-        rec = inputs_for(t, root, build_dir)
+        rec = inputs_for(t, root, build_dir, walker=walker, tracked=tracked)
         if rec is not None:
             tests[name] = rec
     doc = {"schema": SCHEMA, "tests": dict(sorted(tests.items()))}
@@ -998,6 +1166,8 @@ def main(argv: list[str]) -> int:
                     blocking.append(item)
                 else:
                     advisory.append(item)
+    if "executables" in current:
+        blocking.extend(none_review_problems(root, build_dir))
     scope = f"diff-scoped against {base}" if base else "full compare (no base resolved)"
     if advisory:
         print(f"script-test-inputs: note: {len(advisory)} entr{'y' if len(advisory) == 1 else 'ies'} drifted from "
@@ -1013,6 +1183,11 @@ def main(argv: list[str]) -> int:
         print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches ({scope}).")
         for kind, name, _ in blocking[:40]:
             print(f"  {kind}: {name}")
+        if any(kind.startswith(("NONE review", "stale NONE")) for kind, _, _ in blocking):
+            print("A pulp_test_spawns(<test> NONE REASON ...) review must state what makes the test load\n"
+                  "nothing this tree builds. When its sources name a build path (a build-directory or binary\n"
+                  f"environment variable, or a directory walk beside a build path), its owner confirms it in\n"
+                  f"{NONE_BUILD_PATH_REVIEWS.as_posix()} with the reason the path never holds a tree-built artifact.")
         if any(kind == "new undeclared data source" for kind, _, _ in blocking):
             print("A compiled test source reads the checkout (it names PULP_SOURCE_DIR, test/fixtures, or a\n"
                   "definition pointing into the checkout) without declaring what it reads. Declare it next to\n"

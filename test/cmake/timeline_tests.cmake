@@ -766,9 +766,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")
 # test forks without exec. The graph-binding suite loads PulpGain.clap only where
 # the top-level CMakeLists.txt gives it that edge (examples builds), and loads
 # nothing built otherwise.
-pulp_test_spawns(pulp-test-timeline-journal NONE)
+pulp_test_spawns(pulp-test-timeline-journal NONE REASON "forks itself without exec and loads nothing the tree builds")
 if(NOT PULP_BUILD_EXAMPLES)
-    pulp_test_spawns(pulp-test-timeline-graph-binding NONE)
+    pulp_test_spawns(pulp-test-timeline-graph-binding NONE REASON "without examples it loads nothing the tree builds")
 endif()
 
 # Runtime data: these read the timeline fixture corpus and nothing else from
@@ -777,3 +777,8 @@ pulp_test_data(pulp-test-timeline-persistence NO_DEFINE PATHS test/fixtures/time
 pulp_test_data(pulp-test-timeline-replay-golden NO_DEFINE PATHS test/fixtures/timeline)
 pulp_test_data(pulp-test-fixture-runner-cli NO_DEFINE PATHS test/fixtures/timeline)
 pulp_test_data(pulp-test-timeline-document-fuzz NO_DEFINE PATHS test/fixtures/timeline)
+
+# Reviewed plugin-loader calls (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-timeline-multitrack-pdc NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")
+pulp_test_spawns(pulp-test-timeline-offline-renderer NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")
+pulp_test_spawns(pulp-test-timeline-phase1-examples NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")

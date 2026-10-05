@@ -511,3 +511,8 @@ pulp_add_test_suite(pulp-test-processor-node-adapter
 pulp_add_test_suite(pulp-test-generated-dsp-graph-parity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_generated_dsp_graph_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+
+# Reviewed plugin-loader calls (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-baked-graph-processor-parity NONE REASON "adds only in-memory PluginSlot instances and reloads graphs it serialized from them with GraphSerializer::from_json, so it loads nothing the tree builds")
+pulp_test_spawns(pulp-test-group-sampler-host-graph NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")
+pulp_test_spawns(pulp-test-signal-graph-executor-parity NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")

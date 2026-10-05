@@ -35,7 +35,7 @@ input the graph cannot see:
   (`pulp_test_data()`, globs allowed); an executable marked
   `data: undeclared` reads the checkout without a declaration and is always
   affected, and so is one marked `spawns: undeclared` (it starts a process
-  with no spawn edge and no reviewed `pulp_test_spawns(NONE)`, so what it runs
+  with no spawn edge and no reviewed `pulp_test_spawns(NONE REASON ...)`, so what it runs
   is unknown); one marked `data: whole_checkout` (it walks the tree) is
   always affected too;
 - a compiled test is affected when a directory its command line names

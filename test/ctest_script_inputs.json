@@ -144,6 +144,7 @@
     "tools/cli/cmd_audio_plugin_common.cpp",
     "tools/cli/cmd_audio_plugin_inspect.cpp",
     "tools/cli/cmd_audio_render.cpp",
+    "tools/cli/cmd_bake.cpp",
     "tools/cli/cmd_config.cpp",
     "tools/cli/cmd_design_subcommands.cpp",
     "tools/cli/cmd_doctor.cpp",
@@ -210,6 +211,18 @@
    ],
    "spawning_sources": [
     "test/test_authoring_capsule_hostile.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-baked-graph-processor-parity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_baked_graph_processor_parity.cpp"
    ],
    "spawns": "none",
    "undeclared_sources": []
@@ -729,7 +742,9 @@
    ],
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [],
+   "runtime_targets": [
+    "pulp-mcp"
+   ],
    "sources": [
     "test/test_cli_project_command.cpp",
     "tools/cli/cli_common.cpp",
@@ -761,7 +776,7 @@
     "tools/cli/tartci_lease.cpp",
     "tools/cli/update_check.cpp"
    ],
-   "spawns": "none",
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-cli-shellout": {
@@ -1521,6 +1536,18 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-group-graph-editor": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_graph_editor_open.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-group-native-platform": {
    "data": "none",
    "inputs": [],
@@ -1543,9 +1570,21 @@
     "test/fixtures/sample-region-compat/bake/legacy-v1.pulpbake"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_baked_codec.cpp"
    ],
+   "spawning_sources": [
+    "test/test_signal_graph_anticipation.cpp",
+    "test/test_signal_graph_live_swap_continuity.cpp",
+    "test/test_signal_graph_live_swap_staging.cpp",
+    "test/test_signal_graph_metadata_cache.cpp",
+    "test/test_signal_graph_parallel_plugin_scratch.cpp",
+    "test/test_signal_graph_pdc_swap_continuity.cpp",
+    "test/test_signal_graph_prepared_swap_live.cpp",
+    "test/test_signal_graph_transport.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-group-script-format": {
@@ -1647,6 +1686,19 @@
    "sources": [],
    "spawning_sources": [
     "test/test_host_regression.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-host-signal-graph": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_host_signal_graph.cpp",
+    "test/test_host_signal_graph_prepared_edit.cpp"
    ],
    "spawns": "none",
    "undeclared_sources": []
@@ -1833,6 +1885,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-node-pack": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-node-pack-module"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_node_pack.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-nsis-installer": {
    "data": "none",
    "inputs": [],
@@ -1869,6 +1935,18 @@
     "test/test_osc_render_wav_cli.cpp"
    ],
    "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-plugin-manager-panel": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_plugin_manager_panel.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-project-package": {
@@ -1910,6 +1988,18 @@
    "sources": [
     "test/test_reload_library.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-sample-region-runtime": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/sample_region_i2/i2_negative_controls.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-sample-region-sequencer": {
@@ -1955,6 +2045,18 @@
    "sources": [
     "test/test_ship_tracing_guard.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-signal-graph-executor-parity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_signal_graph_executor_parity.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-streaming-model-contract": {
@@ -2006,7 +2108,11 @@
    "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
-    "test/test_timeline_graph_automation_delivery.cpp"
+    "test/test_sequence_processor.cpp",
+    "test/test_timeline_graph_automation_delivery.cpp",
+    "test/test_timeline_graph_binding.cpp",
+    "test/test_timeline_graph_binding_lifecycle.cpp",
+    "test/test_timeline_graph_binding_publication.cpp"
    ],
    "spawns": "none",
    "undeclared_sources": []
@@ -2019,6 +2125,43 @@
    "sources": [],
    "spawning_sources": [
     "test/test_timeline_file_journal.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-timeline-multitrack-pdc": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "examples/timeline-phase1/timeline_multitrack_arrangement.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-timeline-offline-renderer": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_timeline_offline_renderer.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-timeline-phase1-examples": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "examples/timeline-phase1/timeline_example_engine.cpp",
+    "examples/timeline-phase1/timeline_multitrack_arrangement.cpp"
    ],
    "spawns": "none",
    "undeclared_sources": []
@@ -2148,6 +2291,7 @@
   "pulp-test-clap-hosted-editor",
   "pulp-test-clap-latency-quirk",
   "pulp-test-clap-midi-events",
+  "pulp-test-clap-slot-channel-width",
   "pulp-test-clap-webview",
   "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
@@ -2717,6 +2861,8 @@
   "affected-targets-selftest": {
    "entry": "tools/scripts/test_affected_targets.py",
    "inputs": [
+    "core/host",
+    "core/host/include",
     "core/runtime",
     "core/runtime/include/pulp/runtime/log.hpp",
     "core/view",
@@ -2733,6 +2879,8 @@
     "test/test_widget_bridge.cpp",
     "test/test_widgets.cpp",
     "test/test_widgets_label.cpp",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cli",
     "tools/cli/cmd_build.cpp",
     "tools/cmake/PulpTestData.cmake",
@@ -3135,6 +3283,8 @@
   "changed-surface-policy-selftest": {
    "entry": "tools/scripts/test_changed_surface_policy.py",
    "inputs": [
+    "core/host",
+    "core/host/include",
     "core/platform/include/pulp/platform/child_process.hpp",
     "core/signal/include/pulp/signal/signal.hpp",
     "docs/status",
@@ -3159,6 +3309,8 @@
     "tools/ci/executable_selection.py",
     "tools/ci/key_blind_executables.json",
     "tools/ci/lane_reuse_record.py",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",
@@ -3187,9 +3339,13 @@
   "changed-surface-registration-projection-selftest": {
    "entry": "tools/scripts/test_changed_surface_registration_projection.py",
    "inputs": [
+    "core/host",
+    "core/host/include",
     "docs/status",
     "test/fixtures",
     "test/support",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/gate_common.py",
@@ -3201,6 +3357,8 @@
   "changed-surface-runner-selftest": {
    "entry": "tools/scripts/test_run_changed_surface_tests.py",
    "inputs": [
+    "core/host",
+    "core/host/include",
     "docs/status",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/test_pulp_add_sparkle.cmake",
@@ -3216,6 +3374,8 @@
     "tools/ci/governed-build.sh",
     "tools/ci/key_blind_executables.json",
     "tools/ci/lane_reuse_record.py",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpSparkle.cmake",
     "tools/cmake/PulpTestData.cmake",
     "tools/cmake/PulpWgpuUniversal.cmake",
@@ -3230,9 +3390,13 @@
   "changed-surface-script-families-drift": {
    "entry": "tools/scripts/changed_surface_script_families.py",
    "inputs": [
+    "core/host",
+    "core/host/include",
     "docs/status",
     "test/fixtures",
     "test/support",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts",
     "tools/scripts/changed_surface_inventory.py",
@@ -3251,12 +3415,16 @@
     ".github/workflows",
     ".github/workflows/build-macos.yml",
     ".github/workflows/build.yml",
+    "core/host",
+    "core/host/include",
     "core/view/src/widgets.cpp",
     "docs/status",
     "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/support",
+    "tools/ci/load_api_exemptions.json",
     "tools/ci/source_selftests.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/wide_non_native_checks.json",
     "tools/cli/cmd_run.cpp",
     "tools/cmake",
@@ -3292,6 +3460,8 @@
     ".github/workflows",
     ".github/workflows/build-macos.yml",
     ".github/workflows/build.yml",
+    "core/host",
+    "core/host/include",
     "docs/status",
     "docs/status/agent-capabilities.json",
     "docs/status/authority-navigation.json",
@@ -3318,10 +3488,12 @@
     "tools/ci/ios_gate_digest.py",
     "tools/ci/key_blind_executables.json",
     "tools/ci/link_members.py",
+    "tools/ci/load_api_exemptions.json",
     "tools/ci/object_deps.py",
     "tools/ci/reuse_record.py",
     "tools/ci/source_selftests.json",
     "tools/ci/spawn_closure.py",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake",
@@ -3831,9 +4003,13 @@
   "ctest-inventory-parity-self-check": {
    "entry": "tools/scripts/ctest_inventory_parity.py",
    "inputs": [
+    "core/host",
+    "core/host/include",
     "docs/status",
     "test/fixtures",
     "test/support",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/ctest_inventory_parity.py",
@@ -4110,6 +4286,8 @@
    "inputs": [
     ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
+    "core/host",
+    "core/host/include",
     "docs/status",
     "test/ctest_script_inputs.json",
     "test/fixtures",
@@ -4121,9 +4299,11 @@
     "tools/ci/executable_selection.py",
     "tools/ci/key_blind_executables.json",
     "tools/ci/link_members.py",
+    "tools/ci/load_api_exemptions.json",
     "tools/ci/object_deps.py",
     "tools/ci/reuse_record.py",
     "tools/ci/spawn_closure.py",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_executable_keys.py",
     "tools/ci/test_receipts_shadow.py",
     "tools/cmake",
@@ -6017,6 +6197,15 @@
    ],
    "kind": "python"
   },
+  "mlx-named-model-harness-selftest": {
+   "entry": "tools/validation/test_mlx_named_model_harness.py",
+   "inputs": [
+    "test/fixtures/neural/example.nam",
+    "tools/validation/mlx_named_model_harness.py",
+    "tools/validation/test_mlx_named_model_harness.py"
+   ],
+   "kind": "python"
+  },
   "msvc-string-literal-guard": {
    "entry": "tools/scripts/msvc_string_literal_guard.py",
    "inputs": [
@@ -6182,6 +6371,8 @@
    "inputs": [
     ".github/workflows/build.yml",
     "core/gpu_audio/CMakeLists.txt",
+    "core/host",
+    "core/host/include",
     "docs/status",
     "docs/status/consumption-profiles.json",
     "docs/status/consumption-profiles.schema.json",
@@ -6201,9 +6392,11 @@
     "tools/ci/install_visual_python_deps.sh",
     "tools/ci/key_blind_executables.json",
     "tools/ci/lane_reuse_record.py",
+    "tools/ci/load_api_exemptions.json",
     "tools/ci/pr_head_affected_tests.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
@@ -6521,6 +6714,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6556,6 +6750,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6591,6 +6786,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6626,6 +6822,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6680,6 +6877,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6716,6 +6914,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6754,6 +6953,7 @@
     "tools/rack/patch_corpus.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6793,6 +6993,7 @@
     "tools/rack/patch_corpus.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6828,6 +7029,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6863,6 +7065,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6922,6 +7125,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -6959,6 +7163,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7020,6 +7225,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7072,6 +7278,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7111,6 +7318,7 @@
     "tools/rack/patch_gate.cpp",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/replay_licence_fix.py",
     "tools/rack/run_state.py",
@@ -7148,6 +7356,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7184,6 +7393,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7240,6 +7450,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7275,6 +7486,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7327,6 +7539,7 @@
     "tools/rack/patch_lang.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7362,6 +7575,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7397,6 +7611,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7441,6 +7656,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7492,10 +7708,57 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
     "tools/rack/test_prompt_fidelity.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-prompt-handoff-selftest": {
+   "entry": "tools/rack/test_prompt_handoff.py",
+   "inputs": [
+    "core/audio",
+    "core/format",
+    "core/platform",
+    "core/runtime",
+    "core/signal",
+    "core/simd",
+    "core/state",
+    "core/timebase",
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/generate.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_prompt_handoff.py",
+    "tools/rack/toolchain_headers.py",
     "tools/rack/toolpaths.py"
    ],
    "kind": "python"
@@ -7554,6 +7817,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7589,6 +7853,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7624,6 +7889,7 @@
     "tools/rack/patch.py",
     "tools/rack/patch_vocabulary.py",
     "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
     "tools/rack/rack_open.py",
     "tools/rack/run_state.py",
     "tools/rack/signal_path.py",
@@ -7779,6 +8045,8 @@
     ".github/workflows",
     ".github/workflows/build-macos.yml",
     ".github/workflows/build.yml",
+    "core/host",
+    "core/host/include",
     "core/view/src/widgets.cpp",
     "docs/status",
     "docs/status/agent-capabilities.json",
@@ -7807,10 +8075,12 @@
     "tools/ci/ios_gate_digest.py",
     "tools/ci/key_blind_executables.json",
     "tools/ci/link_members.py",
+    "tools/ci/load_api_exemptions.json",
     "tools/ci/object_deps.py",
     "tools/ci/reuse_record.py",
     "tools/ci/source_selftests.json",
     "tools/ci/spawn_closure.py",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake",
@@ -7848,14 +8118,18 @@
    "inputs": [
     ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
+    "core/host",
+    "core/host/include",
     "docs/status",
     "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/support",
     "tools/ci/codemodel_digest.py",
     "tools/ci/link_members.py",
+    "tools/ci/load_api_exemptions.json",
     "tools/ci/object_deps.py",
     "tools/ci/reuse_record.py",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_codemodel_digest.py",
     "tools/ci/test_reuse_record.py",
     "tools/ci/testdata/codemodel_digest",
@@ -7998,9 +8272,13 @@
   "script-test-inputs-drift": {
    "entry": "tools/scripts/script_test_inputs.py",
    "inputs": [
+    "core/host",
+    "core/host/include",
     "docs/status",
     "test/fixtures",
     "test/support",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py"
@@ -8011,6 +8289,8 @@
    "entry": "tools/scripts/test_script_test_inputs.py",
    "inputs": [
     "core/events/include/pulp/events/child_process_manager.hpp",
+    "core/host",
+    "core/host/include",
     "core/host/include/pulp/host",
     "core/platform/include/pulp/platform/child_process.hpp",
     "docs/status",
@@ -8018,6 +8298,8 @@
     "examples/pulp-gain/CMakeLists.txt",
     "test/fixtures",
     "test/support",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",

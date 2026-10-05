@@ -57,5 +57,5 @@ pulp_test_spawns(pulp-test-cli-kit-commands NOT_RUN pulp-screenshot)
 
 # It links the kit runner, whose screenshot path (pulp-screenshot) it never
 # reaches, and the package registry's curl/powershell download.
-pulp_test_spawns(pulp-test-cli-content-commands NONE)
+pulp_test_spawns(pulp-test-cli-content-commands NONE REASON "links the kit runner, whose screenshot path it never reaches, and the registry's curl/powershell download, it runs nothing the tree builds")
 pulp_test_spawns(pulp-test-cli-content-commands NOT_RUN pulp-screenshot)
