@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 123,
+  "inventory_version": 124,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,12 +42,12 @@
     }
   ],
   "counts": {
-    "public_headers": 502,
-    "reviewed_headers": 223,
+    "public_headers": 503,
+    "reviewed_headers": 224,
     "legacy_unreviewed_headers": 279,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 120,
+      "capability_entrypoint": 121,
       "capability_support": 44,
       "infrastructure": 57,
       "legacy_unreviewed": 279,
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 270,
-        "reviewed_headers": 124,
+        "public_headers": 271,
+        "reviewed_headers": 125,
         "legacy_unreviewed_headers": 146,
         "unsupported_headers": 2
       },
@@ -1207,7 +1207,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_prepared_topology_edit.hpp",
-      "fingerprint": "sha256:e4d22adde4a16ab367d0b8c1acbcdced9cec747b1bbe5543003c5d396d39c628",
+      "fingerprint": "sha256:0022182b0e350a7aa975e8eab7ef47b1ca1e1c15bfaffd9b6ce13aa10370fb94",
       "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1218,7 +1218,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:2184129ca983c41e575e23199b83bb0ef6dc12a748154995f695e755db7bc711",
+      "fingerprint": "sha256:a618fa2c7869e01210adb59eb8369fe6d869e113e8cadffc7daffaa70d0a08e3",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4018,7 +4018,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/processing_switch_crossfade.hpp",
-      "fingerprint": "sha256:8b34df01f4ebcdc418f040b2e58a203c3b274867c916648954bfb31fa06287fe",
+      "fingerprint": "sha256:d24a6d343cd8b18da0fc1bcb71c9d090dbdf4ac17f31c6a33714583a32595fde",
       "include": "pulp/signal/processing_switch_crossfade.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4356,7 +4356,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_frame_engine.hpp",
-      "fingerprint": "sha256:3d371041810892c7a9f5a3e132e0efa0c22a7bcc961fc82a78b0f644599e665e",
+      "fingerprint": "sha256:0ecaccef2ad745c8509a74447eb12b07d9fd061743d850bfe563497d77264d05",
       "include": "pulp/signal/spectral_frame_engine.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4530,6 +4530,17 @@
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo range; it is a bounded conversion primitive intended for composition inside delay kernels rather than an advertised generator DSP claim. It has no in-tree consumer today beyond the signal umbrella header."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/tempo_delay_wrapper.hpp",
+      "fingerprint": "sha256:f01d65b929e0137704e32b7a4a6e4dacc4d8f3dbf933ca1fe19529b16c9e0ccd",
+      "include": "pulp/signal/tempo_delay_wrapper.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.tempo-delay-wrapper"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
