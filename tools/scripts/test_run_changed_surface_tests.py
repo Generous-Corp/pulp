@@ -2012,13 +2012,15 @@ class ExecutableReuseTest(unittest.TestCase):
     def test_a_staged_report_missing_or_altered_is_a_loud_mismatch(self) -> None:
         for report, actual in ((None, None), (b"{}\n", hashlib.sha256(b"{}\n").hexdigest())):
             with self.subTest(report=report):
-                derived, keys, _, stderr = self.derive_with_audit(self.staged(), report)
+                derived, keys, result, stderr = self.derive_with_audit(self.staged(), report)
                 self.assertEqual(derived["status"], "derived", derived)  # keyed, and fails closed
                 self.assertNotIn("--audit-report", keys)
                 self.assertEqual((derived["audit"]["status"], derived["audit"]["expected_sha256"],
                                   derived["audit"]["actual_sha256"]),
                                  ("report_mismatch", hashlib.sha256(self.REPORT).hexdigest(), actual))
-                self.assertIn("audit report mismatch", stderr)
+                line = next(l for l in stderr.splitlines() if "audit report mismatch" in l)
+                self.assertIn(f"expected {hashlib.sha256(self.REPORT).hexdigest()}", line)
+                self.assertIn(f"actual {actual}" if actual else f"missing {result / 'read-audit.json'}", line)
 
     def test_a_base_whose_key_code_predates_the_audit_keys_without_the_flag(self) -> None:
         derived, keys, _, _ = self.derive_with_audit(self.staged(), self.REPORT, accepts=False)

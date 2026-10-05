@@ -548,13 +548,13 @@ def resolve_audit(binding: dict[str, Any], code: Path, result_dir: Path) -> tupl
     except FileNotFoundError:
         actual = None
     except OSError as error:
-        print(f"executable-reuse: audit report {report} is unreadable ({error}); keying without it",
-              file=sys.stderr)
+        print(f"executable-reuse: audit report mismatch: expected {audit['report_sha256']}, "
+              f"actual unreadable {report} ({error}); keying without it", file=sys.stderr)
         return {"status": "report_unreadable", **bound, "expected_sha256": audit["report_sha256"],
                 "error": str(error)}, None
     if actual != audit["report_sha256"]:
         print(f"executable-reuse: audit report mismatch: expected {audit['report_sha256']}, "
-              f"actual {actual or 'missing'}; keying without it", file=sys.stderr)
+              f"actual {actual or f'missing {report}'}; keying without it", file=sys.stderr)
         return {"status": "report_mismatch", **bound, "expected_sha256": audit["report_sha256"],
                 "actual_sha256": actual}, None
     # A base whose key code predates the audit rule rejects the argument; it
