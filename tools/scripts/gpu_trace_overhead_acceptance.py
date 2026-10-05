@@ -32,6 +32,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+from script_argv import argv_for
 import types
 import unicodedata
 from pathlib import Path, PurePosixPath
@@ -511,7 +513,7 @@ class McpSession:
         if self.directory_claim is not None:
             self.directory_claim.assert_current()
         self.process = subprocess.Popen(
-            [str(executable)],
+            argv_for(executable),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
