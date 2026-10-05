@@ -253,6 +253,7 @@ class CombinedInstallerTest(unittest.TestCase):
         expect_success: bool = True,
         analyze_omits_relocatable: bool = False,
         embed_framework_in: str | None = None,
+        embed_helper_in: str | None = None,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -436,6 +437,12 @@ class CombinedInstallerTest(unittest.TestCase):
                         exe.write_text("fixture\n")
                         exe.chmod(0o755)
                     (fw / "Versions" / "Current").symlink_to("B")
+                if embed_helper_in == app_name:
+                    helper = bundle / "Contents" / "Helpers" / "Capture Helper.app" / "Contents" / "MacOS"
+                    helper.mkdir(parents=True)
+                    executable = helper / "Capture Helper"
+                    executable.write_text("fixture helper\n")
+                    executable.chmod(0o755)
                 args.extend(("--app", title, str(bundle)))
                 if title in (scripted_apps or set()):
                     scripts = tmp / f"{title}-scripts"
@@ -668,6 +675,22 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertIn("--preserve-metadata=entitlements", lines[xpc])
         # The framework's own binary is sealed with the framework, never alone.
         self.assertFalse(any(line.endswith("Versions/Current/Sparkle") for line in lines))
+
+    def test_contents_helpers_are_signed_before_the_containing_app(self) -> None:
+        self._run_installer([], [("Fixture standalone", "Fixture")],
+                            embed_helper_in="Fixture")
+        lines = self._last_codesign_argv.splitlines()
+
+        def index_of(suffix: str) -> int:
+            hits = [i for i, line in enumerate(lines)
+                    if line.startswith("--force") and line.endswith(suffix)]
+            self.assertTrue(hits, f"never signed: {suffix}\n" + "\n".join(lines))
+            return hits[0]
+
+        helper = index_of("Contents/Helpers/Capture Helper.app/Contents/MacOS/Capture Helper")
+        app = index_of("Fixture.app")
+        self.assertLess(helper, app)
+        self.assertIn("--options runtime --timestamp", lines[helper])
 
     def test_apps_are_pinned_to_applications_instead_of_relocated(self) -> None:
         xml, relocation = self._run_installer(
