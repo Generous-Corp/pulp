@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -157,6 +159,37 @@ class GitBatchTransportTest(unittest.TestCase):
             output = families._git(root, "cat-file", "--batch", stdin=requests.encode("ascii"))
             self.assertEqual(output.count(f"{blob} blob {len(payload)}\n".encode("ascii")), 512)
             self.assertEqual(output.count(payload), 512)
+
+    def test_git_batch_request_uses_deadlock_safe_stdin(self) -> None:
+        """A cat-file-like producer may fill stdout before reading its request."""
+        fake_git = """#!/usr/bin/env python3
+import sys
+sys.stdout.write('x' * 4_000_000)
+sys.stdout.flush()
+request = sys.stdin.buffer.read()
+sys.stdout.write(str(len(request)))
+sys.stdout.flush()
+"""
+        probe = """import pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import changed_surface_script_families as families
+request = (b"deadbeef\\n" * 20000)
+result = families._git(pathlib.Path('.'), 'cat-file', '--batch', stdin=request)
+print(result[-len(str(len(request))):].decode())
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake = root / "git"
+            fake.write_text(fake_git, encoding="utf-8")
+            fake.chmod(0o755)
+            env = dict(os.environ)
+            env["PATH"] = f"{root}{os.pathsep}{env.get('PATH', '')}"
+            completed = subprocess.run(
+                [sys.executable, "-c", probe, str(Path(__file__).resolve().parent)],
+                cwd=root, env=env, text=True, capture_output=True, timeout=10,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), str(len(b"deadbeef\n" * 20000)))
 
 
 class GeneratedFamiliesTest(FamilyFixture):

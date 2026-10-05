@@ -63,9 +63,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
-import tempfile
 from typing import Any, Iterable
 
 HERE = Path(__file__).resolve().parent
