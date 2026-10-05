@@ -337,4 +337,12 @@ std::size_t precompile_scripts(const std::vector<std::string>& sources,
 /// True when byte-identical `source` has stored bytecode (tests, diagnostics).
 bool script_bytecode_cached(const std::string& source);
 
+namespace detail {
+/// Tests only: called by precompile_scripts() on its own thread after it has
+/// claimed `source` and before it compiles it, so a test can hold a compile in
+/// flight deterministically. Pass an empty function to clear it.
+void set_precompile_claim_hook_for_tests(std::function<void(const std::string&)> hook);
+std::function<void(const std::string&)> precompile_claim_hook_for_tests();
+}  // namespace detail
+
 } // namespace pulp::view

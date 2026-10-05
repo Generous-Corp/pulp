@@ -735,8 +735,13 @@ TEST_CASE("Editor prewarm: an instantiated plug-in's editor scripts are requeste
     // plug-in; it must reach the scheduler once per plug-in per process, and
     // never when the environment blocks editors or the plug-in has none.
     ScopedEnvVar ci("CI"), headless("PULP_HEADLESS"), test_mode("PULP_TEST_MODE"),
-        disabled("PULP_DISABLE_PLUGIN_EDITOR"), prewarm("PULP_EDITOR_PREWARM");
+        disabled("PULP_DISABLE_PLUGIN_EDITOR"), prewarm("PULP_EDITOR_PREWARM"),
+        display("DISPLAY"), wayland("WAYLAND_DISPLAY");
     ci.unset(); headless.unset(); test_mode.unset(); disabled.unset(); prewarm.unset();
+    // On Linux an editor needs a display server; a headless runner has none,
+    // which correctly blocks editors (and so their prewarm). Stand one in, as
+    // a desktop session would provide.
+    display.set(":0");
     format::detail::reset_editor_prewarm_requests_for_tests();
     g_scheduled_scripts.clear();
     format::set_editor_prewarm_scheduler(&record_prewarm);
@@ -767,6 +772,13 @@ TEST_CASE("Editor prewarm: an instantiated plug-in's editor scripts are requeste
     prewarm.set("0");
     CHECK_FALSE(format::request_editor_prewarm(in_ci));
     prewarm.unset();
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    // Without a display server no editor can open, so nothing is prewarmed.
+    display.unset();
+    wayland.unset();
+    CHECK_FALSE(format::request_editor_prewarm(in_ci));
+    display.set(":0");
+#endif
     CHECK(in_ci.prewarm_asks == 0);
     CHECK(g_scheduled_scripts.size() == 1);
 
