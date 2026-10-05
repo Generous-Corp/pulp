@@ -222,14 +222,18 @@ catch_discover_tests(pulp-test-cli-migration-index
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-cli-tool-registry NONE)       # python3, cmake, tar, sh; registered tools are temp scripts
-pulp_test_spawns(pulp-test-cli-importer-install NONE)     # links the registry's runner; the importer is a temp script
-pulp_test_spawns(pulp-test-cli-import-install NONE)       # links the import runner but never runs an importer
-pulp_test_spawns(pulp-test-cli-project-command NONE)      # git against temp repos; cmake only for --verify-builds
-pulp_test_spawns(pulp-test-cli-project-command NOT_RUN pulp-mcp) # doctor is handed a missing pulp-mcp path
-pulp_test_spawns(pulp-test-cli-update-check NONE)         # curl, behind an injected fetcher
-pulp_test_spawns(pulp-test-cli-update-mode NONE)          # curl, behind an injected fetcher
-pulp_test_spawns(pulp-test-cli-migration-index NONE)      # python3 on tools/scripts/build_migration_index.py
+pulp_test_spawns(pulp-test-cli-tool-registry NONE REASON "runs python3, cmake, tar and sh, registered tools are temp scripts, nothing the tree builds")
+pulp_test_spawns(pulp-test-cli-importer-install NONE REASON "links the registry's runner, the importer is a temp script, nothing the tree builds")
+pulp_test_spawns(pulp-test-cli-import-install NONE REASON "links the import runner but never runs an importer, it loads nothing the tree builds")
+# Its unfiltered doctor checks (test_cli_project_command.cpp:1389, 1415,
+# 1435) look for pulp-mcp on PATH and under the project and may run
+# `pulp-mcp --version`, and its delegate reads an ambient PULP_BUILD_DIR, so a
+# build of this tree can reach it. Declared rather than reviewed NONE: the
+# test reruns when pulp-mcp changes.
+pulp_test_spawns(pulp-test-cli-project-command pulp-mcp)
+pulp_test_spawns(pulp-test-cli-update-check NONE REASON "curl behind an injected fetcher, it runs nothing the tree builds")
+pulp_test_spawns(pulp-test-cli-update-mode NONE REASON "curl behind an injected fetcher, it runs nothing the tree builds")
+pulp_test_spawns(pulp-test-cli-migration-index NONE REASON "runs python3 on tools/scripts/build_migration_index.py, a source script, nothing the tree builds")
 
 # The WidgetBridge doctor case runs the doctor in process, and the doctor walks
 # the whole checkout; `project bump` from the checkout probes the root too.
