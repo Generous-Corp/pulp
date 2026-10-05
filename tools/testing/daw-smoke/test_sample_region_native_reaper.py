@@ -2,6 +2,10 @@ import importlib.util, pathlib, tempfile, unittest
 p=pathlib.Path(__file__).with_name('sample_region_native_reaper.py'); s=importlib.util.spec_from_file_location('drv',p); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 class DriverShape(unittest.TestCase):
  def test_formats_are_explicit(self): self.assertEqual(m.FORMATS,('au','vst3','clap'))
+ def test_overall_status_preserves_pre_render_failure(self):
+  self.assertEqual(m.overall_status([{'status':'failed'}, {'status':'passed'}]), 'failed')
+ def test_overall_status_keeps_unknown_results_inconclusive(self):
+  self.assertEqual(m.overall_status([{'status':'inconclusive'}]), 'inconclusive')
  def test_missing_bundles_do_not_pass(self):
   with tempfile.TemporaryDirectory() as d: self.assertNotEqual(m.main(['--out',d]),0)
  def test_lua_is_checked_in(self): self.assertTrue(m.LUA.is_file())
@@ -19,6 +23,21 @@ class DriverShape(unittest.TestCase):
    f.write('<VST "x"\n"'+base64.b64encode(blob).decode()+'"\n>\n'); f.flush()
    ok, value, reason=m.serialized_coefficient_guard(f.name)
    self.assertFalse(ok); self.assertAlmostEqual(value, -0.1570800096, places=6); self.assertIn('expected', reason)
+ def test_serialized_coefficient_guard_decodes_au_plist_state(self):
+  import base64, struct
+  blob=b'PULP'+struct.pack('<IIIf', 1, 1, 2901, 0.5)
+  plist='<?xml version="1.0"?><plist><dict><key>pulp-state</key><data>'+base64.b64encode(blob).decode()+'</data></dict></plist>'
+  outer=base64.b64encode(plist.encode()).decode()
+  with tempfile.NamedTemporaryFile('w', suffix='.rpp') as f:
+   f.write('<AU "x" "y" "" 1 2 3\n  '+outer+'\n>\n'); f.flush()
+   self.assertEqual(m.serialized_coefficient_guard(f.name)[0:2], (True, 0.5))
+ def test_serialized_coefficient_guard_decodes_clap_nested_state(self):
+  import base64, struct
+  blob=b'PULP'+struct.pack('<IIIf', 1, 1, 2901, 0.5)
+  state=base64.b64encode(blob).decode()
+  with tempfile.NamedTemporaryFile('w', suffix='.rpp') as f:
+   f.write('<CLAP "x" com.pulp.sample-region-allpass ""\n<IN_PINS\n>\n<STATE\n  '+state+'\n>\n>\n'); f.flush()
+   self.assertEqual(m.serialized_coefficient_guard(f.name)[0:2], (True, 0.5))
  def test_loaded_au_chunk_decodes_format_identity(self):
   chunk='<AU "AU: Sample Region Allpass (Pulp)" "Pulp: Sample Region Allpass" "" 1635083896 1399996784 1349872752\\n'
   identity=m.parse_loaded_fx_chunk('au',chunk)
