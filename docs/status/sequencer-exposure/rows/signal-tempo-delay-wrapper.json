@@ -1,0 +1,91 @@
+{
+  "id": "signal-tempo-delay-wrapper",
+  "title": "Prepared tempo delay wrapper with bounded feedback and fixed-head retiming",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "117f3c3f-b624-4d87-b1e2-b87b75fef750",
+  "owned_paths": [
+    "core/signal/include/pulp/signal/tempo_delay_wrapper.hpp",
+    "test/test_tempo_delay_wrapper.cpp",
+    "examples/pulp-delay/pulp_delay.cpp",
+    "docs/guides/signal-processing.md",
+    "docs/reference/modules.md",
+    "docs/status/sequencer-exposure/rows/signal-tempo-delay-wrapper.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/signal/include/pulp/signal/tempo_delay_wrapper.hpp",
+      "needles": [
+        "class TempoDelayWrapper",
+        "fixed read heads",
+        "tail_samples()"
+      ]
+    },
+    {
+      "path": "test/test_tempo_delay_wrapper.cpp",
+      "needles": [
+        "matches the causal impulse oracle",
+        "invariant to callback partitioning",
+        "refuses invalid configuration"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The public signal header and generated installed capability manifest expose a prepared stereo tempo-delay API with bounded state and typed refusals. This pending source receipt does not establish a released SDK artifact.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/signal/include/pulp/signal/tempo_delay_wrapper.hpp",
+          "needles": ["class TempoDelayWrapper", "TempoDelayWrapperError"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_tempo_delay_wrapper.cpp",
+          "needles": ["causal impulse oracle", "steady state integer delay oracle"]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The wrapper is an in-process audio-owner primitive and adds no offline timeline command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The wrapper adds no timeline MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The named example keeps its existing delay parameters; this source slice adds no new remote control operation."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The signal.tempo-delay-wrapper capability is published with typed bindings and a real prepare link probe; generated manifest and surface inventory are refreshed in the same transaction.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": ["signal.tempo-delay-wrapper", "tempo_delay_wrapper.hpp"]
+        },
+        {
+          "kind": "agent_manifest",
+          "path": "docs/status/agent-capability-surface.json",
+          "needles": ["pulp/signal/tempo_delay_wrapper.hpp"]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}
