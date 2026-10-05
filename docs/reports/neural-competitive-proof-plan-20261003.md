@@ -8,13 +8,11 @@ counter, or a model that merely produces plausible audio is insufficient.
 ## Current source boundary
 
 The source snapshot for this plan is `origin/main` at
-`e260a88701eb85d1a22e11952826f98a4a36671c`. It includes the private CPU
+`ab7e48d234bf8ce034b2abd47796d074bd39f4c5`. It includes the private CPU
 neural lifecycle facade, manifest/installed-asset admission, serialized NAM/TCN
-CPU bridge, and the tools-only `tools/validation/mlx_worker_harness.py` probe
-through merged neural packages ([PR 9332](https://github.com/Generous-Corp/pulp/pull/9332),
-[PR 9331](https://github.com/Generous-Corp/pulp/pull/9331),
-[PR 9412](https://github.com/Generous-Corp/pulp/pull/9412), and
-[PR 9415](https://github.com/Generous-Corp/pulp/pull/9415)). The MLX probe is
+CPU bridge, the tools-only `tools/validation/mlx_worker_harness.py` probe,
+the Apple host-tier planning matrix, and the later CI/pluginval and CLAP-width
+refusals through merged PR9591. The MLX probe is
 default-off synthetic scheduling evidence; it is not wired into a plugin build
 and is not a shipped product/provider. The processor facade still executes CPU
 and records non-CPU requests as fallback or unavailable, so every MLX, Dawn,
