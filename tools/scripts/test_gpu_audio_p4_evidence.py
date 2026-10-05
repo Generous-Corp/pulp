@@ -76,6 +76,9 @@ def fixture() -> list[dict]:
         "expected_blocks_per_trial": 2,
         "bootstrap_seed": 17,
         "bootstrap_resamples": 1000,
+        "scheduling": {"worker": "ordinary_worker", "contention": "quiet",
+                        "thermal_state": "nominal", "power_state": "automatic",
+                        "workgroup_joined": False, "workgroup_join_failures": 0},
         "row": {"block_frames": 128, "sample_rate_hz": 48000, "channels": 2,
                 "ir_frames": 4096, "inflight_depth": 2, "lead_blocks": 2,
                 "load": "quiet", "deadline_ns": 1000, "watchdog_ns": 5000,
@@ -229,6 +232,23 @@ class EvidenceTests(unittest.TestCase):
             "mach_continuous_time",
         )
         self.assertEqual(summary["row_gate"]["status"], "fail")
+
+    def test_scheduling_context_is_required_and_workgroup_is_authenticated(self) -> None:
+        records = fixture()
+        records[0].pop("scheduling")
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("scheduling must be an object" in error for error in errors))
+
+        records = fixture()
+        records[0]["scheduling"]["worker"] = "pretend_realtime"
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("scheduling.worker is invalid" in error for error in errors))
+
+        records = fixture()
+        records[0]["scheduling"]["worker"] = "audio_workgroup"
+        records[0]["scheduling"]["workgroup_joined"] = False
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("requires workgroup_joined=true" in error for error in errors))
 
     def test_row_gate_passes_a_cpu_win_without_claiming_program_verdict(self) -> None:
         records = fixture()

@@ -391,11 +391,22 @@ bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync, const Tri
     const auto provider = env("PULP_GPU_AUDIO_P4_PROVIDER");
     const auto provider_revision = env("PULP_GPU_AUDIO_P4_PROVIDER_REVISION");
     const auto provider_asset = env("PULP_GPU_AUDIO_P4_PROVIDER_ASSET_SHA256");
+    const auto worker_scheduling = env("PULP_GPU_AUDIO_P4_WORKER_SCHEDULING");
+    const auto host_contention = env("PULP_GPU_AUDIO_P4_HOST_CONTENTION");
+    const auto thermal_state = env("PULP_GPU_AUDIO_P4_THERMAL_STATE");
+    const auto power_state = env("PULP_GPU_AUDIO_P4_POWER_STATE");
+    const auto workgroup_joined = env("PULP_GPU_AUDIO_P4_WORKGROUP_JOINED");
+    const auto workgroup_failures = env("PULP_GPU_AUDIO_P4_WORKGROUP_JOIN_FAILURES");
     const auto campaign_id = env("PULP_GPU_AUDIO_P4_CAMPAIGN_ID");
     const auto ui_p99 = env("PULP_GPU_AUDIO_P4_UI_P99_NS");
     const auto raw_output = env("PULP_GPU_AUDIO_P4_RAW_OUTPUT");
     if (!source || !binary || !machine || !model || !os || !adapter || !provider ||
-        !provider_revision || !provider_asset || !campaign_id || !ui_p99 || !raw_output)
+        !provider_revision || !provider_asset || !worker_scheduling || !host_contention ||
+        !thermal_state || !power_state || !workgroup_joined || !workgroup_failures ||
+        !campaign_id || !ui_p99 || !raw_output)
+        return false;
+    if (std::string_view(workgroup_joined) != "true" &&
+        std::string_view(workgroup_joined) != "false")
         return false;
     const auto parse_u64 = [](const char* value) -> std::uint64_t {
         char* end = nullptr;
@@ -419,6 +430,12 @@ bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync, const Tri
     manifest.provider = provider;
     manifest.provider_revision = provider_revision;
     manifest.provider_asset_sha256 = provider_asset;
+    manifest.worker_scheduling = worker_scheduling;
+    manifest.host_contention = host_contention;
+    manifest.thermal_state = thermal_state;
+    manifest.power_state = power_state;
+    manifest.worker_workgroup_joined = std::string_view(workgroup_joined) == "true";
+    manifest.worker_workgroup_join_failures = parse_u64(workgroup_failures);
     manifest.generated_utc = "provided-by-campaign-wrapper";
     manifest.build_flags = {"-O3", "-DNDEBUG"};
     manifest.warmup_blocks = 2;
