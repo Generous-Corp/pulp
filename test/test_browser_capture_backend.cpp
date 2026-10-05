@@ -506,6 +506,77 @@ TEST_CASE("a transient version read is retried instead of rejecting a browser",
     CHECK(result.major_version == 123);
 }
 
+TEST_CASE("a capability probe that times out names its deadline",
+          "[import-design][browser-capture]") {
+    // A slow probe and a browser that lacks a capability are different
+    // problems. The reason must lead the message: callers keep only its first
+    // few hundred characters, and the Checked list comes last.
+    TempTree tree("probe-timeout");
+    const auto browser =
+        tree.write("browser-wrapper", "#!/bin/sh\necho 'Google Chrome 151.0.0.0'\n");
+    fs::permissions(browser,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    const auto script = tree.write("probe-hangs.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    options.probe_timeout_ms = 100;
+    const auto discovery = capture::discover_browser(options);
+
+    REQUIRE_FALSE(discovery.ok());
+    REQUIRE(discovery.probes.size() == 1);
+    CHECK(discovery.probes[0].failure == "browser CDP capability probe timed out after 100 ms");
+    CHECK(discovery.diagnostic.code == "browser-capability-unavailable");
+    const auto first_line =
+        discovery.diagnostic.message.substr(0, discovery.diagnostic.message.find('\n'));
+    CHECK(first_line.find("timed out after 100 ms") != std::string::npos);
+}
+
+TEST_CASE("a capability probe that is refused names the refusal in the headline",
+          "[import-design][browser-capture]") {
+    TempTree tree("probe-refused");
+    const auto browser =
+        tree.write("browser-wrapper", "#!/bin/sh\necho 'Google Chrome 151.0.0.0'\n");
+    fs::permissions(browser,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    const auto script = tree.write("probe-refuses.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto discovery = capture::discover_browser(options);
+
+    REQUIRE_FALSE(discovery.ok());
+    CHECK(discovery.diagnostic.code == "browser-capability-unavailable");
+    const auto& message = discovery.diagnostic.message;
+    CHECK(message.find("Page.captureScreenshot is not supported") != std::string::npos);
+    CHECK(message.find("timed out") == std::string::npos);
+}
+
+TEST_CASE("the probe deadline can be raised from the environment",
+          "[import-design][browser-capture]") {
+    const char* name = "PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS";
+    std::string saved;
+    const bool had = std::getenv(name) != nullptr;
+    if (had)
+        saved = std::getenv(name);
+    ::unsetenv(name);
+    CHECK(capture::probe_timeout_from_environment(15000) == 15000);
+    ::setenv(name, "60000", 1);
+    CHECK(capture::probe_timeout_from_environment(15000) == 60000);
+    for (const char* bad : {"", "0", "-5", "12x", "abc", "99999999999"}) {
+        ::setenv(name, bad, 1);
+        CHECK(capture::probe_timeout_from_environment(15000) == 15000);
+    }
+    if (had)
+        ::setenv(name, saved.c_str(), 1);
+    else
+        ::unsetenv(name);
+}
+
 TEST_CASE("an unreadable version is never reported as a version verdict",
           "[import-design][browser-capture]") {
     TempTree tree("version-unreadable");
