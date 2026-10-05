@@ -2,7 +2,7 @@
 
 Date: 2026-10-05
 Work package: D (MLX Apple Silicon provider)
-Source baseline: `origin/main` at `ff83c0e9fd147dc143af7228eac0e3298e84b35f`
+Source baseline: `origin/main` at `32dafd05f2e179e9b52468253dc1915bcefc23df`
 Status: bounded private evidence; Phase 3/product gate **not claimed**
 
 ## Scope and safety boundary
