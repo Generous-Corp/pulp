@@ -4040,6 +4040,10 @@ annotations ("The job has exceeded the maximum execution time"), not by grepping
 the log, which also matches the workflow's own comments about `timeout-minutes`.
 On a PR the `windows` check is an Ubuntu aggregate that compiles and tests nothing
 on Windows (see `docs/guides/test-lanes.md`).
+The nightly's Linux legs carry the same setup as `build.yml`'s Linux leg (an
+`origin/main` fetch for the agent-capability checks, the visual-analysis Python set,
+lavapipe on both architectures). A test that passes in `build.yml` and fails only in
+the nightly is usually a missing setup step there, not a platform bug.
 
 Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
 and its `tracking-issues` job find-or-creates a per-platform issue on failure,
