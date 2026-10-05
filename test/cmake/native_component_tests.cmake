@@ -143,5 +143,5 @@ endif()
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-group-native-platform NONE)    # /bin/sh, sleep, ping, cmd, /bin/pwd
-pulp_test_spawns(pulp-test-native-core-processor NONE)    # fork without exec
+pulp_test_spawns(pulp-test-group-native-platform NONE REASON "runs /bin/sh, sleep, ping, cmd and /bin/pwd, nothing the tree builds")
+pulp_test_spawns(pulp-test-native-core-processor NONE REASON "forks itself without exec and loads nothing the tree builds")

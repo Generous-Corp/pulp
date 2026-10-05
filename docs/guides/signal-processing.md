@@ -79,6 +79,37 @@ real-time safe.
 
 ---
 
+
+### TempoDelayWrapper
+
+`TempoDelayWrapper` owns the retained stereo history and feedback route for a
+musical delay. Prepare it once at the maximum addressable delay, then publish a
+sample or `BeatDivision` target before processing the next block:
+
+```cpp
+#include <pulp/signal/tempo_delay_wrapper.hpp>
+
+pulp::signal::TempoDelayWrapper delay;
+delay.prepare(sample_rate, max_delay_samples);
+delay.set_tempo(pulp::timebase::BeatDivision::Eighth, 120.0);
+delay.set_feedback(0.65);
+delay.set_crossfeed(0.25);
+delay.process(left, right, frame_count);
+```
+
+The wrapper supports Lagrange-3 and Lagrange-5 reads. Unsupported interpolation,
+nonfinite input, invalid tempo or division, out-of-range delay, and feedback above
+`0.98` return typed errors. A retime keeps both read heads fixed and crossfades
+their outputs over the configured transition, so tempo changes do not sweep a
+read head and create pitch glide. `reset()` clears both histories and cancels an
+active retime. It reports zero direct-path latency; with feedback off the tail is
+the largest configured delay, while active feedback is unbounded (`tail_samples()`
+returns `-1`).
+
+Processing is allocation-free and callback-partition invariant after `prepare()`.
+The `examples/pulp-delay` consumer routes its authored free or synchronized times
+through this wrapper before applying the selected character coloration.
+
 ### Gain
 
 Applies gain in linear or dB scale. Includes `db_to_linear()` and `linear_to_db()` free functions.

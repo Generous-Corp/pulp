@@ -1,5 +1,11 @@
 # Neural audio program status (2026-10-02; reconciled 2026-10-04)
 
+> **Historical audit snapshot.** This status report records the program state at
+> its dated snapshot and is not the current-head status receipt. For current
+> coordination and acceptance state, see the [neural audio program status
+> (2026-10-04)](neural-audio-program-status-20261004.md) and the [neural
+> real-time competitive proof plan](../reports/neural-competitive-proof-plan-20261003.md).
+
 This is the resumable status snapshot for the neural-audio workstream. The
 normative plan, gate definitions, planted controls, and pass criteria remain in
 [`planning/research/2026-10-01-neural-audio-mlx-first-program-plan.md`](../../planning/research/2026-10-01-neural-audio-mlx-first-program-plan.md).

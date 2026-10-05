@@ -643,13 +643,13 @@ endif()
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-cli-validator-discovery NONE)  # `<validator> --version` and `command -v` on system paths
-pulp_test_spawns(pulp-test-cli-mac-runtime-validators NONE) # plutil and auval, behind an injected runner
-pulp_test_spawns(pulp-test-cli-package-commands NONE)     # links the registry's runner but never runs a tool
+pulp_test_spawns(pulp-test-cli-validator-discovery NONE REASON "runs <validator> --version and command -v on system paths, nothing the tree builds")
+pulp_test_spawns(pulp-test-cli-mac-runtime-validators NONE REASON "plutil and auval, behind an injected runner")
+pulp_test_spawns(pulp-test-cli-package-commands NONE REASON "links the registry's runner but never runs a tool, it runs nothing the tree builds")
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-cli-skew-banner NONE)          # bash on a temp driver, with a temp `pulp` shim
+pulp_test_spawns(pulp-test-cli-skew-banner NONE REASON "runs bash on a temp driver with a temp pulp shim, nothing the tree builds")
 # It sources the version-check helper from the checkout, found by walking up
 # from its working directory.
 if(TARGET pulp-test-cli-skew-banner)

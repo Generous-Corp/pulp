@@ -12,7 +12,7 @@
     {
       "path": "tools/scripts/agent_capability_catalog_performance.py",
       "needles": [
-        "sha256:095202e7161b1c2a1d8e408ee90e616a7a7f3f7ccb9ff3e62060f5a1aed88aa5"
+        "sha256:50bbf265dd33bd4504a2d071901a5b941a7e910f9cfe3efceac8753c8110525a"
       ]
     },
     {
@@ -26,7 +26,7 @@
     {
       "path": "tools/scripts/agent_capability_manifest.py",
       "needles": [
-        "SURFACE_INVENTORY_VERSION = 121"
+        "SURFACE_INVENTORY_VERSION = 122"
       ]
     }
   ],

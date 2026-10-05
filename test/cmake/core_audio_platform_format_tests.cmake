@@ -730,7 +730,7 @@ unset(_pulp_core_only_links)
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-nsis-installer NONE)           # makensis
+pulp_test_spawns(pulp-test-nsis-installer NONE REASON "runs the system makensis, nothing the tree builds")
 
 # The MCP server tests read the root CMakeLists.txt (pulp_compat), the server's
 # own source (a tool-list contract), the generated timeline tool schema, the
