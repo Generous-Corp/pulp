@@ -503,31 +503,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-644135f879ce"
-paths = ["tools/scripts/gpu_audio_provider_identity.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
 name = "script-readers-56cf508a59af"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
@@ -4850,7 +4825,6 @@ paths = [
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
-  "tools/scripts/gpu_audio_provider_identity.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
   "tools/scripts/install_shipyard_token_check.py",
@@ -5343,7 +5317,6 @@ paths = [
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
-  "tools/scripts/gpu_audio_provider_identity.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
   "tools/scripts/install_shipyard_token_check.py",
