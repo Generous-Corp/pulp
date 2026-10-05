@@ -17,24 +17,27 @@ import patch as P  # noqa: E402
 from test_generation_eligibility import source_policy_inventory  # noqa: E402
 
 
+# The catalogue offers every plugin for the running machine, so whether a plugin
+# is fetched depends on the request alone, never on which machine runs the test.
+HERE_ARCH = P.rack_arch()
 CATALOGUE = {
-    "X": {"brand": "Xylophone Labs", "arches": ["mac-arm64"]},
-    "X2": {"brand": "Xylophone Labs", "arches": ["mac-arm64"]},
-    "Y": {"brand": "Yellow Tree", "arches": ["mac-arm64"]},
-    "CVfunk": {"brand": "CV funk", "arches": ["mac-arm64"]},
-    "Slash": {"brand": "Catro/Blanco", "arches": ["mac-arm64"]},
+    "X": {"brand": "Xylophone Labs", "arches": [HERE_ARCH]},
+    "X2": {"brand": "Xylophone Labs", "arches": [HERE_ARCH]},
+    "Y": {"brand": "Yellow Tree", "arches": [HERE_ARCH]},
+    "CVfunk": {"brand": "CV funk", "arches": [HERE_ARCH]},
+    "Slash": {"brand": "Catro/Blanco", "arches": [HERE_ARCH]},
     "Ampersand": {"brand": "Jasmine & Olive Trees",
-                   "arches": ["mac-arm64"]},
-    "p.s.F-X": {"brand": "p.s.F/X", "arches": ["mac-arm64"]},
+                   "arches": [HERE_ARCH]},
+    "p.s.F-X": {"brand": "p.s.F/X", "arches": [HERE_ARCH]},
     "MathematicsAndMusicLab": {
         "brand": "Mathematics and Music Lab (MML)",
-        "arches": ["mac-arm64"]},
-    "alto777_LFSR": {"brand": "alto777", "arches": ["mac-arm64"]},
+        "arches": [HERE_ARCH]},
+    "alto777_LFSR": {"brand": "alto777", "arches": [HERE_ARCH]},
     "PathSetOmriCohen": {
-        "brand": "Path Set x Omri Cohen", "arches": ["mac-arm64"]},
-    "ForgeModular": {"brand": "Forge Modular", "arches": ["mac-arm64"]},
-    "AS": {"brand": "AS", "arches": ["mac-arm64"]},
-    "Bogaudio": {"brand": "Bogaudio", "arches": ["mac-arm64"]},
+        "brand": "Path Set x Omri Cohen", "arches": [HERE_ARCH]},
+    "ForgeModular": {"brand": "Forge Modular", "arches": [HERE_ARCH]},
+    "AS": {"brand": "AS", "arches": [HERE_ARCH]},
+    "Bogaudio": {"brand": "Bogaudio", "arches": [HERE_ARCH]},
 }
 
 
