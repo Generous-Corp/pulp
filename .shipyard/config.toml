@@ -589,14 +589,14 @@ derivation_paths = [
     "tools/ci/link_members.py",
     "tools/ci/object_deps.py",
     "tools/ci/spawn_closure.py",
-    "tools/ci/test_receipts_shadow.py",
-    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/reuse_record.py",
     "tools/ci/key_blind_executables.json",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/script_test_inputs.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/run_changed_surface_tests.py",
 ]
 build_dir = "build"

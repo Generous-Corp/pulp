@@ -6853,7 +6853,12 @@ which of those failed.
   Shipyard reads it only from the protected base and copies those files from
   there, so a PR that edits any of them, or drops one from the list, runs the
   full suite. A new import in that code must be added to the list in the same
-  change, or every keyed run fails to derive on the bare copy.
+  change, or every keyed run fails to derive on the bare copy. A file the key
+  code does not import must stay out: its edits would make every base that
+  moved it read as selector-policy drift. `tools/ci/test_executable_keys.py`
+  (`KeyCodeClosureTests`) pins the list to exactly that closure plus the
+  adapter. The test-name pattern the keys share with the per-test receipts
+  shadow lives in `tools/ci/always_run_names.py` for that reason.
 - `base_record` says where a record's `job.json` states platform, toolchain,
   completeness, cleanliness, the full suite and problems; Shipyard binds every
   qualifying record (up to eight) and the adapter picks the one whose
