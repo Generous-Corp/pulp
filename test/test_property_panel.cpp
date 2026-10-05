@@ -15,7 +15,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <string>
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 #include <pulp/state/properties_file.hpp>
 #include <pulp/view/property_panel.hpp>
 
@@ -23,10 +32,21 @@ using namespace pulp::view;
 
 namespace {
 
+// Unique per process and per call: two runs of this binary at once (parallel
+// CTest entries, or two checkouts on one host) must not save over each
+// other's file between a save and its reload.
 std::filesystem::path scratch_props_file(const std::string& tag) {
+    static std::atomic<unsigned long long> counter{0};
+#if defined(_WIN32)
+    const auto pid = static_cast<std::uint64_t>(_getpid());
+#else
+    const auto pid = static_cast<std::uint64_t>(::getpid());
+#endif
+    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
     auto dir = std::filesystem::temp_directory_path() / "pulp-property-panel-tests";
     std::filesystem::create_directories(dir);
-    auto path = dir / (tag + ".json");
+    auto path = dir / (tag + "-" + std::to_string(pid) + "-" + std::to_string(tick) + "-"
+                       + std::to_string(counter.fetch_add(1)) + ".json");
     std::filesystem::remove(path);
     return path;
 }

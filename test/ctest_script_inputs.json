@@ -3265,6 +3265,21 @@
    ],
    "kind": "python"
   },
+  "catch-test-name-guard": {
+   "entry": "tools/scripts/catch_test_name_guard.py",
+   "inputs": [
+    "tools/scripts/catch_test_name_guard.py"
+   ],
+   "kind": "python"
+  },
+  "catch-test-name-guard-selftest": {
+   "entry": "tools/scripts/test_catch_test_name_guard.py",
+   "inputs": [
+    "tools/scripts/catch_test_name_guard.py",
+    "tools/scripts/test_catch_test_name_guard.py"
+   ],
+   "kind": "python"
+  },
   "ccache-job-delta-selftest": {
    "entry": "tools/ci/test_ccache_job_delta.py",
    "inputs": [
