@@ -23,9 +23,13 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         VERBATIM)
 
     add_executable(pulp-test-control-dspx04-graph-product-e2e
-        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_typed_skip.cpp)
+        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_e2e.cpp
+        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
+    target_include_directories(pulp-test-control-dspx04-graph-product-e2e PRIVATE
+        ${CMAKE_SOURCE_DIR}/inspect/src ${CMAKE_SOURCE_DIR}/test
+        ${CMAKE_SOURCE_DIR}/core/audio/include)
     target_link_libraries(pulp-test-control-dspx04-graph-product-e2e PRIVATE
-        Catch2::Catch2WithMain)
+        pulp::inspect-client pulp::audio Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-dspx04-graph-product-e2e PRIVATE
         PULP_DSPX04_GRAPH_PRODUCT_FIXTURE="$<TARGET_FILE:pulp-control-dspx04-graph-product-fixture>" PULP_SAMPLE_REGION_EDITABLE_STANDALONE="" PULP_SAMPLE_REGION_FROZEN_STANDALONE="")
     add_dependencies(pulp-test-control-dspx04-graph-product-e2e
@@ -58,13 +62,9 @@ endif()
 if(PULP_ENABLE_INSPECTOR AND NOT APPLE AND NOT IOS AND NOT PULP_IOS AND
    TARGET pulp::inspect-client AND TARGET pulp-cli AND TARGET pulp-mcp)
     add_executable(pulp-test-control-dspx04-graph-product-e2e
-        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_e2e.cpp
-        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
-    target_include_directories(pulp-test-control-dspx04-graph-product-e2e PRIVATE
-        ${CMAKE_SOURCE_DIR}/inspect/src ${CMAKE_SOURCE_DIR}/test
-        ${CMAKE_SOURCE_DIR}/core/audio/include)
+        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_typed_skip.cpp)
     target_link_libraries(pulp-test-control-dspx04-graph-product-e2e PRIVATE
-        pulp::inspect-client pulp::audio Catch2::Catch2WithMain)
+        Catch2::Catch2WithMain)
     set_target_properties(pulp-test-control-dspx04-graph-product-e2e PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/dspx04-control")
     pulp_scaled_test_timeout(_pulp_dspx04_graph_product_nonapple_timeout 30)
