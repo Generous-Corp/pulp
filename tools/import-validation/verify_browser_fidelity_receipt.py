@@ -7,16 +7,17 @@ need Chromium, but an import roundtrip can fail before any native comparison
 when the browser oracle was incomplete.  This checker turns the producer's
 positive/repeat/negative evidence into a reusable, fail-closed contract.
 
-A valid receipt proves that both browser launches reached the same visible DOM
-marker, produced a non-empty root, reported no console or network failures,
-and wrote byte-identical screenshots.  It also records that a planted broken
-mount was rejected.  The checker never treats a missing field as an empty
-success value.
+A valid receipt proves that both browser launches evaluated the exact source
+bytes named by `sourceSha256`, reached the same visible DOM marker, produced a
+non-empty root, reported no console or network failures, and wrote
+byte-identical screenshots.  It also records that a planted broken mount was
+rejected.  The checker never treats a missing field as an empty success value.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -25,7 +26,14 @@ from typing import Any, Iterable
 
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_REQUIRED_TOP_LEVEL = {"source", "positive", "repeat", "deterministicDomMarker", "negativeControl"}
+_REQUIRED_TOP_LEVEL = {
+    "source",
+    "sourceSha256",
+    "positive",
+    "repeat",
+    "deterministicDomMarker",
+    "negativeControl",
+}
 _REQUIRED_RUN_FIELDS = {"marker", "dom", "consoleErrors", "networkFailures", "screenshotSha256"}
 _REQUIRED_DOM_FIELDS = {"title", "ready", "rootChildren"}
 _REQUIRED_MARKER_FIELDS = {"count", "text"}
@@ -60,8 +68,14 @@ def _check_sha(value: Any, name: str) -> str:
     return text
 
 
-def _check_source(source: Any, *, source_override: Path | None) -> Path:
+def _check_source(
+    source: Any,
+    source_sha256: Any,
+    *,
+    source_override: Path | None,
+) -> Path:
     recorded = Path(_require_string(source, "source")).expanduser()
+    expected_sha256 = _check_sha(source_sha256, "sourceSha256")
     candidate = source_override.expanduser() if source_override is not None else recorded
     try:
         resolved = candidate.resolve(strict=True)
@@ -69,8 +83,15 @@ def _check_source(source: Any, *, source_override: Path | None) -> Path:
         raise ReceiptError(f"source does not exist: {candidate}") from exc
     if not resolved.is_file():
         raise ReceiptError(f"source is not a regular file: {resolved}")
-    if resolved.stat().st_size == 0:
+    source_bytes = resolved.read_bytes()
+    if not source_bytes:
         raise ReceiptError(f"source is empty: {resolved}")
+    actual_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise ReceiptError(
+            "sourceSha256 does not match source bytes "
+            f"(got {actual_sha256})"
+        )
     return resolved
 
 
@@ -123,11 +144,13 @@ def validate_receipt(
     ``source_override`` is useful when a receipt is copied between checkouts:
     the receipt's ``source`` remains provenance, while the override identifies
     the source that the current import is about to consume.  The override is
-    the path checked in that case.
+    the path checked and must contain the recorded source digest.
     """
     root = _require_mapping(payload, "receipt")
     _check_keys(root, _REQUIRED_TOP_LEVEL, "receipt")
-    source = _check_source(root["source"], source_override=source_override)
+    source = _check_source(
+        root["source"], root["sourceSha256"], source_override=source_override
+    )
 
     if root["deterministicDomMarker"] is not True:
         raise ReceiptError("deterministicDomMarker must be true")

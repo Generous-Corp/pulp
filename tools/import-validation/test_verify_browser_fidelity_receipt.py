@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import tempfile
@@ -30,6 +31,7 @@ def receipt(source: Path) -> dict:
 
     return {
         "source": str(source),
+        "sourceSha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "positive": run(),
         "repeat": run(),
         "deterministicDomMarker": True,
@@ -66,6 +68,17 @@ class BrowserFidelityReceiptTest(unittest.TestCase):
         copied["source"] = str(self.root / "old-checkout" / "editor.html")
         summary = verifier.validate_receipt(copied, source_override=self.source)
         self.assertEqual(summary["source"], str(self.source.resolve()))
+
+    def test_negative_changed_source_bytes_are_rejected(self) -> None:
+        self.source.write_text("<!doctype html><div id='root'>CHANGED</div>\n", encoding="utf-8")
+        with self.assertRaisesRegex(verifier.ReceiptError, "sourceSha256"):
+            verifier.validate_receipt(self.payload)
+
+    def test_negative_source_digest_shape_is_rejected(self) -> None:
+        broken = copy.deepcopy(self.payload)
+        broken["sourceSha256"] = "not-a-digest"
+        with self.assertRaisesRegex(verifier.ReceiptError, "sourceSha256"):
+            verifier.validate_receipt(broken)
 
     def test_cli_positive_emits_json_summary(self) -> None:
         out = io.StringIO()
