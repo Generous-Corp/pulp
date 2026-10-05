@@ -6196,6 +6196,15 @@
    ],
    "kind": "python"
   },
+  "mlx-named-model-harness-selftest": {
+   "entry": "tools/validation/test_mlx_named_model_harness.py",
+   "inputs": [
+    "test/fixtures/neural/example.nam",
+    "tools/validation/mlx_named_model_harness.py",
+    "tools/validation/test_mlx_named_model_harness.py"
+   ],
+   "kind": "python"
+  },
   "msvc-string-literal-guard": {
    "entry": "tools/scripts/msvc_string_literal_guard.py",
    "inputs": [
