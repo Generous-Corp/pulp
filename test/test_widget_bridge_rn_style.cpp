@@ -817,7 +817,7 @@ TEST_CASE("WidgetBridge exposes a ToggleButton's on/off colour pairs",
 
     // Color channels are 0..1 floats, not bytes.
     const auto chan = [](int byte) { return static_cast<float>(byte) / 255.0f; };
-    const auto near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
+    const auto close_to = [](float a, float b) { return std::abs(a - b) < 0.01f; };
 
     bridge.load_script("createToggleButton('t')");
     auto* t = dynamic_cast<ToggleButton*>(bridge.widget("t"));
@@ -828,26 +828,26 @@ TEST_CASE("WidgetBridge exposes a ToggleButton's on/off colour pairs",
     bridge.load_script("setToggleBackground('t', '#16DAC2', '#10B6A3')");
     REQUIRE(t->off_background_color_override().has_value());
     REQUIRE(t->on_background_color_override().has_value());
-    CHECK(near(t->off_background_color_override()->r, chan(0x16)));
-    CHECK(near(t->off_background_color_override()->g, chan(0xDA)));
-    CHECK(near(t->off_background_color_override()->b, chan(0xC2)));
-    CHECK(near(t->on_background_color_override()->r, chan(0x10)));
+    CHECK(close_to(t->off_background_color_override()->r, chan(0x16)));
+    CHECK(close_to(t->off_background_color_override()->g, chan(0xDA)));
+    CHECK(close_to(t->off_background_color_override()->b, chan(0xC2)));
+    CHECK(close_to(t->on_background_color_override()->r, chan(0x10)));
 
     bridge.load_script("setToggleBorderColor('t', '#2B3340', '#3A4351')");
     REQUIRE(t->off_border_color_override().has_value());
-    CHECK(near(t->off_border_color_override()->r, chan(0x2B)));
-    CHECK(near(t->on_border_color_override()->b, chan(0x51)));
+    CHECK(close_to(t->off_border_color_override()->r, chan(0x2B)));
+    CHECK(close_to(t->on_border_color_override()->b, chan(0x51)));
 
     bridge.load_script("setToggleTextColor('t', '#052320', '#F3F6F9')");
     REQUIRE(t->off_text_color_override().has_value());
-    CHECK(near(t->off_text_color_override()->g, chan(0x23)));
-    CHECK(near(t->on_text_color_override()->r, chan(0xF3)));
+    CHECK(close_to(t->off_text_color_override()->g, chan(0x23)));
+    CHECK(close_to(t->on_text_color_override()->r, chan(0xF3)));
 
     // An empty colour leaves that state alone rather than clearing it, so one
     // state can be styled without disturbing the other.
     bridge.load_script("setToggleBackground('t', '', '#FFFFFF')");
-    CHECK(near(t->off_background_color_override()->r, chan(0x16)));
-    CHECK(near(t->on_background_color_override()->r, 1.0f));
+    CHECK(close_to(t->off_background_color_override()->r, chan(0x16)));
+    CHECK(close_to(t->on_background_color_override()->r, 1.0f));
 
     bridge.load_script(
         "setCornerRadius('t', 'All', 10);"
