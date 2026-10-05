@@ -1,0 +1,59 @@
+{
+  "id": "timeline-phase1-tests-heap-processors",
+  "title": "Phase1 example tests heap-own step-sequencer processors and link a Windows-sized stack on Apple",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "0a879049-9c00-49b2-9e00-b48fbbe59d1d",
+  "owned_paths": [
+    "examples/timeline-phase1/test_timeline_phase1_codec.cpp",
+    "examples/timeline-phase1/test_timeline_phase1_edits.cpp",
+    "examples/timeline-phase1/test_timeline_phase1_examples.cpp",
+    "test/cmake/timeline_tests.cmake",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/timeline-phase1-tests-heap-processors.json"
+  ],
+  "evidence": [
+    {
+      "path": "examples/timeline-phase1/test_timeline_phase1_examples.cpp",
+      "needles": [
+        "auto live_owner = std::make_unique<TimelineStepSequencerProcessor>();",
+        "auto& live = *live_owner;"
+      ]
+    },
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "target_link_options(pulp-test-timeline-phase1-examples PRIVATE",
+        "-Wl,-stack_size,0x100000)"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "## A step-sequencer processor is too big for more than one per test stack"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No installed header, target, or exported symbol changes. The edits are confined to example test translation units and the test-only target's link options, none of which ship in an SDK artifact."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler is added or changed. The tests drive TimelineStepSequencerProcessor directly."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed. Nothing under tools/mcp reads or registers these tests."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, or profile policy changes. The processor is unchanged; only where the tests allocate it moved from the stack to the heap."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged. Changing test-local storage publishes no design-time capability."
+    }
+  }
+}
