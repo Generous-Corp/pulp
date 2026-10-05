@@ -344,22 +344,26 @@ if [ -f "$PGL" ]; then
     fi
 fi
 
-# ── 6c. diff-scoped clang-format (advisory) ─────────────────────────────────
-# Touched lines only; existing formatting debt is grandfathered. Exit 3 (no
-# clang-format 21 here) is infrastructure, not a verdict. Same promotion knob
-# as the pre-push hook: PULP_ENFORCE_PREPUSH_FORMAT=1 makes exit 1 fail.
+# ── 6c. diff-scoped clang-format ────────────────────────────────────────────
+# Touched lines only; existing formatting debt is grandfathered. Blocking by
+# default, like the pre-push hook; PULP_ENFORCE_PREPUSH_FORMAT=0 demotes exit 1
+# to advisory. Exit 3 (no clang-format 21 here) is infrastructure, not a
+# verdict.
 FMT="$ROOT/tools/scripts/format_changed.sh"
 if [ -f "$FMT" ]; then
     echo "" >&2
-    echo "▸ diff-scoped clang-format check (advisory; touched lines only)" >&2
+    echo "▸ diff-scoped clang-format check (touched lines only)" >&2
     bash "$FMT" --check --base "$BASE"
     case $? in
         0) ;;
         1)
-            if [ "${PULP_ENFORCE_PREPUSH_FORMAT:-0}" = "1" ]; then
+            if [ "${PULP_ENFORCE_PREPUSH_FORMAT:-1}" = "1" ]; then
+                echo "format_changed: touched lines are not clang-format clean." >&2
+                echo "  Fix: tools/scripts/format_changed.sh, then stage the files it rewrote (git status) and commit" >&2
+                echo "  Demote to advisory: PULP_ENFORCE_PREPUSH_FORMAT=0" >&2
                 fail=1
             else
-                echo "format_changed: ADVISORY — touched lines are not clang-format clean; run tools/scripts/format_changed.sh" >&2
+                echo "format_changed: ADVISORY (PULP_ENFORCE_PREPUSH_FORMAT=0) — touched lines are not clang-format clean; run tools/scripts/format_changed.sh" >&2
             fi
             ;;
         3) echo "format_changed: SKIPPED — no clang-format 21 on this machine (INFRASTRUCTURE, not a formatting verdict)" >&2 ;;
