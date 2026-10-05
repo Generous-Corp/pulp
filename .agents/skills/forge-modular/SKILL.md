@@ -44,6 +44,20 @@ Change the engine in Forge, and test the app-to-generator boundary there
 against these tools. A stub generator in a Forge test must read
 `--prompt-file`, not `sys.argv[2]`, once the engine passes it.
 
+## One generation per output directory, held by an OS lock
+
+`patch.py build` and `generate.py` take `generation_lock.acquire_or_exit()` on
+the Rack plugin directory they install into (`RACK_PLUGIN_DIR`, or
+`generate.py --install-dir`) before any work, and exit 75 with a plain reason
+when another generation holds it. The lock is an `flock` on
+`<lock root>/<sha256(realpath(dir))[:32]>.lock`, never a marker file and
+never inside the plugin directory. The kernel releases it when the process
+dies, crash or SIGKILL included. The lock root is `FORGE_GENERATION_LOCK_DIR`,
+else `~/Library/Caches/Forge Modular/generation-locks` on macOS. The Forge
+engine must compute the same path (realpath, sha256, first 32 hex) to take the
+same lock. Tests set both variables to temp directories, so they never touch a
+real plugin directory or contend with a running Forge.
+
 ## A run that fails still has to hand something over
 
 `generate()` returns `(patch, why, shortfall)`. `shortfall` is `None` on a pass

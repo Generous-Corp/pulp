@@ -8423,6 +8423,10 @@ def main(argv):
         return 0
 
     if cmd == "build" and len(argv) > 2:
+        # Before anything is fetched or installed: a second build against the
+        # same Rack plugin directory would install over this one.
+        import generation_lock
+        generation_lock.acquire_or_exit(rack_plugin_dir())
         response_file = None
         if "--response-file" in argv:
             index = argv.index("--response-file")
