@@ -324,7 +324,7 @@ class Collector:
                         return rows
                     page += 1
             name = f"runs/{event}-{day}.json.gz"
-            rows = self._cached(name, fetch, keep=day < settled)
+            rows = self._cached(name, fetch, keep=day <= settled)
             if not rows:
                 # Never let an empty listing stand in for the day: drop it
                 # and ask again, uncached.

@@ -1403,18 +1403,30 @@ class RunListingTests(unittest.TestCase):
         return {"id": 1, "head_sha": "s", "head_branch": "b", "created_at": f"{day}T12:00:00Z", "updated_at": None,
                 "status": "completed", "conclusion": "success", "event": "pull_request", "run_attempt": 1, "path": "p"}
 
-    def test_a_recent_or_empty_day_is_not_cached(self):
-        now = dt.datetime.now(dt.timezone.utc)
-        old = (now - dt.timedelta(days=5)).date().isoformat()
-        recent = (now - dt.timedelta(days=1)).date().isoformat()
-        with tempfile.TemporaryDirectory() as tmp:
-            for day, pages, kept in ((old, [[self.listed(old)]], True), (recent, [[self.listed(recent)]], False),
-                                     (old, [[], []], False)):
-                c, calls = self.collector(tmp, pages)
-                (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").unlink(missing_ok=True)
-                start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
-                c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
-                self.assertEqual((Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists(), kept, (day, pages))
+    def listing(self, tmp, day, pages):
+        c, calls = self.collector(tmp, pages)
+        start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
+        runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
+        return runs, calls, (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists()
+
+    def test_a_day_is_cached_only_once_it_is_two_days_old(self):
+        today = dt.datetime.now(dt.timezone.utc).date()
+        for age, kept in ((0, False), (1, False), (2, True), (5, True)):
+            day = (today - dt.timedelta(days=age)).isoformat()
+            with tempfile.TemporaryDirectory() as tmp:
+                runs, _, cached = self.listing(tmp, day, [[self.listed(day)]])
+                self.assertEqual(len(runs), 1, age)
+                self.assertEqual(cached, kept, age)
+
+    def test_an_empty_listing_is_never_cached_and_is_asked_again(self):
+        today = dt.datetime.now(dt.timezone.utc).date()
+        for age in (0, 5):
+            day = (today - dt.timedelta(days=age)).isoformat()
+            with tempfile.TemporaryDirectory() as tmp:
+                runs, calls, cached = self.listing(tmp, day, [[], []])
+                self.assertEqual((runs, cached, len(calls)), ([], False, 2), age)   # asked twice, kept nothing
+                runs, calls, _ = self.listing(tmp, day, [[self.listed(day)]])
+                self.assertEqual((len(runs), len(calls)), (1, 1), age)             # the next call fetches again
 
     def test_a_cached_empty_day_is_asked_again(self):
         old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).date().isoformat()
