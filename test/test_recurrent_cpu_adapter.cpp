@@ -24,6 +24,8 @@ float sigmoid(float value) noexcept {
 }
 
 struct SyntheticKernel {
+    using FaultCallback = void (*)() noexcept;
+
     RecurrentFamily family;
     std::array<float, kHidden> hidden{};
     std::array<float, kHidden> cell{};
@@ -31,6 +33,7 @@ struct SyntheticKernel {
     bool prepared = false;
     bool fail_once = false;
     bool fail_release_once = false;
+    FaultCallback fault_callback = nullptr;
     std::size_t prepare_calls = 0;
     std::size_t reset_calls = 0;
     std::size_t release_calls = 0;
@@ -57,6 +60,8 @@ bool prepare_kernel(void* opaque, const StreamingPrepareContext&) noexcept {
 
 void process_kernel(void* opaque, const float* input, float* output, std::uint32_t frames) noexcept {
     auto& kernel = *static_cast<SyntheticKernel*>(opaque);
+    if (kernel.fault_callback != nullptr)
+        kernel.fault_callback();
     for (std::uint32_t frame = 0; frame < frames; ++frame) {
         const float x = input[frame];
         if (kernel.family == RecurrentFamily::Lstm) {
@@ -110,13 +115,10 @@ bool release_kernel(void* opaque) noexcept {
     return true;
 }
 
-#if defined(_MSC_VER)
-__declspec(noinline)
-#else
-__attribute__((noinline))
-#endif
-std::byte* planted_allocation() {
-    return new std::byte[17];
+void emit_planted_rt_faults() noexcept {
+    pulp::test::rt_contract_probe_record_allocation(17);
+    pulp::test::rt_contract_probe_record_lock();
+    pulp::test::rt_contract_probe_record_blocking();
 }
 
 StreamingModelSpec make_spec(RecurrentFamily family, std::uint32_t sample_rate = 48000,
@@ -465,14 +467,26 @@ TEST_CASE("recurrent CPU adapter process has no realtime allocations",
 
 TEST_CASE("recurrent CPU adapter RT probe catches planted negatives",
           "[gpu_audio][neural][recurrent][realtime][negative]") {
+    const auto spec = make_spec(RecurrentFamily::Lstm);
+    SyntheticKernel kernel{.family = RecurrentFamily::Lstm,
+                           .fault_callback = emit_planted_rt_faults};
+    RecurrentCpuAdapter adapter(spec, make_shape(RecurrentFamily::Lstm), make_kernel(kernel));
+    const auto context = StreamingPrepareContext{.spec = &adapter.spec(),
+                                                 .artifact_id = "synthetic-recurrent",
+                                                 .artifact_hash = "synthetic-weights",
+                                                 .max_frames = 32};
+    REQUIRE(adapter.prepare(context));
+    std::array<float, 32> input{};
+    std::array<float, 32> output{};
+    const float* input_channels[] = {input.data()};
+    float* output_channels[] = {output.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 32);
+    auto out = pulp::audio::BufferView<float>(output_channels, 1, 32);
     pulp::test::RtContractProbe events;
-    auto* planted = planted_allocation();
-    pulp::test::rt_contract_probe_record_allocation(17);
-    delete[] planted;
-    pulp::test::rt_contract_probe_record_lock();
-    pulp::test::rt_contract_probe_record_blocking();
+    adapter.process_cpu(in, out, 32, {.epoch = 1, .sequence = 0});
     CHECK(events.allocation_count() == 1);
     CHECK(events.allocated_bytes() == 17);
     CHECK(events.lock_events() == 1);
     CHECK(events.blocking_events() == 1);
+    REQUIRE(adapter.release());
 }
