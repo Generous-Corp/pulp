@@ -840,6 +840,10 @@ pulp_add_test_suite(pulp-test-standalone-musical-typing GROUP pulp-test-group-co
 # opens no window and reaches no network.
 pulp_add_test_suite(pulp-test-standalone-updater GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone)
+# In-app updates service: status, generated Settings note, JS bridge messages,
+# the native Settings group and the standalone Settings panel's Updates tab.
+pulp_add_test_suite(pulp-test-app-updates GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone)
 # Synthetic key-sequence driver: spec parsing, the press/capture frame
 # schedule, and the platform driver's refusal contract.
 pulp_add_test_suite(pulp-test-standalone-key-sequence GROUP pulp-test-group-core-standalone

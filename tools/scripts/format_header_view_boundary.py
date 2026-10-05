@@ -44,6 +44,8 @@ VIEW_PREFIXES = ("pulp/view/", "pulp/canvas/", "pulp/render/")
 # Headers whose include closure legitimately reaches the view layer. These are
 # the pulp-format-view surface. Keep sorted.
 VIEW_HEADERS = {
+    "pulp/format/app_updates_bridge.hpp",
+    "pulp/format/app_updates_settings_view.hpp",
     "pulp/format/clap_adapter.hpp",
     "pulp/format/clap_entry.hpp",
     "pulp/format/detail/au_v2_editor_resize.hpp",

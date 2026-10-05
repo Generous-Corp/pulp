@@ -7,6 +7,14 @@
 #       [AUTOMATIC_CHECKS ON|OFF]      # writes SUEnableAutomaticChecks; omit to
 #                                      # let Sparkle ask the user on 2nd launch
 #       [CHECK_INTERVAL <seconds>]     # SUScheduledCheckInterval
+#       [RELEASES_URL <url>]           # https page listing releases; shown, linked,
+#                                      # in the Settings "Updates" note
+#       [INSTALLER package|app]        # what an update installs: a signed .pkg
+#                                      # (quits the app, asks for an admin
+#                                      # password) or a replacement .app
+#       [AUTOMATIC_INSTALL ON|OFF]     # SUAllowsAutomaticUpdates; default OFF, so
+#                                      # an update is never installed without the
+#                                      # user choosing Install
 #       [KEEP_XPC_SERVICES]            # keep Installer/Downloader.xpc (sandboxed apps)
 #       [VERSION 2.10.0 SHA256 <hash>] # override the pinned distribution
 #       [DIST_DIR <dir>])              # use an already-extracted distribution
@@ -43,8 +51,16 @@
 #     the next reconfigure until the next relink.)
 #
 # The SDK side (pulp-standalone) finds Sparkle at run time through the
-# Objective-C runtime and adds "Check for Updates…" to the app menu; see
-# core/format/include/pulp/format/detail/standalone_updater.hpp.
+# Objective-C runtime and gives the standalone, with no further code:
+#   * "Check for Updates…" directly under "About <App>" in the app menu,
+#   * an "Updates" tab in Pulp's Settings panel (automatic-check toggle,
+#     Check for Updates…, version, last check, and a note built from
+#     RELEASES_URL / INSTALLER / AUTOMATIC_INSTALL so it stays true),
+#   * pulp::format::app_update_status() and friends
+#     (pulp/format/app_updates.hpp), and the EditorBridge messages a JS
+#     editor's own Settings use (pulp/format/app_updates_bridge.hpp).
+# See core/format/include/pulp/format/detail/standalone_updater.hpp and
+# docs/guides/app-updates.md.
 #
 # Release signing is the installer recipe's job: build_combined_installer.sh
 # signs every nested framework inside-out (Autoupdate, Updater.app, the
@@ -183,8 +199,8 @@ endfunction()
 
 function(pulp_add_sparkle target)
     cmake_parse_arguments(ARG "KEEP_XPC_SERVICES"
-        "FEED_URL;PUBLIC_ED_KEY;AUTOMATIC_CHECKS;CHECK_INTERVAL;VERSION;SHA256;DIST_DIR" ""
-        ${ARGN})
+        "FEED_URL;PUBLIC_ED_KEY;AUTOMATIC_CHECKS;CHECK_INTERVAL;RELEASES_URL;INSTALLER;AUTOMATIC_INSTALL;VERSION;SHA256;DIST_DIR"
+        "" ${ARGN})
     if(NOT APPLE OR IOS OR PULP_IOS)
         message(STATUS "Pulp: pulp_add_sparkle(${target}) ignored: Sparkle is macOS-only")
         return()
@@ -227,6 +243,14 @@ function(pulp_add_sparkle target)
     endif()
     if(ARG_CHECK_INTERVAL AND NOT ARG_CHECK_INTERVAL MATCHES "^[0-9]+$")
         message(FATAL_ERROR "pulp_add_sparkle: CHECK_INTERVAL must be whole seconds")
+    endif()
+    if(ARG_RELEASES_URL AND NOT ARG_RELEASES_URL MATCHES "^https://")
+        message(FATAL_ERROR
+            "pulp_add_sparkle: RELEASES_URL must be an https:// page; got ${ARG_RELEASES_URL}")
+    endif()
+    if(ARG_INSTALLER AND NOT ARG_INSTALLER MATCHES "^(package|app)$")
+        message(FATAL_ERROR
+            "pulp_add_sparkle: INSTALLER must be package or app; got ${ARG_INSTALLER}")
     endif()
 
     pulp_resolve_sparkle_distribution(_dist
@@ -272,6 +296,22 @@ function(pulp_add_sparkle target)
     if(ARG_CHECK_INTERVAL)
         string(APPEND _keys
             "\t<key>SUScheduledCheckInterval</key>\n\t<integer>${ARG_CHECK_INTERVAL}</integer>\n")
+    endif()
+    # Automatic installation is opt-in: without it Sparkle never installs an
+    # update the user did not choose, which is what the Settings note promises.
+    if(ARG_AUTOMATIC_INSTALL)
+        string(APPEND _keys "\t<key>SUAllowsAutomaticUpdates</key>\n\t<true/>\n")
+    else()
+        string(APPEND _keys "\t<key>SUAllowsAutomaticUpdates</key>\n\t<false/>\n")
+    endif()
+    if(ARG_RELEASES_URL)
+        _pulp_sparkle_plist_escape(_releases_xml "${ARG_RELEASES_URL}")
+        string(APPEND _keys
+            "\t<key>PulpUpdatesReleasesURL</key>\n\t<string>${_releases_xml}</string>\n")
+    endif()
+    if(ARG_INSTALLER)
+        string(APPEND _keys
+            "\t<key>PulpUpdatesInstaller</key>\n\t<string>${ARG_INSTALLER}</string>\n")
     endif()
     get_target_property(_already ${target} PULP_SPARKLE_PLIST_XML)
     set_target_properties(${target} PROPERTIES

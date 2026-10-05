@@ -446,12 +446,17 @@ carries, from a feed of signed installer packages:
    ```cmake
    pulp_add_sparkle(MyPlugin_Standalone
        FEED_URL      "https://github.com/me/myplugin/releases/latest/download/appcast.xml"
-       PUBLIC_ED_KEY "<public key>")
+       PUBLIC_ED_KEY "<public key>"
+       RELEASES_URL  "https://github.com/me/myplugin/releases"
+       INSTALLER     package
+       AUTOMATIC_CHECKS ON)
    ```
 
-   The app gains **Check for Updates…** in its application menu. Plug-in bundles
-   never carry Sparkle; updating the app updates them because the update is the
-   whole installer package.
+   The app gains **Check for Updates…** directly under **About** in its
+   application menu and an **Updates** group in Settings; a custom editor adds
+   its own Settings row in a few lines ([In-app updates](app-updates.md)).
+   Plug-in bundles never carry Sparkle and show no update controls; updating the
+   app updates them because the update is the whole installer package.
 3. **Package as usual.** `build_combined_installer.sh` signs the embedded
    framework inside-out with the Developer ID identity and the hardened runtime
    and notarizes the package with everything else.

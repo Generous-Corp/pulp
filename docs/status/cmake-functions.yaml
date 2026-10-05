@@ -132,6 +132,9 @@ functions:
     optional:
       - AUTOMATIC_CHECKS
       - CHECK_INTERVAL
+      - RELEASES_URL
+      - INSTALLER
+      - AUTOMATIC_INSTALL
       - KEEP_XPC_SERVICES
       - VERSION
       - SHA256

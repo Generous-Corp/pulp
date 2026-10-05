@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/format/app_updates.hpp>
+#include <pulp/format/app_updates_settings_view.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/settings_panel.hpp>
@@ -122,6 +124,11 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     // Compose plugin-contributed settings tabs after the host-owned Audio/MIDI tabs.
     for (auto& section : plugin_sections)
         if (section.view) settings_panel->add_section(std::move(section.title), std::move(section.view));
+    // An app that can update itself gets an Updates tab (automatic-check
+    // toggle, Check for Updates…, version, last check, and a note derived from
+    // its declared update facts). Only the standalone installs the service.
+    if (app_update_status().available)
+        settings_panel->add_section("Updates", std::make_unique<AppUpdatesSettingsView>());
 
     auto tab_panel = std::make_unique<view::TabPanel>();
     tab_panel->flex().flex_grow = 1.0f;

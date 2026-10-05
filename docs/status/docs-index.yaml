@@ -84,6 +84,11 @@ docs:
     kind: guide
     summary: End-to-end signing, notarization, packaging, and distribution
 
+  - slug: app-updates
+    path: guides/app-updates.md
+    kind: guide
+    summary: In-app updates for a standalone app — Check for Updates in the app menu and Settings from one pulp_add_sparkle() call, the JS/native Settings hook, and dev-build stub
+
   - slug: juce-embed
     path: guides/juce-embed.md
     kind: guide

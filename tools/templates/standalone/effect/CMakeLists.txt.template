@@ -34,3 +34,15 @@ pulp_add_plugin({{TARGET_NAME}}
     AAX_PRODUCT_CODE "{{AAX_PRODUCT_CODE}}"
     AAX_NATIVE_CODE "{{AAX_NATIVE_CODE}}"
 )
+
+# In-app updates for the standalone app (macOS, Sparkle 2): "Check for Updates…"
+# under About in the app menu and an Updates group in Settings. Uncomment once
+# you publish an appcast; see the Pulp guide docs/guides/app-updates.md.
+# if(APPLE AND TARGET {{TARGET_NAME}}_Standalone)
+#     pulp_add_sparkle({{TARGET_NAME}}_Standalone
+#         FEED_URL         "https://github.com/OWNER/REPO/releases/latest/download/appcast.xml"
+#         PUBLIC_ED_KEY    "PUBLIC_KEY_FROM_generate_keys"
+#         RELEASES_URL     "https://github.com/OWNER/REPO/releases"
+#         INSTALLER        package
+#         AUTOMATIC_CHECKS ON)
+# endif()
