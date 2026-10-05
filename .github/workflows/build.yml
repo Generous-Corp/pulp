@@ -3250,11 +3250,6 @@ jobs:
     name: ${{ github.event_name == 'merge_group' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true' || needs.protected-receipt-reuse.outputs.macos_reused == 'true') && 'macos' || 'macos-merge-unused' }}
     needs: [resolve-provider, classify, protected-receipt-reuse]
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
-    # actions: write lets the verdict cancel this run when a dependency was
-    # cancelled rather than failed (tools/ci/macos_merge_group_bootstrap.sh).
-    permissions:
-      actions: write
-      contents: read
     if: >-
       !inputs.local_proof
       && !cancelled()
@@ -3264,13 +3259,13 @@ jobs:
           || needs.classify.outputs.native_build_required != 'true'
           || needs.protected-receipt-reuse.outputs.macos_reused == 'true')
     steps:
-      - name: Check out the bootstrap verdict
+      # The whole tree at depth 1, like the classify job: when classify was
+      # never given a runner, the verdict classifies the group here.
+      - name: Check out the bootstrap verdict and classifier
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
-          sparse-checkout: |
-            tools/ci/macos_merge_group_bootstrap.sh
-          sparse-checkout-cone-mode: false
+          lfs: false
 
       - name: macOS merge-group bootstrap (required when native leg is absent)
         env:
@@ -3279,7 +3274,13 @@ jobs:
           NATIVE_REQUIRED: ${{ needs.classify.outputs.native_build_required }}
           RECEIPT_RESULT: ${{ needs.protected-receipt-reuse.result }}
           RECEIPT_REUSED: ${{ needs.protected-receipt-reuse.outputs.macos_reused }}
-          GH_TOKEN: ${{ github.token }}
+          # The classify job's inputs, for the in-job classifier.
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_HEAD_SHA: ${{ github.sha }}
+          EVENT_PATH: ${{ github.event_path }}
         run: bash tools/ci/macos_merge_group_bootstrap.sh
       # A `macos` check that ran no suite still belongs in the replay history
       # (receipt reuse and skip-safe groups are what a policy's coverage is

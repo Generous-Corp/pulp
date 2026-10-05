@@ -782,16 +782,19 @@ context, and never execute the candidate's verifier as the authority.
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
 
-**A cancelled preamble is not a failed one.** When `classify` or
-`resolve-provider` is CANCELLED (no hosted runner was ever acquired: the check
-run's annotation says "The job was not acquired by Runner of type hosted even
-after multiple attempts"; or the queue re-batched), the merge-group bootstrap
-cancels its own run instead of failing `macos` closed
-(`tools/ci/macos_merge_group_bootstrap.sh`). Failing closed there made GitHub
-eject the PR, re-batch, and hit the same wait in a loop. `failure`, `skipped`
-and a missing result still fail closed. Before blaming a change for a 2-4 s
-`macos` red in a merge group, read the preamble jobs' `runner_name` and
-annotations: an empty runner is infrastructure.
+**A cancelled preamble is not a failed one.** When `classify` is CANCELLED
+because GitHub never assigned it a runner (the check run's annotation says "The
+job was not acquired by Runner of type hosted even after multiple attempts"),
+the merge-group bootstrap classifies the group in-job with the classify job's
+scripts (`tools/ci/macos_merge_group_bootstrap.sh`, logging "preamble not
+acquired (infrastructure)") and proceeds: skip-safe passes, a native group
+fails closed (its leg never started), a failing in-job classifier fails closed.
+Failing closed on every cancel made GitHub eject the PR, re-batch, and hit the
+same wait in a loop. Cancelling the run instead does not help: a cancelled
+required check is another non-success, and the queue ejects on any.
+`failure`, `skipped` and a missing result still fail closed. Before blaming a
+change for a 2-4 s `macos` red in a merge group, read the preamble jobs'
+`runner_name` and annotations: an empty runner is infrastructure.
 
 ### A reused merge-group receipt must carry test evidence, not a verdict
 
