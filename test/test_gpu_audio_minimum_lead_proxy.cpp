@@ -288,6 +288,38 @@ TEST_CASE("minimum lead proxy requires authoritative matrix and denominator") {
     CHECK_FALSE(e.finish().authoritative_campaign);
 }
 
+TEST_CASE("minimum lead proxy admission consumes every campaign coverage field") {
+    const auto invalid = [](auto mutate) {
+        auto a = admission();
+        mutate(a);
+        MinimumLeadProxyEvaluator e(a);
+        e.observe(sample(0));
+        CHECK_FALSE(e.finish().admission_valid);
+        CHECK_FALSE(e.finish().complete);
+    };
+    invalid([](auto& a) { a.slots_mask = 0; });
+    invalid([](auto& a) { a.leads_mask = 0; });
+    invalid([](auto& a) { a.validated_cell_denominator = 999; });
+    invalid([](auto& a) { a.cold_runs = 4; });
+    invalid([](auto& a) { a.steady_runs = 4; });
+    invalid([](auto& a) { a.quiet_coverage = false; });
+    invalid([](auto& a) { a.ui_coverage = false; });
+    invalid([](auto& a) { a.gpu_contention_coverage = false; });
+    invalid([](auto& a) { a.overload_coverage = false; });
+    invalid([](auto& a) { a.thermal_coverage = false; });
+}
+
+TEST_CASE("minimum lead proxy completion requires valid admission") {
+    auto a = admission();
+    a.slots_mask = 0;
+    MinimumLeadProxyEvaluator e(a);
+    for (std::uint64_t n = 0; n < MinimumLeadProxyEvaluator::diagnostic_minimum_samples; ++n)
+        e.observe(sample(n));
+    const auto r = e.finish();
+    CHECK_FALSE(r.admission_valid);
+    CHECK_FALSE(r.complete);
+}
+
 TEST_CASE("minimum lead proxy covers diagnostic sample rate block contention thermal cell") {
     auto a = admission();
     a.sample_rate = 44100;

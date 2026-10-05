@@ -125,6 +125,10 @@ class MinimumLeadProxyEvaluator {
   public:
     static constexpr std::uint64_t diagnostic_minimum_samples = 1000;
     static constexpr std::uint64_t authoritative_minimum_samples = 100000;
+    // Diagnostic admission still describes the complete campaign cell shape;
+    // an external reducer owns the authoritative 100,000-sample acceptance.
+    static constexpr std::uint32_t required_slots_mask = 0x1e; // 2,4,8,16
+    static constexpr std::uint32_t required_leads_mask = 0x0f; // 1,2,4,8
     static constexpr std::size_t bounded_id_capacity = 131072;
     static constexpr bool uses_bounded_id_storage = true;
     static constexpr std::uint64_t worst_case_probe_budget = bounded_id_capacity * 3;
@@ -249,19 +253,26 @@ class MinimumLeadProxyEvaluator {
             admission_.identity.raw_hashes_authenticated && admission_.cell_id != 0 &&
             admission_.admission_epoch != 0 &&
             admission_.observer_capacity >= diagnostic_minimum_samples &&
-            admission_.fused_or_coalesced_dispatch &&
+            admission_.slots_mask == required_slots_mask &&
+            admission_.leads_mask == required_leads_mask && admission_.cold_runs >= 5 &&
+            admission_.steady_runs >= 5 &&
+            admission_.validated_cell_denominator >= diagnostic_minimum_samples &&
+            admission_.quiet_coverage && admission_.ui_coverage &&
+            admission_.gpu_contention_coverage && admission_.overload_coverage &&
+            admission_.thermal_coverage && admission_.fused_or_coalesced_dispatch &&
             (admission_.observer_single_owner || admission_.observer_synchronized_handoff) &&
             admission_.worker_offline_single_owner;
         out.prediction_valid = out.prediction_samples == out.sample_count &&
                                out.sample_count != 0 &&
                                out.prediction_margin_min_ns != Receipt::unavailable &&
                                out.predictor_underestimates == 0 && out.invalid_predictions == 0;
-        out.complete = out.sample_count >= diagnostic_minimum_samples && out.duplicate_ids == 0 &&
-                       out.id_storage_overflow == 0 && out.missing_evidence == 0 &&
-                       out.duplicate_records == 0 && out.sequence_gaps == 0 &&
-                       out.generation_mismatches == 0 && out.identity_mismatches == 0 &&
-                       out.observer_overflow == 0 && out.callback_deadline_misses == 0 &&
-                       out.gpu_completed == out.sample_count && out.cpu_fallback == 0;
+        out.complete = out.admission_valid && out.sample_count >= diagnostic_minimum_samples &&
+                       out.duplicate_ids == 0 && out.id_storage_overflow == 0 &&
+                       out.missing_evidence == 0 && out.duplicate_records == 0 &&
+                       out.sequence_gaps == 0 && out.generation_mismatches == 0 &&
+                       out.identity_mismatches == 0 && out.observer_overflow == 0 &&
+                       out.callback_deadline_misses == 0 && out.gpu_completed == out.sample_count &&
+                       out.cpu_fallback == 0;
         // This proxy never owns campaign acceptance. An external reducer must
         // authenticate the complete matrix and may consume this diagnostic receipt.
         out.authoritative_campaign = false;
