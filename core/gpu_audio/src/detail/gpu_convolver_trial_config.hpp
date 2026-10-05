@@ -21,9 +21,18 @@ enum class GpuConvolverTrialLoad : std::uint8_t {
     Overload,
 };
 
+// Host-observed machine state; this never implies GPU execution or success.
+enum class GpuConvolverThermalState : std::uint8_t { Unavailable, Nominal, Warm, Throttled };
+
 // Metadata owned by the benchmark, not inferred from a trace record. A raw
 // writer must receive this context explicitly and reject a trial that cannot
 // prove its geometry, deadline, transfer counters, and timing provenance.
+constexpr bool valid_gpu_convolver_thermal_state(GpuConvolverThermalState state) noexcept {
+    return state == GpuConvolverThermalState::Unavailable ||
+           state == GpuConvolverThermalState::Nominal || state == GpuConvolverThermalState::Warm ||
+           state == GpuConvolverThermalState::Throttled;
+}
+
 struct GpuConvolverTrialContext {
     std::uint64_t trial_id = 0;
     std::uint64_t pair_id = 0;
@@ -34,19 +43,29 @@ struct GpuConvolverTrialContext {
     std::uint32_t channels = 0;
     std::uint32_t ir_frames = 0;
     std::uint32_t inflight_depth = 0;
+    std::uint32_t queue_capacity = 0;
+    std::uint32_t max_inflight = 0;
     std::uint32_t lead_blocks = 0;
     std::uint64_t deadline_ns = 0;
     std::uint64_t watchdog_ns = 0;
     bool transfer_counters_direct = false;
     bool timing_provenance_direct = false;
+    bool workgroup_requested = false;
+    bool workgroup_joined = false;
+    GpuConvolverThermalState thermal_state = GpuConvolverThermalState::Unavailable;
 };
 
 constexpr bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
     return context.trial_id != 0 && context.pair_id != 0 && context.block_frames != 0 &&
            context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
-           context.inflight_depth != 0 && context.lead_blocks != 0 && context.deadline_ns != 0 &&
+           context.inflight_depth != 0 && context.queue_capacity > context.lead_blocks &&
+           context.max_inflight != 0 &&
+           context.max_inflight <= context.queue_capacity - context.lead_blocks &&
+           context.lead_blocks != 0 && context.deadline_ns != 0 &&
            context.watchdog_ns > context.deadline_ns && context.transfer_counters_direct &&
-           context.timing_provenance_direct;
+           context.timing_provenance_direct &&
+           valid_gpu_convolver_thermal_state(context.thermal_state) &&
+           (!context.workgroup_requested || context.workgroup_joined);
 }
 
 // Host-only configuration for a single diagnostic preparation. This is private

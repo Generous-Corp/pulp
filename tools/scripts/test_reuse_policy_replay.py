@@ -20,8 +20,10 @@ Run:
 """
 from __future__ import annotations
 
+import gzip
 import io
 import json
+import datetime as dt
 import os
 import subprocess
 import urllib.error
@@ -82,6 +84,121 @@ def corpus(tests: list[dict], **pair_kw) -> rpr.Corpus:
     return rpr.Corpus([group(), head()], [pair(**pair_kw)], tests={"g1": tests})
 
 
+class CutoffTests(unittest.TestCase):
+    FIX = "f1x"
+
+    @staticmethod
+    def corpus(checkouts):
+        runs = [group(run_id=f"g{i}", checkout_sha=sha, created_at=f"2026-10-0{i}T12:00:00Z")
+                for i, sha in enumerate(checkouts, start=1)]
+        return rpr.Corpus(runs + [head()], [])
+
+    def contains(self, after_fix):
+        return lambda commit, checkout: after_fix.get(checkout)
+
+    def test_the_cutoff_is_the_first_group_containing_the_fix(self):
+        c = self.corpus(["a", "b", "c", "d"])
+        cut = rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": True, "c": True, "d": True}))
+        self.assertEqual((cut["since"], cut["group_run_id"], cut["groups_after"]),
+                         ("2026-10-02T12:00:00Z", "g2", 3))
+
+    def test_a_later_group_without_the_fix_leaves_no_time_window(self):
+        c = self.corpus(["a", "b", "c"])
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "do not contain it.*g3"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": True, "c": False}))
+
+    def test_an_unknown_answer_is_not_a_no(self):
+        c = self.corpus(["a", "b"])
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "cannot tell.*g1"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": None, "b": True}))
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "no merge group"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": False}))
+
+    def test_the_cli_derives_since_from_the_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "c"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(run_id="g1", checkout_sha="old", created_at="2026-10-01T12:00:00Z"),
+                                                     group(run_id="g2", checkout_sha="new", created_at="2026-10-05T12:00:00Z"),
+                                                     head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [KeyBlindTests.pair(1, ["test/old-miss"]) | {"group_run_id": "g1"},
+                                                     KeyBlindTests.pair(2, []) | {"group_run_id": "g2"}])
+            listed = Path(tmp) / "list.json"
+            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}))
+            argv = ["key-blind", "--corpus", str(corpus), "--list", str(listed)]
+            answers = {"old": False, "new": True}
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX]), 0)
+            self.assertIn("since 2026-10-05T12:00:00Z: first group containing f1x is run g2", out.getvalue())
+            answers["new"] = None
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX]), 2)
+            self.assertIn("CUTOFF UNPROVEN", err.getvalue())
+            answers["new"] = True
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX, "--since", "2026-10-01"]), 2)
+            self.assertIn("exclusive", err.getvalue())
+
+
+class SameBytesTests(unittest.TestCase):
+    T = "a test"
+
+    def run_with(self, digests, outcomes):
+        """digests: run -> sha of the test's executable (None: no record);
+        outcomes: run -> the test's outcome in that run's rows."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runs = [group(run_id="g1", created_at="2026-10-05T12:00:00Z"), head(run_id="p1")]
+            runs += [head(run_id=r, created_at=f"2026-10-0{i}T00:00:00Z") for i, r in enumerate(("w1", "w2"), 1)]
+            for run_id, outcome in outcomes.items():
+                rpr.write_jsonl(root / "tests" / f"{run_id}.jsonl.gz", [t("other"), t(self.T, outcome)])
+            corpus = rpr.Corpus(runs, [dict(pair(), source_key_head_run_id="p1")])
+            records = {r: None if d is None else {"executables": {self.T: "test/x"}, "binaries": {"test/x": d}}
+                       for r, d in digests.items()}
+            row = {"pr": 1, "group_run_id": "g1", "test_id": self.T, "outcome": "fail", "attempts": 2, "reason": "r"}
+            with mock.patch.object(rrc.Collector, "reuse_record", lambda self, run_id: records.get(run_id)):
+                (out,) = rrc.same_bytes_evidence(root, corpus, [row])
+            return out
+
+    def test_identical_bytes_and_a_third_run_passing_on_them_qualifies(self):
+        out = self.run_with({"p1": "aa", "g1": "aa", "w1": "bb", "w2": "aa"},
+                            {"p1": "pass", "g1": "fail", "w1": "pass", "w2": "pass"})
+        self.assertEqual((out["qualifies"], out["witness_run_id"]), (True, "w2"))   # w1 passed on other bytes
+
+    def test_bytes_that_moved_do_not_qualify(self):
+        out = self.run_with({"p1": "aa", "g1": "cc", "w1": "cc"}, {"p1": "pass", "g1": "fail", "w1": "pass"})
+        self.assertEqual((out["qualifies"], out["witness_run_id"]), (False, None))
+
+    def test_the_head_pass_alone_is_not_a_witness(self):
+        out = self.run_with({"p1": "aa", "g1": "aa", "w1": "aa"}, {"p1": "pass", "g1": "fail", "w1": "fail"})
+        self.assertEqual(out["qualifies"], False)
+
+    def test_a_missing_record_is_no_evidence(self):
+        out = self.run_with({"p1": None, "g1": "aa", "w1": "aa"}, {"p1": "pass", "g1": "fail", "w1": "pass"})
+        self.assertEqual((out["head_digest"], out["qualifies"]), (None, False))
+
+    def test_score_reports_the_line_and_still_fails_on_every_false_skip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "c"
+            rpr.write_jsonl(root / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(root / "pairs.jsonl", [pair()])
+            rpr.write_jsonl(root / "tests" / "g1.jsonl.gz", [t("skills-doc-sync", "fail", 2), t("other")])
+            evidence = lambda corpus_dir, corpus, rows, gh=None: [dict(r, head_run_id="p1", head_digest="aa",
+                                                                         group_digest="aa", witness_run_id="w",
+                                                                         qualifies=True) for r in rows]
+            argv = ["score", "--corpus", str(root), "--policy", "inert-drift"]
+            with mock.patch.object(rrc, "same_bytes_evidence", evidence), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv + ["--same-bytes"]), 1)
+            self.assertIn("same-bytes nondeterministic 1 of 1 false skips (net 0)", out.getvalue())
+            self.assertIn("witness w", out.getvalue())
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv), 1)
+            self.assertNotIn("same-bytes", out.getvalue())
+
+
 class KeyBlindTests(unittest.TestCase):
     @staticmethod
     def pair(pr, unreached, content_keyed=True):
@@ -104,6 +221,55 @@ class KeyBlindTests(unittest.TestCase):
         self.assertEqual(doc["executables"]["test/old"]["explained"], "linker stub order")
         with self.assertRaises(ValueError):
             rpr.key_blind_update([], {"schema": "other"})
+
+    def test_a_delisted_name_re_enters_when_a_content_keyed_pair_shows_it_unreached(self):
+        # Delisting is a reviewed edit of the list, not a property of the
+        # update: a name taken off comes back the first time the key misses
+        # it again, with the miss that brought it back as its example.
+        existing = {"schema": rpr.KEY_BLIND_SCHEMA, "executables": {
+            "test/kept": {"example": {"pr": 1, "group_run_id": "g1"}, "explained": "linker stub order"}}}
+        doc, added = rpr.key_blind_update([self.pair(5, [])], existing)
+        self.assertEqual((added, sorted(doc["executables"])), ([], ["test/kept"]))
+        doc, added = rpr.key_blind_update([self.pair(6, ["test/delisted"], content_keyed=False),
+                                           self.pair(7, ["test/delisted"])], existing)
+        self.assertEqual(added, ["test/delisted"])
+        self.assertEqual(doc["executables"]["test/delisted"],
+                         {"example": {"pr": 7, "group_run_id": "g7"}, "explained": None})
+        self.assertEqual(doc["executables"]["test/kept"]["explained"], "linker stub order")
+
+    def test_the_objc_stub_executables_are_off_the_checked_in_list_and_can_return(self):
+        # The five linked deterministically once -Wl,-objc_stubs_small was
+        # passed, so the checked-in list no longer carries them; a key miss
+        # on any of them lists it again.
+        checked_in = json.loads((rpr.REPO_ROOT / "tools" / "ci" / "key_blind_executables.json").read_text())
+        stubs = ["test/pulp-test-group-core-standalone", "test/pulp-test-settings-sections",
+                 "test/pulp-test-standalone-recording", "test/pulp-test-standalone-rt",
+                 "test/pulp-test-timeline-phase1-examples"]
+        self.assertEqual(sorted(set(stubs) & set(checked_in["executables"])), [])
+        doc, added = rpr.key_blind_update([self.pair(8, stubs)], checked_in)
+        self.assertEqual(added, stubs)
+        self.assertLessEqual(set(checked_in["executables"]), set(doc["executables"]))
+
+    def test_since_keeps_misses_older_than_a_delisting_out_of_the_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "c"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(run_id="g1", created_at="2026-10-01T12:00:00Z"),
+                                                     group(run_id="g2", created_at="2026-10-05T12:00:00Z"),
+                                                     group(run_id="g4", created_at="2026-10-03T00:00:00Z"),
+                                                     head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [
+                self.pair(1, ["test/delisted"]) | {"group_run_id": "g1"},
+                self.pair(2, []) | {"group_run_id": "g2"},
+                self.pair(3, ["test/unknown-group"]) | {"group_run_id": "g9"},
+                self.pair(4, ["test/at-cutoff"]) | {"group_run_id": "g4"}])
+            listed = Path(tmp) / "list.json"
+            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}))
+            argv = ["key-blind", "--corpus", str(corpus), "--list", str(listed)]
+            self.assertEqual(rpr.main(argv + ["--since", "2026-10-04T00:00:00Z"]), 0)
+            self.assertEqual(rpr.main(argv + ["--since", "2026-10-04"]), 0)
+            self.assertEqual(rpr.main(argv + ["--since", "2026-10-01"]), 1)   # the old miss is inside
+            self.assertEqual(rpr.main(argv + ["--since", "2026-10-03T00:00:00Z"]), 1)  # a group at the cutoff is inside
+            self.assertEqual(rpr.main(argv), 1)
 
     def test_the_cli_fails_on_a_new_entry_unless_written(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -970,7 +1136,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v7"
+        cache = corpus / "cache" / "record-v8"
         cache.mkdir(parents=True)
         # group-a is rebuilt but its bytes came out the same (over-approximation);
         # group-b's bytes changed but nothing in the drift reaches it: the
@@ -1013,7 +1179,7 @@ class RecordedGraphTests(unittest.TestCase):
             rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
             rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
             rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
-            cache = corpus / "cache" / "record-v7"
+            cache = corpus / "cache" / "record-v8"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": {"test/group-c": "3"}}),
                              ("g1", {"link": self.link, "executables": {"ta": "test/group-a"},
@@ -1050,7 +1216,7 @@ class RecordedGraphTests(unittest.TestCase):
             link = dict(self.link)
             if recorded:
                 link["test/plug.so"] = {"objects": [], "members": {"core/liba.a": ["b.cpp.o"]}}
-            cache = corpus / "cache" / "record-v7"
+            cache = corpus / "cache" / "record-v8"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": None}),
                              ("g1", {"link": link, "executables": {"ta": "test/group-a"}, "binaries": None})):
@@ -1077,7 +1243,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v7"
+        cache = corpus / "cache" / "record-v8"
         cache.mkdir(parents=True)
         recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
                 "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
@@ -1111,7 +1277,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
         targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
                    for n in ("group-a", "group-b", "group-c")}
-        cache = corpus / "cache" / "record-v7"
+        cache = corpus / "cache" / "record-v8"
         cache.mkdir(parents=True)
         common = {"targets": targets, "binaries": None, "generated_headers": headers}
         recs = {"p1": {**common, "link": None, "executables": None, "digest_schema": head_schema,
@@ -1198,12 +1364,15 @@ class RecordedGraphTests(unittest.TestCase):
         model = {"schema": "pulp-codemodel-digest/v2", "generated_headers": "ninja-deps",
                  "commit_bound_declared": ["stamp"],
                  "targets": {"z": {"type": "EXECUTABLE", "artifacts": ["<build>/test/z"], "commit_bound": True},
-                             "y": {"type": "EXECUTABLE", "artifacts": ["<build>/test/y"], "commit_bound": False}}}
+                             "y": {"type": "EXECUTABLE", "artifacts": ["<build>/test/y"], "commit_bound": False},
+                             # A plugin bundle declared commit-bound: its marker embeds the build nonce.
+                             "plug": {"type": "MODULE_LIBRARY", "artifacts": ["<build>/AU/P.component/Contents/MacOS/P"],
+                                      "commit_bound": True}}}
         rows = [{"test_id": "x case", "executable": "<build>/test/x", "commit_bound": True},
                 {"test_id": "y", "executable": "<build>/test/y", "commit_bound": False}]
         rec = self.record_from({"codemodel-abc.json": json.dumps(model),
                                 "tests.jsonl": "\n".join(json.dumps(r) for r in rows)})
-        self.assertEqual(rec["declared_commit_bound"], ["test/x", "test/z"])
+        self.assertEqual(rec["declared_commit_bound"], ["AU/P.component/Contents/MacOS/P", "test/x", "test/z"])
         self.assertTrue(rrc.content_keyed(rec))
         self.assertFalse(rrc.content_keyed(dict(rec, generated_headers="unavailable")))
 
@@ -1390,6 +1559,146 @@ class ScriptInputsTests(unittest.TestCase):
             self.assertIsNone(c.input_list_at("d" * 40))
             self.assertEqual(len(attempts), 2)                    # the failure was not cached
             self.assertFalse((Path(tmp) / "script-inputs" / f"{'d' * 40}.json.gz").exists())
+
+
+class RunListingTests(unittest.TestCase):
+    def collector(self, tmp, pages, totals=None):
+        # Each response states a total_count: the given one, or by default
+        # the page's own length (every listing here is one page unless the
+        # test says otherwise).
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.cache = Path(tmp)
+        c.listing_shortfalls = []
+        calls = []
+        gh = mock.Mock()
+        gh.repository = "o/r"
+
+        def json_(path):
+            calls.append(path)
+            batch = pages.pop(0) if pages else []
+            total = totals.pop(0) if totals else len(batch)
+            return {"workflow_runs": batch} | ({} if total is None else {"total_count": total})
+        gh.json = json_
+        c.gh = gh
+        return c, calls
+
+    def listed(self, day, run_id=1):
+        return {"id": run_id, "head_sha": "s", "head_branch": "b", "created_at": f"{day}T12:00:00Z", "updated_at": None,
+                "status": "completed", "conclusion": "success", "event": "pull_request", "run_attempt": 1, "path": "p"}
+
+    def listing(self, tmp, day, pages, totals=None):
+        c, calls = self.collector(tmp, pages, totals)
+        start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
+        runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
+        return runs, calls, (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists()
+
+    def test_a_day_is_cached_only_once_it_is_two_days_old(self):
+        today = dt.datetime.now(dt.timezone.utc).date()
+        for age, kept in ((0, False), (1, False), (2, True), (5, True)):
+            day = (today - dt.timedelta(days=age)).isoformat()
+            with tempfile.TemporaryDirectory() as tmp:
+                runs, _, cached = self.listing(tmp, day, [[self.listed(day)]])
+                self.assertEqual(len(runs), 1, age)
+                self.assertEqual(cached, kept, age)
+
+    def test_an_empty_listing_is_never_cached_and_is_asked_again(self):
+        today = dt.datetime.now(dt.timezone.utc).date()
+        for age in (0, 5):
+            day = (today - dt.timedelta(days=age)).isoformat()
+            with tempfile.TemporaryDirectory() as tmp:
+                runs, calls, cached = self.listing(tmp, day, [[], []])
+                self.assertEqual((runs, cached, len(calls)), ([], False, 2), age)   # asked twice, kept nothing
+                runs, calls, _ = self.listing(tmp, day, [[self.listed(day)]])
+                self.assertEqual((len(runs), len(calls)), (1, 1), age)             # the next call fetches again
+
+    def test_a_cached_empty_day_is_asked_again(self):
+        old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).date().isoformat()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runs" / f"pull_request-{old}.json.gz"
+            path.parent.mkdir(parents=True)
+            with gzip.open(path, "wt") as fh:
+                json.dump([], fh)                      # what a bad afternoon left behind
+            c, calls = self.collector(tmp, [[self.listed(old)]])
+            start = dt.datetime.fromisoformat(old + "T00:00:00+00:00")
+            runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
+            self.assertEqual(len(runs), 1)
+            self.assertEqual(len(calls), 1)
+
+    def old_day(self):
+        return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).date().isoformat()
+
+    def test_a_listing_short_of_its_total_count_is_asked_again_then_fails_loudly(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort) as caught:
+                self.listing(tmp, day, [[self.listed(day)], [self.listed(day)]], totals=[2, 2])
+            self.assertIn(f"pull_request runs created {day}: listed 1 of total_count 2", str(caught.exception))
+            self.assertFalse((Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists())
+
+    def test_a_short_listing_that_is_whole_when_asked_again_is_used_and_recorded(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            whole = [self.listed(day, 1), self.listed(day, 2)]
+            c, calls = self.collector(tmp, [[self.listed(day)], whole], [2, 2])
+            start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
+            runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
+            cached = (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists()
+            self.assertEqual(([r["id"] for r in runs], len(calls), cached), ([1, 2], 2, True))
+            self.assertEqual(c.listing_shortfalls, [{"event": "pull_request", "day": day, "listed": 1,
+                                                     "total_count": 2, "page": 1,
+                                                     "whole_when_asked_again": True}])
+
+    def test_a_truncated_later_page_fails(self):
+        day = self.old_day()
+        full = [self.listed(day, n) for n in range(100)]
+        with tempfile.TemporaryDirectory() as tmp:
+            runs, calls, _ = self.listing(tmp, day, [full, [self.listed(day, 100)]], totals=[101, 101])
+            self.assertEqual((len(runs), len(calls)), (101, 2))
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort) as caught:
+                self.listing(tmp, day, [full, [], full, []], totals=[101, 101, 101, 101])
+            self.assertIn("listed 100 of total_count 101 after page 2", str(caught.exception))
+
+    def test_a_repeated_run_does_not_count_twice(self):
+        # A run created while the pages are read shifts the next page by one,
+        # so its first row repeats; repeats must not make up a shortfall.
+        day = self.old_day()
+        full = [self.listed(day, n) for n in range(100)]
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort):
+                self.listing(tmp, day, [full, [self.listed(day, 99)], full, [self.listed(day, 99)]],
+                             totals=[101, 101, 101, 101])
+
+    def test_a_response_without_a_total_count_fails(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort):
+                self.listing(tmp, day, [[self.listed(day)], [self.listed(day)]], totals=[None, None])
+
+    def test_the_cli_reports_a_recovered_shortfall(self):
+        manifest = {"merge_groups": 1, "pairs_with_head_run": 1, "record_coverage": {},
+                    "listing_shortfalls": [{"event": "pull_request", "day": "2026-10-05", "listed": 1,
+                                            "total_count": 2, "page": 1, "whole_when_asked_again": True}]}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc, "GitHub"), \
+                mock.patch.object(rrc.Collector, "collect", return_value=manifest), \
+                mock.patch("sys.stdout", new_callable=io.StringIO), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = rpr.main(["collect", "--since", "2026-10-05", "--out", str(Path(tmp) / "c")])
+        self.assertEqual(code, 0)
+        self.assertIn("instrument event: pull_request runs created 2026-10-05 listed 1 of total_count 2",
+                      stderr.getvalue())
+
+    def test_the_cli_exits_non_zero_naming_the_day(self):
+        err = rrc.ListingShort("pull_request", "2026-10-05", 1, 2, 1)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc, "GitHub"), \
+                mock.patch.object(rrc.Collector, "collect", side_effect=err), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = rpr.main(["collect", "--since", "2026-10-05", "--out", str(Path(tmp) / "c")])
+        self.assertEqual(code, 1)
+        self.assertIn("LISTING SHORT: pull_request runs created 2026-10-05: listed 1 of total_count 2",
+                      stderr.getvalue())
 
 
 class GraftTests(unittest.TestCase):

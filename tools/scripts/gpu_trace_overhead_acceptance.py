@@ -20,7 +20,10 @@ import os
 import platform
 import random
 import re
-import resource
+try:
+    import resource
+except ImportError:  # Windows has no setrlimit; see _raise_descriptor_limit.
+    resource = None
 import secrets
 import select
 import stat as stat_module
@@ -1179,7 +1182,16 @@ def _git_blob_digest_bytes(data: bytes) -> str:
     return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
 
 
+# The Windows UCRT fixes its low-level descriptor table at 8192 entries
+# (_NHANDLE_) and offers no call to raise it.
+_WINDOWS_CRT_DESCRIPTOR_LIMIT = 8192
+
+
 def _raise_descriptor_limit(required: int) -> None:
+    if resource is None:
+        if required > _WINDOWS_CRT_DESCRIPTOR_LIMIT:
+            raise ValueError("exact source sealing exceeds the process descriptor limit")
+        return
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     if soft >= required:
         return

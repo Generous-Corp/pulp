@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -147,6 +148,7 @@ def parse_job_log(lines: Iterable[str]) -> dict:
 API = "https://api.github.com"
 REPOSITORY = "Generous-Corp/pulp"
 WORKFLOW = "build.yml"
+RUN_LISTING_SETTLE_DAYS = 2
 QUEUE_BRANCH_RE = re.compile(r"^gh-readonly-queue/[^/]+/pr-(?P<pr>\d+)-(?P<base>[0-9a-f]{40})$")
 REUSE_RECORD_ARTIFACT = "reuse-record-macos"
 # The first merge-group and PR-head jobs that write a reuse record (the
@@ -274,6 +276,16 @@ def record_platform(job: dict | None) -> str:
     return "unknown"
 
 
+class ListingShort(RuntimeError):
+    """A run listing came back shorter than the API's own total_count for
+    the same query."""
+
+    def __init__(self, event: str, day: str, listed: int, total: Any, page: int) -> None:
+        self.row = {"event": event, "day": day, "listed": listed, "total_count": total, "page": page}
+        super().__init__(f"{event} runs created {day}: listed {listed} of total_count {total} after page {page}"
+                         + (" (the 10-page cap)" if page >= 10 else ""))
+
+
 class Collector:
     def __init__(self, gh: GitHub, out: Path, repo: Path, workers: int) -> None:
         self.gh = gh
@@ -284,6 +296,7 @@ class Collector:
         self.cache.mkdir(parents=True, exist_ok=True)
         self._git_lock = threading.Lock()
         self._commit_cache: dict[str, dict | None] = {}
+        self.listing_shortfalls: list[dict] = []
 
     # -- cached reads ------------------------------------------------------
     def _cached(self, name: str, fetch: Callable[[], Any], keep: bool = True) -> Any:
@@ -303,22 +316,51 @@ class Collector:
         return value
 
     def list_runs(self, event: str, since: dt.datetime, until: dt.datetime) -> list[dict]:
-        today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+        # A day's listing is cached only once it has settled: GitHub's
+        # created-date filter has returned an empty page for a busy day a few
+        # hours after it ended, and a cached empty day silently drops every
+        # pair that needed one of its runs. An empty listing is never cached.
+        settled = (dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=RUN_LISTING_SETTLE_DAYS)).isoformat()
         runs: list[dict] = []
         for day in _days(since, until):
             def fetch(day=day) -> list[dict]:
-                rows, page = [], 1
+                rows, page, total = [], 1, None
                 while True:
                     doc = self.gh.json(f"repos/{self.gh.repository}/actions/workflows/{WORKFLOW}/runs"
                                        f"?event={event}&created={day}&per_page=100&page={page}")
+                    if total is None:
+                        total = doc.get("total_count")
                     batch = doc.get("workflow_runs", [])
                     rows += [{k: r.get(k) for k in ("id", "head_sha", "head_branch", "created_at",
                                                     "updated_at", "status", "conclusion", "event",
                                                     "run_attempt", "path")} for r in batch]
                     if len(batch) < 100 or page >= 10:
-                        return rows
+                        break
                     page += 1
-            rows = self._cached(f"runs/{event}-{day}.json.gz", fetch, keep=day < today)
+                # A listing shorter than the count the API states for the same
+                # query silently drops every pair needing one of the missing
+                # runs. The first page's count is the floor: runs created
+                # while the pages are read only add to it.
+                listed = len({r["id"] for r in rows})
+                if not isinstance(total, int) or listed < total:
+                    raise ListingShort(event, day, listed, total, page)
+                return rows
+            name = f"runs/{event}-{day}.json.gz"
+            try:
+                rows = self._cached(name, fetch, keep=day <= settled)
+            except ListingShort as err:
+                # An instrument event either way: recorded in the manifest
+                # when the second answer is whole, fatal when it is not.
+                print(f"collect: {err}; asking again", file=sys.stderr)
+                event_row = dict(err.row, whole_when_asked_again=False)
+                self.listing_shortfalls.append(event_row)
+                rows = self._cached(name, fetch, keep=day <= settled)
+                event_row["whole_when_asked_again"] = True
+            if not rows:
+                # Never let an empty listing stand in for the day: drop it
+                # and ask again, uncached.
+                (self.cache / name).unlink(missing_ok=True)
+                rows = self._cached(name, fetch, keep=False)
             runs += [r for r in rows if since <= _parse_time(r["created_at"]) <= until]
         return runs
 
@@ -493,13 +535,13 @@ class Collector:
             declared = None
             if bound_known and model is not None and isinstance(model.get("commit_bound_declared"), list):
                 declared = sorted(bound_exes | {a.removeprefix("<build>/") for t in (model.get("targets") or {}).values()
-                                                if t.get("commit_bound") and t.get("type") == "EXECUTABLE"
+                                                if t.get("commit_bound") and t.get("type") in ("EXECUTABLE", "MODULE_LIBRARY")
                                                 for a in t.get("artifacts") or []})
             return {"targets": targets, "link": link, "executables": tests, "binaries": binaries,
                     "digest_schema": None if model is None else model.get("schema"),
                     "generated_headers": None if model is None else model.get("generated_headers"),
                     "declared_commit_bound": declared, "deps": recorded_deps(deps_doc)}
-        return self._cached(f"record-v7/{run_id}.json.gz", fetch)
+        return self._cached(f"record-v8/{run_id}.json.gz", fetch)
 
     def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
         """The per-target codemodel digests a run recorded, or None."""
@@ -866,6 +908,7 @@ class Collector:
             "rejected_runs": sum(1 for r in runs.values() if r["rejected"]),
             "record_coverage": self.record_coverage(groups + [r for r in heads_listing
                                                               if since <= _parse_time(r["created_at"]) <= until]),
+            "listing_shortfalls": self.listing_shortfalls,
             "api_calls": self.gh.calls,
         }
         (self.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -1401,6 +1444,84 @@ def load_graph(build_dir: Path | None, pickle_path: Path | None):
     deps = shadow.parse_ninja_deps(subprocess.run(["ninja", "-C", str(build_dir), "-t", "deps"], check=True,
                                                   capture_output=True, text=True).stdout)
     return shadow.Graph(build_dir, edges, deps)
+
+
+def same_bytes_evidence(corpus_dir: Path, corpus, rows: list[dict], gh: "GitHub | None" = None) -> list[dict]:
+    """For each false-skip row (a skipped test that failed in its group):
+    whether it is a same-bytes nondeterministic failure. It qualifies only
+    when the test's executable has the same sha256 in the head run the
+    policy read and in the group, and some third run passed the same test
+    on those same bytes. The scorer still counts every row; this is the
+    evidence a read-back may net out, each row naming its witness run."""
+    collector = Collector.__new__(Collector)
+    collector.cache, collector.gh = corpus_dir / "cache", gh
+    records: dict[str, dict | None] = {}
+
+    def digest(run_id: str, test_id: str) -> str | None:
+        run_id = str(run_id)
+        if run_id not in records:
+            try:
+                records[run_id] = collector.reuse_record(run_id)
+            except Exception:   # an unfetchable record is no evidence, never a match
+                records[run_id] = None
+        rec = records[run_id] or {}
+        exe = (rec.get("executables") or {}).get(test_id)
+        return (rec.get("binaries") or {}).get(exe) if exe else None
+
+    pairs = {str(p.get("group_run_id")): p for p in corpus.pairs}
+    out = []
+    for row in rows:
+        pair = pairs.get(str(row["group_run_id"])) or {}
+        head = pair.get("source_key_head_run_id") or next((h["run_id"] for h in pair.get("heads") or []), None)
+        head_digest = digest(head, row["test_id"]) if head else None
+        group_digest = digest(row["group_run_id"], row["test_id"])
+        witness = None
+        if head_digest and head_digest == group_digest:
+            for run_id in sorted(corpus.runs, key=lambda r: corpus.runs[r].get("created_at") or ""):
+                if run_id in (str(head), str(row["group_run_id"])):
+                    continue
+                path = corpus_dir / "tests" / f"{run_id}.jsonl.gz"
+                if not path.exists():
+                    continue
+                passed = False
+                with gzip.open(path, "rt", encoding="utf-8") as handle:
+                    for line in handle:
+                        if row["test_id"] in line:   # cheap prefilter before parsing 20k rows
+                            t = json.loads(line)
+                            if t.get("test_id") == row["test_id"]:
+                                passed = t.get("outcome") == "pass"
+                                break
+                if passed and digest(run_id, row["test_id"]) == group_digest:
+                    witness = run_id
+                    break
+        out.append(dict(row, head_run_id=head, head_digest=head_digest, group_digest=group_digest,
+                        witness_run_id=witness, qualifies=witness is not None))
+    return out
+
+
+def ancestry(repo: Path, repository: str, gh: "GitHub | None" = None) -> Callable[[str, str], bool | None]:
+    """`contains(commit, checkout)` for `cutoff_after`: the local clone's
+    answer through any shallow grafts, else the API's compare status, else
+    None. A partial clone often lacks merge-queue commits, so the local
+    answer alone would leave groups unknown."""
+    empty = Path(tempfile.gettempdir()) / "reuse-replay-empty-shallow"
+    empty.write_text("")
+    env = {**os.environ, "GIT_SHALLOW_FILE": str(empty), "GIT_NO_LAZY_FETCH": "1"}
+    client: list = [gh]
+
+    def contains(commit: str, checkout: str) -> bool | None:
+        rc = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", commit, checkout],
+                            capture_output=True, env=env).returncode
+        if rc in (0, 1):
+            return rc == 0
+        if client[0] is None:
+            client[0] = GitHub(repository, None)
+        try:
+            status = client[0].json(f"repos/{repository}/compare/{commit}...{checkout}").get("status")
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError):
+            return None
+        return {"ahead": True, "identical": True, "behind": False, "diverged": False}.get(status)
+    return contains
 
 
 def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root: Path, graph_build_dir: Path,

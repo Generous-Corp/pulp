@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 namespace pulp::examples::delay {
 namespace {
@@ -47,11 +48,19 @@ void PulpDelayProcessor::prepare(const format::PrepareContext& context) {
     mix_smoother_.set_immediate(std::clamp(state().get_value(kMix) * 0.01f, 0.0f, 1.0f));
     routing_mono_smoother_.set_immediate(
         mono_routing_target(routing_from_param(state().get_value(kRouting))));
+    const auto maximum_delay = static_cast<std::size_t>(std::ceil(context.sample_rate * 3.0)) + 4u;
+    if (tempo_delay_.prepare(context.sample_rate, maximum_delay,
+                             signal::TempoDelayWrapperInterpolation::lagrange3,
+                             256) != signal::TempoDelayWrapperError::none) {
+        prepared_ = false;
+        return;
+    }
     engines_.prepare(context.sample_rate, character_from_param(state().get_value(kCharacter)));
     prepared_ = true;
 }
 
 void PulpDelayProcessor::release() {
+    tempo_delay_.reset();
     engines_.reset();
     prepared_ = false;
 }
@@ -70,10 +79,24 @@ void PulpDelayProcessor::process(audio::BufferView<float>& output,
         return;
     }
 
+    if (context.reset_requested) {
+        tempo_delay_.reset();
+        engines_.reset();
+    }
     const auto character = character_from_param(state().get_value(kCharacter));
     const auto routing = routing_from_param(state().get_value(kRouting));
-    const auto times =
-        DelayTimeModel::derive(delay_time_inputs_from_store(state(), context.tempo_bpm));
+    const auto delay_inputs = delay_time_inputs_from_store(state(), context.tempo_bpm);
+    const auto times = DelayTimeModel::derive(delay_inputs);
+    const auto sample_rate = tempo_delay_.sample_rate();
+    (void)tempo_delay_.set_delay_samples(static_cast<double>(times.left_ms) * sample_rate * 0.001,
+                                         static_cast<double>(times.right_ms) * sample_rate * 0.001);
+    (void)tempo_delay_.set_feedback(
+        std::clamp(static_cast<double>(state().get_value(kFeedback)) * 0.01, 0.0,
+                   signal::TempoDelayWrapper::kMaximumFeedback));
+    (void)tempo_delay_.set_crossfeed(
+        routing == Routing::ping_pong
+            ? 1.0
+            : std::clamp(static_cast<double>(state().get_value(kCrossfeed)) * 0.01, 0.0, 1.0));
     engines_.apply(engine_config(times, routing));
     engines_.request_character(character);
 
@@ -107,12 +130,12 @@ CharacterEngineConfig PulpDelayProcessor::engine_config(const EffectiveDelayTime
     const float mod_rate = std::clamp(state().get_value(kModRate), 0.05f, 10.0f);
     const float mod_rate_normalized = std::log(mod_rate / 0.05f) / std::log(10.0f / 0.05f);
     return {
-        .time_ms = times.left_ms,
-        .right_time_ms = times.right_ms,
+        .time_ms = 1.0f,
+        .right_time_ms = 1.0f,
         .time_offset = times.right_ratio,
         .right_uses_ratio = times.right_uses_ratio,
-        .feedback = state().get_value(kFeedback) * 0.01f,
-        .crossfeed = routing == Routing::ping_pong ? 1.0f : state().get_value(kCrossfeed) * 0.01f,
+        .feedback = 0.0f,
+        .crossfeed = 0.0f,
         .character_amount = state().get_value(kCharacterAmount) * 0.01f,
         .diffusion = state().get_value(kDiffusion) * 0.01f,
         .duck = state().get_value(kDuck) * 0.01f,
@@ -141,6 +164,10 @@ void PulpDelayProcessor::process_chunk(float* output_left, float* output_right,
         output_right[index] = input_right[index] + mono_blend * (mono - input_right[index]);
     }
 
+    // The wrapper owns the musical delay history and feedback route. The
+    // character engine is deliberately kept at its minimum 1 ms line so it
+    // colors the wrapper's wet signal without introducing a second long delay.
+    (void)tempo_delay_.process(output_left, output_right, static_cast<std::size_t>(num_samples));
     engines_.process(output_left, output_right, num_samples, alternate_left_.data(),
                      alternate_right_.data());
 

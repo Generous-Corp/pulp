@@ -5,6 +5,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/smoothed_value.hpp>
+#include <pulp/signal/tempo_delay_wrapper.hpp>
 
 #include <memory>
 #include <vector>
@@ -30,6 +31,7 @@ class PulpDelayProcessor final : public format::Processor {
                        const float* input_right, int num_samples) noexcept;
 
     CharacterEngineBank engines_;
+    signal::TempoDelayWrapper tempo_delay_;
     std::vector<float> dry_left_;
     std::vector<float> dry_right_;
     std::vector<float> alternate_left_;

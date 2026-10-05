@@ -70,6 +70,23 @@ def tearDownModule() -> None:
         raise AssertionError(f"git read memo was never consulted: {_GIT_MEMO_STATS}")
 
 
+class DescriptorLimitWithoutResourceTests(unittest.TestCase):
+    """Windows has no ``resource`` module; the script must still load there."""
+
+    def test_loads_without_resource_and_bounds_by_the_crt_table(self) -> None:
+        with mock.patch.dict(sys.modules, {"resource": None}):
+            spec = importlib.util.spec_from_file_location(
+                "gpu_trace_overhead_acceptance_without_resource", SCRIPT
+            )
+            assert spec and spec.loader
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        self.assertIsNone(module.resource)
+        module._raise_descriptor_limit(module._WINDOWS_CRT_DESCRIPTOR_LIMIT)
+        with self.assertRaisesRegex(ValueError, "descriptor limit"):
+            module._raise_descriptor_limit(module._WINDOWS_CRT_DESCRIPTOR_LIMIT + 1)
+
+
 class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def bound_receipt(self):
         head = MODULE.subprocess.run(
