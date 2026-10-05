@@ -2240,29 +2240,37 @@ TEST_CASE("pulp build allows explicit unsupported SDK bypass",
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-build-allow-skew-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(tmp);
-    {
-        std::ofstream f(tmp / "pulp.toml");
-        f << "[pulp]\n"
-          << "sdk_version = \"99.0.0\"\n"
-          << "cli_min_version = \"99.0.0\"\n";
-    }
+    auto tmp = unique_temp_dir("pulp-shellout-build-allow-skew");
+    write_text(tmp / "pulp.toml", "[pulp]\n"
+                                  "sdk_version = \"99.0.0\"\n"
+                                  "cli_min_version = \"99.0.0\"\n");
 
-    const auto bin = fs::absolute(pulp_binary());
-    auto cwd_saver = fs::current_path();
-    fs::current_path(tmp);
-    auto r = exec(bin.string(), {"build", "--allow-unsupported-sdk"}, 30000);
-    fs::current_path(cwd_saver);
+    // Past the compatibility gate, `pulp build` resolves the project's SDK and
+    // would download v99.0.0 from GitHub, and the update check would query the
+    // releases API: two network round trips the bypass does not depend on, and
+    // the reason this case outran its budget on a loaded gate VM. A cached SDK
+    // in a private PULP_HOME resolves locally, so the run goes straight on to
+    // configure, which stops at the empty project.
+    auto home = unique_temp_dir("pulp-shellout-build-allow-skew-home");
+    write_text(home / "sdk" / "99.0.0" / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake",
+               "# stub: resolved locally, never loaded\n");
+    ScopedEnvVar scoped_pulp_home("PULP_HOME");
+    scoped_pulp_home.set(home.string());
+    ScopedEnvVar no_update_check("PULP_UPDATE_CHECK_DISABLED");
+    no_update_check.set("1");
+
+    auto r = run_pulp_in_directory(tmp, {"build", "--allow-unsupported-sdk"});
     fs::remove_all(tmp);
+    fs::remove_all(home);
 
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code != 0);
     auto combined = r.stdout_output + r.stderr_output;
     REQUIRE(combined.find("requires a newer Pulp CLI") == std::string::npos);
     REQUIRE(combined.find("pulp upgrade 99.0.0") == std::string::npos);
+    // Control: the run got past the gate to configure, and fetched nothing.
+    REQUIRE(combined.find("CMakeLists.txt") != std::string::npos);
+    REQUIRE(combined.find("Downloading") == std::string::npos);
 }
 
 TEST_CASE("pulp build validates js engine option before compatibility checks",
