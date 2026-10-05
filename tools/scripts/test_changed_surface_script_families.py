@@ -114,6 +114,17 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertEqual(self.family_for(generated, "tools/scripts/shared.py"), [])
         self.assertNotEqual(self.family_for(generated, "tools/scripts/test_runner.py"), [])
 
+    def test_the_static_predictor_agrees_with_native_reachable_on_the_live_tree(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        tracked = families.tracked_files(root)
+        declared = json.loads((root / families.SCRIPT_INPUTS).read_text(encoding="utf-8"))["tests"]
+        scripts = families.top_level_scripts(tracked)
+        configured = families.native_reachable(scripts, tracked, {e.get("entry") for e in declared.values()},
+                                               lambda rel: families.read_text(root, rel))
+        prediction = families.Prediction(families.Snapshot(root, "HEAD", {}), declared)
+        self.assertTrue(configured)  # control: something is reachable, so both sides were read
+        self.assertEqual({s for s in scripts if prediction.reached(s)}, configured)
+
     def test_the_live_tree_keeps_a_reviewed_scanner_list_out_of_script_bodies(self) -> None:
         # A script body that names a path makes it reachable, so a list of
         # reviewed paths kept in a reachable script would unmap them all. The
@@ -149,6 +160,39 @@ class GeneratedFamiliesTest(FamilyFixture):
         generated = self.generate()
         self.assertNotEqual(self.family_for(generated, "tools/scripts/test_entry.py"), [])
         self.assertEqual(self.family_for(generated, "tools/scripts/codegen.py"), [])
+
+    def predicted_and_configured(self) -> tuple[set[str], set[str]]:
+        """Reachability as the static predictor and as native_reachable()
+        decide it, over the fixture committed as one revision."""
+        self.write("test/ctest_script_inputs.json",
+                   json.dumps({"schema": "pulp-ctest-script-inputs/v1", "tests": self.declared,
+                               "executables": {}}))
+        git = ["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-q", "-m", "fixture"], check=True)
+        tracked = families.tracked_files(self.root)
+        scripts = families.top_level_scripts(tracked)
+        entries = {e.get("entry") for e in self.declared.values()}
+        configured = families.native_reachable(scripts, tracked, entries,
+                                               lambda rel: families.read_text(self.root, rel))
+        prediction = families.Prediction(families.Snapshot(self.root, "HEAD", {}), self.declared)
+        return {s for s in scripts if prediction.reached(s)}, configured
+
+    def test_the_static_predictor_agrees_with_native_reachable_on_an_entry_cmake_runs(self) -> None:
+        self.write("tools/scripts/tool.py", "")
+        self.write("tools/scripts/quiet.py", "")
+        self.write("tools/scripts/uses_tool.py", "import tool\n")
+        self.write("test/cmake/tests.cmake",
+                   "add_test(NAME tool-selftest COMMAND python3 tools/scripts/tool.py)\n"
+                   "add_custom_command(TARGET probe PRE_LINK COMMAND python3 tools/scripts/tool.py)\n"
+                   "add_test(NAME quiet COMMAND python3 tools/scripts/quiet.py)\n")
+        self.script_test("tool-selftest", "tools/scripts/tool.py", [])
+        self.script_test("quiet", "tools/scripts/quiet.py", [])
+        predicted, configured = self.predicted_and_configured()
+        # tool.py is reached through the custom command, and the script that
+        # names it is not (reachability flows from a seed to what it names).
+        self.assertEqual(configured, {"tools/scripts/tool.py"})
+        self.assertEqual(predicted, configured)
 
     def test_a_test_entry_cmake_also_runs_stays_unmapped(self) -> None:
         self.add_whole_tree()
