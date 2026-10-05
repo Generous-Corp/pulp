@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/scan_blacklist.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -16,9 +17,7 @@ namespace {
 struct TempFile {
     fs::path path;
     TempFile() {
-        auto stem = "pulp-blacklist-" + std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count());
-        path = fs::temp_directory_path() / stem;
+        path = pulp::test::unique_temp_path("pulp-blacklist");
     }
     ~TempFile() { std::error_code ec; fs::remove_all(path, ec); }
     void write(const std::string& s) {

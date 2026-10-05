@@ -2,7 +2,7 @@
 #include <pulp/canvas/svg.hpp>
 #include <pulp/canvas/canvas.hpp>
 
-#include <chrono>
+#include "support/unique_temp_dir.hpp"
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -18,11 +18,7 @@ static const char* test_svg = R"(
 )";
 
 static std::filesystem::path make_temp_svg_path(const char* stem) {
-    const auto tick = std::chrono::steady_clock::now()
-                          .time_since_epoch()
-                          .count();
-    return std::filesystem::temp_directory_path() /
-           (std::string(stem) + "-" + std::to_string(tick) + ".svg");
+    return pulp::test::unique_temp_path(stem, ".svg");
 }
 
 TEST_CASE("SvgImage from string", "[canvas][svg]") {

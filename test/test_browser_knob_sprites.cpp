@@ -13,6 +13,7 @@
 // well as a moving one on the frame where they agree — so the pointer is
 // rendered at several values and asserted to have MOVED.
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_knob_sprites.hpp"
 #include "tools/import-design/import_png_codec.hpp"
 
@@ -25,7 +26,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -46,12 +46,7 @@ struct TempDirectory {
     fs::path root;
 
     TempDirectory() {
-        root = fs::temp_directory_path() /
-               ("pulp-browser-knob-sprites-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch()
-                                   .count()));
-        fs::create_directories(root);
+        root = pulp::test::make_unique_temp_dir("pulp-browser-knob-sprites");
     }
     ~TempDirectory() {
         std::error_code ec;

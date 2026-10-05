@@ -1,16 +1,17 @@
-#include <catch2/catch_test_macros.hpp>
 #include "support/thread_progress.hpp"
-#include <chrono>
-#include <pulp/view/script_engine.hpp>
+#include "support/unique_temp_dir.hpp"
+#include <atomic>
+#include <catch2/catch_test_macros.hpp>
 #include <choc/platform/choc_FileWatcher.h>
-#include <fstream>
-#include <thread>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <pulp/view/script_engine.hpp>
 #include <string>
-#include <atomic>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -27,12 +28,7 @@ static void write_js_file(const std::filesystem::path& path, const std::string& 
 }
 
 static std::filesystem::path make_temp_dir(const std::string& prefix) {
-    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto tmp_dir = std::filesystem::temp_directory_path() /
-                   (prefix + "_" + std::to_string(suffix));
-    std::filesystem::remove_all(tmp_dir);
-    std::filesystem::create_directories(tmp_dir);
-    return tmp_dir;
+    return pulp::test::make_unique_temp_dir(prefix);
 }
 
 static bool wait_for_reload_containing(HotReloader& reloader,

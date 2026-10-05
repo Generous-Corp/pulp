@@ -1,6 +1,7 @@
 #include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "support/audio_test_signals.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_convolver.hpp>
@@ -227,11 +228,8 @@ int run(Config config) {
     }
 
     if (config.directory.empty()) {
-        config.directory = std::filesystem::temp_directory_path() /
-                           ("pulp-paced-convolution-" +
-                            std::to_string(nanoseconds(Clock::now().time_since_epoch())));
-    }
-    if (!std::filesystem::create_directory(config.directory)) {
+        config.directory = pulp::test::make_unique_temp_dir("pulp-paced-convolution");
+    } else if (!std::filesystem::create_directory(config.directory)) {
         std::cerr << "output directory must be new: " << config.directory << '\n';
         return 2;
     }

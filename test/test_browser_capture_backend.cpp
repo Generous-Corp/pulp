@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_backend.hpp"
 
 #include <algorithm>
@@ -21,13 +22,8 @@ namespace {
 class TempTree {
 public:
     explicit TempTree(std::string_view label) {
-        const auto nonce = std::chrono::steady_clock::now()
-                               .time_since_epoch()
-                               .count();
-        root_ = fs::temp_directory_path()
-            / (std::string("pulp-browser-capture-test-") + std::string(label)
-               + "-" + std::to_string(nonce));
-        fs::create_directories(root_);
+        root_ = pulp::test::make_unique_temp_dir(std::string("pulp-browser-capture-test-") +
+                                                 std::string(label));
     }
 
     ~TempTree() {
