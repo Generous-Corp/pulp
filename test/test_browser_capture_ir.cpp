@@ -51,7 +51,8 @@ struct TempCapture {
                    ("pulp-browser-capture-ir-test-" + std::to_string(pid) + "-" +
                     std::to_string(tick) + "-" +
                     std::to_string(serial.fetch_add(1, std::memory_order_relaxed)));
-            if (fs::create_directory(root)) break;
+            if (fs::create_directory(root))
+                break;
         }
     }
     ~TempCapture() {
