@@ -2134,6 +2134,18 @@ the config, reports otherwise, and never fails a merge group. Regenerate with
 after the script-inputs list. The build directory needs a CMake file-API
 codemodel reply; without one the check reports a skip.
 
+The pre-push hook runs the build-free half,
+`changed_surface_script_families.py --static --base origin/main`: it predicts
+the mapping of each script the change adds, removes or re-reads from the
+committed script-inputs list at the merge base and at HEAD, and blocks a
+mapping flip the families file does not carry (about a second). Comparing
+against the base cancels what the prediction cannot see without a build
+(labels outside the authoritative corpus, fixtures, build products), and a
+reader-set change is reported rather than blocked. `tools/scripts/gates.sh`
+runs it before the configured check, which decides when the two disagree, and
+fails rather than reporting NOT CHECKED when the configured check cannot run on
+a change to a surface it blocks.
+
 Documentation under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`,
 and `docs/validation/**` selects only that mandatory kernel. Generated or
 authoritative state under `docs/status/**` remains fail-closed for this bounded

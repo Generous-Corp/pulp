@@ -32,8 +32,18 @@ drift-fast) one CI roundtrip later. This lane closes that gap:
    PULP_GATES_NO_CONFIGURE=1 skips this and reports the check NOT CHECKED.
 4. Run the diff-scoped `--check`; on drift print the exact `--write` command.
 
+The families check also has a build-free half: `--static` predicts whether the
+change maps or unmaps a script the families file was not regenerated for, and
+runs first (about a second). The configured `--check` decides when it runs.
+When it cannot run (PULP_GATES_NO_CONFIGURE=1, a failed configure, a skip) and
+the change touches a surface a stale family could bound wrongly (a top-level
+tools/scripts/*.py, a skill doc, the script-inputs list, the generator, the
+config or the families file), the lane FAILS instead of reporting NOT CHECKED:
+the required gate checks exactly that a full CI round trip later.
+
 Lines starting `NOT CHECKED locally:` are collected by gates.sh into its
-summary. Exit codes: 0 in sync, not reachable, or not checked (stated); 1 drift.
+summary. Exit codes: 0 in sync, not reachable, or not checked (stated); 1 drift,
+or the families check could not run on a change it blocks.
 
 Env: PULP_GATES_NO_CONFIGURE, PULP_GATES_BUILD_DIR, CMAKE (default `cmake`),
 PULP_GATES_SETUP (default `<root>/setup.sh`; empty skips the dependency step).
@@ -132,6 +142,9 @@ def main(argv: list[str]) -> int:
         for r in manifest_reasons[:8]:
             say(f"    {r}")
 
+    families_paths = families_surface(sti.changed_files(root, a.base)) if manifest_reasons else []
+    static_rc = check_families_static(root, a.base) if families_paths else 0
+
     build, why = sst.choose_build_dir(root, os.environ)
     if build is not None:
         say(f"  script-test-inputs: build dir {build} ({why})")
@@ -139,9 +152,10 @@ def main(argv: list[str]) -> int:
         say("  script-test-inputs: !!! PULP_GATES_NO_CONFIGURE=1 and no usable configured build "
             f"({why}). The list is NOT verified here; CI's pr-fast / drift-fast will fail this "
             "PR if it drifted. Unset PULP_GATES_NO_CONFIGURE to configure build-gate (~40 s, no compile).")
-        for test in (TEST, LANE_TEST, FAMILIES_TEST):
+        for test in (TEST, LANE_TEST):
             say(f"NOT CHECKED locally: {test} (PULP_GATES_NO_CONFIGURE=1; no usable build: {why})")
-        return 0
+        return families_unverified(families_paths, static_rc,
+                                   f"PULP_GATES_NO_CONFIGURE=1; no usable build: {why}")
     else:
         declared = os.environ.get(sst.GATES_BUILD_DIR_ENV, "").strip()
         build = Path(declared).expanduser() if declared else root / GATE_DIR
@@ -150,9 +164,9 @@ def main(argv: list[str]) -> int:
             "(configure only, no compile)")
         failed = configure(root, build)
         if failed:
-            for test in (TEST, LANE_TEST, FAMILIES_TEST):
+            for test in (TEST, LANE_TEST):
                 say(f"NOT CHECKED locally: {test} (configure failed: {failed})")
-            return 0
+            return families_unverified(families_paths, static_rc, f"configure failed: {failed}")
 
     try:
         shown = build.resolve().relative_to(root).as_posix()
@@ -163,7 +177,7 @@ def main(argv: list[str]) -> int:
         drift |= check_script_inputs(root, build, shown, a.base)
     if manifest_reasons:
         drift |= check_selftest_manifest(root, build, shown)
-        drift |= check_families(root, build, shown, a.base)
+        drift |= check_families(root, build, shown, a.base, families_paths, static_rc)
     return drift
 
 
@@ -211,8 +225,55 @@ def check_selftest_manifest(root: Path, build: Path, shown: str) -> int:
     return 0
 
 
-def check_families(root: Path, build: Path, shown: str, base: str) -> int:
+def families_surface(changed: set[str]) -> list[str]:
+    """Changed paths a stale family could bound wrongly (the generator's blocks_on)."""
+    return sorted(p for p in changed
+                  if p in {".shipyard/config.toml", ".shipyard/changed-surface-families.toml",
+                           "test/ctest_script_inputs.json",
+                           "tools/scripts/changed_surface_script_families.py"}
+                  or (p.startswith("tools/scripts/") and p.endswith(".py"))
+                  or (p.startswith(".agents/skills/") and p.endswith("/SKILL.md")))
+
+
+def check_families_static(root: Path, base: str) -> int:
+    """The build-free prediction: 1 when the change maps or unmaps a script the
+    families file does not carry, else 0 (2 when it could not predict)."""
+    if not FAMILIES.is_file():
+        return 2
+    rc, out = run_tool([sys.executable, str(FAMILIES), "--repo-root", str(root), "--static",
+                        "--base", base], root)
+    for line in out.splitlines()[-14:]:
+        say(f"  {line}")
+    return rc if rc in (0, 1) else 2
+
+
+def families_unverified(families_paths: list[str], static_rc: int, why: str) -> int:
+    """The configured families check did not run. A change to a surface it
+    blocks fails here rather than one CI round trip later; any other change
+    keeps the check NOT CHECKED."""
+    if not families_paths:
+        say(f"NOT CHECKED locally: {FAMILIES_TEST} ({why})")
+        return 0
+    verdict = {0: "the build-free prediction found no mapping flip, but reader sets and build "
+                  "targets need the configured check",
+               1: "the build-free prediction above found a mapping flip",
+               2: "the build-free prediction could not run"}[static_rc]
+    say(f"  changed-surface script families: FAILED, not verified ({why}). This change touches "
+        f"{len(families_paths)} path(s) the required gate checks against the families file "
+        f"({families_paths[0]}{', ...' if len(families_paths) > 1 else ''}); {verdict}.")
+    say("  Verify it before pushing, from any configured Ninja build (configure only, no compile):")
+    say("    tools/scripts/gates.sh origin/main          # configures build-gate when none is usable")
+    say("    PULP_GATES_BUILD_DIR=<configured dir> tools/scripts/gates.sh origin/main")
+    say("  and on drift regenerate and commit the file:")
+    say("    python3 tools/scripts/changed_surface_script_families.py --build-dir <dir> --write")
+    say("    git add .shipyard/changed-surface-families.toml")
+    return 1
+
+
+def check_families(root: Path, build: Path, shown: str, base: str,
+                   families_paths: list[str] | None = None, static_rc: int = 0) -> int:
     """`changed-surface-script-families-drift`, diff-scoped like the ctest."""
+    families_paths = families_paths or []
     if not FAMILIES.is_file():
         say(f"NOT CHECKED locally: {FAMILIES_TEST} ({FAMILIES.name} is not in this checkout)")
         return 0
@@ -223,14 +284,16 @@ def check_families(root: Path, build: Path, shown: str, base: str) -> int:
         (build / CODEMODEL_QUERY).touch()
         rc, out = run_tool([os.environ.get("CMAKE", "cmake"), "-S", str(root), "-B", str(build)], root)
         if rc != 0:
-            say(f"NOT CHECKED locally: {FAMILIES_TEST} (reconfigure for the codemodel reply "
-                f"exited {rc} on {shown})")
-            return 0
+            return families_unverified(families_paths, static_rc,
+                                       f"reconfigure for the codemodel reply exited {rc} on {shown}")
     rc, out = run_tool([sys.executable, str(FAMILIES), "--repo-root", str(root), "--build-dir",
                         str(build), "--check", "--base", base], root)
     for line in out.splitlines()[-12:]:
         say(f"  {line}")
     if rc == 0:
+        if static_rc == 1:
+            say("  changed-surface script families: the configured check is in sync, so the "
+                "build-free prediction above was wrong for this change; the configured check decides.")
         return 0
     if rc == 1:
         say("  changed-surface script families: DRIFT. Regenerate the families file from this "
@@ -238,9 +301,8 @@ def check_families(root: Path, build: Path, shown: str, base: str) -> int:
         say(f"    python3 tools/scripts/changed_surface_script_families.py --build-dir {shown} --write")
         say("    git add .shipyard/changed-surface-families.toml")
         return 1
-    say(f"NOT CHECKED locally: {FAMILIES_TEST} (changed_surface_script_families.py --check "
-        f"exited {rc} on {shown})")
-    return 0
+    return families_unverified(families_paths, static_rc,
+                               f"changed_surface_script_families.py --check exited {rc} on {shown}")
 
 
 if __name__ == "__main__":
