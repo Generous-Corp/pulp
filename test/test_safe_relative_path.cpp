@@ -62,3 +62,20 @@ TEST_CASE("is_within_directory compares normalized paths", "[runtime][path-safet
     CHECK_FALSE(is_within_directory(root, fs::path("dest") / "rootish" / "a"));
     CHECK_FALSE(is_within_directory(root, fs::path("dest")));
 }
+
+TEST_CASE("is_within_directory refuses an empty directory", "[runtime][path-safety]") {
+    CHECK_FALSE(is_within_directory(fs::path(""), fs::path("/etc")));
+    CHECK_FALSE(is_within_directory(fs::path(""), fs::path("a")));
+    CHECK_FALSE(is_within_directory(fs::path(""), fs::path("")));
+}
+
+TEST_CASE("is_within_directory treats a dot directory as the current directory",
+          "[runtime][path-safety]") {
+    CHECK(is_within_directory(fs::path("."), fs::path("./x")));
+    CHECK(is_within_directory(fs::path("."), fs::path("x/y")));
+    CHECK(is_within_directory(fs::path("."), fs::path(".")));
+    CHECK(is_within_directory(fs::path("a/.."), fs::path("x")));
+    CHECK_FALSE(is_within_directory(fs::path("."), fs::path("../x")));
+    CHECK_FALSE(is_within_directory(fs::path("."), fs::path("x/../../y")));
+    CHECK_FALSE(is_within_directory(fs::path("."), fs::path("/x")));
+}

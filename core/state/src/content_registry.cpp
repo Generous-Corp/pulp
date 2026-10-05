@@ -1,8 +1,9 @@
 #include <pulp/state/content_registry.hpp>
 #include <pulp/audio/sample_bank.hpp>
 #include <pulp/runtime/crypto.hpp>
-#include <pulp/runtime/safe_relative_path.hpp>
 #include <pulp/runtime/system.hpp>
+
+#include <pulp/runtime/safe_relative_path.hpp>
 
 #include <choc/text/choc_JSON.h>
 

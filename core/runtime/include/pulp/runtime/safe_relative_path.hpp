@@ -37,12 +37,23 @@ inline bool is_safe_relative_path(const std::filesystem::path& path) {
 }
 
 /// True if @p candidate, compared lexically after normalization, is
-/// @p directory itself or lies beneath it. Use it after joining a screened
+/// @p directory itself or lies beneath it. An empty @p directory contains
+/// nothing. Use it after joining a screened
 /// relative path onto its destination, as a second line of defence.
 inline bool is_within_directory(const std::filesystem::path& directory,
                                 const std::filesystem::path& candidate) {
     const auto root = directory.lexically_normal();
     const auto path = candidate.lexically_normal();
+    // An empty directory constrains nothing, so it cannot vouch for anything.
+    if (root.empty())
+        return false;
+    // `.` (or `a/..`) is the current directory: any relative candidate that
+    // does not climb out of it lies within it.
+    if (root == ".") {
+        if (path.has_root_name() || path.has_root_directory())
+            return false;
+        return path.empty() || *path.begin() != "..";
+    }
     auto r = root.begin();
     auto p = path.begin();
     for (; r != root.end(); ++r) {

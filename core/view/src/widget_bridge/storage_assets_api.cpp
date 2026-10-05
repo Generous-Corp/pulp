@@ -3,8 +3,9 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
-#include <pulp/runtime/safe_relative_path.hpp>
 #include "api_registry.hpp"
+
+#include <pulp/runtime/safe_relative_path.hpp>
 
 #include <cctype>
 #include <filesystem>
