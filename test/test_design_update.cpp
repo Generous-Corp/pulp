@@ -71,6 +71,23 @@ TEST_CASE("compatible keyed changes retain the existing materialization shape",
     CHECK(plan.updates.front().key == "control");
 }
 
+TEST_CASE("value-only binding metadata does not change the materialization shape",
+          "[view][import][update]") {
+    auto old_node = node("editor");
+    auto new_node = old_node;
+    old_node.attributes["pulpInitialValue"] = "old text";
+    old_node.attributes["pulpPlaceholder"] = "old placeholder";
+    new_node.attributes["pulpInitialValue"] = "new text";
+    new_node.attributes["pulpPlaceholder"] = "new placeholder";
+
+    const auto plan = plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                std::span<const IRNode>(&new_node, 1));
+    REQUIRE(plan.keyed);
+    REQUIRE(plan.updates.size() == 1);
+    CHECK(plan.updates.front().kind == DesignUpdateKind::retained);
+    CHECK(plan.updates.front().key == "editor");
+}
+
 TEST_CASE("same-anchor shape changes recreate instead of reusing stale controls",
           "[view][import][update]") {
     SECTION("node type") {
