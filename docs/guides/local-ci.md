@@ -918,7 +918,7 @@ A test that runs or loads another built target declares it with
 edge after every tool directory has been read. An inline
 `if(TARGET <tool>)` in `test/cmake` is evaluated too early and creates no
 edge. An executable whose sources call a process API with no such edge and no
-reviewed `pulp_test_spawns(<test> NONE)` is `spawns: undeclared`, and the
+reviewed `pulp_test_spawns(<test> NONE REASON "<why>")` is `spawns: undeclared`, and the
 shadow selects it on every change. So is one whose code names a built
 program (a string such as `"pulp-cpp"`) that no edge reaches and no reviewed
 `pulp_test_spawns(<test> NOT_RUN <target>)` covers, and one whose declared

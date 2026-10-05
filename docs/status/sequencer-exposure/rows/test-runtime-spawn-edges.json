@@ -16,8 +16,8 @@
     {
       "path": "test/cmake/timeline_tests.cmake",
       "needles": [
-        "pulp_test_spawns(pulp-test-timeline-journal NONE)",
-        "pulp_test_spawns(pulp-test-timeline-graph-binding NONE)",
+        "pulp_test_spawns(pulp-test-timeline-journal NONE REASON",
+        "pulp_test_spawns(pulp-test-timeline-graph-binding NONE REASON",
         "pulp_test_data(pulp-test-timeline-persistence NO_DEFINE PATHS test/fixtures/timeline)",
         "pulp_test_data(pulp-fixture-runner NO_DEFINE PATHS test/fixtures/timeline)"
       ]

@@ -224,8 +224,8 @@ pulp_add_test_suite(pulp-test-web-compat-react-shims GROUP pulp-test-group-desig
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-offscreen-capture-rt-contract NONE) # fork without exec
+pulp_test_spawns(pulp-test-offscreen-capture-rt-contract NONE REASON "forks itself without exec and loads nothing the tree builds")
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-design-swift-codegen NONE)     # swiftc
+pulp_test_spawns(pulp-test-design-swift-codegen NONE REASON "runs the system swiftc, nothing the tree builds")

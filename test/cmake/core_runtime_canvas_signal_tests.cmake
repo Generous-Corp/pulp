@@ -1068,9 +1068,9 @@ endif()
 
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-group-core-audio NONE)         # fork without exec
-pulp_test_spawns(pulp-test-group-core-events NONE)        # constructs ChildProcessManager; starts nothing
-pulp_test_spawns(pulp-test-group-core-platform NONE)      # dlopen of the system libdbus
-pulp_test_spawns(pulp-test-group-core-runtime-http NONE)  # /bin/echo, /bin/sh, /bin/pwd, powershell
-pulp_test_spawns(pulp-test-streaming-model-contract NONE) # fork without exec
-pulp_test_spawns(pulp-test-group-core-gpu-audio-private NONE) # fork without exec
+pulp_test_spawns(pulp-test-group-core-audio NONE REASON "forks itself without exec and loads nothing the tree builds")
+pulp_test_spawns(pulp-test-group-core-events NONE REASON "constructs ChildProcessManager and starts nothing")
+pulp_test_spawns(pulp-test-group-core-platform NONE REASON "dlopens the system libdbus, nothing the tree builds")
+pulp_test_spawns(pulp-test-group-core-runtime-http NONE REASON "runs /bin/echo, /bin/sh, /bin/pwd and powershell, nothing the tree builds")
+pulp_test_spawns(pulp-test-streaming-model-contract NONE REASON "forks itself without exec and loads nothing the tree builds")
+pulp_test_spawns(pulp-test-group-core-gpu-audio-private NONE REASON "forks itself without exec and loads nothing the tree builds")

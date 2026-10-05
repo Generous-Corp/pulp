@@ -26,3 +26,6 @@ if(Python3_EXECUTABLE)
     set_tests_properties(sample-region-i2-rt02-process-contract PROPERTIES
         LABELS "sample-region;i2;rt-safety")
 endif()
+
+# Reviewed plugin-loader calls (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-sample-region-runtime NONE REASON "reloads graphs it serialized from in-memory nodes with GraphSerializer::from_json, so it loads nothing the tree builds")

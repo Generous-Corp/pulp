@@ -4,6 +4,11 @@ Date: 2026-10-04
 Protected base: `origin/main` at `ff83c0e9fd147dc143af7228eac0e3298e84b35f`
 Worktree: `/Users/danielraffel/Code/pulp-neural-package-a-modelstore-audit-20261004`
 
+> **Historical audit snapshot.** This report records the package-A audit at the
+> protected base above; it is not a current-head status receipt. For current
+> coordination and acceptance state, see the [neural audio program status](../status/neural-audio-program-status-20261004.md)
+> and the [neural real-time competitive proof plan](neural-competitive-proof-plan-20261003.md).
+
 ## Result
 
 **PASS** for the private neural manifest and ModelStore install/reload gates present

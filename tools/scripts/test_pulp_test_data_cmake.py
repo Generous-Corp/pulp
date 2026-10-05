@@ -20,7 +20,8 @@ What must hold:
   to some of an executable's sources (and refuses one that is not its own);
 - `pulp_test_spawns()` gives a test an edge to a tool defined after the test
   directory, where an inline `if(TARGET tool)` is false and silently drops
-  it; `runtime_targets` lists the edge, and `spawns_none` a reviewed NONE;
+  it; `runtime_targets` lists the edge, and `spawns_none` a reviewed NONE,
+  which must carry a REASON (recorded as `spawns_none_reason`);
 - a `$<TARGET_FILE:x>` definition without an edge to x fails the configure,
   and so does a NONE on an executable that has one, or a pulp_test_spawns()
   edge that does not reach the written index;
@@ -286,12 +287,22 @@ class PulpTestSpawnsCMakeTests(unittest.TestCase):
         self.assertEqual(index["spawner"]["runtime_targets"], ["tool"])
 
     def test_none_records_a_review_and_refuses_an_edge(self) -> None:
-        proc, index = self.configure("pulp_test_spawns(plain NONE)\n")
+        proc, index = self.configure('pulp_test_spawns(plain NONE REASON "loads only fixtures")\n')
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual((index["plain"]["spawns_none"], index["plain"]["runtime_targets"]), (True, []))
-        proc, _ = self.configure("pulp_test_spawns(spawner NONE)\npulp_test_spawns(spawner tool)\n")
+        self.assertEqual((index["plain"]["spawns_none"], index["plain"]["runtime_targets"],
+                          index["plain"]["spawns_none_reason"]), (True, [], "loads only fixtures"))
+        self.assertIsNone(index["spawner"]["spawns_none_reason"])
+        proc, _ = self.configure('pulp_test_spawns(spawner NONE REASON "x")\npulp_test_spawns(spawner tool)\n')
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("spawner is declared pulp_test_spawns(NONE) but depends on tool", proc.stderr)
+
+    def test_a_none_without_a_reason_fails_the_configure(self) -> None:
+        for call in ("pulp_test_spawns(plain NONE)", 'pulp_test_spawns(plain NONE REASON "")',
+                     'pulp_test_spawns(plain NONE REASON "a" extra)'):
+            with self.subTest(call=call):
+                proc, _ = self.configure(call + "\n")
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("pulp_test_spawns(plain NONE) needs REASON", proc.stderr)
 
     def test_not_run_is_recorded_and_refuses_an_edge(self) -> None:
         proc, index = self.configure("pulp_test_spawns(plain NOT_RUN tool)\n")

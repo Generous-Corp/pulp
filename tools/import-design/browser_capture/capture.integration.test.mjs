@@ -2,9 +2,11 @@
 import assert from "node:assert/strict";
 import {
   access,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -19,6 +21,7 @@ import {
   escapeRegExp,
   execute,
   installedBrowser,
+  managedBrowser,
   rgbaPixel,
 } from "./capture_integration_support.mjs";
 
@@ -83,6 +86,65 @@ test("installedBrowser prefers a provisioned browser over system installations",
         await installedBrowser({ PULP_DESIGN_BROWSER: absent }), "");
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+// A PULP_HOME holding a `pulp tool install chrome-for-testing` layout.
+async function managedHome(executable) {
+  const home = await mkdtemp(path.join(os.tmpdir(), "pulp-managed-browser-"));
+  const root = path.join(home, "tools", "chrome-for-testing");
+  const binary = path.join(root, "151.0.7922.47", "mac-arm64", "chrome");
+  await mkdir(path.dirname(binary), { recursive: true });
+  await writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  await writeFile(path.join(root, "current.json"), JSON.stringify({
+    schema: 1, version: "151.0.7922.47", platform: "mac-arm64", executable,
+  }));
+  return { home, root, binary };
+}
+
+test("an installed Chrome for Testing is preferred over system browsers",
+  async () => {
+    const { home, binary } = await managedHome("151.0.7922.47/mac-arm64/chrome");
+    try {
+      const candidates = browserCandidates({ PULP_HOME: home });
+      assert.equal(candidates[0], binary);
+      assert.ok(candidates.some((c) => c.includes("/Applications/")),
+        "system browsers stay as later fallbacks");
+      assert.equal(await installedBrowser({ PULP_HOME: home }), binary);
+      // The pinned override and the CI rule still come first.
+      assert.deepEqual(
+        browserCandidates({ PULP_HOME: home, PULP_DESIGN_BROWSER: "/pinned" }),
+        ["/pinned"]);
+      assert.deepEqual(
+        browserCandidates({ PULP_HOME: home, GITHUB_ACTIONS: "true" }), []);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+test("a managed install that escapes its root or its version is ignored",
+  async () => {
+    for (const executable of [
+      "../../../../bin/sh",
+      "/bin/sh",
+      "151.0.7922.47/other-platform/chrome",
+      "other-version/mac-arm64/chrome",
+      "151.0.7922.47/mac-arm64/missing",
+    ]) {
+      const { home } = await managedHome(executable);
+      try {
+        assert.equal(managedBrowser({ PULP_HOME: home }), "", executable);
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    }
+    // A symlink that leaves the managed root is refused too.
+    const { home, root } = await managedHome("151.0.7922.47/mac-arm64/link");
+    try {
+      await symlink("/bin/sh", path.join(root, "151.0.7922.47", "mac-arm64", "link"));
+      assert.equal(managedBrowser({ PULP_HOME: home }), "");
+    } finally {
+      await rm(home, { recursive: true, force: true });
     }
   });
 
