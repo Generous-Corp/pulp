@@ -24,6 +24,7 @@ concurrency:
 jobs:
   numeric:
     name: g++-14 on, 11 numeric tests
+    if: github.event.inputs.only != 'g13'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 75
     steps:
@@ -52,7 +53,7 @@ jobs:
 
   bench:
     name: g++-14 bench ${{ matrix.mode }}
-    if: github.event.inputs.only != 'checks'
+    if: github.event.inputs.only == 'all'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     strategy:
@@ -99,8 +100,10 @@ jobs:
             cp b/test/pulp-dsp-throughput-benchmark bench-$mode
           done
           wc -l objs-on.txt objs-off.txt
-          if diff -q objs-on.txt objs-off.txt; then echo "OBJECTS IDENTICAL"; else diff objs-on.txt objs-off.txt | head -40; echo "OBJECTS DIFFER: $(diff objs-on.txt objs-off.txt | grep -c '^<')"; fi
+          diff objs-on.txt objs-off.txt > objs.diff || true
+          if [ -s objs.diff ]; then cat objs.diff; echo "OBJECTS DIFFER: $(grep -c '^<' objs.diff)"; else echo "OBJECTS IDENTICAL"; fi
           sha256sum bench-on bench-off
+          for f in $(grep '^<' objs.diff | awk '{print $3}'); do echo "== $f"; done
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: gcc13-identity, path: "objs-*.txt"}
+        with: {name: gcc13-identity, path: "objs*"}
