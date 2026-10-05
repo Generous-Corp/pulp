@@ -281,7 +281,7 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertEqual(family["risk_class"], "low")
 
         selected_tests = set(self.policy["baseline_tests"]) | set(family["tests"])
-        self.assertEqual(len(selected_tests), 56)
+        self.assertEqual(len(selected_tests), 57)
         self.assertEqual(
             selected_build_targets(self.policy, family["name"]),
             {"pulp-test-build-check", "pulp-cli", "pulp-test-child-process"},
