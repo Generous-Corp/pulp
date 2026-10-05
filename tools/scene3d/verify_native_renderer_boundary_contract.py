@@ -2,6 +2,7 @@
 """Verifies the native renderer link-boundary checker rejects drift."""
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -57,12 +58,31 @@ def append_to_link(build_dir, relative, token):
     write_text(path, read_text(path) + f" {token}\n")
 
 
-def remove_required_token(build_dir, relative, token):
+def remove_required_token(build_dir, relative, *spellings):
     path = build_dir / relative
     text = read_text(path)
-    if token.lower() not in text.lower():
-        raise ValueError(f"{relative} does not contain required token {token!r}")
-    write_text(path, text.replace(token, ""))
+    if not any(spelling.lower() in text.lower() for spelling in spellings):
+        raise ValueError(f"{relative} does not contain required token {spellings[0]!r}")
+    for spelling in spellings:
+        text = text.replace(spelling, "")
+    write_text(path, text)
+
+
+WEBGPU_LINK_FILES = (
+    "core/render/CMakeFiles/pulp-renderer3d-probe.dir/link.txt",
+    "core/render/CMakeFiles/pulp-scene3d-inspect-native.dir/link.txt",
+    "test/CMakeFiles/pulp-test-renderer3d.dir/link.txt",
+)
+
+
+def mutate_no_soname_webgpu_spelling(build_dir):
+    # The Linux spelling: the runtime named by -l rather than by its path.
+    for relative in WEBGPU_LINK_FILES:
+        path = build_dir / relative
+        text = re.sub(r"\S*libwgpu_native\S*", "-lwgpu_native", read_text(path))
+        if "-lwgpu_native" not in text:
+            raise ValueError(f"{relative} does not link the WebGPU runtime")
+        write_text(path, text)
 
 
 def remove_link_file(build_dir, relative):
@@ -98,7 +118,13 @@ def mutate_missing_render_webgpu_token(build_dir):
         build_dir,
         "core/render/CMakeFiles/pulp-renderer3d-probe.dir/link.txt",
         "libwgpu_native",
+        "-lwgpu_native",
     )
+
+
+def mutate_missing_no_soname_webgpu_token(build_dir):
+    mutate_no_soname_webgpu_spelling(build_dir)
+    mutate_missing_render_webgpu_token(build_dir)
 
 
 def mutate_missing_required_link_file(build_dir):
@@ -138,10 +164,12 @@ def main():
 
     cases = [
         ("valid-current-link-boundary", None, 0, "native_renderer_boundary_verified=7 link files"),
+        ("valid-no-soname-webgpu-link", mutate_no_soname_webgpu_spelling, 0, "native_renderer_boundary_verified=7 link files"),
         ("forbidden-view-link-token", mutate_forbidden_view_token, 1, "forbidden view module token"),
         ("forbidden-widget-link-token", mutate_forbidden_widget_token, 1, "forbidden runtime WebGPU bridge token"),
         ("missing-scene-parser-token", mutate_missing_scene_parser_token, 1, "missing required native glTF parser token"),
         ("missing-render-webgpu-token", mutate_missing_render_webgpu_token, 1, "missing required native WebGPU runtime token"),
+        ("missing-no-soname-webgpu-token", mutate_missing_no_soname_webgpu_token, 1, "missing required native WebGPU runtime token"),
         ("missing-required-link-file", mutate_missing_required_link_file, 1, "No such file or directory"),
     ]
     errors = []
