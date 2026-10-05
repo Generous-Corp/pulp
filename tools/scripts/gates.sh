@@ -122,6 +122,7 @@ FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 SCHEDULE_BACKSTOP="$ROOT/tools/scripts/schedule_backstop_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
+RAW_PID_PROBE_LINT="$ROOT/tools/scripts/raw_pid_probe_lint.py"
 FORCED_RESTORE_LINT="$ROOT/tools/scripts/forced_restore_lint.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
 SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
@@ -791,6 +792,17 @@ if [ -f "$UNBOUNDED_WAIT_LINT" ]; then
     echo "" >&2
     echo "▸ unbounded-wait lint (a test wait must be able to time out)" >&2
     if ! "$PYTHON" "$UNBOUNDED_WAIT_LINT" --base "$BASE"; then
+        fail=1
+    fi
+fi
+
+# A liveness probe written as os.kill(pid, 0) sends Ctrl+C to the whole console
+# on Windows and kills the ctest run that started it. Whole-tree: there is no
+# backlog, every probe goes through process_liveness.pid_alive.
+if [ -f "$RAW_PID_PROBE_LINT" ]; then
+    echo "" >&2
+    echo "▸ raw pid-probe lint (no os.kill(pid, 0); Ctrl+C on Windows)" >&2
+    if ! "$PYTHON" "$RAW_PID_PROBE_LINT" --root "$ROOT" >&2; then
         fail=1
     fi
 fi
