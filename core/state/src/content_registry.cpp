@@ -1,6 +1,7 @@
 #include <pulp/state/content_registry.hpp>
 #include <pulp/audio/sample_bank.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/safe_relative_path.hpp>
 #include <pulp/runtime/system.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -88,12 +89,7 @@ bool intersects(const std::vector<std::string>& a, const std::vector<std::string
 }
 
 bool safe_rel_path(const fs::path& rel) {
-    if (rel.empty() || rel.is_absolute()) return false;
-    for (const auto& part : rel) {
-        const auto s = part.string();
-        if (s.empty() || s == "." || s == "..") return false;
-    }
-    return true;
+    return pulp::runtime::is_safe_relative_path(rel);
 }
 
 bool safe_id_component(std::string_view value) {

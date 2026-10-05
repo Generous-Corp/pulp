@@ -3,6 +3,7 @@
 #include "gpu_probe_recipe_catalog_data.h"
 
 #include <choc/text/choc_JSON.h>
+#include <pulp/runtime/safe_relative_path.hpp>
 
 #include <algorithm>
 #include <array>
@@ -71,9 +72,8 @@ bool finite_nonnegative(double value) {
 bool safe_relative_name(std::string_view value) {
     if (value.empty() || value.size() > 240) return false;
     const std::filesystem::path path(value);
-    if (path.is_absolute() || path.has_root_name() || path.has_root_directory()) return false;
-    for (const auto& part : path)
-        if (part == ".." || part == ".") return false;
+    if (!pulp::runtime::is_safe_relative_path(path))
+        return false;
     return path.lexically_normal().generic_string() == value;
 }
 
