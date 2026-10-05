@@ -271,6 +271,18 @@ if(PULP_HAS_CLAP)
         LIBRARIES pulp::format clap
         COMPILE_DEFINITIONS PULP_CLAP_GUI=1)
 
+    # CLAP slot channel-width negotiation: a CLAP plugin's audio ports are
+    # static, so prepare() must refuse a width the ports cannot serve rather
+    # than let the plugin return without writing and present silence as a
+    # successful render. Reaches into core/host/src for the slot factory that
+    # skips dlopen, so the contract is pinned against a fake plugin.
+    add_executable(pulp-test-clap-slot-channel-width test_clap_slot_channel_width.cpp)
+    target_link_libraries(pulp-test-clap-slot-channel-width
+        PRIVATE pulp::host clap Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-clap-slot-channel-width
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-clap-slot-channel-width)
+
     add_executable(pulp-test-clap-entry test_clap_entry.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp

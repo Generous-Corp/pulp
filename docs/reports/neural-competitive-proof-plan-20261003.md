@@ -126,6 +126,25 @@ quality metric is within the predeclared tolerance.
 
 ## Model coverage ladder
 
+## Apple Silicon service matrix
+
+M1, M3, and M5 are valid experiment hosts, but a control-path measurement is
+not a neural-provider support claim. Existing native-control observations
+reported GPU p50 values of 10.250 us on M1 Max, 6.792 us on M3 Ultra, and
+7.292 us on M5 Max. Those runs had observer and allocation confounders, so
+they prove cross-generation availability only. Each provider and model still
+needs its own receipt:
+
+| Host tier | Permitted use before a real provider receipt | Promotion evidence required |
+| --- | --- | --- |
+| M1 Max | CPU/reference work and Dawn feasibility experiments | paced named-model receipt with zero unexplained fallback and deadline margin |
+| M3 Ultra | block-parallel MLX/Dawn experiments and multi-instance profiling | the same receipt plus useful accelerator parallelism and reset/device-loss evidence |
+| M5 Max/Studio | primary sustained GPU-audio campaign candidate | the same receipt at production block sizes, with independent cold starts and packaging identity |
+
+Results remain host-specific. A pass on M5 does not promote M1 or M3, and a
+control that runs on all three does not prove that a persistent audio node
+benefits from GPU execution.
+
 The first receipt is deliberately small, but the program must expand coverage
 before claiming a general engine advantage:
 

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/spectr-gpu-nam-forge-controls.schema.json",
+  "title": "Spectr/GPU-NAM Forge model control and researcher receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "node", "model", "execution", "receipt", "exposure"],
+  "properties": {
+    "schema": { "const": "pulp.spectr-gpu-nam-forge-controls.v1" },
+    "node": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type_id", "version"],
+      "properties": {
+        "type_id": { "type": "string", "pattern": "^[a-z][a-z0-9.-]+$" },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "provider", "checkpoint_sha256", "license", "redistributable"],
+      "properties": {
+        "model_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$" },
+        "provider": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$" },
+        "checkpoint_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "license": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "redistributable": { "type": "boolean" }
+      }
+    },
+    "execution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sample_rate_hz", "block_size", "latency_samples", "fallback"],
+      "properties": {
+        "sample_rate_hz": { "type": "integer", "minimum": 8000, "maximum": 384000 },
+        "block_size": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "latency_samples": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "fallback": { "enum": ["cpu", "silence"] },
+        "fallback_primed": { "type": "boolean" }
+      }
+    },
+    "receipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["receipt_id", "source_revision", "provider_identity", "observed_path", "status"],
+      "properties": {
+        "receipt_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{3,127}$" },
+        "source_revision": { "type": "string", "minLength": 7, "maxLength": 80 },
+        "provider_identity": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "observed_path": { "enum": ["gpu", "cpu_fallback", "silence"] },
+        "status": { "enum": ["pass", "inconclusive", "fail"] },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "exposure": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "catalog_registered", "named_consumer"],
+      "properties": {
+        "status": { "const": "metadata_only" },
+        "catalog_registered": { "const": false },
+        "named_consumer": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9._-]{0,63}$" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "receipt": { "properties": { "status": { "const": "pass" } } } } },
+      "then": { "properties": { "receipt": { "required": ["artifact_sha256"] } } }
+    }
+  ]
+}

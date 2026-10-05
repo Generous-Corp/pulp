@@ -25,6 +25,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -82,9 +83,15 @@ class FindPluginvalTests(unittest.TestCase):
             self.assertEqual(os.path.realpath(got[name]), os.path.realpath(expected), name)
             self.assertNotIn("Contents/MacOS/" + str(self.bundles).lstrip("/"), got[name])
             self.assertTrue(Path(got[name]).is_file(), name)
-        # Control: the fake bundle is visible to CMake's own app-bundle search,
-        # so the helper runs after real app-bundle lookups.
-        self.assertTrue(got["RAW1"].endswith("pluginval"), got)
+        # Control: on macOS the fake bundle is visible to CMake's own
+        # app-bundle search, so both helper calls run after real app-bundle
+        # lookups. Other platforms correctly ignore CMAKE_APPBUNDLE_PATH.
+        if sys.platform == "darwin":
+            for name in ("RAW1", "RAW2"):
+                self.assertTrue(got[name].endswith("pluginval"), got)
+        else:
+            for name in ("RAW1", "RAW2"):
+                self.assertEqual(got[name], f"{name}-NOTFOUND", got)
 
     def test_a_cached_path_that_names_no_file_heals(self) -> None:
         doubled = f"{self.binary.parent}{self.binary.parent}/pluginval"
