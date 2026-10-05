@@ -85,5 +85,24 @@ if(PULP_ENABLE_INSPECTOR AND NOT APPLE AND NOT IOS AND NOT PULP_IOS AND
                   LABELS "inspect;control;dspx-04;e2e;product;typed-skip")
 endif()
 
+# Keep the typed-skip product contract discoverable when a platform configure
+# omits the inspector SDK or one of its product dependencies.  The real Apple
+# receipt above and the non-Apple inspector build both own this target name;
+# this fallback only fills the registration gap with the same typed-skip test.
+if(PULP_BUILD_TESTS AND NOT TARGET pulp-test-control-dspx04-graph-product-e2e AND
+   TARGET Catch2::Catch2WithMain)
+    add_executable(pulp-test-control-dspx04-graph-product-e2e
+        ${CMAKE_SOURCE_DIR}/test/test_control_dspx04_graph_product_e2e.cpp)
+    target_include_directories(pulp-test-control-dspx04-graph-product-e2e PRIVATE
+        ${CMAKE_SOURCE_DIR}/inspect/src ${CMAKE_SOURCE_DIR}/test
+        ${CMAKE_SOURCE_DIR}/core/audio/include)
+    target_link_libraries(pulp-test-control-dspx04-graph-product-e2e PRIVATE
+        Catch2::Catch2WithMain)
+    pulp_scaled_test_timeout(_pulp_dspx04_graph_product_fallback_timeout 30)
+    catch_discover_tests(pulp-test-control-dspx04-graph-product-e2e
+        PROPERTIES TIMEOUT "${_pulp_dspx04_graph_product_fallback_timeout}"
+                  LABELS "inspect;control;dspx-04;e2e;product;typed-skip")
+endif()
+
 endfunction()
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _pulp_register_dspx04_control_e2e)
