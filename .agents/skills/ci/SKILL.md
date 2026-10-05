@@ -4025,6 +4025,18 @@ macOS dominates *cost* (it bills at ~10x Linux per minute), Windows dominates
 smaller invoice — and the macOS gate is the thing to protect, precisely because
 it is both the expensive lane and the only required one.
 
+**The nightly is the only Windows ctest lane, and until it built in parallel it
+never got there.** All 140 runs from 2026-05-21 to 2026-10-04 ended cancelled or
+failed; the Windows job never succeeded. The Build steps passed no parallel level,
+so the default generators built serially (Makefiles `make -j1`; Visual Studio
+MSBuild one project at a time) and hit `timeout-minutes` inside Build every night.
+The fix is a literal `--parallel 4` on those hosted 4-core legs, the same as
+`build.yml`'s hosted Windows leg. Read a cancelled nightly from the check-run
+annotations ("The job has exceeded the maximum execution time"), not by grepping
+the log, which also matches the workflow's own comments about `timeout-minutes`.
+On a PR the `windows` check is an Ubuntu aggregate that compiles and tests nothing
+on Windows (see `docs/guides/test-lanes.md`).
+
 Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
 and its `tracking-issues` job find-or-creates a per-platform issue on failure,
 reopens a closed one, and auto-closes on recovery. So a Windows regression becomes
