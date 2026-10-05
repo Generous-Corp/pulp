@@ -219,6 +219,15 @@ class MinimumLeadProxyEvaluator {
         const auto& p = s.prediction;
         if (p.available && p.version != 0 && p.provenance != 0) {
             saturating_increment(receipt_.prediction_samples);
+            if (!prediction_version_seen_) {
+                prediction_version_ = p.version;
+                prediction_version_seen_ = true;
+            } else if (p.version != prediction_version_) {
+                // A campaign must use one predictor contract end to end. A
+                // mixed-version receipt cannot establish a single bound.
+                saturating_increment(receipt_.missing_evidence);
+                saturating_increment(receipt_.invalid_predictions);
+            }
             const auto error = p.observed_ns >= p.predicted_ns ? p.observed_ns - p.predicted_ns
                                                                : p.predicted_ns - p.observed_ns;
             if (receipt_.prediction_abs_error_max_ns == Receipt::unavailable ||
@@ -303,6 +312,8 @@ class MinimumLeadProxyEvaluator {
     std::uint64_t expected_generation_ = 0;
     std::uint64_t next_sequence_ = 0;
     bool seen_sequence_ = false;
+    std::uint32_t prediction_version_ = 0;
+    bool prediction_version_seen_ = false;
     std::unique_ptr<std::uint64_t[]> id_storage_;
 
     static bool checked_add(std::uint64_t a, std::uint64_t b, std::uint64_t& out) noexcept {

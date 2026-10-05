@@ -157,6 +157,19 @@ TEST_CASE("minimum lead proxy rejects predictor provenance") {
     auto r = run(s);
     CHECK_FALSE(r.prediction_valid);
 }
+TEST_CASE("minimum lead proxy rejects mixed predictor versions") {
+    MinimumLeadProxyEvaluator e(admission());
+    e.observe(sample(0));
+    auto mixed = sample(1);
+    mixed.prediction.version = sample(0).prediction.version + 1;
+    e.observe(mixed);
+    const auto r = e.finish();
+    CHECK(r.prediction_samples == 2);
+    CHECK(r.invalid_predictions > 0);
+    CHECK(r.missing_evidence > 0);
+    CHECK_FALSE(r.prediction_valid);
+    CHECK_FALSE(r.complete);
+}
 TEST_CASE("minimum lead proxy binds provider executable model and resident plan") {
     auto s = sample(0);
     s.identity.model = 99;
