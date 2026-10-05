@@ -469,13 +469,18 @@ class Collector:
             link = None
             if links is not None and link_members.unusable(links) is None:
                 names = links.get("members") or {}
+                scoped = link_members.shared_scope(links)
                 link = {exe.removeprefix("<build>/"): {
                             "objects": [o.removeprefix("<build>/") for o in rec.get("objects") or []],
                             "members": {a.removeprefix("<build>/"): (list(names.get(a) or []) if arc.get("whole") else
                                                                     [names[a][i] for i in arc.get("members") or []
                                                                      if a in names and i < len(names[a])])
                                         for a, arc in (rec.get("archives") or {}).items()}}
-                        for exe, rec in (links.get("executables") or {}).items()}
+                        for exe, rec in (links.get("executables") or {}).items()
+                        # A loader of a build-produced shared library is not
+                        # keyed (shared_scope); left out, it reads unrecorded.
+                        if rec.get("kind", "executable") != "shared"
+                        and exe not in scoped}
             targets = None if model is None else {
                 n: {k: t.get(k) for k in ("digest", "type", "artifacts", "dependencies")}
                 for n, t in (model.get("targets") or {}).items()}

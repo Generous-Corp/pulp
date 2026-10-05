@@ -367,6 +367,23 @@ class KeyTests(unittest.TestCase):
         with self.assertRaises(ValueError):                 # an unreadable list is an error, not empty
             self.fx.keys(head, key_blind=listed)
 
+    def test_a_loader_of_a_build_produced_shared_library_always_runs(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        links = self.fx.links
+        links["schema"] = "pulp-link-members/v4"
+        links["executables"]["<build>/core/libs.dylib"] = {"kind": "shared", "objects": [], "archives": {}}
+        links["executables"][f"<build>/{EXE}"]["shared"] = ["<build>/core/libs.dylib"]
+        links["executables"][f"<build>/{MOD}"]["shared"] = []  # system libraries only: not in scope
+        keys = self.fx.keys(head)
+        # EXE's keys still compute equal, yet it runs: the library is not modelled.
+        self.assertTrue(self.equal(keys, EXE))
+        self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"], keys[MOD]["always_run"]),
+                         ("shared_link", None, None))
+        # The same map before v4 cannot say who loads the library: nothing keys.
+        links["schema"] = "pulp-link-members/v3"
+        keys = self.fx.keys(head)
+        self.assertEqual({e["always_run"] for e in keys.values()}, {"base_unrecorded"})
+
     def test_the_checked_in_key_blind_list_is_readable(self):
         self.assertIsInstance(ek.load_key_blind(ek.KEY_BLIND_LIST), frozenset)
 

@@ -875,6 +875,10 @@ object deps, an object that is missing from `objects` or listed in `stale`
 has unknown headers. The macOS gate VM can leave Ninja STALE entries after an
 interrupted build, so treat that object as changed, never as "includes
 nothing".
+A usable link map can still hold build-produced shared libraries, and their
+loaders must never be keyed. Call `link_members.shared_scope()` and run those
+loaders (always_run `shared_link`); a new reader that skips it would reuse a
+loader whose dylib changed.
 
 ### `pulp_test_data` is a static claim; the nightly read audit measures it
 
