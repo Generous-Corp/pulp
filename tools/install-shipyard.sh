@@ -118,6 +118,26 @@ repair_truncated_queue_file() {
 
 repair_truncated_queue_file
 
+# ── CI token preflight ──────────────────────────────────────────────────────
+# The upstream installer resolves the release through the GitHub API, and
+# sends `Authorization: Bearer` only when SHIPYARD_GITHUB_TOKEN or GITHUB_TOKEN
+# is set. Anonymous calls from shared hosted-runner IPs exhaust the 60/hour
+# limit on busy days and fail with HTTP 403, so under GitHub Actions a missing
+# token is refused here, naming the fix, instead of surfacing as a flaky
+# download error. Local runs stay anonymous-OK.
+if [ "${GITHUB_ACTIONS:-}" = "true" ] \
+    && [ -z "${SHIPYARD_GITHUB_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
+    echo "Error: install-shipyard.sh is running under GitHub Actions without a token." >&2
+    echo "  Anonymous GitHub API release lookups are rate-limited (HTTP 403) on" >&2
+    echo "  shared runner IPs. Pass the job token to this step:" >&2
+    echo "" >&2
+    echo "      env:" >&2
+    echo "        GITHUB_TOKEN: \${{ github.token }}" >&2
+    echo "" >&2
+    echo "  (SHIPYARD_GITHUB_TOKEN is also accepted.)" >&2
+    exit 1
+fi
+
 # ── Delegate to upstream installer ──────────────────────────────────────────
 
 echo "→ Installing Shipyard $VERSION via upstream install.sh"

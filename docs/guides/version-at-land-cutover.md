@@ -115,6 +115,14 @@ on files the bot wrote. A regenerator that fails is **best-effort**: it leaves
 its file stale and prints which one failed, rather than aborting the bump —
 the bot is the single writer for versions, and a wedged bot stops all releases.
 
+The `CHANGELOG.md` regenerator (`shipyard changelog regenerate`) needs the
+pinned Shipyard, which the workflow installs with `tools/install-shipyard.sh`
+before the bump step. That install step passes `GITHUB_TOKEN`: the upstream
+installer resolves the release through the GitHub API, and an anonymous lookup
+from a shared runner IP fails with HTTP 403 once the 60/hour limit is spent,
+which fails the whole drain run. Under GitHub Actions the wrapper refuses to
+run without a token, and `workflow-lint.yml` rejects a tokenless install step.
+
 ### Why the race can't lose or duplicate a version
 
 `apply_and_push` is safe under concurrent post-merge runs because of three
