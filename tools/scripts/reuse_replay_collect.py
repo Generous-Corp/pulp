@@ -275,6 +275,11 @@ def record_platform(job: dict | None) -> str:
     return "unknown"
 
 
+class ListingShort(RuntimeError):
+    """A run listing came back shorter than the API's own total_count for
+    the same query, after one retry."""
+
+
 class Collector:
     def __init__(self, gh: GitHub, out: Path, repo: Path, workers: int) -> None:
         self.gh = gh
@@ -312,19 +317,34 @@ class Collector:
         runs: list[dict] = []
         for day in _days(since, until):
             def fetch(day=day) -> list[dict]:
-                rows, page = [], 1
+                rows, page, total = [], 1, None
                 while True:
                     doc = self.gh.json(f"repos/{self.gh.repository}/actions/workflows/{WORKFLOW}/runs"
                                        f"?event={event}&created={day}&per_page=100&page={page}")
+                    if total is None:
+                        total = doc.get("total_count")
                     batch = doc.get("workflow_runs", [])
                     rows += [{k: r.get(k) for k in ("id", "head_sha", "head_branch", "created_at",
                                                     "updated_at", "status", "conclusion", "event",
                                                     "run_attempt", "path")} for r in batch]
                     if len(batch) < 100 or page >= 10:
-                        return rows
+                        break
                     page += 1
+                # A listing shorter than the count the API states for the same
+                # query silently drops every pair needing one of the missing
+                # runs. The first page's count is the floor: runs created
+                # while the pages are read only add to it.
+                listed = len({r["id"] for r in rows})
+                if not isinstance(total, int) or listed < total:
+                    raise ListingShort(f"{event} runs created {day}: listed {listed} of total_count {total} "
+                                       f"after page {page}" + (" (the 10-page cap)" if page >= 10 else ""))
+                return rows
             name = f"runs/{event}-{day}.json.gz"
-            rows = self._cached(name, fetch, keep=day <= settled)
+            try:
+                rows = self._cached(name, fetch, keep=day <= settled)
+            except ListingShort as err:
+                print(f"collect: {err}; asking again", file=sys.stderr)
+                rows = self._cached(name, fetch, keep=day <= settled)
             if not rows:
                 # Never let an empty listing stand in for the day: drop it
                 # and ask again, uncached.

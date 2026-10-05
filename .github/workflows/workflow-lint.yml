@@ -35,6 +35,7 @@ on:
       - 'tools/scripts/workflow_runner_selector_audit.py'
       - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
+      - 'tools/scripts/test_cross_platform_check_concurrency.py'
       - 'tools/scripts/windows_cli_compile_scope.py'
       - 'tools/scripts/test_windows_cli_compile_scope.py'
       - 'tools/scripts/windows_cli_release_precheck.py'
@@ -150,6 +151,7 @@ on:
       - 'tools/scripts/workflow_runner_selector_audit.py'
       - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
+      - 'tools/scripts/test_cross_platform_check_concurrency.py'
       - 'tools/scripts/windows_cli_compile_scope.py'
       - 'tools/scripts/test_windows_cli_compile_scope.py'
       - 'tools/scripts/windows_cli_release_precheck.py'
@@ -463,6 +465,9 @@ jobs:
           # Keep the authoritative Windows runtime suite pinned independently
           # from moving latest-toolchain release/coverage/nightly lanes.
           python3 tools/scripts/test_windows_runner_policy.py
+          # Proof-branch dispatches run per ref; only main touches the
+          # cross-platform tracking issues.
+          python3 tools/scripts/test_cross_platform_check_concurrency.py
           # Pulp #47 — guard the linux-arm64 Skia manifest entry against
           # silent regressions (parallel to the linux-x64 / mac-arm64
           # entries enforced by tests/test_skia_determinism.py).
