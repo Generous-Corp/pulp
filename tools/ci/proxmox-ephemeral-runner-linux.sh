@@ -995,6 +995,24 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
         | grep -Eq "^[[:space:]-]*Token:"
 ' || die "golden $GOLDEN lacks an uncredentialed gh CLI"
 
+# The golden's apt timers last ran when it was baked, so Persistent=true starts
+# apt-daily-upgrade about a minute after every clone boots. It holds the dpkg
+# lock while the job's own apt-get runs, and the job fails on "Could not get
+# lock /var/lib/dpkg/lock-frontend". Stop the timers in this throwaway clone and
+# let any apt run that already started finish (killing it mid-dpkg would break
+# the clone) before a job can be assigned.
+ssh -o BatchMode=yes "ci@$GUEST_IP" '
+    sudo -n systemctl stop apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+    for _ in $(seq 1 120); do
+        # unattended-upgrades.service is only a shutdown hook and stays active;
+        # the upgrade itself runs inside apt-daily-upgrade.service.
+        systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service \
+            2>/dev/null || exit 0
+        sleep 5
+    done
+    exit 1
+' || log "WARN: apt maintenance in clone $VMID was still running after 10 minutes; jobs may meet a held dpkg lock"
+
 # GitHub's JIT endpoint creates one exact ephemeral registration. The
 # generation UUID in RUNNER_NAME prevents a stale registration from causing a
 # stable-name 409. Keep both request and response in mode-0600 files, and move

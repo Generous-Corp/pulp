@@ -1084,6 +1084,16 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertEqual(values["TARTCI_PROXMOX_CORES"], "1")
         self.assertLessEqual(int(values["TARTCI_PROXMOX_MEMORY_MB"]), 2048)
 
+    def test_clone_apt_timers_are_quiesced_before_a_job_is_assigned(self) -> None:
+        quiesce = self.script.index("sudo -n systemctl stop apt-daily.timer apt-daily-upgrade.timer")
+        self.assertLess(quiesce, self.script.index('log "minting JIT runner configuration"'))
+        block = self.script[quiesce : self.script.index('log "minting JIT runner configuration"')]
+        self.assertIn("systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service", block)
+        # The shutdown hook is always active; waiting on it would stall every clone.
+        self.assertNotIn("is-active --quiet unattended-upgrades", block)
+        # A running upgrade is waited for, never killed mid-dpkg.
+        self.assertNotIn("systemctl kill", block)
+
     def test_engine_is_present_and_syntactically_valid(self) -> None:
         """The engine both wrappers exec must be committed, executable, and parse."""
         self.assertTrue(
