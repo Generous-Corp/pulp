@@ -243,7 +243,7 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
   fi
   # Contents/lib too: a staged helper's rpath can point outside MacOS/, and an
   # unsigned dylib anywhere in the bundle fails notarization.
-  for _libdir in "$b/Contents/MacOS" "$b/Contents/lib" "$b/Contents/Frameworks"; do
+  for _libdir in "$b/Contents/MacOS" "$b/Contents/lib" "$b/Contents/Frameworks" "$b/Contents/Helpers"; do
     [[ -d "$_libdir" ]] || continue
     find "$_libdir" -name "*.dylib" -print0 2>/dev/null | while IFS= read -r -d '' d; do
       codesign --force --options runtime --timestamp -s "$APP_ID" "$d"; done
@@ -271,6 +271,11 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local _scan=()
   [[ -d "$b/Contents/Resources" ]] && _scan+=("$b/Contents/Resources")
   [[ -d "$b/Contents/MacOS" ]] && _scan+=("$b/Contents/MacOS")
+  # Some products carry capture/preview helpers under Contents/Helpers.
+  # These are nested app bundles and must be signed before the containing
+  # plugin/app, just like helpers under Resources.  Leaving this directory out
+  # produces a package that builds successfully but is rejected by notarization.
+  [[ -d "$b/Contents/Helpers" ]] && _scan+=("$b/Contents/Helpers")
   # The bundle's CFBundleExecutable is signed as part of the outer bundle. Do
   # not sign it once as a nested helper first: `codesign` interprets adjacent
   # `<executable>.*` evidence files as subcomponents when handed the bare Mach-O
