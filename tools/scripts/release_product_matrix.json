@@ -53,7 +53,8 @@
     "browser_capture/security.mjs",
     "browser_capture/semantics.mjs",
     "browser_capture/settle.mjs",
-    "browser_capture/tokens.mjs"
+    "browser_capture/tokens.mjs",
+    "browser_capture/vendor_payload.mjs"
   ],
   "pulp_library_stems": [
     "pulp-audio",

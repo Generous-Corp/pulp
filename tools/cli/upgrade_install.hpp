@@ -492,6 +492,7 @@ inline constexpr std::string_view browser_capture_runtime_files[]{
         "semantics.mjs",
         "settle.mjs",
         "tokens.mjs",
+        "vendor_payload.mjs",
     };
 
 inline bool has_any_exec_bit(const fs::path& path) {
