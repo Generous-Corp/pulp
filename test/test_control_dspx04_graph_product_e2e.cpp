@@ -92,8 +92,11 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     launch.addMember("inventory_id",
                      choc::value::createString(
                          choc::json::parse(prepared.data_json)["inventory_id"].getString()));
-    REQUIRE(management.manage("host-launch", choc::json::toString(launch, false), 10s).status_id ==
-            "launched");
+    const auto launched =
+        management.manage("host-launch", choc::json::toString(launch, false), 10s);
+    INFO(launched.explanation);
+    INFO(launched.data_json);
+    REQUIRE(launched.status_id == "launched");
     const auto identity = wait_for_instance(management, "dev.pulp.test.dspx04-graph-product");
     const std::string instance(identity["instance_id"].getString());
     REQUIRE_FALSE(instance.empty());
