@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from scene3d_launch import argv_for
 
 
 EXPECTED_EXTENSIONS = [
@@ -164,12 +165,12 @@ def main():
         scene_path = temp_path / "advanced-material.gltf"
         scene_path.write_text(json.dumps(make_advanced_material_gltf()), encoding="utf-8")
 
-        inspect_output = run_command([str(args.inspect_tool), str(scene_path)])
+        inspect_output = run_command([*argv_for(args.inspect_tool), str(scene_path)])
         require_stats(parse_stats(inspect_output))
         print("scene3d_advanced_material_inspect_verified=true")
 
         sidecar_json = run_command([
-            str(args.sidecar_tool),
+            *argv_for(args.sidecar_tool),
             "--source",
             "pulp-advanced-material-contract",
             "--exported-at",
@@ -184,7 +185,7 @@ def main():
 
         sidecar_path = temp_path / "advanced-material.pulp3d.json"
         sidecar_path.write_text(sidecar_json, encoding="utf-8")
-        preflight_output = run_command([str(args.preflight_tool), str(sidecar_path)])
+        preflight_output = run_command([*argv_for(args.preflight_tool), str(sidecar_path)])
         require_preflight(preflight_output)
         print("scene3d_advanced_material_preflight_verified=true")
 

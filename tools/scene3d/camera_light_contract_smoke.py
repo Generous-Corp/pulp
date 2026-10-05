@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from scene3d_launch import argv_for
 
 
 def make_camera_light_gltf():
@@ -160,12 +161,12 @@ def main():
             json.dumps(make_camera_light_gltf()),
             encoding="utf-8")
 
-        inspect_output = run_command([str(args.inspect_tool), str(scene_path)])
+        inspect_output = run_command([*argv_for(args.inspect_tool), str(scene_path)])
         require_stats(parse_stats(inspect_output))
         print("scene3d_camera_light_inspect_verified=true")
 
         sidecar_json = run_command([
-            str(args.sidecar_tool),
+            *argv_for(args.sidecar_tool),
             "--source",
             "pulp-camera-light-contract",
             "--exported-at",
@@ -180,7 +181,7 @@ def main():
 
         sidecar_path = Path(temp_dir) / "camera-light.pulp3d.json"
         sidecar_path.write_text(sidecar_json, encoding="utf-8")
-        preflight_output = run_command([str(args.preflight_tool), str(sidecar_path)])
+        preflight_output = run_command([*argv_for(args.preflight_tool), str(sidecar_path)])
         require_preflight(preflight_output)
         print("scene3d_camera_light_preflight_verified=true")
 

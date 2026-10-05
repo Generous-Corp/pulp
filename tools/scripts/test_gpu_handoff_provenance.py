@@ -23,6 +23,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import gpu_handoff_provenance as provenance  # noqa: E402
 import gpu_ledger_sentinel_check as sentinel_check  # noqa: E402
+from script_argv import argv_for  # noqa: E402
 
 
 def git(root: pathlib.Path, *arguments: str) -> str:
@@ -1193,7 +1194,7 @@ class MergeSentinel(unittest.TestCase):
 
         shutil.copyfile(source, into)
         subprocess.run(
-            [str(self.driver), str(source), str(into), str(source)],
+            [*argv_for(self.driver), str(source), str(into), str(source)],
             check=True, stdin=subprocess.DEVNULL, timeout=30,
         )
 
@@ -1333,7 +1334,7 @@ class MergeSentinel(unittest.TestCase):
                 provenance.serialize_handoff(document), encoding="utf-8"
             )
         completed = subprocess.run(
-            [str(self.driver), str(written["base"]), str(written["ours"]),
+            [*argv_for(self.driver), str(written["base"]), str(written["ours"]),
              str(written["theirs"])],
             check=False, stdin=subprocess.DEVNULL, timeout=30,
             capture_output=True, text=True,
