@@ -449,10 +449,23 @@ The supervisor publishes a root-owned per-generation lease while it owns a
 clone. `pulp-ephemeral-reap.timer` is the crash-recovery backstop: after one
 hour it considers only an ownerless Pulp slot, then requires the exact GitHub
 registration to be idle, one `Runner.Listener --jitconfig`, no worker or
-configuration process, and an empty `_work`. Execution first replaces all
-routing labels with a shutdown fence, proves the idle state twice, stops and
-deregisters the runner, and rechecks the unchanged VM config under the VMID
-allocation lock before destroy. Missing, duplicate, unreachable, busy, or
+configuration process, and an empty `_work`. Execution rechecks the unchanged
+VM config under the VMID allocation lock, then fences dispatch by deregistering
+the runner, and logs each of the four steps as `FENCE <vmid> n/4`:
+
+1. Read the runner and require `busy=false`.
+2. `DELETE` the registration. GitHub refuses to delete a runner that is running
+   a job, so a refusal leaves the clone for the next pass, and a success proves
+   no job held it.
+3. Require the runner to return 404, and require that no in-progress job in the
+   repository names it. The second check guards against a 404 that only means
+   the wrong id was read.
+4. Re-probe the guest for no worker and an untouched `_work`, then destroy it.
+
+A label fence cannot work here: a JIT runner's labels are read-only, so
+replacing them never removes a routing label. The supervisor's own shutdown
+uses the same deregistration fence, and hands a runner GitHub reports busy to
+its deferred cleanup. Missing, duplicate, unreachable, busy, or
 otherwise ambiguous evidence always preserves the VM. Run
 `pulp-ephemeral-reap.sh` without arguments for a non-mutating report.
 After a controller reboot leaves an `onboot=0` clone stopped, recovery accepts
@@ -6747,16 +6760,14 @@ A running clone with a registered, idle runner must be deregistered first
 (`ghapp api --method DELETE repos/Generous-Corp/pulp/actions/runners/<id>`) so
 GitHub cannot assign it a job while it stops.
 
-**The reaper cannot yet reclaim an idle-listener JIT orphan.** Proving a
-generation is not enough on its own. For a running clone whose runner is still
-listening, `--yes` first fences dispatch by replacing the runner's labels, then
-requires that only `self-hosted`, `Linux`, `X64` and `pulp-shutdown-fenced`
-remain. Labels set through a JIT configuration are read-only, so
-`pulp-build-linux-x64` and `pulp-host-macpro` survive the `PUT` and every pass
-logs `SKIP <id> — dispatch fence could not be proved`. Report mode still says
-`WOULD REAP`. Post-job clones (listener exited, registration gone) and stopped
-clones do reap. Until the fence is redesigned, an idle orphan whose supervisor
-was killed needs the manual deregister-then-destroy above.
+**An idle JIT orphan is reclaimed by deregistering it.** JIT runner labels are
+read-only, so a label fence can never strip `pulp-build-linux-x64` or
+`pulp-host-macpro`. An earlier reaper relied on one and logged `dispatch fence
+could not be proved` on every pass. The reaper and the supervisor's shutdown
+now fence by `DELETE`, which GitHub refuses for a busy runner. Each step is
+logged as `FENCE <vmid> n/4` (reaper) or `JIT fence n/4` (supervisor); see the
+reaper description above. A `SKIP ... JIT fence 2/4: GitHub refused` line
+means the runner was busy, and the next pass retries it.
 
 **The trusted role fails closed against the live runner group.**
 `verify_linux_runner_group.py --policy trusted` requires group
