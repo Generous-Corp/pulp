@@ -1403,6 +1403,13 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(version-at-land-selftest PROPERTIES
         TIMEOUT 180)
 
+    # GitHub's itemTypes-filtered timelineItems connection reports totalCount
+    # over EVERY timeline item, so a filtered totalCount reads a never-queued
+    # PR as ejected. Fails if any tracked query selects it, and proves the scan
+    # reached the known filtered queries.
+    add_test(NAME graphql-filtered-count-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_graphql_filtered_count_guard.py")
+
     # min-OS measurement: --measure/--elf floor derivation over a built binary
     # (magic-byte format detection + Mach-O/ELF/PE/ar readers). The primitive the
     # SDK-consumer sweep calls per artifact.

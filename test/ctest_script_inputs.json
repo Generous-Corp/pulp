@@ -5821,6 +5821,15 @@
    ],
    "kind": "python"
   },
+  "graphql-filtered-count-guard": {
+   "entry": "tools/scripts/test_graphql_filtered_count_guard.py",
+   "inputs": [
+    "tools/scripts/graphql_filtered_count_guard.py",
+    "tools/scripts/test_graphql_filtered_count_guard.py",
+    "tools/scripts/version_at_land.py"
+   ],
+   "kind": "python"
+  },
   "harness-adapters-base-selftest": {
    "entry": "tools/harness/tests/test_adapters_base.py",
    "inputs": [
