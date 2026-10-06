@@ -380,6 +380,22 @@ class GeneratedFamiliesTest(FamilyFixture):
         generated = self.generate()
         self.assertNotEqual(self.family_for(generated, "tools/scripts/test_fixture.py"), [])
 
+    def test_fixture_reader_builds_the_registered_setup_target(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_setup.py", "")
+        self.write("tools/scripts/test_fixture.py", "")
+        self.script_test("fixture-setup", "tools/scripts/test_setup.py",
+                         command=["/b/bin/setup"], fixture_setup=["setup"])
+        self.script_test("fixture-selftest", "tools/scripts/test_fixture.py",
+                         command=["/b/bin/reader"], fixtures=["setup"])
+        generated = self.generate(("fixture-setup", "/b/bin/setup"),
+                                  ("fixture-reader", "/b/bin/reader"))
+        owners = [name for name in self.family_for(generated, "tools/scripts/test_fixture.py")
+                  if name != "script-surface-whole-tree"]
+        self.assertEqual(len(owners), 1)
+        self.assertEqual(generated[owners[0]]["build_targets"],
+                         ["fixture-reader", "fixture-setup", "pulp-cli"])
+
     def test_reader_outside_the_authoritative_corpus_is_not_selected(self) -> None:
         self.add_whole_tree()
         self.write("tools/scripts/shared_util.py", "")

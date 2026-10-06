@@ -5556,6 +5556,8 @@ tests = [
 ]
 build_targets = [
   "pulp-cli",
+  "pulp-gpu-dawn-shared-io-provider-probe",
+  "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-shared-io-paced-convolution-probe",
   "pulp-timeline-schema-emit",
 ]
@@ -6012,6 +6014,7 @@ tests = [
 build_targets = [
   "pulp-cli",
   "pulp-gpu-dawn-shared-io-provider-probe",
+  "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-shared-io-paced-convolution-probe",
 ]
 supported_build_types = [

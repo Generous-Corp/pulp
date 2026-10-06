@@ -233,14 +233,20 @@ def producer_targets(tests: list[dict], model: inventory.CodeModel) -> tuple[dic
     build_root = os.path.normpath(model.build_root)
     targets: dict[str, set[str]] = {}
     unsatisfiable: set[str] = set()
+    fixture_setup_tests: dict[str, set[str]] = {}
     provided_fixtures: set[str] = set()
     for test in tests:
         props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
         setup = props.get("FIXTURES_SETUP")
         if isinstance(setup, list):
-            provided_fixtures.update(str(fixture) for fixture in setup)
+            fixtures = {str(fixture) for fixture in setup}
         elif setup:
-            provided_fixtures.add(str(setup))
+            fixtures = {str(setup)}
+        else:
+            fixtures = set()
+        provided_fixtures.update(fixtures)
+        for fixture in fixtures:
+            fixture_setup_tests.setdefault(fixture, set()).add(test["name"])
     for test in tests:
         props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
         required = props.get("FIXTURES_REQUIRED")
@@ -269,6 +275,22 @@ def producer_targets(tests: list[dict], model: inventory.CodeModel) -> tuple[dic
                         or os.path.splitext(path)[1] not in (".json", ".txt", ".log", "")):
                     # A build product nothing in this configuration owns.
                     unsatisfiable.add(test["name"])
+    # CTest executes registered FIXTURES_SETUP tests as part of a bounded
+    # reader selection. Include their executable targets in the family so the
+    # setup product is built before the reader runs.
+    for test in tests:
+        props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
+        required = props.get("FIXTURES_REQUIRED")
+        if isinstance(required, list):
+            required_fixtures = {str(fixture) for fixture in required}
+        elif required:
+            required_fixtures = {str(required)}
+        else:
+            required_fixtures = set()
+        needed = targets.setdefault(test["name"], set())
+        for fixture in required_fixtures:
+            for setup_name in fixture_setup_tests.get(fixture, set()):
+                needed.update(targets.get(setup_name, set()))
     return targets, unsatisfiable
 
 
