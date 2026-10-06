@@ -107,7 +107,7 @@ std::string read_file(const fs::path& path);
 std::set<fs::path> unresolved_relative_runtime_modules(
     const fs::path& runtime) {
     static const std::regex relative_module{
-        R"pulp(["'](\./[^"']+\.mjs)["'])pulp"};
+        R"pulp(["']((?:\./|\.\./)[^"']+\.mjs)["'])pulp"};
     std::set<fs::path> unresolved;
     for (const auto& entry : fs::recursive_directory_iterator(runtime)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".mjs")
