@@ -23,6 +23,12 @@ class CheckSdkCompleteTests(unittest.TestCase):
         (self.prefix / "bin/pulp-import-design").write_text("importer")
         (source_runtime / "capture.mjs").write_text("capture")
         (runtime / "capture.mjs").write_text("capture")
+        (source_runtime / "interaction_plan_protocol.json").write_text("protocol")
+        (runtime / "interaction_plan_protocol.json").write_text("protocol")
+        (source_runtime / "runtime_manifest.txt").write_text(
+            "capture.mjs\ninteraction_plan_protocol.json\n")
+        (runtime / "runtime_manifest.txt").write_text(
+            "capture.mjs\ninteraction_plan_protocol.json\n")
         source_contract = self.source / "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
         source_contract.parent.mkdir(parents=True)
         source_contract.write_text("contract")
@@ -62,6 +68,14 @@ class CheckSdkCompleteTests(unittest.TestCase):
         (self.prefix / "bin/jsx-runtime/materialized_binding_contract.mjs").unlink()
         problems = complete.check(self.prefix, self.source)
         self.assertTrue(any("materialized binding contract" in problem for problem in problems))
+
+    def test_manifested_json_runtime_asset_stale_bytes_are_rejected(self) -> None:
+        (self.prefix / "version.txt").write_text("0.918.0\n")
+        (self.prefix / "bin/browser_capture-v1/interaction_plan_protocol.json").write_text(
+            "stale"
+        )
+        problems = complete.check(self.prefix, self.source)
+        self.assertTrue(any("interaction_plan_protocol.json" in problem for problem in problems))
 
     def test_materialized_contract_stale_bytes_are_rejected(self) -> None:
         (self.prefix / "version.txt").write_text("0.918.0\n")

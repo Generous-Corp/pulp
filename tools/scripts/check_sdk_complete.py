@@ -104,24 +104,31 @@ def check(prefix: Path, source: Path) -> list[str]:
             f"(copy {src_contract} -> {contract})"
         )
 
-    # Only the runtime modules matter. Test files (*.test.mjs) are not shipped,
-    # so their absence is correct and must not read as drift.
-    shipped = sorted(
-        p for p in src_runtime.glob("*.mjs") if not p.name.endswith(".test.mjs"))
-    if not shipped:
-        problems.append(f"no runtime modules found in {src_runtime}")
+    # The manifest is the shipping contract, including non-JavaScript assets
+    # such as interaction_plan_protocol.json. Checking only *.mjs lets a stale
+    # JSON protocol survive an otherwise byte-identical SDK check.
+    manifest = src_runtime / "runtime_manifest.txt"
+    if not manifest.is_file():
+        problems.append(f"runtime manifest missing from source: {manifest}")
+        return problems
+    shipped_names = tuple(
+        line.strip() for line in manifest.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    if not shipped_names:
+        problems.append(f"runtime manifest is empty: {manifest}")
         return problems
 
-    for src in shipped:
-        installed = runtime / src.name
-        if not installed.exists():
-            problems.append(f"runtime module missing from the SDK: {src.name}")
+    for name in shipped_names:
+        src = src_runtime / name
+        installed = runtime / name
+        if not src.is_file():
+            problems.append(f"source runtime manifest entry is missing: {name}")
+        elif not installed.is_file():
+            problems.append(f"runtime asset missing from the SDK: {name}")
         elif not filecmp.cmp(src, installed, shallow=False):
-            # The message names the fix, because the instinct on seeing this is
-            # to rebuild the binary — which is already current and is not what
-            # drifted.
             problems.append(
-                f"runtime module is STALE in the SDK: {src.name} "
+                f"runtime asset is STALE in the SDK: {name} "
                 f"(copy {src} -> {installed}; rebuilding the binary will not "
                 "fix it)")
 
