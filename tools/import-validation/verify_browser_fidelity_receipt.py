@@ -136,7 +136,9 @@ def _check_run(run: Any, name: str) -> dict[str, Any]:
     return value
 
 
-def _check_negative_control(value: Any, source_sha256: str) -> dict[str, Any]:
+def _check_negative_control(
+    value: Any, source: Path, source_sha256: str
+) -> dict[str, Any]:
     control = _require_mapping(value, "negativeControl")
     _check_keys(control, _REQUIRED_NEGATIVE_FIELDS, "negativeControl")
 
@@ -158,10 +160,30 @@ def _check_negative_control(value: Any, source_sha256: str) -> dict[str, Any]:
         mutation["mutatedSourceSha256"],
         "negativeControl.mutation.mutatedSourceSha256",
     )
-    if mutated_source == source_sha256:
+    if kind != "broken-editor-source":
         raise ReceiptError(
-            "negativeControl.mutation.mutatedSourceSha256 must differ from "
-            "receipt.sourceSha256"
+            "negativeControl.mutation.kind must equal 'broken-editor-source'"
+        )
+    try:
+        source_text = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ReceiptError(
+            "negativeControl.mutation source must be valid UTF-8"
+        ) from exc
+    mutated_text = source_text.replace(
+        "ReactDOM.createRoot", "ReactDOM.brokenRoot"
+    )
+    if mutated_text == source_text:
+        raise ReceiptError(
+            "negativeControl.mutation did not match ReactDOM.createRoot"
+        )
+    expected_mutated_source = hashlib.sha256(
+        mutated_text.encode("utf-8")
+    ).hexdigest()
+    if mutated_source != expected_mutated_source:
+        raise ReceiptError(
+            "negativeControl.mutation.mutatedSourceSha256 does not match "
+            "the canonical source mutation"
         )
 
     outcome = _require_mapping(control["outcome"], "negativeControl.outcome")
@@ -194,8 +216,9 @@ def validate_receipt(
 
     if root["deterministicDomMarker"] is not True:
         raise ReceiptError("deterministicDomMarker must be true")
-    negative_control = _check_negative_control(root["negativeControl"],
-                                               root["sourceSha256"])
+    negative_control = _check_negative_control(
+        root["negativeControl"], source, root["sourceSha256"]
+    )
 
     positive = _check_run(root["positive"], "positive")
     repeat = _check_run(root["repeat"], "repeat")

@@ -29,7 +29,11 @@ def receipt(source: Path) -> dict:
             "screenshotSha256": SHA,
         }
 
-    source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+    source_bytes = source.read_bytes()
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    mutated_source_sha256 = hashlib.sha256(
+        source_bytes.replace(b"ReactDOM.createRoot", b"ReactDOM.brokenRoot")
+    ).hexdigest()
     return {
         "source": str(source),
         "sourceSha256": source_sha256,
@@ -38,9 +42,9 @@ def receipt(source: Path) -> dict:
         "deterministicDomMarker": True,
         "negativeControl": {
             "mutation": {
-                "kind": "remove-root-mount",
+                "kind": "broken-editor-source",
                 "sourceSha256": source_sha256,
-                "mutatedSourceSha256": "1" * 64,
+                "mutatedSourceSha256": mutated_source_sha256,
             },
             "outcome": {
                 "status": "rejected",
@@ -55,7 +59,11 @@ class BrowserFidelityReceiptTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.source = self.root / "editor.html"
-        self.source.write_text("<!doctype html><div id='root'>SPECTR</div>\n", encoding="utf-8")
+        self.source.write_text(
+            "<!doctype html><div id='root'>SPECTR</div>\n"
+            "<script>ReactDOM.createRoot(root)</script>\n",
+            encoding="utf-8",
+        )
         self.path = self.root / "receipt.json"
         self.payload = receipt(self.source)
         self.path.write_text(json.dumps(self.payload), encoding="utf-8")
@@ -146,11 +154,21 @@ class BrowserFidelityReceiptTest(unittest.TestCase):
             self.payload["sourceSha256"],
         )
 
-    def test_negative_mutation_digest_must_differ_from_source(self) -> None:
+    def test_negative_forged_mutation_digest_is_rejected(self) -> None:
         broken = copy.deepcopy(self.payload)
-        broken["negativeControl"]["mutation"]["mutatedSourceSha256"] = \
-            self.payload["sourceSha256"]
-        with self.assertRaisesRegex(verifier.ReceiptError, "must differ"):
+        broken["negativeControl"]["mutation"]["mutatedSourceSha256"] = "1" * 64
+        with self.assertRaisesRegex(verifier.ReceiptError, "canonical source mutation"):
+            verifier.validate_receipt(broken)
+
+    def test_negative_mutation_without_exact_source_match_is_rejected(self) -> None:
+        broken = copy.deepcopy(self.payload)
+        self.source.write_text("<!doctype html><div id='root'>SPECTR</div>\n",
+                               encoding="utf-8")
+        source_sha256 = hashlib.sha256(self.source.read_bytes()).hexdigest()
+        broken["sourceSha256"] = source_sha256
+        broken["negativeControl"]["mutation"]["sourceSha256"] = source_sha256
+        broken["negativeControl"]["mutation"]["mutatedSourceSha256"] = "1" * 64
+        with self.assertRaisesRegex(verifier.ReceiptError, "did not match"):
             verifier.validate_receipt(broken)
 
 
