@@ -180,8 +180,11 @@ export function serializeMaterializedIdsMap(value) {
 }
 
 function explicitSourceId(value) {
+  // Match materializedSourceRecord: capture adapters may wrap source-owned
+  // fields in `source` while retaining structural fields at the top level.
+  // Explicit ids are source-owned too and must survive that wrapper.
   const source = value?.source && typeof value.source === 'object'
-    ? value.source : value;
+    ? { ...value, ...value.source } : value;
   const candidate = source?.data_pulp_id ?? source?.pulp_id ??
     source?.source_id ?? source?.stable_id;
   return candidate === undefined || candidate === null || candidate === ''

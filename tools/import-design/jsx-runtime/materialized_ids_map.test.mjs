@@ -95,6 +95,19 @@ test('exact source keys reuse their prior id without minting or mutation', () =>
     serializeMaterializedIdsMap(first.map));
 });
 
+test('preserves an explicit id nested in a source wrapper', () => {
+  const result = assignMaterializedSourceIds([{
+    anchor: '#button',
+    source: {
+      component: 'Panel', local_path: 'Panel.tsx#button',
+      content_hash: HASH_A, data_pulp_id: 'pulp-source-explicit',
+    },
+  }]);
+  assert.equal(result.assignments[0].id, 'pulp-source-explicit');
+  assert.equal(result.assignments[0].disposition, 'explicit');
+  assert.equal(result.map.entries[0].id, 'pulp-source-explicit');
+});
+
 test('same-signature candidates fail closed instead of guessing an identity', () => {
   const prior = assignMaterializedSourceIds([
     { ...source('Knob', 'left.tsx'), data_pulp_id: 'pulp-source-left' },
