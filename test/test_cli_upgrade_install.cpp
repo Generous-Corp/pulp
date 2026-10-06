@@ -93,6 +93,15 @@ void copy_source_browser_capture_runtime(const fs::path& runtime) {
     }
 }
 
+void copy_source_materialized_contract(const fs::path& root) {
+    const auto source = fs::path{PULP_REPO_ROOT} / "tools" / "import-design" /
+        "jsx-runtime" / "materialized_binding_contract.mjs";
+    fs::create_directories(root / "jsx-runtime");
+    fs::copy_file(source, root / "jsx-runtime" /
+        "materialized_binding_contract.mjs",
+        fs::copy_options::overwrite_existing);
+}
+
 std::string read_file(const fs::path& path);
 
 std::set<fs::path> unresolved_relative_runtime_modules(
@@ -154,7 +163,7 @@ TEST_CASE("upgrade runtime list matches the canonical browser manifest",
         std::begin(ui::browser_capture_runtime_files),
         std::end(ui::browser_capture_runtime_files)};
 
-    REQUIRE(manifest.size() == 19);
+    REQUIRE(manifest.size() == cpp_runtime_files.size());
     CHECK(cpp_runtime_files == manifest);
 }
 
@@ -172,6 +181,12 @@ TEST_CASE("upgrade-installed browser runtime resolves its relative module graph"
     ui::install_import_design_protocol_runtime(
         install, import_source, runtime_source);
 
+    // capture.mjs resolves the shared contract from the sibling jsx-runtime
+    // directory. The archive installer publishes that sibling as a separate
+    // payload; mirror it here so this focused runtime graph check includes the
+    // cross-directory import.
+    copy_source_materialized_contract(install);
+
     const auto installed_runtime =
         install / ui::browser_capture_runtime_install_name();
     const auto unresolved =
@@ -180,6 +195,34 @@ TEST_CASE("upgrade-installed browser runtime resolves its relative module graph"
         INFO("missing installed runtime module: " << module);
     }
     CHECK(unresolved.empty());
+
+    fs::remove_all(incoming);
+    fs::remove_all(install);
+}
+
+TEST_CASE("upgrade-installed browser runtime rejects a missing materialized contract",
+          "[cli][upgrade][import-design][manifest][negative]") {
+    auto incoming = make_tmpdir("browser-runtime-graph-negative-incoming");
+    auto install = make_tmpdir("browser-runtime-graph-negative-install");
+    const auto import_source =
+        incoming / ui::import_design_binary_name();
+    const auto runtime_source =
+        incoming / ui::browser_capture_runtime_name();
+    write_file(import_source, "import-helper");
+    copy_source_browser_capture_runtime(runtime_source);
+    ui::install_import_design_protocol_runtime(
+        install, import_source, runtime_source);
+    copy_source_materialized_contract(install);
+    std::error_code remove_error;
+    fs::remove(install / "jsx-runtime" / "materialized_binding_contract.mjs",
+               remove_error);
+    REQUIRE_FALSE(remove_error);
+
+    const auto installed_runtime =
+        install / ui::browser_capture_runtime_install_name();
+    const auto unresolved =
+        unresolved_relative_runtime_modules(installed_runtime);
+    CHECK(unresolved.contains("../jsx-runtime/materialized_binding_contract.mjs"));
 
     fs::remove_all(incoming);
     fs::remove_all(install);

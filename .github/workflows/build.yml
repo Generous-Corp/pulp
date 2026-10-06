@@ -1805,12 +1805,23 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/setup-node@v4
         with:
-          node-version: '22.14.0'
+          node-version: '22.15.0'
           cache: npm
           cache-dependency-path: tools/import-design/jsx-runtime/package-lock.json
 
       - name: Install materialized runtime Node test dependencies (Linux)
         if: runner.os == 'Linux'
+        run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
+
+      # The required macOS CTest lane registers the same materialized runtime
+      # conformance probe as Linux. macOS runners carry Node, but do not carry
+      # this checkout's locked esbuild install; without this step the required
+      # probe fails before it can exercise canonicalization. The packaged
+      # browser-capture module path is covered separately by the runtime-stage
+      # fix below; this step supplies its Node package dependency.
+      # Keep Linux's setup-node + npm ci path above unchanged.
+      - name: Install materialized runtime Node test dependencies (macOS)
+        if: runner.os == 'macOS'
         run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
 
       - name: Configure
