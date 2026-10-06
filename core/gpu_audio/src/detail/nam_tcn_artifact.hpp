@@ -149,9 +149,8 @@ class NamTcnArtifact final {
         Model candidate;
         if (!candidate.configure(parsed, weights, scale, error))
             return false;
-        const auto sample_rate = root.hasObjectMember("sample_rate")
-                                    ? number(root["sample_rate"])
-                                    : -1.0;
+        const auto sample_rate =
+            root.hasObjectMember("sample_rate") ? number(root["sample_rate"]) : -1.0;
         if (!(sample_rate > 0.0) || !std::isfinite(sample_rate))
             return fail("invalid sample_rate");
         // Commit the fully validated candidate only after every field has
