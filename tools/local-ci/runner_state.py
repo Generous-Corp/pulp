@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from process_liveness import pid_alive as _pid_alive  # noqa: E402
 
 from io_utils import LockBusyError, atomic_write_text, file_lock
 from state_paths import drain_lock_path, runner_info_path
@@ -19,13 +23,7 @@ def read_runner_info(path: Path | None = None) -> dict | None:
 
 
 def pid_alive(pid: int | None) -> bool:
-    if not pid or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
+    return _pid_alive(pid) is True
 
 
 def current_runner_info(

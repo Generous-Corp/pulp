@@ -4066,6 +4066,10 @@ after a Build that finished with errors, not only after a clean one: MSBuild kee
 building the other projects, so the targets that built are tested and the broken
 ones read "Not Run". The job stays red because Build failed; do not read a Windows
 ctest summary in a red nightly as a green build.
+The nightly's Linux legs carry the same setup as `build.yml`'s Linux leg (an
+`origin/main` fetch for the agent-capability checks, the visual-analysis Python set,
+lavapipe on both architectures). A test that passes in `build.yml` and fails only in
+the nightly is usually a missing setup step there, not a platform bug.
 
 Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
 and its `tracking-issues` job find-or-creates a per-platform issue on failure,
@@ -11686,3 +11690,17 @@ its fetches and then lets its fail-closed checks decide) and give the step a
 jobs with `filter=all`: the jobs API defaults to the latest attempt, which hides the
 cancelled attempt you are looking for.
 
+
+## Probe a pid through `process_liveness.pid_alive`, never `os.kill(pid, 0)`
+
+On Windows `os.kill(pid, 0)` is `os.kill(pid, signal.CTRL_C_EVENT)`: Python
+calls `GenerateConsoleCtrlEvent`, which sends Ctrl+C to every process on the
+console instead of testing the pid, and a probe in any ctest-run script kills
+the whole Windows ctest run (`0xC000013A`). With `ctest -j` the casualty
+reported at the kill is often not the culprit: look for a parallel test that
+probes a pid. `tools/scripts/process_liveness.pid_alive` is the one probe
+(OpenProcess + exit code on Windows; True, False, or None for "cannot tell").
+`raw_pid_probe_lint.py` in `gates.sh` and `version-skill-check` rejects any
+other `os.kill(<pid>, 0)`. A script that is copied into fixtures or imported as
+`tools.scripts.*` (`build_dir_lock.py`, the fetch scripts) imports it with a
+fallback that answers None, and None must never mean "dead".

@@ -82,6 +82,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trace-frame-cost-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_frame_cost.py")
+    # Windows cannot execute a shebang script; tests stand in for native
+    # tools with scripts, so every launch of a configurable tool goes through
+    # script_argv.argv_for. The selftest covers both platforms and pins two
+    # consumers to the helper.
+    add_test(NAME script-argv-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_argv.py")
     # The web-compat harness classifies a CSS property as out-of-scope when it
     # is absent from a hand-transcribed table of one Yoga release. A stale table
     # therefore hides real gaps as "out of scope" and the compat numbers improve
