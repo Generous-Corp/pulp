@@ -36,6 +36,9 @@ import time
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from process_liveness import pid_alive  # noqa: E402
+
 SCRIPT = Path(__file__).with_name("governed-build.sh")
 
 # The wrapper records each build in Shipyard's metrics store when `shipyard` is
@@ -425,9 +428,7 @@ class GovernedBuildTests(unittest.TestCase):
         """A pid that has certainly exited (spawned and reaped here)."""
         proc = subprocess.Popen(["true"])
         proc.wait()
-        try:
-            os.kill(proc.pid, 0)
-        except ProcessLookupError:
+        if pid_alive(proc.pid) is False:
             return proc.pid
         raise unittest.SkipTest("could not obtain a reliably-dead pid")
 

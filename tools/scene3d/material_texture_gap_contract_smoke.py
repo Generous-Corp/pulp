@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from scene3d_launch import argv_for
 
 
 EXPECTED_FEATURES = [
@@ -278,12 +279,12 @@ def main():
         scene_path.write_text(json.dumps(make_texture_gap_gltf(len(bin_bytes))),
                               encoding="utf-8")
 
-        inspect_output = run_command([str(args.inspect_tool), str(scene_path)])
+        inspect_output = run_command([*argv_for(args.inspect_tool), str(scene_path)])
         require_stats(parse_stats(inspect_output))
         print("scene3d_material_texture_gap_inspect_verified=true")
 
         sidecar_json = run_command([
-            str(args.sidecar_tool),
+            *argv_for(args.sidecar_tool),
             "--source",
             "pulp-material-texture-gap-contract",
             "--exported-at",
@@ -298,7 +299,7 @@ def main():
 
         sidecar_path = temp_path / "material-texture-gap.pulp3d.json"
         sidecar_path.write_text(sidecar_json, encoding="utf-8")
-        preflight_output = run_command([str(args.preflight_tool), str(sidecar_path)])
+        preflight_output = run_command([*argv_for(args.preflight_tool), str(sidecar_path)])
         require_preflight(preflight_output)
         print("scene3d_material_texture_gap_preflight_verified=true")
 

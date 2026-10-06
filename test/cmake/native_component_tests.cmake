@@ -39,6 +39,17 @@ add_dependencies(pulp-test-child-process-standard-input pulp-child-process-input
 target_compile_definitions(pulp-test-child-process-standard-input PRIVATE
     PULP_CHILD_PROCESS_INPUT_FIXTURE="$<TARGET_FILE:pulp-child-process-input-fixture>")
 
+# Shared unique temp directory helper (test/support/unique_temp_dir.hpp): the
+# fixture is a child process, so the cross-process case can run eight at once.
+add_executable(pulp-unique-temp-dir-fixture fixtures/unique_temp_dir_fixture.cpp)
+target_include_directories(pulp-unique-temp-dir-fixture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+pulp_add_test_suite(pulp-test-unique-temp-dir
+    SOURCES test_unique_temp_dir.cpp
+    LIBRARIES pulp::platform)
+add_dependencies(pulp-test-unique-temp-dir pulp-unique-temp-dir-fixture)
+target_compile_definitions(pulp-test-unique-temp-dir PRIVATE
+    PULP_UNIQUE_TEMP_DIR_FIXTURE="$<TARGET_FILE:pulp-unique-temp-dir-fixture>")
+
 # Progress parser tests
 pulp_add_test_suite(pulp-test-progress-parser GROUP pulp-test-group-native-platform
     LIBRARIES pulp::platform)

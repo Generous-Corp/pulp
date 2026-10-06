@@ -82,6 +82,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trace-frame-cost-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_frame_cost.py")
+    # Windows cannot execute a shebang script; tests stand in for native
+    # tools with scripts, so every launch of a configurable tool goes through
+    # script_argv.argv_for. The selftest covers both platforms and pins two
+    # consumers to the helper.
+    add_test(NAME script-argv-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_argv.py")
     # The web-compat harness classifies a CSS property as out-of-scope when it
     # is absent from a hand-transcribed table of one Yoga release. A stale table
     # therefore hides real gaps as "out of scope" and the compat numbers improve
@@ -341,6 +348,12 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+
+    # Temp-leak guard: wraps a test command in a private temp directory and
+    # fails when the command leaves anything there (see its use on the Node
+    # unit aggregate in design_import_tool_cli_tests.cmake).
+    add_test(NAME tmp-leak-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_tmp_leak_guard.py")
 
     # Shared Catch2 test PCH: the configure-time ledger says which suites reuse
     # a carrier; this reads the generator's compile lines back and proves it
@@ -1249,13 +1262,22 @@ if(Python3_Interpreter_FOUND)
     # Shipyard's declared target so a different optional feature set cannot be
     # mistaken for inventory drift.
     if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
-        set(_changed_surface_policy_args)
-        if(PULP_CHANGED_SURFACE_INVENTORY_TARGET)
-            list(APPEND _changed_surface_policy_args --build-dir "${CMAKE_BINARY_DIR}")
-        endif()
+        # The policy tables alone, from source: this is also a source-lane
+        # test, so it never takes a build-tree argument.
         add_test(NAME changed-surface-policy-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py")
+        # The live-tree inventory check, which reads the build tree, only where
+        # Shipyard's target enables it. It is registered in every
+        # configuration (bare elsewhere) so the generated script-input and
+        # changed-surface family lists, keyed by test name, are the same for
+        # the required gate and the Shipyard lane.
+        set(_changed_surface_inventory_args)
+        if(PULP_CHANGED_SURFACE_INVENTORY_TARGET)
+            list(APPEND _changed_surface_inventory_args --build-dir "${CMAKE_BINARY_DIR}")
+        endif()
+        add_test(NAME changed-surface-policy-inventory COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
-            ${_changed_surface_policy_args})
+            ${_changed_surface_inventory_args})
         add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         # Two cases walk the whole tracked tree for configured reachability,
@@ -1570,6 +1592,28 @@ endif()
 if(UNIX)
     add_test(NAME setup-source-cache
         COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_source_cache.sh")
+endif()
+
+# setup.sh's shared source cache after a killed priming run: a lock whose owner
+# is gone is reclaimed (a live one never is), and a half-populated cache is
+# re-fetched rather than trusted. Windows runs it under Git for Windows' bash,
+# located beside git rather than on PATH, where bash.exe may be WSL's.
+if(UNIX)
+    add_test(NAME setup-cache-lock
+        COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
+    set_tests_properties(setup-cache-lock PROPERTIES TIMEOUT 240)
+elseif(WIN32)
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        get_filename_component(_pulp_git_bin_dir "${GIT_EXECUTABLE}" DIRECTORY)
+        get_filename_component(_pulp_git_root "${_pulp_git_bin_dir}" DIRECTORY)
+        find_program(PULP_GIT_BASH bash HINTS "${_pulp_git_root}/bin" NO_DEFAULT_PATH)
+        if(PULP_GIT_BASH)
+            add_test(NAME setup-cache-lock
+                COMMAND "${PULP_GIT_BASH}" "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
+            set_tests_properties(setup-cache-lock PROPERTIES TIMEOUT 240)
+        endif()
+    endif()
 endif()
 # Catch2 discovery must preserve multi-label lists as one CTest property value.
 if(Python3_Interpreter_FOUND)

@@ -593,16 +593,18 @@ that failed to write never changes the lane's verdict; read the run log's last
 
 `[targets.mac.changed_surface_selection.executable_reuse]` makes Shipyard copy
 `derivation_paths` from the protected base into a bare directory and run the
-key code there with `python3 -I`. Three mistakes do not error at configure
+key code there with `python3 -I`. Four mistakes do not error at configure
 time; they make every keyed run fail to derive or every re-derivation refuse:
 
-- **A new import in the key code must join `derivation_paths` in the same
-  change.** The bare copy holds only the listed files. `test_receipts_shadow`
-  pulls in `affected_tests_shadow` and `tools/scripts/protected_merge_receipt`,
-  which is how the list grew past the obvious five. Check the closure by
-  copying exactly the listed files from the branch into a temp dir and running
-  `python3 -I tools/ci/executable_keys.py --print-toolchain --build-dir /nonexistent`
-  and `python3 -I tools/ci/executable_selection.py --help` there.
+- **`derivation_paths` is exactly the key code's import closure plus the
+  adapter, no more and no less.** The bare copy holds only the listed files, so
+  a missing import fails every derivation; an extra file is also a selector
+  policy path, so every base that moves it plans full as
+  `selector_policy_drift` (the receipts shadow was 5 of 38 such drifts before
+  the shared name pattern moved to `tools/ci/always_run_names.py`).
+  `KeyCodeClosureTests` in `tools/ci/test_executable_keys.py` derives the
+  closure from the imports and pins the list and `KEY_CODE_PATHS` to it; run it
+  after any import change in the key code.
 - **`load_record` must digest a record in byte order of its relative paths**
   (`a.b` before `a/b`), as Shipyard's `record_digest` does. Sorting `Path`
   objects orders by parts and gives a different digest on any record whose
@@ -612,6 +614,13 @@ time; they make every keyed run fail to derive or every re-derivation refuse:
   Shipyard predates `executable_reuse` cannot parse the policy at all, so the
   changed-surface plan falls back to full on every PR. Bump the pinned
   Shipyard on the lane hosts before the table lands on main.
+- **A new flag in the `rederive` command lands with the key code that accepts
+  it.** The host re-derives with the base's command against the base's copy,
+  so `--audit-report {audit_report}` on a main whose `executable_keys.py`
+  lacks the argument makes argparse exit 2 on every re-derivation, and the
+  second refusal turns `PULP_REUSE_LIVE` off.
+  `test_the_configured_rederive_command_parses_with_this_key_code` parses the
+  configured command with the same copy's parser.
 
 ## Performance lanes report; they never gate
 
@@ -778,9 +787,35 @@ executables; the bootstrap consumes only the newly derived merge-group
 decision. Missing, ambiguous, expired, or mutated evidence must leave the
 original matrix entry in place. Never make the PR receipt itself a required
 context, and never execute the candidate's verifier as the authority.
+**Every required job on a hosted label can eject a group when GitHub cannot
+assign hosted runners.** The job is cancelled after about fifteen minutes with
+no `runner_name`, and the queue ejects on that non-success. `drift-fast` and the
+wclap job route through `PULP_DRIFT_FAST_RUNS_ON_JSON` / `PULP_WCLAP_RUNS_ON_JSON`
+(unset = `ubuntu-latest`). A self-hosted target must admit the workflow in its
+runner group: `pulp-trusted-build` admits neither, and refuses the wclap
+workflow because it holds a deploy secret; a job routed to a group that does
+not admit it waits forever. `version-skill-check.yml` and
+`vellum-freeze-check.yml` route only when `github.workflow_ref` is the main
+definition, which a merge_group or pull_request event never is, so they run
+hosted in practice.
+
 `tools/scripts/test_required_macos_alias.py` and
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
+
+**A cancelled preamble is not a failed one.** When `classify` is CANCELLED
+because GitHub never assigned it a runner (the check run's annotation says "The
+job was not acquired by Runner of type hosted even after multiple attempts"),
+the merge-group bootstrap classifies the group in-job with the classify job's
+scripts (`tools/ci/macos_merge_group_bootstrap.sh`, logging "preamble not
+acquired (infrastructure)") and proceeds: skip-safe passes, a native group
+fails closed (its leg never started), a failing in-job classifier fails closed.
+Failing closed on every cancel made GitHub eject the PR, re-batch, and hit the
+same wait in a loop. Cancelling the run instead does not help: a cancelled
+required check is another non-success, and the queue ejects on any.
+`failure`, `skipped` and a missing result still fail closed. Before blaming a
+change for a 2-4 s `macos` red in a merge group, read the preamble jobs'
+`runner_name` and annotations: an empty runner is infrastructure.
 
 ### A reused merge-group receipt must carry test evidence, not a verdict
 
@@ -2720,9 +2755,10 @@ amended before its first push was never on any remote ref.
 
 ## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
 
-`tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py` and
-`check_skip_not_pass.py` before every push. Both are whole-tree text scans —
-0.1s and ~2s, no build tree, no configure. The required gate already runs them
+`tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py`,
+`clock_only_temp_key_guard.py` and `check_skip_not_pass.py` before every push.
+All are whole-tree text scans of a few seconds at most, with no build tree and
+no configure. The required gate already runs them
 as ctests, so this adds no coverage; it moves *when* you find out.
 
 That timing is the whole point. A batch is main plus every entry ahead of it, so
@@ -2746,6 +2782,13 @@ What each one refuses:
   `test/cmake/character_delay_tests.cmake`. The guard honours an inline
   `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
   since the skip marker evades the thing the guard exists to catch.
+
+- **A test temp path keyed on a clock reading alone.** CTest runs cases as
+  concurrent processes, and two that read the same `steady_clock` tick share
+  the directory and read or delete each other's files (a browser-capture case
+  accepted a drifted capture this way). Use `pulp::test::make_unique_temp_dir`
+  or `unique_temp_path` from `test/support/unique_temp_dir.hpp` (pid + serial,
+  exclusive create). Escape with `clock-only-temp-key-guard: skip <reason>`.
 
 - **An unmet precondition reported as a pass.** A `SUCCEED()` / `WARN()` / bare
   `return` at the top of a case leaves it PASSING, so the suite's pass count is
@@ -4044,6 +4087,10 @@ after a Build that finished with errors, not only after a clean one: MSBuild kee
 building the other projects, so the targets that built are tested and the broken
 ones read "Not Run". The job stays red because Build failed; do not read a Windows
 ctest summary in a red nightly as a green build.
+The nightly's Linux legs carry the same setup as `build.yml`'s Linux leg (an
+`origin/main` fetch for the agent-capability checks, the visual-analysis Python set,
+lavapipe on both architectures). A test that passes in `build.yml` and fails only in
+the nightly is usually a missing setup step there, not a platform bug.
 
 Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
 and its `tracking-issues` job find-or-creates a per-platform issue on failure,
@@ -5540,6 +5587,14 @@ four more Windows jobs to the pool that is already the bottleneck, so the drain
 gets slower, not faster — and the re-dispatched runs then wedge each other. If
 the pool is already saturated with advisory work, cancel it (the macOS legs have
 usually finished, so nothing is lost) rather than adding more.
+
+Every advisory hosted lane that runs on `pull_request` already groups per PR ref
+with `cancel-in-progress` on for PR events, so a new push retires the previous
+head's runs. That includes `codeql-advanced.yml` (six hosted jobs, one on macOS),
+pinned by `tools/scripts/test_codeql_workflow_concurrency.py`. A backlog of
+Coverage / Sanitizers / CodeQL runs is therefore one run per *open PR*, not
+superseded heads; check `head_branch` for duplicates before reaching for more
+concurrency settings. Required checks keep their own non-cancelling groups.
 
 ### A step gated on `!= 'pull_request'` also fires on `merge_group`
 
@@ -7555,7 +7610,16 @@ executable's cases are one row keyed by the executable.
 `test_changed_surface_policy.py --build-dir build` now checks the live tree
 only: every registration has a command after the build, no composite identity
 is ambiguous, and every literal test the policy names exists. A run bare
-checks the policy tables alone.
+checks the policy tables alone. The two are separate ctests:
+`changed-surface-policy-selftest` is always the bare run (it is also a
+source-lane test, and the source lane refuses a build-tree argument), and
+`changed-surface-policy-inventory` adds `--build-dir` under
+`PULP_CHANGED_SURFACE_INVENTORY_TARGET`, which Shipyard's configure sets (it is
+registered bare everywhere else, so the generated script-input and family
+lists, keyed by test name, do not differ between the required gate and the
+Shipyard lane). One
+registration that took `--build-dir` under that flag made
+`source-selftest-lane-contract` red on every Shipyard local lane run.
 
 The selftest also runs inside a bounded leg, where only the selected targets
 are built, so a registration without a command passes only with the runner's
@@ -9358,6 +9422,14 @@ name the lane for what it builds.
 
 **Nightly cross-platform check (`.github/workflows/cross-platform-check.yml`):** Pulp's team develops and tests on macOS; Linux, Windows, and Android are advisory "tell us if it breaks" signal, and per-PR CI has been slimmed so those legs no longer run on every PR. This scheduled workflow is the backstop. It runs nightly (`cron: '17 7 * * *'` — odd minute, off-peak; also `workflow_dispatch` for manual bisect) and builds + tests **Linux** (`ubuntu-latest`), **Windows** (`windows-latest`), and **Android** (NDK build on `ubuntu-latest`) as three independent jobs with `fail-fast: false` so one platform breaking never masks the others — catching ALL cross-platform breakage in one pass is the point. GitHub-hosted runners only: it must never consume the scarce self-hosted macOS capacity. A final `tracking-issues` job (`needs:` all three, `if: always()`) maintains **one tracking issue PER platform**, keyed by the EXACT titles `Cross-platform Linux check is broken` / `Cross-platform Windows check is broken` / `Cross-platform Android check is broken`. It reuses `auto-release-watchdog.yml`'s find-or-create / edit / reopen / close gh-api pattern: a failed platform job opens (or reopens + edits) its issue; a passing one closes its open issue. De-dup is by `gh issue list --search "in:title <title>" --state all` matching the exact title — never a fresh issue per night. Created issues carry `bug`, `ci`, `cross-platform`, and `platform:linux`/`platform:windows`/`platform:android` labels, and the body includes the run URL, tip SHA, per-job results, artifact name, and the commit range since the last green run (derived from the Actions API) so a regression can be bisected within a night's batch. Distinct from `nightly-full-build.yml`, which does the full macOS `make all` to catch test targets PR CI never compiles; this workflow is the *non-macOS* coverage PR CI no longer provides. If you slim or restore a per-PR advisory platform leg, keep this nightly in sync — it is the only thing keeping cross-platform debt visible.
 
+**Dispatching it from a proof branch.** The concurrency group is per ref
+(`cross-platform-check-${{ github.ref }}`, `cancel-in-progress: false`), so
+dispatches from different branches run in parallel and agents no longer take
+turns; a second dispatch on the same ref still waits for the first. Only runs on
+`refs/heads/main` maintain the tracking issues, so a proof branch can neither
+open nor close them. `tools/scripts/test_cross_platform_check_concurrency.py`
+pins both.
+
 **Gotcha — `shell: cmd` step exit code is the LAST command's errorlevel.** Under `shell: cmd` GitHub Actions uses `cmd.exe` semantics: the step exit code is the errorlevel of the *last* program run, not the first failing one. The Windows ctest step writes to `test-windows.log` for artifact upload, then `type`s it into the run log — if `type` (always errorlevel 0) ran last, a real `ctest` failure was masked and the job went green, so the nightly tracking-issue logic never fired for genuine Windows breakage (codex P1 on pulp#2536). Fix: capture `set CTEST_RC=%ERRORLEVEL%` on the line *immediately* after `ctest` (before `type` overwrites `%ERRORLEVEL%`), then `exit /b %CTEST_RC%` as the final command. Same trap applies to any multi-command `shell: cmd` block where a non-final command is the one that can fail — capture-and-`exit /b`, or make the fallible command last. Note `build.yml`'s Windows test step is *not* affected: it runs `ctest` as the last command, so its errorlevel propagates naturally.
 
 **`RELEASE_BOT_TOKEN` is required for the auto-release chain to fire.** Without it, auto-release silently degrades — tags get created via `GITHUB_TOKEN` but GitHub doesn't trigger workflows on `GITHUB_TOKEN`-pushed tags, so `release-cli.yml` and `sign-and-release.yml` never run and no GitHub Release appears. Run `pulp doctor` to check; if missing, follow the "One-time setup" section in `docs/guides/versioning.md`. `pulp pr` will also print a heads-up before pushing the PR if the secret isn't present.
@@ -10873,7 +10945,12 @@ downstream consumer of the installed headers — so only someone building a
 plug-in against a `cmake --install`ed SDK hits it.
 
 `tools/scripts/win32_include_lint.py` guards `core/*/include` whole-tree in
-`gates.sh`. Always use `pulp/platform/win32_sane.hpp`, which pre-sets `NOMINMAX`
+`gates.sh`. Its sibling `tools/scripts/safe_path_guard_lint.py` (also in
+`gates.sh` and `version-skill-check.yml`) fails any boolean `*safe*` path guard
+in `core/` or `tools/cli/` that tests `is_absolute()`/`is_relative()` without
+calling `pulp::runtime::is_safe_relative_path`: on Windows `/x`, `\x` and `C:x`
+are not absolute, so a bare check lets an untrusted name replace the
+destination's root. Always use `pulp/platform/win32_sane.hpp`, which pre-sets `NOMINMAX`
 and `WIN32_LEAN_AND_MEAN`. Sources are deliberately out of scope: a `.cpp` that
 leaks breaks only itself, immediately; a header exports the hazard.
 
@@ -11378,7 +11455,7 @@ ubuntu-24.04 ships without the compiler-rt realtime runtime, so
 dispatch-only for that reason; fixing the variable moves the failure from the
 install step to the configure step and nothing else.
 
-## Diff-scoped clang-format gate (advisory) — touched lines only
+## Diff-scoped clang-format gate — touched lines only (blocking before push)
 
 `tools/scripts/format_changed.sh --check --base <ref>` judges only the hunks a
 branch changes; the tree itself does not round-trip under `.clang-format`
@@ -11387,26 +11464,40 @@ files, byte-identical across Xcode / CommandLineTools / Homebrew `llvm@21`;
 v19 differs on two), so a whole-file check would fail every PR and a
 whole-tree reformat is a separate decision. Existing debt is grandfathered.
 
-Three surfaces run the same script, all **advisory** today:
+Three surfaces run the same script. The two that run before a push **block**
+by default; the CI check reports:
 
 | Surface | Invocation | Exit 1 (verdict) | Exit 3 (no clang-format) |
 |---|---|---|---|
-| `.githooks/pre-push` | `run_gate_captured bash "$FMT" --check --base "$BASE"` | `ADVISORY` line, push allowed; `PULP_ENFORCE_PREPUSH_FORMAT=1` makes it `fail=1` | `SKIPPED … INFRASTRUCTURE`, push allowed |
-| `tools/scripts/gates.sh` | same, unsupervised | same knob | same skip |
+| `.githooks/pre-push` | `run_gate_captured bash "$FMT" --check --base "$BASE"` | `fail=1`, naming the fix (`tools/scripts/format_changed.sh`); `PULP_ENFORCE_PREPUSH_FORMAT=0` demotes one push to an `ADVISORY` line | `SKIPPED … INFRASTRUCTURE`, push allowed |
+| `tools/scripts/gates.sh` | same, unsupervised | same, same knob | same skip |
 | `.github/workflows/format-changed-check.yml` (`Format (changed lines)`, hosted `ubuntu-latest`, path-filtered to C++ sources) | pip `clang-format==21.1.8`, `--base origin/<base_ref>` | job fails with `::error title=Formatting` | job fails with `::error title=INFRASTRUCTURE` — never worded as a formatting verdict |
 
-The workflow is **not** in `required_status_checks`; it reports. Promote it
-by adding the check to branch protection and flipping the hook default only
-after open branches are clean on touched lines — at wiring time 4 of 6
-sampled in-flight PRs would have failed (26–355 diff lines each), which is
-why both surfaces start advisory. Measured cost: 1.8–3.9 s per branch in
+The workflow is **not** in `required_status_checks`; it reports. The hook and
+gates.sh started advisory (at wiring time 4 of 6 sampled in-flight PRs would
+have failed, 26–355 diff lines each) and were flipped to blocking on
+2026-10-05: while advisory, the CI check still went red on 4 of the 14 open PRs
+that ran it, and four PRs that day each spent a
+push and a re-review round on a one-command fix that `shipyard pr` had printed
+as `ADVISORY … Push allowed`. A branch with debt on its touched lines now runs
+`tools/scripts/format_changed.sh` once before its next push. Measured cost: 1.8–3.9 s per branch in
 the hook (the diff-cover build is the slow gate, not this).
 
 Exit 3 is deliberately an *infrastructure* failure with its own wording on
 every surface: a gate that reports "no binary" as "misformatted" is the
 false-verdict class this repo keeps paying for. The wiring — exit codes kept
 apart, the PyPI pin, hosted runner — is asserted by
-`tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
+`tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`),
+which also RUNS each shell caller's block against a stub `format_changed.sh`
+(exit 0/1/3, knob unset/0/1) so the blocking default is behaviour, not text.
+
+`--check` must agree with the rewrite mode, or a blocking gate becomes one the
+fix cannot clear. It once read the formatter's output through `$(...)`, which
+strips trailing newlines, so every touched file ending in a blank line read
+dirty while `format_changed.sh` left it alone; it now keeps the output
+byte-for-byte (`tools/scripts/test_format_changed.sh` pins that case). Include sorting ignores `--lines`: one new `#include` re-sorts its whole
+block, rewriting and blaming lines nobody touched, so an edited file is
+formatted with `--sort-includes=false`; a new file is still sorted whole.
 
 ### Its `--lines` output is not always what clang-format would produce
 
@@ -11642,3 +11733,17 @@ its fetches and then lets its fail-closed checks decide) and give the step a
 jobs with `filter=all`: the jobs API defaults to the latest attempt, which hides the
 cancelled attempt you are looking for.
 
+
+## Probe a pid through `process_liveness.pid_alive`, never `os.kill(pid, 0)`
+
+On Windows `os.kill(pid, 0)` is `os.kill(pid, signal.CTRL_C_EVENT)`: Python
+calls `GenerateConsoleCtrlEvent`, which sends Ctrl+C to every process on the
+console instead of testing the pid, and a probe in any ctest-run script kills
+the whole Windows ctest run (`0xC000013A`). With `ctest -j` the casualty
+reported at the kill is often not the culprit: look for a parallel test that
+probes a pid. `tools/scripts/process_liveness.pid_alive` is the one probe
+(OpenProcess + exit code on Windows; True, False, or None for "cannot tell").
+`raw_pid_probe_lint.py` in `gates.sh` and `version-skill-check` rejects any
+other `os.kill(<pid>, 0)`. A script that is copied into fixtures or imported as
+`tools.scripts.*` (`build_dir_lock.py`, the fetch scripts) imports it with a
+fallback that answers None, and None must never mean "dead".

@@ -17,6 +17,7 @@ import importlib.util
 import os
 import pathlib
 import shutil
+import sys
 import subprocess
 import tempfile
 import unittest
@@ -126,7 +127,7 @@ class DecisionCore(unittest.TestCase):
 
 
 def _have_apple_toolchain():
-    return (os.uname().sysname == "Darwin"
+    return (sys.platform == "darwin"
             and shutil.which("clang") and shutil.which("lipo")
             and shutil.which("codesign"))
 

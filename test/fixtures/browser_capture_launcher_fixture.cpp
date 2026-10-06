@@ -41,6 +41,16 @@ int main(int argc, char** argv) {
     // argv[0] is the capture script passed to the configured Node executable.
     const std::string& command = args[1];
     if (command == "probe") {
+        const std::string script = fs::path(args[0]).filename().string();
+        if (script.find("probe-hangs") != std::string::npos) {
+            // Outlives any probe deadline, so the caller's own timeout fires.
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            return 0;
+        }
+        if (script.find("probe-refuses") != std::string::npos) {
+            std::cerr << "Page.captureScreenshot is not supported\n";
+            return 1;
+        }
         return 0;
     }
     if (command != "capture") return 65;

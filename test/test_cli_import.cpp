@@ -12,9 +12,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/portable_env.hpp"
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/import_detect.hpp"
 #include "tools/cli/import_spi.hpp"
-#include "support/portable_env.hpp"
 
 #include <pulp/platform/child_process.hpp>
 
@@ -35,12 +36,7 @@ namespace {
 struct TempDir {
     fs::path path;
     explicit TempDir(const std::string& prefix) {
-        path = fs::temp_directory_path() /
-               (prefix + "-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch().count()) +
-                "-" + std::to_string(::rand()));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
     ~TempDir() { std::error_code ec; fs::remove_all(path, ec); }
 };

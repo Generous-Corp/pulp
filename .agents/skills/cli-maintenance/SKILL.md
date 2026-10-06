@@ -3797,9 +3797,24 @@ argument form: it is `pulp-cpp version`, not `pulp-cpp pulp version`, and
 On Windows `os.kill(pid, 0)` is `os.kill(pid, signal.CTRL_C_EVENT)`: Python calls
 `GenerateConsoleCtrlEvent`, which sends Ctrl+C to every process on the console
 instead of testing `pid`. A liveness probe in a ctest-run script killed the whole
-Windows ctest run that way (`0xC000013A`, "Terminate batch job (Y/N)?"). The
-CLI-side scripts that probe a pid (`tools/ci/build_dir_lock.py`,
-`tools/scripts/live_build_check.py`) take an `os.name == "nt"` route that opens the
-process with `PROCESS_QUERY_LIMITED_INFORMATION` and reads `STILL_ACTIVE`; copy
-that, not the POSIX `os.kill`, into any new Python that probes a pid.
+Windows ctest run that way (`0xC000013A`, "Terminate batch job (Y/N)?"). Every
+probe goes through `tools/scripts/process_liveness.pid_alive`, which on Windows
+opens the process with `PROCESS_QUERY_LIMITED_INFORMATION` and reads
+`STILL_ACTIVE`; `tools/scripts/raw_pid_probe_lint.py` (in `gates.sh` and
+`version-skill-check`) rejects a raw `os.kill(<pid>, 0)` anywhere in `tools/` or
+`test/`. The one exception is `gpu_first_visible_a3_role_producer.py`, which is
+copied as a single sealed file into evidence and so keeps its own Windows route
+with a lint skip.
 
+## Untrusted paths go through `pulp::runtime::is_safe_relative_path`
+
+An archive entry, manifest member, template path or registry location that the
+CLI joins onto a directory must be screened by
+`pulp::runtime::is_safe_relative_path` (`pulp/runtime/safe_relative_path.hpp`),
+never by `is_absolute()`: on Windows `/x`, `\x` and `C:x` are not absolute and
+replace the destination's root when joined. Where a destination exists, also
+check `pulp::runtime::is_within_directory` after the join.
+`tools/scripts/safe_path_guard_lint.py` fails a `*safe*` guard that skips the
+helper. A source-compiled test target that does not link `pulp::runtime`
+(`pulp-test-cli-import-emit`, the gpu-probe model library) needs
+`core/runtime/include` on its include path for the header.

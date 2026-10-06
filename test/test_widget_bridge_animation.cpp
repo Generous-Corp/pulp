@@ -3,6 +3,7 @@
 // (Element.animate(...) / KeyframeEffect), motion provenance, and the
 // pulp-motion-bench harness output.
 
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -1347,11 +1348,7 @@ TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
-    const auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto font_path =
-        std::filesystem::temp_directory_path() /
-        ("pulp-widget-bridge-font-" + unique + ".ttf");
+    const auto font_path = pulp::test::unique_temp_path("pulp-widget-bridge-font", ".ttf");
     {
         std::ofstream out(font_path, std::ios::binary);
         out << "fake-font";

@@ -118,10 +118,12 @@ CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 LIVE_BUILD_CHECK="$ROOT/tools/scripts/live_build_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
+SAFE_PATH_LINT="$ROOT/tools/scripts/safe_path_guard_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 SCHEDULE_BACKSTOP="$ROOT/tools/scripts/schedule_backstop_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
+RAW_PID_PROBE_LINT="$ROOT/tools/scripts/raw_pid_probe_lint.py"
 FORCED_RESTORE_LINT="$ROOT/tools/scripts/forced_restore_lint.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
 SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
@@ -344,22 +346,26 @@ if [ -f "$PGL" ]; then
     fi
 fi
 
-# ── 6c. diff-scoped clang-format (advisory) ─────────────────────────────────
-# Touched lines only; existing formatting debt is grandfathered. Exit 3 (no
-# clang-format 21 here) is infrastructure, not a verdict. Same promotion knob
-# as the pre-push hook: PULP_ENFORCE_PREPUSH_FORMAT=1 makes exit 1 fail.
+# ── 6c. diff-scoped clang-format ────────────────────────────────────────────
+# Touched lines only; existing formatting debt is grandfathered. Blocking by
+# default, like the pre-push hook; PULP_ENFORCE_PREPUSH_FORMAT=0 demotes exit 1
+# to advisory. Exit 3 (no clang-format 21 here) is infrastructure, not a
+# verdict.
 FMT="$ROOT/tools/scripts/format_changed.sh"
 if [ -f "$FMT" ]; then
     echo "" >&2
-    echo "▸ diff-scoped clang-format check (advisory; touched lines only)" >&2
+    echo "▸ diff-scoped clang-format check (touched lines only)" >&2
     bash "$FMT" --check --base "$BASE"
     case $? in
         0) ;;
         1)
-            if [ "${PULP_ENFORCE_PREPUSH_FORMAT:-0}" = "1" ]; then
+            if [ "${PULP_ENFORCE_PREPUSH_FORMAT:-1}" = "1" ]; then
+                echo "format_changed: touched lines are not clang-format clean." >&2
+                echo "  Fix: tools/scripts/format_changed.sh, then stage the files it rewrote (git status) and commit" >&2
+                echo "  Demote to advisory: PULP_ENFORCE_PREPUSH_FORMAT=0" >&2
                 fail=1
             else
-                echo "format_changed: ADVISORY — touched lines are not clang-format clean; run tools/scripts/format_changed.sh" >&2
+                echo "format_changed: ADVISORY (PULP_ENFORCE_PREPUSH_FORMAT=0) — touched lines are not clang-format clean; run tools/scripts/format_changed.sh" >&2
             fi
             ;;
         3) echo "format_changed: SKIPPED — no clang-format 21 on this machine (INFRASTRUCTURE, not a formatting verdict)" >&2 ;;
@@ -699,6 +705,14 @@ if [ -f "$WIN32_INCLUDE_LINT" ]; then
     fi
 fi
 
+if [ -f "$SAFE_PATH_LINT" ]; then
+    echo "" >&2
+    echo "▸ safe-path guard lint (untrusted paths screened by the shared helper)" >&2
+    if ! "$PYTHON" "$SAFE_PATH_LINT" --root "$ROOT" >&2; then
+        fail=1
+    fi
+fi
+
 # ── 10. import-provenance (opt-in) ─────────────────────────────────────────
 # Audits that any emitted/migrated project carries a well-formed independent
 # provenance marker. No-op for normal Pulp-repo pushes; set
@@ -791,6 +805,17 @@ if [ -f "$UNBOUNDED_WAIT_LINT" ]; then
     echo "" >&2
     echo "▸ unbounded-wait lint (a test wait must be able to time out)" >&2
     if ! "$PYTHON" "$UNBOUNDED_WAIT_LINT" --base "$BASE"; then
+        fail=1
+    fi
+fi
+
+# A liveness probe written as os.kill(pid, 0) sends Ctrl+C to the whole console
+# on Windows and kills the ctest run that started it. Whole-tree: there is no
+# backlog, every probe goes through process_liveness.pid_alive.
+if [ -f "$RAW_PID_PROBE_LINT" ]; then
+    echo "" >&2
+    echo "▸ raw pid-probe lint (no os.kill(pid, 0); Ctrl+C on Windows)" >&2
+    if ! "$PYTHON" "$RAW_PID_PROBE_LINT" --root "$ROOT" >&2; then
         fail=1
     fi
 fi
@@ -951,7 +976,7 @@ if [ -n "${PULP_SKIP_PREQUEUE_GUARDS:-}" ]; then
     echo "  A skip is not a pass — both still run as ctests in the required gate." >&2
 else
     prequeue_changed="$(git diff --name-only "$BASE"...HEAD 2>/dev/null || true)"
-    for prequeue_guard in catch_discover_timeout_guard.py check_skip_not_pass.py; do
+    for prequeue_guard in catch_discover_timeout_guard.py clock_only_temp_key_guard.py check_skip_not_pass.py; do
         prequeue_path="$ROOT/tools/scripts/$prequeue_guard"
         [ -f "$prequeue_path" ] || continue
         echo "" >&2

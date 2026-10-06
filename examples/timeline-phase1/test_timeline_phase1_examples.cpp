@@ -90,7 +90,8 @@ TEST_CASE("timeline step sequencer preserves frozen grid state and renders audib
 }
 
 TEST_CASE("timeline step sequencer loop flushes voices and never leaves stuck notes") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
     constexpr std::int64_t kBarSamples = 96'000;
@@ -109,7 +110,8 @@ TEST_CASE("timeline step sequencer loop flushes voices and never leaves stuck no
 }
 
 TEST_CASE("timeline step sequencer graph process is allocation free after prepare") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
     StereoBlock block(64);
@@ -124,7 +126,8 @@ TEST_CASE("timeline step sequencer graph process is allocation free after prepar
 }
 
 TEST_CASE("timeline step sequencer fully reprepares for a new device rate") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     auto changed = prepare_context(64);
     changed.sample_rate = 44'100.0;
@@ -137,7 +140,8 @@ TEST_CASE("timeline step sequencer fully reprepares for a new device rate") {
 }
 
 TEST_CASE("timeline step channel edits persist recompile and deterministically change render") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
     REQUIRE(processor.persistent_project());
@@ -197,7 +201,8 @@ TEST_CASE("timeline step channel edits persist recompile and deterministically c
     REQUIRE(changed.energy() > 0.0);
     REQUIRE(changed.left != baseline_left);
 
-    TimelineStepSequencerProcessor replay;
+    auto replay_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& replay = *replay_owner;
     replay.prepare(prepare_context());
     REQUIRE(submit_pitch_edit(replay, 12));
     REQUIRE(replay.apply_pending_edits_and_recompile());
@@ -232,9 +237,12 @@ TEST_CASE("timeline step live recompile adopts without resetting transport") {
         }
     };
 
-    TimelineStepSequencerProcessor live;
-    TimelineStepSequencerProcessor edited_reference;
-    TimelineStepSequencerProcessor stale_reference;
+    auto live_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& live = *live_owner;
+    auto edited_reference_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& edited_reference = *edited_reference_owner;
+    auto stale_reference_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& stale_reference = *stale_reference_owner;
     live.prepare(prepare_context());
     edited_reference.prepare(prepare_context());
     stale_reference.prepare(prepare_context());
@@ -287,7 +295,8 @@ TEST_CASE("timeline step live recompile adopts without resetting transport") {
 }
 
 TEST_CASE("timeline step channel rejects edits outside the persisted active extent") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     state::StepEditCommand command;
     command.client_sequence = 9;
@@ -305,7 +314,8 @@ TEST_CASE("timeline step channel rejects edits outside the persisted active exte
 }
 
 TEST_CASE("timeline step channel rejects cells beyond active pattern length") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
     REQUIRE(processor.persistent_project());
@@ -347,7 +357,8 @@ TEST_CASE("timeline step channel rejects cells beyond active pattern length") {
     REQUIRE(registered);
     REQUIRE(registered->canonical_payload_json() == before_payload);
 
-    TimelineStepSequencerProcessor reference;
+    auto reference_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& reference = *reference_owner;
     reference.prepare(prepare_context());
     REQUIRE(reference.engine_prepared());
     REQUIRE(reference.seek_samples(0) == playback::TransportError::None);
@@ -382,7 +393,8 @@ TEST_CASE("timeline step sparse recompile reuses the clean sentinel track by poi
         return processor.channel().ui_try_submit(command);
     };
 
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
 

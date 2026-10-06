@@ -24,7 +24,10 @@ dependency-free units, the serial real-Chromium integration file (with its own
 600-second CTest timeout), and the esbuild-backed materialized-runtime
 canonicalization case. The required Linux leg runs the locked
 `npm ci --prefix tools/import-design/jsx-runtime` step before CMake configure,
-which makes the dependency-backed case visible to CTest. Source-only or offline
+which makes the dependency-backed case visible to CTest. Because the automatic
+Linux selector may use a clean Proxmox VM without a system Node installation,
+`build.yml` first provisions the exact Node `22.14.0` toolchain with
+`actions/setup-node@v4` and a lockfile-keyed npm cache. Source-only or offline
 configurations without that `node_modules/esbuild` installation still register
 the dependency-free suites, but they do not claim the canonicalization proof.
 
@@ -977,7 +980,16 @@ was unknown. Each run ends with one
 platform registers was audited, and no audited executable has a finding.
 `incomplete` means the run cannot vouch for itself. The nightly passes `--fail-on-findings`, so its
 exit follows that verdict: 0 for clean, 1 for findings, 2 for incomplete. A
-red nightly therefore means the streak of clean runs is broken.
+red nightly therefore means the streak of clean runs is broken. A clean run's
+stage0 block also publishes `covered`, the executables it observed with no
+finding. The key manifest (`tools/ci/executable_keys.py --audit-report`) marks
+any executable outside that set always_run `audit_uncovered`, and every
+executable when no clean report is handed in. So a lane never skips a test
+whose reads no audit has observed, such as the macOS-only executables Linux
+does not register. The `rederive` command in `.shipyard/config.toml` passes the
+same report as `--audit-report {audit_report}`; the flag and the key code that
+accepts it change together, because a host re-derives with the base's command
+against the base's key code.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
@@ -1507,7 +1519,9 @@ and cannot be configured from this repository; there is no workflow trigger or
 `.github/workflows/codex-review-request.yml` is that ask. On a PR opened by
 `shipyard-local[bot]` it posts the same `@codex review` comment a human would,
 using `GITHUB_TOKEN` and no privileged secret at all, then verifies a review
-actually completed and fails if none did.
+actually completed when the connector is available. The check is advisory:
+missing credentials, API failures, unavailable connectors, and review timeouts
+emit warnings and pass so they never block an otherwise green PR.
 
 The absence of a user PAT there is deliberate. A same-repository
 `pull_request` evaluates the workflow file from the PR's own revision, so any
@@ -1552,7 +1566,7 @@ targets.
 That has one consequence worth knowing: on the pull request that first adds the
 checker, the base commit has no copy of it, so the checker cannot run. The job
 reports that exit distinctly — "did not run" rather than "not reviewed" — and
-still fails, because a run that verified nothing must not read as a pass.
+passes with a warning because review coverage is advisory.
 
 This workflow requests reviews; it does not audit whether older PRs got one.
 `.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
@@ -2129,7 +2143,11 @@ cannot allowlist its own regression; owners delete their row when they fix the
 test.
 
 The mandatory kernel always runs, including the selector's own
-`changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
+`changed-surface-policy-selftest` (the policy tables, from source) and
+`changed-surface-policy-inventory` (the live-tree inventory check: it takes
+`--build-dir` only under `PULP_CHANGED_SURFACE_INVENTORY_TARGET` and runs bare
+elsewhere; the selftest takes no build-tree argument because it is also a
+source-lane test). Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes
 require the full suite; unknown paths fail safely to full as well. Reviewed
 bounded families cover Forge/DSP catalog projection commands, the isolated
@@ -3212,6 +3230,20 @@ matrix child exists, the corresponding bootstrap is inactive and uses an
 `-unused` display name so it cannot collide with or satisfy branch protection.
 `tools/scripts/test_required_macos_alias.py` and
 `tools/scripts/test_windows_runner_policy.py` pin both ownership paths.
+
+The merge-group bootstrap's verdict lives in
+`tools/ci/macos_merge_group_bootstrap.sh`. A provider or classifier result of
+`failure`, `skipped` or none fails `macos` closed. A `cancelled` classify does
+not: GitHub cancels a job it never assigned a runner to, and failing closed on
+that turned a hosted-runner outage into a red required check, so the queue
+ejected the PR, re-batched, and met the same wait (2026-10-05, during a
+hosted-runner assignment incident). The bootstrap already has a runner, so it
+classifies the merge group itself with the classify job's scripts and proceeds
+on that answer: nothing native to build passes skip-safe; a group that needs
+the native build fails closed, because the native leg and the receipt reuse
+both wait on classify; a failing in-job classifier fails closed.
+`tools/ci/test_macos_merge_group_bootstrap.py` runs the script against stub
+results.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
@@ -5101,6 +5133,24 @@ runner: the workflow handles `pull_request_target` and mints the narrowly scoped
 Vellum reader credential only after checking out and binding literal protected
 `main` controls.
 
+### `drift-fast` and the wclap job
+
+`PULP_DRIFT_FAST_RUNS_ON_JSON` (the required `drift-fast` job in
+`drift-fast.yml`) and `PULP_WCLAP_RUNS_ON_JSON` (the required "Build + prove +
+(owner-gated) deploy" job in `wclap-cloudflare.yml`) route those jobs away from
+GitHub-hosted runners. Unset, each falls back to `ubuntu-latest`, so nothing
+changes until one is set. They exist because a required check whose hosted job
+is never assigned a runner is cancelled after about fifteen minutes, and the
+merge queue ejects the group: on 2026-10-05, during a hosted-runner assignment
+incident, a group was ejected through `drift-fast` this way. Both are JSON and
+parsed, like every `*_RUNS_ON_JSON` selector. Before setting one to a
+self-hosted pool, check that pool's runner group admits the workflow:
+`pulp-trusted-build` lists its workflows (`tools/ci/verify_linux_runner_group.py`)
+and does not include `drift-fast.yml`, and it refuses `wclap-cloudflare.yml`
+outright because that workflow holds the Cloudflare deploy secret. A job routed
+to a group that does not admit its workflow is never assigned and waits
+forever.
+
 The Linux and Windows label sets include a `pulp-host-*` label that pins the
 lane to one machine, so the supervisor serving them must carry it too — GitHub
 selects a runner only when it carries every requested label. Declare the machine
@@ -6864,7 +6914,12 @@ which of those failed.
   Shipyard reads it only from the protected base and copies those files from
   there, so a PR that edits any of them, or drops one from the list, runs the
   full suite. A new import in that code must be added to the list in the same
-  change, or every keyed run fails to derive on the bare copy.
+  change, or every keyed run fails to derive on the bare copy. A file the key
+  code does not import must stay out: its edits would make every base that
+  moved it read as selector-policy drift. `tools/ci/test_executable_keys.py`
+  (`KeyCodeClosureTests`) pins the list to exactly that closure plus the
+  adapter. The test-name pattern the keys share with the per-test receipts
+  shadow lives in `tools/ci/always_run_names.py` for that reason.
 - `base_record` says where a record's `job.json` states platform, toolchain,
   completeness, cleanliness, the full suite and problems; Shipyard binds every
   qualifying record (up to eight) and the adapter picks the one whose
@@ -7246,4 +7301,3 @@ all of those fetches a shared 300 s budget and treats a fetch that runs past it 
 an unfetchable ref (a WARN, then its fail-closed ancestry checks decide). The step
 also carries `timeout-minutes: 10`. Before this, a stalled fetch held the required
 `macos` gate for 43 minutes with no output and no build.
-

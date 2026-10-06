@@ -2187,6 +2187,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-unique-temp-dir": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-unique-temp-dir-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_unique_temp_dir.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-validation-contract": {
    "data": "declared",
    "detected_sources": [
@@ -2625,6 +2639,7 @@
   "pulp-test-midi-arpeggiator",
   "pulp-test-midi-parameter-map-scaling",
   "pulp-test-midi-performance-kernels",
+  "pulp-test-midi-routing-ledger",
   "pulp-test-midi-step-player",
   "pulp-test-midi-utility-note-length",
   "pulp-test-midi-voice-modulation-adapter",
@@ -2683,6 +2698,7 @@
   "pulp-test-popover-row-template-1147",
   "pulp-test-processor-node-adapter",
   "pulp-test-project-package",
+  "pulp-test-public-type-sizes",
   "pulp-test-pulp-node-v1",
   "pulp-test-real-plugin-runner-cache",
   "pulp-test-recurrent-cpu-adapter",
@@ -2816,6 +2832,7 @@
   "pulp-test-transition-cost",
   "pulp-test-true-peak-limiter",
   "pulp-test-udev-monitor",
+  "pulp-test-unique-temp-dir",
   "pulp-test-unison-voice-stack",
   "pulp-test-unit-delay",
   "pulp-test-validation-contract",
@@ -2856,6 +2873,7 @@
   "pulp-test-windowing",
   "pulp-test-xcode-developer-path",
   "pulp-test-yoga-layout-bench",
+  "pulp-unique-temp-dir-fixture",
   "sample-region-allpass-consumer"
  ],
  "executables_scanned_for": [
@@ -3154,7 +3172,8 @@
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
     "tools/scripts/queue_batch_attribute.py",
-    "tools/scripts/queue_known_flakes.json"
+    "tools/scripts/queue_known_flakes.json",
+    "tools/scripts/script_argv.py"
    ],
    "kind": "python"
   },
@@ -3174,7 +3193,8 @@
    "entry": "tools/ci/test_build_dir_lock.py",
    "inputs": [
     "tools/ci/build_dir_lock.py",
-    "tools/ci/test_build_dir_lock.py"
+    "tools/ci/test_build_dir_lock.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },
@@ -3303,6 +3323,63 @@
    ],
    "kind": "python"
   },
+  "changed-surface-policy-inventory": {
+   "entry": "tools/scripts/test_changed_surface_policy.py",
+   "inputs": [
+    "core/host",
+    "core/host/include",
+    "core/platform/include/pulp/platform/child_process.hpp",
+    "core/signal/include/pulp/signal/signal.hpp",
+    "docs/status",
+    "docs/status/dsp-capabilities.json",
+    "docs/status/forge-catalog.json",
+    "docs/status/sequencer-exposure.json",
+    "test/CMakeLists.txt",
+    "test/cmake/native_component_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/ctest_script_inputs.json",
+    "test/fixtures",
+    "test/fixtures/child_process_input_fixture.cpp",
+    "test/support",
+    "test/test_child_process.cpp",
+    "test/test_child_process_standard_input.cpp",
+    "test/test_runtime_utils.cpp",
+    "tools/ci",
+    "tools/ci/build_dir_lock.py",
+    "tools/ci/changed_surface_lane_reds.json",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/executable_keys.py",
+    "tools/ci/executable_selection.py",
+    "tools/ci/key_blind_executables.json",
+    "tools/ci/lane_reuse_record.py",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
+    "tools/cli/cmd_forge.cpp",
+    "tools/cli/cmd_misc.cpp",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/cmake/toolchains/macos-arm64-osxcross.cmake",
+    "tools/import-design/browser_capture/security.mjs",
+    "tools/rack/generate.py",
+    "tools/rack/patch.py",
+    "tools/rack/provenance_check.py",
+    "tools/rack/test_acid_preflight.py",
+    "tools/rack/test_generate_safety.py",
+    "tools/scripts",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/generate_widget_bridge_api.py",
+    "tools/scripts/process_liveness.py",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/test_changed_surface_policy.py",
+    "tools/scripts/test_runner_topology_check.py",
+    "tools/scripts/version_bump_check.py"
+   ],
+   "kind": "python"
+  },
   "changed-surface-policy-selftest": {
    "entry": "tools/scripts/test_changed_surface_policy.py",
    "inputs": [
@@ -3351,6 +3428,7 @@
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/generate_widget_bridge_api.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_changed_surface_policy.py",
@@ -3404,6 +3482,7 @@
     "tools/cmake/PulpWgpuUniversal.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/gate_common.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_run_changed_surface_tests.py"
@@ -3504,6 +3583,7 @@
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/executable_keys.py",
@@ -3723,6 +3803,22 @@
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
+   ],
+   "kind": "python"
+  },
+  "clock-only-temp-key-guard": {
+   "entry": "tools/scripts/clock_only_temp_key_guard.py",
+   "inputs": [
+    "tools/scripts/clock_only_temp_key_guard.py"
+   ],
+   "kind": "python"
+  },
+  "clock-only-temp-key-guard-selftest": {
+   "entry": "tools/scripts/test_clock_only_temp_key_guard.py",
+   "inputs": [
+    "tools/scripts/clock_only_temp_key_guard.json",
+    "tools/scripts/clock_only_temp_key_guard.py",
+    "tools/scripts/test_clock_only_temp_key_guard.py"
    ],
    "kind": "python"
   },
@@ -4315,9 +4411,8 @@
     "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/support",
-    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
-    "tools/ci/ctest_gate_args.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/key_blind_executables.json",
@@ -4329,7 +4424,6 @@
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_executable_keys.py",
     "tools/ci/test_receipts_shadow.py",
-    "tools/cmake",
     "tools/cmake/PulpDependencies.cmake",
     "tools/cmake/PulpFetchContent.cmake",
     "tools/cmake/PulpTestData.cmake",
@@ -4338,6 +4432,7 @@
     "tools/scripts/classify_changes.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
@@ -4394,7 +4489,8 @@
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
     "tools/scripts/queue_batch_attribute.py",
-    "tools/scripts/queue_known_flakes.json"
+    "tools/scripts/queue_known_flakes.json",
+    "tools/scripts/script_argv.py"
    ],
    "kind": "python"
   },
@@ -4410,7 +4506,8 @@
    "entry": "tools/fleet/test_fleet_lib.py",
    "inputs": [
     "tools/fleet/fleet_lib.py",
-    "tools/fleet/test_fleet_lib.py"
+    "tools/fleet/test_fleet_lib.py",
+    "tools/scripts/script_argv.py"
    ],
    "kind": "python"
   },
@@ -4592,7 +4689,8 @@
   "governed-build-selftest": {
    "entry": "tools/ci/test_governed_build.py",
    "inputs": [
-    "tools/ci/test_governed_build.py"
+    "tools/ci/test_governed_build.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },
@@ -4618,6 +4716,7 @@
     "tools/deps/manifest.json",
     "tools/scripts",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
    ],
    "kind": "python"
@@ -4862,6 +4961,7 @@
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_dpr_runner.py",
@@ -5056,6 +5156,7 @@
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
@@ -5194,6 +5295,7 @@
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
@@ -5289,6 +5391,7 @@
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
@@ -5389,6 +5492,7 @@
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/release_product_matrix.json",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
@@ -5498,6 +5602,7 @@
     "tools/scripts/package_cli.py",
     "tools/scripts/release_artifact_contents.py",
     "tools/scripts/release_product_matrix.json",
+    "tools/scripts/script_argv.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
     "tools/scripts/test_gpu_first_visible_a3_campaign.py",
@@ -6189,6 +6294,14 @@
    ],
    "kind": "python"
   },
+  "macos-merge-group-bootstrap-selftest": {
+   "entry": "tools/ci/test_macos_merge_group_bootstrap.py",
+   "inputs": [
+    "tools/ci/macos_merge_group_bootstrap.sh",
+    "tools/ci/test_macos_merge_group_bootstrap.py"
+   ],
+   "kind": "python"
+  },
   "measure-min-os-selftest": {
    "entry": "tools/scripts/test_measure_min_os.py",
    "inputs": [
@@ -6435,6 +6548,7 @@
     "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/gpu_audio_provider_identity.py",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_build_time_report.py",
@@ -6552,7 +6666,8 @@
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
     "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
-    "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs"
+    "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs",
+    "tools/scripts/tmp_leak_guard.py"
    ],
    "kind": "node"
   },
@@ -6705,6 +6820,7 @@
     "tools/scripts/queue_admission_guard.py",
     "tools/scripts/queue_batch_attribute.py",
     "tools/scripts/queue_known_flakes.json",
+    "tools/scripts/script_argv.py",
     "tools/scripts/test_prepush_cannot_measure.py",
     "tools/scripts/test_queue_batch_attribute.py"
    ],
@@ -7136,6 +7252,7 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
     "tools/rack/idiom_check.py",
@@ -7235,6 +7352,7 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
     "tools/rack/idiom_check.py",
@@ -7667,6 +7785,7 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
     "tools/rack/idiom_check.py",
@@ -7764,6 +7883,7 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
     "tools/rack/idiom_check.py",
@@ -8091,6 +8211,7 @@
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/executable_keys.py",
@@ -8292,6 +8413,28 @@
    ],
    "kind": "python"
   },
+  "script-argv-selftest": {
+   "entry": "tools/scripts/test_script_argv.py",
+   "inputs": [
+    ".github/actions",
+    ".github/workflows",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "test/cmake/consumption_census_tests.cmake",
+    "test/ctest_script_inputs.json",
+    "tools/ci/install_visual_python_deps.sh",
+    "tools/motion/visual/requirements.lock",
+    "tools/motion/visual/requirements.txt",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json",
+    "tools/scripts/script_argv.py",
+    "tools/scripts/test_script_argv.py",
+    "tools/scripts/trace_frame_cost.py"
+   ],
+   "kind": "python"
+  },
   "script-test-inputs-drift": {
    "entry": "tools/scripts/script_test_inputs.py",
    "inputs": [
@@ -8326,7 +8469,8 @@
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
-    "tools/scripts/test_script_test_inputs.py"
+    "tools/scripts/test_script_test_inputs.py",
+    "tools/scripts/tmp_leak_guard.py"
    ],
    "kind": "python"
   },
@@ -8439,6 +8583,13 @@
     "tools/scripts/test_setup_bootstrap_plan_guard.py"
    ],
    "kind": "python"
+  },
+  "setup-cache-lock": {
+   "entry": "tools/scripts/test_setup_cache_lock.sh",
+   "inputs": [
+    "tools/scripts/test_setup_cache_lock.sh"
+   ],
+   "kind": "shell"
   },
   "setup-source-cache": {
    "entry": "tools/scripts/test_setup_source_cache.sh",
@@ -8625,6 +8776,7 @@
     ".github/workflows/build.yml",
     "docs/status",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/spawn_closure.py",
@@ -8856,6 +9008,14 @@
    ],
    "kind": "python"
   },
+  "tmp-leak-guard-selftest": {
+   "entry": "tools/scripts/test_tmp_leak_guard.py",
+   "inputs": [
+    "tools/scripts/test_tmp_leak_guard.py",
+    "tools/scripts/tmp_leak_guard.py"
+   ],
+   "kind": "python"
+  },
   "token-coverage-ratchet": {
    "entry": "tools/scripts/token_coverage_check.py",
    "inputs": [
@@ -9048,6 +9208,7 @@
     "external/skia-build",
     "tools/deps/manifest.json",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
    ],
    "kind": "python"
@@ -9058,6 +9219,7 @@
     "external/skia-build",
     "tools/deps/manifest.json",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
    ],
    "kind": "python"

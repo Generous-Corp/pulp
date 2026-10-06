@@ -7,10 +7,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/upgrade_install.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -33,14 +33,7 @@ namespace ui = pulp::cli::upgrade_install;
 namespace {
 
 fs::path make_tmpdir(const std::string& tag) {
-    auto dir = fs::temp_directory_path() /
-               ("pulp-test-upgrade-install-" + tag + "-" +
-                std::to_string(pulp_test_pid()) + "-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch()
-                                   .count()));
-    fs::create_directories(dir);
-    return dir;
+    return pulp::test::make_unique_temp_dir("pulp-test-upgrade-install-" + tag);
 }
 
 const char* runtime_library_name() {

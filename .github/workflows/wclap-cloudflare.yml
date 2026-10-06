@@ -56,7 +56,14 @@ jobs:
     name: Build + prove + (owner-gated) deploy
     # Scheduled-workflow fork guard: forks should not burn a weekly cron.
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
-    runs-on: ubuntu-latest
+    # Hosted by default. PULP_WCLAP_RUNS_ON_JSON can route this required job
+    # elsewhere when GitHub cannot assign hosted runners; it is JSON and
+    # parsed (an unparsed array becomes one literal label and the job queues
+    # forever). This workflow carries the Cloudflare deploy secret, so the
+    # trusted Linux runner group refuses it by policy
+    # (tools/ci/verify_linux_runner_group.py): a target has to be a pool that
+    # may hold that secret.
+    runs-on: ${{ fromJSON(vars.PULP_WCLAP_RUNS_ON_JSON || '"ubuntu-latest"') }}
     env:
       # Owner-gated deploy switch (a step `if:` cannot read `secrets` directly).
       HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
