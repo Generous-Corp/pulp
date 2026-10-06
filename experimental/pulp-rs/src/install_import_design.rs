@@ -15,7 +15,9 @@ use crate::error::{CliError, Result};
 
 pub(super) const BROWSER_CAPTURE_ARCHIVE_DIR: &str = "browser_capture";
 const BROWSER_CAPTURE_PROTOCOL_DIR: &str = "browser_capture-v1";
-pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 18] = [
+const JSX_RUNTIME_ARCHIVE_DIR: &str = "jsx-runtime";
+const MATERIALIZED_BINDING_CONTRACT: &str = "materialized_binding_contract.mjs";
+pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 19] = [
     "browser_process.mjs",
     "capture.mjs",
     "health.mjs",
@@ -34,6 +36,7 @@ pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 18] = [
     "semantics.mjs",
     "settle.mjs",
     "tokens.mjs",
+    "vendor_payload.mjs",
 ];
 
 /// Browser-solved design import helper basename for the running OS.
@@ -51,14 +54,19 @@ pub fn import_design_basename() -> &'static str {
 pub(super) struct ImportDesignPayload {
     pub(super) helper: Option<PathBuf>,
     pub(super) runtime: Option<PathBuf>,
+    pub(super) materialized_binding_contract: Option<PathBuf>,
 }
 
 /// Locate and validate the coupled import-design helper/runtime payload.
 pub(super) fn locate_payload(root: &Path) -> Result<ImportDesignPayload> {
     let helper_path = root.join(import_design_basename());
     let runtime_path = root.join(BROWSER_CAPTURE_ARCHIVE_DIR);
+    let contract_path = root
+        .join(JSX_RUNTIME_ARCHIVE_DIR)
+        .join(MATERIALIZED_BINDING_CONTRACT);
     let helper = helper_path.is_file().then_some(helper_path);
     let runtime = runtime_path.is_dir().then_some(runtime_path);
+    let materialized_binding_contract = contract_path.is_file().then_some(contract_path);
     if helper.is_some() != runtime.is_some() {
         return Err(CliError::Other(
             "archive contains an incomplete import-design helper/runtime pair".into(),
@@ -72,7 +80,16 @@ pub(super) fn locate_payload(root: &Path) -> Result<ImportDesignPayload> {
             "archive browser_capture runtime is incomplete".into(),
         ));
     }
-    Ok(ImportDesignPayload { helper, runtime })
+    if helper.is_some() && runtime.is_some() && materialized_binding_contract.is_none() {
+        return Err(CliError::Other(
+            "archive is missing the materialized binding contract".into(),
+        ));
+    }
+    Ok(ImportDesignPayload {
+        helper,
+        runtime,
+        materialized_binding_contract,
+    })
 }
 
 fn copy_directory_recursive(src: &Path, dst: &Path) -> Result<()> {
@@ -143,14 +160,87 @@ enum InstallPhase {
     HelperPublished,
 }
 
+#[derive(Debug)]
+struct PublishedPath {
+    destination: PathBuf,
+    backup: PathBuf,
+    had_previous: bool,
+}
+
+fn path_entry_exists(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
+fn publish_staged(staged: &Path, destination: &Path, backup: &Path) -> Result<PublishedPath> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            CliError::Other(format!(
+                "could not create install directory {}: {error}",
+                parent.display()
+            ))
+        })?;
+    }
+
+    let had_previous = path_entry_exists(destination);
+    if had_previous {
+        fs::rename(destination, backup).map_err(|error| {
+            CliError::Other(format!(
+                "could not stage replacement of {}: {error}",
+                destination.display()
+            ))
+        })?;
+    }
+    if let Err(error) = fs::rename(staged, destination) {
+        if had_previous {
+            let _ = fs::rename(backup, destination);
+        }
+        return Err(CliError::Other(format!(
+            "could not install {}: {error}",
+            destination.display()
+        )));
+    }
+    Ok(PublishedPath {
+        destination: destination.to_owned(),
+        backup: backup.to_owned(),
+        had_previous,
+    })
+}
+
+fn rollback_published(published: &mut Vec<PublishedPath>) -> bool {
+    let mut rollback_failed = false;
+    while let Some(path) = published.pop() {
+        if path_entry_exists(&path.destination) {
+            let is_directory = fs::symlink_metadata(&path.destination)
+                .map(|metadata| metadata.file_type().is_dir())
+                .unwrap_or(false);
+            let remove_result = if is_directory {
+                fs::remove_dir_all(&path.destination)
+            } else {
+                fs::remove_file(&path.destination)
+            };
+            if remove_result.is_err() {
+                rollback_failed = true;
+                continue;
+            }
+        }
+        if path.had_previous {
+            if fs::rename(&path.backup, &path.destination).is_err() {
+                rollback_failed = true;
+            }
+        }
+    }
+    rollback_failed
+}
+
 /// Publish a complete implementation of the versioned browser-capture
 /// protocol before publishing the helper that selects it. The legacy
 /// `browser_capture/` directory and older protocol directories are untouched,
-/// so an interrupted upgrade leaves the old helper usable.
+/// so an interrupted upgrade leaves the old helper and contract usable.
 fn install_with_observer<F>(
     install_dir: &Path,
     new_helper: &Path,
     new_runtime: &Path,
+    new_materialized_binding_contract: &Path,
     mut observe_phase: F,
 ) -> Result<()>
 where
@@ -161,8 +251,13 @@ where
     let transaction = create_unique_transaction(install_dir)?;
     let helper_staged = transaction.join(import_design_basename());
     let runtime_staged = transaction.join(BROWSER_CAPTURE_PROTOCOL_DIR);
-    let runtime_previous = transaction.join("previous-runtime");
-    let mut preserve_transaction_for_recovery = false;
+    let contract_staged = transaction
+        .join(JSX_RUNTIME_ARCHIVE_DIR)
+        .join(MATERIALIZED_BINDING_CONTRACT);
+    let contract_dst = install_dir
+        .join(JSX_RUNTIME_ARCHIVE_DIR)
+        .join(MATERIALIZED_BINDING_CONTRACT);
+    let mut published = Vec::new();
 
     let result = (|| -> Result<()> {
         copy_with_exec(new_helper, &helper_staged)?;
@@ -172,80 +267,70 @@ where
                 "staged browser capture runtime is incomplete".into(),
             ));
         }
-
-        let mut moved_previous_runtime = false;
-        if runtime_dst.exists() {
-            match fs::rename(&runtime_dst, &runtime_previous) {
-                Ok(()) => moved_previous_runtime = true,
-                Err(_) if !runtime_dst.exists() => {
-                    // A concurrent updater moved it after our existence check.
-                }
-                Err(error) => {
-                    return Err(CliError::Other(format!(
-                        "could not stage replacement of {}: {error}",
-                        runtime_dst.display()
-                    )));
-                }
-            }
+        if !new_materialized_binding_contract.is_file() {
+            return Err(CliError::Other(
+                "materialized binding contract is not a regular file".into(),
+            ));
         }
-
-        if let Err(error) = fs::rename(&runtime_staged, &runtime_dst) {
-            if !has_complete_capture_runtime(&runtime_dst) {
-                if moved_previous_runtime && fs::rename(&runtime_previous, &runtime_dst).is_err() {
-                    preserve_transaction_for_recovery = true;
-                }
-                return Err(CliError::Other(format!(
-                    "could not install {}: {error}",
-                    runtime_dst.display()
-                )));
-            }
-        }
-
-        observe_phase(InstallPhase::RuntimeAvailable)?;
-
-        #[cfg(windows)]
-        {
-            let helper_previous = transaction.join("previous-helper");
-            let had_helper = helper_dst.exists();
-            if had_helper {
-                fs::rename(&helper_dst, &helper_previous).map_err(|error| {
-                    CliError::Other(format!(
-                        "could not stage replacement of {}: {error}",
-                        helper_dst.display()
-                    ))
-                })?;
-            }
-            if let Err(error) = fs::rename(&helper_staged, &helper_dst) {
-                if had_helper && fs::rename(&helper_previous, &helper_dst).is_err() {
-                    preserve_transaction_for_recovery = true;
-                }
-                return Err(CliError::Other(format!(
-                    "could not install {}: {error}",
-                    helper_dst.display()
-                )));
-            }
-        }
-        #[cfg(not(windows))]
-        fs::rename(&helper_staged, &helper_dst).map_err(|error| {
+        fs::create_dir_all(contract_staged.parent().expect("contract has a parent")).map_err(
+            |error| {
+                CliError::Other(format!(
+                    "could not stage materialized binding contract: {error}"
+                ))
+            },
+        )?;
+        fs::copy(new_materialized_binding_contract, &contract_staged).map_err(|error| {
             CliError::Other(format!(
-                "could not install {}: {error}",
-                helper_dst.display()
+                "could not copy materialized binding contract {}: {error}",
+                new_materialized_binding_contract.display()
             ))
         })?;
 
+        published.push(publish_staged(
+            &runtime_staged,
+            &runtime_dst,
+            &transaction.join("previous-runtime"),
+        )?);
+        published.push(publish_staged(
+            &contract_staged,
+            &contract_dst,
+            &transaction.join("previous-contract"),
+        )?);
+        observe_phase(InstallPhase::RuntimeAvailable)?;
+
+        published.push(publish_staged(
+            &helper_staged,
+            &helper_dst,
+            &transaction.join("previous-helper"),
+        )?);
         observe_phase(InstallPhase::HelperPublished)?;
         Ok(())
     })();
 
-    if result.is_ok() || !preserve_transaction_for_recovery {
+    if result.is_err() {
+        if !rollback_published(&mut published) {
+            remove_path_best_effort(&transaction);
+        }
+    } else {
         remove_path_best_effort(&transaction);
     }
     result
 }
 
 /// Install a validated helper/runtime pair into the release binary directory.
-pub(super) fn install(install_dir: &Path, new_helper: &Path, new_runtime: &Path) -> Result<()> {
-    install_with_observer(install_dir, new_helper, new_runtime, |_| Ok(()))
+pub(super) fn install(
+    install_dir: &Path,
+    new_helper: &Path,
+    new_runtime: &Path,
+    new_materialized_binding_contract: &Path,
+) -> Result<()> {
+    install_with_observer(
+        install_dir,
+        new_helper,
+        new_runtime,
+        new_materialized_binding_contract,
+        |_| Ok(()),
+    )
 }
 
 #[cfg(test)]
@@ -316,6 +401,15 @@ mod tests {
             &archive_dir.path().join(BROWSER_CAPTURE_ARCHIVE_DIR),
             b"runtime",
         );
+        fs::create_dir_all(archive_dir.path().join(JSX_RUNTIME_ARCHIVE_DIR)).unwrap();
+        fs::write(
+            archive_dir
+                .path()
+                .join(JSX_RUNTIME_ARCHIVE_DIR)
+                .join(MATERIALIZED_BINDING_CONTRACT),
+            b"contract",
+        )
+        .unwrap();
         fs::create_dir(bin_dir.path().join(BROWSER_CAPTURE_ARCHIVE_DIR)).unwrap();
         fs::write(
             bin_dir
@@ -362,6 +456,16 @@ mod tests {
             fs::read(
                 bin_dir
                     .path()
+                    .join(JSX_RUNTIME_ARCHIVE_DIR)
+                    .join(MATERIALIZED_BINDING_CONTRACT)
+            )
+            .unwrap(),
+            b"contract"
+        );
+        assert_eq!(
+            fs::read(
+                bin_dir
+                    .path()
                     .join(BROWSER_CAPTURE_ARCHIVE_DIR)
                     .join("capture.mjs")
             )
@@ -388,22 +492,53 @@ mod tests {
 
         let new_helper = incoming.path().join(import_design_basename());
         let new_runtime = incoming.path().join(BROWSER_CAPTURE_ARCHIVE_DIR);
+        let new_contract = incoming
+            .path()
+            .join(JSX_RUNTIME_ARCHIVE_DIR)
+            .join(MATERIALIZED_BINDING_CONTRACT);
         fs::write(&new_helper, b"new-import").unwrap();
         write_complete_runtime(&new_runtime, b"new-runtime");
         fs::write(new_runtime.join("health.mjs"), b"new-health").unwrap();
+        fs::create_dir_all(new_contract.parent().unwrap()).unwrap();
+        fs::write(&new_contract, b"new-contract").unwrap();
+        fs::create_dir_all(bin_dir.path().join(JSX_RUNTIME_ARCHIVE_DIR)).unwrap();
+        fs::write(
+            bin_dir
+                .path()
+                .join(JSX_RUNTIME_ARCHIVE_DIR)
+                .join(MATERIALIZED_BINDING_CONTRACT),
+            b"old-contract",
+        )
+        .unwrap();
 
         let mut phases = Vec::new();
-        install_with_observer(bin_dir.path(), &new_helper, &new_runtime, |phase| {
-            phases.push(phase);
-            if phase == InstallPhase::RuntimeAvailable {
-                assert_eq!(fs::read(&helper_dst).unwrap(), b"old-import");
-                assert_eq!(
-                    fs::read(runtime_dst.join("capture.mjs")).unwrap(),
-                    b"new-runtime"
-                );
-            }
-            Ok(())
-        })
+        install_with_observer(
+            bin_dir.path(),
+            &new_helper,
+            &new_runtime,
+            &new_contract,
+            |phase| {
+                phases.push(phase);
+                if phase == InstallPhase::RuntimeAvailable {
+                    assert_eq!(fs::read(&helper_dst).unwrap(), b"old-import");
+                    assert_eq!(
+                        fs::read(runtime_dst.join("capture.mjs")).unwrap(),
+                        b"new-runtime"
+                    );
+                    assert_eq!(
+                        fs::read(
+                            bin_dir
+                                .path()
+                                .join(JSX_RUNTIME_ARCHIVE_DIR)
+                                .join(MATERIALIZED_BINDING_CONTRACT)
+                        )
+                        .unwrap(),
+                        b"new-contract"
+                    );
+                }
+                Ok(())
+            },
+        )
         .unwrap();
         assert_eq!(fs::read(helper_dst).unwrap(), b"new-import");
         assert_eq!(
@@ -413,6 +548,16 @@ mod tests {
         assert_eq!(
             fs::read(runtime_dst.join("health.mjs")).unwrap(),
             b"new-health"
+        );
+        assert_eq!(
+            fs::read(
+                bin_dir
+                    .path()
+                    .join(JSX_RUNTIME_ARCHIVE_DIR)
+                    .join(MATERIALIZED_BINDING_CONTRACT)
+            )
+            .unwrap(),
+            b"new-contract"
         );
         assert!(!runtime_dst.join("obsolete.mjs").exists());
         assert_eq!(
@@ -432,28 +577,54 @@ mod tests {
         let helper_dst = bin_dir.path().join(import_design_basename());
         let legacy_runtime = bin_dir.path().join(BROWSER_CAPTURE_ARCHIVE_DIR);
         let versioned_runtime = bin_dir.path().join(BROWSER_CAPTURE_PROTOCOL_DIR);
+        let contract_dst = bin_dir
+            .path()
+            .join(JSX_RUNTIME_ARCHIVE_DIR)
+            .join(MATERIALIZED_BINDING_CONTRACT);
         fs::write(&helper_dst, b"old-import").unwrap();
         fs::create_dir(&legacy_runtime).unwrap();
         fs::write(legacy_runtime.join("capture.mjs"), b"legacy-runtime").unwrap();
+        fs::create_dir(&versioned_runtime).unwrap();
+        fs::write(versioned_runtime.join("capture.mjs"), b"old-runtime").unwrap();
+        fs::create_dir_all(contract_dst.parent().unwrap()).unwrap();
+        fs::write(&contract_dst, b"legacy-contract").unwrap();
 
         let new_helper = incoming.path().join(import_design_basename());
         let new_runtime = incoming.path().join(BROWSER_CAPTURE_ARCHIVE_DIR);
+        let new_contract = incoming
+            .path()
+            .join(JSX_RUNTIME_ARCHIVE_DIR)
+            .join(MATERIALIZED_BINDING_CONTRACT);
         fs::write(&new_helper, b"new-import").unwrap();
         write_complete_runtime(&new_runtime, b"new-runtime");
+        fs::create_dir_all(new_contract.parent().unwrap()).unwrap();
+        fs::write(&new_contract, b"new-contract").unwrap();
 
-        let error = install_with_observer(bin_dir.path(), &new_helper, &new_runtime, |phase| {
-            assert_eq!(phase, InstallPhase::RuntimeAvailable);
-            assert_eq!(fs::read(&helper_dst).unwrap(), b"old-import");
-            assert_eq!(
-                fs::read(legacy_runtime.join("capture.mjs")).unwrap(),
-                b"legacy-runtime"
-            );
-            assert_eq!(
-                fs::read(versioned_runtime.join("capture.mjs")).unwrap(),
-                b"new-runtime"
-            );
-            Err(CliError::Other("injected interruption".into()))
-        })
+        let error = install_with_observer(
+            bin_dir.path(),
+            &new_helper,
+            &new_runtime,
+            &new_contract,
+            |phase| {
+                if phase == InstallPhase::RuntimeAvailable {
+                    assert_eq!(fs::read(&helper_dst).unwrap(), b"old-import");
+                    assert_eq!(
+                        fs::read(legacy_runtime.join("capture.mjs")).unwrap(),
+                        b"legacy-runtime"
+                    );
+                    assert_eq!(
+                        fs::read(versioned_runtime.join("capture.mjs")).unwrap(),
+                        b"new-runtime"
+                    );
+                    assert_eq!(fs::read(&contract_dst).unwrap(), b"new-contract");
+                    Ok(())
+                } else {
+                    assert_eq!(phase, InstallPhase::HelperPublished);
+                    assert_eq!(fs::read(&helper_dst).unwrap(), b"new-import");
+                    Err(CliError::Other("injected interruption".into()))
+                }
+            },
+        )
         .unwrap_err();
 
         assert!(error.to_string().contains("injected interruption"));
@@ -464,8 +635,9 @@ mod tests {
         );
         assert_eq!(
             fs::read(versioned_runtime.join("capture.mjs")).unwrap(),
-            b"new-runtime"
+            b"old-runtime"
         );
+        assert_eq!(fs::read(&contract_dst).unwrap(), b"legacy-contract");
         assert!(!has_transaction(bin_dir.path()));
     }
 
@@ -485,6 +657,21 @@ mod tests {
 
         let error = locate_payload(archive.path()).unwrap_err();
         assert!(error.to_string().contains("runtime is incomplete"));
+    }
+
+    #[test]
+    fn locate_payload_requires_materialized_binding_contract() {
+        let archive = tempfile::tempdir().unwrap();
+        fs::write(archive.path().join(import_design_basename()), b"new-import").unwrap();
+        write_complete_runtime(
+            &archive.path().join(BROWSER_CAPTURE_ARCHIVE_DIR),
+            b"complete-runtime",
+        );
+
+        let error = locate_payload(archive.path()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("missing the materialized binding contract"));
     }
 
     #[test]

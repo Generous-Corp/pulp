@@ -283,6 +283,8 @@ pub struct ExtractedArchive {
     pub new_import_design: Option<PathBuf>,
     /// Extracted `browser_capture/` runtime directory, when shipped.
     pub browser_capture_runtime: Option<PathBuf>,
+    /// Materialized JSX runtime contract coupled to the browser-capture runtime.
+    pub materialized_binding_contract: Option<PathBuf>,
 }
 
 /// Look in `root` for the new `pulp` and optional sibling binaries.
@@ -351,6 +353,7 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
         new_control_standalone_runtime: has_standalone_payload.then_some(standalone_runtime_path),
         new_import_design: import_design.helper,
         browser_capture_runtime: import_design.runtime,
+        materialized_binding_contract: import_design.materialized_binding_contract,
     })
 }
 
@@ -539,12 +542,13 @@ pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Resu
             install_new_binary(&dst, new_runtime)?;
         }
     }
-    if let (Some(install_dir), Some(new_import), Some(runtime)) = (
+    if let (Some(install_dir), Some(new_import), Some(runtime), Some(contract)) = (
         plan.self_path.parent(),
         archive.new_import_design.as_deref(),
         archive.browser_capture_runtime.as_deref(),
+        archive.materialized_binding_contract.as_deref(),
     ) {
-        install_import_design::install(install_dir, new_import, runtime)?;
+        install_import_design::install(install_dir, new_import, runtime, contract)?;
     }
     Ok(report)
 }
