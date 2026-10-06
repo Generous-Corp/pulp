@@ -383,8 +383,7 @@ TEST_CASE("alternate frame materialization shape changes recreate the parent",
     }
 }
 
-TEST_CASE("native binding contract changes recreate keyed nodes",
-          "[view][import][update]") {
+TEST_CASE("native binding contract changes recreate keyed nodes", "[view][import][update]") {
     const auto require_contract_recreated = [](const char* key, const char* attribute) {
         auto old_node = node(key);
         auto new_node = old_node;
@@ -395,9 +394,15 @@ TEST_CASE("native binding contract changes recreate keyed nodes",
                           key);
     };
 
-    SECTION("route identity") { require_contract_recreated("route", "pulpRouteId"); }
-    SECTION("choice value") { require_contract_recreated("choice-value", "pulpChoiceValue"); }
-    SECTION("choice label") { require_contract_recreated("choice-label", "pulpChoiceLabel"); }
+    SECTION("route identity") {
+        require_contract_recreated("route", "pulpRouteId");
+    }
+    SECTION("choice value") {
+        require_contract_recreated("choice-value", "pulpChoiceValue");
+    }
+    SECTION("choice label") {
+        require_contract_recreated("choice-label", "pulpChoiceLabel");
+    }
     SECTION("waveform shape") {
         require_contract_recreated("waveform-shape", "pulpWaveformShape");
     }

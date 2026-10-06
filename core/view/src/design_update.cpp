@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <cstdint>
-#include <string_view>
 #include <pulp/view/design_update.hpp>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -55,11 +55,11 @@ bool is_rekeyable_binding_attribute(std::string_view key) {
     // These are names/payloads that an update consumer can change in place.
     // The planner must still compare their presence through the topology bits
     // above so bound↔unbound transitions recreate the native control.
-    for (const auto candidate : {"pulpParamKey", "pulpBindingModule", "pulpBindingParam",
-                                 "pulpParamKeyX", "pulpBindingModuleX", "pulpBindingParamX",
-                                 "pulpParamKeyY", "pulpBindingModuleY", "pulpBindingParamY",
-                                 "pulpMeterSource", "pulpMeterChannel", "pulpMeterValueKey",
-                                 "pulpValueKey", "pulpInitialValue", "pulpPlaceholder"}) {
+    for (const auto candidate :
+         {"pulpParamKey", "pulpBindingModule", "pulpBindingParam", "pulpParamKeyX",
+          "pulpBindingModuleX", "pulpBindingParamX", "pulpParamKeyY", "pulpBindingModuleY",
+          "pulpBindingParamY", "pulpMeterSource", "pulpMeterChannel", "pulpMeterValueKey",
+          "pulpValueKey", "pulpInitialValue", "pulpPlaceholder"}) {
         if (key == candidate)
             return true;
     }
@@ -146,8 +146,7 @@ bool interactive_materialization_equal(const IRInteractiveElement& old_element,
 // their complete materialization identity in the same compatibility check as
 // frame zero so an edit to an alternate cannot leave stale SVG/overlays behind.
 bool frame_materialization_equal(const IRNode& old_frame, const IRNode& new_frame) {
-    if (old_frame.type != new_frame.type ||
-        old_frame.audio_widget != new_frame.audio_widget ||
+    if (old_frame.type != new_frame.type || old_frame.audio_widget != new_frame.audio_widget ||
         old_frame.render_mode != new_frame.render_mode ||
         old_frame.svg_asset_id != new_frame.svg_asset_id ||
         old_frame.capture_asset_id != new_frame.capture_asset_id ||
