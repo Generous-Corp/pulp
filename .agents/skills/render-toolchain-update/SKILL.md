@@ -339,3 +339,10 @@ retain those fields in the PR/landing evidence.
   `pins.RASTER_GOLDEN_VERIFIED_PLATFORMS` records which hosts that identity was
   actually measured on, so add a platform key only after a run on that platform
   reported the matching digest.
+
+- The design importer browser runtime is split across
+  `bin/browser_capture-v1` and `bin/jsx-runtime`. Release workflow tests must
+  stage and verify both roots because `capture.mjs` resolves the materialized
+  binding contract through the sibling path. Keep the source module canonical
+  under `tools/import-design/jsx-runtime` and test the missing sibling as a
+  failure.
