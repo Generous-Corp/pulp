@@ -110,6 +110,9 @@ from test_version_bump_check_extra import (  # noqa: E402,F401
     VersionFileIoTests,
 )
 from test_version_bump_model_b import ModelBGateTests  # noqa: E402,F401
+# Every enforcing lint block in gates.sh turns its lint's failure into fail=1;
+# a merge that splices two adjacent blocks cannot silently drop one.
+from test_gates_lint_blocks import LintBlockTests  # noqa: E402,F401
 
 
 # ── Entry ──────────────────────────────────────────────────────────────
