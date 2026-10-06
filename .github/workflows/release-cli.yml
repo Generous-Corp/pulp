@@ -2215,6 +2215,7 @@ jobs:
           python3 tools/scripts/release_artifact_contents.py release-assets \
             --all-platforms --version "${TAG#v}" \
             --source-sha "$(git rev-parse "${TAG}^{commit}")" \
+            --source-dir . \
             --matrix "$publication_matrix" \
             "${control_registry_args[@]}"
 

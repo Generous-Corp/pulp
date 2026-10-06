@@ -1758,6 +1758,48 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_cli_source_runtime_bytes_are_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            platform = "linux-x64"
+            path = root / rac.cli_asset_name(platform)
+            members = set(rac.cli_members(platform, rac.DEFAULT_MATRIX, VERSION))
+            source_payloads = {
+                member: rac.cli_runtime_source_path(member, ROOT).read_bytes()
+                for member in members
+                if rac.cli_runtime_source_path(member, ROOT) is not None
+            }
+            write_archive(
+                path,
+                members,
+                as_zip=False,
+                platform=platform,
+                payload_overrides=source_payloads,
+            )
+            rac.verify_cli_archive(
+                path,
+                platform,
+                VERSION,
+                source_root=ROOT,
+            )
+
+            stale_member = next(iter(source_payloads))
+            source_payloads[stale_member] = b"stale CLI runtime bytes"
+            write_archive(
+                path,
+                members,
+                as_zip=False,
+                platform=platform,
+                payload_overrides=source_payloads,
+            )
+            with self.assertRaisesRegex(rac.ContentError, "CLI runtime sha256 mismatch"):
+                rac.verify_cli_archive(
+                    path,
+                    platform,
+                    VERSION,
+                    source_root=ROOT,
+                )
+
     def test_negative_control_unexpected_sdk_importer_runtime_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

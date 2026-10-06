@@ -554,6 +554,51 @@ def cli_runtime_member(platform: str) -> str:
     )
 
 
+def cli_runtime_source_path(member: str, source_root: Path) -> Path | None:
+    """Map a shipped CLI importer runtime member to its source bytes.
+
+    Native libraries and bundled Node are produced artifacts, so they have no
+    source-file equivalent here. The browser capture modules and materialized
+    binding contract are source-owned and must match the archive exactly.
+    """
+    if member.startswith("browser_capture/"):
+        name = member.removeprefix("browser_capture/")
+        if name in {"node", "node.exe", "node.LICENSE"}:
+            return None
+        return source_root / "tools" / "import-design" / "browser_capture" / name
+    if member == MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER:
+        return (
+            source_root / "tools" / "import-design" / "jsx-runtime"
+            / "materialized_binding_contract.mjs"
+        )
+    return None
+
+
+def verify_cli_runtime_bytes(
+    archive: Archive,
+    expected_members: frozenset[str],
+    source_root: Path,
+) -> None:
+    """Verify source-owned importer runtime bytes in a CLI archive."""
+    for member in sorted(expected_members):
+        source = cli_runtime_source_path(member, source_root)
+        if source is None:
+            continue
+        if not source.is_file():
+            raise ContentError(
+                f"{archive.path.name}: CLI runtime source is missing: {source}"
+            )
+        expected = source.read_bytes()
+        actual = archive.read(member, limit=256 * 1024 * 1024)
+        expected_sha = hashlib.sha256(expected).hexdigest()
+        actual_sha = hashlib.sha256(actual).hexdigest()
+        if actual_sha != expected_sha:
+            raise ContentError(
+                f"{archive.path.name}: CLI runtime sha256 mismatch for {member}; "
+                f"archive={actual_sha} source={expected_sha}"
+            )
+
+
 def cli_members(
     platform: str,
     matrix: ProductMatrix = DEFAULT_MATRIX,
@@ -966,6 +1011,7 @@ def verify_cli_archive(
     version: str,
     matrix: ProductMatrix = DEFAULT_MATRIX,
     expected_registry_digest: str | None = None,
+    source_root: Path | None = None,
 ) -> None:
     with Archive(path) as archive:
         expected = cli_members(platform, matrix, version)
@@ -977,6 +1023,8 @@ def verify_cli_archive(
                 f"{path.name}: CLI product matrix mismatch; missing={missing}, "
                 f"unexpected={unexpected}"
             )
+        if source_root is not None:
+            verify_cli_runtime_bytes(archive, expected, source_root)
         if not platform.startswith("windows-"):
             require_executable(
                 archive, cli_binary_members(platform, matrix, version)
@@ -1253,6 +1301,7 @@ def verify_platform(
     native_signatures: bool,
     matrix: ProductMatrix = DEFAULT_MATRIX,
     expected_registry_digest: str | None = None,
+    source_root: Path | None = None,
 ) -> None:
     if platform not in matrix.platforms:
         raise ContentError(f"unsupported release platform: {platform}")
@@ -1261,7 +1310,14 @@ def verify_platform(
     for path in (cli, sdk):
         if not path.is_file():
             raise ContentError(f"missing release archive: {path.name}")
-    verify_cli_archive(cli, platform, version, matrix, expected_registry_digest)
+    verify_cli_archive(
+        cli,
+        platform,
+        version,
+        matrix,
+        expected_registry_digest,
+        source_root,
+    )
     verify_sdk_archive(
         sdk, platform, version, source_sha, matrix, expected_registry_digest
     )
@@ -1283,6 +1339,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--control-registry-digest",
         help="Frozen registry digest from the exact source ref that built the release",
+    )
+    parser.add_argument(
+        "--source-dir",
+        type=Path,
+        help="source checkout used to verify source-owned CLI runtime bytes",
     )
     parser.add_argument("--native-signatures", action="store_true")
     return parser
@@ -1314,6 +1375,7 @@ def main(argv: list[str] | None = None) -> int:
                 native_signatures=args.native_signatures,
                 matrix=matrix,
                 expected_registry_digest=args.control_registry_digest,
+                source_root=args.source_dir,
             )
             print(f"OK: {platform} release archives match the product matrix")
     except (ContentError, OSError, UnicodeError) as exc:
