@@ -297,9 +297,8 @@ TEST_CASE("upgrade install publishes versioned runtime before import-design help
     write_file(archive, "archive");
     write_file(import_source, "new-import");
     write_complete_browser_capture_runtime(runtime_source, "new-runtime");
-    write_file_create_parent(
-        extracted / "jsx-runtime" / "materialized_binding_contract.mjs",
-        "new-contract");
+    write_file_create_parent(extracted / "jsx-runtime" / "materialized_binding_contract.mjs",
+                             "new-contract");
     write_file_create_parent(
         runtime_source / "lib" / "health.mjs", "new-health");
 
@@ -320,8 +319,8 @@ TEST_CASE("upgrade install publishes versioned runtime before import-design help
                       "capture.mjs") == "new-runtime");
     REQUIRE(read_file(install / ui::browser_capture_runtime_install_name() /
                       "lib" / "health.mjs") == "new-health");
-    REQUIRE(read_file(install / "jsx-runtime" /
-                      "materialized_binding_contract.mjs") == "new-contract");
+    REQUIRE(read_file(install / "jsx-runtime" / "materialized_binding_contract.mjs") ==
+            "new-contract");
     REQUIRE(read_file(install / ui::browser_capture_runtime_name() /
                       "capture.mjs") == "old-runtime");
     REQUIRE(read_file(install / "browser_capture-v0" / "capture.mjs") ==
@@ -356,9 +355,8 @@ TEST_CASE("upgrade install replaces the complete protocol runtime before helper"
         incoming / ui::browser_capture_runtime_name();
     write_file(import_source, "new-import");
     write_complete_browser_capture_runtime(runtime_source, "new-runtime");
-    write_file_create_parent(
-        incoming / "jsx-runtime" / "materialized_binding_contract.mjs",
-        "new-contract");
+    write_file_create_parent(incoming / "jsx-runtime" / "materialized_binding_contract.mjs",
+                             "new-contract");
     write_file(runtime_source / "health.mjs", "new-health");
     write_file_create_parent(
         install / ui::browser_capture_runtime_install_name() / "capture.mjs",
@@ -415,25 +413,21 @@ TEST_CASE("upgrade install rolls back all siblings after a publish failure",
     write_file(archive, "archive");
     write_file(import_source, "new-import");
     write_complete_browser_capture_runtime(runtime_source, "new-runtime");
-    write_file_create_parent(
-        extracted / "jsx-runtime" / "materialized_binding_contract.mjs",
-        "new-contract");
+    write_file_create_parent(extracted / "jsx-runtime" / "materialized_binding_contract.mjs",
+                             "new-contract");
     write_file(extracted / "README.txt", "new-readme");
 
     write_file(install / ui::import_design_binary_name(), "old-import");
-    write_file_create_parent(
-        install / ui::browser_capture_runtime_install_name() / "capture.mjs",
-        "old-runtime");
-    write_file_create_parent(
-        install / "jsx-runtime" / "materialized_binding_contract.mjs",
-        "old-contract");
+    write_file_create_parent(install / ui::browser_capture_runtime_install_name() / "capture.mjs",
+                             "old-runtime");
+    write_file_create_parent(install / "jsx-runtime" / "materialized_binding_contract.mjs",
+                             "old-contract");
     write_file(install / "README.txt", "old-readme");
 
     std::size_t published_count = 0;
     const auto error = exception_message([&] {
         ui::install_sibling_payloads_impl(
-            extracted, install, primary, archive,
-            [&](ui::SiblingInstallPhase phase) {
+            extracted, install, primary, archive, [&](ui::SiblingInstallPhase phase) {
                 REQUIRE(phase == ui::SiblingInstallPhase::payload_published);
                 ++published_count;
                 throw std::runtime_error("injected sibling publish failure");
@@ -442,12 +436,11 @@ TEST_CASE("upgrade install rolls back all siblings after a publish failure",
 
     REQUIRE(error == "injected sibling publish failure");
     REQUIRE(published_count == 1);
-    REQUIRE(read_file(install / ui::import_design_binary_name()) ==
-            "old-import");
-    REQUIRE(read_file(install / ui::browser_capture_runtime_install_name() /
-                      "capture.mjs") == "old-runtime");
-    REQUIRE(read_file(install / "jsx-runtime" /
-                      "materialized_binding_contract.mjs") == "old-contract");
+    REQUIRE(read_file(install / ui::import_design_binary_name()) == "old-import");
+    REQUIRE(read_file(install / ui::browser_capture_runtime_install_name() / "capture.mjs") ==
+            "old-runtime");
+    REQUIRE(read_file(install / "jsx-runtime" / "materialized_binding_contract.mjs") ==
+            "old-contract");
     REQUIRE(read_file(install / "README.txt") == "old-readme");
     REQUIRE_FALSE(has_import_design_transaction(install));
 
@@ -549,19 +542,15 @@ TEST_CASE("upgrade install rejects an import runtime without its contract",
     write_file(primary, "primary");
     write_file(archive, "archive");
     write_file(extracted / ui::import_design_binary_name(), "new-import");
-    write_complete_browser_capture_runtime(
-        extracted / ui::browser_capture_runtime_name(), "new-runtime");
+    write_complete_browser_capture_runtime(extracted / ui::browser_capture_runtime_name(),
+                                           "new-runtime");
     write_file(install / ui::import_design_binary_name(), "old-import");
 
-    const auto error = exception_message([&] {
-        ui::install_sibling_payloads(extracted, install, primary, archive);
-    });
-    REQUIRE(error ==
-            "release archive is missing the materialized binding contract");
-    REQUIRE(read_file(install / ui::import_design_binary_name()) ==
-            "old-import");
-    REQUIRE_FALSE(fs::exists(
-        install / ui::browser_capture_runtime_install_name()));
+    const auto error = exception_message(
+        [&] { ui::install_sibling_payloads(extracted, install, primary, archive); });
+    REQUIRE(error == "release archive is missing the materialized binding contract");
+    REQUIRE(read_file(install / ui::import_design_binary_name()) == "old-import");
+    REQUIRE_FALSE(fs::exists(install / ui::browser_capture_runtime_install_name()));
     REQUIRE_FALSE(has_import_design_transaction(install));
 
     fs::remove_all(extracted);

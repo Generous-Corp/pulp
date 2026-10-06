@@ -6613,6 +6613,7 @@
     "tools/import-design/jsx-runtime/materialized_dynamic_layout.test.mjs",
     "tools/import-design/jsx-runtime/materialized_font_bindings.test.mjs",
     "tools/import-design/jsx-runtime/materialized_frame_contract.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_ids_map.test.mjs",
     "tools/import-design/jsx-runtime/materialized_layer_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_metadata_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
@@ -6668,6 +6669,16 @@
     "tools/import-design/browser_capture/vendor_payload.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-materialized-runtime-node-dependencies": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
    ],
    "kind": "node"
   },
@@ -6731,7 +6742,9 @@
   },
   "pulp-ui-build-contracts": {
    "entry": "tools/ui-build/test_ui_build.py",
-   "inputs": [],
+   "inputs": [
+    "tools/ui-build/test_ui_build.py"
+   ],
    "kind": "python"
   },
   "pulp-ui-clean-output-lint": {
