@@ -6725,7 +6725,8 @@
     "external/skia-build",
     "tools/deps/manifest.json",
     "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py"
+    "tools/scripts/gpu_audio_provider_identity.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },
@@ -6735,7 +6736,8 @@
     "external/skia-build",
     "tools/deps/manifest.json",
     "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py"
+    "tools/scripts/gpu_audio_provider_identity.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },
