@@ -898,20 +898,21 @@ std::string GraphSerializer::to_json(
     for (const auto& connection : graph.connections())
         canonical_connections.push_back(&connection);
     if (regions.empty())
-        std::sort(
-            canonical_connections.begin(), canonical_connections.end(),
-            [](const auto* lhs, const auto* rhs) {
-            return std::tie(lhs->source_node, lhs->source_port, lhs->dest_node, lhs->dest_port,
-                            lhs->feedback, lhs->midi, lhs->automation, lhs->audio_rate_modulation,
-                            lhs->sidechain, lhs->automation_param_id, lhs->automation_range_lo,
-                            lhs->automation_range_hi, lhs->automation_smoothing_ms,
-                            lhs->automation_mix) <
-                   std::tie(rhs->source_node, rhs->source_port, rhs->dest_node, rhs->dest_port,
-                            rhs->feedback, rhs->midi, rhs->automation, rhs->audio_rate_modulation,
-                            rhs->sidechain, rhs->automation_param_id, rhs->automation_range_lo,
-                            rhs->automation_range_hi, rhs->automation_smoothing_ms,
-                            rhs->automation_mix);
-            });
+        std::sort(canonical_connections.begin(), canonical_connections.end(),
+                  [](const auto* lhs, const auto* rhs) {
+                      return std::tie(lhs->source_node, lhs->source_port, lhs->dest_node,
+                                      lhs->dest_port, lhs->feedback, lhs->midi, lhs->automation,
+                                      lhs->audio_rate_modulation, lhs->sidechain,
+                                      lhs->automation_param_id, lhs->automation_range_lo,
+                                      lhs->automation_range_hi, lhs->automation_smoothing_ms,
+                                      lhs->automation_mix) <
+                             std::tie(rhs->source_node, rhs->source_port, rhs->dest_node,
+                                      rhs->dest_port, rhs->feedback, rhs->midi, rhs->automation,
+                                      rhs->audio_rate_modulation, rhs->sidechain,
+                                      rhs->automation_param_id, rhs->automation_range_lo,
+                                      rhs->automation_range_hi, rhs->automation_smoothing_ms,
+                                      rhs->automation_mix);
+                  });
     std::vector<SampleRegionDefinition> canonical_regions(regions.begin(), regions.end());
     // Region records and their nested members remain authored sequences: their
     // order carries topology/control meaning across round trips.
