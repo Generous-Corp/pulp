@@ -24,6 +24,7 @@ LEADS = (1, 2, 4, 8)
 RUNS_PER_KIND = 5
 REQUIRED_MEASURED_BLOCKS = 100_000
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # A P2 receipt is promotion input only when the provider and the artifact
 # generation that produced it are bound to one immutable manifest.  Keep this
@@ -400,7 +401,9 @@ def run(args: argparse.Namespace) -> int:
     manifest = {"schema": SCHEMA, "performance_verdict": "unassigned",
                 "acceptance_status": "authenticated_screening",
                 "generated_utc": datetime.now(timezone.utc).isoformat(),
-                "source_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+                "source_revision": subprocess.check_output(
+                    ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True
+                ).strip(),
                 "probe_sha256": probe_sha256, "probe_path": str(args.probe.resolve()),
                 "machine_id": platform.node() or "unavailable", "host_platform": platform.platform(),
                 "negative_control": negative_control,
