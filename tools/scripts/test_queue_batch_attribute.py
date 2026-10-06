@@ -2068,10 +2068,17 @@ class GuardEnvironmentTests(unittest.TestCase):
             env.update({k: v.replace("{tmp}", tmp) for k, v in extra_env.items()})
             if "GHAPP_REAL_GH" in env:
                 fake = pathlib.Path(env["GHAPP_REAL_GH"])
+                # A Python stand-in, not sh, with this interpreter's absolute
+                # path in its shebang: PATH is stripped to an empty directory
+                # here, so neither `env` nor (on Windows) bash can find an
+                # interpreter; argv_for runs it through sys.executable.
                 fake.write_text(
-                    "#!/bin/sh\n"
-                    f'printf "%s\\n" "$*" >> "{tmp}/gh-calls.log"\n'
-                    "exit 1\n"
+                    f"#!{sys.executable}\n"
+                    "import sys\n"
+                    f"with open({str(pathlib.Path(tmp) / 'gh-calls.log')!r}, 'a', encoding='utf-8') as log:\n"
+                    "    log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+                    "sys.exit(1)\n",
+                    encoding="utf-8",
                 )
                 fake.chmod(0o755)
             proc = subprocess.run(

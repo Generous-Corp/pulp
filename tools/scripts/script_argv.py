@@ -25,9 +25,14 @@ def _interpreter(shebang: bytes) -> str:
     words = shebang[2:].strip().split()
     if not words:
         return ""
-    name = words[0].rsplit(b"/", 1)[-1]
+    def basename(word: bytes) -> bytes:
+        # A Windows interpreter path uses backslashes and ends in .exe.
+        name = word.replace(b"\\", b"/").rsplit(b"/", 1)[-1].lower()
+        return name[:-4] if name.endswith(b".exe") else name
+
+    name = basename(words[0])
     if name == b"env" and len(words) > 1:
-        name = words[1].rsplit(b"/", 1)[-1]
+        name = basename(words[1])
     return name.decode("ascii", "replace")
 
 
