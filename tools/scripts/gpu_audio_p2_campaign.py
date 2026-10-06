@@ -147,6 +147,83 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _parse_axis(value: str, allowed: tuple[int, ...], label: str) -> tuple[int, ...]:
+    """Parse a comma-separated subset of one campaign matrix axis.
+
+    The default still runs the complete acceptance matrix.  Selecting a subset
+    is useful for a bounded single-cell smoke or a resumed campaign, but the
+    probe and receipt validators remain unchanged and fail closed per cell.
+    """
+
+    values = [part.strip() for part in value.split(",")]
+    if not values or any(not part for part in values):
+        raise argparse.ArgumentTypeError(f"{label} must be a comma-separated non-empty list")
+    try:
+        parsed = tuple(int(part, 10) for part in values)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{label} must contain integers") from exc
+    if any(item not in allowed for item in parsed):
+        allowed_text = ",".join(str(item) for item in allowed)
+        raise argparse.ArgumentTypeError(f"{label} values must be drawn from {{{allowed_text}}}")
+    if len(set(parsed)) != len(parsed):
+        raise argparse.ArgumentTypeError(f"{label} must not contain duplicates")
+    return tuple(item for item in allowed if item in parsed)
+
+
+class LosslessLifecycleObserver:
+    """Retain every raw row and expose per-admission lifecycle identities.
+
+    The observer is deliberately a small host-side hook.  It does not infer
+    missing rows or synthesize terminal decisions; ``validate_identity_rows``
+    remains the authority for exactly-once admission/terminal/delivery proof.
+    """
+
+    def __init__(self) -> None:
+        self._rows: list[dict] = []
+
+    def observe(self, row: dict) -> None:
+        if not isinstance(row, dict):
+            raise RuntimeError("raw observer row must be an object")
+        self._rows.append(row)
+
+    @property
+    def rows(self) -> tuple[dict, ...]:
+        return tuple(self._rows)
+
+    def identities(self) -> dict[tuple[int, int, int], dict[str, dict]]:
+        """Return retained terminal/delivery rows keyed by admission identity."""
+
+        observed: dict[tuple[int, int, int], dict[str, dict]] = {}
+        for row in self._rows:
+            if row.get("kind") != "record" or row.get("trace_kind") not in LIFECYCLE_TRACE_KINDS:
+                continue
+            identity = (row.get("engine_id"), row.get("generation"), row.get("sequence"))
+            label = "terminal" if row.get("trace_kind") == 0 else "delivery"
+            observed.setdefault(identity, {})[label] = row
+        return observed
+
+    def validate(self, expected_probe_sha256: str | None = None,
+                 expected_manifest_sha256: str | None = None,
+                 receipt: dict[str, Any] | None = None) -> None:
+        validate_identity_rows(list(self._rows), expected_probe_sha256,
+                               expected_manifest_sha256, receipt)
+
+
+def observe_jsonl(path: Path) -> LosslessLifecycleObserver:
+    """Read a raw JSONL stream without dropping blank or malformed rows."""
+
+    observer = LosslessLifecycleObserver()
+    with path.open() as stream:
+        for line_number, line in enumerate(stream, 1):
+            if not line.strip():
+                raise RuntimeError(f"raw observer encountered blank line {line_number}")
+            try:
+                observer.observe(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"raw observer encountered invalid JSON at line {line_number}") from exc
+    return observer
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--probe", type=Path)
@@ -154,6 +231,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--frames", type=int, default=32, choices=(32, 64, 128))
     p.add_argument("--blocks", type=int, default=REQUIRED_MEASURED_BLOCKS)
     p.add_argument("--warmup", type=int, default=16)
+    p.add_argument("--slots", type=lambda value: _parse_axis(value, SLOTS, "--slots"),
+                   default=SLOTS,
+                   help="comma-separated provider-slot cells (default: 2,4,8,16)")
+    p.add_argument("--leads", type=lambda value: _parse_axis(value, LEADS, "--leads"),
+                   default=LEADS,
+                   help="comma-separated lead-block cells (default: 1,2,4,8)")
     p.add_argument("--wake-on-write", action="store_true")
     p.add_argument(
         "--plan-only",
@@ -329,8 +412,14 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
 
 
 def run(args: argparse.Namespace) -> int:
+    selected_slots = tuple(args.slots)
+    selected_leads = tuple(args.leads)
+    if not selected_slots or not selected_leads:
+        raise RuntimeError("campaign matrix selection must contain at least one slot and lead")
+    matrix_complete = selected_slots == SLOTS and selected_leads == LEADS
+    cells = [{"slots": slots, "lead": lead}
+             for slots in selected_slots for lead in selected_leads]
     if args.plan_only:
-        cells = [{"slots": slots, "lead": lead} for slots in SLOTS for lead in LEADS]
         print(json.dumps({
             "schema": SCHEMA,
             "status": "contract_only",
@@ -358,7 +447,8 @@ def run(args: argparse.Namespace) -> int:
     campaign_manifest_digest: str | None = None
     try:
         control_dir = args.output_dir / "negative-control"
-        control = [str(args.probe), f"--frames={args.frames}", "--slots=2", "--lead=1",
+        control = [str(args.probe), f"--frames={args.frames}", f"--slots={selected_slots[0]}",
+                   f"--lead={selected_leads[0]}",
                    f"--blocks={args.blocks}", f"--warmup={args.warmup}",
                    "--run-kind=cold",
                    f"--output-dir={control_dir}", f"--raw-jsonl={control_dir / 'raw.jsonl'}",
@@ -371,15 +461,16 @@ def run(args: argparse.Namespace) -> int:
         control_raw = control_dir / "raw.jsonl"
         if control_receipt.get("status") == "completed" or not control_receipt.get("negative_control") or not control_raw.is_file():
             raise RuntimeError("negative control unexpectedly passed or was not marked")
-        control_rows = [json.loads(line) for line in control_raw.read_text().splitlines()]
-        validate_identity_rows(control_rows, probe_sha256, receipt=control_receipt)
+        control_observer = observe_jsonl(control_raw)
+        control_observer.validate(probe_sha256, receipt=control_receipt)
+        control_rows = control_observer.rows
         campaign_manifest_digest = control_rows[0].get("provenance_manifest_sha256")
         negative_control = {"argv": control, "returncode": control_proc.returncode,
                             "receipt_sha256": sha256(control_receipt_path),
                             "stdout_sha256": hashlib.sha256(control_proc.stdout.encode()).hexdigest(),
                             "stderr_sha256": hashlib.sha256(control_proc.stderr.encode()).hexdigest()}
-        for slots in SLOTS:
-            for lead in LEADS:
+        for slots in selected_slots:
+            for lead in selected_leads:
                 for run_kind in ("cold", "steady"):
                     logical_repetitions = range(1, RUNS_PER_KIND + 1)
                     # Cold repetitions are independent processes.  Steady
@@ -405,12 +496,13 @@ def run(args: argparse.Namespace) -> int:
                         receipt = json.loads(receipt_path.read_text())
                         validate_receipt(receipt, slots, lead, run_kind)
                         raw_path = trial_dir / "raw.jsonl"
-                        raw_rows = raw_path.read_text().splitlines() if raw_path.is_file() else []
-                        if len(raw_rows) < 2 or json.loads(raw_rows[0]).get("kind") != "provenance":
+                        if not raw_path.is_file():
                             raise RuntimeError(f"{slots=} {lead=} missing streamed provenance/rows")
-                        parsed_rows = [json.loads(line) for line in raw_rows]
-                        validate_identity_rows(parsed_rows, probe_sha256,
-                                              campaign_manifest_digest, receipt)
+                        observer = observe_jsonl(raw_path)
+                        if len(observer.rows) < 2 or observer.rows[0].get("kind") != "provenance":
+                            raise RuntimeError(f"{slots=} {lead=} missing streamed provenance/rows")
+                        observer.validate(probe_sha256, campaign_manifest_digest, receipt)
+                        parsed_rows = observer.rows
                         provenance = parsed_rows[0]
                         if provenance.get("run_kind") != run_kind:
                             raise RuntimeError(
@@ -436,12 +528,13 @@ def run(args: argparse.Namespace) -> int:
                 child.rmdir()
         args.output_dir.rmdir()
         raise
-    if len(trials) != len(SLOTS) * len(LEADS) * 2 * RUNS_PER_KIND:
+    if len(trials) != len(selected_slots) * len(selected_leads) * 2 * RUNS_PER_KIND:
         raise RuntimeError("campaign completed with an incomplete cold/steady matrix")
     if not campaign_manifest_digest:
         raise RuntimeError("campaign has no manifest-bound provider provenance")
     manifest = {"schema": SCHEMA, "performance_verdict": "unassigned",
-                "acceptance_status": "authenticated_screening",
+                "acceptance_status": ("authenticated_screening" if matrix_complete
+                                       else "authenticated_screening_subset"),
                 "generated_utc": datetime.now(timezone.utc).isoformat(),
                 "source_revision": subprocess.check_output(
                     ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True
@@ -450,11 +543,13 @@ def run(args: argparse.Namespace) -> int:
                 "machine_id": platform.node() or "unavailable", "host_platform": platform.platform(),
                 "negative_control": negative_control,
                 "provenance_manifest_sha256": campaign_manifest_digest,
-                "slots": list(SLOTS), "leads": list(LEADS), "runs_per_kind": RUNS_PER_KIND,
+                "slots": list(selected_slots), "leads": list(selected_leads),
+                "runs_per_kind": RUNS_PER_KIND,
                 "run_kinds": ["cold", "steady"], "required_measured_blocks": REQUIRED_MEASURED_BLOCKS,
                 "paced": True, "trials": trials}
     (args.output_dir / "campaign.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps({"schema": SCHEMA, "status": "completed", "trials": len(trials),
+                      "acceptance_status": manifest["acceptance_status"],
                       "performance_verdict": "unassigned"}))
     return 0
 
