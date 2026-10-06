@@ -9,6 +9,17 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09190"></a>
+## [0.919.0] - 2026-10-06
+
+- release/version bump ([#9722](https://github.com/Generous-Corp/pulp/pull/9722))
+- codex/dsp refresh 20261006 ([#9723](https://github.com/Generous-Corp/pulp/pull/9723))
+- feat/keys audit uncovered ([#9649](https://github.com/Generous-Corp/pulp/pull/9649))
+- fix/windows posix only test predicates ([#9714](https://github.com/Generous-Corp/pulp/pull/9714))
+- fix/windows scene3d sidecar json path ([#9709](https://github.com/Generous-Corp/pulp/pull/9709))
+- test/changed surface policy inventory ([#9690](https://github.com/Generous-Corp/pulp/pull/9690))
+- codex/dspx04 negative controls followup 20261006 ([#9710](https://github.com/Generous-Corp/pulp/pull/9710))
+
 <a id="v09180"></a>
 ## [0.918.0] - 2026-10-06
 
@@ -9928,6 +9939,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.919.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.919.0
 [0.918.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.918.0
 [0.917.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.917.0
 [0.916.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.916.0
