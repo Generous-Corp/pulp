@@ -55,7 +55,8 @@ inline constexpr std::array<HandlerSpec, 4> kHandlers{{
     {"set_parameter", Direction::Command, "SetParameterRequest", "SetParameterResponse"},
 }};
 
-inline constexpr std::array<std::string_view, 3> kCommandNames{{"begin_gesture", "end_gesture", "set_parameter"}};
+inline constexpr std::array<std::string_view, 3> kCommandNames{
+    {"begin_gesture", "end_gesture", "set_parameter"}};
 inline constexpr std::array<std::string_view, 1> kPublicationNames{{"parameter_changed"}};
 
 } // namespace pulp::view::editor_bridge_contract

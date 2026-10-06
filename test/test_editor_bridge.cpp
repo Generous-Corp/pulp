@@ -207,8 +207,7 @@ TEST_CASE("EditorBridge: remove_handler reverts to unknown_type",
 }
 
 TEST_CASE("EditorBridge: handlers exposes a sorted ownership-safe snapshot",
-          "[editor_bridge][typed-contract]")
-{
+          "[editor_bridge][typed-contract]") {
     EditorBridge bridge;
     bridge.add_handler("set_parameter", [](const auto&) { return EditorBridge::ok_response(); });
     bridge.add_handler("begin_gesture", [](const auto&) { return EditorBridge::ok_response(); });
@@ -224,8 +223,7 @@ TEST_CASE("EditorBridge: handlers exposes a sorted ownership-safe snapshot",
 }
 
 TEST_CASE("EditorBridge: handlers parity control catches a missing contract handler",
-          "[editor_bridge][typed-contract][control]")
-{
+          "[editor_bridge][typed-contract][control]") {
     std::vector<std::string> contract;
     for (const auto name : pulp::view::editor_bridge_contract::kCommandNames)
         contract.emplace_back(name);
@@ -239,8 +237,7 @@ TEST_CASE("EditorBridge: handlers parity control catches a missing contract hand
 }
 
 TEST_CASE("EditorBridge: generated contract and registration table stay in parity",
-          "[editor_bridge][typed-contract]")
-{
+          "[editor_bridge][typed-contract]") {
     std::vector<std::string> contract;
     EditorBridge bridge;
     for (const auto name : pulp::view::editor_bridge_contract::kCommandNames) {
