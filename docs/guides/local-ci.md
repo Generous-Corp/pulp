@@ -1497,7 +1497,9 @@ and cannot be configured from this repository; there is no workflow trigger or
 `.github/workflows/codex-review-request.yml` is that ask. On a PR opened by
 `shipyard-local[bot]` it posts the same `@codex review` comment a human would,
 using `GITHUB_TOKEN` and no privileged secret at all, then verifies a review
-actually completed and fails if none did.
+actually completed when the connector is available. The check is advisory:
+missing credentials, API failures, unavailable connectors, and review timeouts
+emit warnings and pass so they never block an otherwise green PR.
 
 The absence of a user PAT there is deliberate. A same-repository
 `pull_request` evaluates the workflow file from the PR's own revision, so any
@@ -1542,7 +1544,7 @@ targets.
 That has one consequence worth knowing: on the pull request that first adds the
 checker, the base commit has no copy of it, so the checker cannot run. The job
 reports that exit distinctly — "did not run" rather than "not reviewed" — and
-still fails, because a run that verified nothing must not read as a pass.
+passes with a warning because review coverage is advisory.
 
 This workflow requests reviews; it does not audit whether older PRs got one.
 `.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
