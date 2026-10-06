@@ -108,8 +108,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "388dc11a684ec433f84b050f84c635b63e0b7805",
-          "object_id": "a978cf9e069687bfb12dac18439d1e538435e42c",
+          "revision": "6a955ff812750aee7d7a5eb821017111b85d516d",
+          "object_id": "c395021b85c393b030b43101647dc2f46b9a3401",
           "object_type": "tree"
         },
         {
@@ -309,8 +309,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "2045be2f722645deb4ad9049af13cd74035ae700",
-          "object_id": "bc03f1cccecb6b866970fab84ed2a94c1607d57c",
+          "revision": "83ab9fb062141effe46a3d60a8603752bec8ef2c",
+          "object_id": "ed5a8a6a83ec1db8e8b1e2b8bc18230276641ceb",
           "object_type": "blob"
         },
         {
@@ -774,8 +774,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_acceptance_v2.py",
           "state": "pulp-owned-retained",
-          "revision": "e8877a8c6944d6197b4ed93f673e09a7917cf6f2",
-          "object_id": "01400ebffc56657e0235bc87357d7e0cd76ece48",
+          "revision": "83ab9fb062141effe46a3d60a8603752bec8ef2c",
+          "object_id": "49e1156879516533549cc99ccda859f1bf054989",
           "object_type": "blob"
         },
         {
@@ -838,8 +838,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_role_producer.py",
           "state": "pulp-owned-retained",
-          "revision": "ba090983d4fbcb184713c2a8c69b1c0b65baccd1",
-          "object_id": "5562406a1851daf8baa88a2a964193c78de2fc5d",
+          "revision": "d51f757895c99b29af6547741b3345eae0ccba54",
+          "object_id": "8fbd03de142c185de7964c24b8969bcc46b563cb",
           "object_type": "blob"
         },
         {
@@ -1658,8 +1658,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "388dc11a684ec433f84b050f84c635b63e0b7805",
-          "object_id": "a978cf9e069687bfb12dac18439d1e538435e42c",
+          "revision": "6a955ff812750aee7d7a5eb821017111b85d516d",
+          "object_id": "c395021b85c393b030b43101647dc2f46b9a3401",
           "object_type": "tree"
         },
         {
