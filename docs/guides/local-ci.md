@@ -24,7 +24,10 @@ dependency-free units, the serial real-Chromium integration file (with its own
 600-second CTest timeout), and the esbuild-backed materialized-runtime
 canonicalization case. The required Linux leg runs the locked
 `npm ci --prefix tools/import-design/jsx-runtime` step before CMake configure,
-which makes the dependency-backed case visible to CTest. Source-only or offline
+which makes the dependency-backed case visible to CTest. Because the automatic
+Linux selector may use a clean Proxmox VM without a system Node installation,
+`build.yml` first provisions the exact Node `22.14.0` toolchain with
+`actions/setup-node@v4` and a lockfile-keyed npm cache. Source-only or offline
 configurations without that `node_modules/esbuild` installation still register
 the dependency-free suites, but they do not claim the canonicalization proof.
 
@@ -7258,4 +7261,3 @@ all of those fetches a shared 300 s budget and treats a fetch that runs past it 
 an unfetchable ref (a WARN, then its fail-closed ancestry checks decide). The step
 also carries `timeout-minutes: 10`. Before this, a stalled fetch held the required
 `macos` gate for 43 minutes with no output and no build.
-
