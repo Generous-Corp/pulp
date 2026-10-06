@@ -967,7 +967,16 @@ was unknown. Each run ends with one
 platform registers was audited, and no audited executable has a finding.
 `incomplete` means the run cannot vouch for itself. The nightly passes `--fail-on-findings`, so its
 exit follows that verdict: 0 for clean, 1 for findings, 2 for incomplete. A
-red nightly therefore means the streak of clean runs is broken.
+red nightly therefore means the streak of clean runs is broken. A clean run's
+stage0 block also publishes `covered`, the executables it observed with no
+finding. The key manifest (`tools/ci/executable_keys.py --audit-report`) marks
+any executable outside that set always_run `audit_uncovered`, and every
+executable when no clean report is handed in. So a lane never skips a test
+whose reads no audit has observed, such as the macOS-only executables Linux
+does not register. The `rederive` command in `.shipyard/config.toml` passes the
+same report as `--audit-report {audit_report}`; the flag and the key code that
+accepts it change together, because a host re-derives with the base's command
+against the base's key code.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
