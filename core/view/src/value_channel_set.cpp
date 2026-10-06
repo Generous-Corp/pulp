@@ -4,6 +4,10 @@
 
 namespace pulp::view {
 
+ValueChannelSet::~ValueChannelSet() {
+    detail::value_channel_telemetry_index_release(telemetry_control_.get());
+}
+
 std::uint64_t ValueChannelSet::generation_identity() const noexcept {
     return detail::value_channel_telemetry_control_identity(
         telemetry_control_.get());
@@ -36,26 +40,21 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
                                     [&](const ValueChannelInfo& i) { return i.name == name; });
     if (clash != infos_.end()) return fail(DeclareError::duplicate_name);
 
-    infos_.push_back(ValueChannelInfo{std::move(name), std::move(unit), shape, neutral});
-    const auto index = infos_.size() - 1;
-    const auto& key = infos_.back().name;
-    switch (shape) {
-    case ValueChannelShape::scalar:
-        scalar_indices_.emplace(key, index);
-        break;
-    case ValueChannelShape::meter:
-        meter_indices_.emplace(key, index);
-        break;
-    case ValueChannelShape::vector:
-        vector_indices_.emplace(key, index);
-        break;
-    case ValueChannelShape::events:
-        event_indices_.emplace(key, index);
-        break;
-    }
-    entries_.push_back(std::make_unique<Entry>());
+    // Allocate the existing control sidecar before mutating the ordered
+    // declaration vectors. This keeps a failed setup allocation transactional.
     if (!telemetry_control_)
         telemetry_control_ = detail::make_value_channel_telemetry_control();
+    infos_.push_back(ValueChannelInfo{std::move(name), std::move(unit), shape, neutral});
+    try {
+        entries_.push_back(std::make_unique<Entry>());
+        detail::value_channel_telemetry_index_add(telemetry_control_.get(), infos_.back().name,
+                                                  shape, infos_.size() - 1);
+    } catch (...) {
+        if (entries_.size() >= infos_.size())
+            entries_.pop_back();
+        infos_.pop_back();
+        throw;
+    }
     if (error) *error = DeclareError::ok;
     return entries_.back().get();
 }
@@ -106,21 +105,18 @@ EventSource* ValueChannelSet::declare_events(std::string name, std::string unit,
 
 std::ptrdiff_t ValueChannelSet::index_of(std::string_view name,
                                          ValueChannelShape shape) const {
-    const auto lookup = [&](const auto& indices) -> std::ptrdiff_t {
-        const auto it = indices.find(name);
-        return it == indices.end() ? -1 : static_cast<std::ptrdiff_t>(it->second);
-    };
     // Exact match remains deliberate: a shape mismatch is a miss rather than
     // a wrong-typed hit, so a binding can never silently read another source.
-    switch (shape) {
-    case ValueChannelShape::scalar:
-        return lookup(scalar_indices_);
-    case ValueChannelShape::meter:
-        return lookup(meter_indices_);
-    case ValueChannelShape::vector:
-        return lookup(vector_indices_);
-    case ValueChannelShape::events:
-        return lookup(event_indices_);
+    const auto indexed =
+        detail::value_channel_telemetry_index_lookup(telemetry_control_.get(), name, shape);
+    if (indexed >= 0)
+        return indexed;
+    // A control created by an older SDK has no side-table entry. Keep the
+    // source-compatible behavior correct for that case; new declarations use
+    // the O(1) index above and only misses pay this compatibility scan.
+    for (std::size_t i = 0; i < infos_.size(); ++i) {
+        if (infos_[i].name == name && infos_[i].shape == shape)
+            return static_cast<std::ptrdiff_t>(i);
     }
     return -1;
 }
