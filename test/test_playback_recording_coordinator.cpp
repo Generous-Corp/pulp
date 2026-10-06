@@ -241,6 +241,7 @@ TEST_CASE("recording coordinator commits a punched loopback take at calibrated p
     auto registry = make_builtin_timeline_registry();
     REQUIRE(registry);
     auto package_writer = PackageWriter::create(package.path, std::move(registry).value());
+    if (!package_writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(package_writer.error().code) << " path=" << package_writer.error().path.string());
     REQUIRE(package_writer);
     PackageMediaStager stager(*package_writer);
     auto committed =
@@ -341,6 +342,7 @@ TEST_CASE("recording coordinator trims latency compensation that crosses timelin
     auto registry = make_builtin_timeline_registry();
     REQUIRE(registry);
     auto package_writer = PackageWriter::create(package.path, std::move(registry).value());
+    if (!package_writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(package_writer.error().code) << " path=" << package_writer.error().path.string());
     REQUIRE(package_writer);
     PackageMediaStager stager(*package_writer);
     auto committed = coordinator.commit_take(completed, commit_request(),

@@ -419,6 +419,7 @@ std::vector<std::uint8_t> xattr_bytes(const fs::path& path, const char* name) {
 void publish_baseline(const fs::path& root, const pulp::timeline::ContentHash& hash,
                       std::span<const std::uint8_t> bytes, const pulp::timeline::Project& project) {
     auto writer = PackageWriter::create(root, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     const auto staged = writer.value().stage_blob(BlobStore::Media, hash, bytes);
     REQUIRE(staged);
@@ -484,6 +485,7 @@ TEST_CASE("Project package stages content by verified hash and round trips its g
     std::vector<BlobReference> extra_references;
     {
         auto writer = PackageWriter::create(temporary.path, registry());
+        if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
         REQUIRE(writer);
         for (std::size_t index = 0; index < extra_bytes.size(); ++index) {
             const auto extra_hash = hash_bytes(extra_bytes[index]);
@@ -519,6 +521,7 @@ TEST_CASE("Project package rejects wrong hashes, unsafe reads, conflicts, and si
     const auto wrong = *pulp::timeline::ContentHash::from_hex(std::string(64, 'a'));
     auto writer = PackageWriter::create(
         temporary.path, registry(), PackageLimits{.max_blob_bytes = 3, .max_project_bytes = 1024});
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     const auto lock_conflict = PackageWriter::create(temporary.path, registry());
     REQUIRE_FALSE(lock_conflict);
@@ -725,6 +728,7 @@ TEST_CASE("Package writer rejects a root pathname rebound away from its lock",
           "[project-package][root][race]") {
     TemporaryPackage temporary("writer-root-rebind");
     auto writer = PackageWriter::create(temporary.path, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     const auto displaced =
         temporary.path.parent_path() / (temporary.path.filename().string() + "-displaced");
@@ -804,6 +808,7 @@ TEST_CASE("Generation publication revalidates verified blobs before replacement"
     const std::vector<std::uint8_t> media{'p', 'i', 'n', 'n', 'e', 'd'};
     const auto hash = hash_bytes(media);
     auto writer = PackageWriter::create(temporary.path, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     REQUIRE(writer->stage_blob(BlobStore::Media, hash, media));
     g_remove_after_reference_set = temporary.path / "media" / hash.to_hex();
@@ -835,6 +840,7 @@ TEST_CASE("Project package readers observe one complete generation during public
     REQUIRE(first_json.size() != second_json.size());
 
     auto writer = PackageWriter::create(temporary.path, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     REQUIRE(writer.value().stage_blob(BlobStore::Media, first_hash, first_media));
     REQUIRE(writer.value().stage_blob(BlobStore::Media, second_hash, second_media));
@@ -1293,6 +1299,7 @@ TEST_CASE("Package writer keeps Windows stages private and adopts direct-child D
     fs::create_directories(temporary.path);
 
     auto writer = PackageWriter::create(temporary.path, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     const std::vector<std::uint8_t> first_media{'f', 'i', 'r', 's', 't'};
     const auto first_hash = hash_bytes(first_media);
@@ -1432,6 +1439,7 @@ TEST_CASE("Package writer files match direct-child Linux ACL and setgid inherita
     REQUIRE(::chmod(temporary.path.c_str(), 02750) == 0);
 
     auto writer = PackageWriter::create(temporary.path, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     const std::vector<std::uint8_t> first_media{'f', 'i', 'r', 's', 't'};
     const auto first_hash = hash_bytes(first_media);
@@ -1598,6 +1606,7 @@ TEST_CASE("Package writer files match direct-child macOS ACL inheritance",
     fs::create_directories(temporary.path);
 
     auto writer = PackageWriter::create(temporary.path, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     const std::vector<std::uint8_t> first_media{'f', 'i', 'r', 's', 't'};
     const auto first_hash = hash_bytes(first_media);
@@ -1889,6 +1898,8 @@ TEST_CASE("Package writer anchors a relative root before publication callbacks",
     pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
     g_switch_current_path.clear();
 
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
+
     REQUIRE(writer);
     REQUIRE(writer->root() == fs::canonical(first / "package"));
     REQUIRE(fs::is_directory(first / "package" / "media"));
@@ -1967,6 +1978,7 @@ TEST_CASE("Package writer fences the same pre-existing blob handle that it verif
     const std::vector<std::uint8_t> bytes{'d', 'u', 'r', 'a', 'b', 'l', 'e'};
     const auto hash = hash_bytes(bytes);
     auto writer = PackageWriter::create(temporary.path, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     REQUIRE(writer->stage_blob(BlobStore::Media, hash, bytes));
 
@@ -1993,6 +2005,7 @@ TEST_CASE("Project publication rejects a blob pathname swapped after handle veri
     const std::vector<std::uint8_t> bytes{'v', 'e', 'r', 'i', 'f', 'i', 'e', 'd'};
     const auto hash = hash_bytes(bytes);
     auto writer = PackageWriter::create(temporary.path, registry());
+    if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
     REQUIRE(writer);
     REQUIRE(writer->stage_blob(BlobStore::Media, hash, bytes));
 
@@ -2052,6 +2065,7 @@ TEST_CASE("Project reference validation hashes each canonical blob once per pass
 
     {
         auto writer = PackageWriter::create(temporary.path, registry());
+        if (!writer) UNSCOPED_INFO("diag: PackageWriter::create failed: code=" << static_cast<int>(writer.error().code) << " path=" << writer.error().path.string());
         REQUIRE(writer);
         REQUIRE(writer->stage_blob(BlobStore::Media, first_hash, first_bytes));
         REQUIRE(writer->stage_blob(BlobStore::Media, second_hash, second_bytes));
