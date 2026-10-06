@@ -14,6 +14,7 @@
 #include <optional>
 #include <queue>
 #include <sstream>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -34,6 +35,8 @@ inline double get_double(const V& v) {
 
 constexpr int kFormatVersion = 3;
 constexpr std::size_t kMaxSerializedSampleRegionConnections = 2'048;
+constexpr std::size_t kMaxSerializedNodes = 512;
+constexpr std::size_t kMaxSerializedConnections = 16'384;
 
 struct GraphMigrationEntry {
     int from_version = 0;
@@ -876,6 +879,50 @@ std::string GraphSerializer::to_json(
     }
     auto root = choc::value::createObject("PulpGraph");
     const auto regions = graph.sample_regions();
+    if (graph.nodes().size() > kMaxSerializedNodes ||
+        graph.connections().size() > kMaxSerializedConnections)
+        return {};
+    // Canonicalize collection order before emitting JSON. SignalGraph preserves
+    // insertion order for editing, while the serialized contract is content
+    // addressed: equivalent graphs must produce identical bytes regardless of
+    // construction order.
+    std::vector<const GraphNode*> canonical_nodes;
+    canonical_nodes.reserve(graph.nodes().size());
+    for (const auto& node : graph.nodes())
+        canonical_nodes.push_back(&node);
+    std::sort(canonical_nodes.begin(), canonical_nodes.end(),
+              [](const auto* lhs, const auto* rhs) { return lhs->id < rhs->id; });
+    std::vector<const Connection*> canonical_connections;
+    canonical_connections.reserve(graph.connections().size());
+    for (const auto& connection : graph.connections())
+        canonical_connections.push_back(&connection);
+    std::sort(
+        canonical_connections.begin(), canonical_connections.end(),
+        [](const auto* lhs, const auto* rhs) {
+            return std::tie(lhs->source_node, lhs->source_port, lhs->dest_node, lhs->dest_port,
+                            lhs->feedback, lhs->midi, lhs->automation, lhs->audio_rate_modulation,
+                            lhs->sidechain, lhs->automation_param_id, lhs->automation_range_lo,
+                            lhs->automation_range_hi, lhs->automation_smoothing_ms,
+                            lhs->automation_mix) <
+                   std::tie(rhs->source_node, rhs->source_port, rhs->dest_node, rhs->dest_port,
+                            rhs->feedback, rhs->midi, rhs->automation, rhs->audio_rate_modulation,
+                            rhs->sidechain, rhs->automation_param_id, rhs->automation_range_lo,
+                            rhs->automation_range_hi, rhs->automation_smoothing_ms,
+                            rhs->automation_mix);
+        });
+    std::vector<SampleRegionDefinition> canonical_regions(regions.begin(), regions.end());
+    std::sort(canonical_regions.begin(), canonical_regions.end(),
+              [](const auto& lhs, const auto& rhs) { return lhs.region_id < rhs.region_id; });
+    for (auto& region : canonical_regions) {
+        std::sort(region.members.begin(), region.members.end(),
+                  [](const auto& lhs, const auto& rhs) { return lhs.node < rhs.node; });
+        std::sort(region.input_boundaries.begin(), region.input_boundaries.end());
+        std::sort(region.output_boundaries.begin(), region.output_boundaries.end());
+        std::sort(region.promoted_parameters.begin(), region.promoted_parameters.end(),
+                  [](const auto& lhs, const auto& rhs) {
+                      return std::tie(lhs.param_id, lhs.key) < std::tie(rhs.param_id, rhs.key);
+                  });
+    }
     if (!regions.empty() && graph.connections().size() > kMaxSerializedSampleRegionConnections) {
         return {};
     }
@@ -883,7 +930,7 @@ std::string GraphSerializer::to_json(
         SampleRegionParserShape shape{};
         shape.regions = regions.size();
         shape.connections_total = graph.connections().size();
-        for (const auto& region : regions) {
+        for (const auto& region : canonical_regions) {
             accumulate_parser_region_shape(graph, region, shape);
             std::uint64_t region_connections = 0;
             for (const auto& connection : graph.connections()) {
@@ -905,7 +952,8 @@ std::string GraphSerializer::to_json(
 
     // Nodes
     auto nodes_arr = choc::value::createEmptyArray();
-    for (const auto& n : graph.nodes()) {
+    for (const auto* n_ptr : canonical_nodes) {
+        const auto& n = *n_ptr;
         auto node_obj = choc::value::createObject("Node");
         node_obj.addMember("id",   (int64_t)n.id);
         node_obj.addMember("type", node_type_str(n.type));
@@ -957,7 +1005,8 @@ std::string GraphSerializer::to_json(
 
     // Connections
     auto conns_arr = choc::value::createEmptyArray();
-    for (const auto& c : graph.connections()) {
+    for (const auto* c_ptr : canonical_connections) {
+        const auto& c = *c_ptr;
         auto co = choc::value::createObject("Conn");
         co.addMember("source_node", (int64_t)c.source_node);
         co.addMember("source_port", (int64_t)c.source_port);
@@ -982,7 +1031,7 @@ std::string GraphSerializer::to_json(
 
     if (!regions.empty()) {
         auto regions_arr = choc::value::createEmptyArray();
-        for (const auto& region : regions) {
+        for (const auto& region : canonical_regions) {
             auto ro = choc::value::createObject("SampleRegion");
             ro.addMember("id", (int64_t)region.region_id);
             auto members = choc::value::createEmptyArray();
