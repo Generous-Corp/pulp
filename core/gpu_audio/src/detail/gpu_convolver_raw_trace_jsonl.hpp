@@ -316,10 +316,9 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
         if (!nonempty(value))
             return false;
     }
-    for (const auto value : {std::string_view(manifest.worker_scheduling),
-                             std::string_view(manifest.host_contention),
-                             std::string_view(manifest.host_thermal_state),
-                             std::string_view(manifest.power_state)}) {
+    for (const auto value :
+         {std::string_view(manifest.worker_scheduling), std::string_view(manifest.host_contention),
+          std::string_view(manifest.host_thermal_state), std::string_view(manifest.power_state)}) {
         if (!nonempty(value) || value.find_first_of("\r\n") != std::string_view::npos)
             return false;
     }
