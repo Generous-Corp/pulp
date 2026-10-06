@@ -94,6 +94,24 @@ test('drops legacy SVG primitive ink bounds from normalized layout metadata', ()
 
   assert.equal(normalized.layout_bindings.length, 1);
   assert.equal(normalized.layout_bindings[0].path.at(-1).tag, 'svg');
+  assert.deepEqual(Object.keys(normalized.bindings_by_id.layout),
+    [normalized.layout_bindings[0].id]);
+  assert.equal(Object.keys(normalized.bindings_by_id.layout).some(id =>
+    id.includes('path')), false);
+});
+
+test('drops filtered legacy layout ids from the normalized id map', () => {
+  const legacy = {
+    id: 'pulp-layout-svg-path', anchor: '#root',
+    path: [{ tag: 'svg', index: 0 }, { tag: 'path', index: 0 }],
+    box: { left: 1, top: 2, width: 3, height: 4 },
+  };
+  const normalized = normalizeMaterializedMetadata({
+    layout_bindings: [legacy],
+    bindings_by_id: { layout: { [legacy.id]: legacy } },
+  });
+  assert.deepEqual(normalized.layout_bindings, []);
+  assert.deepEqual(normalized.bindings_by_id.layout, {});
 });
 
 test('keeps fractional captured text width across first-commit Yoga rounding', () => {

@@ -372,8 +372,24 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
   if (canvasBindings.length > 16384)
     throw new Error(`${label} contains too many canvas bindings`);
 
+  // Rebuild the id maps from the normalized lists. Some legacy captures put
+  // SVG presentation bindings in layout_bindings; after filtering those rows,
+  // returning the input map would leave list/map parity broken and allow a
+  // stale binding to be replayed through an id lookup.
+  const normalizedLists = {
+    semantic: semanticBindings,
+    layout: layoutBindings,
+    text: textBindings,
+    paint: paintBindings,
+    canvas: canvasBindings,
+  };
+  const bindingsById = Object.fromEntries(Object.entries(normalizedLists).map(
+    ([kind, bindings]) => [kind, Object.fromEntries(
+      bindings.map(binding => [binding.id, binding]),
+    )],
+  ));
   return { coordinate_space: coordinateSpace, font_bindings: fontBindings,
-    bindings_by_id: bindingDocument.bindings_by_id,
+    bindings_by_id: bindingsById,
     semantic_bindings: semanticBindings, layout_bindings: layoutBindings,
     text_bindings: textBindings, paint_bindings: paintBindings,
     canvas_bindings: canvasBindings };
