@@ -40,8 +40,12 @@ permissions:
   issues: write
   actions: read
 
+# One group per ref: proof branches dispatched to read the Windows and Linux
+# suites run in parallel, while two runs of the same ref (the nightly on main)
+# still never overlap. A single repo-wide group kept only one pending run, so
+# every branch waited for every other branch's dispatch.
 concurrency:
-  group: cross-platform-check
+  group: cross-platform-check-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -486,7 +490,9 @@ jobs:
   tracking-issues:
     name: Maintain per-platform tracking issues
     needs: [linux, linux-arm64, windows, android]
-    if: always()
+    # The tracking issues describe main. A proof-branch dispatch must neither
+    # open nor close them, and branches now run concurrently with main.
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -511,7 +517,7 @@ jobs:
           run_id='${{ github.run_id }}'
 
           last_green_sha=$(
-            gh api "repos/${repo}/actions/workflows/cross-platform-check.yml/runs?status=success&per_page=20" \
+            gh api "repos/${repo}/actions/workflows/cross-platform-check.yml/runs?status=success&branch=main&per_page=20" \
               --jq "[.workflow_runs[] | select((.id | tostring) != \"${run_id}\")] | first | .head_sha // \"\"" \
               2>/dev/null || echo ""
           )

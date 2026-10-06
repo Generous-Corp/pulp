@@ -6,7 +6,6 @@
 [[families]]
 name = "script-readers-1490e4d4ef76"
 paths = [
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -111,6 +110,7 @@ paths = [
   "tools/scripts/test_coverage_diff_comment_extra.py",
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
+  "tools/scripts/test_cross_platform_check_concurrency.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_designated_initializer_lint.py",
   "tools/scripts/test_docs_generate.py",
@@ -4894,7 +4894,6 @@ risk_class = "low"
 name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5053,6 +5052,7 @@ paths = [
   "tools/scripts/test_coverage_diff_comment_extra.py",
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
+  "tools/scripts/test_cross_platform_check_concurrency.py",
   "tools/scripts/test_ctest_duplicate_registration.py",
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
@@ -5401,7 +5401,6 @@ risk_class = "low"
 name = "script-surface-environment-bound"
 paths = [
   ".agents/skills/*/SKILL.md",
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5560,6 +5559,7 @@ paths = [
   "tools/scripts/test_coverage_diff_comment_extra.py",
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
+  "tools/scripts/test_cross_platform_check_concurrency.py",
   "tools/scripts/test_ctest_duplicate_registration.py",
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",

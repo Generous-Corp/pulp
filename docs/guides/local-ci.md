@@ -1497,7 +1497,9 @@ and cannot be configured from this repository; there is no workflow trigger or
 `.github/workflows/codex-review-request.yml` is that ask. On a PR opened by
 `shipyard-local[bot]` it posts the same `@codex review` comment a human would,
 using `GITHUB_TOKEN` and no privileged secret at all, then verifies a review
-actually completed and fails if none did.
+actually completed when the connector is available. The check is advisory:
+missing credentials, API failures, unavailable connectors, and review timeouts
+emit warnings and pass so they never block an otherwise green PR.
 
 The absence of a user PAT there is deliberate. A same-repository
 `pull_request` evaluates the workflow file from the PR's own revision, so any
@@ -1542,7 +1544,7 @@ targets.
 That has one consequence worth knowing: on the pull request that first adds the
 checker, the base commit has no copy of it, so the checker cannot run. The job
 reports that exit distinctly — "did not run" rather than "not reviewed" — and
-still fails, because a run that verified nothing must not read as a pass.
+passes with a warning because review coverage is advisory.
 
 This workflow requests reviews; it does not audit whether older PRs got one.
 `.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
@@ -3202,6 +3204,20 @@ matrix child exists, the corresponding bootstrap is inactive and uses an
 `-unused` display name so it cannot collide with or satisfy branch protection.
 `tools/scripts/test_required_macos_alias.py` and
 `tools/scripts/test_windows_runner_policy.py` pin both ownership paths.
+
+The merge-group bootstrap's verdict lives in
+`tools/ci/macos_merge_group_bootstrap.sh`. A provider or classifier result of
+`failure`, `skipped` or none fails `macos` closed. A `cancelled` classify does
+not: GitHub cancels a job it never assigned a runner to, and failing closed on
+that turned a hosted-runner outage into a red required check, so the queue
+ejected the PR, re-batched, and met the same wait (2026-10-05, during a
+hosted-runner assignment incident). The bootstrap already has a runner, so it
+classifies the merge group itself with the classify job's scripts and proceeds
+on that answer: nothing native to build passes skip-safe; a group that needs
+the native build fails closed, because the native leg and the receipt reuse
+both wait on classify; a failing in-job classifier fails closed.
+`tools/ci/test_macos_merge_group_bootstrap.py` runs the script against stub
+results.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
