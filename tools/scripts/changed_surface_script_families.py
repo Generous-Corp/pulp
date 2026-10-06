@@ -326,7 +326,14 @@ def environment_bound(tests: list[dict]) -> set[str]:
     bound = set()
     for test in tests:
         props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
-        if props.get("PULP_OPTIONAL") is True:
+        # CTest's JSON export serializes cache/property booleans as strings in
+        # some generators (for example ``"TRUE"``), while synthetic fixtures
+        # and older exports may carry a native bool.  Normalize both forms so
+        # an optional browser/GPU test cannot accidentally become a bounded
+        # required test merely because the exporter changed representation.
+        optional = props.get("PULP_OPTIONAL")
+        if optional is True or (
+                isinstance(optional, str) and optional.strip().upper() == "TRUE"):
             continue
         labels = props.get("LABELS") or []
         if props.get("RESOURCE_LOCK") or ENVIRONMENT_LABELS & set(labels):
