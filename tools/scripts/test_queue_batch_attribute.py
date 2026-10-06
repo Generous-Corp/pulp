@@ -2095,12 +2095,20 @@ class GuardEnvironmentTests(unittest.TestCase):
             proc.gh_calls = log.read_text() if log.exists() else ""  # type: ignore[attr-defined]
             return proc
 
+    @staticmethod
+    def _detail(proc: subprocess.CompletedProcess) -> str:
+        """Everything a failed run said, so a remote failure is readable."""
+        return (f"\nargv: {proc.args!r}\nreturncode: {proc.returncode}"
+                f"\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                f"\ngh calls:\n{proc.gh_calls}")  # type: ignore[attr-defined]
+
     def test_certify_reads_through_the_wrappers_real_gh_when_ghapp_is_off_path(self) -> None:
         proc = self._run({"GH_TOKEN": "app-token", "GHAPP_REAL_GH": "{tmp}/gh"})
-        self.assertNotIn("Traceback", proc.stderr)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        detail = self._detail(proc)
+        self.assertNotIn("Traceback", proc.stderr, detail)
+        self.assertEqual(proc.returncode, 0, detail)
         self.assertIn("api repos/Generous-Corp/pulp/actions/runs/36535153595",
-                      proc.gh_calls)  # type: ignore[attr-defined]
+                      proc.gh_calls, detail)  # type: ignore[attr-defined]
         verdict = json.loads(proc.stdout)
         self.assertEqual(verdict["run_id"], 36535153595)
         # Every read failed, so nothing may be certified.
@@ -2108,9 +2116,10 @@ class GuardEnvironmentTests(unittest.TestCase):
 
     def test_no_reachable_cli_is_a_clean_unusable_invocation(self) -> None:
         proc = self._run({})
-        self.assertNotIn("Traceback", proc.stderr)
-        self.assertEqual(proc.returncode, 2)
-        self.assertIn("PULP_GH_CLI", proc.stderr)
+        detail = self._detail(proc)
+        self.assertNotIn("Traceback", proc.stderr, detail)
+        self.assertEqual(proc.returncode, 2, detail)
+        self.assertIn("PULP_GH_CLI", proc.stderr, detail)
 
 
 if __name__ == "__main__":
