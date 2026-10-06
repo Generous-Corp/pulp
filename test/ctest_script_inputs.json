@@ -224,7 +224,7 @@
    "spawning_sources": [
     "test/test_baked_graph_processor_parity.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-browser-capture-import": {
@@ -1063,6 +1063,26 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-control-dspx04-graph-product-e2e": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-control-dspx04-graph-product-fixture",
+    "pulp-mcp"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp",
+    "test/support/control_sample_region_e2e.hpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": [],
+   "unmatched_programs": [
+    "pulp-control-broker"
+   ]
+  },
   "pulp-test-control-endpoint-enrollment": {
    "data": "none",
    "inputs": [],
@@ -1575,6 +1595,7 @@
     "test/test_baked_codec.cpp"
    ],
    "spawning_sources": [
+    "test/test_retained_history_dspx03.cpp",
     "test/test_signal_graph_anticipation.cpp",
     "test/test_signal_graph_live_swap_continuity.cpp",
     "test/test_signal_graph_live_swap_staging.cpp",
@@ -1584,7 +1605,7 @@
     "test/test_signal_graph_prepared_swap_live.cpp",
     "test/test_signal_graph_transport.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-group-script-format": {
@@ -2056,7 +2077,7 @@
    "spawning_sources": [
     "test/test_signal_graph_executor_parity.cpp"
    ],
-   "spawns": "none",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-streaming-model-contract": {
@@ -2164,6 +2185,20 @@
     "examples/timeline-phase1/timeline_multitrack_arrangement.cpp"
    ],
    "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-unique-temp-dir": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-unique-temp-dir-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_unique_temp_dir.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-validation-contract": {
@@ -2358,6 +2393,7 @@
   "pulp-test-commuted-string-excitation",
   "pulp-test-control-broker-daemon",
   "pulp-test-control-client-connection",
+  "pulp-test-control-dspx04-graph-product-e2e",
   "pulp-test-control-endpoint",
   "pulp-test-control-endpoint-enrollment",
   "pulp-test-control-gpu-health-provider",
@@ -2721,6 +2757,7 @@
   "pulp-test-signal-frequency-shifter-ssb",
   "pulp-test-signal-granular",
   "pulp-test-signal-graph-audio-parity",
+  "pulp-test-signal-graph-control-authority",
   "pulp-test-signal-graph-executor-parity",
   "pulp-test-signal-graph-offline-parity",
   "pulp-test-signal-harmony-engine",
@@ -2793,6 +2830,7 @@
   "pulp-test-transition-cost",
   "pulp-test-true-peak-limiter",
   "pulp-test-udev-monitor",
+  "pulp-test-unique-temp-dir",
   "pulp-test-unison-voice-stack",
   "pulp-test-unit-delay",
   "pulp-test-validation-contract",
@@ -2833,6 +2871,7 @@
   "pulp-test-windowing",
   "pulp-test-xcode-developer-path",
   "pulp-test-yoga-layout-bench",
+  "pulp-unique-temp-dir-fixture",
   "sample-region-allpass-consumer"
  ],
  "executables_scanned_for": [
@@ -3131,7 +3170,8 @@
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
     "tools/scripts/queue_batch_attribute.py",
-    "tools/scripts/queue_known_flakes.json"
+    "tools/scripts/queue_known_flakes.json",
+    "tools/scripts/script_argv.py"
    ],
    "kind": "python"
   },
@@ -3151,7 +3191,8 @@
    "entry": "tools/ci/test_build_dir_lock.py",
    "inputs": [
     "tools/ci/build_dir_lock.py",
-    "tools/ci/test_build_dir_lock.py"
+    "tools/ci/test_build_dir_lock.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },
@@ -3328,6 +3369,7 @@
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/generate_widget_bridge_api.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_changed_surface_policy.py",
@@ -3381,6 +3423,7 @@
     "tools/cmake/PulpWgpuUniversal.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/gate_common.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_run_changed_surface_tests.py"
@@ -3481,6 +3524,7 @@
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/executable_keys.py",
@@ -3700,6 +3744,22 @@
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
+   ],
+   "kind": "python"
+  },
+  "clock-only-temp-key-guard": {
+   "entry": "tools/scripts/clock_only_temp_key_guard.py",
+   "inputs": [
+    "tools/scripts/clock_only_temp_key_guard.py"
+   ],
+   "kind": "python"
+  },
+  "clock-only-temp-key-guard-selftest": {
+   "entry": "tools/scripts/test_clock_only_temp_key_guard.py",
+   "inputs": [
+    "tools/scripts/clock_only_temp_key_guard.json",
+    "tools/scripts/clock_only_temp_key_guard.py",
+    "tools/scripts/test_clock_only_temp_key_guard.py"
    ],
    "kind": "python"
   },
@@ -4292,9 +4352,8 @@
     "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/support",
-    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
-    "tools/ci/ctest_gate_args.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/key_blind_executables.json",
@@ -4306,7 +4365,6 @@
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_executable_keys.py",
     "tools/ci/test_receipts_shadow.py",
-    "tools/cmake",
     "tools/cmake/PulpDependencies.cmake",
     "tools/cmake/PulpFetchContent.cmake",
     "tools/cmake/PulpTestData.cmake",
@@ -4315,6 +4373,7 @@
     "tools/scripts/classify_changes.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
@@ -4371,7 +4430,8 @@
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
     "tools/scripts/queue_batch_attribute.py",
-    "tools/scripts/queue_known_flakes.json"
+    "tools/scripts/queue_known_flakes.json",
+    "tools/scripts/script_argv.py"
    ],
    "kind": "python"
   },
@@ -4387,7 +4447,8 @@
    "entry": "tools/fleet/test_fleet_lib.py",
    "inputs": [
     "tools/fleet/fleet_lib.py",
-    "tools/fleet/test_fleet_lib.py"
+    "tools/fleet/test_fleet_lib.py",
+    "tools/scripts/script_argv.py"
    ],
    "kind": "python"
   },
@@ -4569,7 +4630,8 @@
   "governed-build-selftest": {
    "entry": "tools/ci/test_governed_build.py",
    "inputs": [
-    "tools/ci/test_governed_build.py"
+    "tools/ci/test_governed_build.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },
@@ -4595,6 +4657,7 @@
     "tools/deps/manifest.json",
     "tools/scripts",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
    ],
    "kind": "python"
@@ -4839,6 +4902,7 @@
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_dpr_runner.py",
@@ -5033,6 +5097,7 @@
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
@@ -5171,6 +5236,7 @@
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
@@ -5266,6 +5332,7 @@
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
@@ -5366,6 +5433,7 @@
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/release_product_matrix.json",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
@@ -5475,6 +5543,7 @@
     "tools/scripts/package_cli.py",
     "tools/scripts/release_artifact_contents.py",
     "tools/scripts/release_product_matrix.json",
+    "tools/scripts/script_argv.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
     "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
     "tools/scripts/test_gpu_first_visible_a3_campaign.py",
@@ -6412,6 +6481,7 @@
     "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/gpu_audio_provider_identity.py",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_build_time_report.py",
@@ -6529,7 +6599,8 @@
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
     "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
-    "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs"
+    "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs",
+    "tools/scripts/tmp_leak_guard.py"
    ],
    "kind": "node"
   },
@@ -6682,6 +6753,7 @@
     "tools/scripts/queue_admission_guard.py",
     "tools/scripts/queue_batch_attribute.py",
     "tools/scripts/queue_known_flakes.json",
+    "tools/scripts/script_argv.py",
     "tools/scripts/test_prepush_cannot_measure.py",
     "tools/scripts/test_queue_batch_attribute.py"
    ],
@@ -8068,6 +8140,7 @@
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/executable_keys.py",
@@ -8269,6 +8342,28 @@
    ],
    "kind": "python"
   },
+  "script-argv-selftest": {
+   "entry": "tools/scripts/test_script_argv.py",
+   "inputs": [
+    ".github/actions",
+    ".github/workflows",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "test/cmake/consumption_census_tests.cmake",
+    "test/ctest_script_inputs.json",
+    "tools/ci/install_visual_python_deps.sh",
+    "tools/motion/visual/requirements.lock",
+    "tools/motion/visual/requirements.txt",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json",
+    "tools/scripts/script_argv.py",
+    "tools/scripts/test_script_argv.py",
+    "tools/scripts/trace_frame_cost.py"
+   ],
+   "kind": "python"
+  },
   "script-test-inputs-drift": {
    "entry": "tools/scripts/script_test_inputs.py",
    "inputs": [
@@ -8303,7 +8398,8 @@
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
-    "tools/scripts/test_script_test_inputs.py"
+    "tools/scripts/test_script_test_inputs.py",
+    "tools/scripts/tmp_leak_guard.py"
    ],
    "kind": "python"
   },
@@ -8416,6 +8512,13 @@
     "tools/scripts/test_setup_bootstrap_plan_guard.py"
    ],
    "kind": "python"
+  },
+  "setup-cache-lock": {
+   "entry": "tools/scripts/test_setup_cache_lock.sh",
+   "inputs": [
+    "tools/scripts/test_setup_cache_lock.sh"
+   ],
+   "kind": "shell"
   },
   "setup-source-cache": {
    "entry": "tools/scripts/test_setup_source_cache.sh",
@@ -8602,6 +8705,7 @@
     ".github/workflows/build.yml",
     "docs/status",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/spawn_closure.py",
@@ -8833,6 +8937,14 @@
    ],
    "kind": "python"
   },
+  "tmp-leak-guard-selftest": {
+   "entry": "tools/scripts/test_tmp_leak_guard.py",
+   "inputs": [
+    "tools/scripts/test_tmp_leak_guard.py",
+    "tools/scripts/tmp_leak_guard.py"
+   ],
+   "kind": "python"
+  },
   "token-coverage-ratchet": {
    "entry": "tools/scripts/token_coverage_check.py",
    "inputs": [
@@ -9025,6 +9137,7 @@
     "external/skia-build",
     "tools/deps/manifest.json",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
    ],
    "kind": "python"
@@ -9035,6 +9148,7 @@
     "external/skia-build",
     "tools/deps/manifest.json",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
    ],
    "kind": "python"

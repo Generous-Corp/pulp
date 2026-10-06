@@ -119,7 +119,10 @@ void SharedIoComputePlan::record_terminal(const SharedIoSlotLedger::SlotToken& t
         return;
     const auto pending = pending_[token.slot].token;
     pending_[token.slot].active = false;
-    if (pending.submitted_ns != 0) {
+    // Calibrate admission only from successful terminal work. Failed/device
+    // lost submissions have no stable execution-time meaning; their lifecycle
+    // receipts remain authoritative, but they must not bias the predictor.
+    if (status == SharedIoArena::CompletionStatus::RetiredSuccess && pending.submitted_ns != 0) {
         const auto completed_ns = monotonic_now_ns();
         if (completed_ns >= pending.submitted_ns) {
             predictor_.observe(completed_ns - pending.submitted_ns);

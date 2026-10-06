@@ -9,6 +9,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME audio-glitch-trace-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/audio/test_glitch_trace.py")
     set_tests_properties(audio-glitch-trace-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # clock_only_temp_key_guard.py: a test temp path named from a clock reading
+    # alone is shared by two concurrent cases that read the same tick. The
+    # selftest proves the scan reads real sources (an empty scan is an error).
+    add_test(NAME clock-only-temp-key-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/clock_only_temp_key_guard.py")
+    set_tests_properties(clock-only-temp-key-guard PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME clock-only-temp-key-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_clock_only_temp_key_guard.py")
+    set_tests_properties(clock-only-temp-key-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME deps-audit-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/test_audit.py")
     set_tests_properties(deps-audit-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

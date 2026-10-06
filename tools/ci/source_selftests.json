@@ -917,6 +917,12 @@
       ]
     },
     {
+      "name": "tmp-leak-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_tmp_leak_guard.py"
+      ]
+    },
+    {
       "name": "tools-registry-check-selftest",
       "argv": [
         "{repo}/tools/scripts/test_tools_registry_check.py"

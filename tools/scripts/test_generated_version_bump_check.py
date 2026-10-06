@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -53,6 +54,8 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         # regenerator, the slowest step here, and every fixture starts from the
         # same base. Each test gets its own clone of this template.
         cls.template_holder = tempfile.TemporaryDirectory(prefix="pulp-generated-bump-base-")
+        # A class cleanup runs even when the rest of this setup fails.
+        cls.addClassCleanup(cls.template_holder.cleanup)
         source = Path(__file__).resolve().parents[2]
         template = Path(cls.template_holder.name) / "base"
         common = Path(run(source, "rev-parse", "--path-format=absolute",
@@ -83,10 +86,6 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         )
         cls.template = template
         cls.template_base = run(template, "rev-parse", "HEAD")
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.template_holder.cleanup()
 
     def setUp(self) -> None:
         self.holder = tempfile.TemporaryDirectory(prefix="pulp-generated-bump-test-")
@@ -931,4 +930,9 @@ receipt.write_text('{"handoff_sha256": "%s"}\\n'
 
 
 if __name__ == "__main__":
+    # This suite outlives local harness timeouts on a full-history checkout. A
+    # timeout's SIGTERM would end the process without running any cleanup, and
+    # the template it leaves is a full checkout. As KeyboardInterrupt, which
+    # unittest re-raises, the interpreter exits normally and removes it.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     unittest.main()

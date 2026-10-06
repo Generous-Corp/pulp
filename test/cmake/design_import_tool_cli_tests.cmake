@@ -75,8 +75,15 @@ if(_PULP_NODE_FOR_TESTS)
     list(REMOVE_ITEM _PULP_MATERIALIZED_RUNTIME_NODE_TESTS
          ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS})
 
+    # The aggregate runs in a private temp directory and fails if any suite
+    # leaves scratch there, which would otherwise pile up on the boot volume.
+    set(_PULP_NODE_UNIT_TMP_GUARD)
+    if(Python3_Interpreter_FOUND)
+        set(_PULP_NODE_UNIT_TMP_GUARD ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/tmp_leak_guard.py --)
+    endif()
     add_test(NAME pulp-browser-capture-node-unit
-             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+             COMMAND ${_PULP_NODE_UNIT_TMP_GUARD} ${_PULP_NODE_FOR_TESTS} --test
                      ${_PULP_BROWSER_CAPTURE_NODE_TESTS}
                      ${_PULP_MATERIALIZED_RUNTIME_NODE_TESTS})
     set_tests_properties(pulp-browser-capture-node-unit PROPERTIES

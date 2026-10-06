@@ -182,8 +182,42 @@ TEST_CASE("FileDialog::install_native_backend preserves a host-set backend",
 // `dbus-run-session -- ctest` (ephemeral private session bus, headless). Off
 // Linux / without a bus, every object-server method honest-fails (false/empty).
 
+namespace {
+// Points the session-bus address at a socket that cannot exist, for one scope,
+// so a test about having no bus does not depend on whether the host runs one
+// (a desktop, or a CI image with at-spi2, does). libdbus reads the address when
+// the process first connects, and each ctest entry is its own process.
+class NoSessionBus {
+public:
+#if defined(__linux__)
+    NoSessionBus() {
+        if (const char* v = std::getenv("DBUS_SESSION_BUS_ADDRESS")) {
+            saved_ = v;
+            had_ = true;
+        }
+        ::setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/pulp-test-no-session-bus", 1);
+    }
+    ~NoSessionBus() {
+        if (had_) ::setenv("DBUS_SESSION_BUS_ADDRESS", saved_.c_str(), 1);
+        else ::unsetenv("DBUS_SESSION_BUS_ADDRESS");
+    }
+#else
+    NoSessionBus() = default;
+#endif
+    NoSessionBus(const NoSessionBus&) = delete;
+    NoSessionBus& operator=(const NoSessionBus&) = delete;
+
+#if defined(__linux__)
+private:
+    std::string saved_;
+    bool had_ = false;
+#endif
+};
+}  // namespace
+
 TEST_CASE("DBus object-server honest-fails without a bus",
           "[platform][dbus][objectserver][issue-L7a1]") {
+    [[maybe_unused]] NoSessionBus no_bus;
     DBus bus;  // never connected
     REQUIRE_FALSE(bus.connected());
     REQUIRE(bus.unique_name().empty());

@@ -246,6 +246,7 @@ TEST_CASE("shared IO execution predictor is opt-in and conservative",
     predictor.configure({.enabled = true, .minimum_samples = 2, .safety_margin_ns = 100});
     predictor.observe(1000);
     REQUIRE_FALSE(predictor.estimate().ready);
+    REQUIRE_FALSE(predictor.admit(1000, 2000));
     predictor.observe(1200);
 
     const auto estimate = predictor.estimate();
@@ -265,6 +266,65 @@ TEST_CASE("shared IO execution predictor is opt-in and conservative",
     predictor.configure({});
     REQUIRE_FALSE(predictor.estimate().enabled);
     REQUIRE(predictor.admit(10'000, 10'001));
+}
+
+TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle boundaries",
+          "[gpu_audio][shared_io][prediction]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+
+    // A failed terminal is retained in the lifecycle receipt but cannot train
+    // the execution predictor.
+    provider.terminal_status = SharedIoArena::CompletionStatus::RetiredFailed;
+    auto failed_input = plan.acquire_input(1, 0);
+    REQUIRE(failed_input);
+    REQUIRE(plan.submit({failed_input->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto failed = plan.pop_completion();
+    REQUIRE(failed);
+    CHECK(plan.prediction_estimate().samples == 0);
+    REQUIRE(plan.discard_completion(*failed));
+    REQUIRE(plan.reprime_when_quiescent());
+
+    provider.terminal_status = SharedIoArena::CompletionStatus::RetiredSuccess;
+    auto successful_input = plan.acquire_input(2, 0);
+    REQUIRE(successful_input);
+    REQUIRE(plan.submit({successful_input->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto successful = plan.pop_completion();
+    REQUIRE(successful);
+    CHECK(plan.prediction_estimate().ready);
+    CHECK(plan.telemetry().prediction_samples == 1);
+    REQUIRE(plan.discard_completion(*successful));
+
+    // A calibrated future deadline is admitted.
+    const auto future_deadline =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count()) +
+        1'000'000'000;
+    auto admitted_input = plan.acquire_input(3, future_deadline);
+    REQUIRE(admitted_input);
+    REQUIRE(plan.cancel({admitted_input->token, future_deadline}));
+
+    // An expired deadline is refused, which lets the caller take its CPU
+    // fallback path without consuming a provider slot.
+    const auto expired_deadline = future_deadline - 2'000'000'000;
+    CHECK_FALSE(plan.acquire_input(4, expired_deadline));
+    CHECK(plan.telemetry().prediction_refusals == 1);
+    REQUIRE(plan.reprime_when_quiescent());
+    CHECK(plan.prediction_estimate().samples == 0);
+    CHECK(plan.prediction_estimate().enabled);
+
+    // Disabling the policy restores the established admission behavior.
+    plan.set_prediction_policy({});
+    auto disabled_input = plan.acquire_input(4, 1);
+    REQUIRE(disabled_input);
+    REQUIRE(plan.cancel({disabled_input->token, 1}));
+    REQUIRE(plan.release());
 }
 
 TEST_CASE("shared IO compute plan classifies completion after bounded wake",

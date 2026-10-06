@@ -5,9 +5,9 @@
 #include <pulp/host/plugin_slot.hpp>
 
 #include "lv2_discovery.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -30,14 +30,7 @@ struct ScratchDir {
     fs::path path;
 
     explicit ScratchDir(const char* stem) {
-        const auto counter =
-            std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path()
-             / (std::string("pulp-lv2-host-") + stem + "-"
-                + std::to_string(counter));
-        std::error_code ec;
-        fs::remove_all(path, ec);
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(std::string("pulp-lv2-host-") + stem);
     }
 
     ~ScratchDir() {

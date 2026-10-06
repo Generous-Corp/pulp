@@ -198,6 +198,14 @@ class KeyTests(unittest.TestCase):
         self.assertKeyChanged(policy, env, "A case one", "environment")
         self.assertEqual(policy["B case"], env["B case"])
 
+    def test_the_shared_name_pattern_is_part_of_the_policy(self) -> None:
+        # The always-run pattern moved out of this file; editing it must
+        # still move every key, as it did when it lived here.
+        self.w.change("tools/ci/always_run_names.py", "ALWAYS_RUN_NAME_RE = None\n")
+        edited = self.w.keys()
+        for name in ("A case one", "check-selftest"):
+            self.assertKeyChanged(self.base, edited, name, "policy")
+
     def test_the_same_content_at_other_paths_keys_identically(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             other = Path(tmp)

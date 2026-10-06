@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import copy
 import hashlib
+import io
 import json
 import os
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -1866,6 +1869,7 @@ class ExecutableReuseTest(unittest.TestCase):
     copied inputs and digests beside the result receipt."""
 
     RECORD_SHA = "9" * 64
+    AUDIT_SHA_OVERRIDE: str | None = None
 
     OTHER_SHA = "7" * 64
     CANDIDATES = [{"run_id": "77", "record_sha256": "7" * 64, "record_path": "/store/c0", "commit": "c" * 40},
@@ -1908,7 +1912,12 @@ class ExecutableReuseTest(unittest.TestCase):
                 if target.name == "executable-keys.json":
                     used = argv[argv.index("--base-record") + 1] if "--base-record" in argv else None
                     sha = record_sha or digests.get(used)
-                    target.write_text(json.dumps({"producer": {"base_record_sha256": sha},
+                    producer = {"base_record_sha256": sha}
+                    if "--audit-report" in argv:
+                        audit = Path(argv[argv.index("--audit-report") + 1])
+                        producer["audit_report_sha256"] = (
+                            self.AUDIT_SHA_OVERRIDE or hashlib.sha256(audit.read_bytes()).hexdigest())
+                    target.write_text(json.dumps({"producer": producer,
                                                   "reasons": {"keyed": 1}}), encoding="utf-8")
                 elif target.name == "selection.json":
                     target.write_text(json.dumps({"would_skip": ["a", "b"], "sampled_executables": ["a"]}),
@@ -1939,6 +1948,113 @@ class ExecutableReuseTest(unittest.TestCase):
                     runner.validate_executable_reuse_binding(bad)
             with self.assertRaisesRegex(runner.SelectionExecutionError, "unexpected schema"):
                 runner.decode_selection_receipt(*encode_receipt({**selection_receipt(), "other": 1}))
+
+    REPORT = b'{"schema": "pulp-read-audit/v1", "stage0": {"verdict": "clean", "covered": ["t"]}}\n'
+
+    def staged(self, sha: str | None = None) -> dict:
+        return {"status": "staged", "run_id": "37340123820", "audit_commit": "e" * 40, "commits_behind": 3,
+                "report_sha256": sha or hashlib.sha256(self.REPORT).hexdigest()}
+
+    def test_the_audit_binding_is_optional_and_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            good = self.binding(Path(directory), Path(directory))
+            for audit in (self.staged(), {"status": "none", "reason": "no_clean_run"},
+                          {"status": "none", "reason": "fetch_failed"}, {"status": "none", "reason": "no_credentials"}):
+                runner.validate_executable_reuse_binding({**good, "audit": audit})
+            staged = self.staged()
+            for bad in ({**staged, "report_path": "/x"}, {**staged, "status": "applied"},
+                        {k: v for k, v in staged.items() if k != "commits_behind"},
+                        {**staged, "commits_behind": -1}, {**staged, "commits_behind": True},
+                        {**staged, "commits_behind": "3"}, {**staged, "audit_commit": "e"},
+                        {**staged, "report_sha256": "X" * 64}, {**staged, "run_id": ""},
+                        {"status": "none", "reason": "other"}, {"status": "none"},
+                        {"status": "none", "reason": "no_clean_run", "run_id": "1"}, None, "staged"):
+                with self.subTest(bad=bad), self.assertRaises(runner.SelectionExecutionError):
+                    runner.validate_executable_reuse_binding({**good, "audit": bad})
+
+    def derive_with_audit(self, audit: dict | None, report: bytes | None, accepts: bool = True):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        build, code = self.tree(Path(directory))
+        if accepts:
+            (code / "tools/ci/executable_keys.py").write_text('ap.add_argument("--audit-report")\n',
+                                                               encoding="utf-8")
+        result = Path(directory) / "result"
+        result.mkdir()
+        if report is not None:
+            (result / "read-audit.json").write_bytes(report)
+        binding = self.binding(build, code)
+        if audit is not None:
+            binding["audit"] = audit
+        run, calls = self.fake(build)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            derived = runner.derive_executable_reuse(binding, "b" * 40, build, result, run)
+        keys = next((a for a, _ in calls if len(a) > 2 and a[2].endswith("executable_keys.py")), [])
+        return derived, keys, result, stderr.getvalue()
+
+    def test_a_staged_report_is_verified_and_handed_to_the_key_code(self) -> None:
+        derived, keys, result, _ = self.derive_with_audit(self.staged(), self.REPORT)
+        self.assertEqual(derived["status"], "derived", derived)
+        self.assertEqual(keys[keys.index("--audit-report") + 1], str(result / "read-audit.json"))
+        self.assertEqual(derived["audit"], {"status": "applied", "run_id": "37340123820", "audit_commit": "e" * 40,
+                                            "commits_behind": 3,
+                                            "report_sha256": hashlib.sha256(self.REPORT).hexdigest()})
+
+    def test_a_manifest_keyed_on_another_report_refuses(self) -> None:
+        self.AUDIT_SHA_OVERRIDE = "0" * 64
+        try:
+            derived, _, _, _ = self.derive_with_audit(self.staged(), self.REPORT)
+        finally:
+            self.AUDIT_SHA_OVERRIDE = None
+        self.assertEqual(derived, {"status": "error: the audit report is not the one Shipyard bound"})
+
+    def test_a_staged_report_missing_or_altered_is_a_loud_mismatch(self) -> None:
+        for report, actual in ((None, None), (b"{}\n", hashlib.sha256(b"{}\n").hexdigest())):
+            with self.subTest(report=report):
+                derived, keys, _, stderr = self.derive_with_audit(self.staged(), report)
+                self.assertEqual(derived["status"], "derived", derived)  # keyed, and fails closed
+                self.assertNotIn("--audit-report", keys)
+                self.assertEqual((derived["audit"]["status"], derived["audit"]["expected_sha256"],
+                                  derived["audit"]["actual_sha256"]),
+                                 ("report_mismatch", hashlib.sha256(self.REPORT).hexdigest(), actual))
+                self.assertIn("audit report mismatch", stderr)
+
+    def test_a_base_whose_key_code_predates_the_audit_keys_without_the_flag(self) -> None:
+        derived, keys, _, _ = self.derive_with_audit(self.staged(), self.REPORT, accepts=False)
+        self.assertEqual(derived["status"], "derived", derived)
+        self.assertNotIn("--audit-report", keys)
+        self.assertEqual(derived["audit"]["status"], "base_key_code_predates_audit")
+
+    def test_no_report_or_none_is_stated(self) -> None:
+        derived, keys, _, _ = self.derive_with_audit(None, None)
+        self.assertEqual((derived["audit"], "--audit-report" in keys), ({"status": "absent"}, False))
+        derived, keys, _, _ = self.derive_with_audit({"status": "none", "reason": "no_credentials"}, self.REPORT)
+        self.assertEqual((derived["audit"], "--audit-report" in keys),
+                         ({"status": "none", "reason": "no_credentials"}, False))
+
+    def test_a_relative_bound_build_dir_reaches_every_step_absolute(self) -> None:
+        # Shipyard binds the build directory as the lane spells it, relative to
+        # the checkout; the steps run in the derivation code directory.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build, code = self.tree(root)
+            run, calls = self.fake(build)
+            binding = {**self.binding(build, code), "build_dir": "build"}
+            previous = os.getcwd()
+            os.chdir(root)
+            try:
+                derived = runner.derive_executable_reuse(binding, "b" * 40, build, root / "result", run)
+            finally:
+                os.chdir(previous)
+            self.assertEqual(derived["status"], "derived", derived)
+            steps = [argv for argv, kwargs in calls if kwargs.get("cwd") == str(code)]
+            self.assertEqual(len(steps), 4)  # toolchain pick, codemodel, keys, selection
+            pick = next(argv for argv in steps if argv[2] == "-c")
+            self.assertEqual(pick[4], str(build))
+            build_dirs = [argv[argv.index("--build-dir") + 1] for argv in steps if "--build-dir" in argv]
+            self.assertEqual(build_dirs, [str(build), str(build)])  # codemodel and keys
+            self.assertEqual(derived["build_dir"], str(build))
 
     def test_derives_from_base_code_after_a_fresh_reconfigure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
