@@ -295,6 +295,9 @@ class GpuConvolver : public GpuAudioNode {
     bool trial_staged_sync_reference_ = false;
     std::uint32_t trial_success_stride_ = 1;
     std::uint8_t trial_completion_policy_ = 0; // Dawn completion policy enum
+    // Low 32 bits carry the private completion wait; high 32 bits carry the
+    // private trace-retention bound. Keeping both in this existing field
+    // preserves the exported class layout for SDK consumers.
     std::uint64_t trial_completion_wait_ns_ = 0;
 
     std::unique_ptr<render::GpuCompute> gpu_;

@@ -349,6 +349,9 @@ int run(Config config) {
     trial_config.capture_callback_timing = true;
     trial_config.success_stride = 1;
     trial_config.slots = config.slots;
+    // Trial mode drains the fixed producer queues into pre-reserved
+    // non-RT retention so a full 100k-block census remains lossless.
+    trial_config.retention_capacity = total_blocks * 2u;
     if (!pulp::gpu_audio::detail::configure_gpu_convolver_trial(node, trial_config))
         return 2;
     if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||

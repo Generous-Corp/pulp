@@ -4711,6 +4711,14 @@
    ],
    "kind": "shell"
   },
+  "gpu-audio-p2-campaign-contract-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_campaign.py",
+    "tools/scripts/test_gpu_audio_p2_campaign.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-p4-evidence-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p4_evidence.py",
    "inputs": [
@@ -6715,13 +6723,6 @@
     "tools/import-design/material_audit.test.mjs"
    ],
    "kind": "node"
-  },
-  "pulp-gpu-audio-p2-campaign-contract": {
-   "entry": "tools/scripts/gpu_audio_p2_campaign.py",
-   "inputs": [
-    "tools/scripts/gpu_audio_p2_campaign.py"
-   ],
-   "kind": "python"
   },
   "pulp-gpu-audio-provider-identity": {
    "entry": "tools/scripts/gpu_audio_provider_identity.py",

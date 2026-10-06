@@ -94,6 +94,9 @@ struct GpuConvolverTrialConfig {
     // passed through to the prepared shared-I/O session; the public runtime
     // ABI remains unchanged.
     std::uint32_t slots = 0;
+    // Private diagnostic retention bound. A probe sets this to its complete
+    // callback census size; zero leaves the ordinary runtime queue behavior.
+    std::uint32_t retention_capacity = 0;
 };
 
 // Quiescent diagnostic drain for the complete admission census. This remains

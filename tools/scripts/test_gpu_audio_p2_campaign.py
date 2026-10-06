@@ -161,6 +161,19 @@ class P2CampaignContractTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             campaign.validate_identity_rows(wrong_classification, expected_sha)
 
+    def test_identity_rows_reject_unknown_and_unaccounted_trace_kinds(self):
+        rows = self._rows()
+        expected_sha = rows[0]["executable_observed_sha256"]
+        unknown = [dict(row) for row in rows]
+        unknown.append(dict(rows[-1], trace_kind=99))
+        with self.assertRaisesRegex(RuntimeError, "unknown trace kind"):
+            campaign.validate_identity_rows(unknown, expected_sha)
+        for trace_kind in (1, 3):
+            unaccounted = [dict(row) for row in rows]
+            unaccounted.append(dict(rows[-1], trace_kind=trace_kind))
+            with self.assertRaisesRegex(RuntimeError, "unaccounted trace kind"):
+                campaign.validate_identity_rows(unaccounted, expected_sha)
+
     def test_steady_receipt_requires_same_process_residency(self):
         base = {
             "schema": "pulp.gpu-audio-paced-convolution.v1", "status": "completed",

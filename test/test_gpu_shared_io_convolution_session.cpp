@@ -276,6 +276,18 @@ TEST_CASE("shared convolution session packs provider slots and delivers exact pr
     REQUIRE(fixture.session.release());
 }
 
+TEST_CASE("shared convolution session reports no provider identity for a non-Dawn provider",
+          "[gpu_audio][shared_io][session][identity]") {
+    Fixture fixture;
+    fixture.prepare();
+    const auto identity = fixture.session.provider_identity();
+    CHECK_FALSE(identity.authenticated);
+    CHECK(identity.provider_revision.empty());
+    CHECK(identity.adapter_name.empty());
+    CHECK(identity.adapter_backend.empty());
+    REQUIRE(fixture.session.release());
+}
+
 TEST_CASE("shared convolution session trace captures admission and terminal identity",
           "[gpu_audio][shared_io][trace]") {
     Fixture fixture;
