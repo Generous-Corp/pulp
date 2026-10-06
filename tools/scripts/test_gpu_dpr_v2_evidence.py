@@ -599,7 +599,8 @@ def termination_boundary_tests() -> None:
     planted = NeverReapedAdapter()
     with (
         mock.patch.object(process_boundary.os, "name", "posix"),
-        # create=True: Windows has no os.killpg to replace.
+        # create=True: Windows has neither os.killpg nor signal.SIGKILL.
+        mock.patch.object(process_boundary.signal, "SIGKILL", 9, create=True),
         mock.patch.object(process_boundary.os, "killpg", create=True) as killpg,
     ):
         try:
@@ -608,14 +609,15 @@ def termination_boundary_tests() -> None:
             assert error.code in str(error)
         else:
             raise AssertionError("unreapable adapter lacked a typed termination failure")
+        expected_signals = [
+            mock.call(planted.pid, process_boundary.signal.SIGTERM),
+            mock.call(planted.pid, process_boundary.signal.SIGKILL),
+        ]
     assert planted.wait_timeouts == [
         process_boundary.TERMINATION_GRACE_SECONDS,
         process_boundary.TERMINATION_FINAL_SECONDS,
     ]
-    assert killpg.call_args_list == [
-        mock.call(planted.pid, process_boundary.signal.SIGTERM),
-        mock.call(planted.pid, process_boundary.signal.SIGKILL),
-    ]
+    assert killpg.call_args_list == expected_signals
 
     events: list[str] = []
     suspended = mock.Mock(pid=31337, _handle=99)
