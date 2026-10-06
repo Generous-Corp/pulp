@@ -1093,6 +1093,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertNotIn("is-active --quiet unattended-upgrades", block)
         # A running upgrade is waited for, never killed mid-dpkg.
         self.assertNotIn("systemctl kill", block)
+        self.assertIn("cloud-init status --wait", block)
+        self.assertIn("--ciupgrade 0", self.script)
 
     def test_engine_is_present_and_syntactically_valid(self) -> None:
         """The engine both wrappers exec must be committed, executable, and parse."""

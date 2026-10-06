@@ -866,8 +866,10 @@ EOF
     rm -f "$VM_FIREWALL_TMP"
     NET0="${NET0},firewall=1"
 fi
+# --ciupgrade 0: Proxmox's cloud-init default runs a full apt upgrade on first
+# boot, which holds the dpkg lock while the job's own apt-get runs.
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
-    --cpuunits 50 --balloon 0 --onboot 0 \
+    --cpuunits 50 --balloon 0 --onboot 0 --ciupgrade 0 \
     --net0 "$NET0" \
     --ipconfig0 "ip=${GUEST_IP}/${GUEST_IPV4_PREFIX_LENGTH},gw=${GUEST_IPV4_GATEWAY}" \
     --nameserver "$GUEST_DNS_SERVER" >/dev/null \
@@ -995,14 +997,18 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
         | grep -Eq "^[[:space:]-]*Token:"
 ' || die "golden $GOLDEN lacks an uncredentialed gh CLI"
 
-# The golden's apt timers last ran when it was baked, so Persistent=true starts
-# apt-daily-upgrade about a minute after every clone boots. It holds the dpkg
+# Two things run apt in a fresh clone. Cloud-init's first-boot module upgrades
+# packages unless --ciupgrade 0 is set above, and the golden's apt timers last
+# ran when it was baked, so Persistent=true starts apt-daily-upgrade about a
+# minute after every clone boots. It holds the dpkg
 # lock while the job's own apt-get runs, and the job fails on "Could not get
 # lock /var/lib/dpkg/lock-frontend". Stop the timers in this throwaway clone and
 # let any apt run that already started finish (killing it mid-dpkg would break
 # the clone) before a job can be assigned.
 ssh -o BatchMode=yes "ci@$GUEST_IP" '
     sudo -n systemctl stop apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+    # First-boot cloud-init may still be running apt for the golden.
+    timeout 600 cloud-init status --wait >/dev/null 2>&1 || true
     for _ in $(seq 1 120); do
         # unattended-upgrades.service is only a shutdown hook and stays active;
         # the upgrade itself runs inside apt-daily-upgrade.service.
