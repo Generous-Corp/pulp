@@ -890,15 +890,17 @@ std::string GraphSerializer::to_json(
     canonical_nodes.reserve(graph.nodes().size());
     for (const auto& node : graph.nodes())
         canonical_nodes.push_back(&node);
-    std::sort(canonical_nodes.begin(), canonical_nodes.end(),
-              [](const auto* lhs, const auto* rhs) { return lhs->id < rhs->id; });
+    if (regions.empty())
+        std::sort(canonical_nodes.begin(), canonical_nodes.end(),
+                  [](const auto* lhs, const auto* rhs) { return lhs->id < rhs->id; });
     std::vector<const Connection*> canonical_connections;
     canonical_connections.reserve(graph.connections().size());
     for (const auto& connection : graph.connections())
         canonical_connections.push_back(&connection);
-    std::sort(
-        canonical_connections.begin(), canonical_connections.end(),
-        [](const auto* lhs, const auto* rhs) {
+    if (regions.empty())
+        std::sort(
+            canonical_connections.begin(), canonical_connections.end(),
+            [](const auto* lhs, const auto* rhs) {
             return std::tie(lhs->source_node, lhs->source_port, lhs->dest_node, lhs->dest_port,
                             lhs->feedback, lhs->midi, lhs->automation, lhs->audio_rate_modulation,
                             lhs->sidechain, lhs->automation_param_id, lhs->automation_range_lo,
@@ -909,20 +911,10 @@ std::string GraphSerializer::to_json(
                             rhs->sidechain, rhs->automation_param_id, rhs->automation_range_lo,
                             rhs->automation_range_hi, rhs->automation_smoothing_ms,
                             rhs->automation_mix);
-        });
+            });
     std::vector<SampleRegionDefinition> canonical_regions(regions.begin(), regions.end());
-    std::sort(canonical_regions.begin(), canonical_regions.end(),
-              [](const auto& lhs, const auto& rhs) { return lhs.region_id < rhs.region_id; });
-    for (auto& region : canonical_regions) {
-        std::sort(region.members.begin(), region.members.end(),
-                  [](const auto& lhs, const auto& rhs) { return lhs.node < rhs.node; });
-        std::sort(region.input_boundaries.begin(), region.input_boundaries.end());
-        std::sort(region.output_boundaries.begin(), region.output_boundaries.end());
-        std::sort(region.promoted_parameters.begin(), region.promoted_parameters.end(),
-                  [](const auto& lhs, const auto& rhs) {
-                      return std::tie(lhs.param_id, lhs.key) < std::tie(rhs.param_id, rhs.key);
-                  });
-    }
+    // Region records and their nested members remain authored sequences: their
+    // order carries topology/control meaning across round trips.
     if (!regions.empty() && graph.connections().size() > kMaxSerializedSampleRegionConnections) {
         return {};
     }
