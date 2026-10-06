@@ -326,6 +326,8 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
     if (manifest.worker_scheduling != "ordinary_worker" &&
         manifest.worker_scheduling != "audio_workgroup")
         return false;
+    if (manifest.worker_scheduling == "audio_workgroup" && !manifest.worker_workgroup_joined)
+        return false;
     if (!hex_string(manifest.source_revision, 40) || !hex_string(manifest.provider_revision, 40) ||
         !hex_string(manifest.binary_sha256, 64) ||
         !hex_string(manifest.provider_asset_sha256, 64) || manifest.build_flags.empty() ||
