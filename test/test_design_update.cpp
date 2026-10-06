@@ -132,8 +132,7 @@ TEST_CASE("value-only binding metadata does not change the materialization shape
     CHECK(plan.updates.front().key == "editor");
 }
 
-TEST_CASE("materialization identity changes recreate keyed nodes",
-          "[view][import][update]") {
+TEST_CASE("materialization identity changes recreate keyed nodes", "[view][import][update]") {
     SECTION("the same SVG asset is retained") {
         auto old_node = node("svg");
         auto new_node = old_node;
