@@ -2,16 +2,17 @@
 // Covers: harness happy path, report generation, MIDI control surface,
 // missing validator graceful degradation, and state round-trips.
 
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
-#include <pulp/format/validation_harness.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <pulp/format/validation_harness.hpp>
 #if !defined(_WIN32)
 #include <sys/stat.h>
 #endif
@@ -99,15 +100,12 @@ std::unique_ptr<pulp::format::Processor> create_test_gain() {
 }
 
 std::filesystem::path make_temp_path(const char* stem) {
-    auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique + ".json");
+    return pulp::test::unique_temp_path(stem, ".json");
 }
 
+// A unique path for a directory the caller creates (nothing is created here).
 std::filesystem::path make_temp_dir(const char* stem) {
-    auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique);
+    return pulp::test::unique_temp_path(stem);
 }
 
 void write_text_file(const std::filesystem::path& path, const std::string& text) {

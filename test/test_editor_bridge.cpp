@@ -19,12 +19,12 @@
 #include "pulp/view/scripted_ui.hpp"
 #include "pulp/view/web_view.hpp"
 #include "pulp/view/widgets.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <filesystem>
@@ -531,12 +531,8 @@ TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement"
           "[editor_bridge][native_runtime][scripted_ui][reload]")
 {
     namespace fs = std::filesystem;
-    const auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto temp_dir = fs::temp_directory_path()
-                        / ("pulp-editor-bridge-session-" + unique);
+    const auto temp_dir = pulp::test::make_unique_temp_dir("pulp-editor-bridge-session");
     const auto script_path = temp_dir / "ui.js";
-    fs::create_directories(temp_dir);
     const auto write_script = [&](float value) {
         std::ofstream out(script_path);
         out << "var response = JSON.parse(__testEditorDispatch(JSON.stringify("

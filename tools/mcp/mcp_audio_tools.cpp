@@ -103,6 +103,7 @@ std::string handle_audio_probe_json(const std::string& params_json) {
         return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string("Error: " + temp_error) +
                "}]}";
     }
+    const ProbeJsonTempGuard temp_guard(temp.directory);
     auto output_path = temp.json_path;
 
     std::string cmd = shell_quote(source_build_cli_path(root).string()) + " run";
@@ -205,6 +206,7 @@ std::string handle_audio_scope(const std::string& params_json) {
         return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string("Error: " + temp_error) +
                "}]}";
     }
+    const ProbeJsonTempGuard temp_guard(temp.directory);
     auto output_path = temp.directory / "scope.json";
 
     std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio scope";
@@ -296,6 +298,7 @@ std::string handle_audio_plugin_inspect(const std::string& params_json) {
     auto temp = make_private_probe_json_temp(temp_error);
     if (temp.json_path.empty())
         return arg_error("Error: " + temp_error);
+    const ProbeJsonTempGuard temp_guard(temp.directory);
     const auto diagnostics_path = temp.directory / "diagnostics.txt";
     // Keep stdout as the JSON protocol. Vendor libraries and the host scanner
     // may write diagnostics to stderr even on success.
@@ -417,6 +420,7 @@ std::string handle_audio_render(const std::string& params_json) {
     if (temp.json_path.empty()) {
         return arg_error("Error: " + temp_error);
     }
+    const ProbeJsonTempGuard temp_guard(temp.directory);
     const fs::path temp_dir = temp.directory;
     if (out.empty())
         out = (temp_dir / "render.wav").string();
@@ -579,6 +583,7 @@ std::string handle_audio_compare(const std::string& params_json) {
     if (temp.json_path.empty()) {
         return arg_error("Error: " + temp_error);
     }
+    const ProbeJsonTempGuard temp_guard(temp.directory);
     const fs::path temp_dir = temp.directory;
     const auto report_path = (temp_dir / "compare.json").string();
 

@@ -10,10 +10,11 @@
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -78,9 +79,7 @@ std::string asset_text(const ClaudeBundleAsset& asset) {
 class TempDir {
 public:
     explicit TempDir(const std::string& prefix) {
-        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
 
     ~TempDir() {

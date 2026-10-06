@@ -100,6 +100,7 @@ paths = [
   "tools/scripts/test_cli_sync_check_extra.py",
   "tools/scripts/test_cmajor_external.py",
   "tools/scripts/test_codecov_upload_contract.py",
+  "tools/scripts/test_codeql_workflow_concurrency.py",
   "tools/scripts/test_compat_aggregate.py",
   "tools/scripts/test_compat_sync_check.py",
   "tools/scripts/test_compat_sync_check_extra.py",
@@ -1551,6 +1552,33 @@ tests = [
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
   "clean-worktrees-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-684cceaca97b"
+paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clock-only-temp-key-guard-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3840,6 +3868,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b65ea4a4ca0e"
+paths = ["tools/scripts/test_tmp_leak_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "tmp-leak-guard-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-9ece129bb475"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
@@ -4919,9 +4974,11 @@ paths = [
   "tools/scripts/test_clean_worktrees.py",
   "tools/scripts/test_cli_sync_check.py",
   "tools/scripts/test_cli_sync_check_extra.py",
+  "tools/scripts/test_clock_only_temp_key_guard.py",
   "tools/scripts/test_cmajor_external.py",
   "tools/scripts/test_cmake_manifest_parse.py",
   "tools/scripts/test_codecov_upload_contract.py",
+  "tools/scripts/test_codeql_workflow_concurrency.py",
   "tools/scripts/test_compat_aggregate.py",
   "tools/scripts/test_compat_sync_check.py",
   "tools/scripts/test_compat_sync_check_extra.py",
@@ -5126,6 +5183,7 @@ paths = [
   "tools/scripts/test_summarize_daw_bench_results.py",
   "tools/scripts/test_tart_home_resolution.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
+  "tools/scripts/test_tmp_leak_guard.py",
   "tools/scripts/test_tools_registry_check.py",
   "tools/scripts/test_trace_frame_cost.py",
   "tools/scripts/test_trace_span_category_lint.py",
@@ -5202,6 +5260,8 @@ tests = [
   "changed-surface-script-families-drift",
   "checkout-location-guard-selftest",
   "claude-md-sync-hook",
+  "clock-only-temp-key-guard",
+  "clock-only-temp-key-guard-selftest",
   "cmake-examples-reorder-init-guard",
   "cmake-ios-hostapp-bundle-guard",
   "consumption-census-contract-control-note",
@@ -5251,6 +5311,7 @@ tests = [
   "timeline-schema-js-drift",
   "timeline-schema-ts-drift",
   "timeline-sync-soak-verifier-self-test",
+  "tmp-leak-guard-selftest",
   "tool-registry-reminder-hook",
   "tools-registry-check",
   "tools-registry-check-selftest",
@@ -5411,9 +5472,11 @@ paths = [
   "tools/scripts/test_clean_worktrees.py",
   "tools/scripts/test_cli_sync_check.py",
   "tools/scripts/test_cli_sync_check_extra.py",
+  "tools/scripts/test_clock_only_temp_key_guard.py",
   "tools/scripts/test_cmajor_external.py",
   "tools/scripts/test_cmake_manifest_parse.py",
   "tools/scripts/test_codecov_upload_contract.py",
+  "tools/scripts/test_codeql_workflow_concurrency.py",
   "tools/scripts/test_compat_aggregate.py",
   "tools/scripts/test_compat_sync_check.py",
   "tools/scripts/test_compat_sync_check_extra.py",
@@ -5618,6 +5681,7 @@ paths = [
   "tools/scripts/test_summarize_daw_bench_results.py",
   "tools/scripts/test_tart_home_resolution.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
+  "tools/scripts/test_tmp_leak_guard.py",
   "tools/scripts/test_tools_registry_check.py",
   "tools/scripts/test_trace_frame_cost.py",
   "tools/scripts/test_trace_span_category_lint.py",
