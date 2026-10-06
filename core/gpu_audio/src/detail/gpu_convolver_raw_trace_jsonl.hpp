@@ -751,7 +751,8 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
     raw_writer_detail::json_string(manifest_line, manifest.host_thermal_state);
     manifest_line << R"(,"power_state":)";
     raw_writer_detail::json_string(manifest_line, manifest.power_state);
-    manifest_line << R"(,"workgroup_joined":)" << (manifest.worker_workgroup_joined ? "true" : "false")
+    manifest_line << R"(,"workgroup_joined":)"
+                  << (manifest.worker_workgroup_joined ? "true" : "false")
                   << R"(,"workgroup_join_failures":)" << manifest.worker_workgroup_join_failures
                   << R"(})"
                   << R"(,"row":{"block_frames":)" << manifest.block_frames
