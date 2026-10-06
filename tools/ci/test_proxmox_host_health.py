@@ -83,7 +83,7 @@ class GovernorTests(unittest.TestCase):
                 ["/bin/bash", str(GOVERNOR), *args],
                 capture_output=True,
                 text=True,
-                env=full_env,
+                env=full_env, encoding="utf-8"
             )
 
     def test_reserve_is_derived_from_the_machine(self) -> None:
@@ -156,7 +156,7 @@ class HealthCheckTests(unittest.TestCase):
     def _manifest(self) -> list[tuple[str, str]]:
         out = subprocess.run(
             ["/bin/bash", str(HEALTH), "--manifest"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, encoding="utf-8"
         ).stdout
         return [tuple(line.split()[:2]) for line in out.splitlines() if line.strip()]
 
@@ -182,7 +182,7 @@ class HealthCheckTests(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["/bin/bash", str(HEALTH), *args],
-            capture_output=True, text=True, env=self._env(),
+            capture_output=True, text=True, env=self._env(), encoding="utf-8"
         )
 
     def _install(self) -> None:

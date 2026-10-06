@@ -31,7 +31,7 @@ def repo(files: dict[str, str]) -> tempfile.TemporaryDirectory:
     for name, text in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
     return tmp
 
@@ -84,7 +84,7 @@ class LedgerTests(unittest.TestCase):
     def test_every_listed_file_says_why(self) -> None:
         ledger = Path(__file__).resolve().parents[2] / "tools/scripts/clock_only_temp_key_guard.json"
         self.assertEqual(ledger, guard.LEDGER)
-        for name, entry in json.loads(ledger.read_text())["sites"].items():
+        for name, entry in json.loads(ledger.read_text(encoding="utf-8"))["sites"].items():
             with self.subTest(name=name):
                 self.assertGreater(entry["count"], 0)
                 self.assertGreater(len(entry["reason"]), 20)
@@ -93,7 +93,7 @@ class LedgerTests(unittest.TestCase):
         with repo(files) as td:
             ledger = Path(td) / "ledger.json"
             ledger.write_text(json.dumps({"schema": 1, "sites": {
-                name: {"count": count, "reason": "r"} for name, count in counts.items()}}))
+                name: {"count": count, "reason": "r"} for name, count in counts.items()}}), encoding="utf-8")
             return guard.main(["--root", td, "--ledger", str(ledger)])
 
     def test_a_listed_site_passes_and_a_new_one_beside_it_fails(self) -> None:

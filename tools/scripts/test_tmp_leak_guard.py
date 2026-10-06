@@ -26,7 +26,7 @@ class TmpLeakGuardTest(unittest.TestCase):
 
     def guard(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, str(GUARD), *args], env=self.env,
-                              text=True, capture_output=True, timeout=60)
+                              text=True, capture_output=True, timeout=60, encoding="utf-8")
 
     def python(self, code: str) -> list[str]:
         return ["--", sys.executable, "-c", code]
