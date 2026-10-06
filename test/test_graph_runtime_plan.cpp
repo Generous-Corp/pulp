@@ -159,9 +159,11 @@ TEST_CASE("GraphRuntimePlan canonicalizes ordinary audio fan-in only",
         std::vector<NodeId> ids;
         const auto& destination = result.plan.nodes[3];
         for (std::uint32_t offset = 0; offset < destination.inbound_connection_count; ++offset) {
-            const auto connection_index = result.plan.inbound_connection_indices[
-                destination.first_inbound_connection + offset];
-            ids.push_back(result.plan.nodes[result.plan.connections[connection_index].source_index].id);
+            const auto connection_index =
+                result.plan
+                    .inbound_connection_indices[destination.first_inbound_connection + offset];
+            ids.push_back(
+                result.plan.nodes[result.plan.connections[connection_index].source_index].id);
         }
         return ids;
     };

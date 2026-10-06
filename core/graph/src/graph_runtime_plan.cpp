@@ -261,21 +261,22 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                 result.plan.nodes[right.dest_index].id,
                 right.dest_port,
             };
-            if (left_key != right_key) return left_key < right_key;
+            if (left_key != right_key)
+                return left_key < right_key;
             return lhs < rhs;
         };
         const auto ordinary_audio = [&](std::uint32_t connection_index) {
             const auto& connection = result.plan.connections[connection_index];
             return carries_audio(connection) && !connection.feedback && !connection.sidechain;
         };
-        const auto canonicalize_slice = [&](std::uint32_t first,
-                                            std::uint32_t count,
+        const auto canonicalize_slice = [&](std::uint32_t first, std::uint32_t count,
                                             std::vector<std::uint32_t>& adjacency) {
             std::vector<std::uint32_t> ordinary;
             ordinary.reserve(count);
             for (std::uint32_t offset = 0; offset < count; ++offset) {
                 const auto connection_index = adjacency[first + offset];
-                if (ordinary_audio(connection_index)) ordinary.push_back(connection_index);
+                if (ordinary_audio(connection_index))
+                    ordinary.push_back(connection_index);
             }
             std::sort(ordinary.begin(), ordinary.end(), connection_less);
             std::size_t ordinary_index = 0;
