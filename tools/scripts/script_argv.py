@@ -47,10 +47,28 @@ def argv_for(executable: str | os.PathLike[str], *, platform: str | None = None)
     if interpreter.startswith("python"):
         return [sys.executable, path]
     if interpreter in ("sh", "bash", "dash", "zsh"):
-        bash = shutil.which("bash")
+        bash = _windows_bash()
         if bash:
             return [bash, path]
     return [path]
+
+
+def _windows_bash() -> str | None:
+    """Git for Windows' bash. PATH often carries only ``Git\\cmd`` (where
+    ``git.exe`` lives), so look beside it for ``Git\\bin\\bash.exe`` when
+    ``bash`` itself is not on PATH."""
+    bash = shutil.which("bash")
+    if bash:
+        return bash
+    git = shutil.which("git")
+    if not git:
+        return None
+    root = os.path.dirname(os.path.dirname(git))
+    for candidate in (os.path.join(root, "bin", "bash.exe"),
+                      os.path.join(root, "usr", "bin", "bash.exe")):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 __all__ = ["argv_for"]
