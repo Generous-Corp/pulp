@@ -26,6 +26,14 @@ REQUIRED_MEASURED_BLOCKS = 100_000
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Keep this in lockstep with detail::SharedIoTraceKind.  The raw P2
+# lifecycle census deliberately retains only Terminal and Delivery rows;
+# Eligible and Recovery rows are valid trace kinds elsewhere, but are not
+# accounted for by this admission/terminal/delivery verifier and therefore
+# must fail closed rather than being silently ignored.
+TRACE_KINDS = frozenset((0, 1, 2, 3))
+LIFECYCLE_TRACE_KINDS = frozenset((0, 2))
+
 # A P2 receipt is promotion input only when the provider and the artifact
 # generation that produced it are bound to one immutable manifest.  Keep this
 # list deliberately small: adding a field without including it in the digest
@@ -245,12 +253,20 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
         raise RuntimeError("raw census contains unknown row kind")
     if not records:
         raise RuntimeError("raw record census is empty")
+    record_rows = [r for r in records if r.get("kind") == "record"]
+    for record in record_rows:
+        trace_kind = record.get("trace_kind")
+        if (isinstance(trace_kind, bool) or not isinstance(trace_kind, int) or
+                trace_kind not in TRACE_KINDS):
+            raise RuntimeError("raw census contains unknown trace kind")
+        if trace_kind not in LIFECYCLE_TRACE_KINDS:
+            raise RuntimeError("raw census contains an unaccounted trace kind")
     admissions = [(r.get("engine_id"), r.get("generation"), r.get("sequence"))
                   for r in rows if r.get("kind") == "admission"]
-    terminals = [(r.get("engine_id"), r.get("generation"), r.get("sequence")) for r in records
-                 if r.get("kind") == "record" and r.get("trace_kind") == 0]
-    deliveries = [(r.get("engine_id"), r.get("generation"), r.get("sequence")) for r in records
-                  if r.get("kind") == "record" and r.get("trace_kind") == 2]
+    terminals = [(r.get("engine_id"), r.get("generation"), r.get("sequence")) for r in record_rows
+                 if r.get("trace_kind") == 0]
+    deliveries = [(r.get("engine_id"), r.get("generation"), r.get("sequence")) for r in record_rows
+                  if r.get("trace_kind") == 2]
     if not admissions:
         raise RuntimeError("raw admission census is empty")
     if len(admissions) != len(set(admissions)):
@@ -262,9 +278,9 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
     engine_ids = {r.get("engine_id") for r in rows if r.get("kind") in ("admission", "record")}
     if engine_ids != {provenance_engine_id}:
         raise RuntimeError("raw rows have inconsistent engine identity")
-    if any(r.get("kind") == "record" and r.get("trace_kind") == 0 and (r.get("generation", 0) == 0 or
+    if any(r.get("trace_kind") == 0 and (r.get("generation", 0) == 0 or
            r.get("valid_stages", 0) == 0 or r.get("gpu_terminal", 0) == 0 or
-           r.get("admission_identity_matched") is not True) for r in records):
+           r.get("admission_identity_matched") is not True) for r in record_rows):
         raise RuntimeError("raw terminal row lacks authenticated fields")
     admission_set = set(admissions)
     admitted_deliveries = [identity for identity in deliveries if identity in admission_set]
@@ -287,9 +303,9 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
             raise RuntimeError("raw admitted-delivery census disagrees with receipt")
     terminal_by_identity = {
         (r.get("engine_id"), r.get("generation"), r.get("sequence")): r
-        for r in records if r.get("kind") == "record" and r.get("trace_kind") == 0
+        for r in record_rows if r.get("trace_kind") == 0
     }
-    for delivery in (r for r in records if r.get("kind") == "record" and r.get("trace_kind") == 2):
+    for delivery in (r for r in record_rows if r.get("trace_kind") == 2):
         identity = (delivery.get("engine_id"), delivery.get("generation"), delivery.get("sequence"))
         if delivery.get("delivery", 0) == 0:
             raise RuntimeError("raw delivery row lacks an audio disposition")
