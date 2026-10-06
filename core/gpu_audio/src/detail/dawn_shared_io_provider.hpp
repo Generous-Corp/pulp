@@ -138,6 +138,9 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
 
     struct AdapterIdentity {
         std::string name;
+        std::string backend;
+        std::string native_runtime_name;
+        std::string native_runtime_revision;
         std::uint32_t vendor_id = 0;
         std::uint32_t device_id = 0;
     };

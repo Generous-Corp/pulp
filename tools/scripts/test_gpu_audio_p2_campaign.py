@@ -35,7 +35,8 @@ class P2CampaignContractTests(unittest.TestCase):
                     "admission_identity_matched": True}
         delivery = {"kind": "record", "engine_id": 7, "trace_kind": 2, "generation": 1,
                     "sequence": 2, "delivery": 1, "callback_timing_available": True,
-                    "callback_end_ns": 10, "result_visible_ns": 11}
+                    "callback_end_ns": 10, "result_visible_ns": 11,
+                    "admitted": True, "callback_only": False}
         return [provenance, admission, terminal, delivery]
 
     def test_identity_rows_reject_duplicate_or_missing_terminals(self):
@@ -103,6 +104,20 @@ class P2CampaignContractTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             campaign.validate_identity_rows(bad_gpu_pair, expected_sha)
 
+    def test_callback_only_delivery_rows_are_retained_and_classified(self):
+        rows = self._rows()
+        expected_sha = rows[0]["executable_observed_sha256"]
+        callback_only = {
+            "kind": "record", "engine_id": 7, "trace_kind": 2, "generation": 1,
+            "sequence": 3, "delivery": 2, "callback_timing_available": True,
+            "callback_end_ns": 20, "result_visible_ns": 21,
+            "admitted": False, "callback_only": True,
+        }
+        campaign.validate_identity_rows(rows + [callback_only], expected_sha)
+        wrong_classification = list(rows) + [dict(callback_only, admitted=True)]
+        with self.assertRaises(RuntimeError):
+            campaign.validate_identity_rows(wrong_classification, expected_sha)
+
     def test_steady_receipt_requires_same_process_residency(self):
         base = {
             "schema": "pulp.gpu-audio-paced-convolution.v1", "status": "completed",
@@ -128,6 +143,10 @@ class P2CampaignContractTests(unittest.TestCase):
     def test_defaults_to_required_100k_blocks(self):
         args = campaign.parse_args(["--probe", "/bin/true", "--output-dir", "/tmp/p2-contract-test"])
         self.assertEqual(args.blocks, campaign.REQUIRED_MEASURED_BLOCKS)
+
+    def test_plan_only_declares_complete_matrix(self):
+        args = campaign.parse_args(["--plan-only"])
+        self.assertEqual(campaign.run(args), 0)
 
     def test_lower_block_count_rejected_before_probe(self):
         with tempfile.TemporaryDirectory() as root:

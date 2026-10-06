@@ -133,12 +133,17 @@ def sha256(path: Path) -> str:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--probe", required=True, type=Path)
-    p.add_argument("--output-dir", required=True, type=Path)
+    p.add_argument("--probe", type=Path)
+    p.add_argument("--output-dir", type=Path)
     p.add_argument("--frames", type=int, default=32, choices=(32, 64, 128))
     p.add_argument("--blocks", type=int, default=REQUIRED_MEASURED_BLOCKS)
     p.add_argument("--warmup", type=int, default=16)
     p.add_argument("--wake-on-write", action="store_true")
+    p.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="validate and print the complete authenticated matrix without running hardware",
+    )
     return p.parse_args(argv)
 
 
@@ -242,8 +247,10 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
            r.get("valid_stages", 0) == 0 or r.get("gpu_terminal", 0) == 0 or
            r.get("admission_identity_matched") is not True) for r in records):
         raise RuntimeError("raw terminal row lacks authenticated fields")
-    if len(deliveries) != len(admissions) or sorted(admissions) != sorted(deliveries):
-        raise RuntimeError("admission/delivery identity multisets differ")
+    admission_set = set(admissions)
+    admitted_deliveries = [identity for identity in deliveries if identity in admission_set]
+    if len(admitted_deliveries) != len(admissions) or sorted(admissions) != sorted(admitted_deliveries):
+        raise RuntimeError("admission/admitted-delivery identity multisets differ")
     if sorted(admissions) != sorted(terminals):
         raise RuntimeError("admission/terminal identity multisets differ")
     terminal_by_identity = {
@@ -259,6 +266,13 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
         if not _positive_integer(delivery.get("callback_end_ns")) or not _positive_integer(
                 delivery.get("result_visible_ns")):
             raise RuntimeError("raw delivery row lacks publication timestamps")
+        expected_admitted = identity in admission_set
+        if delivery.get("admitted") is not expected_admitted:
+            raise RuntimeError("raw delivery admitted classification disagrees with admissions")
+        if delivery.get("callback_only") is not (not expected_admitted):
+            raise RuntimeError("raw delivery callback-only classification disagrees with admissions")
+        if not expected_admitted:
+            continue
         terminal = terminal_by_identity[identity]
         # GPU delivery is legal only after an accepted terminal.  A fallback,
         # silence, or priming decision may pair with any typed terminal cause.
@@ -267,6 +281,22 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.plan_only:
+        cells = [{"slots": slots, "lead": lead} for slots in SLOTS for lead in LEADS]
+        print(json.dumps({
+            "schema": SCHEMA,
+            "status": "contract_only",
+            "performance_verdict": "unassigned",
+            "cells": cells,
+            "cell_count": len(cells),
+            "run_kinds": ["cold", "steady"],
+            "runs_per_kind": RUNS_PER_KIND,
+            "required_measured_blocks": REQUIRED_MEASURED_BLOCKS,
+            "trial_count": len(cells) * 2 * RUNS_PER_KIND,
+        }, sort_keys=True))
+        return 0
+    if args.probe is None or args.output_dir is None:
+        raise RuntimeError("--probe and --output-dir are required for a hardware campaign")
     if not args.probe.is_file() or not args.probe.stat().st_mode & 0o111:
         raise RuntimeError(f"probe is not executable: {args.probe}")
     if args.output_dir.exists():

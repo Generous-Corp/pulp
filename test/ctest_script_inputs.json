@@ -6712,6 +6712,13 @@
    ],
    "kind": "node"
   },
+  "pulp-gpu-audio-p2-campaign-contract": {
+   "entry": "tools/scripts/gpu_audio_p2_campaign.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_campaign.py"
+   ],
+   "kind": "python"
+  },
   "pulp-gpu-audio-provider-identity": {
    "entry": "tools/scripts/gpu_audio_provider_identity.py",
    "inputs": [

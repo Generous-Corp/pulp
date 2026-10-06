@@ -478,6 +478,19 @@
                     FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                     RESOURCE_LOCK pulp_gpu
                     TIMEOUT 150)
+
+                # Reach the authoritative P2 matrix driver in the configured
+                # test graph without starting its 16,000,000-block hardware
+                # campaign. This contract invocation proves that the driver
+                # exposes all slots/leads, cold/steady runs, and the required
+                # measured-block denominator; physical execution remains an
+                # explicit operator action with an authenticated provider.
+                add_test(NAME pulp-gpu-audio-p2-campaign-contract
+                    COMMAND "${Python3_EXECUTABLE}"
+                        "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_p2_campaign.py"
+                        --plan-only)
+                set_tests_properties(pulp-gpu-audio-p2-campaign-contract PROPERTIES
+                    TIMEOUT 10)
             endif()
 
             # This goes through the private session factory rather than

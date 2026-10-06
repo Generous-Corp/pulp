@@ -185,6 +185,30 @@ std::string copy_string(wgpu::StringView value) {
     return {value.data, length};
 }
 
+std::string backend_name(wgpu::BackendType backend) {
+    switch (backend) {
+    case wgpu::BackendType::Metal:
+        return "metal";
+    case wgpu::BackendType::Vulkan:
+        return "vulkan";
+    case wgpu::BackendType::D3D11:
+        return "d3d11";
+    case wgpu::BackendType::D3D12:
+        return "d3d12";
+    case wgpu::BackendType::OpenGL:
+        return "opengl";
+    case wgpu::BackendType::OpenGLES:
+        return "opengles";
+    case wgpu::BackendType::WebGPU:
+        return "webgpu";
+    case wgpu::BackendType::Null:
+        return "null";
+    case wgpu::BackendType::Undefined:
+        return {};
+    }
+    return {};
+}
+
 } // namespace
 
 constexpr auto kSharedIoFftWgsl = R"wgsl(
@@ -667,6 +691,12 @@ struct DawnSharedIoProvider::Impl {
             return false;
         }
         adapter_identity.name = copy_string(adapter_info.device);
+        adapter_identity.backend = backend_name(adapter_info.backendType);
+        adapter_identity.native_runtime_revision = revision(dawnProcGetVersion());
+        // Preserve the runtime description returned by the live adapter. The
+        // session accepts it only together with the observed proc revision and
+        // backend; a build-time Dawn/Metal label is not runtime identity.
+        adapter_identity.native_runtime_name = copy_string(adapter_info.description);
         adapter_identity.vendor_id = adapter_info.vendorID;
         adapter_identity.device_id = adapter_info.deviceID;
         if (!adapter.HasFeature(wgpu::FeatureName::HostMappedPointer)) {

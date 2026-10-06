@@ -76,17 +76,18 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
         const auto adapter = provider->adapter_identity();
         identity.provider_revision = provider->dawn_revision();
         identity.adapter_name = adapter.name;
-        // The provider rejects every backend other than Metal before the
-        // session is prepared. Record that observed backend beside the
-        // adapter identity rather than relying on a build-time label.
-        identity.adapter_backend = "Metal";
+        identity.adapter_backend = adapter.backend;
         identity.adapter_vendor_id = adapter.vendor_id;
         identity.adapter_device_id = adapter.device_id;
-        identity.native_runtime_name = "Dawn";
-        identity.native_runtime_backend = identity.adapter_backend;
+        identity.native_runtime_name = adapter.native_runtime_name;
+        identity.native_runtime_backend = adapter.backend;
         identity.authenticated =
             !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
-            identity.adapter_backend == "Metal" && identity.adapter_vendor_id != 0;
+            identity.adapter_backend == "metal" && identity.adapter_vendor_id != 0 &&
+            !adapter.native_runtime_revision.empty() &&
+            adapter.native_runtime_revision == identity.provider_revision &&
+            !identity.native_runtime_name.empty() &&
+            identity.native_runtime_backend == identity.adapter_backend;
         // Metal may report device ID zero for a valid Apple adapter.  Zero is
         // an observed identifier, not an absent identity; backend, vendor,
         // name, and immutable provider revision remain mandatory above.
