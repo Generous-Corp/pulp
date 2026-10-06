@@ -636,7 +636,7 @@ def run_cli(
     start = time.perf_counter_ns()
     try:
         run = subprocess.run(
-            [str(executable), "trace", question, "--trace", str(trace), "--json"],
+            [*argv_for(executable), "trace", question, "--trace", str(trace), "--json"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
