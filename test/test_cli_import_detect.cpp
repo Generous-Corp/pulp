@@ -14,14 +14,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "tools/import-design/import_detect.hpp"
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/json_parser.hpp"
+#include "tools/import-design/import_detect.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
 #include <cctype>
-#include <chrono>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -43,14 +43,7 @@ struct ScratchDir {
     fs::path path;
 
     explicit ScratchDir(const char* stem) {
-        const auto counter =
-            std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path()
-             / ("pulp-import-detect-" + std::string(stem) + "-"
-                + std::to_string(counter));
-        std::error_code ec;
-        fs::remove_all(path, ec);
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir("pulp-import-detect-" + std::string(stem));
     }
 
     ~ScratchDir() {

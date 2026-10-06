@@ -6,19 +6,20 @@
 #else
 #define PULP_TEST_HAS_GPU_SURFACE 0
 #endif
-#include <pulp/view/scripted_ui.hpp>
-#include <pulp/view/value_channel_set.hpp>
-#include <pulp/format/reload/scripted_ui_swap_unit.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/widgets.hpp>
+#include "support/unique_temp_dir.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <vector>
 #include <filesystem>
 #include <fstream>
+#include <pulp/format/reload/scripted_ui_swap_unit.hpp>
+#include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/value_channel_set.hpp>
+#include <pulp/view/widgets.hpp>
 #include <thread>
 #include <utility>
+#include <vector>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -85,10 +86,7 @@ TEST_CASE("ScriptedUiSession installs materialized runtime import before each re
 #endif
 
 fs::path make_temp_dir(const char* stem) {
-    auto unique = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-    auto dir = fs::temp_directory_path() / (std::string(stem) + "-" + unique);
-    fs::create_directories(dir);
-    return dir;
+    return pulp::test::make_unique_temp_dir(stem);
 }
 
 void write_text(const fs::path& path, const std::string& content) {

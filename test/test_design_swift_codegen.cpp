@@ -19,8 +19,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 using namespace pulp::view;
@@ -299,6 +301,19 @@ fs::path unique_temp_dir(const std::string& prefix) {
     return dir;
 }
 
+// Removes its directory when it goes out of scope, so a run leaves nothing in
+// the shared temp directory even when a REQUIRE or SKIP unwinds the test.
+struct ScopedTempDir {
+    fs::path path;
+    explicit ScopedTempDir(const std::string& prefix) : path(unique_temp_dir(prefix)) {}
+    ~ScopedTempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+    ScopedTempDir(const ScopedTempDir&) = delete;
+    ScopedTempDir& operator=(const ScopedTempDir&) = delete;
+};
+
 void write_file(const fs::path& path, const std::string& body) {
     std::ofstream f(path);
     REQUIRE(f.is_open());
@@ -314,6 +329,8 @@ struct SwiftGate { bool runnable = false; bool ok = false; std::string diagnosti
 // skips; `ok` is the actual type-check verdict and is what the gate asserts.
 SwiftGate swiftc_typecheck(const std::vector<std::string>& sources) {
     static bool tried = false, module_ok = false;
+    // A function-local static, so the emitted module is removed at process exit.
+    static std::optional<ScopedTempDir> module_holder;
     static fs::path module_dir;
     const auto swiftc = swiftc_path();
     if (swiftc.empty()) return {false, false, "swiftc unavailable"};
@@ -322,7 +339,8 @@ SwiftGate swiftc_typecheck(const std::vector<std::string>& sources) {
         return {false, false, "PulpSwift sources not found under PULP_REPO_ROOT"};
     if (!tried) {
         tried = true;
-        module_dir = unique_temp_dir("pulp-swiftui-module");
+        module_holder.emplace("pulp-swiftui-module");
+        module_dir = module_holder->path;
         std::vector<std::string> emit = {
             "-emit-module", "-module-name", "PulpSwift",
             "-emit-module-path", (module_dir / "PulpSwift.swiftmodule").string(),
@@ -344,7 +362,8 @@ SwiftGate swiftc_typecheck(const std::vector<std::string>& sources) {
 // Run the swiftc gate over the result of generate_pulp_swift for `ir`.
 void require_generated_swift_compiles(const DesignIR& ir, const std::string& tag) {
     const auto result = generate_pulp_swift(ir, ir.asset_manifest);
-    auto tmp = unique_temp_dir("pulp-swiftui-gate-" + tag);
+    const ScopedTempDir scratch("pulp-swiftui-gate-" + tag);
+    const fs::path& tmp = scratch.path;
     const fs::path view_swift = tmp / "ImportedPulpView.swift";
     const fs::path theme_swift = tmp / "PulpTheme.swift";
     write_file(view_swift, result.view_source);

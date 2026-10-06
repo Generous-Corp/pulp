@@ -583,7 +583,15 @@ target_include_directories(pulp-test-audio-matrix PRIVATE ${CMAKE_SOURCE_DIR}/ex
 catch_discover_tests(pulp-test-audio-matrix)
 # Cross-platform byte golden. Keep contraction policy target-local: this test
 # owns a deliberately exact arithmetic contract; unrelated production/test
-# targets retain the project's normal optimization policy.
+# targets retain the project's normal optimization policy. It is stricter than
+# tools/cmake/PulpFloatingPointContraction.cmake, which turns contraction off
+# only for GCC and leaves Clang/AppleClang contracting within one expression.
+# It is not load-bearing on AppleClang today: removing it leaves the golden
+# byte-exact (measured 2026-10-05). It guards the golden
+# (test/fixtures/audio/cross_platform_signal_chain.wav) against a future
+# in-expression a*b+c that AppleClang's default `on` would fuse, because the
+# golden's contract is byte stability across compilers. GCC gets `off` from the
+# project policy; MSVC keeps /fp:strict.
 add_executable(pulp-test-cross-platform-audio-golden
     test_cross_platform_audio_golden.cpp)
 target_link_libraries(pulp-test-cross-platform-audio-golden

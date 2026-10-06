@@ -38,7 +38,7 @@ for a in "$@"; do
     case "$a" in
         -i) inplace=1 ;;
         --lines=*) ranges="$ranges ${a#--lines=}" ;;
-        --style=*) ;;
+        --style=*|--sort-includes=*) ;;
         *) file="$a" ;;
     esac
 done
@@ -48,8 +48,11 @@ out="$(awk -v R="$ranges" '
         hit = (n == 0)
         for (i = 1; i <= n; i++) if (NR >= lo[i] && NR <= hi[i]) hit = 1
         if (hit && $0 !~ /^F:/) print "F:" $0; else print
-    }' "$file")"
-if [ "$inplace" -eq 1 ]; then printf '%s\n' "$out" > "$file"; else printf '%s\n' "$out"; fi
+    }' "$file"; printf x)"
+# The x keeps the command substitution from stripping trailing blank lines:
+# a formatter that leaves a file alone must hand it back byte-for-byte.
+out="${out%x}"
+if [ "$inplace" -eq 1 ]; then printf '%s' "$out" > "$file"; else printf '%s' "$out"; fi
 EOF
     chmod +x "$dir/clang-format"
 }
@@ -273,6 +276,42 @@ out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="$fake/clang-format" \
 expect_rc "formatter dies under --check → exit 2, not exit 1" 2
 expect_out "formatter dies under --check → reported as a failure, not a diff" "clang-format failed"
 expect_no_out "formatter dies under --check → emits no formatting verdict" "need formatting"
+rm -rf "$repo"
+
+# ── a touched file that ends in a blank line ────────────────────────────────
+# Already formatted (the fake leaves `F:` lines alone), so --check must be
+# clean. Reading the formatter's output through `$(...)` strips the trailing
+# blank line and reported every such file dirty, while the rewrite mode left
+# it as is: a verdict the fix could never clear.
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+git -C "$repo" checkout -q main
+printf 'line1\nline2\nline3\nline4\nline5\n\n' > "$repo/core/a.cpp"
+git -C "$repo" commit -qam "trailing blank line"
+git -C "$repo" branch -qf work main
+git -C "$repo" checkout -q work
+printf 'line1\nline2\nF:CHANGED\nline4\nline5\n\n' > "$repo/core/a.cpp"
+run "$repo" "$fake" --check
+expect_rc "trailing blank line, touched lines already formatted → --check clean" 0
+expect_no_out "trailing blank line → no spurious end-of-file hunk" "need formatting"
+rm -rf "$repo"
+
+# ── include sorting stays off for an edited file, on for a new one ─────────
+# clang-format sorts a whole include block even under --lines, so one added
+# #include would rewrite lines nobody touched. The fake logs its argv.
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+printf 'n1\n' > "$repo/core/new.cpp"
+run "$repo" "$fake" --check
+if grep -E -- 'core/a\.cpp' "$repo/fake.log" | grep -q -- '--sort-includes=false'; then
+    ok "edited file → formatter called with --sort-includes=false"
+else
+    bad "edited file → formatter called with --sort-includes=false" "$(cat "$repo/fake.log")"
+fi
+if grep -E -- 'core/new\.cpp' "$repo/fake.log" | grep -q -- '--sort-includes=false'; then
+    bad "new file → include sorting left on" "$(cat "$repo/fake.log")"
+else
+    ok "new file → include sorting left on"
+fi
 rm -rf "$repo"
 
 # ── path restriction ────────────────────────────────────────────────────────
