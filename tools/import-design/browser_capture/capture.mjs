@@ -73,7 +73,10 @@ import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mj
 import {
   materializedCoordinateSpaceFromQuad,
 } from "./materialized_coordinate_space.mjs";
-import { trustedCapturedVendorPayload } from "./vendor_payload.mjs";
+import {
+  annotateCapturedVendorReferences,
+  classifyTrustedCapturedVendorPayload,
+} from "./vendor_payload.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -906,14 +909,19 @@ async function captureMaterializedDocument(cdp) {
       cursor = close >= 0 ? close + 8 : openEnd + 1;
     }
     const emptyScript = scriptRefs.length > 0 && scriptRefs.every((ref) => ref.empty);
-    const declaredVendor = scriptRefs.find((ref) => ref.vendor)?.vendor || '';
     const javascriptMime = /^(?:text|application)\/javascript(?:\s*;|$)/i.test(asset.mime_type);
-    if (emptyScript && javascriptMime &&
-        (declaredVendor === 'react' || declaredVendor === 'react-dom' || declaredVendor === 'babel') &&
-        scriptRefs.every((ref) => !ref.vendor || ref.vendor === declaredVendor) &&
-        trustedCapturedVendorPayload(
-          declaredVendor, Buffer.from(dataBase64, "base64").toString("utf8"))) {
-      asset.vendor_kind = declaredVendor;
+    const trustedVendor = javascriptMime
+      ? classifyTrustedCapturedVendorPayload(
+        Buffer.from(dataBase64, "base64").toString("utf8"))
+      : "";
+    if (emptyScript && trustedVendor &&
+        scriptRefs.every((ref) => !ref.vendor || ref.vendor === trustedVendor)) {
+      // Normal browser loaders omit capture metadata.  Once the exact
+      // allowlisted bytes are known, emit the marker ourselves so the
+      // canonicalizer can remove only this capture-owned vendor asset.
+      materialized.html = annotateCapturedVendorReferences(
+        materialized.html, asset.url, trustedVendor);
+      asset.vendor_kind = trustedVendor;
     }
   }
 

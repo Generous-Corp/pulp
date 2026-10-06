@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  annotateCapturedVendorReferences,
   SUPPORTED_VENDOR_PAYLOAD_SHA256,
+  classifyTrustedCapturedVendorPayload,
   trustedCapturedVendorPayload,
   trustedVendorPayload,
   trustedVendorPayloadDigest,
@@ -63,4 +65,31 @@ test("capture trust rejects padded marker spoofing even when the shape matches",
     "globalThis.authored = true;";
   assert.equal(trustedVendorPayload("react", spoof), true);
   assert.equal(trustedCapturedVendorPayload("react", spoof), false);
+});
+
+test("capture producer annotates unmarked empty vendor references", () => {
+  const html = '<script src="blob:react"></script>\n' +
+    '<script src="blob:font"></script>';
+  const annotated = annotateCapturedVendorReferences(
+    html, "blob:react", "react");
+  assert.match(
+    annotated,
+    /<script src="blob:react" data-pulp-vendor="react"><\/script>/);
+  assert.match(annotated, /<script src="blob:font"><\/script>/);
+});
+
+test("capture producer refuses authored or conflicting references", () => {
+  const authored = '<script src="blob:react">window.keep = true;</script>';
+  assert.equal(
+    annotateCapturedVendorReferences(authored, "blob:react", "react"),
+    authored);
+  const conflicting =
+    '<script src="blob:react" data-pulp-vendor="babel"></script>';
+  assert.equal(
+    annotateCapturedVendorReferences(conflicting, "blob:react", "react"),
+    conflicting);
+  assert.equal(
+    classifyTrustedCapturedVendorPayload(
+      "/* data-pulp-vendor=react */ window.keep = true;"),
+    "");
 });

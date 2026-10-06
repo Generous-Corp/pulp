@@ -16,6 +16,12 @@ export const SUPPORTED_VENDOR_PAYLOAD_SHA256 = Object.freeze({
   babel: "2623a9e22809915ce789b4461154e277ddce520d5a4320c14d44332a5d0dcea0",
 });
 
+export const SUPPORTED_VENDOR_KINDS = Object.freeze([
+  "react",
+  "react-dom",
+  "babel",
+]);
+
 /**
  * Return true when `digest` is one of the exact bytes approved for `kind`.
  * This is kept separate so tests can exercise the immutable allowlist without
@@ -67,4 +73,107 @@ export function trustedCapturedVendorPayload(kind, source) {
   if (!trustedVendorPayload(kind, source)) return false;
   const digest = createHash("sha256").update(source, "utf8").digest("hex");
   return trustedVendorPayloadDigest(kind, digest);
+}
+
+/**
+ * Identify a capture-owned vendor payload without relying on authored markup.
+ * The exact digest is the authority; callers may safely use the result to add
+ * the capture-only role marker to an otherwise unannotated script reference.
+ */
+export function classifyTrustedCapturedVendorPayload(source) {
+  for (const kind of SUPPORTED_VENDOR_KINDS) {
+    if (trustedCapturedVendorPayload(kind, source)) return kind;
+  }
+  return "";
+}
+
+function capturedAttribute(openTag, wanted) {
+  let index = openTag.toLowerCase().indexOf("script") + 6;
+  while (index < openTag.length) {
+    while (/\s/.test(openTag[index])) ++index;
+    if (index >= openTag.length || openTag[index] === ">" ||
+        openTag[index] === "/") break;
+    const start = index;
+    while (index < openTag.length && !/[\s=/>]/.test(openTag[index])) ++index;
+    const name = openTag.slice(start, index).toLowerCase();
+    while (/\s/.test(openTag[index])) ++index;
+    let value = "";
+    if (openTag[index] === "=") {
+      ++index;
+      while (/\s/.test(openTag[index])) ++index;
+      const quote = openTag[index] === '"' || openTag[index] === "'"
+        ? openTag[index++] : "";
+      const valueStart = index;
+      if (quote) {
+        while (index < openTag.length && openTag[index] !== quote) ++index;
+      } else {
+        while (index < openTag.length && !/[\s>]/.test(openTag[index])) ++index;
+      }
+      value = openTag.slice(valueStart, index);
+      if (quote && openTag[index] === quote) ++index;
+    }
+    if (name === wanted) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Add capture-owned provenance to matching empty script references.  This is
+ * deliberately conservative: any pre-existing conflicting marker, non-empty
+ * script body, malformed tag, or URL mismatch leaves the complete document
+ * unchanged.  That prevents a capture from rewriting authored behavior.
+ */
+export function annotateCapturedVendorReferences(html, assetUrl, vendorKind) {
+  if (typeof html !== "string" || !html || typeof assetUrl !== "string" ||
+      !assetUrl || !SUPPORTED_VENDOR_KINDS.includes(vendorKind)) return html;
+
+  const lowerHtml = html.toLowerCase();
+  const replacements = [];
+  let cursor = 0;
+  while (cursor < html.length) {
+    const start = lowerHtml.indexOf("<script", cursor);
+    if (start < 0) break;
+    const boundary = lowerHtml[start + 7];
+    if (boundary && !/[\s/>]/.test(boundary)) {
+      cursor = start + 7;
+      continue;
+    }
+    let openEnd = start + 7;
+    let quote = "";
+    for (; openEnd < html.length; ++openEnd) {
+      const character = html[openEnd];
+      if (quote) {
+        if (character === quote) quote = "";
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === ">") {
+        break;
+      }
+    }
+    if (openEnd >= html.length) return html;
+    const openTag = html.slice(start, openEnd + 1);
+    const close = lowerHtml.indexOf("</script", openEnd + 1);
+    if (close < 0) return html;
+    if (capturedAttribute(openTag, "src") === assetUrl) {
+      if (html.slice(openEnd + 1, close).trim() !== "") {
+        return html;
+      }
+      const declared = capturedAttribute(openTag, "data-pulp-vendor");
+      if (declared !== undefined && declared !== vendorKind) return html;
+      if (declared === undefined) {
+        replacements.push([
+          start,
+          openEnd + 1,
+          `${openTag.slice(0, -1)} data-pulp-vendor="${vendorKind}">`,
+        ]);
+      }
+    }
+    cursor = close + 8;
+  }
+  let result = html;
+  for (let index = replacements.length - 1; index >= 0; --index) {
+    const [start, end, replacement] = replacements[index];
+    result = `${result.slice(0, start)}${replacement}${result.slice(end)}`;
+  }
+  return result;
 }
