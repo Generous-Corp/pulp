@@ -79,9 +79,23 @@ BindingShape binding_shape(const IRNode& node) {
 }
 
 bool shape_compatible(const IRNode& old_node, const IRNode& new_node) {
-    return old_node.type == new_node.type && old_node.render_mode == new_node.render_mode &&
-           old_node.audio_widget == new_node.audio_widget &&
-           binding_shape(old_node) == binding_shape(new_node);
+    if (old_node.type != new_node.type || old_node.render_mode != new_node.render_mode ||
+        old_node.audio_widget != new_node.audio_widget ||
+        old_node.svg_asset_id != new_node.svg_asset_id ||
+        old_node.capture_asset_id != new_node.capture_asset_id ||
+        old_node.interactive_elements.size() != new_node.interactive_elements.size() ||
+        binding_shape(old_node) != binding_shape(new_node))
+        return false;
+
+    // These fields select the native materialization behind a stable anchor.
+    // Reusing the old view after one changes leaves the new node pointing at
+    // stale SVG/capture bytes or at the wrong custom-control factory/config.
+    return std::equal(old_node.interactive_elements.begin(), old_node.interactive_elements.end(),
+                      new_node.interactive_elements.begin(),
+                      [](const auto& old_element, const auto& new_element) {
+                          return old_element.factory_id == new_element.factory_id &&
+                                 old_element.custom_props == new_element.custom_props;
+                      });
 }
 
 void append_update(DesignChildUpdatePlan& plan, DesignUpdateKind kind, std::string key,

@@ -132,6 +132,93 @@ TEST_CASE("value-only binding metadata does not change the materialization shape
     CHECK(plan.updates.front().key == "editor");
 }
 
+TEST_CASE("materialization identity changes recreate keyed nodes",
+          "[view][import][update]") {
+    SECTION("the same SVG asset is retained") {
+        auto old_node = node("svg");
+        auto new_node = old_node;
+        old_node.render_mode = NodeRenderMode::faithful_svg;
+        old_node.svg_asset_id = "panel-v1";
+        new_node.render_mode = NodeRenderMode::faithful_svg;
+        new_node.svg_asset_id = "panel-v1";
+        const auto plan = plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1));
+        REQUIRE(plan.keyed);
+        REQUIRE(plan.updates.size() == 1);
+        CHECK(plan.updates.front().kind == DesignUpdateKind::retained);
+    }
+
+    SECTION("the same custom materialization is retained") {
+        auto old_node = node("custom-stable");
+        auto new_node = old_node;
+        IRInteractiveElement element;
+        element.kind = InteractiveElementKind::custom;
+        element.factory_id = "factory";
+        element.custom_props = R"({"mode":"compact"})";
+        old_node.interactive_elements.push_back(element);
+        new_node.interactive_elements.push_back(element);
+        const auto plan = plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1));
+        REQUIRE(plan.keyed);
+        REQUIRE(plan.updates.size() == 1);
+        CHECK(plan.updates.front().kind == DesignUpdateKind::retained);
+    }
+
+    SECTION("a changed SVG asset is recreated") {
+        auto old_node = node("svg");
+        auto new_node = old_node;
+        old_node.render_mode = NodeRenderMode::faithful_svg;
+        old_node.svg_asset_id = "panel-v1";
+        new_node.render_mode = NodeRenderMode::faithful_svg;
+        new_node.svg_asset_id = "panel-v2";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "svg");
+    }
+
+    SECTION("a changed capture asset is recreated") {
+        auto old_node = node("capture");
+        auto new_node = old_node;
+        old_node.render_mode = NodeRenderMode::faithful_capture;
+        old_node.capture_asset_id = "capture-v1";
+        new_node.render_mode = NodeRenderMode::faithful_capture;
+        new_node.capture_asset_id = "capture-v2";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "capture");
+    }
+
+    SECTION("a changed custom factory is recreated") {
+        auto old_node = node("custom");
+        auto new_node = old_node;
+        IRInteractiveElement element;
+        element.kind = InteractiveElementKind::custom;
+        element.factory_id = "factory.v1";
+        element.custom_props = R"({"mode":"compact"})";
+        old_node.interactive_elements.push_back(element);
+        new_node.interactive_elements.push_back(element);
+        new_node.interactive_elements.front().factory_id = "factory.v2";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "custom");
+    }
+
+    SECTION("changed custom props are recreated") {
+        auto old_node = node("custom-props");
+        auto new_node = old_node;
+        IRInteractiveElement element;
+        element.kind = InteractiveElementKind::custom;
+        element.factory_id = "factory";
+        element.custom_props = R"({"mode":"compact"})";
+        old_node.interactive_elements.push_back(element);
+        new_node.interactive_elements.push_back(element);
+        new_node.interactive_elements.front().custom_props = R"({"mode":"expanded"})";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "custom-props");
+    }
+}
+
 TEST_CASE("same-anchor shape changes recreate instead of reusing stale controls",
           "[view][import][update]") {
     SECTION("node type") {
