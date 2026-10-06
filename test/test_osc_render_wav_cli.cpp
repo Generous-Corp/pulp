@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include "test_cli_shellout_util.hpp"
 
 #include <chrono>
@@ -30,12 +31,7 @@ fs::path tool_binary() {
 struct TempFile {
     fs::path path;
     explicit TempFile(const std::string& name) {
-        path = fs::temp_directory_path() /
-               (name + "-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch()
-                                   .count()) +
-                ".wav");
+        path = pulp::test::unique_temp_path(name, ".wav");
     }
     ~TempFile() {
         std::error_code ec;

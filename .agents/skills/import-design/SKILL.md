@@ -3929,6 +3929,15 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `pulp config set import_design.browser {auto,managed,system}` picks the mode;
   `managed-browser-unavailable` fires only when `managed` is selected
   explicitly and nothing is installed.
+- **A capability-probe failure names its own reason in the headline.**
+  `browser-capability-unavailable` covers both a probe that ran out of time
+  ("timed out after <N> ms") and a browser that lacks a capability (the
+  probe's stderr). The reason leads the first line because callers keep only
+  the start of the message: Forge's HTML import cuts it at 600 characters, which
+  once hid the reason inside the Checked list. The probe deadline is
+  `probe_timeout_ms` (15 s); production callers apply
+  `probe_timeout_from_environment()`, so `PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS`
+  raises it on a loaded CI host without touching the capture budget.
 - **The Node capture tests share the C++ order only in part.**
   `browser_capture/capture_integration_support.mjs` carries its own
   `installedBrowser()` resolver, the only browser resolution in the repository
@@ -5780,6 +5789,14 @@ for the generated lane to use it.
 
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
+
+- **Node suites under `browser_capture/` and `jsx-runtime/` must remove every
+  temp dir they make.** The `pulp-browser-capture-node-unit` aggregate runs
+  inside `tools/scripts/tmp_leak_guard.py`, which points `TMPDIR` at a private
+  directory and fails the test if anything is left there. Put a suite's
+  scratch under one `mkdtempSync` root removed by node:test's `after()` (or a
+  per-test `t.after()`), as `materialized_state_atlas.test.mjs` does. Before
+  the guard, that one file left 21 directories per run on the boot volume.
 
 - **A per-node clip RECTANGLE cannot carry a rounded clipper, and the node that
   renders wrong is not the node that owns the radius.** Lowering flattens the

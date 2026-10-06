@@ -10,6 +10,7 @@
 // user hits on day one.
 
 #include "../tools/cli/json_parser.hpp"
+#include "support/unique_temp_dir.hpp"
 #include "test_cli_shellout_helpers.hpp"
 
 #include <optional>
@@ -1943,9 +1944,7 @@ TEST_CASE("pulp create scaffolds a no-build app project with Android files",
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-create-app-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-create-app");
     auto home = base / "home";
     auto project = base / "out" / "neon-drum";
     fs::create_directories(home);
@@ -2004,9 +2003,7 @@ TEST_CASE("pulp create rejects invalid type before scaffolding",
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-create-invalid-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-create-invalid");
     auto home = base / "home";
     auto project = base / "out" / "bad-type";
     fs::create_directories(home);
@@ -2037,9 +2034,7 @@ TEST_CASE("pulp create validates parser errors before scaffolding", "[cli][shell
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-create-parser-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-create-parser");
     auto home = base / "home";
     auto out = base / "out";
     fs::create_directories(home);
@@ -2207,10 +2202,7 @@ TEST_CASE("pulp build fails fast when standalone SDK is ahead of the installed C
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-build-skew-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(tmp);
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-build-skew");
     {
         std::ofstream f(tmp / "pulp.toml");
         f << "[pulp]\n"
@@ -2240,29 +2232,37 @@ TEST_CASE("pulp build allows explicit unsupported SDK bypass",
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-build-allow-skew-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(tmp);
-    {
-        std::ofstream f(tmp / "pulp.toml");
-        f << "[pulp]\n"
-          << "sdk_version = \"99.0.0\"\n"
-          << "cli_min_version = \"99.0.0\"\n";
-    }
+    auto tmp = unique_temp_dir("pulp-shellout-build-allow-skew");
+    write_text(tmp / "pulp.toml", "[pulp]\n"
+                                  "sdk_version = \"99.0.0\"\n"
+                                  "cli_min_version = \"99.0.0\"\n");
 
-    const auto bin = fs::absolute(pulp_binary());
-    auto cwd_saver = fs::current_path();
-    fs::current_path(tmp);
-    auto r = exec(bin.string(), {"build", "--allow-unsupported-sdk"}, 30000);
-    fs::current_path(cwd_saver);
+    // Past the compatibility gate, `pulp build` resolves the project's SDK and
+    // would download v99.0.0 from GitHub, and the update check would query the
+    // releases API: two network round trips the bypass does not depend on, and
+    // the reason this case outran its budget on a loaded gate VM. A cached SDK
+    // in a private PULP_HOME resolves locally, so the run goes straight on to
+    // configure, which stops at the empty project.
+    auto home = unique_temp_dir("pulp-shellout-build-allow-skew-home");
+    write_text(home / "sdk" / "99.0.0" / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake",
+               "# stub: resolved locally, never loaded\n");
+    ScopedEnvVar scoped_pulp_home("PULP_HOME");
+    scoped_pulp_home.set(home.string());
+    ScopedEnvVar no_update_check("PULP_UPDATE_CHECK_DISABLED");
+    no_update_check.set("1");
+
+    auto r = run_pulp_in_directory(tmp, {"build", "--allow-unsupported-sdk"});
     fs::remove_all(tmp);
+    fs::remove_all(home);
 
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code != 0);
     auto combined = r.stdout_output + r.stderr_output;
     REQUIRE(combined.find("requires a newer Pulp CLI") == std::string::npos);
     REQUIRE(combined.find("pulp upgrade 99.0.0") == std::string::npos);
+    // Control: the run got past the gate to configure, and fetched nothing.
+    REQUIRE(combined.find("CMakeLists.txt") != std::string::npos);
+    REQUIRE(combined.find("Downloading") == std::string::npos);
 }
 
 TEST_CASE("pulp build validates js engine option before compatibility checks",
@@ -2320,10 +2320,7 @@ TEST_CASE("pulp with update.mode=off never prints a banner",
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-mode-off-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(tmp);
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-mode-off");
     {
         std::ofstream cfg(tmp / "config.toml");
         cfg << "[update]\nmode = \"off\"\n";
@@ -2375,10 +2372,7 @@ TEST_CASE("pulp with update.mode=manual prints the manual notice",
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-mode-manual-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(tmp);
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-mode-manual");
     {
         std::ofstream cfg(tmp / "config.toml");
         cfg << "[update]\nmode = \"manual\"\n";
@@ -2489,9 +2483,7 @@ TEST_CASE("pulp project unpin switches a pinned project to floating mode",
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-unpin-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-unpin");
     auto home = base / "home";
     auto project = base / "out" / "my-plugin";
     fs::create_directories(home);
@@ -2626,9 +2618,7 @@ TEST_CASE("pulp project bump updates standalone SDK pins and undo reverts them",
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-project-bump-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-project-bump");
     auto project = base / "Clock";
     auto home = base / "home";
     fs::create_directories(project);
@@ -2962,9 +2952,7 @@ TEST_CASE("pulp run --headless --screenshot --frames writes a PNG",
     }
 
     // Build a fake project tree that cmd_run can navigate.
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-run-headless-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-run-headless");
     auto build_dir = base / "build";
     auto bin_dir = build_dir / "bin";
     fs::create_directories(bin_dir);

@@ -112,8 +112,15 @@ struct BrowserDiscoveryOptions {
     std::optional<fs::path> node_executable;
     std::optional<fs::path> capture_script;
     int minimum_major = kMinimumChromiumMajor;
+    // The capability probe's deadline. Production callers apply
+    // probe_timeout_from_environment() so a slow host can raise it.
     int probe_timeout_ms = 15000;
 };
+
+// PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS as a positive integer, else
+// `fallback_ms`. A loaded CI host can start Chrome slower than the default
+// probe deadline allows; this raises it without changing the capture budget.
+int probe_timeout_from_environment(int fallback_ms);
 
 struct BrowserModeSelection {
     std::optional<BrowserMode> mode;

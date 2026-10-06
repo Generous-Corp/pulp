@@ -118,6 +118,47 @@ class NamesStemTest(unittest.TestCase):
                                      re.search(r"\b" + re.escape(stem) + r"\b", text) is not None)
 
 
+class GitBatchTransportTest(unittest.TestCase):
+    """Large batch requests must not depend on anonymous pipe capacity."""
+
+    def test_cat_file_batch_keeps_large_request_and_response_off_pipes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            original_run = families.subprocess.run
+
+            def checked_run(*args, **kwargs):
+                if kwargs.get("stdin") is not None:
+                    self.assertIsNot(kwargs.get("stdout"), subprocess.PIPE)
+                    self.assertNotIn("capture_output", kwargs)
+                return original_run(*args, **kwargs)
+
+            families.subprocess.run = checked_run
+            try:
+                output = families._git(
+                    root, "cat-file", "--batch", stdin=(b"deadbeef\n" * 20_000)
+                )
+            finally:
+                families.subprocess.run = original_run
+            self.assertEqual(output.count(b"deadbeef missing\n"), 20_000)
+
+    def test_cat_file_batch_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            payload = b"x" * 512
+            blob = subprocess.run(
+                ["git", "-C", str(root), "hash-object", "-w", "--stdin"],
+                input=payload,
+                check=True,
+                capture_output=True,
+            ).stdout.strip().decode("ascii")
+            requests = (blob + "\n") * 512
+            output = families._git(root, "cat-file", "--batch", stdin=requests.encode("ascii"))
+            self.assertEqual(output.count(f"{blob} blob {len(payload)}\n".encode("ascii")), 512)
+            self.assertEqual(output.count(payload), 512)
+
+
 class GeneratedFamiliesTest(FamilyFixture):
     def test_script_maps_to_exactly_its_readers_and_the_whole_tree_family(self) -> None:
         self.add_whole_tree()

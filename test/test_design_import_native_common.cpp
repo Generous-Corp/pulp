@@ -1,6 +1,7 @@
-#include "../core/view/src/design_import_native_common.hpp"
 #include "../core/view/src/design_import_internal.hpp"
+#include "../core/view/src/design_import_native_common.hpp"
 #include "../core/view/src/design_ir_helpers.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <pulp/view/design_tokens.hpp>
 #include <pulp/view/svg_path_widget.hpp>
@@ -13,7 +14,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -40,12 +40,8 @@ namespace {
 namespace fs = std::filesystem;
 
 struct TempTree {
-    fs::path path = fs::temp_directory_path() /
-                    ("pulp-asset-resolution-" +
-                     std::to_string(std::chrono::steady_clock::now()
-                                        .time_since_epoch()
-                                        .count()));
-    TempTree() { fs::create_directories(path); }
+    fs::path path = pulp::test::make_unique_temp_dir("pulp-asset-resolution");
+    TempTree() = default;
     ~TempTree() {
         std::error_code error;
         fs::remove_all(path, error);
