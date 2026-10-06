@@ -75,6 +75,9 @@ def _validate_provider_identity(provenance: dict[str, Any]) -> None:
         value = provenance.get(field)
         if not isinstance(value, str) or not value.strip():
             raise RuntimeError(f"raw provenance {field} must be non-empty")
+    adapter_backend = provenance["adapter_backend"].casefold()
+    if adapter_backend != "metal":
+        raise RuntimeError("raw provenance adapter_backend must be Metal")
     if not SHA256_RE.fullmatch(provenance.get("provider_revision", "")):
         # Provider revisions are normally git SHAs; accepting only a full
         # SHA-256 here would reject the existing 40-character Dawn revision.
@@ -95,12 +98,16 @@ def _validate_provider_identity(provenance: dict[str, Any]) -> None:
         for field in ("name", "backend"):
             if not isinstance(native.get(field), str) or not native[field].strip():
                 raise RuntimeError(f"raw provenance native_runtime.{field} must be non-empty")
+        native_backend = native["backend"]
     else:
         if provenance.get("native_runtime_identity_status") != "passed":
             raise RuntimeError("raw provenance native runtime identity is missing")
         for field in ("native_runtime_name", "native_runtime_backend"):
             if not isinstance(provenance.get(field), str) or not provenance[field].strip():
                 raise RuntimeError(f"raw provenance {field} must be non-empty")
+        native_backend = provenance["native_runtime_backend"]
+    if native_backend.casefold() != adapter_backend:
+        raise RuntimeError("raw provenance native runtime backend disagrees with adapter backend")
 
 
 def _validate_run_identity(provenance: dict[str, Any]) -> None:
@@ -202,11 +209,15 @@ def validate_receipt(receipt: dict, slots: int, lead: int, expected_run_kind: st
         raise RuntimeError(f"{slots=} {lead=} receipt failed: {', '.join(failed)}")
 
 def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None = None,
-                          expected_manifest_sha256: str | None = None) -> None:
+                          expected_manifest_sha256: str | None = None,
+                          receipt: dict[str, Any] | None = None) -> None:
     provenance_rows = [r for r in rows if r.get("kind") == "provenance"]
     if len(provenance_rows) != 1 or provenance_rows[0].get("schema") != "pulp.gpu-audio.p2.raw.v1":
         raise RuntimeError("raw provenance row missing or has unexpected schema")
     provenance = provenance_rows[0]
+    provenance_engine_id = provenance.get("engine_id")
+    if not _positive_integer(provenance_engine_id):
+        raise RuntimeError("raw provenance engine identity must be a positive integer")
     executable_sha256 = provenance.get("executable_observed_sha256")
     if not isinstance(executable_sha256, str) or SHA256_RE.fullmatch(executable_sha256) is None:
         raise RuntimeError("raw provenance lacks an exact observed executable hash")
@@ -240,14 +251,16 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
                  if r.get("kind") == "record" and r.get("trace_kind") == 0]
     deliveries = [(r.get("engine_id"), r.get("generation"), r.get("sequence")) for r in records
                   if r.get("kind") == "record" and r.get("trace_kind") == 2]
+    if not admissions:
+        raise RuntimeError("raw admission census is empty")
     if len(admissions) != len(set(admissions)):
         raise RuntimeError("raw admission census contains duplicate identities")
     if len(terminals) != len(set(terminals)):
         raise RuntimeError("raw terminal census contains duplicate identities")
     if len(deliveries) != len(set(deliveries)):
         raise RuntimeError("raw delivery census contains duplicate identities")
-    engine_ids = {r.get("engine_id") for r in records if r.get("kind") in ("admission", "record")}
-    if len(engine_ids) != 1 or None in engine_ids:
+    engine_ids = {r.get("engine_id") for r in rows if r.get("kind") in ("admission", "record")}
+    if engine_ids != {provenance_engine_id}:
         raise RuntimeError("raw rows have inconsistent engine identity")
     if any(r.get("kind") == "record" and r.get("trace_kind") == 0 and (r.get("generation", 0) == 0 or
            r.get("valid_stages", 0) == 0 or r.get("gpu_terminal", 0) == 0 or
@@ -259,6 +272,19 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
         raise RuntimeError("admission/admitted-delivery identity multisets differ")
     if sorted(admissions) != sorted(terminals):
         raise RuntimeError("admission/terminal identity multisets differ")
+    if receipt is not None:
+        expected_admissions = receipt.get("admissions_enqueued")
+        expected_terminals = receipt.get("terminal_record_count")
+        expected_authenticated = receipt.get("authenticated_terminal_records")
+        if not all(_nonnegative_integer(value) for value in
+                   (expected_admissions, expected_terminals, expected_authenticated)):
+            raise RuntimeError("receipt lacks non-negative raw census counters")
+        if len(admissions) != expected_admissions:
+            raise RuntimeError("raw admission census disagrees with receipt")
+        if len(terminals) != expected_terminals or len(terminals) != expected_authenticated:
+            raise RuntimeError("raw terminal census disagrees with receipt")
+        if len(admitted_deliveries) != expected_admissions:
+            raise RuntimeError("raw admitted-delivery census disagrees with receipt")
     terminal_by_identity = {
         (r.get("engine_id"), r.get("generation"), r.get("sequence")): r
         for r in records if r.get("kind") == "record" and r.get("trace_kind") == 0
@@ -330,7 +356,7 @@ def run(args: argparse.Namespace) -> int:
         if control_receipt.get("status") == "completed" or not control_receipt.get("negative_control") or not control_raw.is_file():
             raise RuntimeError("negative control unexpectedly passed or was not marked")
         control_rows = [json.loads(line) for line in control_raw.read_text().splitlines()]
-        validate_identity_rows(control_rows, probe_sha256)
+        validate_identity_rows(control_rows, probe_sha256, receipt=control_receipt)
         campaign_manifest_digest = control_rows[0].get("provenance_manifest_sha256")
         negative_control = {"argv": control, "returncode": control_proc.returncode,
                             "receipt_sha256": sha256(control_receipt_path),
@@ -368,7 +394,7 @@ def run(args: argparse.Namespace) -> int:
                             raise RuntimeError(f"{slots=} {lead=} missing streamed provenance/rows")
                         parsed_rows = [json.loads(line) for line in raw_rows]
                         validate_identity_rows(parsed_rows, probe_sha256,
-                                              campaign_manifest_digest)
+                                              campaign_manifest_digest, receipt)
                         provenance = parsed_rows[0]
                         if provenance.get("run_kind") != run_kind:
                             raise RuntimeError(

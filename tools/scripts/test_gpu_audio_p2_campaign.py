@@ -17,6 +17,7 @@ class P2CampaignContractTests(unittest.TestCase):
         }
         provenance = {
             "kind": "provenance", "schema": "pulp.gpu-audio.p2.raw.v1",
+            "engine_id": 7,
             "provider_identity_status": "passed", "provider_observed_identity": "passed",
             "provider_revision": "e" * 40, "adapter_name": "Apple GPU",
             "adapter_backend": "metal", "adapter_vendor_id": 0x106B,
@@ -85,6 +86,48 @@ class P2CampaignContractTests(unittest.TestCase):
         rows = self._rows()
         rows[0]["adapter_device_id"] = 0
         campaign.validate_identity_rows(rows, rows[0]["executable_observed_sha256"])
+
+    def test_provider_and_native_backends_must_be_matching_metal(self):
+        rows = self._rows()
+        expected_sha = rows[0]["executable_observed_sha256"]
+        non_metal = [dict(row) for row in rows]
+        non_metal[0]["adapter_backend"] = "vulkan"
+        with self.assertRaises(RuntimeError):
+            campaign.validate_identity_rows(non_metal, expected_sha)
+        mismatch = [dict(row) for row in rows]
+        mismatch[0]["native_runtime_backend"] = "vulkan"
+        with self.assertRaises(RuntimeError):
+            campaign.validate_identity_rows(mismatch, expected_sha)
+
+    def test_provenance_engine_identity_must_match_every_row(self):
+        rows = self._rows()
+        expected_sha = rows[0]["executable_observed_sha256"]
+        mismatch = [dict(row) for row in rows]
+        mismatch[0]["engine_id"] = 8
+        with self.assertRaises(RuntimeError):
+            campaign.validate_identity_rows(mismatch, expected_sha)
+        mismatch = [dict(row) for row in rows]
+        mismatch[1]["engine_id"] = 8
+        with self.assertRaises(RuntimeError):
+            campaign.validate_identity_rows(mismatch, expected_sha)
+
+    def test_raw_census_requires_admission_and_receipt_counter_match(self):
+        rows = self._rows()
+        expected_sha = rows[0]["executable_observed_sha256"]
+        callback_only = {
+            "kind": "record", "engine_id": 7, "trace_kind": 2, "generation": 1,
+            "sequence": 3, "delivery": 2, "callback_timing_available": True,
+            "callback_end_ns": 20, "result_visible_ns": 21,
+            "admitted": False, "callback_only": True,
+        }
+        with self.assertRaises(RuntimeError):
+            campaign.validate_identity_rows(rows[:1] + [callback_only], expected_sha)
+        receipt = {"admissions_enqueued": 1, "terminal_record_count": 1,
+                   "authenticated_terminal_records": 1}
+        campaign.validate_identity_rows(rows, expected_sha, receipt=receipt)
+        with self.assertRaises(RuntimeError):
+            campaign.validate_identity_rows(rows, expected_sha,
+                                            receipt={**receipt, "admissions_enqueued": 2})
 
     def test_delivery_disposition_must_match_terminal_census(self):
         rows = self._rows()
