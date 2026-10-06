@@ -247,6 +247,16 @@ Session::Callback callback(Session& session, std::span<const float> input,
 }
 } // namespace
 
+TEST_CASE("shared convolution session provider identity fails closed before preparation",
+          "[gpu_audio][shared_io][provider]") {
+    Session session;
+    const auto identity = session.provider_identity();
+    CHECK_FALSE(identity.authenticated);
+    CHECK_FALSE(identity.native_runtime_authenticated);
+    CHECK(identity.provider_revision.empty());
+    CHECK(identity.adapter_name.empty());
+}
+
 TEST_CASE("shared convolution session packs provider slots and delivers exact prepared output",
           "[gpu_audio][shared_io][session]") {
     Fixture fixture;
