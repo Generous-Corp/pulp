@@ -138,15 +138,15 @@ private:
   using ChannelIndex =
       std::unordered_map<std::string, std::size_t, ChannelNameHash, ChannelNameEqual>;
 
-    /// The sources for one declared channel; exactly one is non-null, matching
-    /// the shape recorded in `infos_` at the same index.
-    struct Entry {
-        std::shared_ptr<detail::ValueChannelTelemetryState> telemetry;
-        std::unique_ptr<ScalarSource> scalar;
-        std::unique_ptr<MeterSource> meter;
-        std::unique_ptr<VectorSource> vector;
-        std::unique_ptr<EventSource> events;
-    };
+  /// The sources for one declared channel; exactly one is non-null, matching
+  /// the shape recorded in `infos_` at the same index.
+  struct Entry {
+      std::shared_ptr<detail::ValueChannelTelemetryState> telemetry;
+      std::unique_ptr<ScalarSource> scalar;
+      std::unique_ptr<MeterSource> meter;
+      std::unique_ptr<VectorSource> vector;
+      std::unique_ptr<EventSource> events;
+  };
 
     /// Shared declaration checks; returns nullptr and sets `error` on refusal.
     Entry* add_entry(std::string name, std::string unit, float neutral,
