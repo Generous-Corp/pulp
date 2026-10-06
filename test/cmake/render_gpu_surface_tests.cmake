@@ -446,6 +446,15 @@
                     ../core/gpu_audio/src)
                 add_dependencies(pulp-gpu-shared-io-paced-convolution-probe
                     pulp-gpu-dawn-shared-io-provider-probe)
+                # The paced P2 target's identity fixture verifies the
+                # host-mapped provider executable as well as the shared-I/O
+                # probe.  Keep the fixture executable in the focused build
+                # closure; otherwise CTest discovers the identity test with a
+                # generator-expression path to an unbuilt binary and fails
+                # closed as provider_path_missing before the shared provider
+                # fixture can run.
+                add_dependencies(pulp-gpu-shared-io-paced-convolution-probe
+                    pulp-gpu-host-mapped-pointer-probe)
                 # Carry the exact provider bindings already authenticated for
                 # pulp-gpu-audio into the private campaign probe. Empty values
                 # remain explicit and fail closed in its raw receipt.
