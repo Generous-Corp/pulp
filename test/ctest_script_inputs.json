@@ -932,7 +932,8 @@
     "test/test_cli_tartci_lease.cpp"
    ],
    "inputs": [
-    "tools/ci/build_dir_lock.py"
+    "tools/ci/build_dir_lock.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "compiled",
    "sources": [
