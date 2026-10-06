@@ -94,9 +94,8 @@ BindingShape binding_shape(const IRNode& node) {
 // changing that binding in place via set_element_param_key().
 bool interactive_materialization_equal(const IRInteractiveElement& old_element,
                                        const IRInteractiveElement& new_element) {
-    return old_element.kind == new_element.kind &&
-           old_element.cx == new_element.cx && old_element.cy == new_element.cy &&
-           old_element.hit_radius == new_element.hit_radius &&
+    return old_element.kind == new_element.kind && old_element.cx == new_element.cx &&
+           old_element.cy == new_element.cy && old_element.hit_radius == new_element.hit_radius &&
            old_element.svg_patch_d == new_element.svg_patch_d &&
            old_element.default_value == new_element.default_value &&
            old_element.flash == new_element.flash && old_element.x == new_element.x &&
@@ -126,8 +125,7 @@ bool frame_materialization_equal(const IRNode& old_frame, const IRNode& new_fram
         return false;
 
     if (!std::equal(old_frame.interactive_elements.begin(), old_frame.interactive_elements.end(),
-                    new_frame.interactive_elements.begin(),
-                    interactive_materialization_equal))
+                    new_frame.interactive_elements.begin(), interactive_materialization_equal))
         return false;
 
     return std::equal(old_frame.alternate_frames.begin(), old_frame.alternate_frames.end(),

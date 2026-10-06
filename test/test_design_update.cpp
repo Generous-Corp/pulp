@@ -50,8 +50,7 @@ IRInteractiveElement materialized_element() {
     return element;
 }
 
-template <typename Mutator>
-void require_interactive_recreated(const char* key, Mutator mutate) {
+template <typename Mutator> void require_interactive_recreated(const char* key, Mutator mutate) {
     auto old_node = node(key);
     auto new_node = old_node;
     old_node.interactive_elements.push_back(materialized_element());
@@ -277,96 +276,77 @@ TEST_CASE("materialization identity changes recreate keyed nodes", "[view][impor
 TEST_CASE("interactive materialization fields recreate same-anchor nodes",
           "[view][import][update]") {
     SECTION("SVG patch path") {
-        require_interactive_recreated("svg-patch", [](auto& element) {
-            element.svg_patch_d = "M2 2L3 3";
-        });
+        require_interactive_recreated("svg-patch",
+                                      [](auto& element) { element.svg_patch_d = "M2 2L3 3"; });
     }
 
     SECTION("geometry") {
-        require_interactive_recreated("geometry", [](auto& element) {
-            element.x += 1.0f;
-        });
+        require_interactive_recreated("geometry", [](auto& element) { element.x += 1.0f; });
     }
 
     SECTION("target frame") {
-        require_interactive_recreated("target-frame", [](auto& element) {
-            element.target_frame = 3;
-        });
+        require_interactive_recreated("target-frame",
+                                      [](auto& element) { element.target_frame = 3; });
     }
 
     SECTION("action") {
-        require_interactive_recreated("action", [](auto& element) {
-            element.action = "octave_down";
-        });
+        require_interactive_recreated("action",
+                                      [](auto& element) { element.action = "octave_down"; });
     }
 
     SECTION("options") {
-        require_interactive_recreated("options", [](auto& element) {
-            element.options.push_back("three");
-        });
+        require_interactive_recreated("options",
+                                      [](auto& element) { element.options.push_back("three"); });
     }
 
     SECTION("selected index") {
-        require_interactive_recreated("selected-index", [](auto& element) {
-            element.selected_index = 0;
-        });
+        require_interactive_recreated("selected-index",
+                                      [](auto& element) { element.selected_index = 0; });
     }
 
     SECTION("other overlay fields") {
         SECTION("placeholder") {
-            require_interactive_recreated("placeholder", [](auto& element) {
-                element.placeholder = "new placeholder";
-            });
+            require_interactive_recreated(
+                "placeholder", [](auto& element) { element.placeholder = "new placeholder"; });
         }
         SECTION("background color") {
-            require_interactive_recreated("bg-color", [](auto& element) {
-                element.bg_color = "#654321";
-            });
+            require_interactive_recreated("bg-color",
+                                          [](auto& element) { element.bg_color = "#654321"; });
         }
         SECTION("value label text") {
-            require_interactive_recreated("text", [](auto& element) {
-                element.text = "new value";
-            });
+            require_interactive_recreated("text",
+                                          [](auto& element) { element.text = "new value"; });
         }
         SECTION("value label alignment") {
-            require_interactive_recreated("value-alignment", [](auto& element) {
-                element.value_left_align = false;
-            });
+            require_interactive_recreated("value-alignment",
+                                          [](auto& element) { element.value_left_align = false; });
         }
     }
 
     SECTION("other patch fields") {
         SECTION("pivot") {
-            require_interactive_recreated("pivot", [](auto& element) {
-                element.cx += 1.0f;
-            });
+            require_interactive_recreated("pivot", [](auto& element) { element.cx += 1.0f; });
         }
         SECTION("hit radius") {
-            require_interactive_recreated("hit-radius", [](auto& element) {
-                element.hit_radius += 1.0f;
-            });
+            require_interactive_recreated("hit-radius",
+                                          [](auto& element) { element.hit_radius += 1.0f; });
         }
         SECTION("default value") {
-            require_interactive_recreated("default-value", [](auto& element) {
-                element.default_value = 0.5f;
-            });
+            require_interactive_recreated("default-value",
+                                          [](auto& element) { element.default_value = 0.5f; });
         }
         SECTION("toggle flash") {
-            require_interactive_recreated("flash", [](auto& element) {
-                element.flash = false;
-            });
+            require_interactive_recreated("flash", [](auto& element) { element.flash = false; });
         }
         SECTION("xy pad default value") {
-            require_interactive_recreated("default-value-y", [](auto& element) {
-                element.default_value_y = 0.25f;
-            });
+            require_interactive_recreated("default-value-y",
+                                          [](auto& element) { element.default_value_y = 0.25f; });
         }
     }
 
     SECTION("source provenance") {
-        require_interactive_recreated("source-node", [](auto& element) {
-            element.source_node_id = "source:2";
-        });
+        require_interactive_recreated("source-node",
+                                      [](auto& element) { element.source_node_id = "source:2"; });
     }
 }
 
