@@ -29,13 +29,24 @@ def receipt(source: Path) -> dict:
             "screenshotSha256": SHA,
         }
 
+    source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
     return {
         "source": str(source),
-        "sourceSha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "sourceSha256": source_sha256,
         "positive": run(),
         "repeat": run(),
         "deterministicDomMarker": True,
-        "negativeControl": "rejected",
+        "negativeControl": {
+            "mutation": {
+                "kind": "remove-root-mount",
+                "sourceSha256": source_sha256,
+                "mutatedSourceSha256": "1" * 64,
+            },
+            "outcome": {
+                "status": "rejected",
+                "errorCode": "capture-mount-missing",
+            },
+        },
     }
 
 
@@ -121,6 +132,26 @@ class BrowserFidelityReceiptTest(unittest.TestCase):
         missing = self.root / "missing.json"
         rc = verifier.main([str(missing)])
         self.assertEqual(rc, 1)
+
+    def test_negative_forged_rejection_without_source_binding_is_rejected(self) -> None:
+        broken = copy.deepcopy(self.payload)
+        broken["negativeControl"] = {"outcome": {"status": "rejected"}}
+        with self.assertRaisesRegex(verifier.ReceiptError, "negativeControl"):
+            verifier.validate_receipt(broken)
+
+    def test_negative_mutation_bound_evidence_passes(self) -> None:
+        summary = verifier.validate_receipt(self.payload)
+        self.assertEqual(
+            summary["negative_control"]["mutation"]["sourceSha256"],
+            self.payload["sourceSha256"],
+        )
+
+    def test_negative_mutation_digest_must_differ_from_source(self) -> None:
+        broken = copy.deepcopy(self.payload)
+        broken["negativeControl"]["mutation"]["mutatedSourceSha256"] = \
+            self.payload["sourceSha256"]
+        with self.assertRaisesRegex(verifier.ReceiptError, "must differ"):
+            verifier.validate_receipt(broken)
 
 
 if __name__ == "__main__":

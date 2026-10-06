@@ -10,8 +10,9 @@ positive/repeat/negative evidence into a reusable, fail-closed contract.
 A valid receipt proves that both browser launches evaluated the exact source
 bytes named by `sourceSha256`, reached the same visible DOM marker, produced a
 non-empty root, reported no console or network failures, and wrote
-byte-identical screenshots.  It also records that a planted broken mount was
-rejected.  The checker never treats a missing field as an empty success value.
+byte-identical screenshots.  It also carries source-bound, structured evidence
+that a planted broken mount was rejected.  The checker never treats a missing
+field as an empty success value.
 """
 
 from __future__ import annotations
@@ -37,6 +38,9 @@ _REQUIRED_TOP_LEVEL = {
 _REQUIRED_RUN_FIELDS = {"marker", "dom", "consoleErrors", "networkFailures", "screenshotSha256"}
 _REQUIRED_DOM_FIELDS = {"title", "ready", "rootChildren"}
 _REQUIRED_MARKER_FIELDS = {"count", "text"}
+_REQUIRED_NEGATIVE_FIELDS = {"mutation", "outcome"}
+_REQUIRED_MUTATION_FIELDS = {"kind", "sourceSha256", "mutatedSourceSha256"}
+_REQUIRED_NEGATIVE_OUTCOME_FIELDS = {"status", "errorCode"}
 
 
 class ReceiptError(ValueError):
@@ -132,6 +136,42 @@ def _check_run(run: Any, name: str) -> dict[str, Any]:
     return value
 
 
+def _check_negative_control(value: Any, source_sha256: str) -> dict[str, Any]:
+    control = _require_mapping(value, "negativeControl")
+    _check_keys(control, _REQUIRED_NEGATIVE_FIELDS, "negativeControl")
+
+    mutation = _require_mapping(control["mutation"], "negativeControl.mutation")
+    _check_keys(mutation, _REQUIRED_MUTATION_FIELDS, "negativeControl.mutation")
+    kind = _require_string(mutation["kind"], "negativeControl.mutation.kind")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", kind):
+        raise ReceiptError(
+            "negativeControl.mutation.kind must be a lowercase identifier"
+        )
+    mutation_source = _check_sha(
+        mutation["sourceSha256"], "negativeControl.mutation.sourceSha256"
+    )
+    if mutation_source != source_sha256:
+        raise ReceiptError(
+            "negativeControl.mutation.sourceSha256 must match receipt.sourceSha256"
+        )
+    mutated_source = _check_sha(
+        mutation["mutatedSourceSha256"],
+        "negativeControl.mutation.mutatedSourceSha256",
+    )
+    if mutated_source == source_sha256:
+        raise ReceiptError(
+            "negativeControl.mutation.mutatedSourceSha256 must differ from "
+            "receipt.sourceSha256"
+        )
+
+    outcome = _require_mapping(control["outcome"], "negativeControl.outcome")
+    _check_keys(outcome, _REQUIRED_NEGATIVE_OUTCOME_FIELDS, "negativeControl.outcome")
+    if outcome["status"] != "rejected":
+        raise ReceiptError("negativeControl.outcome.status must equal 'rejected'")
+    _require_string(outcome["errorCode"], "negativeControl.outcome.errorCode")
+    return control
+
+
 def validate_receipt(
     payload: Any,
     *,
@@ -154,8 +194,8 @@ def validate_receipt(
 
     if root["deterministicDomMarker"] is not True:
         raise ReceiptError("deterministicDomMarker must be true")
-    if root["negativeControl"] != "rejected":
-        raise ReceiptError("negativeControl must equal 'rejected'")
+    negative_control = _check_negative_control(root["negativeControl"],
+                                               root["sourceSha256"])
 
     positive = _check_run(root["positive"], "positive")
     repeat = _check_run(root["repeat"], "repeat")
@@ -184,7 +224,7 @@ def validate_receipt(
         "marker_count": positive["marker"]["count"],
         "root_children": positive["dom"]["rootChildren"],
         "screenshot_sha256": positive["screenshotSha256"],
-        "negative_control": root["negativeControl"],
+        "negative_control": negative_control,
     }
 
 
