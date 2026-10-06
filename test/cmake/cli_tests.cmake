@@ -98,7 +98,9 @@ add_executable(pulp-test-cli-import-emit
     ${CMAKE_SOURCE_DIR}/tools/cli/import_emit_scan.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/import_detect.cpp
 )
-target_include_directories(pulp-test-cli-import-emit PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(pulp-test-cli-import-emit PRIVATE ${CMAKE_SOURCE_DIR}
+    # Header-only pulp/runtime/safe_relative_path.hpp; no pulp::runtime link.
+    ${CMAKE_SOURCE_DIR}/core/runtime/include)
 target_link_libraries(pulp-test-cli-import-emit PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)

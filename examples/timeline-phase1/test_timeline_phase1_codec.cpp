@@ -126,7 +126,8 @@ TEST_CASE("timeline step pattern codec is canonical at maximum bounded extent") 
     }
 }
 TEST_CASE("timeline step pattern codec rejects malformed schema counts cells and padding") {
-    TimelineStepSequencerProcessor source;
+    auto source_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& source = *source_owner;
     source.prepare(prepare_context());
     auto encoded = timeline::serialize_project(*source.persistent_project(),
                                                source.pattern_registry());
@@ -161,7 +162,8 @@ TEST_CASE("timeline step pattern codec rejects malformed schema counts cells and
     auto padded_project = make_invalid_step_project(
         source, InvalidStepProject::InactivePatternPadding);
     REQUIRE(padded_project);
-    TimelineStepSequencerProcessor loader;
+    auto loader_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& loader = *loader_owner;
     loader.prepare(prepare_context());
     REQUIRE_FALSE(loader.load_persistent_project(*padded_project));
 
@@ -172,7 +174,8 @@ TEST_CASE("timeline step pattern codec rejects malformed schema counts cells and
 }
 
 TEST_CASE("timeline step rejected project loads preserve the live generation") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context(8192));
     REQUIRE(processor.engine_prepared());
     REQUIRE(submit_pitch_edit(processor, 12));

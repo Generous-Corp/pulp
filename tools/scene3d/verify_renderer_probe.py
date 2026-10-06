@@ -315,6 +315,21 @@ def require_at_least(values, key, minimum, errors):
         errors.append(f"{key}: expected at least {minimum}, got {actual}")
 
 
+def golden_not_applicable(entry, values, platform):
+    """Why this host cannot judge the golden, or None when it can. A golden
+    scoped to the macOS default adapter is a fingerprint of that adapter's
+    rasterization; another host's adapter draws the same scene with other
+    bytes, so off macOS a different backend is not a failure. On macOS it is
+    one: there the scope's adapter is the one that should have been picked."""
+    scope = str(entry.get("adapter_scope", ""))
+    expected = str(entry.get("adapter_backend_type", ""))
+    actual = values.get("adapter_backend_type", "")
+    if platform == "darwin" or not scope.startswith("macos_") or actual == expected:
+        return None
+    return (f"golden recorded on {scope} ({expected}); this host's adapter is "
+            f"{actual or 'unknown'} ({values.get('adapter_name', 'unnamed')})")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Verify Renderer3D probe output against the golden manifest.")
@@ -354,6 +369,10 @@ def main():
         return 1
 
     values = parse_key_values(result.stdout)
+    not_applicable = golden_not_applicable(entry, values, sys.platform)
+    if not_applicable:
+        print(f"renderer_probe_golden_not_applicable={args.entry_id}: {not_applicable}")
+        return 0
     errors = []
     actual_fields = set(values.keys())
     if actual_fields != PROBE_FIELDS:
