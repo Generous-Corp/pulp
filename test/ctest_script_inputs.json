@@ -84,6 +84,7 @@
     "tools/cli/cmd_seq.cpp",
     "tools/cli/cmd_ship.cpp",
     "tools/cli/cmd_tweaks.cpp",
+    "tools/cli/cmd_ui.cpp",
     "tools/cli/cmd_upgrade.cpp",
     "tools/cli/cmd_validate.cpp",
     "tools/cli/cmd_version.cpp",
@@ -2639,6 +2640,7 @@
   "pulp-test-midi-arpeggiator",
   "pulp-test-midi-parameter-map-scaling",
   "pulp-test-midi-performance-kernels",
+  "pulp-test-midi-routing-ledger",
   "pulp-test-midi-step-player",
   "pulp-test-midi-utility-note-length",
   "pulp-test-midi-voice-modulation-adapter",
@@ -2697,6 +2699,7 @@
   "pulp-test-popover-row-template-1147",
   "pulp-test-processor-node-adapter",
   "pulp-test-project-package",
+  "pulp-test-public-type-sizes",
   "pulp-test-pulp-node-v1",
   "pulp-test-real-plugin-runner-cache",
   "pulp-test-recurrent-cpu-adapter",
@@ -6659,38 +6662,12 @@
    ],
    "kind": "shell"
   },
-  "pulp-ui-clean-output-lint": {
-   "entry": "tools/ui-build/lint/clean_output_lint.py",
-   "inputs": [
-    "tools/ui-build/lint/clean_output_lint.py",
-    "tools/ui-build/lint/fixtures/clean"
-   ],
-   "kind": "python"
-  },
-  "pulp-ui-clean-output-lint-negative-contract": {
-   "entry": "tools/ui-build/lint/test_clean_output_lint.py",
-   "inputs": [
-    "tools/ui-build/lint/clean_output_lint.py",
-    "tools/ui-build/lint/test_clean_output_lint.py"
-   ],
-   "kind": "python"
-  },
   "pulp-materialized-runtime-conformance": {
    "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
    "inputs": [
     "tools/import-design/browser_capture/vendor_payload.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
-   ],
-   "kind": "node"
-  },
-  "pulp-materialized-runtime-node-dependencies": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
    ],
    "kind": "node"
   },
@@ -6751,6 +6728,11 @@
     "test/test_ctest_timeout_kills_wedged.sh"
    ],
    "kind": "shell"
+  },
+  "pulp-ui-build-contracts": {
+   "entry": "tools/ui-build/test_ui_build.py",
+   "inputs": [],
+   "kind": "python"
   },
   "pulp-ui-clean-output-lint": {
    "entry": "tools/ui-build/lint/clean_output_lint.py",
@@ -9144,28 +9126,6 @@
    "entry": "tools/scripts/test_vellum_trusted_merge.py",
    "inputs": [
     "tools/scripts/test_vellum_trusted_merge.py"
-   ],
-   "kind": "python"
-  },
-  "vellum-boundary-lint": {
-   "entry": "tools/scripts/vellum_boundary_lint.py",
-   "inputs": [
-    "core/view",
-    "core/view/src",
-    "tools/import-design/pulp-package.json",
-    "tools/scripts/vellum_boundary_lint.py",
-    "tools/ui-build/pulp-package.json"
-   ],
-   "kind": "python"
-  },
-  "vellum-boundary-lint-negative-contract": {
-   "entry": "tools/scripts/test_vellum_boundary_lint.py",
-   "inputs": [
-    "tools/import-design",
-    "tools/import-design/pulp-package.json",
-    "tools/scripts/test_vellum_boundary_lint.py",
-    "tools/ui-build",
-    "tools/ui-build/pulp-package.json"
    ],
    "kind": "python"
   },

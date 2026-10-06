@@ -63,6 +63,14 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(pulp-ui-clean-output-lint
         pulp-ui-clean-output-lint-negative-contract
         PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+    # The source emitter is the smallest executable WP-2a seam.  It owns
+    # deterministic snapshot output and a fail-closed drift check while the
+    # future TSX/runtime compiler is developed behind the same command.
+    add_test(NAME pulp-ui-build-contracts
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/test_ui_build.py")
+    set_tests_properties(pulp-ui-build-contracts PROPERTIES
+        LABELS "pr;design-import" TIMEOUT 60)
 
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
