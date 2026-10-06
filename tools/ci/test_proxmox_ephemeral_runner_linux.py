@@ -1094,7 +1094,30 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         # A running upgrade is waited for, never killed mid-dpkg.
         self.assertNotIn("systemctl kill", block)
         self.assertIn("cloud-init status --wait", block)
-        self.assertIn("--ciupgrade 0", self.script)
+        # A clone still running apt after the wait is discarded, never handed a job.
+        self.assertIn('|| die "apt maintenance in clone $VMID was still running', self.script)
+        self.assertNotIn("WARN: apt maintenance", self.script)
+
+    def _qm_set_sizing_argv(self) -> list[str]:
+        """The clone-sizing `qm set` invocation, continuation lines joined, as argv."""
+        import shlex
+        lines = self.script.splitlines()
+        start = next(i for i, line in enumerate(lines)
+                     if line.startswith('qm set "$VMID" --cores'))
+        command = []
+        for line in lines[start:]:
+            command.append(line.rstrip("\\").strip())
+            if not line.rstrip().endswith("\\"):
+                break
+        joined = " ".join(command).split(">/dev/null")[0]
+        return shlex.split(joined)
+
+    def test_clone_disables_cloud_init_first_boot_upgrade(self) -> None:
+        # The comment above the call mentions the flag too, so only the argv counts.
+        argv = self._qm_set_sizing_argv()
+        self.assertEqual(argv[:3], ["qm", "set", "$VMID"])
+        self.assertIn("--ciupgrade", argv)
+        self.assertEqual(argv[argv.index("--ciupgrade") + 1], "0")
 
     def test_engine_is_present_and_syntactically_valid(self) -> None:
         """The engine both wrappers exec must be committed, executable, and parse."""

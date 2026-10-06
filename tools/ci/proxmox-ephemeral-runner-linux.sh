@@ -1017,7 +1017,7 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
         sleep 5
     done
     exit 1
-' || log "WARN: apt maintenance in clone $VMID was still running after 10 minutes; jobs may meet a held dpkg lock"
+' || die "apt maintenance in clone $VMID was still running after 10 minutes; discarding it rather than hand a job a held dpkg lock"
 
 # GitHub's JIT endpoint creates one exact ephemeral registration. The
 # generation UUID in RUNNER_NAME prevents a stale registration from causing a
