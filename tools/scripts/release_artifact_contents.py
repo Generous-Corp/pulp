@@ -60,6 +60,9 @@ PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS = frozenset(
         "browser_capture/tokens.mjs",
     }
 )
+MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER = (
+    "jsx-runtime/materialized_binding_contract.mjs"
+)
 CONTROL_BROKER_CLI_MEMBER = "pulp-control-broker"
 CONTROL_BROKER_SDK_MEMBER = "pulp-sdk/libexec/pulp/pulp-control-broker"
 CONTROL_STANDALONE_HOST_CLI_MEMBER = "pulp-control-standalone-host"
@@ -169,6 +172,17 @@ def control_standalone_host_required(
     )
 
 
+def materialized_binding_contract_required(
+    matrix: ProductMatrix, version: str | None
+) -> bool:
+    """Whether the importer payload must carry the sibling JSX contract."""
+    if version is None:
+        return matrix.materialized_binding_contract_floor != "999999.0.0"
+    return version_tuple(version) >= version_tuple(
+        matrix.materialized_binding_contract_floor
+    )
+
+
 @dataclass(frozen=True)
 class ProductMatrix:
     contract_floor: str
@@ -178,6 +192,7 @@ class ProductMatrix:
     control_broker_floor: str
     control_standalone_host_floor: str
     node_runtime_floor: str
+    materialized_binding_contract_floor: str
     gpu_health_contract_floor: str
     gpu_health_v2_contract_floor: str
     gpu_health_run_attestation_contract_floor: str
@@ -249,6 +264,9 @@ class ProductMatrix:
                 ),
                 node_runtime_floor=str(
                     doc.get("node_runtime_floor", "999999.0.0")
+                ),
+                materialized_binding_contract_floor=str(
+                    doc.get("materialized_binding_contract_floor", "999999.0.0")
                 ),
                 gpu_health_contract_floor=str(
                     doc.get("gpu_health_contract_floor", "999999.0.0")
@@ -335,6 +353,16 @@ class ProductMatrix:
                 f"invalid release product matrix {path}: active_platforms "
                 f"{sorted(unknown)} not in the platform inventory"
             )
+        if (
+            matrix.materialized_binding_contract_floor != "999999.0.0"
+            and matrix.cli_contract_declared
+            and MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER
+            not in matrix.common_cli_members
+        ):
+            raise ContentError(
+                f"invalid release product matrix {path}: materialized binding "
+                "contract floor is declared without its CLI member"
+            )
         if not any(p.startswith("darwin-") for p in matrix.active_platforms):
             raise ContentError(
                 f"invalid release product matrix {path}: active_platforms must "
@@ -345,6 +373,7 @@ class ProductMatrix:
         version_tuple(matrix.sdk_provenance_floor)
         version_tuple(matrix.capability_handoff_floor)
         version_tuple(matrix.inspector_sdk_floor)
+        version_tuple(matrix.materialized_binding_contract_floor)
         version_tuple(matrix.control_broker_floor)
         version_tuple(matrix.control_standalone_host_floor)
         return matrix
@@ -503,7 +532,10 @@ def effective_cli_contract(
                 PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
             )
     if matrix.cli_contract_declared:
-        return matrix.cli_binary_stems, matrix.common_cli_members
+        resources = matrix.common_cli_members
+        if not materialized_binding_contract_required(matrix, version):
+            resources = resources - {MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER}
+        return matrix.cli_binary_stems, resources
     if version is not None:
         return (
             frozenset(PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS),
@@ -565,6 +597,10 @@ def sdk_import_design_runtime_members(
             f"pulp-sdk/bin/browser_capture-v1/{node_name}",
             "pulp-sdk/bin/browser_capture-v1/node.LICENSE",
         })
+    if materialized_binding_contract_required(matrix, version):
+        members.add(
+            "pulp-sdk/bin/" + MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER
+        )
     return frozenset(members)
 
 
@@ -1097,9 +1133,14 @@ def verify_sdk_archive(
             expected_runtime = sdk_import_design_runtime_members(
                 platform, matrix, version
             )
-            runtime_prefix = "pulp-sdk/bin/browser_capture-v1/"
+            runtime_prefixes = (
+                "pulp-sdk/bin/browser_capture-v1/",
+                "pulp-sdk/bin/jsx-runtime/",
+            )
             actual_runtime = {
-                name for name in names if name.startswith(runtime_prefix)
+                name
+                for name in names
+                if any(name.startswith(prefix) for prefix in runtime_prefixes)
             }
             if actual_runtime != expected_runtime:
                 raise ContentError(

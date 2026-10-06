@@ -118,6 +118,9 @@ def _importer_runtime_paths(prefix: Path, platform: str) -> set[str]:
         matrix = json.loads(PRODUCT_MATRIX.read_text(encoding="utf-8"))
         members = matrix["common_cli_members"]
         node_floor = str(matrix.get("node_runtime_floor", "999999.0.0"))
+        materialized_contract_floor = str(
+            matrix.get("materialized_binding_contract_floor", "999999.0.0")
+        )
     except (KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
         raise ProvenanceError(
             f"cannot determine importer runtime contract from {PRODUCT_MATRIX}: {exc}"
@@ -128,11 +131,16 @@ def _importer_runtime_paths(prefix: Path, platform: str) -> set[str]:
         for member in members
         if isinstance(member, str) and member.startswith(capture_prefix)
     }
+    contract_member = "jsx-runtime/materialized_binding_contract.mjs"
+    version = _version_tuple(_read_text(prefix / "version.txt"))
+    if (
+        contract_member in members
+        and version >= _version_tuple(materialized_contract_floor)
+    ):
+        paths.add("bin/" + contract_member)
     if not paths:
         raise ProvenanceError(f"empty importer runtime contract in {PRODUCT_MATRIX}")
-    if _version_tuple(_read_text(prefix / "version.txt")) >= _version_tuple(
-        node_floor
-    ):
+    if version >= _version_tuple(node_floor):
         node_name = "node.exe" if platform.startswith("windows-") else "node"
         paths.update({
             f"bin/browser_capture-v1/{node_name}",

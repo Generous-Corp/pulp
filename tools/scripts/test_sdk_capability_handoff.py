@@ -17,6 +17,9 @@ RUNTIME_PATHS = (
     handoff.IMPORTER_RUNTIME_ROOT / "capture.mjs",
     handoff.IMPORTER_RUNTIME_ROOT / "health.mjs",
 )
+MATERIALIZED_CONTRACT_PATH = Path(
+    "bin/jsx-runtime/materialized_binding_contract.mjs"
+)
 
 
 class SdkCapabilityHandoffTests(unittest.TestCase):
@@ -125,6 +128,30 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
             {entry["path"] for entry in document["importer"]["runtime"]},
             expected,
         )
+
+    def test_sibling_materialized_contract_is_part_of_handoff(self) -> None:
+        sibling = self.prefix / MATERIALIZED_CONTRACT_PATH
+        sibling.parent.mkdir(parents=True, exist_ok=True)
+        sibling.write_bytes(b"export const fixtureContract = true;\n")
+        expected = {path.as_posix() for path in (*RUNTIME_PATHS, MATERIALIZED_CONTRACT_PATH)}
+        document = handoff.build_handoff(
+            self.prefix,
+            sdk_source_sha=SOURCE_SHA,
+            platform=PLATFORM,
+            expected_importer_runtime_paths=expected,
+        )
+        self.assertEqual(
+            {entry["path"] for entry in document["importer"]["runtime"]},
+            expected,
+        )
+        sibling.unlink()
+        with self.assertRaisesRegex(handoff.HandoffError, "selected contract"):
+            handoff.build_handoff(
+                self.prefix,
+                sdk_source_sha=SOURCE_SHA,
+                platform=PLATFORM,
+                expected_importer_runtime_paths=expected,
+            )
 
     def test_duplicate_importer_runtime_path_is_rejected(self) -> None:
         document = self.stamp()

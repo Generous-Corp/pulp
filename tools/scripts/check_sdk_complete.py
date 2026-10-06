@@ -2,10 +2,12 @@
 """Verify an installed Pulp SDK is internally consistent with its source tree.
 
 The design importer is a BINARY plus a `browser_capture-v1/` JavaScript runtime
-that ships beside it. They are two halves of one tool: the binary drives the
-browser, the runtime defines the capture protocol and every gate that runs
-inside the page. Refreshing one without the other produces an SDK that looks
-updated, links fine, and silently runs an old protocol.
+and (for materialized imports) a sibling `jsx-runtime/` contract that ships
+beside it. They are the halves of one tool: the binary drives the browser, the
+runtime defines the capture protocol and every gate that runs inside the page,
+and the sibling contract defines the shared binding schema. Refreshing one
+without the others produces an SDK that looks updated, links fine, and silently
+runs an old protocol.
 
 That is not hypothetical. A capture gate added to the runtime was never copied
 into an SDK whose binary HAD been refreshed, so a panel that the gate rejects
@@ -48,6 +50,14 @@ def _node_runtime_required(prefix: Path, source: Path) -> bool:
     return _version_tuple(version) >= _version_tuple(floor)
 
 
+def _materialized_contract_required(prefix: Path, source: Path) -> bool:
+    version = (prefix / "version.txt").read_text(encoding="utf-8").strip()
+    matrix_path = source / "tools/scripts/release_product_matrix.json"
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    floor = str(matrix.get("materialized_binding_contract_floor", "999999.0.0"))
+    return _version_tuple(version) >= _version_tuple(floor)
+
+
 def check(prefix: Path, source: Path) -> list[str]:
     """Return a list of problems; empty means the SDK is consistent."""
     problems: list[str] = []
@@ -56,10 +66,16 @@ def check(prefix: Path, source: Path) -> list[str]:
     runtime = prefix / "bin" / "browser_capture-v1"
     node = runtime / ("node.exe" if sys.platform == "win32" else "node")
     node_license = runtime / "node.LICENSE"
+    contract = prefix / "bin" / "jsx-runtime" / "materialized_binding_contract.mjs"
     src_runtime = source / "tools" / "import-design" / "browser_capture"
+    src_contract = (
+        source / "tools" / "import-design" / "jsx-runtime"
+        / "materialized_binding_contract.mjs"
+    )
 
     try:
         require_node = _node_runtime_required(prefix, source)
+        require_contract = _materialized_contract_required(prefix, source)
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         problems.append(f"cannot determine bundled Node requirement: {exc}")
         return problems
@@ -70,6 +86,8 @@ def check(prefix: Path, source: Path) -> list[str]:
         problems.append(f"missing bundled Node runtime: {node}")
     if require_node and not node_license.is_file():
         problems.append(f"missing bundled Node license: {node_license}")
+    if require_contract and not contract.is_file():
+        problems.append(f"missing materialized binding contract: {contract}")
     if not runtime.is_dir():
         problems.append(f"missing capture runtime directory: {runtime}")
     if problems:
@@ -78,6 +96,13 @@ def check(prefix: Path, source: Path) -> list[str]:
     if not src_runtime.is_dir():
         problems.append(f"source capture runtime not found: {src_runtime}")
         return problems
+    if require_contract and not src_contract.is_file():
+        problems.append(f"source materialized binding contract not found: {src_contract}")
+    elif require_contract and not filecmp.cmp(src_contract, contract, shallow=False):
+        problems.append(
+            f"materialized binding contract is STALE in the SDK: {src_contract.name} "
+            f"(copy {src_contract} -> {contract})"
+        )
 
     # Only the runtime modules matter. Test files (*.test.mjs) are not shipped,
     # so their absence is correct and must not read as drift.
