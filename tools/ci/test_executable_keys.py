@@ -3,6 +3,7 @@
 base-recorded input set, and every always_run reason."""
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -480,6 +481,33 @@ class ManifestTests(unittest.TestCase):
             pass
         with mock.patch.object(ek, "load_record", side_effect=Parsed), self.assertRaises(Parsed):
             ek.main(argv)
+
+    @unittest.skipIf(tomllib is None, "tomllib unavailable; cannot read .shipyard/config.toml")
+    def test_every_derivation_parser_refuses_an_abbreviated_flag(self):
+        # A host runs these scripts from argv it did not write; with prefix
+        # matching a renamed or removed flag would still be accepted.
+        with (HERE.parents[1] / ".shipyard" / "config.toml").open("rb") as handle:
+            config = tomllib.load(handle)
+        paths = [p for p in config["targets"]["mac"]["changed_surface_selection"]["executable_reuse"]
+                 ["derivation_paths"] if p.endswith(".py")]
+        lenient, seen = [], 0
+        for rel in paths:
+            tree = ast.parse((HERE.parents[1] / rel).read_text(encoding="utf-8"))
+            for call in ast.walk(tree):
+                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and call.func.attr in ("ArgumentParser", "add_parser")):
+                    continue
+                seen += 1
+                if not any(k.arg == "allow_abbrev" and isinstance(k.value, ast.Constant) and k.value.value is False
+                           for k in call.keywords):
+                    lenient.append(f"{rel}:{call.lineno}")
+        self.assertGreaterEqual(seen, len(paths) // 2)  # the scan saw the parsers
+        self.assertEqual(lenient, [])
+        # Accepting the prefix would reach load_record; refusing it is argparse's exit 2.
+        with self.assertRaises(SystemExit) as raised, mock.patch("sys.stderr"), \
+                mock.patch.object(ek, "load_record", side_effect=AssertionError("--audit-repor was accepted")):
+            ek.main(["x", "--source-root", ".", "--base-sha", "a", "--audit-repor", "r", "--out", "o"])
+        self.assertEqual(raised.exception.code, 2)
 
     def test_registrations_match_the_build_dir_as_a_string(self):
         # The host re-deriving a manifest holds copies, not the build tree:

@@ -1099,7 +1099,7 @@ def touch_reasons(root: Path, base: str, list_path: Path | None = None) -> list[
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     ap.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[2]))
     ap.add_argument("--build-dir")
     ap.add_argument("--inventory-json", help="a saved `ctest --show-only=json-v1` document (tests)")
