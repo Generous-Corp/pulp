@@ -43,6 +43,19 @@ class ArgvForTests(unittest.TestCase):
             self.assertEqual(script_argv.argv_for(script, platform="nt"),
                              ["C:/Git/bin/bash.exe", str(script)])
 
+    def test_windows_finds_git_bash_beside_git_when_bash_is_not_on_path(self) -> None:
+        script = self.write("fake", b"#!/bin/sh\necho hi\n")
+        git_root = self.root / "Git"
+        (git_root / "cmd").mkdir(parents=True)
+        (git_root / "bin").mkdir()
+        (git_root / "cmd" / "git.exe").write_bytes(b"MZ")
+        bash = git_root / "bin" / "bash.exe"
+        bash.write_bytes(b"MZ")
+        which = {"bash": None, "git": str(git_root / "cmd" / "git.exe")}
+        with mock.patch.object(script_argv.shutil, "which", side_effect=which.get):
+            self.assertEqual(script_argv.argv_for(script, platform="nt"),
+                             [str(bash), str(script)])
+
     def test_windows_without_bash_leaves_a_shell_script_alone(self) -> None:
         script = self.write("fake", b"#!/bin/sh\necho hi\n")
         with mock.patch.object(script_argv.shutil, "which", return_value=None):
