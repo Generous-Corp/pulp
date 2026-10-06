@@ -8,7 +8,7 @@ counter, or a model that merely produces plausible audio is insufficient.
 ## Current source boundary
 
 The source snapshot for this plan is the fetched protected `origin/main` at
-[`0b55a687af63497d90364f9950f7dfff229aff80`](https://github.com/Generous-Corp/pulp/commit/0b55a687af63497d90364f9950f7dfff229aff80). It includes the private CPU
+[`550ce89344f7cb0e9644826d95791ab5c27d5df2`](https://github.com/Generous-Corp/pulp/commit/550ce89344f7cb0e9644826d95791ab5c27d5df2). It includes the private CPU
 neural lifecycle facade, manifest/installed-asset admission, serialized NAM/TCN
 CPU bridge, the tools-only `tools/validation/mlx_worker_harness.py` probe,
 the Apple host-tier planning matrix, the minimum-lead GPU proxy (PR9582),
@@ -130,7 +130,7 @@ quality metric is within the predeclared tolerance.
 ## Apple Silicon service matrix
 
 M1, M3, and M5 are valid experiment hosts, but a control-path measurement is
-not a neural-provider support claim. The historical source anchor below is retained for provenance; current protected source is [`0b55a687af63497d90364f9950f7dfff229aff80`](https://github.com/Generous-Corp/pulp/commit/0b55a687af63497d90364f9950f7dfff229aff80). The historical source anchor is
+not a neural-provider support claim. The historical source anchor below is retained for provenance; current protected source is [`550ce89344f7cb0e9644826d95791ab5c27d5df2`](https://github.com/Generous-Corp/pulp/commit/550ce89344f7cb0e9644826d95791ab5c27d5df2). The historical source anchor is
 [`b038559ab2d019566c4964d42c0786310c139860`](https://github.com/Generous-Corp/pulp/commit/b038559ab2d019566c4964d42c0786310c139860),
 which includes the named-model MLX, host-evidence, GPU lifecycle, and provenance
 merges ([PR 9577](https://github.com/Generous-Corp/pulp/pull/9577), [PR 9602](https://github.com/Generous-Corp/pulp/pull/9602), [PR 9525](https://github.com/Generous-Corp/pulp/pull/9525), and [PR 9605](https://github.com/Generous-Corp/pulp/pull/9605)). Existing native-control observations
