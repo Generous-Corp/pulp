@@ -1,0 +1,48 @@
+{
+  "id": "dspx-04-automation-modulation",
+  "title": "Automation and modulation share an explicit base-vs-offset contract",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "dspx04-minimal-example-host-20261004",
+  "owned_paths": [
+    "core/state/include/pulp/state/parameter.hpp",
+    "core/state/include/pulp/state/store.hpp",
+    "core/state/src/store.cpp",
+    "core/state/include/pulp/state/modulation_lane.hpp",
+    "core/state/include/pulp/state/parameter_event_queue.hpp",
+    "core/timeline/include/pulp/timeline/modulation.hpp",
+    "test/test_modulation_matrix.cpp",
+    "test/cmake/test_control_sdk_consumer.cmake",
+    "inspect/include/pulp/inspect/control_standalone_host.hpp",
+    "inspect/src/control_standalone_host.cpp",
+    "inspect/src/control_standalone_host_minimal.cpp",
+    "inspect/src/control_signal_graph_executor.cpp",
+    "core/host/include/pulp/host/processor_signal_graph_binding.hpp",
+    "core/host/src/processor_signal_graph_binding.cpp",
+    "core/host/CMakeLists.txt",
+    "tools/cmake/PulpAppTargets.cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "docs/guides/automation-modulation.md",
+    "docs/status/sequencer-exposure/rows/dspx-04-automation-modulation.json"
+  ],
+  "evidence": [
+    {"path": "core/state/include/pulp/state/parameter.hpp", "needles": ["struct BaseOffsetValue", "validate_base_offset"]},
+    {"path": "core/state/include/pulp/state/store.hpp", "needles": ["get_base_offset"]},
+    {"path": "core/state/include/pulp/state/modulation_lane.hpp", "needles": ["validate_modulation_lane", "AudioSourceRequiresAudioTarget"]},
+    {"path": "core/state/include/pulp/state/parameter_event_queue.hpp", "needles": ["class ModulationEventQueue", "overflowed"]},
+    {"path": "core/timeline/include/pulp/timeline/modulation.hpp", "needles": ["A route is not an automation lane", "relative offset"]},
+    {"path": "test/test_timeline_modulation_route_commands.cpp", "needles": ["a modulation route is authored and rewired in place and removed whole", "a stale route expectation is refused"]},
+    {"path": "test/test_signal_graph_executor_parity.cpp", "needles": ["connect_audio_rate_modulation", "mixed block sizes"]},
+    {"path": "test/test_processor_block_adapter.cpp", "needles": ["keeps dense modulation out of legacy param events", "sample_rate"]},
+    {"path": "test/test_connection_classify.cpp", "needles": ["dense audio-rate modulation edge", "audio_rate"]},
+    {"path": "test/test_modulation_matrix.cpp", "needles": ["base and offset remain one canonical automation value", "dense modulation delivery refuses queue overflow explicitly", "dense modulation ordering survives the sample-rate and block matrix"]},
+    {"path": "docs/guides/automation-modulation.md", "needles": ["base-vs-offset", "typed unsupported result"]}
+  ],
+  "surfaces": {
+    "installed_sdk": {"disposition": "exposed", "rationale": "The public state and timeline headers expose the canonical base-vs-offset value, route validation, and bounded dense queue.", "evidence": [{"kind": "sdk_header", "path": "core/state/include/pulp/state/parameter.hpp", "needles": ["struct BaseOffsetValue"]}], "authority": {"admission": "in_process", "writer_profile": null, "bounds": null, "refusal_codes": []}},
+    "offline_timeline_cli": {"disposition": "deferred", "rationale": "The timeline model preserves routes, but no offline CLI operation publishes this packet's complete base-vs-offset and dense-delivery contract yet. Typed deferred receipt: status=deferred, code=UnsupportedSurface, operation=automation.modulation.route, required=route lifecycle plus dense overflow receipt.", "owner": "dspx-04", "dependencies": ["timeline-automation-command"]},
+    "offline_timeline_mcp": {"disposition": "deferred", "rationale": "No offline MCP operation currently preserves dense route delivery and typed refusal results end to end. Typed deferred receipt: status=deferred, code=UnsupportedSurface, operation=automation.modulation.route, required=route lifecycle plus dense overflow receipt.", "owner": "dspx-04", "dependencies": ["timeline-automation-command"]},
+    "live_product_control": {"disposition": "exposed", "rationale": "The approved minimal installable DSPX-04 example host owns a prepared Processor SignalGraph, binds the canonical resolver, and proves the insert, rewire, and remove lifecycle for the prepared graph route through the broker. The generic CLI and generated MCP projections reach the same registry operation. This promotes live control for the namespaced example host only; Forge and commercial products still require their own equivalent receipt.", "evidence": [{"kind": "capability_definition", "path": "inspect/include/pulp/inspect/capability_definitions.inc", "needles": ["ModulationRouteEdit", "dev.pulp.graph/modulation-route.edit@1"]}, {"kind": "operation_definition", "path": "inspect/src/control_manifest.cpp", "needles": ["ModulationRouteEdit, \"graph/modulation-route.edit\""]}, {"kind": "executor_binding", "path": "inspect/src/control_standalone_host.cpp", "needles": ["make_control_signal_graph_executor", "dev.pulp.graph/modulation-route.edit@1"]}, {"kind": "profile_policy", "path": "inspect/include/pulp/inspect/capability_definitions.inc", "needles": ["ModulationRouteEdit, \"graph.modulation-route.edit\", \"dev.pulp.graph/modulation-route.edit@1\", Control, Authoring, HostMain, Receipt, 0, 1, 1, 0"]}, {"kind": "cli_projection", "path": "tools/cli/cmd_control.cpp", "needles": ["control_operation_registry()", "resolve_control_operation"]}, {"kind": "mcp_projection", "path": "tools/mcp/mcp_control_tool_catalog.cpp", "needles": ["control_operation_registry()", "pulp_control_"]}, {"kind": "test", "path": "test/test_control_dspx04_graph_product_e2e.cpp", "needles": ["ControlBrokerDaemon", "dev.pulp.graph/modulation-route.edit@1", "bounded dense capacity"]}], "authority": {"admission": "in_process", "writer_profile": null, "bounds": null, "refusal_codes": []}},
+    "design_time_agent_manifest": {"disposition": "exposed", "rationale": "The installed agent manifest already exposes the canonical dense Processor modulation capability; this packet aligns its base-vs-offset and refusal semantics with the public state contract.", "evidence": [{"kind": "agent_manifest", "path": "docs/status/agent-capabilities.json", "needles": ["audio.audio-rate-modulation-dense", "Graph-owned Processor nodes receive bounded borrowed dense modulation lanes"]}], "authority": {"admission": "descriptor", "writer_profile": null, "bounds": null, "refusal_codes": []}}
+  }
+}

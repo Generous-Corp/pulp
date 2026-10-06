@@ -435,6 +435,13 @@ float StateStore::get_modulated(ParamID id) const {
     return std::clamp(modulated, param.range.min, param.range.max);
 }
 
+BaseOffsetValue StateStore::get_base_offset(ParamID id) const {
+    const auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end())
+        return {};
+    return values_[it->second].get_base_offset();
+}
+
 void StateStore::set_mod_offset(ParamID id, float offset) {
     auto it = id_to_index_.find(id);
     if (it != id_to_index_.end()) {

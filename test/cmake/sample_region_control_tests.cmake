@@ -71,8 +71,8 @@ function(_pulp_register_sample_region_control_e2e)
         # redirected.
         #
         # The staged `pulp` is the production C++ `pulp-cli` target. Keep the
-        # management-client alias at `<bin>/../tools/cli/pulp-cpp` so the broker
-        # can trust the enrolling test executable without replacing that CLI.
+        # management-client alias under this test's own output directory so
+        # the DSPX-04 product test cannot overwrite its identity.
         #
         # Copied, never re-signed: ad-hoc signing derives the identifier from the
         # basename, so re-signing under another name would change the very
@@ -80,9 +80,9 @@ function(_pulp_register_sample_region_control_e2e)
         # `stage_signed_binary(..., false)` aliases in
         # test_control_phase15_aggregate_e2e.cpp.
         COMMAND "${CMAKE_COMMAND}" -E make_directory
-            "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/../tools/cli"
+            "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/tools/cli"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-sample-region-e2e>"
-            "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/../tools/cli/pulp-cpp"
+            "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/tools/cli/pulp-cpp"
         VERBATIM)
     pulp_scaled_test_timeout(_pulp_sample_region_e2e_timeout 180)
     catch_discover_tests(pulp-test-control-sample-region-e2e

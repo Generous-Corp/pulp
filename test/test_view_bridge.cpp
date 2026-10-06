@@ -1,27 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
-#include <pulp/format/editor_idle_pump.hpp>
-#include <pulp/format/editor_prewarm.hpp>
-#include <pulp/format/editor_ui.hpp>
-#include <pulp/format/gpu_host_select.hpp>
-#include <pulp/format/detail/au_v2_editor_resize.hpp>
-#include <pulp/format/plugin_state_io.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/format/view_bridge.hpp>
-#include <pulp/state/store.hpp>
-#include <pulp/state/listener_token.hpp>
-#include <pulp/view/auto_ui.hpp>
-#include <pulp/view/design_frame_view.hpp>
-#include <pulp/view/host_param_surface.hpp>
-#include <pulp/view/parameter_binding.hpp>
-#include <pulp/view/scripted_ui.hpp>
-#include <pulp/view/scripted_ui_prewarm.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/view.hpp>
-#include <pulp/view/window_host.hpp>
-#include <pulp/view/widget_bridge.hpp>
-#include <pulp/view/widgets.hpp>
-#include <pulp/canvas/canvas.hpp>
+
+#include "support/portable_env.hpp"
+#include "support/unique_temp_dir.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -30,6 +11,28 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/format/detail/au_v2_editor_resize.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
+#include <pulp/format/editor_prewarm.hpp>
+#include <pulp/format/editor_ui.hpp>
+#include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/format/view_bridge.hpp>
+#include <pulp/state/listener_token.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/auto_ui.hpp>
+#include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/parameter_binding.hpp>
+#include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/scripted_ui_prewarm.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -42,21 +45,8 @@ using namespace pulp;
 
 namespace {
 
-int set_env_var(const char* name, const char* value) {
-#if defined(_WIN32)
-    return _putenv_s(name, value);
-#else
-    return ::setenv(name, value, 1);
-#endif
-}
-
-int unset_env_var(const char* name) {
-#if defined(_WIN32)
-    return _putenv_s(name, "");
-#else
-    return ::unsetenv(name);
-#endif
-}
+using pulp::test::set_env_var;
+using pulp::test::unset_env_var;
 
 class ScopedEnvVar {
 public:
@@ -516,10 +506,7 @@ public:
 };
 
 std::filesystem::path write_editor_script(const char* stem, const std::string& code) {
-    const auto dir = std::filesystem::temp_directory_path()
-        / (std::string(stem) + "-"
-           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::filesystem::create_directories(dir);
+    const auto dir = pulp::test::make_unique_temp_dir(stem);
     std::ofstream(dir / "main.js") << code;
     return dir / "main.js";
 }
@@ -837,19 +824,19 @@ TEST_CASE("Editor open: hosted editors open content-first unless PULP_EDITOR_OPE
           "[view_bridge][scripted-ui][editor-open][content-first]") {
     const char* saved = std::getenv("PULP_EDITOR_OPEN");
     const std::string saved_value = saved ? saved : "";
-    unsetenv("PULP_EDITOR_OPEN");
+    unset_env_var("PULP_EDITOR_OPEN");
     CHECK(format::ViewBridge::Options::hosted_editor().content_first_open);
     CHECK(format::ViewBridge::Options::hosted_editor().defer_document_load);
-    setenv("PULP_EDITOR_OPEN", "view-first", 1);
+    set_env_var("PULP_EDITOR_OPEN", "view-first");
     CHECK_FALSE(format::ViewBridge::Options::hosted_editor().content_first_open);
-    setenv("PULP_EDITOR_OPEN", "content-first", 1);
+    set_env_var("PULP_EDITOR_OPEN", "content-first");
     CHECK(format::ViewBridge::Options::hosted_editor().content_first_open);
     // Standalone and harness bridges never ask a host to present anything.
     CHECK_FALSE(format::ViewBridge::Options{}.content_first_open);
     if (saved)
-        setenv("PULP_EDITOR_OPEN", saved_value.c_str(), 1);
+        set_env_var("PULP_EDITOR_OPEN", saved_value.c_str());
     else
-        unsetenv("PULP_EDITOR_OPEN");
+        unset_env_var("PULP_EDITOR_OPEN");
 }
 
 TEST_CASE("Editor open: content-first mounts the document before the host's first frame",
@@ -1702,10 +1689,7 @@ TEST_CASE("ViewBridge rebuilds the open editor in place on reload", "[view_bridg
 
 TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
           "[view_bridge][reload][scripted-ui]") {
-    const auto temp_dir = std::filesystem::temp_directory_path()
-        / ("pulp-view-bridge-scripted-reload-"
-           + std::to_string(std::chrono::steady_clock::now()
-                                .time_since_epoch().count()));
+    const auto temp_dir = pulp::test::make_unique_temp_dir("pulp-view-bridge-scripted-reload");
     struct TempDirCleanup {
         std::filesystem::path path;
         ~TempDirCleanup() {
@@ -1713,7 +1697,7 @@ TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
             std::filesystem::remove_all(path, ignored);
         }
     } cleanup{temp_dir};
-    REQUIRE(std::filesystem::create_directories(temp_dir));
+    REQUIRE(std::filesystem::is_directory(temp_dir));
     const auto script_path = temp_dir / "ui.js";
     {
         std::ofstream script(script_path);

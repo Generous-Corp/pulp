@@ -389,6 +389,12 @@ EXECUTABLE_REUSE_BINDING = {
 # merge rules; the toolchain rule needs this head's configure, so the runner
 # applies it and uses the first candidate built by the lane's toolchain.
 EXECUTABLE_REUSE_CANDIDATE = {"run_id": str, "record_sha256": str, "record_path": str, "commit": str}
+# The optional `audit` binding: the last clean read-audit report of main that
+# Shipyard staged as read-audit.json in the result directory, or why there is
+# none. A binding without it (an older planner) stays valid.
+AUDIT_STAGED = {"status": str, "run_id": str, "audit_commit": str, "commits_behind": int, "report_sha256": str}
+AUDIT_NONE_REASONS = ("no_clean_run", "fetch_failed", "no_credentials")
+AUDIT_REPORT_FILE = "read-audit.json"
 MAX_REUSE_CANDIDATES = 8
 # Run from Shipyard's extracted base copies, never from the checkout.
 DERIVATION_SCRIPTS = {
@@ -398,9 +404,26 @@ DERIVATION_SCRIPTS = {
 }
 
 
+def validate_audit_binding(audit: Any) -> None:
+    if not isinstance(audit, dict):
+        raise SelectionExecutionError("selection receipt executable_reuse.audit is invalid")
+    if audit.get("status") == "none":
+        if set(audit) != {"status", "reason"} or audit["reason"] not in AUDIT_NONE_REASONS:
+            raise SelectionExecutionError("selection receipt executable_reuse.audit is invalid")
+        return
+    if audit.get("status") != "staged" or set(audit) != set(AUDIT_STAGED) or any(
+            not isinstance(audit[k], t) or isinstance(audit[k], bool) for k, t in AUDIT_STAGED.items()) \
+            or not audit["run_id"] or audit["commits_behind"] < 0 \
+            or not re.fullmatch(r"[0-9a-fA-F]{40}", audit["audit_commit"]) \
+            or not re.fullmatch(r"[0-9a-f]{64}", audit["report_sha256"]):
+        raise SelectionExecutionError("selection receipt executable_reuse.audit is invalid")
+
+
 def validate_executable_reuse_binding(binding: Any) -> None:
-    if not isinstance(binding, dict) or set(binding) != set(EXECUTABLE_REUSE_BINDING):
+    if not isinstance(binding, dict) or set(binding) - {"audit"} != set(EXECUTABLE_REUSE_BINDING):
         raise SelectionExecutionError("selection receipt executable_reuse has an unexpected schema")
+    if "audit" in binding:
+        validate_audit_binding(binding["audit"])
     for key, kind in EXECUTABLE_REUSE_BINDING.items():
         value = binding[key]
         if not isinstance(value, kind) or isinstance(value, bool) or value == "":
@@ -506,6 +529,45 @@ print(json.dumps({'toolchain': lane, 'pick': pick}, sort_keys=True))
 """
 
 
+def resolve_audit(binding: dict[str, Any], code: Path, result_dir: Path) -> tuple[dict[str, Any], Path | None]:
+    """(what the receipt says about the audit report, the report to hand the
+    key code or None). Without a usable report the key code marks every
+    executable audit_uncovered, so the run is keyed and fails closed; the
+    stated status says why. A staged report whose bytes are missing or do not
+    match its bound digest is a mismatch, said loudly, never `none`."""
+    audit = binding.get("audit")
+    if audit is None:
+        return {"status": "absent"}, None
+    if audit["status"] == "none":
+        return {"status": "none", "reason": audit["reason"]}, None
+    bound = {"run_id": audit["run_id"], "audit_commit": audit["audit_commit"],
+             "commits_behind": audit["commits_behind"]}
+    report = result_dir / AUDIT_REPORT_FILE
+    try:
+        actual = _sha256_file(report)
+    except FileNotFoundError:
+        actual = None
+    except OSError as error:
+        print(f"executable-reuse: audit report {report} is unreadable ({error}); keying without it",
+              file=sys.stderr)
+        return {"status": "report_unreadable", **bound, "expected_sha256": audit["report_sha256"],
+                "error": str(error)}, None
+    if actual != audit["report_sha256"]:
+        print(f"executable-reuse: audit report mismatch: expected {audit['report_sha256']}, "
+              f"actual {actual or 'missing'}; keying without it", file=sys.stderr)
+        return {"status": "report_mismatch", **bound, "expected_sha256": audit["report_sha256"],
+                "actual_sha256": actual}, None
+    # A base whose key code predates the audit rule rejects the argument; it
+    # keys with no report, and says so.
+    try:
+        accepts = "--audit-report" in (code / DERIVATION_SCRIPTS["keys"]).read_text(encoding="utf-8")
+    except OSError:
+        accepts = False
+    if not accepts:
+        return {"status": "base_key_code_predates_audit", **bound, "report_sha256": actual}, None
+    return {"status": "applied", **bound, "report_sha256": actual}, report
+
+
 def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[str, Any]:
     if Path(binding["build_dir"]).resolve() != build_dir.resolve():
         raise DerivationError("the bound build directory is not this lane's")
@@ -547,7 +609,11 @@ def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[
     # The key code's own probe reads the compiler this build directory
     # recorded; an older base copy takes no argument.
     candidates = binding["candidates"]
-    picked = json.loads(step(["-c", PICK_SCRIPT, binding["build_dir"],
+    # The steps run in the derivation code directory, so a relative bound
+    # path would name a directory there; every step gets the lane's absolute
+    # build directory, the same string its ctest listing's commands carry.
+    bound_build = os.path.abspath(build_dir)
+    picked = json.loads(step(["-c", PICK_SCRIPT, bound_build,
                               json.dumps([c["record_path"] for c in candidates])], "toolchain pick"))
     files["toolchain.json"].write_text(json.dumps(picked["toolchain"], sort_keys=True) + "\n", encoding="utf-8")
     pick = candidates[picked["pick"]["index"]] if picked["pick"] is not None else None
@@ -556,20 +622,23 @@ def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[
     # With no candidate on this toolchain the first one still keys, so every
     # executable carries base_other_toolchain and the reason names a record.
     used = pick or (candidates[0] if candidates else None)
-    bound_build = binding["build_dir"]
     step([str(scripts["codemodel"]), "--build-dir", bound_build, "--source-root", str(REPO_ROOT),
           "--ctest-json", str(files["ctest-listing.json"]), "--out", str(files["codemodel-digest.json"])],
          "codemodel digest")
     if used is None and not base_sha:
         raise DerivationError("no base commit to key against")
+    audit, report = resolve_audit(binding, code, result_dir)
     step([str(scripts["keys"]), "--source-root", str(REPO_ROOT),
           "--base-sha", used["commit"] if used else base_sha, "--head-sha", head_sha,
           *(["--base-record", used["record_path"], "--base-record-run-id", used["run_id"]] if used else []),
           "--head-codemodel", str(files["codemodel-digest.json"]),
           "--ctest-json", str(files["ctest-listing.json"]), "--build-dir", bound_build,
-          "--toolchain-json", str(files["toolchain.json"]), "--out", str(files["executable-keys.json"])],
+          "--toolchain-json", str(files["toolchain.json"]), "--out", str(files["executable-keys.json"]),
+          *(["--audit-report", str(report)] if report is not None else [])],
          "key manifest")
     manifest = json.loads(files["executable-keys.json"].read_text(encoding="utf-8"))
+    if report is not None and (manifest.get("producer") or {}).get("audit_report_sha256") != audit["report_sha256"]:
+        raise DerivationError("the audit report is not the one Shipyard bound")
     if (manifest.get("producer") or {}).get("base_record_sha256") != (used or {}).get("record_sha256"):
         raise DerivationError("the base record is not the one Shipyard bound")
     step([str(scripts["selection"]), "--manifest", str(files["executable-keys.json"]),
@@ -591,6 +660,9 @@ def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[
         "would_skip_count": len(selection["would_skip"]),
         "sampled_count": len(selection["sampled_executables"]),
         "reasons": manifest.get("reasons"),
+        # The build directory every step was given, for the host's rederive.
+        "build_dir": bound_build,
+        "audit": audit,
     }
 
 

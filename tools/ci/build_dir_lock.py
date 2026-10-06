@@ -31,6 +31,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO, Iterator, Sequence
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+try:
+    from process_liveness import pid_alive as _pid_alive  # noqa: E402
+except ImportError:  # copied without tools/scripts (fixture checkouts)
+    def _pid_alive(pid: object) -> bool | None:
+        """No probe available: report "unknown", never "dead"."""
+        return None
+
 
 LOCK_ROOT_ENV = "PULP_BUILD_DIR_LOCK_ROOT"
 HELD_ENV = "PULP_BUILD_DIR_LOCK_HELD"
@@ -123,17 +131,7 @@ def held_by_ancestor(build_dir: Path) -> bool:
 
 
 def pid_alive(pid: object) -> bool | None:
-    if not isinstance(pid, int) or pid <= 0:
-        return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return None
-    return True
+    return _pid_alive(pid)
 
 
 def read_holder(lock_path: Path) -> dict[str, object] | None:

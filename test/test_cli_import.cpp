@@ -12,6 +12,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/portable_env.hpp"
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/import_detect.hpp"
 #include "tools/cli/import_spi.hpp"
 
@@ -34,12 +36,7 @@ namespace {
 struct TempDir {
     fs::path path;
     explicit TempDir(const std::string& prefix) {
-        path = fs::temp_directory_path() /
-               (prefix + "-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch().count()) +
-                "-" + std::to_string(::rand()));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
     ~TempDir() { std::error_code ec; fs::remove_all(path, ec); }
 };
@@ -269,8 +266,8 @@ pulp::platform::ProcessResult run_cli(const std::vector<std::string>& args,
     pulp::platform::ProcessOptions opts;
     opts.timeout_ms = 60000;
     // Deterministic + offline.
-    ::setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-    ::setenv("PULP_KNOWN_FRAMEWORKS", known_frameworks.c_str(), 1);
+    pulp::test::set_env_var("PULP_UPDATE_CHECK_DISABLED", "1");
+    pulp::test::set_env_var("PULP_KNOWN_FRAMEWORKS", known_frameworks.c_str());
     return pulp::platform::ChildProcess::run(cli_binary().string(), args, opts);
 }
 }  // namespace

@@ -8,6 +8,13 @@ on:
     - cron: '23 3 * * 1'
   workflow_dispatch:
 
+# A new push to a PR retires the previous head's analysis: CodeQL is advisory
+# and only the latest PR head's results matter. Main, schedule, and manual runs
+# get a group per run so every main commit keeps its own analysis.
+concurrency:
+  group: codeql-advanced-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   security-events: write

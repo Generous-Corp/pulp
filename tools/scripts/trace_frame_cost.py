@@ -41,6 +41,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+
+from script_argv import argv_for
 import sys
 import tempfile
 
@@ -239,7 +241,7 @@ def run_processor(processor: str, trace: Path, query: str) -> str:
         handle.write(query)
         query_path = Path(handle.name)
     try:
-        result = subprocess.run([processor, "-q", str(query_path), str(trace)],
+        result = subprocess.run([*argv_for(processor), "-q", str(query_path), str(trace)],
                                 check=False, capture_output=True, text=True)
     finally:
         query_path.unlink(missing_ok=True)

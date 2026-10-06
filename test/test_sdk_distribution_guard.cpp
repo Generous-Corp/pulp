@@ -1,8 +1,8 @@
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/sdk_distribution_guard.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 
@@ -11,10 +11,8 @@ namespace fs = std::filesystem;
 namespace {
 
 struct TempDir {
-    fs::path path = fs::temp_directory_path() /
-                    ("pulp-sdk-distribution-" +
-                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    TempDir() { fs::create_directories(path); }
+    fs::path path = pulp::test::make_unique_temp_dir("pulp-sdk-distribution");
+    TempDir() = default;
     ~TempDir() {
         std::error_code ec;
         fs::remove_all(path, ec);

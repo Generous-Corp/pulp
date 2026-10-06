@@ -18,6 +18,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+from script_argv import argv_for
 import types
 from pathlib import Path
 from typing import Any
@@ -850,7 +852,7 @@ class McpSession:
         self.directory_claim = directory_claim
         self.directory_claim.assert_current()
         self.process = subprocess.Popen(
-            [str(executable)], cwd=cwd, env=environment,
+            argv_for(executable), cwd=cwd, env=environment,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1,
         )
