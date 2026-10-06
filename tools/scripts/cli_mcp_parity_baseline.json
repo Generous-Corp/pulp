@@ -48,7 +48,8 @@
     "trace": "Top-level trace CLI \u2014 canonical live lifecycle is exposed as pulp_trace_start/stop and closed GPU analysis as pulp_trace_analyze; client-side doctor/open/fetch and free-form offline `query --trace` have no MCP peer",
     "tweaks": "Local pulp-tweaks.json drift diagnostic; agents shell out directly (mirrors the inspector drift drawer)",
     "upgrade": "Bin-swap flow; agents call directly",
-    "version": "Trivial via Bash (cat CMakeLists.txt | grep VERSION)"
+    "version": "Trivial via Bash (cat CMakeLists.txt | grep VERSION)",
+    "ui": "Local imported-UI build/check workflow; it operates on checkout files and emits build artifacts, so it is not an RPC-shaped MCP operation"
   },
   "mcp_only": {
     "pulp_audio_compare": "Sub-tool of `pulp audio` \u2014 advisory before/after compare RPC mirroring the shipped `pulp audio compare` verb; delegates to the opt-in Audio Quality Lab tool. `audio` is a parent command, so this sub-verb has no top-level CLI peer.",
