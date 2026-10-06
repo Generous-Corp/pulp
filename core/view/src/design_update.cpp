@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <cstdint>
-#include <functional>
+#include <string_view>
 #include <pulp/view/design_update.hpp>
 #include <unordered_map>
 #include <unordered_set>
@@ -42,47 +42,76 @@ struct BindingShape {
     bool value = false;
     bool action = false;
     std::vector<std::uint8_t> interactive;
+    // Contract fields are copied into native binding callbacks or the initial
+    // widget configuration. A retained node has no generic setter for them,
+    // so compare their values rather than only their presence. Re-keyable
+    // names and text payloads are intentionally excluded below.
+    std::vector<std::pair<std::string, std::string>> contract;
 
     friend bool operator==(const BindingShape&, const BindingShape&) = default;
 };
 
-BindingShape binding_shape(const IRNode& node) {
-    BindingShape shape;
-    shape.scalar = has_nonempty_attribute(node, "binding") ||
-                   has_nonempty_attribute(node, "pulpParamKey") ||
-                   has_nonempty_attribute(node, "pulpBindingModule") ||
-                   has_nonempty_attribute(node, "pulpBindingParam");
-    shape.x = has_nonempty_attribute(node, "pulpParamKeyX") ||
-              has_nonempty_attribute(node, "pulpBindingModuleX") ||
-              has_nonempty_attribute(node, "pulpBindingParamX");
-    shape.y = has_nonempty_attribute(node, "pulpParamKeyY") ||
-              has_nonempty_attribute(node, "pulpBindingModuleY") ||
-              has_nonempty_attribute(node, "pulpBindingParamY");
-    shape.meter = has_nonempty_attribute(node, "pulpMeterSource") ||
-                  has_nonempty_attribute(node, "pulpMeterChannel") ||
-                  has_nonempty_attribute(node, "pulpMeterValueKey");
+bool is_rekeyable_binding_attribute(std::string_view key) {
+    // These are names/payloads that an update consumer can change in place.
+    // The planner must still compare their presence through the topology bits
+    // above so bound↔unbound transitions recreate the native control.
+    for (const auto candidate : {"pulpParamKey", "pulpBindingModule", "pulpBindingParam",
+                                 "pulpParamKeyX", "pulpBindingModuleX", "pulpBindingParamX",
+                                 "pulpParamKeyY", "pulpBindingModuleY", "pulpBindingParamY",
+                                 "pulpMeterSource", "pulpMeterChannel", "pulpMeterValueKey",
+                                 "pulpValueKey", "pulpInitialValue", "pulpPlaceholder"}) {
+        if (key == candidate)
+            return true;
+    }
+    return false;
+}
+
+void append_binding_shape(const IRNode& frame, BindingShape& shape) {
+    shape.scalar = shape.scalar || has_nonempty_attribute(frame, "binding") ||
+                   has_nonempty_attribute(frame, "pulpParamKey") ||
+                   has_nonempty_attribute(frame, "pulpBindingModule") ||
+                   has_nonempty_attribute(frame, "pulpBindingParam");
+    shape.x = shape.x || has_nonempty_attribute(frame, "pulpParamKeyX") ||
+              has_nonempty_attribute(frame, "pulpBindingModuleX") ||
+              has_nonempty_attribute(frame, "pulpBindingParamX");
+    shape.y = shape.y || has_nonempty_attribute(frame, "pulpParamKeyY") ||
+              has_nonempty_attribute(frame, "pulpBindingModuleY") ||
+              has_nonempty_attribute(frame, "pulpBindingParamY");
+    shape.meter = shape.meter || has_nonempty_attribute(frame, "pulpMeterSource") ||
+                  has_nonempty_attribute(frame, "pulpMeterChannel") ||
+                  has_nonempty_attribute(frame, "pulpMeterValueKey");
     // The value key selects the binding family. Initial text and placeholder
     // are payload values on that family, so changing either must remain an
     // in-place update rather than recreating the native control.
-    shape.value = has_nonempty_attribute(node, "pulpValueKey");
-    shape.action = has_nonempty_attribute(node, "pulpHostAction") ||
-                   has_nonempty_attribute(node, "pulpPayloadContract");
+    shape.value = shape.value || has_nonempty_attribute(frame, "pulpValueKey");
+    shape.action = shape.action || has_nonempty_attribute(frame, "pulpHostAction") ||
+                   has_nonempty_attribute(frame, "pulpPayloadContract");
 
-    // Alternate frames share the same DesignFrameView and participate in the
-    // host-routing decision, so include their interactive topology too.  The
-    // names remain deliberately omitted: those are re-keyable payload values.
-    std::function<void(const IRNode&)> append_interactive = [&](const IRNode& frame) {
-        for (const auto& element : frame.interactive_elements) {
-            // Store the enum and binding presence, but never the parameter
-            // name. The name is a re-keyable value; kind and binding
-            // cardinality define the materialized control topology.
-            shape.interactive.push_back(static_cast<std::uint8_t>(element.kind));
-            shape.interactive.push_back(element.param_key.empty() ? 0 : 1);
-        }
-        for (const auto& alternate : frame.alternate_frames)
-            append_interactive(alternate);
-    };
-    append_interactive(node);
+    for (const auto& element : frame.interactive_elements) {
+        // Store the enum and binding presence, but never the parameter name.
+        // The name is a re-keyable value; kind and binding cardinality define
+        // the materialized control topology.
+        shape.interactive.push_back(static_cast<std::uint8_t>(element.kind));
+        shape.interactive.push_back(element.param_key.empty() ? 0 : 1);
+    }
+
+    // Native binding and widget-contract attributes are immutable inputs to
+    // the materializer. Keep exact values, sorted by key for deterministic
+    // comparison despite unordered IR attribute storage. The re-keyable
+    // names/text payloads above are deliberately omitted.
+    for (const auto& [key, value] : frame.attributes) {
+        if (key.rfind("pulp", 0) == 0 && !is_rekeyable_binding_attribute(key))
+            shape.contract.emplace_back(key, value);
+    }
+
+    for (const auto& alternate : frame.alternate_frames)
+        append_binding_shape(alternate, shape);
+}
+
+BindingShape binding_shape(const IRNode& node) {
+    BindingShape shape;
+    append_binding_shape(node, shape);
+    std::sort(shape.contract.begin(), shape.contract.end());
     return shape;
 }
 
@@ -117,7 +146,9 @@ bool interactive_materialization_equal(const IRInteractiveElement& old_element,
 // their complete materialization identity in the same compatibility check as
 // frame zero so an edit to an alternate cannot leave stale SVG/overlays behind.
 bool frame_materialization_equal(const IRNode& old_frame, const IRNode& new_frame) {
-    if (old_frame.render_mode != new_frame.render_mode ||
+    if (old_frame.type != new_frame.type ||
+        old_frame.audio_widget != new_frame.audio_widget ||
+        old_frame.render_mode != new_frame.render_mode ||
         old_frame.svg_asset_id != new_frame.svg_asset_id ||
         old_frame.capture_asset_id != new_frame.capture_asset_id ||
         old_frame.interactive_elements.size() != new_frame.interactive_elements.size() ||

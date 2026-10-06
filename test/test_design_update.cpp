@@ -350,6 +350,74 @@ TEST_CASE("interactive materialization fields recreate same-anchor nodes",
     }
 }
 
+TEST_CASE("alternate frame materialization shape changes recreate the parent",
+          "[view][import][update]") {
+    SECTION("alternate node type") {
+        auto old_node = node("alternate-type");
+        auto new_node = old_node;
+        old_node.render_mode = NodeRenderMode::faithful_svg;
+        old_node.svg_asset_id = "panel";
+        old_node.alternate_frames.push_back(node("alternate"));
+        new_node.render_mode = NodeRenderMode::faithful_svg;
+        new_node.svg_asset_id = "panel";
+        new_node.alternate_frames.push_back(node("alternate"));
+        new_node.alternate_frames.front().type = "knob";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "alternate-type");
+    }
+
+    SECTION("alternate audio widget") {
+        auto old_node = node("alternate-audio");
+        auto new_node = old_node;
+        old_node.render_mode = NodeRenderMode::faithful_svg;
+        old_node.svg_asset_id = "panel";
+        old_node.alternate_frames.push_back(node("alternate"));
+        new_node.render_mode = NodeRenderMode::faithful_svg;
+        new_node.svg_asset_id = "panel";
+        new_node.alternate_frames.push_back(node("alternate"));
+        new_node.alternate_frames.front().audio_widget = AudioWidgetType::fader;
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "alternate-audio");
+    }
+}
+
+TEST_CASE("native binding contract changes recreate keyed nodes",
+          "[view][import][update]") {
+    const auto require_contract_recreated = [](const char* key, const char* attribute) {
+        auto old_node = node(key);
+        auto new_node = old_node;
+        old_node.attributes[attribute] = "old";
+        new_node.attributes[attribute] = "new";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          key);
+    };
+
+    SECTION("route identity") { require_contract_recreated("route", "pulpRouteId"); }
+    SECTION("choice value") { require_contract_recreated("choice-value", "pulpChoiceValue"); }
+    SECTION("choice label") { require_contract_recreated("choice-label", "pulpChoiceLabel"); }
+    SECTION("waveform shape") {
+        require_contract_recreated("waveform-shape", "pulpWaveformShape");
+    }
+    SECTION("event contract") {
+        require_contract_recreated("event-contract", "pulpEventContract");
+    }
+    SECTION("gesture contract") {
+        require_contract_recreated("gesture-contract", "pulpGestureContract");
+    }
+    SECTION("focus contract") {
+        require_contract_recreated("focus-contract", "pulpFocusContract");
+    }
+    SECTION("style tokens") {
+        require_contract_recreated("style-tokens", "pulpStyleTokens");
+    }
+    SECTION("widget schema") {
+        require_contract_recreated("widget-schema", "pulpWidgetSchema");
+    }
+}
+
 TEST_CASE("same-anchor shape changes recreate instead of reusing stale controls",
           "[view][import][update]") {
     SECTION("node type") {
