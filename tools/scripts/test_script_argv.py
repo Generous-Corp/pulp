@@ -32,7 +32,8 @@ class ArgvForTests(unittest.TestCase):
         self.assertEqual(script_argv.argv_for(script, platform="posix"), [str(script)])
 
     def test_windows_runs_a_python_shebang_through_this_interpreter(self) -> None:
-        for line in (b"#!/usr/bin/env python3", b"#!/usr/bin/python3 -u", b"#!/usr/bin/env python"):
+        for line in (b"#!/usr/bin/env python3", b"#!/usr/bin/python3 -u", b"#!/usr/bin/env python",
+                     b"#!C:\\hostedtoolcache\\Python\\3.14.7\\x64\\python.exe"):
             script = self.write("fake.py", line + b"\nprint(1)\n")
             self.assertEqual(script_argv.argv_for(script, platform="nt"),
                              [sys.executable, str(script)], line)
