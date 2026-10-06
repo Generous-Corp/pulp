@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_update.hpp>
+#include <utility>
 
 using namespace pulp::view;
 namespace {
@@ -28,19 +30,19 @@ TEST_CASE("keyed design updates retain identity across reorder and batch blocks"
     REQUIRE(plan.keyed);
     REQUIRE_FALSE(plan.ambiguous_keys);
     REQUIRE(plan.updates.size() == 4);
-    CHECK(plan.updates[0].kind == DesignUpdateKind::moved);
-    CHECK(plan.updates[0].key == "c");
-    CHECK(plan.updates[0].old_index == 2);
-    CHECK(plan.updates[0].new_index == 0);
+    CHECK(plan.updates[0].kind == DesignUpdateKind::removed);
+    CHECK(plan.updates[0].key == "b");
+    CHECK(plan.updates[0].old_index == 1);
     CHECK(plan.updates[1].kind == DesignUpdateKind::moved);
-    CHECK(plan.updates[1].key == "a");
-    CHECK(plan.updates[2].kind == DesignUpdateKind::inserted);
-    CHECK(plan.updates[2].key == "d");
-    CHECK(plan.updates[3].kind == DesignUpdateKind::removed);
-    CHECK(plan.updates[3].key == "b");
-    REQUIRE(plan.blocks.size() == 3);
-    CHECK(plan.blocks[0].kind == DesignUpdateKind::moved);
-    CHECK(plan.blocks[0].count == 2);
+    CHECK(plan.updates[1].key == "c");
+    CHECK(plan.updates[1].old_index == 1);
+    CHECK(plan.updates[1].new_index == 0);
+    CHECK(plan.updates[2].kind == DesignUpdateKind::retained);
+    CHECK(plan.updates[2].key == "a");
+    CHECK(plan.updates[3].kind == DesignUpdateKind::inserted);
+    CHECK(plan.updates[3].key == "d");
+    REQUIRE(plan.blocks.size() == 4);
+    CHECK(plan.blocks[0].kind == DesignUpdateKind::removed);
 }
 
 TEST_CASE("ambiguous anchors fail closed to positional planning", "[view][import][update]") {
@@ -51,8 +53,50 @@ TEST_CASE("ambiguous anchors fail closed to positional planning", "[view][import
     CHECK(plan.ambiguous_keys);
     REQUIRE(plan.updates.size() == 3);
     CHECK(plan.updates[0].kind == DesignUpdateKind::removed);
+    CHECK(plan.updates[0].old_index == 1);
     CHECK(plan.updates[1].kind == DesignUpdateKind::removed);
+    CHECK(plan.updates[1].old_index == 0);
     CHECK(plan.updates[2].kind == DesignUpdateKind::inserted);
+}
+
+TEST_CASE("keyed update indices remain safe for direct application", "[view][import][update]") {
+    const auto apply = [](const std::vector<IRNode>& old_children,
+                          const std::vector<IRNode>& new_children) {
+        const auto plan = plan_design_child_updates(old_children, new_children);
+        std::vector<std::string> working;
+        for (const auto& child : old_children)
+            working.push_back(*child.stable_anchor_id);
+        for (const auto& update : plan.updates) {
+            if (update.kind == DesignUpdateKind::removed) {
+                const auto it = std::find(working.begin(), working.end(), update.key);
+                REQUIRE(it != working.end());
+                working.erase(it);
+            } else if (update.kind == DesignUpdateKind::inserted) {
+                REQUIRE(update.new_index <= working.size());
+                working.insert(working.begin() + static_cast<std::ptrdiff_t>(update.new_index),
+                               update.key);
+            } else if (update.kind == DesignUpdateKind::moved) {
+                REQUIRE(update.old_index < working.size());
+                REQUIRE(working[update.old_index] == update.key);
+                auto value = working[update.old_index];
+                working.erase(working.begin() + static_cast<std::ptrdiff_t>(update.old_index));
+                REQUIRE(update.new_index <= working.size());
+                working.insert(working.begin() + static_cast<std::ptrdiff_t>(update.new_index),
+                               std::move(value));
+            }
+        }
+        std::vector<std::string> expected;
+        for (const auto& child : new_children)
+            expected.push_back(*child.stable_anchor_id);
+        REQUIRE(working == expected);
+    };
+
+    SECTION("move then remove") {
+        apply({node("a"), node("b")}, {node("b")});
+    }
+    SECTION("replace same slot") {
+        apply({node("a")}, {node("b")});
+    }
 }
 
 TEST_CASE("compatible keyed changes retain the existing materialization shape",

@@ -59,7 +59,13 @@ default = "changed-surface script families" + (" (static)" if mode == "STATIC" e
 print(os.environ.get(f"FAKE_{mode}_SAYS", default))
 sys.exit(int(os.environ.get(f"FAKE_{mode}_RC", "0")))
 """
-STUBS = ["tools/scripts/version_bump_check.py", "tools/scripts/skill_sync_check.py"]
+STUBS = [
+    "tools/scripts/version_bump_check.py",
+    "tools/scripts/skill_sync_check.py",
+    # gates.sh now fails closed when this instrument is absent; keep the
+    # synthetic repository's ordinary-path stub explicit.
+    "tools/scripts/vellum_boundary_lint.py",
+]
 
 FAKE_CMAKE = r"""#!/bin/sh
 echo "$*" >> "$FAKE_CMAKE_LOG"

@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 LINT = Path(__file__).with_name("vellum_boundary_lint.py")
+GATES = Path(__file__).with_name("gates.sh")
 
 
 def write(path: Path, text: str) -> None:
@@ -24,6 +25,16 @@ def run(root: Path, *manifests: Path) -> subprocess.CompletedProcess[str]:
 
 
 def main() -> int:
+    # The cheap gate must fail closed if the boundary instrument disappears;
+    # otherwise a renamed or omitted linter silently turns the ownership check
+    # green. Keep this as a planted wiring control beside the runtime lint
+    # controls below.
+    gates = GATES.read_text(encoding="utf-8")
+    missing_guard = 'if [ ! -f "$VELLUM_BOUNDARY" ]; then'
+    if missing_guard not in gates or 'fail=1' not in gates.split(missing_guard, 1)[1].split('fi', 1)[0]:
+        print("gates.sh does not fail closed when the Vellum boundary linter is missing",
+              file=sys.stderr)
+        return 1
     with tempfile.TemporaryDirectory(prefix="pulp-vellum-boundary-") as raw:
         root = Path(raw)
         write(root / "tools/import-design/pulp-package.json", json.dumps({

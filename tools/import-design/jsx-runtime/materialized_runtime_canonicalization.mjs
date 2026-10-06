@@ -146,15 +146,30 @@ export function canonicalizeMaterializedRuntimeDocument(document, options = {}) 
     }
     return whole;
   });
+  const hasReferenceAfterRemovingEmptyScript = (id) =>
+    (() => {
+      const probe = rewriteScripts(html, ({ whole, openTag, source }) => {
+        const src = attribute(openTag, 'src')?.value;
+        // Remove only the exact candidate tag. Preserve every other script,
+        // including inline bodies that may dynamically load this asset.
+        return source.trim() === '' && src === id ? '' : whole;
+      });
+      // Match the complete asset token. A short id such as "react" must not
+      // be treated as a reference merely because another asset is named
+      // "react-dom". Quotes, CSS delimiters, and tag whitespace remain valid
+      // boundaries, while path/query characters remain part of the token.
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`(?:^|[^A-Za-z0-9_./?&=:+%\\-])${escaped}` +
+        `(?=$|[^A-Za-z0-9_./?&=:+%\\-])`).test(probe);
+    })();
   const removableIds = new Set([...removable].filter(([id, kind]) =>
     (kind !== 'babel' || babelCount > 0) &&
     (references.get(id)?.length ?? 0) > 0 &&
     references.get(id).every(Boolean) &&
-    // Remove only the exact empty script references in a probe copy. Any
-    // remaining occurrence (unquoted attributes, CSS, srcset, comments, or
-    // text) is an external reference that the materialized parser may reject
-    // if its asset disappears.
-    !rewriteScripts(html, () => '').includes(id)
+    // Any remaining occurrence (including an inline script body, unquoted
+    // attribute, CSS, srcset, comment, or text) is an external reference that
+    // must keep the asset alive.
+    !hasReferenceAfterRemovingEmptyScript(id)
   ).map(([id]) => id));
   html = rewriteScripts(html, ({ whole, openTag, source }) => {
     const src = attribute(openTag, 'src')?.value;

@@ -105,7 +105,9 @@ DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_chil
     if (!plan.keyed) {
         // No identity is safe to retain. Replace the ambiguous sibling set
         // wholesale instead of accidentally reusing a view by position.
-        for (std::size_t i = 0; i < old_children.size(); ++i)
+        // Removals are emitted from the end so these indices remain valid for
+        // a materializer that applies the plan directly to its child vector.
+        for (std::size_t i = old_children.size(); i-- > 0;)
             append_update(plan, DesignUpdateKind::removed, key_for(old_children[i]), i, 0);
         for (std::size_t i = 0; i < new_children.size(); ++i)
             append_update(plan, DesignUpdateKind::inserted, key_for(new_children[i]), 0, i);
@@ -116,32 +118,56 @@ DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_chil
     for (std::size_t i = 0; i < old_children.size(); ++i)
         old_by_key.emplace(key_for(old_children[i]), i);
     std::vector<bool> consumed(old_children.size(), false);
+    std::vector<bool> recreate(new_children.size(), false);
+    std::vector<bool> recreate_by_old(old_children.size(), false);
+
+    // First classify the old materializations.  All removals must precede
+    // moves/inserts: otherwise an index-based consumer can move a child and
+    // then remove that same slot, deleting the wrong identity.
     for (std::size_t new_index = 0; new_index < new_children.size(); ++new_index) {
         const auto& key = key_for(new_children[new_index]);
         const auto it = old_by_key.find(key);
-        if (it == old_by_key.end()) {
-            append_update(plan, DesignUpdateKind::inserted, key, 0, new_index);
+        if (it == old_by_key.end())
             continue;
-        }
         const auto old_index = it->second;
         consumed[old_index] = true;
-        if (!shape_compatible(old_children[old_index], new_children[new_index])) {
-            // A stable anchor identifies the source node, but does not prove
-            // that its existing native view can host the new materialization.
-            // Emit an explicit remove/insert pair so callers cannot reuse a
-            // stale widget, render lane, or binding topology.
-            append_update(plan, DesignUpdateKind::removed, key, old_index, 0);
-            append_update(plan, DesignUpdateKind::inserted, key, 0, new_index);
-        } else {
-            append_update(
-                plan, old_index == new_index ? DesignUpdateKind::retained : DesignUpdateKind::moved,
-                key, old_index, new_index);
-        }
+        recreate[new_index] = !shape_compatible(old_children[old_index], new_children[new_index]);
+        recreate_by_old[old_index] = recreate[new_index];
     }
-    for (std::size_t old_index = 0; old_index < old_children.size(); ++old_index) {
-        if (!consumed[old_index])
+
+    for (std::size_t old_index = old_children.size(); old_index-- > 0;) {
+        if (!consumed[old_index] || recreate_by_old[old_index])
             append_update(plan, DesignUpdateKind::removed, key_for(old_children[old_index]),
                           old_index, 0);
+    }
+
+    // Track the post-removal working order so every subsequent index is
+    // directly applicable to a mutable child vector.
+    std::vector<std::string> working;
+    working.reserve(old_children.size() + new_children.size());
+    for (std::size_t old_index = 0; old_index < old_children.size(); ++old_index) {
+        if (consumed[old_index] && !recreate_by_old[old_index])
+            working.push_back(key_for(old_children[old_index]));
+    }
+    for (std::size_t new_index = 0; new_index < new_children.size(); ++new_index) {
+        const auto& key = key_for(new_children[new_index]);
+        const auto it = old_by_key.find(key);
+        if (it == old_by_key.end() || recreate[new_index]) {
+            append_update(plan, DesignUpdateKind::inserted, key, 0, new_index);
+            working.insert(working.begin() + static_cast<std::ptrdiff_t>(new_index), key);
+            continue;
+        }
+        const auto current = std::find(working.begin(), working.end(), key);
+        const auto old_index = static_cast<std::size_t>(current - working.begin());
+        if (old_index == new_index) {
+            append_update(plan, DesignUpdateKind::retained, key, old_index, new_index);
+        } else {
+            append_update(plan, DesignUpdateKind::moved, key, old_index, new_index);
+            auto value = *current;
+            working.erase(current);
+            working.insert(working.begin() + static_cast<std::ptrdiff_t>(new_index),
+                           std::move(value));
+        }
     }
     return plan;
 }

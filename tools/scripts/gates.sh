@@ -240,7 +240,10 @@ fi
 # package source may include only public Pulp view headers, and core/view may
 # not reach back into an extractable package.  This is source-only and needs no
 # configured build, so run it in the same cheap gate as the watch preflight.
-if [ -f "$VELLUM_BOUNDARY" ]; then
+if [ ! -f "$VELLUM_BOUNDARY" ]; then
+    echo "gates: Vellum boundary linter is missing: $VELLUM_BOUNDARY" >&2
+    fail=1
+else
     echo "" >&2
     echo "▸ Vellum extractable-package boundary" >&2
     if ! "$PYTHON" "$VELLUM_BOUNDARY"; then

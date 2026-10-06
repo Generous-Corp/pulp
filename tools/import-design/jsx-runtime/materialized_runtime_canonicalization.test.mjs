@@ -179,6 +179,18 @@ test('preserves vendor assets referenced outside script tags', () => {
   assert.match(result.html, /href="react"/);
 });
 
+test('preserves vendor assets referenced by inline script bodies', () => {
+  const react = trustedReact();
+  const result = canonicalizeSynthetic({
+    html: '<script>globalThis.loadVendor("react");</script>' +
+      '<script src="react"></script>',
+    assets: [vendorAsset('react', react, 'react')],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /loadVendor\("react"\)/);
+  assert.match(result.html, /src="react"/);
+});
+
 test('preserves vendor assets in unquoted and CSS references', () => {
   const react = trustedReact();
   const result = canonicalizeSynthetic({
