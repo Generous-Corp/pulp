@@ -6,7 +6,6 @@
 [[families]]
 name = "script-readers-1490e4d4ef76"
 paths = [
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -4866,7 +4865,6 @@ risk_class = "low"
 name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5368,7 +5366,6 @@ risk_class = "low"
 name = "script-surface-environment-bound"
 paths = [
   ".agents/skills/*/SKILL.md",
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",

@@ -6235,6 +6235,14 @@
    ],
    "kind": "python"
   },
+  "macos-merge-group-bootstrap-selftest": {
+   "entry": "tools/ci/test_macos_merge_group_bootstrap.py",
+   "inputs": [
+    "tools/ci/macos_merge_group_bootstrap.sh",
+    "tools/ci/test_macos_merge_group_bootstrap.py"
+   ],
+   "kind": "python"
+  },
   "measure-min-os-selftest": {
    "entry": "tools/scripts/test_measure_min_os.py",
    "inputs": [
