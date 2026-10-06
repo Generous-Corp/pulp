@@ -1,6 +1,9 @@
 import stat
 import tempfile
 import unittest
+import json
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 import gpu_audio_p2_campaign as campaign
@@ -68,6 +71,27 @@ class P2CampaignContractTests(unittest.TestCase):
                 invalid[0]["manifest_bindings"][field] = "unknown"
             with self.assertRaises(RuntimeError):
                 campaign.validate_identity_rows(invalid, expected_sha)
+
+    def test_lossless_observer_retains_per_admission_terminal_and_delivery(self):
+        rows = self._rows()
+        observer = campaign.LosslessLifecycleObserver()
+        for row in rows:
+            observer.observe(row)
+        observer.validate(rows[0]["executable_observed_sha256"])
+        self.assertEqual(observer.rows, tuple(rows))
+        identities = observer.identities()
+        self.assertEqual(set(identities), {(7, 1, 2)})
+        self.assertEqual(set(identities[(7, 1, 2)]), {"terminal", "delivery"})
+
+    def test_observe_jsonl_rejects_blank_or_malformed_rows(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "raw.jsonl"
+            path.write_text('{"kind":"provenance"}\n\n')
+            with self.assertRaisesRegex(RuntimeError, "blank line"):
+                campaign.observe_jsonl(path)
+            path.write_text('{not-json}\n')
+            with self.assertRaisesRegex(RuntimeError, "invalid JSON"):
+                campaign.observe_jsonl(path)
 
     def test_manifest_digest_binds_asset_and_archive_hashes(self):
         rows = self._rows()
@@ -205,6 +229,26 @@ class P2CampaignContractTests(unittest.TestCase):
     def test_plan_only_declares_complete_matrix(self):
         args = campaign.parse_args(["--plan-only"])
         self.assertEqual(campaign.run(args), 0)
+
+    def test_plan_only_accepts_a_bounded_matrix_subset(self):
+        args = campaign.parse_args(["--plan-only", "--slots", "16,2", "--leads", "8,1"])
+        self.assertEqual(args.slots, (2, 16))
+        self.assertEqual(args.leads, (1, 8))
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(campaign.run(args), 0)
+        plan = json.loads(output.getvalue())
+        self.assertEqual(plan["cells"], [
+            {"slots": 2, "lead": 1}, {"slots": 2, "lead": 8},
+            {"slots": 16, "lead": 1}, {"slots": 16, "lead": 8},
+        ])
+        self.assertEqual(plan["trial_count"], 4 * 2 * campaign.RUNS_PER_KIND)
+
+    def test_matrix_axis_rejects_duplicates_and_unknown_values(self):
+        with self.assertRaises(SystemExit):
+            campaign.parse_args(["--plan-only", "--slots", "2,2"])
+        with self.assertRaises(SystemExit):
+            campaign.parse_args(["--plan-only", "--leads", "3"])
 
     def test_lower_block_count_rejected_before_probe(self):
         with tempfile.TemporaryDirectory() as root:
