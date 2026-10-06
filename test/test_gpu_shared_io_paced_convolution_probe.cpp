@@ -17,6 +17,8 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -68,6 +70,39 @@ constexpr auto kPostCallbackDrainTimeout = std::chrono::seconds{2};
 // per-block records in memory, so this caps a single process at 500,000 blocks
 // instead of allowing an unbounded steady run.
 constexpr std::uint32_t kMaximumMeasuredBlocks = 500'000;
+
+// Trace records and admissions are retained in separate vectors, so size the
+// bound for the larger stream. A callback can emit one eligible row and one
+// delivery row, while an admitted block emits one terminal row: three
+// lifecycle rows per callback is the current full-lifecycle contract. Keep one
+// extra row for a teardown/recovery boundary. Checked arithmetic is deliberate:
+// an unrepresentable bound must fail closed instead of truncating into a smaller
+// retention budget that would produce an incomplete receipt.
+std::optional<std::uint32_t> trace_retention_capacity(std::uint32_t total_blocks) {
+    constexpr std::uint64_t kLifecycleRowsPerCallback = 3;
+    constexpr std::uint64_t kAdmissionRowsPerCallback = 1;
+    constexpr std::uint64_t kRetentionMarginRows = 1;
+    constexpr auto kMaximum = std::numeric_limits<std::uint32_t>::max();
+    const auto blocks = static_cast<std::uint64_t>(total_blocks);
+    if (blocks > kMaximum / kLifecycleRowsPerCallback)
+        return std::nullopt;
+    const auto lifecycle_rows = blocks * kLifecycleRowsPerCallback;
+    if (blocks > kMaximum / kAdmissionRowsPerCallback)
+        return std::nullopt;
+    const auto admission_rows = blocks * kAdmissionRowsPerCallback;
+    const auto independent_rows = std::max(lifecycle_rows, admission_rows);
+    if (independent_rows > kMaximum - kRetentionMarginRows)
+        return std::nullopt;
+    return static_cast<std::uint32_t>(independent_rows + kRetentionMarginRows);
+}
+
+std::optional<std::uint32_t> total_callback_blocks(std::uint32_t warmup, std::uint64_t measured,
+                                                   std::uint32_t lead) {
+    const auto total = static_cast<std::uint64_t>(warmup) + measured + lead;
+    if (total > std::numeric_limits<std::uint32_t>::max())
+        return std::nullopt;
+    return static_cast<std::uint32_t>(total);
+}
 
 bool parse(int argc, char** argv, Config& config) {
     for (int i = 1; i < argc; ++i) {
@@ -325,8 +360,11 @@ int run(Config config) {
     constexpr std::size_t ir_frames = 257;
     const auto measured_blocks =
         static_cast<std::uint64_t>(config.blocks) * config.steady_repetitions;
-    const auto total_blocks =
-        static_cast<std::uint32_t>(config.warmup + measured_blocks + config.lead);
+    const auto total_blocks_value =
+        total_callback_blocks(config.warmup, measured_blocks, config.lead);
+    if (!total_blocks_value)
+        return 2;
+    const auto total_blocks = *total_blocks_value;
     const auto total_frames = static_cast<std::size_t>(total_blocks) * config.frames;
     auto input = pulp::test::audio::make_sine(channels, static_cast<int>(total_frames), 731.0f,
                                               sample_rate, 0.2f);
@@ -350,8 +388,13 @@ int run(Config config) {
     trial_config.success_stride = 1;
     trial_config.slots = config.slots;
     // Trial mode drains the fixed producer queues into pre-reserved
-    // non-RT retention so a full 100k-block census remains lossless.
-    trial_config.retention_capacity = total_blocks * 2u;
+    // non-RT retention so a full campaign census remains lossless. The record
+    // and admission streams are bounded independently; retain enough for the
+    // three lifecycle rows per callback plus one teardown/recovery margin.
+    const auto retention_capacity = trace_retention_capacity(total_blocks);
+    if (!retention_capacity)
+        return 2;
+    trial_config.retention_capacity = *retention_capacity;
     if (!pulp::gpu_audio::detail::configure_gpu_convolver_trial(node, trial_config))
         return 2;
     if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
@@ -579,6 +622,7 @@ int run(Config config) {
                << ",\"trace_dropped\":" << trace_stats.trace_dropped
                << ",\"trace_sampled_out\":" << trace_stats.trace_sampled_out
                << ",\"trace_invalid\":" << trace_stats.trace_invalid
+               << ",\"trace_retention_capacity\":" << trial_config.retention_capacity
                << ",\"gpu_receipt_authenticated\":" << (receipt_authenticated ? "true" : "false")
                << ",\"provider_identity_status\":";
         json_string(stream, provider_identity.authenticated ? "passed" : "failed");
