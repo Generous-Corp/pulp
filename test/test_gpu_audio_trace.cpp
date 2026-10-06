@@ -284,7 +284,7 @@ GpuConvolverRawManifest raw_manifest() {
     value.paced = true;
     value.worker_scheduling = "ordinary_worker";
     value.host_contention = "quiet";
-    value.thermal_state = "nominal";
+    value.host_thermal_state = "nominal";
     value.power_state = "automatic";
     value.worker_workgroup_joined = false;
     value.worker_workgroup_join_failures = 0;

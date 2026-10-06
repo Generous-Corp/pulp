@@ -432,7 +432,7 @@ bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync, const Tri
     manifest.provider_asset_sha256 = provider_asset;
     manifest.worker_scheduling = worker_scheduling;
     manifest.host_contention = host_contention;
-    manifest.thermal_state = thermal_state;
+    manifest.host_thermal_state = thermal_state;
     manifest.power_state = power_state;
     manifest.worker_workgroup_joined = std::string_view(workgroup_joined) == "true";
     manifest.worker_workgroup_join_failures = parse_u64(workgroup_failures);

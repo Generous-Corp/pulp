@@ -52,7 +52,7 @@ struct GpuConvolverRawManifest {
     // the campaign wrapper; they are never inferred from worker timestamps.
     std::string worker_scheduling;
     std::string host_contention;
-    std::string thermal_state;
+    std::string host_thermal_state;
     std::string power_state;
     bool worker_workgroup_joined = false;
     std::uint64_t worker_workgroup_join_failures = 0;
@@ -318,7 +318,7 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
     }
     for (const auto value : {std::string_view(manifest.worker_scheduling),
                              std::string_view(manifest.host_contention),
-                             std::string_view(manifest.thermal_state),
+                             std::string_view(manifest.host_thermal_state),
                              std::string_view(manifest.power_state)}) {
         if (!nonempty(value) || value.find_first_of("\r\n") != std::string_view::npos)
             return false;
@@ -747,7 +747,7 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
     manifest_line << R"(,"contention":)";
     raw_writer_detail::json_string(manifest_line, manifest.host_contention);
     manifest_line << R"(,"thermal_state":)";
-    raw_writer_detail::json_string(manifest_line, manifest.thermal_state);
+    raw_writer_detail::json_string(manifest_line, manifest.host_thermal_state);
     manifest_line << R"(,"power_state":)";
     raw_writer_detail::json_string(manifest_line, manifest.power_state);
     manifest_line << R"(,"workgroup_joined":)" << (manifest.worker_workgroup_joined ? "true" : "false")
