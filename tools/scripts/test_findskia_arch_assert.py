@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
+import sys
 import subprocess
 import tempfile
 import unittest
@@ -34,7 +35,7 @@ MACOS_DEPLOYMENT_TARGET = "13.4"
 
 
 def _toolchain_ready():
-    return (os.uname().sysname == "Darwin"
+    return (sys.platform == "darwin"
             and all(shutil.which(t) for t in ("clang", "ar", "lipo", "cmake")))
 
 
