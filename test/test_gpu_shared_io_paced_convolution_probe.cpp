@@ -397,9 +397,6 @@ int run(Config config) {
     // configured lead window so the final admitted sequence receives its typed
     // delivery disposition before the session is released. These CPU-only
     // flush positions are deliberately excluded from measured blocks.
-    const auto realtime_path = pulp::gpu_audio::detail::realtime_gpu_node_path(&node);
-    if (!realtime_path.active() || !realtime_path.fence(realtime_path.context))
-        return 2;
     std::vector<float> flush_input(static_cast<std::size_t>(channels) * config.frames, 0.0f);
     std::vector<float> flush_output(flush_input.size(), 0.0f);
     const float* flush_inputs[channels] = {flush_input.data(), flush_input.data() + config.frames};
@@ -407,7 +404,7 @@ int run(Config config) {
     pulp::audio::BufferView<const float> flush_in(flush_inputs, channels, config.frames);
     pulp::audio::BufferView<float> flush_out(flush_outputs, channels, config.frames);
     for (std::uint32_t block = 0; block < config.lead; ++block)
-        transport.process(flush_in, flush_out, config.frames);
+        transport.process_offline(flush_in, flush_out, config.frames);
     transport.release();
 
     std::vector<pulp::gpu_audio::detail::SharedIoTraceRecord> trace_records;
