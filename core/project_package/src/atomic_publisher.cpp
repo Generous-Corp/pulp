@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <system_error>
 #include <utility>
@@ -155,6 +156,22 @@ bool parent_allows_private_staging(const fs::path& parent) noexcept {
         directory, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, &owner,
         nullptr, &dacl, nullptr, &descriptor);
     CloseHandle(directory);
+    auto proof_sid = [](PSID sid) -> std::string {
+        LPWSTR text = nullptr;
+        if (sid == nullptr || ConvertSidToStringSidW(sid, &text) == 0)
+            return "<none>";
+        std::string out;
+        for (const wchar_t* c = text; *c != 0; ++c)
+            out.push_back(static_cast<char>(*c));
+        LocalFree(text);
+        return out;
+    };
+    std::fprintf(stderr, "[proof-staging] parent=%ls\n", parent.c_str());
+    std::fprintf(stderr, "[proof-staging] real_directory=%d attrs=0x%lx\n", real_directory ? 1 : 0,
+                 static_cast<unsigned long>(info.dwFileAttributes));
+    std::fprintf(stderr, "[proof-staging] GetSecurityInfo=%lu\n",
+                 static_cast<unsigned long>(security_error));
+    std::fprintf(stderr, "[proof-staging] owner=%s\n", proof_sid(owner).c_str());
     if (!real_directory || security_error != ERROR_SUCCESS || owner == nullptr || dacl == nullptr) {
         if (descriptor != nullptr)
             LocalFree(descriptor);
@@ -185,7 +202,15 @@ bool parent_allows_private_staging(const fs::path& parent) noexcept {
         CreateWellKnownSid(WinLocalSystemSid, nullptr, system_storage.data(), &system_bytes) != 0 &&
         CreateWellKnownSid(WinBuiltinAdministratorsSid, nullptr, administrators_storage.data(),
                            &administrators_bytes) != 0;
-    bool safe = token_user != nullptr && trusted_sids && EqualSid(owner, token_user->User.Sid) != 0;
+    std::fprintf(stderr, "[proof-staging] token_user=%s trusted_sids=%d\n",
+                 token_user != nullptr ? proof_sid(token_user->User.Sid).c_str() : "<none>",
+                 trusted_sids ? 1 : 0);
+    const bool proof_owner_ok =
+        token_user != nullptr && EqualSid(owner, token_user->User.Sid) != 0;
+    std::fprintf(stderr, "[proof-staging] owner_is_token_user=%d owner_is_system=%d owner_is_admins=%d\n",
+                 proof_owner_ok ? 1 : 0, EqualSid(owner, system_storage.data()) != 0 ? 1 : 0,
+                 EqualSid(owner, administrators_storage.data()) != 0 ? 1 : 0);
+    bool safe = token_user != nullptr && trusted_sids;
     constexpr ACCESS_MASK dangerous = FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD |
                                       DELETE | WRITE_DAC | WRITE_OWNER | GENERIC_WRITE |
                                       GENERIC_ALL;
@@ -234,9 +259,16 @@ bool parent_allows_private_staging(const fs::path& parent) noexcept {
         const bool trusted = EqualSid(sid, token_user->User.Sid) != 0 ||
                              EqualSid(sid, system_storage.data()) != 0 ||
                              EqualSid(sid, administrators_storage.data()) != 0;
-        if (!trusted)
+        if (!trusted) {
+            std::fprintf(stderr, "[proof-staging] untrusted_ace index=%lu type=%u sid=%s mask=0x%lx\n",
+                         static_cast<unsigned long>(index), static_cast<unsigned>(header->AceType),
+                         proof_sid(sid).c_str(), static_cast<unsigned long>(mask));
             safe = false;
+        }
     }
+    std::fprintf(stderr, "[proof-staging] dacl_safe=%d -> result=%d\n", safe ? 1 : 0,
+                 (safe && proof_owner_ok) ? 1 : 0);
+    safe = safe && proof_owner_ok;
     LocalFree(descriptor);
     return safe;
 #else

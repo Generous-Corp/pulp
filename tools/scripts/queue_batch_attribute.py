@@ -160,7 +160,15 @@ def run_gh(args: list[str], **kwargs) -> subprocess.CompletedProcess:
     """
     cli = gh_cli()
     try:
-        return subprocess.run([*argv_for(cli), *args], **kwargs)
+        _proof_argv = argv_for(cli)
+    except Exception as _proof_exc:  # proof-only
+        _proof_argv = f"<argv_for raised {_proof_exc!r}>"
+    print(f"[proof-gh] cli={cli!r} argv_for={_proof_argv!r} which_bash={shutil.which('bash')!r} "
+          f"which_git={shutil.which('git')!r} exe={sys.executable!r}", file=sys.stderr)
+    try:
+        _proof_proc = subprocess.run([*argv_for(cli), *args], **kwargs)
+        print(f"[proof-gh] rc={_proof_proc.returncode}", file=sys.stderr)
+        return _proof_proc
     except FileNotFoundError:
         print(
             f"queue_batch_attribute: GitHub CLI {cli!r} is not on PATH "
