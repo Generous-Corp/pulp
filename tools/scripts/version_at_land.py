@@ -681,7 +681,8 @@ _LIVENESS_QUERY = (
     "query($owner:String!,$name:String!,$number:Int!){"
     "repository(owner:$owner,name:$name){pullRequest(number:$number){"
     "state isDraft isInMergeQueue autoMergeRequest{enabledAt} "
-    "timelineItems(itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){totalCount} "
+    "timelineItems(first:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){"
+    "nodes{__typename}} "
     "commits(last:1){nodes{commit{statusCheckRollup{"
     "contexts(first:100){pageInfo{hasNextPage} nodes{__typename "
     "... on CheckRun{name conclusion startedAt "
@@ -746,10 +747,18 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
         return "queued", "the bump PR is in the merge queue"
     if pr.get("isDraft") is not False or pr.get("isInMergeQueue") is not False:
         return None, "the bump PR draft/queue state is unknown"
-    ejections = (pr.get("timelineItems") or {}).get("totalCount")
-    if not isinstance(ejections, int):
+    # Count the returned event nodes, never `totalCount`: GitHub's connection
+    # `totalCount` ignores `itemTypes` and counts EVERY timeline item, so a PR
+    # that was never queued would read as ejected. Each node's `__typename` is
+    # checked so the answer cannot depend on how the filter is honoured.
+    ejection_nodes = (pr.get("timelineItems") or {}).get("nodes")
+    if not isinstance(ejection_nodes, list):
         return None, "the bump PR merge-queue history is unknown"
-    if ejections > 0:
+    if any(not isinstance(n, dict) or "__typename" not in n
+           for n in ejection_nodes):
+        return None, "the bump PR merge-queue history is unknown"
+    if any(n["__typename"] == "RemovedFromMergeQueueEvent"
+           for n in ejection_nodes):
         return "dead", "the bump PR was ejected from the merge queue"
     if pr.get("autoMergeRequest") is None:
         return "dead", "the bump PR is not armed for auto-merge"

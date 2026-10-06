@@ -494,6 +494,16 @@ def _check(name: str, conclusion: str | None, *, required: bool = True,
             "startedAt": at, "isRequired": required}
 
 
+def _ejection_timeline(ejected: bool, *, all_items: int = 8) -> dict:
+    """The liveness query's `timelineItems(itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT])`
+    answer, shaped as GitHub really returns it: `totalCount` ignores `itemTypes`
+    and counts every timeline item (8 on never-queued #9736, 17 on dequeued
+    #9255), while `filteredCount` and `nodes` honour the filter."""
+    nodes = [{"__typename": "RemovedFromMergeQueueEvent"}] if ejected else []
+    return {"totalCount": all_items + len(nodes), "filteredCount": len(nodes),
+            "nodes": nodes}
+
+
 class _FakeGh:
     """Stub for `version_at_land._gh`. The PR-route's git ops (push to the bump
     branch) hit a real local bare remote; only the GitHub-facing `gh` calls are
@@ -582,7 +592,7 @@ class _FakeGh:
                   "isInMergeQueue": self.in_queue,
                   "autoMergeRequest": ({"enabledAt": "2026-09-26T01:26:01Z"}
                                        if self.armed else None),
-                  "timelineItems": {"totalCount": 1 if self.ejected else 0},
+                  "timelineItems": _ejection_timeline(self.ejected),
                   "commits": {"nodes": [{"commit": {"statusCheckRollup": (
                       None if self.checks is None else
                       {"contexts": {"pageInfo": {"hasNextPage": False},
@@ -789,6 +799,20 @@ class PrRouteTest(unittest.TestCase):
             ["git", "-C", str(self.origin), "merge-base", "--is-ancestor",
              main_sha, tip]).returncode, 0)
 
+    def test_heal_keeps_a_never_queued_stale_bump_pr(self) -> None:
+        """A stale bump PR that was never in the merge queue is not "ejected".
+
+        Its timeline has other items (8 on #9736), so a `totalCount` read of
+        the filtered connection reports 8 and called it ejected: 42 of 45 heal
+        closes after the heal shipped hit PRs that had never been queued."""
+        fake = _FakeGh(open_prs=1, covers=False, armed=True,
+                       checks=[_check("macos", None)])
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "stale-wait", plan)
+        self.assertFalse(fake.did("pr", "close"))
+        self.assertFalse(fake.did("pr", "create"))
+
     def test_heal_is_off_by_default(self) -> None:
         """Without the opt-in the ejected PR is left alone (stale-defer)."""
         fake = _FakeGh(open_prs=1, covers=False, armed=False)
@@ -903,7 +927,7 @@ class PrRouteTest(unittest.TestCase):
         payload = {"data": {"repository": {"pullRequest": {
             "state": "OPEN", "isDraft": False, "isInMergeQueue": False,
             "autoMergeRequest": {"enabledAt": "x"},
-            "timelineItems": {"totalCount": 0},
+            "timelineItems": _ejection_timeline(False),
             "commits": {"nodes": [{"commit": {"statusCheckRollup": {
                 "contexts": {"pageInfo": {"hasNextPage": True},
                              "nodes": []}}}}]}}}}}
@@ -1198,6 +1222,52 @@ class PrRouteTest(unittest.TestCase):
         self.assertGreater(val._semver("0.10.0"), val._semver("0.9.9"))
         self.assertGreater(val._semver("1.0.0"), val._semver("0.99.99"))
         self.assertFalse(val._semver("0.2.0") > val._semver("0.2.0"))
+
+
+class BumpPrLivenessTest(unittest.TestCase):
+    """`_bump_pr_liveness` against realistic GraphQL payloads for the
+    merge-queue ejection history."""
+
+    def setUp(self) -> None:
+        self._orig_gh = val._gh
+
+    def tearDown(self) -> None:
+        val._gh = self._orig_gh
+
+    def _liveness(self, timeline, *, rc: int = 0):
+        pr = {"state": "OPEN", "isDraft": False, "isInMergeQueue": False,
+              "autoMergeRequest": {"enabledAt": "2026-10-06T10:00:00Z"},
+              "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}}
+        if timeline is not _MISSING:
+            pr["timelineItems"] = timeline
+        out = json.dumps({"data": {"repository": {"pullRequest": pr}}})
+        val._gh = lambda repo, *a, check=True: subprocess.CompletedProcess(
+            a, rc, stdout=out if rc == 0 else "", stderr="")
+        return val._bump_pr_liveness(Path("."), "1")
+
+    def test_never_queued_pr_is_not_ejected(self) -> None:
+        state, reason = self._liveness(
+            {"totalCount": 8, "filteredCount": 0, "nodes": []})
+        self.assertEqual(state, "progressing", reason)
+
+    def test_dequeued_pr_is_ejected(self) -> None:
+        state, reason = self._liveness(
+            {"totalCount": 17, "filteredCount": 1,
+             "nodes": [{"__typename": "RemovedFromMergeQueueEvent"}]})
+        self.assertEqual(state, "dead")
+        self.assertIn("ejected", reason)
+
+    def test_unknown_or_errored_history_fails_closed(self) -> None:
+        for timeline in (_MISSING, None, {"totalCount": 8},
+                         {"nodes": None}, {"nodes": [{}]}, {"nodes": ["x"]}):
+            with self.subTest(timeline=timeline):
+                state, _ = self._liveness(timeline)
+                self.assertIsNone(state)
+        state, _ = self._liveness({"nodes": []}, rc=1)
+        self.assertIsNone(state)
+
+
+_MISSING = object()
 
 
 class RefreshDerivedTest(unittest.TestCase):
