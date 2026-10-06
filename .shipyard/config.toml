@@ -365,6 +365,7 @@ baseline_tests = [
   "agent-hook-paths",
   "cli-help",
   "changed-surface-policy-selftest",
+  "changed-surface-policy-inventory",
 ]
 baseline_build_targets = ["pulp-test-build-check", "pulp-cli"]
 baseline_only_paths = [

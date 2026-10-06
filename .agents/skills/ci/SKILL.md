@@ -7603,7 +7603,16 @@ executable's cases are one row keyed by the executable.
 `test_changed_surface_policy.py --build-dir build` now checks the live tree
 only: every registration has a command after the build, no composite identity
 is ambiguous, and every literal test the policy names exists. A run bare
-checks the policy tables alone.
+checks the policy tables alone. The two are separate ctests:
+`changed-surface-policy-selftest` is always the bare run (it is also a
+source-lane test, and the source lane refuses a build-tree argument), and
+`changed-surface-policy-inventory` adds `--build-dir` under
+`PULP_CHANGED_SURFACE_INVENTORY_TARGET`, which Shipyard's configure sets (it is
+registered bare everywhere else, so the generated script-input and family
+lists, keyed by test name, do not differ between the required gate and the
+Shipyard lane). One
+registration that took `--build-dir` under that flag made
+`source-selftest-lane-contract` red on every Shipyard local lane run.
 
 The selftest also runs inside a bounded leg, where only the selected targets
 are built, so a registration without a command passes only with the runner's
