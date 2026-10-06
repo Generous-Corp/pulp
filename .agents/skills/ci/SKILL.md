@@ -596,13 +596,15 @@ that failed to write never changes the lane's verdict; read the run log's last
 key code there with `python3 -I`. Three mistakes do not error at configure
 time; they make every keyed run fail to derive or every re-derivation refuse:
 
-- **A new import in the key code must join `derivation_paths` in the same
-  change.** The bare copy holds only the listed files. `test_receipts_shadow`
-  pulls in `affected_tests_shadow` and `tools/scripts/protected_merge_receipt`,
-  which is how the list grew past the obvious five. Check the closure by
-  copying exactly the listed files from the branch into a temp dir and running
-  `python3 -I tools/ci/executable_keys.py --print-toolchain --build-dir /nonexistent`
-  and `python3 -I tools/ci/executable_selection.py --help` there.
+- **`derivation_paths` is exactly the key code's import closure plus the
+  adapter, no more and no less.** The bare copy holds only the listed files, so
+  a missing import fails every derivation; an extra file is also a selector
+  policy path, so every base that moves it plans full as
+  `selector_policy_drift` (the receipts shadow was 5 of 38 such drifts before
+  the shared name pattern moved to `tools/ci/always_run_names.py`).
+  `KeyCodeClosureTests` in `tools/ci/test_executable_keys.py` derives the
+  closure from the imports and pins the list and `KEY_CODE_PATHS` to it; run it
+  after any import change in the key code.
 - **`load_record` must digest a record in byte order of its relative paths**
   (`a.b` before `a/b`), as Shipyard's `record_digest` does. Sorting `Path`
   objects orders by parts and gives a different digest on any record whose
@@ -11378,7 +11380,7 @@ ubuntu-24.04 ships without the compiler-rt realtime runtime, so
 dispatch-only for that reason; fixing the variable moves the failure from the
 install step to the configure step and nothing else.
 
-## Diff-scoped clang-format gate (advisory) — touched lines only
+## Diff-scoped clang-format gate — touched lines only (blocking before push)
 
 `tools/scripts/format_changed.sh --check --base <ref>` judges only the hunks a
 branch changes; the tree itself does not round-trip under `.clang-format`
@@ -11387,26 +11389,40 @@ files, byte-identical across Xcode / CommandLineTools / Homebrew `llvm@21`;
 v19 differs on two), so a whole-file check would fail every PR and a
 whole-tree reformat is a separate decision. Existing debt is grandfathered.
 
-Three surfaces run the same script, all **advisory** today:
+Three surfaces run the same script. The two that run before a push **block**
+by default; the CI check reports:
 
 | Surface | Invocation | Exit 1 (verdict) | Exit 3 (no clang-format) |
 |---|---|---|---|
-| `.githooks/pre-push` | `run_gate_captured bash "$FMT" --check --base "$BASE"` | `ADVISORY` line, push allowed; `PULP_ENFORCE_PREPUSH_FORMAT=1` makes it `fail=1` | `SKIPPED … INFRASTRUCTURE`, push allowed |
-| `tools/scripts/gates.sh` | same, unsupervised | same knob | same skip |
+| `.githooks/pre-push` | `run_gate_captured bash "$FMT" --check --base "$BASE"` | `fail=1`, naming the fix (`tools/scripts/format_changed.sh`); `PULP_ENFORCE_PREPUSH_FORMAT=0` demotes one push to an `ADVISORY` line | `SKIPPED … INFRASTRUCTURE`, push allowed |
+| `tools/scripts/gates.sh` | same, unsupervised | same, same knob | same skip |
 | `.github/workflows/format-changed-check.yml` (`Format (changed lines)`, hosted `ubuntu-latest`, path-filtered to C++ sources) | pip `clang-format==21.1.8`, `--base origin/<base_ref>` | job fails with `::error title=Formatting` | job fails with `::error title=INFRASTRUCTURE` — never worded as a formatting verdict |
 
-The workflow is **not** in `required_status_checks`; it reports. Promote it
-by adding the check to branch protection and flipping the hook default only
-after open branches are clean on touched lines — at wiring time 4 of 6
-sampled in-flight PRs would have failed (26–355 diff lines each), which is
-why both surfaces start advisory. Measured cost: 1.8–3.9 s per branch in
+The workflow is **not** in `required_status_checks`; it reports. The hook and
+gates.sh started advisory (at wiring time 4 of 6 sampled in-flight PRs would
+have failed, 26–355 diff lines each) and were flipped to blocking on
+2026-10-05: while advisory, the CI check still went red on 4 of the 14 open PRs
+that ran it, and four PRs that day each spent a
+push and a re-review round on a one-command fix that `shipyard pr` had printed
+as `ADVISORY … Push allowed`. A branch with debt on its touched lines now runs
+`tools/scripts/format_changed.sh` once before its next push. Measured cost: 1.8–3.9 s per branch in
 the hook (the diff-cover build is the slow gate, not this).
 
 Exit 3 is deliberately an *infrastructure* failure with its own wording on
 every surface: a gate that reports "no binary" as "misformatted" is the
 false-verdict class this repo keeps paying for. The wiring — exit codes kept
 apart, the PyPI pin, hosted runner — is asserted by
-`tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
+`tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`),
+which also RUNS each shell caller's block against a stub `format_changed.sh`
+(exit 0/1/3, knob unset/0/1) so the blocking default is behaviour, not text.
+
+`--check` must agree with the rewrite mode, or a blocking gate becomes one the
+fix cannot clear. It once read the formatter's output through `$(...)`, which
+strips trailing newlines, so every touched file ending in a blank line read
+dirty while `format_changed.sh` left it alone; it now keeps the output
+byte-for-byte (`tools/scripts/test_format_changed.sh` pins that case). Include sorting ignores `--lines`: one new `#include` re-sorts its whole
+block, rewriting and blaming lines nobody touched, so an edited file is
+formatted with `--sort-includes=false`; a new file is still sorted whole.
 
 ### Its `--lines` output is not always what clang-format would produce
 

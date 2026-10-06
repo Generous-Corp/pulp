@@ -19,6 +19,8 @@ BrowserImportReadiness probe_browser_import_readiness(
     const std::optional<fs::path>& browser_executable) {
     browser_capture::BrowserDiscoveryOptions options;
     options.explicit_path = browser_executable;
+    options.probe_timeout_ms =
+        browser_capture::probe_timeout_from_environment(options.probe_timeout_ms);
     const auto discovered = browser_capture::discover_browser(options);
     BrowserImportReadiness result;
     if (!discovered.ok()) {
@@ -107,6 +109,8 @@ BrowserHtmlImportResult import_browser_html(
 
     browser_capture::BrowserDiscoveryOptions discovery;
     discovery.explicit_path = request.browser_executable;
+    discovery.probe_timeout_ms =
+        browser_capture::probe_timeout_from_environment(discovery.probe_timeout_ms);
 
     browser_capture::CaptureRequest capture;
     capture.input_file = staged.entry;
