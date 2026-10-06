@@ -1,6 +1,8 @@
 #include "shared_io_convolution_session.hpp"
 
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "dawn_shared_io_provider.hpp"
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -8,6 +10,14 @@
 #include <limits>
 
 namespace pulp::gpu_audio::detail {
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+// The provider is one member of the static gpu-audio archive. Keep an
+// explicit unresolved edge from this session member to the provider member so
+// Apple's one-pass archive scan pulls both members when a consumer only uses
+// the session API. This is a link-time anchor; it does no runtime work.
+void ensure_dawn_shared_io_provider_linked() noexcept;
+#endif
 
 namespace {
 
@@ -55,9 +65,13 @@ SharedIoExecutionContract SharedIoConvolutionSession::execution_contract() const
 
 SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const noexcept {
     SharedIoProviderIdentity identity;
+#if !defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    return identity;
+#else
     const auto* provider = dynamic_cast<const DawnSharedIoProvider*>(provider_.get());
     if (provider == nullptr)
         return identity;
+    ensure_dawn_shared_io_provider_linked();
     try {
         const auto adapter = provider->adapter_identity();
         identity.provider_revision = provider->dawn_revision();
@@ -81,6 +95,7 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
         return SharedIoProviderIdentity{};
     }
     return identity;
+#endif
 }
 
 bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {

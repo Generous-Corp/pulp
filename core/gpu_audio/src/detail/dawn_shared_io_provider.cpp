@@ -2509,6 +2509,9 @@ bool DawnSharedIoProvider::gpu_elapsed_ns(SlotToken token, std::uint64_t& elapse
 } // namespace pulp::gpu_audio::detail
 
 namespace pulp::gpu_audio::detail {
+
+void ensure_dawn_shared_io_provider_linked() noexcept {}
+
 std::string DawnSharedIoProvider::dawn_revision() const {
     return revision(dawn::kDawnVersion.data());
 }
