@@ -2267,6 +2267,7 @@
   "pulp-gpu-audio-coreaudio-workgroup-benchmark",
   "pulp-gpu-audio-p4-matched-convolution-benchmark",
   "pulp-gpu-audio-p4-raw-screening",
+  "pulp-gpu-convolution-reverb-probe",
   "pulp-gpu-dawn-shared-io-provider-probe",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
@@ -4710,6 +4711,14 @@
     "test/test_governed_build.sh"
    ],
    "kind": "shell"
+  },
+  "gpu-audio-p2-campaign-contract-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_campaign.py",
+    "tools/scripts/test_gpu_audio_p2_campaign.py"
+   ],
+   "kind": "python"
   },
   "gpu-audio-p4-evidence-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p4_evidence.py",

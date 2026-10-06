@@ -95,13 +95,16 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
     } catch (...) {
         return SharedIoProviderIdentity{};
     }
-    return identity;
 #endif
+    return identity;
 }
 
 bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     trace_recorder_.reset();
     trace_telemetry_.reset();
+    retained_trace_records_.clear();
+    retained_trace_admissions_.clear();
+    trace_retention_overflow_ = false;
     trace_template_ = config_.trace;
     if (!trace_template_.enabled)
         return true;
@@ -121,8 +124,15 @@ bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     }
     try {
         trace_slots_.assign(config_.slots, {});
+        if (trace_template_.retention_capacity != 0) {
+            retained_trace_records_.reserve(trace_template_.retention_capacity);
+            retained_trace_admissions_.reserve(trace_template_.retention_capacity);
+        }
     } catch (...) {
         trace_recorder_.reset();
+        retained_trace_records_.clear();
+        retained_trace_admissions_.clear();
+        trace_retention_overflow_ = trace_template_.retention_capacity != 0;
     }
     pipeline_.set_trace(trace_recorder_.get(), trace_recorder_ ? &trace_telemetry_ : nullptr);
     return true;
@@ -150,28 +160,63 @@ void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
     }
 }
 
+void SharedIoConvolutionSession::drain_trace_to_retention() noexcept {
+    if (!trace_recorder_ || trace_template_.retention_capacity == 0)
+        return;
+    const auto limit = static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity);
+    const auto retention = trace_template_.retention_capacity;
+    (void)trace_recorder_->drain_worker_records(limit, [&](const SharedIoTraceRecord& record) {
+        if (retained_trace_records_.size() >= retention) {
+            trace_retention_overflow_ = true;
+            return;
+        }
+        retained_trace_records_.push_back(record);
+    });
+    (void)trace_recorder_->drain_admissions(limit, [&](const SharedIoTraceAdmission& admission) {
+        if (retained_trace_admissions_.size() >= retention) {
+            trace_retention_overflow_ = true;
+            return;
+        }
+        retained_trace_admissions_.push_back(admission);
+    });
+}
+
 void SharedIoConvolutionSession::close_trace_generation() noexcept {
     last_closed_trace_records_.clear();
     last_closed_trace_admissions_.clear();
+    last_closed_trace_retention_overflow_ = trace_retention_overflow_;
     if (trace_recorder_) {
         try {
-            last_closed_trace_records_.reserve(SharedIoTraceRecorder::capacity);
-            last_closed_trace_admissions_.reserve(SharedIoTraceRecorder::capacity);
+            last_closed_trace_records_ = std::move(retained_trace_records_);
+            last_closed_trace_admissions_ = std::move(retained_trace_admissions_);
+            const auto retention = trace_template_.retention_capacity;
+            last_closed_trace_records_.reserve(
+                last_closed_trace_records_.size() +
+                (retention != 0 ? retention : SharedIoTraceRecorder::capacity));
+            last_closed_trace_admissions_.reserve(
+                last_closed_trace_admissions_.size() +
+                (retention != 0 ? retention : SharedIoTraceRecorder::capacity));
             for (;;) {
                 const auto drained = trace_recorder_->drain_admissions(
                     static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
                     [&](const SharedIoTraceAdmission& admission) {
-                        last_closed_trace_admissions_.push_back(admission);
+                        if (retention == 0 || last_closed_trace_admissions_.size() < retention)
+                            last_closed_trace_admissions_.push_back(admission);
+                        else
+                            last_closed_trace_retention_overflow_ = true;
                     });
                 if (drained < SharedIoTraceRecorder::capacity)
                     break;
             }
             for (;;) {
-                const auto drained =
-                    drain_trace_records(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-                                        [&](const SharedIoTraceRecord& record) {
-                                            last_closed_trace_records_.push_back(record);
-                                        });
+                const auto drained = drain_trace_records(
+                    static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+                    [&](const SharedIoTraceRecord& record) {
+                        if (retention == 0 || last_closed_trace_records_.size() < retention)
+                            last_closed_trace_records_.push_back(record);
+                        else
+                            last_closed_trace_retention_overflow_ = true;
+                    });
                 if (drained < SharedIoTraceRecorder::capacity)
                     break;
             }
@@ -202,10 +247,13 @@ void SharedIoConvolutionSession::close_trace_generation() noexcept {
         } catch (...) {
             last_closed_trace_records_.clear();
             last_closed_trace_admissions_.clear();
+            last_closed_trace_retention_overflow_ = true;
         }
     }
     drain_trace_until_empty();
     last_closed_trace_stats_ = trace_recorder_ ? trace_recorder_->stats() : SharedIoTraceStats{};
+    retained_trace_records_.clear();
+    retained_trace_admissions_.clear();
     last_closed_trace_telemetry_ = trace_telemetry_.snapshot();
     pipeline_.set_trace(nullptr);
     trace_recorder_.reset();
@@ -557,16 +605,19 @@ SharedIoConvolutionSession::service(std::uint64_t now_ns) noexcept {
     if (!drain_completions(now_ns, result)) {
         fail_closed();
         result.fenced = true;
+        drain_trace_to_retention();
         return result;
     }
     if (!submit_available(result)) {
         fail_closed();
         result.fenced = true;
+        drain_trace_to_retention();
         return result;
     }
     // Deterministic fakes may retire synchronously; one second drain turns
     // those exact terminals into pipeline records without another callback.
     (void)drain_completions(now_ns, result);
+    drain_trace_to_retention();
     result.fenced = fenced();
     return result;
 }

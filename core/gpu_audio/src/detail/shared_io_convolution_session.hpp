@@ -159,6 +159,9 @@ class SharedIoConvolutionSession {
     SharedIoTraceStats last_closed_trace_stats() const noexcept {
         return last_closed_trace_stats_;
     }
+    bool last_closed_trace_retention_overflow() const noexcept {
+        return last_closed_trace_retention_overflow_;
+    }
     std::vector<SharedIoTraceRecord> take_last_closed_trace_records() noexcept {
         return std::exchange(last_closed_trace_records_, {});
     }
@@ -186,6 +189,7 @@ class SharedIoConvolutionSession {
     bool prepare_trace_generation() noexcept;
     void close_trace_generation() noexcept;
     void drain_trace_until_empty() noexcept;
+    void drain_trace_to_retention() noexcept;
     static std::uint64_t trace_now_ns() noexcept;
     bool pack_input(const SharedIoConvolutionPipeline::Lease&, SharedIoArena::WriteLease&) noexcept;
     void fail_closed() noexcept;
@@ -217,6 +221,10 @@ class SharedIoConvolutionSession {
     SharedIoTraceStats last_closed_trace_stats_{};
     std::vector<SharedIoTraceRecord> last_closed_trace_records_;
     std::vector<SharedIoTraceAdmission> last_closed_trace_admissions_;
+    std::vector<SharedIoTraceRecord> retained_trace_records_;
+    std::vector<SharedIoTraceAdmission> retained_trace_admissions_;
+    bool trace_retention_overflow_ = false;
+    bool last_closed_trace_retention_overflow_ = false;
     std::uint64_t provider_starved_ = 0;
     std::optional<SharedIoConvolutionPipeline::Lease> pending_ingress_;
     std::vector<float> terminal_;

@@ -213,11 +213,12 @@ struct ProductTraceFixture {
     ProductTraceProvider* provider = nullptr;
     SharedIoConvolutionSession session;
 
-    void prepare() {
+    void prepare(std::uint32_t retention_capacity = 0) {
         SharedIoTraceConfig trace;
         trace.engine_id = 17;
         trace.success_stride = 1;
         trace.capture_admissions = true;
+        trace.retention_capacity = retention_capacity;
         trace.enabled = true;
 
         auto owner = std::make_unique<ProductTraceProvider>();
@@ -742,6 +743,40 @@ TEST_CASE("diagnostic overflow never refuses physical session submissions", "[gp
     REQUIRE(fixture.session.trace_stats().dropped > 0);
     REQUIRE(fixture.session.trace_stats().admissions_dropped > 0);
     REQUIRE(fixture.session.trace_stats().invalid == 0);
+}
+
+TEST_CASE("trial retention drains fixed queues without dropping a long census",
+          "[gpu_audio][trace][retention]") {
+    constexpr std::uint64_t submissions = SharedIoTraceRecorder::capacity + 512;
+    ProductTraceFixture fixture;
+    // Each admitted block can produce one terminal, one eligibility, and one
+    // callback delivery record. Reserve the complete bounded census before
+    // the worker starts; no service pass may allocate for retention.
+    fixture.prepare(static_cast<std::uint32_t>(submissions * 3 + 16));
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output{};
+    for (std::uint64_t sequence = 0; sequence < submissions; ++sequence) {
+        auto callback = fixture.session.begin_callback(input);
+        REQUIRE(callback.stamp.sequence == sequence);
+        fixture.session.consume_output(callback, output);
+        REQUIRE(fixture.session.service(0).submitted == 1);
+        fixture.provider->complete_sequence(sequence);
+        REQUIRE(fixture.session.service(0).completions == 1);
+    }
+    REQUIRE(fixture.session.release());
+    REQUIRE_FALSE(fixture.session.last_closed_trace_retention_overflow());
+    const auto stats = fixture.session.last_closed_trace_stats();
+    REQUIRE(stats.dropped == 0);
+    REQUIRE(stats.admissions_dropped == 0);
+    REQUIRE(stats.admissions_enqueued == submissions);
+    REQUIRE(stats.enqueued > SharedIoTraceRecorder::capacity);
+    const auto records = fixture.session.take_last_closed_trace_records();
+    const auto admissions = fixture.session.take_last_closed_trace_admissions();
+    REQUIRE(records.size() > SharedIoTraceRecorder::capacity);
+    REQUIRE(admissions.size() == submissions);
+    REQUIRE(std::count_if(records.begin(), records.end(), [](const auto& record) {
+                return record.kind == SharedIoTraceKind::Terminal;
+            }) == submissions);
 }
 
 TEST_CASE("GPU audio trace persists authoritative positive and planted invalid captures",

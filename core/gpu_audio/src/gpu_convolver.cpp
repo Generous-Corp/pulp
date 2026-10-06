@@ -57,6 +57,8 @@ bool expected_dawn_revision_available() noexcept {
 namespace {
 constexpr std::uint8_t kTrialPathMask = 0x07;
 constexpr std::uint8_t kTrialSlotsShift = 3;
+constexpr std::uint64_t kTrialWaitMask = UINT64_C(0xffffffff);
+constexpr unsigned kTrialRetentionShift = 32;
 
 std::uint8_t encode_trial_path_and_slots(detail::SharedIoRequest path,
                                          std::uint32_t slots) noexcept {
@@ -136,6 +138,11 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     if (config.slots != 0 && config.slots != 2 && config.slots != 4 && config.slots != 8 &&
         config.slots != 16)
         return false;
+    // The private packed wait field preserves the exported object layout. The
+    // provider contract caps waits well below this boundary; reject rather
+    // than silently truncating an out-of-range diagnostic value.
+    if (config.completion_wait_ns > kTrialWaitMask)
+        return false;
     // Preserve the public class layout while carrying this private probe-only
     // capacity alongside the existing private path selector.
     convolver.trial_requested_path_ =
@@ -148,7 +155,11 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_staged_sync_reference_ = config.staged_sync_reference;
     convolver.trial_success_stride_ = std::max<std::uint32_t>(1, config.success_stride);
     convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
-    convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
+    // Pack the two private diagnostic values into the pre-existing field so
+    // the exported GpuConvolver object layout remains unchanged.
+    convolver.trial_completion_wait_ns_ =
+        (config.completion_wait_ns & kTrialWaitMask) |
+        (static_cast<std::uint64_t>(config.retention_capacity) << kTrialRetentionShift);
     return true;
 }
 
@@ -186,6 +197,8 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
     try {
         if (convolver.shared_io_->session->prepared() && !convolver.shared_io_->session->release())
             return false;
+        if (convolver.shared_io_->session->last_closed_trace_retention_overflow())
+            return false;
         records = convolver.shared_io_->session->take_last_closed_trace_records();
         return !records.empty();
     } catch (...) {
@@ -206,6 +219,8 @@ bool drain_gpu_convolver_trial_admissions(
         return false;
     try {
         if (convolver.shared_io_->session->prepared() && !convolver.shared_io_->session->release())
+            return false;
+        if (convolver.shared_io_->session->last_closed_trace_retention_overflow())
             return false;
         admissions = convolver.shared_io_->session->take_last_closed_trace_admissions();
         return !admissions.empty();
@@ -348,7 +363,8 @@ bool GpuConvolver::prepare() {
                                       : detail::DawnSharedIoProvider::CompletionPolicy::
                                             ProcessEvents,
                               .completion_wait_ns =
-                                  trial_configured_ ? trial_completion_wait_ns_ : 0},
+                                  trial_configured_ ? (trial_completion_wait_ns_ & kTrialWaitMask)
+                                                    : 0},
                          .session = {.pipeline = {.capacity = shared_capacity,
                                                   .channels = channels_,
                                                   .block_size = block_,
@@ -360,6 +376,12 @@ bool GpuConvolver::prepare() {
                                      .slots = trial_slots != 0 ? trial_slots : kSharedIoSlots,
                                      .sample_rate = sample_rate_,
                                      .trace = {.success_stride = trial_success_stride_,
+                                               .retention_capacity =
+                                                   trial_configured_
+                                                       ? static_cast<std::uint32_t>(
+                                                             trial_completion_wait_ns_ >>
+                                                             kTrialRetentionShift)
+                                                       : 0,
                                                .capture_admissions = trial_capture_admissions_,
                                                .enabled = pulp::runtime::kTracingEnabled ||
                                                           trial_enable_trace_}},
