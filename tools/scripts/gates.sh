@@ -268,7 +268,11 @@ else
         "$CLEAN_OUTPUT_CORPUS"; do
         echo "" >&2
         echo "▸ clean-output source root: $clean_output_root" >&2
-        if ! "$PYTHON" "$CLEAN_OUTPUT_LINT" "$clean_output_root"; then
+        clean_output_args=("$clean_output_root")
+        if [ "$clean_output_root" = "$CLEAN_OUTPUT_CORPUS" ]; then
+            clean_output_args+=(--manifest "$CLEAN_OUTPUT_CORPUS/manifest.json")
+        fi
+        if ! "$PYTHON" "$CLEAN_OUTPUT_LINT" "${clean_output_args[@]}"; then
             fail=1
         fi
     done

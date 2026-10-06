@@ -15,3 +15,5 @@ Append a row before rerunning the Vellum preflight whenever a change event is
 owed. The event's `rationale` starts exactly with:
 
 > design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)
+
+| `20261005-design-import-refactor-20261004` | [8a003f54dd](https://github.com/Generous-Corp/pulp/commit/8a003f54dd) | `design-schema-compiler` | Preserve deterministic keyed DesignIR update application, trusted materialized-runtime canonicalization, fail-closed package-boundary scanning, and the captured clean-output corpus when activating extraction | `ctest --test-dir build -R keyed`; `node --test tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs`; `python3 tools/scripts/test_vellum_boundary_lint.py`; `python3 tools/ui-build/lint/test_clean_output_lint.py` |

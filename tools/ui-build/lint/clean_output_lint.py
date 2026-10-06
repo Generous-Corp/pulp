@@ -12,6 +12,7 @@ has a stable path/line/code so corpus reports can be diffed between runs.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -37,6 +38,37 @@ class Finding:
     line: int
     message: str
     severity: str = "error"
+
+
+def validate_corpus_manifest(source: Path, manifest_path: Path) -> str | None:
+    """Verify that a captured output corpus is the exact recorded artifact."""
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"generated-output manifest cannot be read: {exc}"
+    if manifest.get("schema") != "pulp.clean-output-corpus.v1":
+        return "generated-output manifest has an unsupported schema"
+    if manifest.get("producer") != "pulp import-design --emit source":
+        return "generated-output manifest has an unsupported producer"
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files:
+        return "generated-output manifest must list at least one file"
+    root = source.resolve()
+    for entry in files:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or \
+                not isinstance(entry.get("sha256"), str):
+            return "generated-output manifest contains a malformed file entry"
+        path = (source / entry["path"]).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            return f"generated-output manifest path escapes the source root: {entry['path']}"
+        if not path.is_file():
+            return f"generated-output manifest file is missing: {entry['path']}"
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != entry["sha256"]:
+            return f"generated-output manifest hash mismatch: {entry['path']}"
+    return None
 
 
 def _line_for(text: str, offset: int) -> int:
@@ -154,9 +186,17 @@ def lint_source(root: Path, *, enforce_size: bool = False, max_component_lines: 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
+    parser.add_argument("--manifest", type=Path,
+                        help="verify a captured generated-output corpus manifest")
     parser.add_argument("--json", action="store_true", help="emit the deterministic report as JSON")
     parser.add_argument("--enforce-size", action="store_true")
     args = parser.parse_args(argv)
+    if args.manifest:
+        error = validate_corpus_manifest(args.source, args.manifest)
+        if error:
+            print("pulp-clean-output-v1: FAIL (1 findings)")
+            print(f".:1: invalid-corpus-manifest: {error}")
+            return 1
     report = lint_source(args.source, enforce_size=args.enforce_size)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))

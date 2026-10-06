@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,32 @@ export function Other() {
             self.assertEqual(json.loads(result.stdout)["findings"][0]["code"],
                              "empty-source-root")
 
+    def test_cli_manifest_binds_captured_output_bytes(self):
+        lint = Path(__file__).with_name("clean_output_lint.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "Captured.tsx"
+            source.write_text(
+                'export function Captured() { return <button data-pulp-action="x">x</button>; }\n',
+                encoding="utf-8")
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "schema": "pulp.clean-output-corpus.v1",
+                "producer": "pulp import-design --emit source",
+                "files": [{"path": source.name,
+                           "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}],
+            }), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
+                text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            source.write_text(source.read_text(encoding="utf-8") + "// drift\n", encoding="utf-8")
+            stale = subprocess.run(
+                [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
+                text=True, capture_output=True, check=False)
+            self.assertNotEqual(stale.returncode, 0)
+            self.assertIn("invalid-corpus-manifest", stale.stdout)
+
     def test_gates_runs_lint_when_fixture_directory_is_missing(self):
         gates = Path(__file__).parents[3] / "tools/scripts/gates.sh"
         text = gates.read_text(encoding="utf-8")
@@ -86,7 +113,8 @@ export function Other() {
         end = text.index("# ── 1. skill-sync", start)
         block = text[start:end]
         self.assertIn('if [ ! -f "$CLEAN_OUTPUT_LINT" ]; then', block)
-        self.assertIn('"$PYTHON" "$CLEAN_OUTPUT_LINT" "$ROOT/tools/ui-build/lint/fixtures/clean"', block)
+        self.assertIn('"$ROOT/tools/ui-build/lint/fixtures/clean"', block)
+        self.assertIn('CLEAN_OUTPUT_CORPUS', block)
         self.assertNotIn('&& [ -d "$ROOT/tools/ui-build/lint/fixtures/clean" ]', block)
         self.assertIn("fail=1", block)
 

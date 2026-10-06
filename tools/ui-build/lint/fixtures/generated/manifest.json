@@ -1,0 +1,11 @@
+{
+  "files": [
+    {
+      "path": "CapturedFilterPanel.tsx",
+      "sha256": "c81ee94818270a82565e5945445f07437383a5f68ea69be3f354b8dfe9c1f524"
+    }
+  ],
+  "producer": "pulp import-design --emit source",
+  "schema": "pulp.clean-output-corpus.v1",
+  "source_fixture": "test/fixtures/v0-dev/settings-strip.tsx"
+}

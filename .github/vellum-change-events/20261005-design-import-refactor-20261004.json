@@ -11,7 +11,7 @@
     "Vellum freeze",
     "Vellum trusted freeze",
     "ctest --test-dir build -R pulp-test-design-import-anchors",
-    "ctest --test-dir build -R "keyed design updates|keyed update indices"",
+    "ctest --test-dir build -R keyed",
     "ctest --test-dir build -R pulp-test-graph-runtime-plan",
     "ctest --test-dir build -R pulp-test-graph-serializer",
     "ctest --test-dir build -R pulp-test-host-signal-graph",
