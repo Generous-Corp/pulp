@@ -197,6 +197,59 @@ TEST_CASE("materialized browser document binds packaged fonts fail closed",
     REQUIRE_FALSE(parse_materialized_browser_document(missing).has_value());
 }
 
+TEST_CASE("materialized browser document v2 preserves all five id-addressed binding lists",
+          "[view][import][materialized-browser][schema-v2]") {
+    const std::string json = R"JSON({
+      "schema":"pulp-materialized-browser-document-v2","version":2,
+      "html":"<html><body><div id=\"root\"></div></body></html>",
+      "assets":[{
+        "id":"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82",
+        "mime_type":"text/javascript","byte_length":20,
+        "data_base64":"Z2xvYmFsVGhpcy5va1RydWU9MTs=",
+        "sha256":"93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82"
+      }],
+      "bindings_by_id":{
+        "semantic":{"pulp-semantic-a1":{"id":"pulp-semantic-a1","kind":"semantic","backend_node_id":7}},
+        "layout":{"pulp-layout-b2":{"id":"pulp-layout-b2","kind":"layout","path":[]}},
+        "text":{"pulp-text-c3":{"id":"pulp-text-c3","kind":"text","text":"A"}},
+        "paint":{"pulp-paint-d4":{"id":"pulp-paint-d4","kind":"paint","tag":"svg"}},
+        "canvas":{"pulp-canvas-e5":{"id":"pulp-canvas-e5","kind":"canvas","anchor":"chromium:backend-node:8"}}
+      }
+    })JSON";
+    auto bundle = parse_materialized_browser_document(json);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->materialized_schema_version == 2);
+    REQUIRE(bundle->materialized_bindings.size() == 5);
+    CHECK(bundle->materialized_bindings[0].id == "pulp-semantic-a1");
+    CHECK(bundle->materialized_bindings[0].kind == "semantic");
+    CHECK(bundle->materialized_bindings[4].id == "pulp-canvas-e5");
+    CHECK(bundle->materialized_bindings[4].payload_json.find("backend-node:8") !=
+          std::string::npos);
+}
+
+TEST_CASE("materialized browser document v2 rejects duplicate or mismatched binding ids",
+          "[view][import][materialized-browser][schema-v2]") {
+    const std::string prefix = R"JSON({
+      "schema":"pulp-materialized-browser-document-v2","version":2,
+      "html":"<html><body></body></html>","assets":[],"bindings_by_id":)JSON";
+    const std::string suffix = R"JSON(})JSON";
+    SECTION("duplicate across binding kinds") {
+        const auto json = prefix + R"JSON({
+          "semantic":{"pulp-shared-a1":{"id":"pulp-shared-a1"}},
+          "layout":{"pulp-shared-a1":{"id":"pulp-shared-a1"}},
+          "text":{},"paint":{},"canvas":{}
+        })JSON" + suffix;
+        REQUIRE_FALSE(parse_materialized_browser_document(json).has_value());
+    }
+    SECTION("map key and declared id disagree") {
+        const auto json = prefix + R"JSON({
+          "semantic":{"pulp-semantic-a1":{"id":"pulp-semantic-other"}},
+          "layout":{},"text":{},"paint":{},"canvas":{}
+        })JSON" + suffix;
+        REQUIRE_FALSE(parse_materialized_browser_document(json).has_value());
+    }
+}
+
 TEST_CASE("template <script src> scanning keeps the regex's matching rules",
           "[view][import]") {
     // The scanner replaced std::regex <script\b[^>]*\bsrc=(?:"..."|'...')

@@ -71,6 +71,9 @@ import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs"
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
 import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mjs";
 import {
+  normalizeMaterializedBindingDocument,
+} from "../jsx-runtime/materialized_binding_contract.mjs";
+import {
   materializedCoordinateSpaceFromQuad,
 } from "./materialized_coordinate_space.mjs";
 import {
@@ -415,7 +418,15 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
         `browser capture found duplicate canvas backend node ${backendNodeId}`);
     }
     seenBackendNodeIds.add(backendNodeId);
-    canvases.push(backendNodeId);
+    let pulpId = '';
+    const attributes = nodes.attributes?.[index] ?? [];
+    for (let attr = 0; attr + 1 < attributes.length; attr += 2) {
+      const name = String(strings[attributes[attr]] ?? '').toLowerCase();
+      if (name !== 'data-pulp-id') continue;
+      pulpId = String(strings[attributes[attr + 1]] ?? '');
+      break;
+    }
+    canvases.push({ backendNodeId, pulpId });
   }
   if (canvases.length > MAX_CAPTURED_CANVASES) {
     throw new Error(
@@ -425,7 +436,7 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
 
   const assets = [];
   let totalPixels = 0;
-  for (const backendNodeId of canvases) {
+  for (const { backendNodeId, pulpId } of canvases) {
     const resolved = await cdp.call("DOM.resolveNode", { backendNodeId });
     const objectId = resolved.object?.objectId;
     if (!objectId) {
@@ -531,6 +542,7 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
         width_px: dimensions.width,
         height_px: dimensions.height,
         backend_node_id: backendNodeId,
+        ...(pulpId ? { pulp_id: pulpId } : {}),
         bounds: {
           left: Number(measured.result?.value?.bounds?.left ?? 0),
           top: Number(measured.result?.value?.bounds?.top ?? 0),
@@ -799,8 +811,8 @@ async function captureMaterializedDocument(cdp) {
         });
       }
       return {
-        schema: 'pulp-materialized-browser-document-v1',
-        version: 1,
+        schema: 'pulp-materialized-browser-document-v2',
+        version: 2,
         html: document.html,
         mime_type: document.mime_type,
         assets
@@ -1660,6 +1672,7 @@ async function runCapture(options) {
           kind: String(candidate.kind ?? "unknown"),
           tag: String(candidate.tag ?? ""),
           name: String(candidate.name ?? ""),
+          ...(candidate.pulp_id ? { pulp_id: String(candidate.pulp_id) } : {}),
           bounds: {
             left: Number(candidate.bounds?.left ?? 0),
             top: Number(candidate.bounds?.top ?? 0),
@@ -1750,6 +1763,7 @@ async function runCapture(options) {
         (asset, index) => ({
           index,
           anchor: `chromium:backend-node:${asset.backend_node_id}`,
+          ...(asset.pulp_id ? { pulp_id: asset.pulp_id } : {}),
           bounds: {
             left: asset.bounds.left - finalExtent.left,
             top: asset.bounds.top - finalExtent.top,
@@ -1757,6 +1771,13 @@ async function runCapture(options) {
             height: asset.bounds.height,
           },
         }));
+      // Emit both the replay-friendly arrays and the v2 id-addressed view.
+      // Capture is the identity authority: once a source-owned data-pulp-id is
+      // present it survives sibling insertion; otherwise the deterministic
+      // fallback is retained for v1-shaped inputs and reported by the sidecar.
+      Object.assign(materializedDocument,
+        normalizeMaterializedBindingDocument(materializedDocument,
+          { upgradeSchema: true }));
     }
     // Capture the exact authored body beneath declared moving indicators.
     // Visibility removes only the marked paint without changing its layout,
