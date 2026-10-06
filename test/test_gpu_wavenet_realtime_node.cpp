@@ -263,6 +263,15 @@ TEST_CASE("WaveNet stamped node never calls providers from callback and honors l
     }
 }
 
+TEST_CASE("realtime provider identity is empty without an authenticated shared provider",
+          "[gpu_audio][wavenet][realtime][identity]") {
+    const auto identity = detail::realtime_gpu_provider_identity(nullptr);
+    CHECK_FALSE(identity.authenticated);
+    CHECK(identity.provider_revision.empty());
+    CHECK(identity.adapter_name.empty());
+    CHECK(identity.adapter_backend.empty());
+}
+
 TEST_CASE("WaveNet timed service publishes new work with one shared pump deadline",
           "[gpu_audio][wavenet][realtime]") {
     Harness h(1, 2, 500'000);

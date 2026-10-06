@@ -17,6 +17,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -777,6 +778,57 @@ TEST_CASE("trial retention drains fixed queues without dropping a long census",
     REQUIRE(std::count_if(records.begin(), records.end(), [](const auto& record) {
                 return record.kind == SharedIoTraceKind::Terminal;
             }) == submissions);
+}
+
+TEST_CASE("bounded trace retention fails closed when the census exceeds its limit",
+          "[gpu_audio][trace][retention][negative]") {
+    ProductTraceFixture fixture;
+    fixture.prepare(1);
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output{};
+
+    // Keep several callback-side records queued before close. The worker has
+    // not drained them, so close_trace_generation must retain the bounded
+    // prefix and report the discarded tail rather than claiming completeness.
+    for (int i = 0; i < 4; ++i) {
+        const auto callback = fixture.session.begin_callback(input);
+        fixture.session.consume_output(callback, output);
+    }
+    REQUIRE(fixture.session.release());
+    CHECK(fixture.session.last_closed_trace_retention_overflow());
+    CHECK(fixture.session.take_last_closed_trace_records().size() <= 1);
+    CHECK(fixture.session.take_last_closed_trace_admissions().empty());
+}
+
+TEST_CASE("trace retention is drained before a submission refusal fences the session",
+          "[gpu_audio][trace][retention][negative]") {
+    ProductTraceFixture fixture;
+    fixture.prepare(1);
+    fixture.provider->accept_submissions = false;
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output{};
+    const auto callback = fixture.session.begin_callback(input);
+    fixture.session.consume_output(callback, output);
+    const auto refused = fixture.session.service(0);
+    CHECK(refused.fenced);
+    CHECK(fixture.session.fenced());
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("trace retention is drained before a completion failure fences the session",
+          "[gpu_audio][trace][retention][negative]") {
+    ProductTraceFixture fixture;
+    fixture.prepare(1);
+    const std::array<float, 2> input{std::numeric_limits<float>::quiet_NaN(), 2.f};
+    std::array<float, 2> output{};
+    const auto callback = fixture.session.begin_callback(input);
+    fixture.session.consume_output(callback, output);
+    REQUIRE(fixture.session.service(0).submitted == 1);
+    fixture.provider->complete_sequence(0);
+    const auto failed = fixture.session.service(0);
+    CHECK(failed.fenced);
+    CHECK(fixture.session.fenced());
+    REQUIRE(fixture.session.release());
 }
 
 TEST_CASE("GPU audio trace persists authoritative positive and planted invalid captures",
