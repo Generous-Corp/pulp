@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -53,6 +54,7 @@ struct Config {
     bool wake = false;
     bool corrupt_output = false;
     bool expect_failure = false;
+    bool self_test = false;
     std::string run_kind = "cold";
     std::filesystem::path directory;
     std::filesystem::path raw_jsonl;
@@ -86,6 +88,8 @@ bool parse(int argc, char** argv, Config& config) {
             config.corrupt_output = true;
         else if (argument == "--expect-failure")
             config.expect_failure = true;
+        else if (argument == "--self-test")
+            config.self_test = true;
         else if (argument.starts_with("--run-kind="))
             config.run_kind = argument.substr(11);
         else if (argument.starts_with("--output-dir="))
@@ -150,6 +154,162 @@ void json_string(std::ostream& stream, std::string_view value) {
         }
     }
     stream << '"';
+}
+
+using TraceRecord = pulp::gpu_audio::detail::SharedIoTraceRecord;
+using TraceAdmission = pulp::gpu_audio::detail::SharedIoTraceAdmission;
+
+std::string trace_identity(std::uint64_t engine, std::uint64_t generation, std::uint64_t sequence) {
+    return std::to_string(engine) + ":" + std::to_string(generation) + ":" +
+           std::to_string(sequence);
+}
+
+struct RawCensus {
+    bool valid = true;
+    std::unordered_set<std::string> admission_identities;
+    std::unordered_set<std::string> delivery_identities;
+    std::unordered_set<std::string> terminal_identities;
+    std::vector<const TraceRecord*> lifecycle_records;
+};
+
+RawCensus collect_raw_census(const std::vector<TraceRecord>& records,
+                             const std::vector<TraceAdmission>& admissions, std::uint64_t engine_id,
+                             const std::unordered_set<std::string>& authenticated_terminals) {
+    RawCensus census;
+    for (const auto& admission : admissions) {
+        if (!census.admission_identities
+                 .insert(trace_identity(engine_id, admission.generation, admission.sequence))
+                 .second)
+            census.valid = false;
+    }
+    census.lifecycle_records.reserve(records.size());
+    for (const auto& record : records) {
+        if (record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
+            record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Delivery)
+            continue;
+        const auto identity = trace_identity(engine_id, record.generation, record.sequence);
+        census.lifecycle_records.push_back(&record);
+        if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal) {
+            if (!census.admission_identities.contains(identity) || !record.valid() ||
+                !record.admission_identity_matched ||
+                record.gpu_terminal ==
+                    pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None ||
+                !census.terminal_identities.insert(identity).second)
+                census.valid = false;
+        } else if (record.delivery == pulp::gpu_audio::detail::SharedIoDeliveryDisposition::None ||
+                   !record.callback_timing_available ||
+                   !census.delivery_identities.insert(identity).second) {
+            census.valid = false;
+        }
+    }
+    std::size_t admitted_delivery_count = 0;
+    for (const auto& identity : census.delivery_identities)
+        if (census.admission_identities.contains(identity))
+            ++admitted_delivery_count;
+    census.valid = census.valid &&
+                   authenticated_terminals.size() == census.admission_identities.size() &&
+                   admitted_delivery_count == census.admission_identities.size();
+    return census;
+}
+
+void emit_raw_provenance(std::ostream& raw, std::string_view run_kind, std::uint64_t run_identity,
+                         std::uint64_t engine_id,
+                         const pulp::gpu_audio::detail::SharedIoProviderIdentity& provider_identity,
+                         std::string_view executable_sha, std::string_view manifest_digest) {
+    raw << "{\"kind\":\"provenance\",\"schema\":\"pulp.gpu-audio.p2.raw.v1\","
+           "\"run_kind\":";
+    json_string(raw, run_kind);
+    raw << ",\"same_process_resident\":true,"
+           "\"steady_semantics\":\"same_process_resident\",\"process_id\":"
+        << process_id() << ",\"residency_session_id\":\"" << run_identity
+        << "\",\"prepared_sessions\":1,\"reprepare_count\":0,\"engine_id\":" << engine_id
+        << ",\"provider_identity_status\":\""
+        << (provider_identity.authenticated ? "passed" : "failed")
+        << "\",\"provider_observed_identity\":\""
+        << (provider_identity.authenticated ? "passed" : "failed") << "\",\"provider_revision\":";
+    json_string(raw, provider_identity.provider_revision);
+    raw << ",\"adapter_name\":";
+    json_string(raw, provider_identity.adapter_name);
+    raw << ",\"adapter_backend\":";
+    json_string(raw, provider_identity.adapter_backend);
+    raw << ",\"adapter_vendor_id\":" << provider_identity.adapter_vendor_id
+        << ",\"adapter_device_id\":" << provider_identity.adapter_device_id
+        << ",\"native_runtime_identity_status\":\""
+        << (provider_identity.native_runtime_authenticated ? "passed" : "failed")
+        << "\",\"native_runtime_name\":";
+    json_string(raw, provider_identity.native_runtime_name);
+    raw << ",\"native_runtime_backend\":";
+    json_string(raw, provider_identity.native_runtime_backend);
+    raw << ",\"executable_observed_sha256\":";
+    json_string(raw, executable_sha);
+    raw << ",\"provider_asset_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256);
+    raw << ",\"dawn_archive_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256);
+    raw << ",\"manifest_bindings\":{\"dawn_archive_manifest_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256);
+    raw << ",\"dawn_archive_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256);
+    raw << ",\"provider_asset_manifest_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256);
+    raw << ",\"provider_asset_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256);
+    raw << "},\"provenance_manifest_sha256\":";
+    json_string(raw, manifest_digest);
+    raw << "}\n";
+}
+
+int self_test() {
+    constexpr std::uint64_t engine_id = 7;
+    std::vector<TraceAdmission> admissions{{1, 2}};
+    TraceRecord terminal;
+    terminal.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Terminal;
+    terminal.generation = 1;
+    terminal.sequence = 2;
+    terminal.gpu_work_admitted = true;
+    terminal.admission_identity_matched = true;
+    terminal.gpu_terminal =
+        pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::CompletedAccepted;
+    terminal.outcome = pulp::gpu_audio::detail::SharedIoTraceOutcome::Success;
+    terminal.set(pulp::gpu_audio::detail::SharedIoTraceStage::Scheduled, 1);
+    TraceRecord delivery;
+    delivery.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Delivery;
+    delivery.generation = 1;
+    delivery.sequence = 2;
+    delivery.output_eligible = true;
+    delivery.delivery = pulp::gpu_audio::detail::SharedIoDeliveryDisposition::GpuDelivered;
+    delivery.callback_timing_available = true;
+    std::vector<TraceRecord> records{terminal, delivery};
+    std::unordered_set<std::string> authenticated{trace_identity(engine_id, 1, 2)};
+    if (!collect_raw_census(records, admissions, engine_id, authenticated).valid) {
+        std::cerr << "self-test: valid raw census rejected\n";
+        return 1;
+    }
+    records.push_back(terminal);
+    if (collect_raw_census(records, admissions, engine_id, authenticated).valid) {
+        std::cerr << "self-test: duplicate terminal accepted\n";
+        return 1;
+    }
+
+    pulp::gpu_audio::detail::SharedIoProviderIdentity provider;
+    provider.authenticated = true;
+    provider.provider_revision = "revision\"\\\n";
+    provider.adapter_name = "adapter\"\\\n";
+    provider.adapter_backend = "backend\"\\\n";
+    provider.native_runtime_authenticated = true;
+    provider.native_runtime_name = "runtime\"\\\n";
+    provider.native_runtime_backend = "runtime-backend\"\\\n";
+    std::ostringstream serialized;
+    emit_raw_provenance(serialized, "cold\"\\\n", 42, engine_id, provider, "exe\"\\\n",
+                        "manifest\"\\\n");
+    const auto json = serialized.str();
+    if (json.find("\\\"") == std::string::npos || json.find("\\\\") == std::string::npos ||
+        json.find("\\n") == std::string::npos) {
+        std::cerr << "self-test: provenance strings were not escaped\n";
+        return 1;
+    }
+    std::cout << json;
+    return 0;
 }
 
 int run(Config config) {
@@ -293,48 +453,11 @@ int run(Config config) {
     // callback-only priming and CPU-fallback positions. The admission-linked
     // subset is checked for one terminal and one delivery per admission, while
     // the complete delivery stream remains available for fallback accounting.
-    const auto trace_identity = [](std::uint64_t engine, std::uint64_t generation,
-                                   std::uint64_t sequence) {
-        return std::to_string(engine) + ":" + std::to_string(generation) + ":" +
-               std::to_string(sequence);
-    };
-    std::unordered_set<std::string> admission_identities;
-    bool raw_census_valid = true;
-    for (const auto& admission : trace_admissions) {
-        if (!admission_identities
-                 .insert(trace_identity(engine_id, admission.generation, admission.sequence))
-                 .second)
-            raw_census_valid = false;
-    }
-    std::unordered_set<std::string> delivery_identities;
-    std::vector<const pulp::gpu_audio::detail::SharedIoTraceRecord*> raw_lifecycle_records;
-    raw_lifecycle_records.reserve(trace_records.size());
-    for (const auto& record : trace_records) {
-        if (record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
-            record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Delivery)
-            continue;
-        const auto identity = trace_identity(engine_id, record.generation, record.sequence);
-        raw_lifecycle_records.push_back(&record);
-        if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal) {
-            if (!admission_identities.contains(identity) || !record.valid() ||
-                !record.admission_identity_matched ||
-                record.gpu_terminal ==
-                    pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None ||
-                !terminal_identities.insert(identity).second)
-                raw_census_valid = false;
-        } else {
-            if (record.delivery == pulp::gpu_audio::detail::SharedIoDeliveryDisposition::None ||
-                !record.callback_timing_available || !delivery_identities.insert(identity).second)
-                raw_census_valid = false;
-        }
-    }
-    std::size_t admitted_delivery_count = 0;
-    for (const auto& identity : delivery_identities)
-        if (admission_identities.contains(identity))
-            ++admitted_delivery_count;
-    raw_census_valid = raw_census_valid &&
-                       terminal_identities.size() == admission_identities.size() &&
-                       admitted_delivery_count == admission_identities.size();
+    const auto raw_census =
+        collect_raw_census(trace_records, trace_admissions, engine_id, terminal_identities);
+    const auto& admission_identities = raw_census.admission_identities;
+    const auto& raw_lifecycle_records = raw_census.lifecycle_records;
+    const bool raw_census_valid = raw_census.valid;
 
     if (config.corrupt_output)
         output[0][static_cast<std::size_t>(config.warmup + config.lead) * config.frames] += 1.0f;
@@ -508,35 +631,8 @@ int run(Config config) {
             PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 + "\",\"provider_asset_manifest_sha256\":\"" +
             PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 + "\",\"provider_asset_sha256\":\"" +
             PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 + "\"}");
-        raw << "{\"kind\":\"provenance\",\"schema\":\"pulp.gpu-audio.p2.raw.v1\","
-               "\"run_kind\":\""
-            << config.run_kind
-            << "\",\"same_process_resident\":true,"
-               "\"steady_semantics\":\"same_process_resident\",\"process_id\":"
-            << process_id() << ",\"residency_session_id\":\"" << run_identity
-            << "\",\"prepared_sessions\":1,\"reprepare_count\":0,\"engine_id\":" << engine_id
-            << ",\"provider_identity_status\":\""
-            << (provider_identity.authenticated ? "passed" : "failed")
-            << "\",\"provider_observed_identity\":\""
-            << (provider_identity.authenticated ? "passed" : "failed")
-            << "\",\"provider_revision\":\"" << provider_identity.provider_revision
-            << "\",\"adapter_name\":\"" << provider_identity.adapter_name
-            << "\",\"adapter_backend\":\"" << provider_identity.adapter_backend
-            << "\",\"adapter_vendor_id\":" << provider_identity.adapter_vendor_id
-            << ",\"adapter_device_id\":" << provider_identity.adapter_device_id
-            << ",\"native_runtime_identity_status\":\""
-            << (provider_identity.native_runtime_authenticated ? "passed" : "failed")
-            << "\",\"native_runtime_name\":\"" << provider_identity.native_runtime_name
-            << "\",\"native_runtime_backend\":\"" << provider_identity.native_runtime_backend
-            << "\",\"executable_observed_sha256\":\"" << executable_sha
-            << "\",\"provider_asset_sha256\":\"" << PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256
-            << "\",\"dawn_archive_sha256\":\"" << PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256
-            << "\",\"manifest_bindings\":{\"dawn_archive_manifest_sha256\":\""
-            << PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 << "\",\"dawn_archive_sha256\":\""
-            << PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 << "\",\"provider_asset_manifest_sha256\":\""
-            << PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 << "\",\"provider_asset_sha256\":\""
-            << PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 << "\"},\"provenance_manifest_sha256\":\""
-            << manifest_digest << "\"}\n";
+        emit_raw_provenance(raw, config.run_kind, run_identity, engine_id, provider_identity,
+                            executable_sha, manifest_digest);
         for (const auto& admission : trace_admissions) {
             raw << "{\"kind\":\"admission\",\"engine_id\":" << engine_id
                 << ",\"generation\":" << admission.generation
@@ -580,6 +676,8 @@ int main(int argc, char** argv) {
     if (!parse(argc, argv, config))
         return 2;
     try {
+        if (config.self_test)
+            return self_test();
         return run(config);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
