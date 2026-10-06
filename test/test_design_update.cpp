@@ -20,6 +20,47 @@ void require_recreated(const DesignChildUpdatePlan& plan, const char* key) {
     CHECK(plan.updates[1].kind == DesignUpdateKind::inserted);
     CHECK(plan.updates[1].key == key);
 }
+
+IRInteractiveElement materialized_element() {
+    IRInteractiveElement element;
+    element.kind = InteractiveElementKind::dropdown;
+    element.cx = 11.0f;
+    element.cy = 12.0f;
+    element.hit_radius = 13.0f;
+    element.svg_patch_d = "M0 0L1 1";
+    element.default_value = 0.25f;
+    element.flash = true;
+    element.x = 14.0f;
+    element.y = 15.0f;
+    element.w = 16.0f;
+    element.h = 17.0f;
+    element.options = {"one", "two"};
+    element.selected_index = 1;
+    element.placeholder = "placeholder";
+    element.bg_color = "#123456";
+    element.target_frame = 2;
+    element.action = "octave_up";
+    element.text = "value";
+    element.value_left_align = true;
+    element.default_value_y = 0.75f;
+    element.factory_id = "factory";
+    element.custom_props = R"({"mode":"compact"})";
+    element.source_node_id = "source:1";
+    element.param_key = "old.key";
+    return element;
+}
+
+template <typename Mutator>
+void require_interactive_recreated(const char* key, Mutator mutate) {
+    auto old_node = node(key);
+    auto new_node = old_node;
+    old_node.interactive_elements.push_back(materialized_element());
+    new_node.interactive_elements.push_back(materialized_element());
+    mutate(new_node.interactive_elements.front());
+    require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                std::span<const IRNode>(&new_node, 1)),
+                      key);
+}
 } // namespace
 
 TEST_CASE("keyed design updates retain identity across reorder and batch blocks",
@@ -133,6 +174,21 @@ TEST_CASE("value-only binding metadata does not change the materialization shape
 }
 
 TEST_CASE("materialization identity changes recreate keyed nodes", "[view][import][update]") {
+    SECTION("unchanged interactive materialization is retained") {
+        auto old_node = node("interactive-stable");
+        auto new_node = old_node;
+        old_node.interactive_elements.push_back(materialized_element());
+        new_node.interactive_elements.push_back(materialized_element());
+        // Parameter names are the one mutable identity channel. A host can
+        // re-key an existing DesignFrameElement without rebuilding it.
+        new_node.interactive_elements.front().param_key = "new.key";
+        const auto plan = plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1));
+        REQUIRE(plan.keyed);
+        REQUIRE(plan.updates.size() == 1);
+        CHECK(plan.updates.front().kind == DesignUpdateKind::retained);
+    }
+
     SECTION("the same SVG asset is retained") {
         auto old_node = node("svg");
         auto new_node = old_node;
@@ -215,6 +271,102 @@ TEST_CASE("materialization identity changes recreate keyed nodes", "[view][impor
         require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
                                                     std::span<const IRNode>(&new_node, 1)),
                           "custom-props");
+    }
+}
+
+TEST_CASE("interactive materialization fields recreate same-anchor nodes",
+          "[view][import][update]") {
+    SECTION("SVG patch path") {
+        require_interactive_recreated("svg-patch", [](auto& element) {
+            element.svg_patch_d = "M2 2L3 3";
+        });
+    }
+
+    SECTION("geometry") {
+        require_interactive_recreated("geometry", [](auto& element) {
+            element.x += 1.0f;
+        });
+    }
+
+    SECTION("target frame") {
+        require_interactive_recreated("target-frame", [](auto& element) {
+            element.target_frame = 3;
+        });
+    }
+
+    SECTION("action") {
+        require_interactive_recreated("action", [](auto& element) {
+            element.action = "octave_down";
+        });
+    }
+
+    SECTION("options") {
+        require_interactive_recreated("options", [](auto& element) {
+            element.options.push_back("three");
+        });
+    }
+
+    SECTION("selected index") {
+        require_interactive_recreated("selected-index", [](auto& element) {
+            element.selected_index = 0;
+        });
+    }
+
+    SECTION("other overlay fields") {
+        SECTION("placeholder") {
+            require_interactive_recreated("placeholder", [](auto& element) {
+                element.placeholder = "new placeholder";
+            });
+        }
+        SECTION("background color") {
+            require_interactive_recreated("bg-color", [](auto& element) {
+                element.bg_color = "#654321";
+            });
+        }
+        SECTION("value label text") {
+            require_interactive_recreated("text", [](auto& element) {
+                element.text = "new value";
+            });
+        }
+        SECTION("value label alignment") {
+            require_interactive_recreated("value-alignment", [](auto& element) {
+                element.value_left_align = false;
+            });
+        }
+    }
+
+    SECTION("other patch fields") {
+        SECTION("pivot") {
+            require_interactive_recreated("pivot", [](auto& element) {
+                element.cx += 1.0f;
+            });
+        }
+        SECTION("hit radius") {
+            require_interactive_recreated("hit-radius", [](auto& element) {
+                element.hit_radius += 1.0f;
+            });
+        }
+        SECTION("default value") {
+            require_interactive_recreated("default-value", [](auto& element) {
+                element.default_value = 0.5f;
+            });
+        }
+        SECTION("toggle flash") {
+            require_interactive_recreated("flash", [](auto& element) {
+                element.flash = false;
+            });
+        }
+        SECTION("xy pad default value") {
+            require_interactive_recreated("default-value-y", [](auto& element) {
+                element.default_value_y = 0.25f;
+            });
+        }
+    }
+
+    SECTION("source provenance") {
+        require_interactive_recreated("source-node", [](auto& element) {
+            element.source_node_id = "source:2";
+        });
     }
 }
 

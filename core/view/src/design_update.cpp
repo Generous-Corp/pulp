@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <pulp/view/design_update.hpp>
 #include <unordered_map>
 #include <unordered_set>
@@ -67,15 +68,70 @@ BindingShape binding_shape(const IRNode& node) {
     shape.action = has_nonempty_attribute(node, "pulpHostAction") ||
                    has_nonempty_attribute(node, "pulpPayloadContract");
 
-    shape.interactive.reserve(node.interactive_elements.size() * 2);
-    for (const auto& element : node.interactive_elements) {
-        // Store the enum and binding presence, but never the parameter name.
-        // The name is a re-keyable value; kind and binding cardinality define
-        // the materialized control topology.
-        shape.interactive.push_back(static_cast<std::uint8_t>(element.kind));
-        shape.interactive.push_back(element.param_key.empty() ? 0 : 1);
-    }
+    // Alternate frames share the same DesignFrameView and participate in the
+    // host-routing decision, so include their interactive topology too.  The
+    // names remain deliberately omitted: those are re-keyable payload values.
+    std::function<void(const IRNode&)> append_interactive = [&](const IRNode& frame) {
+        for (const auto& element : frame.interactive_elements) {
+            // Store the enum and binding presence, but never the parameter
+            // name. The name is a re-keyable value; kind and binding
+            // cardinality define the materialized control topology.
+            shape.interactive.push_back(static_cast<std::uint8_t>(element.kind));
+            shape.interactive.push_back(element.param_key.empty() ? 0 : 1);
+        }
+        for (const auto& alternate : frame.alternate_frames)
+            append_interactive(alternate);
+    };
+    append_interactive(node);
     return shape;
+}
+
+// These fields are copied directly into DesignFrameElement by the native
+// materializer.  A retained keyed child has no generic setter for them, so
+// reusing its old view after one changes would leave the new IR pointing at a
+// stale hit target, SVG patch, overlay, swap/action contract, or provenance
+// record.  `param_key` is intentionally absent: DesignFrameView supports
+// changing that binding in place via set_element_param_key().
+bool interactive_materialization_equal(const IRInteractiveElement& old_element,
+                                       const IRInteractiveElement& new_element) {
+    return old_element.kind == new_element.kind &&
+           old_element.cx == new_element.cx && old_element.cy == new_element.cy &&
+           old_element.hit_radius == new_element.hit_radius &&
+           old_element.svg_patch_d == new_element.svg_patch_d &&
+           old_element.default_value == new_element.default_value &&
+           old_element.flash == new_element.flash && old_element.x == new_element.x &&
+           old_element.y == new_element.y && old_element.w == new_element.w &&
+           old_element.h == new_element.h && old_element.options == new_element.options &&
+           old_element.selected_index == new_element.selected_index &&
+           old_element.placeholder == new_element.placeholder &&
+           old_element.bg_color == new_element.bg_color &&
+           old_element.target_frame == new_element.target_frame &&
+           old_element.action == new_element.action && old_element.text == new_element.text &&
+           old_element.value_left_align == new_element.value_left_align &&
+           old_element.default_value_y == new_element.default_value_y &&
+           old_element.factory_id == new_element.factory_id &&
+           old_element.custom_props == new_element.custom_props &&
+           old_element.source_node_id.value_or("") == new_element.source_node_id.value_or("");
+}
+
+// Alternate frames are positional: a swap target refers to their index.  Keep
+// their complete materialization identity in the same compatibility check as
+// frame zero so an edit to an alternate cannot leave stale SVG/overlays behind.
+bool frame_materialization_equal(const IRNode& old_frame, const IRNode& new_frame) {
+    if (old_frame.render_mode != new_frame.render_mode ||
+        old_frame.svg_asset_id != new_frame.svg_asset_id ||
+        old_frame.capture_asset_id != new_frame.capture_asset_id ||
+        old_frame.interactive_elements.size() != new_frame.interactive_elements.size() ||
+        old_frame.alternate_frames.size() != new_frame.alternate_frames.size())
+        return false;
+
+    if (!std::equal(old_frame.interactive_elements.begin(), old_frame.interactive_elements.end(),
+                    new_frame.interactive_elements.begin(),
+                    interactive_materialization_equal))
+        return false;
+
+    return std::equal(old_frame.alternate_frames.begin(), old_frame.alternate_frames.end(),
+                      new_frame.alternate_frames.begin(), frame_materialization_equal);
 }
 
 bool shape_compatible(const IRNode& old_node, const IRNode& new_node) {
@@ -87,15 +143,7 @@ bool shape_compatible(const IRNode& old_node, const IRNode& new_node) {
         binding_shape(old_node) != binding_shape(new_node))
         return false;
 
-    // These fields select the native materialization behind a stable anchor.
-    // Reusing the old view after one changes leaves the new node pointing at
-    // stale SVG/capture bytes or at the wrong custom-control factory/config.
-    return std::equal(old_node.interactive_elements.begin(), old_node.interactive_elements.end(),
-                      new_node.interactive_elements.begin(),
-                      [](const auto& old_element, const auto& new_element) {
-                          return old_element.factory_id == new_element.factory_id &&
-                                 old_element.custom_props == new_element.custom_props;
-                      });
+    return frame_materialization_equal(old_node, new_node);
 }
 
 void append_update(DesignChildUpdatePlan& plan, DesignUpdateKind kind, std::string key,
