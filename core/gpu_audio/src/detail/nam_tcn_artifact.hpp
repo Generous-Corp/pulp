@@ -149,11 +149,17 @@ class NamTcnArtifact final {
         Model candidate;
         if (!candidate.configure(parsed, weights, scale, error))
             return false;
+        const auto sample_rate = root.hasObjectMember("sample_rate")
+                                    ? number(root["sample_rate"])
+                                    : -1.0;
+        if (!(sample_rate > 0.0) || !std::isfinite(sample_rate))
+            return fail("invalid sample_rate");
+        // Commit the fully validated candidate only after every field has
+        // passed validation. A failed replacement must leave the live
+        // artifact, including its metadata and causal state, untouched.
         arrays_ = std::move(candidate.arrays);
         head_scale_ = candidate.head_scale;
-        sample_rate_ = root.hasObjectMember("sample_rate") ? number(root["sample_rate"]) : -1.0;
-        if (!(sample_rate_ > 0.0) || !std::isfinite(sample_rate_))
-            return fail("invalid sample_rate");
+        sample_rate_ = sample_rate;
         receptive_field_ = candidate.receptive_field;
         state_bytes_ = candidate.state_bytes;
         weights_size_ = weights.size();
@@ -511,7 +517,10 @@ class NamTcnArtifactAdapter final : public StreamingModel {
     }
 
     bool prepare(const StreamingPrepareContext& context) noexcept override {
-        prepared_ = false;
+        // Replacement is an explicit release/prepare transaction. Keep the
+        // live artifact available when a caller attempts to prepare over it.
+        if (prepared_)
+            return false;
         if (!valid_streaming_prepare_context(context) || context.spec != &spec_ ||
             context.max_frames == 0 || spec_.input_channels != 1 || spec_.output_channels != 1)
             return false;
