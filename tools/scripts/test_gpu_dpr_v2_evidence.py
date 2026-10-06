@@ -599,7 +599,8 @@ def termination_boundary_tests() -> None:
     planted = NeverReapedAdapter()
     with (
         mock.patch.object(process_boundary.os, "name", "posix"),
-        mock.patch.object(process_boundary.os, "killpg") as killpg,
+        # create=True: Windows has no os.killpg to replace.
+        mock.patch.object(process_boundary.os, "killpg", create=True) as killpg,
     ):
         try:
             runner._terminate_adapter(planted)  # type: ignore[arg-type]
