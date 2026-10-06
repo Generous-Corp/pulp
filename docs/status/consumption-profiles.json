@@ -962,6 +962,7 @@
       "pulp/signal/lofi_chain.hpp",
       "pulp/signal/log_ramped_value.hpp",
       "pulp/signal/lookup_table.hpp",
+      "pulp/signal/loudness_compensation.hpp",
       "pulp/signal/lowpass_gate.hpp",
       "pulp/signal/lpg.hpp",
       "pulp/signal/matrix.hpp",

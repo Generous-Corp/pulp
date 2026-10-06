@@ -163,6 +163,17 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/signal/loudness_compensation.hpp",
+        "fingerprint": "sha256:84a3ad6c9eb82fec38f4c85bb840073afcce337c8b42fc80e291595bf1800222",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Spectrum-weighted loudness compensation is a real-time DSP helper that "
+            "plugins compose around their own gain policy; it is not an independently "
+            "selected generator-facing capability in the installed contract."
+        ),
+    },
+    {
         "include": "pulp/signal/processing_switch_crossfade.hpp",
         "fingerprint": "sha256:d24a6d343cd8b18da0fc1bcb71c9d090dbdf4ac17f31c6a33714583a32595fde",
         "disposition": "infrastructure",
