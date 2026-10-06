@@ -4482,9 +4482,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-<<<<<<< ours
-name = "script-readers-a197cb091ade"
-=======
 name = "script-readers-fdf5931f62e6"
 paths = ["tools/scripts/test_windows_posix_shims.py"]
 tests = [
@@ -4512,8 +4509,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3e0000557e2c"
->>>>>>> theirs
+name = "script-readers-a197cb091ade"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
