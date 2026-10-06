@@ -5,6 +5,7 @@ import json
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 import gpu_audio_p2_campaign as campaign
 
@@ -225,6 +226,25 @@ class P2CampaignContractTests(unittest.TestCase):
     def test_defaults_to_required_100k_blocks(self):
         args = campaign.parse_args(["--probe", "/bin/true", "--output-dir", "/tmp/p2-contract-test"])
         self.assertEqual(args.blocks, campaign.REQUIRED_MEASURED_BLOCKS)
+
+    def test_source_provenance_rejects_tracked_dirty_tree(self):
+        dirty = type("Result", (), {"returncode": 0, "stdout": " M tools/scripts/gpu_audio_p2_campaign.py\n"})()
+        with patch.object(campaign.subprocess, "run", return_value=dirty):
+            with self.assertRaisesRegex(RuntimeError, "tracked modifications"):
+                campaign._source_provenance()
+
+    def test_manifest_provenance_rejects_driver_or_source_mismatch(self):
+        source = "a" * 40
+        driver = "b" * 64
+        manifest = {"source_revision": source, "driver_sha256": driver,
+                    "source_tree_clean": True}
+        campaign.validate_manifest_provenance(manifest, source, driver)
+        with self.assertRaisesRegex(RuntimeError, "source revision"):
+            campaign.validate_manifest_provenance({**manifest, "source_revision": "c" * 40}, source, driver)
+        with self.assertRaisesRegex(RuntimeError, "driver hash"):
+            campaign.validate_manifest_provenance({**manifest, "driver_sha256": "d" * 64}, source, driver)
+        with self.assertRaisesRegex(RuntimeError, "clean tracked"):
+            campaign.validate_manifest_provenance({**manifest, "source_tree_clean": False}, source, driver)
 
     def test_plan_only_declares_complete_matrix(self):
         args = campaign.parse_args(["--plan-only"])

@@ -25,6 +25,7 @@ RUNS_PER_KIND = 5
 REQUIRED_MEASURED_BLOCKS = 100_000
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DRIVER_PATH = Path(__file__).resolve()
 
 # Keep this in lockstep with detail::SharedIoTraceKind.  The raw P2
 # lifecycle census deliberately retains only Terminal and Delivery rows;
@@ -147,6 +148,44 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _source_provenance() -> tuple[str, str]:
+    """Return exact HEAD and driver hashes, refusing tracked source drift."""
+
+    status = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "status", "--porcelain=v1", "--untracked-files=no"],
+        capture_output=True, text=True, check=False,
+    )
+    if status.returncode != 0:
+        raise RuntimeError("unable to establish source tree status")
+    if status.stdout:
+        raise RuntimeError("source tree has tracked modifications; measurement requires a clean tree")
+    try:
+        source_revision = subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("unable to resolve source revision") from exc
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", source_revision):
+        raise RuntimeError("source revision is not an immutable commit SHA")
+    return source_revision, sha256(DRIVER_PATH)
+
+
+def validate_manifest_provenance(manifest: dict[str, Any], expected_source_revision: str,
+                                 expected_driver_sha256: str) -> None:
+    """Reject a campaign manifest whose driver/source binding drifted."""
+
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", expected_source_revision):
+        raise RuntimeError("expected source revision is not an immutable commit SHA")
+    if SHA256_RE.fullmatch(expected_driver_sha256) is None:
+        raise RuntimeError("expected driver hash is not an exact SHA-256")
+    if manifest.get("source_revision") != expected_source_revision:
+        raise RuntimeError("campaign source revision does not match the measured source")
+    if manifest.get("driver_sha256") != expected_driver_sha256:
+        raise RuntimeError("campaign driver hash does not match the measured driver")
+    if manifest.get("source_tree_clean") is not True:
+        raise RuntimeError("campaign manifest does not attest to a clean tracked source tree")
+
+
 def _parse_axis(value: str, allowed: tuple[int, ...], label: str) -> tuple[int, ...]:
     """Parse a comma-separated subset of one campaign matrix axis.
 
@@ -238,6 +277,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    default=LEADS,
                    help="comma-separated lead-block cells (default: 1,2,4,8)")
     p.add_argument("--wake-on-write", action="store_true")
+    p.add_argument("--expected-source-revision")
+    p.add_argument("--expected-driver-sha256")
     p.add_argument(
         "--plan-only",
         action="store_true",
@@ -440,6 +481,11 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError(f"output directory must be new: {args.output_dir}")
     if args.blocks != REQUIRED_MEASURED_BLOCKS:
         raise RuntimeError(f"acceptance campaign requires exactly {REQUIRED_MEASURED_BLOCKS} measured blocks")
+    source_revision, driver_sha256 = _source_provenance()
+    if args.expected_source_revision is not None and args.expected_source_revision != source_revision:
+        raise RuntimeError("expected source revision does not match the measured source")
+    if args.expected_driver_sha256 is not None and args.expected_driver_sha256 != driver_sha256:
+        raise RuntimeError("expected driver hash does not match the measured driver")
     probe_sha256 = sha256(args.probe)
     args.output_dir.mkdir(parents=True)
     trials = []
@@ -536,9 +582,9 @@ def run(args: argparse.Namespace) -> int:
                 "acceptance_status": ("authenticated_screening" if matrix_complete
                                        else "authenticated_screening_subset"),
                 "generated_utc": datetime.now(timezone.utc).isoformat(),
-                "source_revision": subprocess.check_output(
-                    ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True
-                ).strip(),
+                "source_revision": source_revision,
+                "driver_sha256": driver_sha256,
+                "source_tree_clean": True,
                 "probe_sha256": probe_sha256, "probe_path": str(args.probe.resolve()),
                 "machine_id": platform.node() or "unavailable", "host_platform": platform.platform(),
                 "negative_control": negative_control,
@@ -547,6 +593,7 @@ def run(args: argparse.Namespace) -> int:
                 "runs_per_kind": RUNS_PER_KIND,
                 "run_kinds": ["cold", "steady"], "required_measured_blocks": REQUIRED_MEASURED_BLOCKS,
                 "paced": True, "trials": trials}
+    validate_manifest_provenance(manifest, source_revision, driver_sha256)
     (args.output_dir / "campaign.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps({"schema": SCHEMA, "status": "completed", "trials": len(trials),
                       "acceptance_status": manifest["acceptance_status"],
