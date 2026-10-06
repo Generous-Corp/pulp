@@ -7,7 +7,9 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::copy_with_exec;
@@ -66,7 +68,7 @@ pub(super) fn locate_payload(root: &Path) -> Result<ImportDesignPayload> {
         .join(MATERIALIZED_BINDING_CONTRACT);
     let helper = helper_path.is_file().then_some(helper_path);
     let runtime = runtime_path.is_dir().then_some(runtime_path);
-    let materialized_binding_contract = contract_path.is_file().then_some(contract_path);
+    let materialized_binding_contract = contract_path.is_file().then_some(contract_path.clone());
     if helper.is_some() != runtime.is_some() {
         return Err(CliError::Other(
             "archive contains an incomplete import-design helper/runtime pair".into(),
@@ -78,6 +80,11 @@ pub(super) fn locate_payload(root: &Path) -> Result<ImportDesignPayload> {
     {
         return Err(CliError::Other(
             "archive browser_capture runtime is incomplete".into(),
+        ));
+    }
+    if helper.is_none() && runtime.is_none() && path_entry_exists(&contract_path) {
+        return Err(CliError::Other(
+            "archive contains a materialized binding contract without an import-design helper/runtime pair".into(),
         ));
     }
     if helper.is_some() && runtime.is_some() && materialized_binding_contract.is_none() {
@@ -111,6 +118,54 @@ fn copy_directory_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Stage a validated import-design payload below `staging_dir` without
+/// publishing any path in the live install directory.
+pub(super) fn stage_payload(
+    staging_dir: &Path,
+    new_helper: &Path,
+    new_runtime: &Path,
+    new_materialized_binding_contract: &Path,
+) -> Result<()> {
+    fs::create_dir_all(staging_dir).map_err(|error| {
+        CliError::Other(format!(
+            "could not create import-design staging directory {}: {error}",
+            staging_dir.display()
+        ))
+    })?;
+    let helper_staged = staging_dir.join(import_design_basename());
+    let runtime_staged = staging_dir.join(BROWSER_CAPTURE_PROTOCOL_DIR);
+    let contract_staged = staging_dir
+        .join(JSX_RUNTIME_ARCHIVE_DIR)
+        .join(MATERIALIZED_BINDING_CONTRACT);
+    copy_with_exec(new_helper, &helper_staged)?;
+    copy_directory_recursive(new_runtime, &runtime_staged)?;
+    if !has_complete_capture_runtime(&runtime_staged) {
+        return Err(CliError::Other(
+            "staged browser capture runtime is incomplete".into(),
+        ));
+    }
+    if !new_materialized_binding_contract.is_file() {
+        return Err(CliError::Other(
+            "materialized binding contract is not a regular file".into(),
+        ));
+    }
+    fs::create_dir_all(contract_staged.parent().expect("contract has a parent")).map_err(
+        |error| {
+            CliError::Other(format!(
+                "could not stage materialized binding contract: {error}"
+            ))
+        },
+    )?;
+    fs::copy(new_materialized_binding_contract, &contract_staged).map_err(|error| {
+        CliError::Other(format!(
+            "could not copy materialized binding contract {}: {error}",
+            new_materialized_binding_contract.display()
+        ))
+    })?;
+    Ok(())
+}
+
+#[cfg(test)]
 fn remove_path_best_effort(path: &Path) {
     if path.is_dir() {
         let _ = fs::remove_dir_all(path);
@@ -125,8 +180,10 @@ fn has_complete_capture_runtime(runtime: &Path) -> bool {
         .all(|filename| runtime.join(filename).is_file())
 }
 
+#[cfg(test)]
 static TRANSACTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
 fn create_unique_transaction(install_dir: &Path) -> Result<PathBuf> {
     for _ in 0..64 {
         let tick = SystemTime::now()
@@ -154,12 +211,14 @@ fn create_unique_transaction(install_dir: &Path) -> Result<PathBuf> {
     ))
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum InstallPhase {
     RuntimeAvailable,
     HelperPublished,
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct PublishedPath {
     destination: PathBuf,
@@ -171,6 +230,7 @@ fn path_entry_exists(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
 
+#[cfg(test)]
 fn publish_staged(
     staged: &Path,
     destination: &Path,
@@ -213,6 +273,7 @@ fn publish_staged(
     })
 }
 
+#[cfg(test)]
 fn rollback_published(published: &mut Vec<PublishedPath>) -> bool {
     let mut rollback_failed = false;
     while let Some(path) = published.pop() {
@@ -243,6 +304,7 @@ fn rollback_published(published: &mut Vec<PublishedPath>) -> bool {
 /// protocol before publishing the helper that selects it. The legacy
 /// `browser_capture/` directory and older protocol directories are untouched,
 /// so an interrupted upgrade leaves the old helper and contract usable.
+#[cfg(test)]
 fn install_with_observer<F>(
     install_dir: &Path,
     new_helper: &Path,
@@ -273,31 +335,12 @@ where
     let mut preserve_transaction_for_recovery = false;
 
     let result = (|| -> Result<()> {
-        copy_with_exec(new_helper, &helper_staged)?;
-        copy_directory_recursive(new_runtime, &runtime_staged)?;
-        if !has_complete_capture_runtime(&runtime_staged) {
-            return Err(CliError::Other(
-                "staged browser capture runtime is incomplete".into(),
-            ));
-        }
-        if !new_materialized_binding_contract.is_file() {
-            return Err(CliError::Other(
-                "materialized binding contract is not a regular file".into(),
-            ));
-        }
-        fs::create_dir_all(contract_staged.parent().expect("contract has a parent")).map_err(
-            |error| {
-                CliError::Other(format!(
-                    "could not stage materialized binding contract: {error}"
-                ))
-            },
+        stage_payload(
+            &transaction,
+            new_helper,
+            new_runtime,
+            new_materialized_binding_contract,
         )?;
-        fs::copy(new_materialized_binding_contract, &contract_staged).map_err(|error| {
-            CliError::Other(format!(
-                "could not copy materialized binding contract {}: {error}",
-                new_materialized_binding_contract.display()
-            ))
-        })?;
 
         published.push(publish_staged(
             &runtime_staged,
@@ -334,22 +377,6 @@ where
         remove_path_best_effort(&transaction);
     }
     result
-}
-
-/// Install a validated helper/runtime pair into the release binary directory.
-pub(super) fn install(
-    install_dir: &Path,
-    new_helper: &Path,
-    new_runtime: &Path,
-    new_materialized_binding_contract: &Path,
-) -> Result<()> {
-    install_with_observer(
-        install_dir,
-        new_helper,
-        new_runtime,
-        new_materialized_binding_contract,
-        |_| Ok(()),
-    )
 }
 
 #[cfg(test)]

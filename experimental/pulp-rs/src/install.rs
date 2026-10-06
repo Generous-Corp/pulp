@@ -31,6 +31,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{CliError, Result};
 
@@ -296,7 +298,7 @@ pub struct ExtractedArchive {
 /// [`CliError::Other`] if the archive is missing the `pulp` binary.
 pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     let pulp_path = root.join(pulp_basename());
-    if !pulp_path.exists() {
+    if !pulp_path.is_file() {
         return Err(CliError::Other(format!(
             "extracted archive at {} does not contain a {} binary",
             root.display(),
@@ -304,29 +306,61 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
         )));
     }
     let cpp_path = root.join(cpp_basename());
-    let new_cpp = if cpp_path.exists() {
+    let new_cpp = if cpp_path.is_file() {
         Some(cpp_path)
+    } else if cpp_path.exists() {
+        return Err(CliError::Other(format!(
+            "extracted archive contains a non-file {} entry",
+            cpp_basename()
+        )));
     } else {
         None
     };
     let mcp_path = root.join(mcp_basename());
-    let new_mcp = if mcp_path.exists() {
+    let new_mcp = if mcp_path.is_file() {
         Some(mcp_path)
+    } else if mcp_path.exists() {
+        return Err(CliError::Other(format!(
+            "extracted archive contains a non-file {} entry",
+            mcp_basename()
+        )));
     } else {
         None
     };
     let control_broker_path = root.join(control_broker_basename());
-    let new_control_broker = if control_broker_path.exists() {
+    let new_control_broker = if control_broker_path.is_file() {
         Some(control_broker_path)
+    } else if control_broker_path.exists() {
+        return Err(CliError::Other(format!(
+            "extracted archive contains a non-file {} entry",
+            control_broker_basename()
+        )));
     } else {
         None
     };
     let standalone_host_path = root.join(control_standalone_host_basename());
     let standalone_manifest_path = root.join(control_standalone_manifest_basename());
     let standalone_runtime_path = root.join(control_standalone_runtime_basename());
-    let has_standalone_host = standalone_host_path.exists();
-    let has_standalone_manifest = standalone_manifest_path.exists();
-    let has_standalone_runtime = standalone_runtime_path.exists();
+    let has_standalone_host = standalone_host_path.is_file();
+    let has_standalone_manifest = standalone_manifest_path.is_file();
+    let has_standalone_runtime = standalone_runtime_path.is_file();
+    for (path, name) in [
+        (&standalone_host_path, control_standalone_host_basename()),
+        (
+            &standalone_manifest_path,
+            control_standalone_manifest_basename(),
+        ),
+        (
+            &standalone_runtime_path,
+            control_standalone_runtime_basename(),
+        ),
+    ] {
+        if path.exists() && !path.is_file() {
+            return Err(CliError::Other(format!(
+                "extracted archive contains a non-file {name} entry"
+            )));
+        }
+    }
     let has_standalone_payload = has_standalone_host || has_standalone_manifest;
     if has_standalone_payload
         && !(has_standalone_host
@@ -341,6 +375,12 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     }
     let import_design = install_import_design::locate_payload(root)?;
     let shared_runtime_path = root.join(shared_runtime_basename());
+    if shared_runtime_path.exists() && !shared_runtime_path.is_file() {
+        return Err(CliError::Other(format!(
+            "extracted archive contains a non-file {} entry",
+            shared_runtime_basename()
+        )));
+    }
     Ok(ExtractedArchive {
         root: root.to_owned(),
         new_pulp: pulp_path,
@@ -474,83 +514,286 @@ pub fn check_build_artifact_guard(plan: &InstallPlan) -> Result<()> {
     Ok(())
 }
 
-/// Apply the planned replacement: overwrite `plan.self_path` with the
-/// new pulp from the archive, and overwrite or install optional sibling
-/// binaries when the archive ships them.
+/// One staged payload and its retained rollback backup.
+#[derive(Debug)]
+struct PublishedInstallPath {
+    destination: PathBuf,
+    backup: PathBuf,
+    had_previous: bool,
+}
+
+fn create_unique_install_transaction(install_dir: &Path) -> Result<PathBuf> {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    for _ in 0..64 {
+        let tick = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = install_dir.join(format!(
+            ".pulp-upgrade-install-{}-{tick}-{sequence}",
+            std::process::id()
+        ));
+        match fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(CliError::Other(format!(
+                    "could not create upgrade transaction directory {}: {error}",
+                    candidate.display()
+                )));
+            }
+        }
+    }
+    Err(CliError::Other(
+        "could not allocate a unique upgrade transaction directory".into(),
+    ))
+}
+
+fn install_path_entry_exists(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
+fn remove_install_path_best_effort(path: &Path) {
+    if path.is_dir() {
+        let _ = fs::remove_dir_all(path);
+    } else {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn publish_install_staged(
+    staged: &Path,
+    destination: &Path,
+    backup: &Path,
+    preserve_transaction_for_recovery: &mut bool,
+) -> Result<PublishedInstallPath> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            CliError::Other(format!(
+                "could not create install directory {}: {error}",
+                parent.display()
+            ))
+        })?;
+    }
+    let had_previous = install_path_entry_exists(destination);
+    if had_previous {
+        fs::rename(destination, backup).map_err(|error| {
+            CliError::Other(format!(
+                "could not stage replacement of {}: {error}",
+                destination.display()
+            ))
+        })?;
+    }
+    if let Err(error) = fs::rename(staged, destination) {
+        if had_previous && fs::rename(backup, destination).is_err() {
+            *preserve_transaction_for_recovery = true;
+        }
+        return Err(CliError::Other(format!(
+            "could not install {}: {error}",
+            destination.display()
+        )));
+    }
+    Ok(PublishedInstallPath {
+        destination: destination.to_owned(),
+        backup: backup.to_owned(),
+        had_previous,
+    })
+}
+
+fn rollback_install_published(published: &mut Vec<PublishedInstallPath>) -> bool {
+    let mut rollback_failed = false;
+    while let Some(path) = published.pop() {
+        if install_path_entry_exists(&path.destination) {
+            let is_directory = fs::symlink_metadata(&path.destination)
+                .map(|metadata| metadata.file_type().is_dir())
+                .unwrap_or(false);
+            let remove_result = if is_directory {
+                fs::remove_dir_all(&path.destination)
+            } else {
+                fs::remove_file(&path.destination)
+            };
+            if remove_result.is_err() {
+                rollback_failed = true;
+                continue;
+            }
+        }
+        if path.had_previous && fs::rename(&path.backup, &path.destination).is_err() {
+            rollback_failed = true;
+        }
+    }
+    rollback_failed
+}
+
+fn install_extracted_with_observer<F>(
+    plan: &InstallPlan,
+    archive: &ExtractedArchive,
+    mut observe_published: F,
+) -> Result<InstallReport>
+where
+    F: FnMut(&Path) -> Result<()>,
+{
+    check_build_artifact_guard(plan)?;
+    let install_dir = plan.self_path.parent().ok_or_else(|| {
+        CliError::Other(format!(
+            "could not resolve install directory for {}",
+            plan.self_path.display()
+        ))
+    })?;
+    let transaction = create_unique_install_transaction(install_dir)?;
+    let staged_root = transaction.join("payloads");
+    let backup_root = transaction.join("backups");
+    if let Err(error) = fs::create_dir_all(&staged_root) {
+        remove_install_path_best_effort(&transaction);
+        return Err(CliError::Other(format!(
+            "could not create upgrade staging directory {}: {error}",
+            staged_root.display()
+        )));
+    }
+    if let Err(error) = fs::create_dir(&backup_root) {
+        remove_install_path_best_effort(&transaction);
+        return Err(CliError::Other(format!(
+            "could not create upgrade backup directory {}: {error}",
+            backup_root.display()
+        )));
+    }
+
+    let staged = (|| -> Result<(Vec<(PathBuf, PathBuf)>, bool, bool, bool, bool)> {
+        let stage_file = |relative: &str, source: &Path| -> Result<PathBuf> {
+            let staged = staged_root.join(relative);
+            copy_with_exec(source, &staged)?;
+            Ok(staged)
+        };
+        let mut payloads: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let pulp_staged = stage_file(pulp_basename(), &archive.new_pulp)?;
+        payloads.push((pulp_staged, plan.self_path.clone()));
+
+        let cpp_was_present = plan
+            .cpp_path
+            .as_deref()
+            .map(install_path_entry_exists)
+            .unwrap_or(false);
+        let cpp_included = plan.cpp_path.is_some() && archive.new_cpp.is_some();
+        if let (Some(cpp_dst), Some(new_cpp)) =
+            (plan.cpp_path.as_deref(), archive.new_cpp.as_deref())
+        {
+            payloads.push((stage_file(cpp_basename(), new_cpp)?, cpp_dst.to_owned()));
+        }
+        let mcp_was_present = plan
+            .mcp_path
+            .as_deref()
+            .map(install_path_entry_exists)
+            .unwrap_or(false);
+        let mcp_included = plan.mcp_path.is_some() && archive.new_mcp.is_some();
+        if let (Some(mcp_dst), Some(new_mcp)) =
+            (plan.mcp_path.as_deref(), archive.new_mcp.as_deref())
+        {
+            payloads.push((stage_file(mcp_basename(), new_mcp)?, mcp_dst.to_owned()));
+        }
+        if let Some(new_runtime) = archive.shared_runtime.as_deref() {
+            payloads.push((
+                stage_file(shared_runtime_basename(), new_runtime)?,
+                install_dir.join(shared_runtime_basename()),
+            ));
+        }
+        if let (Some(new_import), Some(runtime), Some(contract)) = (
+            archive.new_import_design.as_deref(),
+            archive.browser_capture_runtime.as_deref(),
+            archive.materialized_binding_contract.as_deref(),
+        ) {
+            install_import_design::stage_payload(&staged_root, new_import, runtime, contract)?;
+            payloads.push((
+                staged_root.join("browser_capture-v1"),
+                install_dir.join("browser_capture-v1"),
+            ));
+            payloads.push((
+                staged_root
+                    .join("jsx-runtime")
+                    .join("materialized_binding_contract.mjs"),
+                install_dir
+                    .join("jsx-runtime")
+                    .join("materialized_binding_contract.mjs"),
+            ));
+            payloads.push((
+                staged_root.join(import_design_basename()),
+                install_dir.join(import_design_basename()),
+            ));
+        }
+        Ok((
+            payloads,
+            cpp_was_present,
+            mcp_was_present,
+            cpp_included,
+            mcp_included,
+        ))
+    })();
+    let (mut payloads, cpp_was_present, mcp_was_present, cpp_included, mcp_included) = match staged
+    {
+        Ok(staged) => staged,
+        Err(error) => {
+            remove_install_path_best_effort(&transaction);
+            return Err(error);
+        }
+    };
+
+    // Publish siblings first and the running binary last. Every publication
+    // remains backed up until the whole set commits successfully.
+    payloads.sort_by_key(|(_, destination)| destination == &plan.self_path);
+    let contract_parent = install_dir.join("jsx-runtime");
+    let contract_parent_existed = install_path_entry_exists(&contract_parent);
+    let mut published = Vec::new();
+    let mut preserve_transaction_for_recovery = false;
+    let result = (|| -> Result<()> {
+        for (index, (staged, destination)) in payloads.iter().enumerate() {
+            let backup = backup_root.join(format!(
+                "{index}-{}",
+                destination.file_name().unwrap().to_string_lossy()
+            ));
+            let published_path = publish_install_staged(
+                staged,
+                destination,
+                &backup,
+                &mut preserve_transaction_for_recovery,
+            )?;
+            published.push(published_path);
+            observe_published(destination)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let rollback_failed = rollback_install_published(&mut published);
+        if !rollback_failed && !preserve_transaction_for_recovery {
+            remove_install_path_best_effort(&transaction);
+        }
+        if !contract_parent_existed {
+            let _ = fs::remove_dir(&contract_parent);
+        }
+        return Err(error);
+    }
+    remove_install_path_best_effort(&transaction);
+
+    Ok(InstallReport {
+        pulp_replaced: true,
+        cpp_replaced: cpp_included && cpp_was_present,
+        cpp_created: cpp_included && !cpp_was_present,
+        mcp_replaced: mcp_included && mcp_was_present,
+        mcp_created: mcp_included && !mcp_was_present,
+    })
+}
+
+/// Apply the planned replacement as one transaction: all optional siblings,
+/// runtimes, and the running `pulp` binary are staged before any live path is
+/// published, and every prior path is restored when a later publication fails.
 ///
-/// Callers should invoke [`check_build_artifact_guard`] BEFORE the
-/// download step, but this function also re-checks defensively so a
-/// caller that forgets the pre-flight still can't clobber a build
-/// binary.
+/// Callers should invoke [`check_build_artifact_guard`] before the download
+/// step; this function repeats the guard before staging as defense in depth.
 ///
 /// # Errors
 ///
-/// [`CliError::Other`] if `plan.self_path` looks like a cargo build
-/// artifact (and `PULP_UPGRADE_INSTALL_LIVE=1` is not set);
-/// otherwise surface from [`replace_binary_atomic`] /
-/// [`install_new_binary`].
+/// [`CliError::Other`] for a build-artifact guard refusal or any staging,
+/// publication, or rollback filesystem failure.
 pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Result<InstallReport> {
-    // Defense-in-depth: do the same check the orchestrator should
-    // already have run pre-flight. Cheap, no I/O.
-    check_build_artifact_guard(plan)?;
-    replace_binary_atomic(&plan.self_path, &archive.new_pulp)?;
-    let mut report = InstallReport {
-        pulp_replaced: true,
-        cpp_replaced: false,
-        cpp_created: false,
-        mcp_replaced: false,
-        mcp_created: false,
-    };
-    if let (Some(cpp_dst), Some(new_cpp)) = (plan.cpp_path.as_deref(), archive.new_cpp.as_deref()) {
-        if cpp_dst.exists() {
-            replace_binary_atomic(cpp_dst, new_cpp)?;
-            report.cpp_replaced = true;
-        } else {
-            // Pre-swap user upgrading to a post-swap release: drop
-            // pulp-cpp into the sibling slot so the next pulp invocation
-            // can delegate. Without this the user lands in a state
-            // where `pulp` (Rust) tries to fall through to a missing
-            // pulp-cpp on every legacy command.
-            install_new_binary(cpp_dst, new_cpp)?;
-            report.cpp_created = true;
-        }
-    }
-    if let (Some(mcp_dst), Some(new_mcp)) = (plan.mcp_path.as_deref(), archive.new_mcp.as_deref()) {
-        if mcp_dst.exists() {
-            replace_binary_atomic(mcp_dst, new_mcp)?;
-            report.mcp_replaced = true;
-        } else {
-            // Fresh installs already extract pulp-mcp from the release
-            // archive. Self-updated installs need the same sibling payload
-            // so the Claude Code plugin's launcher can resolve the server.
-            install_new_binary(mcp_dst, new_mcp)?;
-            report.mcp_created = true;
-        }
-    }
-    // The sibling binaries above link the shared runtime from their own
-    // directory. Install it here, before any broker transaction, so a broker
-    // rollback restores this release's runtime rather than leaving the new
-    // binaries beside an older one, or none.
-    if let (Some(install_dir), Some(new_runtime)) = (
-        plan.self_path.parent(),
-        archive.shared_runtime.as_deref(),
-    ) {
-        let dst = install_dir.join(shared_runtime_basename());
-        if fs::symlink_metadata(&dst).is_ok() {
-            replace_binary_atomic(&dst, new_runtime)?;
-        } else {
-            install_new_binary(&dst, new_runtime)?;
-        }
-    }
-    if let (Some(install_dir), Some(new_import), Some(runtime), Some(contract)) = (
-        plan.self_path.parent(),
-        archive.new_import_design.as_deref(),
-        archive.browser_capture_runtime.as_deref(),
-        archive.materialized_binding_contract.as_deref(),
-    ) {
-        install_import_design::install(install_dir, new_import, runtime, contract)?;
-    }
-    Ok(report)
+    install_extracted_with_observer(plan, archive, |_| Ok(()))
 }
 
 /// Result of reconciling the optional Darwin control-broker payload.
