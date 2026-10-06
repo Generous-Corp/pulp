@@ -56,6 +56,7 @@ struct Config {
     bool expect_failure = false;
     bool self_test = false;
     std::string run_kind = "cold";
+    std::uint32_t steady_repetitions = 1;
     std::filesystem::path directory;
     std::filesystem::path raw_jsonl;
     std::filesystem::path executable;
@@ -92,6 +93,8 @@ bool parse(int argc, char** argv, Config& config) {
             config.self_test = true;
         else if (argument.starts_with("--run-kind="))
             config.run_kind = argument.substr(11);
+        else if (number("--steady-repetitions=", config.steady_repetitions))
+            continue;
         else if (argument.starts_with("--output-dir="))
             config.directory = argument.substr(13);
         else if (argument.starts_with("--raw-jsonl="))
@@ -104,7 +107,10 @@ bool parse(int argc, char** argv, Config& config) {
            (config.slots == 2 || config.slots == 4 || config.slots == 8 || config.slots == 16) &&
            (config.run_kind == "cold" || config.run_kind == "steady") &&
            (!config.expect_failure || config.corrupt_output) && config.blocks > 0 &&
-           config.blocks <= kMaximumMeasuredBlocks && config.warmup <= 4096;
+           config.blocks <= kMaximumMeasuredBlocks && config.warmup <= 4096 &&
+           config.steady_repetitions > 0 && config.steady_repetitions <= 5 &&
+           (config.run_kind == "cold" || config.steady_repetitions == 1 ||
+            config.blocks <= kMaximumMeasuredBlocks / config.steady_repetitions);
 }
 
 std::uint64_t nanoseconds(Clock::duration value) {
@@ -317,7 +323,10 @@ int run(Config config) {
     constexpr std::uint32_t sample_rate = 48000;
     constexpr std::uint32_t channels = 2;
     constexpr std::size_t ir_frames = 257;
-    const auto total_blocks = config.warmup + config.blocks + config.lead;
+    const auto measured_blocks =
+        static_cast<std::uint64_t>(config.blocks) * config.steady_repetitions;
+    const auto total_blocks =
+        static_cast<std::uint32_t>(config.warmup + measured_blocks + config.lead);
     const auto total_frames = static_cast<std::size_t>(total_blocks) * config.frames;
     auto input = pulp::test::audio::make_sine(channels, static_cast<int>(total_frames), 731.0f,
                                               sample_rate, 0.2f);
@@ -591,7 +600,10 @@ int run(Config config) {
                << ",\"late_completions\":" << late_completions << ",\"run_identity\":\""
                << run_identity << "\""
                << ",\"logical_pipeline_capacity\":" << std::max(8u, config.lead + 2u)
-               << ",\"warmup_blocks\":" << config.warmup << ",\"measured_blocks\":" << config.blocks
+               << ",\"warmup_blocks\":" << config.warmup
+               << ",\"measured_blocks\":" << measured_blocks
+               << ",\"measured_blocks_per_repetition\":" << config.blocks
+               << ",\"steady_repetitions\":" << config.steady_repetitions
                << ",\"total_callbacks\":" << total_blocks
                << ",\"measured_miss_counter_delta\":" << measured_misses
                << ",\"callback_overruns\":" << callback_overruns

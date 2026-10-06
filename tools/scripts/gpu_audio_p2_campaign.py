@@ -183,7 +183,12 @@ def validate_receipt(receipt: dict, slots: int, lead: int, expected_run_kind: st
         "no_trace_drop": receipt.get("trace_dropped") == 0,
         "positive_high_water": receipt.get("high_water_in_flight", 0) > 0,
         "positive_success": receipt.get("retired_success", 0) > 0,
-        "measured_blocks": receipt.get("measured_blocks") == REQUIRED_MEASURED_BLOCKS,
+        "measured_blocks": receipt.get("measured_blocks") == REQUIRED_MEASURED_BLOCKS * (
+            RUNS_PER_KIND if expected_run_kind == "steady" else 1),
+        "steady_repetitions": expected_run_kind != "steady" or (
+            receipt.get("steady_repetitions") == RUNS_PER_KIND
+            and receipt.get("measured_blocks_per_repetition") == REQUIRED_MEASURED_BLOCKS
+        ),
         "provider_identity": receipt.get("provider_identity_status") == "passed",
         "native_identity": receipt.get("native_runtime_identity_status") == "passed"
         or (isinstance(receipt.get("native_runtime"), dict)
@@ -333,13 +338,21 @@ def run(args: argparse.Namespace) -> int:
         for slots in SLOTS:
             for lead in LEADS:
                 for run_kind in ("cold", "steady"):
-                    for repetition in range(1, RUNS_PER_KIND + 1):
+                    logical_repetitions = range(1, RUNS_PER_KIND + 1)
+                    # Cold repetitions are independent processes.  Steady
+                    # repetitions are one persistent probe process containing
+                    # five contiguous measured segments; this is the only
+                    # way to make same-process residency an actual property.
+                    process_repetitions = (logical_repetitions if run_kind == "cold" else (1,))
+                    for repetition in process_repetitions:
                         trial_dir = args.output_dir / f"slots-{slots}-lead-{lead}-{run_kind}-{repetition}"
                         command = [str(args.probe), f"--frames={args.frames}", f"--slots={slots}",
                                    f"--lead={lead}", f"--blocks={args.blocks}",
                                    f"--warmup={(0 if run_kind == 'cold' else args.warmup)}",
                                    f"--run-kind={run_kind}", f"--output-dir={trial_dir}",
                                    f"--raw-jsonl={trial_dir / 'raw.jsonl'}"]
+                        if run_kind == "steady":
+                            command.append(f"--steady-repetitions={RUNS_PER_KIND}")
                         if args.wake_on_write:
                             command.append("--wake-on-write")
                         proc = subprocess.run(command, capture_output=True, text=True, timeout=900)
@@ -363,11 +376,14 @@ def run(args: argparse.Namespace) -> int:
                         (trial_dir / "command.json").write_text(json.dumps({"argv": command, "returncode": proc.returncode}, indent=2) + "\n")
                         (trial_dir / "probe.stdout").write_text(proc.stdout)
                         (trial_dir / "probe.stderr").write_text(proc.stderr)
-                        trials.append({"slots": slots, "lead": lead, "run_kind": run_kind,
-                                       "repetition": repetition, "receipt_sha256": sha256(receipt_path),
-                                       "raw_jsonl_sha256": sha256(raw_path),
-                                       "blocks_sha256": sha256(trial_dir / "blocks.csv") if (trial_dir / "blocks.csv").is_file() else None,
-                                       "receipt": receipt})
+                        for logical_repetition in logical_repetitions:
+                            trials.append({"slots": slots, "lead": lead, "run_kind": run_kind,
+                                           "repetition": logical_repetition, "receipt_sha256": sha256(receipt_path),
+                                           "raw_jsonl_sha256": sha256(raw_path),
+                                           "blocks_sha256": sha256(trial_dir / "blocks.csv") if (trial_dir / "blocks.csv").is_file() else None,
+                                           "process_id": receipt.get("process_id"),
+                                           "steady_repetitions": receipt.get("steady_repetitions", 1),
+                                           "receipt": receipt})
     except Exception:
         # Preserve no partial campaign receipt: incomplete matrices are not evidence.
         for child in args.output_dir.iterdir():

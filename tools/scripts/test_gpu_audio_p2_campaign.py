@@ -128,7 +128,9 @@ class P2CampaignContractTests(unittest.TestCase):
             "admissions_enqueued": 1, "admissions_dropped": 0, "trace_attempted": 1,
             "trace_enqueued": 1, "trace_dropped": 0, "trace_sampled_out": 0,
             "trace_invalid": 0, "high_water_in_flight": 1, "retired_success": 1,
-            "measured_blocks": campaign.REQUIRED_MEASURED_BLOCKS,
+            "measured_blocks": campaign.REQUIRED_MEASURED_BLOCKS * campaign.RUNS_PER_KIND,
+            "measured_blocks_per_repetition": campaign.REQUIRED_MEASURED_BLOCKS,
+            "steady_repetitions": campaign.RUNS_PER_KIND,
             "provider_identity_status": "passed", "native_runtime_identity_status": "passed",
             "adapter_vendor_id": 1, "adapter_device_id": 1,
         }
