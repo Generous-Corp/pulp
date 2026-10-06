@@ -69,6 +69,14 @@ REQUIRED_TOKENS = {
 }
 
 
+# Spellings a required token may take on a link line. The `webgpu` target is
+# IMPORTED_NO_SONAME on Linux (wgpu-native's .so has no SONAME), so CMake links
+# it as `-L<dir> -lwgpu_native` there instead of naming the library's path.
+REQUIRED_TOKEN_SPELLINGS = {
+    "libwgpu_native": ("libwgpu_native", "-lwgpu_native"),
+}
+
+
 def default_link_files(build_dir: Path):
     return [
         Path("core/scene/CMakeFiles/pulp-scene3d-inspect.dir/link.txt"),
@@ -112,7 +120,8 @@ def scan_required(path: Path, text: str, build_dir: Path):
     lowered = text.lower()
     misses = []
     for token, reason in required.items():
-        if token.lower() not in lowered:
+        spellings = REQUIRED_TOKEN_SPELLINGS.get(token, (token,))
+        if not any(spelling.lower() in lowered for spelling in spellings):
             misses.append((token, reason))
     return misses
 

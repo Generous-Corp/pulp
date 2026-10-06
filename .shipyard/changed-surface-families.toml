@@ -6,7 +6,6 @@
 [[families]]
 name = "script-readers-1490e4d4ef76"
 paths = [
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -212,6 +211,7 @@ paths = [
   "tools/scripts/test_run_software_gpu_break_confirm.py",
   "tools/scripts/test_run_swift_coverage.py",
   "tools/scripts/test_run_swift_coverage_extra.py",
+  "tools/scripts/test_safe_path_guard_lint.py",
   "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
@@ -4866,7 +4866,6 @@ risk_class = "low"
 name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5188,6 +5187,7 @@ paths = [
   "tools/scripts/test_runner_topology_check.py",
   "tools/scripts/test_runner_topology_static.py",
   "tools/scripts/test_rust_cli_build_edge_check.py",
+  "tools/scripts/test_safe_path_guard_lint.py",
   "tools/scripts/test_sample_region_catalogs.py",
   "tools/scripts/test_sample_region_compat_baseline.py",
   "tools/scripts/test_schedule_backstop_check.py",
@@ -5368,7 +5368,6 @@ risk_class = "low"
 name = "script-surface-environment-bound"
 paths = [
   ".agents/skills/*/SKILL.md",
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5690,6 +5689,7 @@ paths = [
   "tools/scripts/test_runner_topology_check.py",
   "tools/scripts/test_runner_topology_static.py",
   "tools/scripts/test_rust_cli_build_edge_check.py",
+  "tools/scripts/test_safe_path_guard_lint.py",
   "tools/scripts/test_sample_region_catalogs.py",
   "tools/scripts/test_sample_region_compat_baseline.py",
   "tools/scripts/test_schedule_backstop_check.py",

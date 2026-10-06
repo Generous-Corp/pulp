@@ -40,6 +40,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <utility>
 
 namespace {
 
@@ -77,6 +78,27 @@ int main() {
     if (descriptor.name != "FormatCoreOnlyConsumer") {
         std::fprintf(stderr, "descriptor did not round-trip\n");
         return 1;
+    }
+
+    // A SettingsSection is part of the Processor contract a core-only consumer
+    // can reach without a view: settings_sections() returns a vector of them,
+    // and destroying that vector needs ~SettingsSection. Reference every
+    // special member explicitly so the link proves they resolve from
+    // format-core on every compiler, not only where one happens to
+    // instantiate the vector's destructor.
+    {
+        pulp::format::Processor::SettingsSection empty;
+        pulp::format::Processor::SettingsSection moved(std::move(empty));
+        pulp::format::Processor::SettingsSection assigned;
+        assigned = std::move(moved);
+        if (assigned.view) {
+            std::fprintf(stderr, "a default SettingsSection carried a view\n");
+            return 1;
+        }
+        if (!processor->settings_sections().empty()) {
+            std::fprintf(stderr, "the default settings_sections() was not empty\n");
+            return 1;
+        }
     }
 
     std::puts("format-core-only consumer linked and ran without the view layer");

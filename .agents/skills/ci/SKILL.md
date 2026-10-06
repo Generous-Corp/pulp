@@ -796,6 +796,20 @@ hosted in practice.
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
 
+**A cancelled preamble is not a failed one.** When `classify` is CANCELLED
+because GitHub never assigned it a runner (the check run's annotation says "The
+job was not acquired by Runner of type hosted even after multiple attempts"),
+the merge-group bootstrap classifies the group in-job with the classify job's
+scripts (`tools/ci/macos_merge_group_bootstrap.sh`, logging "preamble not
+acquired (infrastructure)") and proceeds: skip-safe passes, a native group
+fails closed (its leg never started), a failing in-job classifier fails closed.
+Failing closed on every cancel made GitHub eject the PR, re-batch, and hit the
+same wait in a loop. Cancelling the run instead does not help: a cancelled
+required check is another non-success, and the queue ejects on any.
+`failure`, `skipped` and a missing result still fail closed. Before blaming a
+change for a 2-4 s `macos` red in a merge group, read the preamble jobs'
+`runner_name` and annotations: an empty runner is infrastructure.
+
 ### A reused merge-group receipt must carry test evidence, not a verdict
 
 A merge group can skip `macos`/`linux` entirely by reusing the pull-request
@@ -10915,7 +10929,12 @@ downstream consumer of the installed headers — so only someone building a
 plug-in against a `cmake --install`ed SDK hits it.
 
 `tools/scripts/win32_include_lint.py` guards `core/*/include` whole-tree in
-`gates.sh`. Always use `pulp/platform/win32_sane.hpp`, which pre-sets `NOMINMAX`
+`gates.sh`. Its sibling `tools/scripts/safe_path_guard_lint.py` (also in
+`gates.sh` and `version-skill-check.yml`) fails any boolean `*safe*` path guard
+in `core/` or `tools/cli/` that tests `is_absolute()`/`is_relative()` without
+calling `pulp::runtime::is_safe_relative_path`: on Windows `/x`, `\x` and `C:x`
+are not absolute, so a bare check lets an untrusted name replace the
+destination's root. Always use `pulp/platform/win32_sane.hpp`, which pre-sets `NOMINMAX`
 and `WIN32_LEAN_AND_MEAN`. Sources are deliberately out of scope: a `.cpp` that
 leaks breaks only itself, immediately; a header exports the hazard.
 

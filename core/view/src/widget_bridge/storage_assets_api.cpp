@@ -5,6 +5,8 @@
 #include <pulp/runtime/base64.hpp>
 #include "api_registry.hpp"
 
+#include <pulp/runtime/safe_relative_path.hpp>
+
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -63,12 +65,7 @@ bool bridge_asset_is_text_like(const std::string& mime_type) {
 }
 
 bool safe_relative_asset_path(const std::filesystem::path& rel) {
-    if (rel.empty() || rel.is_absolute()) return false;
-    for (const auto& part : rel) {
-        const auto s = part.string();
-        if (s.empty() || s == "." || s == "..") return false;
-    }
-    return true;
+    return pulp::runtime::is_safe_relative_path(rel);
 }
 
 bool path_within(const std::filesystem::path& path, const std::filesystem::path& root) {

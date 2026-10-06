@@ -65,7 +65,12 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
             "\n  linux:", 1
         )[0]
         self.assertIn("protected-receipt-reuse.outputs.macos_reused == 'true'", alias)
-        self.assertIn("protected receipt decision unavailable", alias)
+        # The verdict lives in the script the job runs.
+        self.assertIn("run: bash tools/ci/macos_merge_group_bootstrap.sh", alias)
+        verdict = (Path(__file__).parents[2] / "tools/ci/macos_merge_group_bootstrap.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("protected receipt decision unavailable", verdict)
 
     def test_receipts_are_only_published_after_successful_pr_validation(self) -> None:
         issue = WORKFLOW.split("- name: Issue exact protected-validation receipt", 1)[1].split(

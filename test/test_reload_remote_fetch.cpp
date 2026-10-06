@@ -199,4 +199,10 @@ TEST_CASE("remote fetch: an untrusted manifest path cannot escape the download d
     REQUIRE_FALSE(is_safe_pack_member_path("/etc/passwd"));       // absolute
     REQUIRE_FALSE(is_safe_pack_member_path("../../etc/passwd"));  // traversal
     REQUIRE_FALSE(is_safe_pack_member_path("a/../../b"));         // traversal mid-path
+    // Rooted forms that std::filesystem does not call absolute on Windows.
+    REQUIRE_FALSE(is_safe_pack_member_path("\\rooted"));
+    REQUIRE_FALSE(is_safe_pack_member_path("C:foo"));
+    REQUIRE_FALSE(is_safe_pack_member_path("C:\\x"));
+    REQUIRE_FALSE(is_safe_pack_member_path("\\\\server\\share"));
+    REQUIRE_FALSE(is_safe_pack_member_path("a\\..\\b"));
 }
