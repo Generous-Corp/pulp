@@ -216,7 +216,7 @@ TEST_CASE("Host composition: plugin sections compose onto the host panel", "[for
 
     SettingsPanel panel;
     for (auto& sec : p.settings_sections())
-        if (sec.view) panel.add_section(std::move(sec.title), std::move(sec.view));
+        if (sec.view) panel.add_section(std::move(sec.title), sec.take_view());
 
     REQUIRE(panel.tab_count() == 4);  // Audio + MIDI + Models + License
 }
