@@ -54,6 +54,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from process_liveness import pid_alive
 
 MARKER_NAME = ".pulp-build-active"
 
@@ -80,16 +81,7 @@ def parse_marker(text: str) -> dict[str, str]:
 
 
 def pid_is_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Owned by another user: it exists, which is what we asked.
-        return True
-    except OSError:
-        return False
-    return True
+    return pid_alive(pid) is True
 
 
 def reap_marker(marker: Path) -> str | None:

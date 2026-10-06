@@ -171,6 +171,16 @@ create_standalone_timeline_document_session_source(const ControlAdmissionPlan&) 
     return std::nullopt;
 }
 
+bool install_standalone_signal_graph_authority_factory(
+    StandaloneSignalGraphAuthorityFactory) noexcept {
+    return false;
+}
+
+pulp::host::SignalGraphControlAuthority*
+create_standalone_signal_graph_authority(format::Processor&) {
+    return nullptr;
+}
+
 bool install_standalone_sample_region_target_factory(StandaloneSampleRegionTargetFactory) noexcept {
     return false;
 }

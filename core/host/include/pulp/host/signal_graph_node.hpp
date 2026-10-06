@@ -28,6 +28,17 @@ enum class NodeType {
 
 enum class LiveSwapCurve { Smoothstep, EqualPower };
 
+/// Policy for stateful DSP cells when a live instance is replaced.  The
+/// policy is explicit so a replacement cannot silently attach a delay tail to
+/// a different algorithm or latency domain.
+enum class RetainedHistoryMode : uint8_t { Clear, Adopt, Crossfade, Reseed, Refuse };
+
+struct RetainedHistoryPolicy {
+    RetainedHistoryMode mode = RetainedHistoryMode::Adopt;
+    std::uint64_t reseed = 0;
+    std::size_t max_bytes = 64ull * 1024ull * 1024ull;
+};
+
 struct NodeLiveSwapPolicy {
     bool allow_live_instance_swap = false;
     // The crossfade shape for a live instance swap: the committed swap renders both the
@@ -39,6 +50,7 @@ struct NodeLiveSwapPolicy {
     LiveSwapCurve curve = LiveSwapCurve::EqualPower;
     float headroom_threshold = 0.75f;
     std::size_t max_state_bytes = 64ull * 1024ull * 1024ull;
+    RetainedHistoryPolicy retained_history;
     std::function<void(NodeId,
                        std::shared_ptr<PluginSlot> /*old_slot*/,
                        std::shared_ptr<PluginSlot> /*new_slot*/)>
@@ -51,6 +63,7 @@ enum class LiveSwapFallbackReason : uint8_t {
     LoadFailed,
     PrepareFailed,
     StateRestoreFailed,
+    HistoryRefused,
     StateTooLarge,
     ShapeMismatch,
     LatencyChanged,

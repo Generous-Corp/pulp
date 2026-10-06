@@ -5,6 +5,7 @@
 #include <pulp/signal/fft.hpp>
 
 #include <random>
+#include <string>
 
 #include <algorithm>
 #include <chrono>
@@ -23,6 +24,22 @@ namespace {
 // whole file green having asserted nothing about GpuCompute at all.
 constexpr const char* kNoGpu =
     "no GPU compute device available (Skia/Dawn not built, or no adapter)";
+
+// The maximum-block dispatches (65535 workgroups grid-striding over up to 2^24
+// samples) are sized for a hardware GPU. A software adapter (llvmpipe,
+// SwiftShader, WARP) runs them on the CPU far past GpuCompute's 2 s blocking
+// read-back deadline, so on one the readback fails or the test times out:
+// that measures the rasterizer, not the kernel. Those blocks skip on a
+// software adapter, saying which one; every smaller route still runs there.
+std::string software_adapter(const GpuCompute& compute) {
+    const auto caps = compute.capabilities();
+    if (caps.adapter_type != "cpu")
+        return {};
+    return "software adapter " + (caps.name.empty() ? std::string("(unnamed)") : caps.name) + " (" +
+           caps.backend +
+           "): the maximum-block grid-stride dispatch outruns the "
+           "2 s blocking read-back deadline on a CPU rasterizer";
+}
 
 }  // namespace
 
@@ -774,8 +791,9 @@ TEST_CASE("GpuCompute additive synth produces the requested partials",
 // lanes tree-reducing the partials sum): numeric parity with a scalar CPU
 // reference across partial counts spanning below / at / above the 256-lane
 // workgroup, a sample count that is NOT a multiple of the workgroup, both routing
-// paths (cooperative vs serial), the >65535-sample grid-stride path, and
-// run-to-run determinism (the tree reduction is fixed-order and atomics-free).
+// paths (cooperative vs serial), and run-to-run determinism (the tree reduction
+// is fixed-order and atomics-free). The >65535-sample grid-stride path has its
+// own case below.
 TEST_CASE("GpuCompute additive synth matches a CPU reference across workgroup sizes",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
@@ -831,6 +849,28 @@ TEST_CASE("GpuCompute additive synth matches a CPU reference across workgroup si
             REQUIRE(out[s] == out2[s]);
         }
     }
+}
+
+TEST_CASE("GpuCompute additive synth grid-strides past the workgroup cap",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone())
+        SKIP(kNoGpu);
+    if (const auto why = software_adapter(*compute); !why.empty())
+        SKIP(why);
+
+    constexpr float SR = 48000.0f;
+    constexpr double TWO_PI = 6.28318530717958647692;
+    auto cpu_add = [&](const std::vector<float>& parts, uint32_t P, uint32_t s, float t0) {
+        const double t = (static_cast<double>(t0) + s) / SR;
+        double acc = 0.0;
+        for (uint32_t i = 0; i < P; ++i) {
+            const double f = parts[i * 3], a = parts[i * 3 + 1], ph = parts[i * 3 + 2];
+            acc += a * std::sin(TWO_PI * f * t + ph);
+        }
+        return static_cast<float>(acc);
+    };
+    const std::vector<float> parts = {55.0f, 1.0f, 0.0f}; // one partial
 
     // Grid-stride path (cooperative): a block whose serial dispatch would exceed
     // the 65535 workgroup-per-dimension cap routes to the cooperative kernel,
@@ -840,7 +880,6 @@ TEST_CASE("GpuCompute additive synth matches a CPU reference across workgroup si
     {
         const uint32_t Sbig = 1u << 24;  // 16,777,216 -> ceil/256 = 65536 > 65535
         const uint32_t P = 1;
-        const auto parts = make_partials(P);
         std::vector<float> out(Sbig, 0.0f);
         REQUIRE(compute->additive_synth(parts.data(), out.data(), P, Sbig, SR, 0.0f));
         // Check indices at LOW t only: at very large sample indices t is huge and
@@ -958,6 +997,37 @@ TEST_CASE("GpuCompute modal strike matches a CPU reference across workgroup size
             REQUIRE(out[s] == out2[s]);
         }
     }
+}
+
+TEST_CASE("GpuCompute modal strike grid-strides past the workgroup cap", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone())
+        SKIP(kNoGpu);
+    if (const auto why = software_adapter(*compute); !why.empty())
+        SKIP(why);
+
+    constexpr float SR = 48000.0f;
+    constexpr double TWO_PI = 6.28318530717958647692;
+    auto cpu_modal = [&](const std::vector<float>& modes, uint32_t M, uint32_t s, float t0) {
+        const double t = (static_cast<double>(t0) + s) / SR;
+        double acc = 0.0;
+        for (uint32_t i = 0; i < M; ++i) {
+            const double f = modes[i * 4], a = modes[i * 4 + 1], d = modes[i * 4 + 2],
+                         ph = modes[i * 4 + 3];
+            acc += a * std::exp(-d * t) * std::sin(TWO_PI * f * t + ph);
+        }
+        return static_cast<float>(acc);
+    };
+    auto make_modes = [](uint32_t M) {
+        std::vector<float> m(static_cast<std::size_t>(M) * 4);
+        for (uint32_t i = 0; i < M; ++i) {
+            m[i * 4 + 0] = 100.0f + 7.0f * static_cast<float>(i);
+            m[i * 4 + 1] = 1.0f / (1.0f + static_cast<float>(i));
+            m[i * 4 + 2] = 3.0f + 0.05f * static_cast<float>(i);
+            m[i * 4 + 3] = 0.1f * static_cast<float>(i);
+        }
+        return m;
+    };
 
     // Grid-stride path in the cooperative kernel: more samples than the 65535
     // workgroup-per-dimension cap, so each workgroup wraps to several samples.

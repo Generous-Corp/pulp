@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -37,8 +37,10 @@ test('the banner runs ahead of the bundle and publishes the revision', () => {
   assert.equal(sandbox.__PULP_REACT_RUNTIME_REVISION__, 7);
 });
 
-test('an invalid revision is refused rather than stamped', () => {
-  const path = join(mkdtempSync(join(tmpdir(), 'pulp-fp-')), 'fp.json');
+test('an invalid revision is refused rather than stamped', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'pulp-fp-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, 'fp.json');
   writeFileSync(path, JSON.stringify({ schema: 1, revision: 0, fixes: [] }));
   assert.throws(() => loadRuntimeFingerprint(path), /positive integer/);
 });

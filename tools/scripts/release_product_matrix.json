@@ -74,6 +74,7 @@
     "pulp-inspect-client",
     "pulp-inspect-control",
     "pulp-inspect-offline-runtime",
+    "pulp-inspect-graph-runtime",
     "pulp-inspect-protocol",
     "pulp-inspect-runtime",
     "pulp-inspect-runtime-eval",

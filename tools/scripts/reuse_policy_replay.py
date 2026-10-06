@@ -116,6 +116,7 @@ controls); 2 invalid input.
 from __future__ import annotations
 
 import argparse
+import collections
 import dataclasses
 import datetime as dt
 import gzip
@@ -650,6 +651,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
 
 
 KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
+STAGE0_POLICY = "source-key-codemodel-recorded"
 KEY_BLIND_VARIANT = "cmake-codemodel-recorded"
 
 
@@ -805,6 +807,55 @@ def render(result: dict) -> str:
     return "\n".join(lines)
 
 
+def stage0_main(a) -> int:
+    """Exit 2 when a group's ancestry cannot be told or the restart pair is
+    not in the corpus; 1 on a watched-executable regression or a blind data
+    scan read as scanned; else 0."""
+    import reuse_replay_collect as rrc
+    corpus = Corpus.load(a.corpus)
+    gh = rrc.GitHub(a.repository, None)
+    st = rrc.stage0_pairs(a.corpus, corpus, a.fix, a.watch, rrc.ancestry(a.repo, a.repository, gh), a.repo, gh)
+    rows = st["pairs"]
+    fs = score(corpus, STAGE0_POLICY)["false_skip_rows"]
+    run = rrc.trailing_clean(rows, a.restart_run, {str(r["group_run_id"]) for r in fs})
+    dc = rrc.data_scan_control(a.corpus, corpus, a.repo, gh)
+    # The same control over the lists the (b) window's pairs read, so the
+    # window's exit stands without the older lists.
+    window_ids = {str(r["group_run_id"]) for r in rows}
+    window = Corpus(list(corpus.runs.values()), [p for p in corpus.pairs if str(p.get("group_run_id")) in window_ids])
+    dc_window = rrc.data_scan_control(a.corpus, window, a.repo, gh)
+    regressions = [(r["pr"], r["group_run_id"], r["regression"]) for r in rows if r["regression"]]
+    if a.json:
+        print(json.dumps({"pairs": rows, "ancestry_unknown": st["ancestry_unknown"], "trailing_clean": run,
+                          "false_skips": fs, "data_scan_control": dc,
+                          "data_scan_control_in_window": dc_window}, indent=1))
+    else:
+        kb = [r["key_blind"] for r in rows]
+        print(f"stage0: {len(rows)} content-keyed pairs whose group contains {a.fix}; "
+              f"ancestry unknown {len(st['ancestry_unknown'])}")
+        print(f"stage0: (b) trailing clean run {run['count']} from restart run {a.restart_run}"
+              + (f", broken by PR #{run['broken_by']['pr']} group {run['broken_by']['group_run_id']}"
+                 if run["broken_by"] else "") + ("" if run["restart_found"] else " (restart run NOT in the corpus)")
+              + f"; false skips on {STAGE0_POLICY}: {len(fs)}")
+        print(f"stage0: watched {len(a.watch)}: commit_bound-absorbed in {sum(1 for r in rows if r['commit_bound'])} pairs, "
+              f"key_blind-absorbed {dict(sorted(collections.Counter(kb).items(), key=str))}, "
+              f"relinked-clean {sum(1 for r in rows if r['relinked_clean'])}, "
+              f"rebuilt in {sum(1 for r in rows if r['rebuilt'])}, REGRESSION {len(regressions)} {regressions[:10]}")
+        print(f"stage0: unreached outside the watched executables: "
+              f"{[(r['pr'], r['group_run_id'], r['unreached_outside']) for r in rows if r['unreached_outside']][:10]}")
+        print(f"stage0: (c) detected-reader control: {dc['lists']} lists, {dc['declaring']} declare a data scan, "
+              f"{dc['holds']} hold, fails {dc['fails']}, no data scan {dc['no_data_scan']}, unreadable {dc['unreadable']}; "
+              f"negative control: {dc['pairs_on_failing_list']} pairs on a failing list, "
+              f"{dc['read_as_scanned_on_failing_list']} read as scanned (must be 0)")
+        print(f"stage0: (c) within the (b) window: {dc_window['lists']} lists at the head and group checkouts of "
+              f"{len(rows)} pairs, {dc_window['declaring']} declare a data scan, {dc_window['holds']} hold, "
+              f"fails {dc_window['fails']}, no data scan {dc_window['no_data_scan']}, "
+              f"unreadable {dc_window['unreadable']}")
+    if st["ancestry_unknown"] or not run["restart_found"]:
+        return 2
+    return 1 if regressions or dc["read_as_scanned_on_failing_list"] else 0
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -847,6 +898,14 @@ def main(argv: list[str]) -> int:
     b.add_argument("--since", default=None,
                    help="only groups created at or after this ISO time: start after the change that "
                         "made a delisted executable deterministic, or its older misses list it again")
+    z = sub.add_parser("stage0", help="the Stage 0 read-back: trailing clean run, watched executables, data-scan control")
+    z.add_argument("--corpus", required=True, type=Path)
+    z.add_argument("--fix", required=True, help="commit whose groups are scored (the restart pair's fix)")
+    z.add_argument("--restart-run", default=None, help="group run the trailing clean run counts from")
+    z.add_argument("--watch", action="append", default=[], help="executable basename the fix made deterministic")
+    z.add_argument("--repo", default=str(REPO_ROOT), type=Path)
+    z.add_argument("--repository", default="Generous-Corp/pulp")
+    z.add_argument("--json", action="store_true")
     s = sub.add_parser("score", help="score policies over a corpus or the scenario fixtures")
     group = s.add_mutually_exclusive_group(required=True)
     group.add_argument("--corpus", type=Path)
@@ -934,6 +993,9 @@ def main(argv: list[str]) -> int:
         if a.write:
             a.list.write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8")
         return 1 if added and not a.write else 0
+
+    if a.cmd == "stage0":
+        return stage0_main(a)
 
     if a.scenarios:
         results = run_scenarios(a.scenarios)

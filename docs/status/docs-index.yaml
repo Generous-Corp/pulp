@@ -29,6 +29,11 @@ docs:
     kind: guide
     summary: Inspect actual graph-owned instances with bounded reports and lifecycle-safe generation handles
 
+  - slug: automation-modulation
+    path: guides/automation-modulation.md
+    kind: guide
+    summary: Shared base-vs-offset automation and modulation delivery across graph, Processor, timeline, and control surfaces
+
   - slug: getting-started
     path: guides/getting-started.md
     kind: guide

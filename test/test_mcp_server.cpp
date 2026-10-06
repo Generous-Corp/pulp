@@ -3367,16 +3367,39 @@ TEST_CASE("pulp_audio_render validates its latency arguments before shelling out
         return handle_request(tool_call(std::to_string(id++), "pulp_audio_render", args));
     };
 
-    // A negative tolerance / intrinsic / expected latency is not a delay.
-    require_contains(
-        call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_tolerance":-1})"),
-        "latency_tolerance must be an integer >= 0");
-    require_contains(
-        call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_intrinsic":-5})"),
-        "latency_intrinsic must be an integer >= 0");
-    require_contains(
-        call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_expect":-2})"),
-        "latency_expect must be an integer >= 0");
+    {
+        // The refusals run with a private temp directory, so the assertion below
+        // sees only what this tool left behind: a refusal must not leak the
+        // private probe directory the tool creates before it reads these args.
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const auto private_tmp = project.path() / "private-tmp";
+        fs::create_directories(private_tmp, ec);
+        REQUIRE_FALSE(ec);
+#if defined(_WIN32)
+        ScopedEnvVar tmp_env("TMP", private_tmp.string());
+#else
+        ScopedEnvVar tmp_env("TMPDIR", private_tmp.string());
+#endif
+        REQUIRE(fs::equivalent(fs::temp_directory_path(), private_tmp));
+
+        // A negative tolerance / intrinsic / expected latency is not a delay.
+        require_contains(
+            call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_tolerance":-1})"),
+            "latency_tolerance must be an integer >= 0");
+        require_contains(
+            call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_intrinsic":-5})"),
+            "latency_intrinsic must be an integer >= 0");
+        require_contains(
+            call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_expect":-2})"),
+            "latency_expect must be an integer >= 0");
+
+        std::vector<std::string> left;
+        for (const auto& entry : fs::directory_iterator(private_tmp))
+            left.push_back(entry.path().filename().string());
+        INFO("left in the private temp directory: " << left.size());
+        REQUIRE(left.empty());
+    }
 
     // A well-formed latency request reaches the shellout, which assembles the CLI
     // flags. This build's CLI runs and refuses the plugin, because none exists:

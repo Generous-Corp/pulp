@@ -346,12 +346,16 @@ jobs:
           python3 tools/scripts/test_designated_initializer_lint.py
           python3 tools/scripts/test_win32_include_lint.py
           python3 tools/scripts/win32_include_lint.py
+          python3 tools/scripts/test_safe_path_guard_lint.py
+          python3 tools/scripts/safe_path_guard_lint.py
           python3 tools/scripts/test_text_encoding_lint.py
           python3 tools/scripts/text_encoding_lint.py --base "${{ steps.base.outputs.ref }}"
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest
           python3 tools/scripts/framework_neutrality_check.py --selftest
+          python3 tools/scripts/test_process_liveness.py
+          python3 tools/scripts/raw_pid_probe_lint.py
 
       - name: Source-only selftests (moved off the macOS gate)
         # The registrations in tools/ci/source_selftests.json read only the

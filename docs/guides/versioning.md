@@ -63,13 +63,16 @@ the self-tests for the compiler-asymmetry lints:
 
 | Lint | Catches |
 |---|---|
+| `raw_pid_probe_lint.py` | a liveness probe written as `os.kill(pid, 0)`, which on Windows sends Ctrl+C to the whole console; probe through `process_liveness.pid_alive` |
 | `intel_canary_lint.py` | arm64-only code that drops the SSE/scalar fallback |
 | `designated_initializer_lint.py` | duplicate designators in one aggregate — legal to Clang, `C7560` on MSVC |
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
+| `safe_path_guard_lint.py` | an untrusted-path guard in `core/` or `tools/cli/` that trusts `is_absolute()`, which on Windows accepts `/x`, `\x` and `C:x`, instead of calling `pulp::runtime::is_safe_relative_path` |
 | `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
 
 `gates.sh` runs `designated_initializer_lint.py` diff-scoped and
-`win32_include_lint.py` over `core/*/include` before a push. All are canaries,
+`win32_include_lint.py` over `core/*/include` before a push, and
+`safe_path_guard_lint.py` over `core/` and `tools/cli/`. All are canaries,
 not substitutes for building on the target: they check what a regex can check
 without a compiler, which for designated initializers means duplicates but not
 declaration order.

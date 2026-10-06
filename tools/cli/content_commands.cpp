@@ -11,6 +11,7 @@
 
 #include <pulp/audio/sample_bank.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/safe_relative_path.hpp>
 
 #include "../../external/miniz/miniz.h"
 
@@ -120,12 +121,7 @@ JsonValue parse_json(const std::string& text) {
 }
 
 bool safe_rel_path(const fs::path& rel) {
-    if (rel.empty() || rel.is_absolute()) return false;
-    for (const auto& part : rel) {
-        const auto s = part.string();
-        if (s.empty() || s == "." || s == "..") return false;
-    }
-    return true;
+    return pulp::runtime::is_safe_relative_path(rel);
 }
 
 bool safe_content_component(const std::string& value) {

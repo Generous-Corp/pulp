@@ -252,6 +252,19 @@ or `reset()` only for an intentional
 identity-free lifecycle clear. Prepare the destination for at least four lanes
 before `write_voice()` so the adapter can publish its block atomically.
 
+### Routing utilities are heap-owned: construct them off the audio thread
+
+`ChannelRouter`, `NoteRangeFilter`, and `KeyboardSplit` keep a 1.2 MB ownership
+ledger. Held inline, one instance overflowed MSVC's 1 MB main-thread stack and
+macOS's 512 KB `std::thread` stack, so the ledger now lives behind a
+`unique_ptr` allocated by the constructor (contract major 2: construction and
+release are `control`). `process()`, `flush()`, `reset()` and `replace_spec()`
+never allocate. The types are move-only; a moved-from object reports
+`valid() == false` and refuses all four entry points without touching storage.
+Each header carries `static_assert(sizeof(T) <= 4096)`, and
+`test/test_public_type_sizes.cpp` holds stack ceilings for the large public
+value types that stay inline.
+
 ### Routing utilities flush through their output buffers
 
 `ChannelRouter`, `NoteRangeFilter`, and `KeyboardSplit` own downstream note
