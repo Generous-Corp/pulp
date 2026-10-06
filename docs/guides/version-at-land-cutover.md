@@ -293,7 +293,13 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
   - **Serialized.** When `PULP_BUMP_ROUTE=pr` the workflow's `concurrency` group
     collapses to a single constant so all drains run one-at-a-time — the
     shared-branch reclaim is only race-free without a competing drain. The
-    `direct` path keeps its event-scoped group unchanged.
+    `direct` path keeps its event-scoped group unchanged. Only runs whose drain
+    job actually executes join that group: a group holds one pending run and a
+    new arrival cancels it, so a `dequeued` event for another PR or a green
+    bump-branch `workflow_run` would otherwise cancel a pending push drain and
+    then skip its own job. Those runs get a per-run group instead.
+    `test_version_at_land.py` evaluates the group expression and the job `if`
+    against every event shape and fails if they diverge.
   - **Stale bump PR.** A bump PR cut before the merge being drained does not
     carry that merge's intent, so the drain never treats it as covering. It
     still does not need replacing while it can land on its own: when it lands,
@@ -311,6 +317,11 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     through the normal confirmed-no-PR `--force-with-lease` path. It acts only on
     CONFIRMED stale AND CONFIRMED dead. A draft (an explicit release hold) or an
     unreadable state fails the run (`stale-defer`, exit 1) and is never closed.
+    A bump PR that already covers the merge but has a failed required check
+    (failure, cancelled, timed out) is a dead end too: re-arming it would wait
+    for nothing until main moved. With the same variable the drain closes it
+    and regenerates the bump; a covering PR in the merge queue, or one whose
+    checks are pending, green or unreadable, is re-armed and never closed.
     The workflow also runs on the bump PR's `dequeued` event and on a non-green
     completion of a workflow reporting its required checks (`workflow_run`,
     scoped to `release/version-bump`), so a dead end is healed when it dies
