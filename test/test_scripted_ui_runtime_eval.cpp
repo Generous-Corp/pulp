@@ -1,11 +1,12 @@
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/widgets.hpp>
-#include <chrono>
-#include <filesystem>
-#include <fstream>
 #include <string>
 
 using namespace pulp::state;
@@ -15,11 +16,7 @@ namespace fs = std::filesystem;
 namespace {
 
 fs::path make_temp_dir(const char* stem) {
-    const auto unique =
-        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto dir = fs::temp_directory_path() / (std::string(stem) + "-" + unique);
-    fs::create_directories(dir);
-    return dir;
+    return pulp::test::make_unique_temp_dir(stem);
 }
 void write_text(const fs::path& path, const std::string& content) {
     std::ofstream file(path);

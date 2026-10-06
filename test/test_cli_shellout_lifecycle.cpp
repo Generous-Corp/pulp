@@ -6,6 +6,7 @@
 // tmpdir, binary_exists guard, and ProcessResult stdout/exit_code
 // assertions.
 
+#include "support/unique_temp_dir.hpp"
 #include "test_cli_shellout_helpers.hpp"
 
 #ifndef PULP_TEST_CONTROL_HEALTH_ENABLED
@@ -263,11 +264,7 @@ TEST_CASE("pulp dev fails fast when standalone SDK is ahead of the installed CLI
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-dev-skew-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch().count()));
-    fs::create_directories(tmp);
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-dev-skew");
     {
         std::ofstream f(tmp / "pulp.toml");
         f << "[pulp]\n"
@@ -323,10 +320,7 @@ TEST_CASE("pulp dev validates value options before build or watch",
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-dev-parser-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch().count()));
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-dev-parser");
     fs::create_directories(tmp / "build");
     {
         std::ofstream f(tmp / "pulp.toml");
@@ -628,11 +622,7 @@ TEST_CASE("pulp upgrade --check-only honors disabled update checks with an empty
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-upgrade-disabled-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch().count()));
-    fs::create_directories(tmp);
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-upgrade-disabled");
 
     pulp_setenv("PULP_HOME", tmp.string().c_str(), 1);
     pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);

@@ -6,7 +6,7 @@
 # and properties; only the binary behind them is shared. Members are grouped
 # by the compile line they already had: pulp::midi, pulp::signal, pulp::audio
 # (+ pulp::runtime) and pulp::runtime alone. A suite stays on its own when it
-# needs its own process or compile line: the eight RT allocation probes
+# needs its own process or compile line: the nine RT allocation probes
 # (harness/rt_allocation_probe.cpp), the denormal null test that spawns its
 # reference generator by path, the ARA scaffold (pulp::format), and
 # skewed-range (pulp::state alone).
@@ -59,6 +59,14 @@ pulp_add_test_suite(pulp-test-midi-utility-kernels GROUP pulp-test-group-late-mi
 pulp_add_test_suite(pulp-test-midi-utility-note-length
     SOURCES test_midi_utility_note_length.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::midi)
+# Routing kernels: heap-owned ledger, allocation-free after construction,
+# moved-from refusal
+pulp_add_test_suite(pulp-test-midi-routing-ledger
+    SOURCES test_midi_routing_ledger.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
+# Stack ceilings for large public value types
+pulp_add_test_suite(pulp-test-public-type-sizes
+    LIBRARIES pulp::midi pulp::state pulp::playback pulp::host)
 pulp_add_test_suite(pulp-test-midi-utility-monophonic GROUP pulp-test-group-late-midi
     SOURCES test_midi_utility_monophonic.cpp
     LIBRARIES pulp::midi)

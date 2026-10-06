@@ -409,11 +409,25 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
+# A test run through the temp-leak guard (`python tmp_leak_guard.py [opts] --
+# CMD...`) is declared as the command it wraps; the guard is one more input.
+TMP_LEAK_GUARD = "tmp_leak_guard.py"
+
+
+def unwrap_guard(command: list[str]) -> tuple[list[str], list[str]]:
+    """(the wrapped command, the guard scripts that wrapped it)."""
+    if (len(command) > 2 and os.path.basename(command[0]).startswith("python")
+            and os.path.basename(command[1]) == TMP_LEAK_GUARD and "--" in command[2:]):
+        return command[command.index("--", 2) + 1:], [command[1]]
+    return command, []
+
+
 def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
                walker: Walker | None = None, tracked: set[str] | None = None) -> dict | None:
     props = {p["name"]: p["value"] for p in test.get("properties", [])}
     wd = Path(props.get("WORKING_DIRECTORY") or root)
-    kind, entry, args = classify(test.get("command") or [], root)
+    command, guards = unwrap_guard(test.get("command") or [])
+    kind, entry, args = classify(command, root)
     if kind == "undeclarable":
         return None
     w = walker or Walker(root)
@@ -446,6 +460,8 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
         w.walk_node(entry, seen)
     else:
         w.walk_shell(entry, seen)
+    for guard in guards:
+        w.walk_python(Path(guard) if os.path.isabs(guard) else wd / guard, search, seen)
     for a in args:
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):

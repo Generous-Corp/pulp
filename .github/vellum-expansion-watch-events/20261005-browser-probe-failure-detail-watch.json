@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-browser-probe-failure-detail-watch",
+  "created_at": "2026-10-05T18:47:21Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Browser capability probe diagnostics only: the browser-capability-unavailable message now leads with the probe's own failure reason, a timed-out probe reports its deadline, and PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS can raise the probe deadline. Capture, Chromium launch flags, DesignIR lowering, rendering and packaging are unchanged; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-browser-capture-backend",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

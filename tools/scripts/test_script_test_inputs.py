@@ -72,6 +72,7 @@ class Repo:
         write(self.root, "tools/import/run.mjs", "import { f } from './lib/util.mjs';\nconst c = require('./config.json');\n")
         write(self.root, "tools/import/lib/util.mjs", "export const f = 1;\n")
         write(self.root, "tools/import/config.json", "{}\n")
+        write(self.root, "tools/scripts/tmp_leak_guard.py", "import alpha_lib\n")
         write(self.root, "tools/scripts/test_beta.sh", "#!/bin/bash\nsource \"$(dirname \"$0\")/lib.sh\"\n. tools/scripts/other.sh\n")
         write(self.root, "tools/scripts/lib.sh", "x=1\n")
         write(self.root, "tools/scripts/other.sh", "y=1\n")
@@ -86,6 +87,10 @@ class Repo:
             {"name": "alpha", "command": ["/usr/bin/python3", f"{r}/tools/scripts/test_alpha.py", f"{r}/test/fixtures/data.txt"],
              "properties": [{"name": "WORKING_DIRECTORY", "value": f"{r}/tools/scripts"}]},
             {"name": "node-run", "command": ["/opt/homebrew/bin/node", "--test", f"{r}/tools/import/run.mjs"], "properties": []},
+            {"name": "guarded-node-run",
+             "command": ["/usr/bin/python3", f"{r}/tools/scripts/tmp_leak_guard.py", "--ignore", "x-*", "--",
+                         "/opt/homebrew/bin/node", "--test", f"{r}/tools/import/run.mjs"],
+             "properties": []},
             {"name": "beta", "command": ["/bin/bash", f"{r}/tools/scripts/test_beta.sh"], "properties": []},
             {"name": "mod", "command": ["/usr/bin/python3", "-m", "test_mod"],
              "properties": [{"name": "WORKING_DIRECTORY", "value": f"{r}/tools/scripts"}]},
@@ -192,6 +197,16 @@ class BuildListTests(unittest.TestCase):
     def test_node_entry_follows_relative_imports_and_requires(self) -> None:
         n = self.lst["tests"]["node-run"]
         self.assertEqual(n["inputs"], ["tools/import/config.json", "tools/import/lib/util.mjs", "tools/import/run.mjs"])
+
+    def test_a_temp_leak_guarded_command_is_declared_as_what_it_wraps(self) -> None:
+        # Classified as the guard, the node test would lose its import walk and
+        # a change to its imports would no longer select it.
+        n = self.lst["tests"]["guarded-node-run"]
+        self.assertEqual(n["kind"], "node")
+        self.assertEqual(n["entry"], "tools/import/run.mjs")
+        self.assertEqual(n["inputs"], [
+            "docs/status/alpha.yaml", "tools/import/config.json", "tools/import/lib/util.mjs", "tools/import/run.mjs",
+            "tools/scripts/alpha_lib.py", "tools/scripts/tmp_leak_guard.py"])
 
     def test_shell_entry_follows_source_lines(self) -> None:
         b = self.lst["tests"]["beta"]

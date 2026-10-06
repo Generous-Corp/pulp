@@ -120,3 +120,15 @@ write_response_artifact(curve, "lowpass.response");  // reviewable JSON
 auto thd = measure_thd(scenario, /*fundamental_hz=*/999.0, {.fft_length = 16384});
 CHECK(thd.thd < 0.001);                              // clean tone, near-zero THD
 ```
+
+## Temp directories and files (`unique_temp_dir.hpp`)
+
+CTest runs each Catch2 case as its own process and runs many at once, so a
+temp path named from a clock reading alone is shared whenever two cases read
+the same tick, and they read and delete each other's files. Use
+`pulp::test::make_unique_temp_dir(prefix)` for a directory: the name carries
+the process id and a per-process serial, and it is used only if that call
+created it. Use `pulp::test::unique_temp_path(prefix, suffix)` for a single
+file path (nothing is created). `tools/scripts/clock_only_temp_key_guard.py`
+(a ctest and a `gates.sh` pre-queue guard) rejects a new clock-only key under
+`test/`.

@@ -660,11 +660,16 @@ class Collector:
         be read. A run's checkout is a merge commit GitHub made, which the
         local clone has usually never fetched (and the collector never
         fetches), so a commit missing locally is read through the API."""
-        res = self._git("show", f"{rev}:{SCRIPT_INPUTS_PATH}", check=False)
+        return self.json_at(rev, SCRIPT_INPUTS_PATH, "script-inputs")
+
+    def json_at(self, rev: str, path: str, cache: str) -> dict | None:
+        """A checked-in JSON file at `rev` (local clone, then the API, cached
+        under `cache/`), or None when it cannot be read or parsed."""
+        res = self._git("show", f"{rev}:{path}", check=False)
         text = None if res.returncode else res.stdout
         if text is None and self.gh is not None and re.fullmatch(r"[0-9a-f]{40}", rev):
             def fetch() -> str | None:
-                url = f"{API}/repos/{self.gh.repository}/contents/{SCRIPT_INPUTS_PATH}?ref={rev}"
+                url = f"{API}/repos/{self.gh.repository}/contents/{path}?ref={rev}"
                 try:
                     with self.gh._request(url, "application/vnd.github.raw+json") as resp:
                         return resp.read().decode("utf-8")
@@ -673,7 +678,7 @@ class Collector:
                         return None  # absent at that commit: cached
                     raise
             try:
-                text = self._cached(f"script-inputs/{rev}.json.gz", fetch)
+                text = self._cached(f"{cache}/{rev}.json.gz", fetch)
             except (urllib.error.URLError, RuntimeError, OSError, UnicodeDecodeError):
                 text = None  # a failed fetch is unread (its script tests run), and is not cached
         if text is None:
@@ -1496,6 +1501,185 @@ def same_bytes_evidence(corpus_dir: Path, corpus, rows: list[dict], gh: "GitHub 
                     break
         out.append(dict(row, head_run_id=head, head_digest=head_digest, group_digest=group_digest,
                         witness_run_id=witness, qualifies=witness is not None))
+    return out
+
+
+KEY_BLIND_LIST_PATH = "tools/ci/key_blind_executables.json"
+STAGE0_VARIANT = "cmake-codemodel-recorded"
+
+
+def key_blind_list_at(collector: "Collector", sha: str) -> set[str] | None:
+    """The executable basenames the key-blind list names at `sha`: empty
+    when that tree has no list, None when the list cannot be read. git
+    reports a path "not in" a commit whose objects a partial clone lacks,
+    so absence counts only when the tree is local; otherwise the API."""
+    res = collector._git("show", f"{sha}:{KEY_BLIND_LIST_PATH}", check=False)
+    text = None if res.returncode else res.stdout
+    if text is None:
+        if collector._git("cat-file", "-e", f"{sha}^{{tree}}", check=False).returncode == 0:
+            return set()
+        gh = collector.gh
+        if gh is None:
+            return None
+        try:
+            with gh._request(f"{API}/repos/{gh.repository}/contents/{KEY_BLIND_LIST_PATH}?ref={sha}",
+                             "application/vnd.github.raw+json") as resp:
+                text = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as err:
+            return set() if err.code == 404 else None
+        except (urllib.error.URLError, OSError):
+            return None
+    try:
+        return {Path(e).name for e in (json.loads(text).get("executables") or {})}
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
+def stage0_pairs(corpus_dir: Path, corpus, fix: str, watched: list[str],
+                 contains: Callable[[str, str], bool | None], repo: Path = REPO_ROOT,
+                 gh: "GitHub | None" = None) -> dict:
+    """The content-keyed pairs whose group checkout contains `fix`, oldest
+    first, each classified for the executables `watched` (basenames) that the
+    fix was meant to make deterministic:
+
+    - relinked_identical: in both records' link and binaries, same bytes,
+      and not unreached;
+    - rebuilt: bytes differ and the key rebuilt it (inputs moved);
+    - regression: bytes differ and the key did not rebuild it;
+    - missing: absent from a record, or neither of the above.
+
+    Each pair also carries how many watched names its group declared
+    commit-bound and how many the key-blind list at the group checkout
+    named (None when that list could not be read), its unreached
+    executables, and those outside the watched set. Groups whose ancestry
+    cannot be told are counted, never classified."""
+    collector = Collector.__new__(Collector)
+    collector.repo, collector.cache, collector.gh = repo, corpus_dir / "cache", gh
+    collector._git_lock, collector._commit_cache = threading.Lock(), {}
+    lists: dict[str, set[str] | None] = {}
+
+    def key_blind_at(sha: str) -> set[str] | None:
+        if sha not in lists:
+            lists[sha] = key_blind_list_at(collector, sha)
+        return lists[sha]
+
+    def record(run_id: Any) -> dict:
+        try:
+            return collector.reuse_record(str(run_id)) or {}
+        except Exception:   # an unreadable record classifies every watched name as missing
+            return {}
+
+    def by_name(d: dict | None) -> dict[str, Any]:
+        return {Path(k).name: v for k, v in (d or {}).items()}
+
+    rows, unknown = [], []
+    for pair in corpus.pairs:
+        keys = pair.get("source_key") or {}
+        if keys.get("content_keyed") is not True or STAGE0_VARIANT not in keys:
+            continue
+        group = corpus.run(pair.get("group_run_id"))
+        if not group or not group.get("checkout_sha"):
+            continue
+        inside = contains(fix, group["checkout_sha"])
+        if inside is None:
+            unknown.append(group["run_id"])
+            continue
+        if not inside:
+            continue
+        variant = keys[STAGE0_VARIANT]
+        unreached = {Path(u).name for u in variant.get("unreached_changed_binaries") or []}
+        rebuilt = {Path(u).name for u in variant.get("rebuilt") or []}
+        head, grp = record(pair.get("source_key_head_run_id")), record(group["run_id"])
+        bound = {Path(x).name for x in grp.get("declared_commit_bound") or []}
+        listed = key_blind_at(group["checkout_sha"])
+        classes = {"relinked_identical": [], "rebuilt": [], "regression": [], "missing": []}
+        hl, gl, hb, gb = (by_name(head.get("link")), by_name(grp.get("link")),
+                          by_name(head.get("binaries")), by_name(grp.get("binaries")))
+        for name in watched:
+            if not (name in hl and name in gl and name in hb and name in gb):
+                kind = "missing"
+            elif hb[name] == gb[name] and name not in unreached:
+                kind = "relinked_identical"
+            elif hb[name] != gb[name] and name in unreached:
+                kind = "regression"
+            elif hb[name] != gb[name] and name in rebuilt:
+                kind = "rebuilt"
+            else:
+                kind = "missing"
+            classes[kind].append(name)
+        rows.append({"pr": pair.get("pr"), "group_run_id": group["run_id"], "checkout_sha": group["checkout_sha"],
+                     "created_at": group.get("created_at"), "unreached": sorted(unreached),
+                     "unreached_outside": sorted(unreached - set(watched)),
+                     "commit_bound": len(bound & set(watched)),
+                     "key_blind": None if listed is None else len(listed & set(watched)),
+                     **classes, "relinked_clean": len(classes["relinked_identical"]) == len(watched)})
+    rows.sort(key=lambda r: r["created_at"] or "")
+    return {"pairs": rows, "ancestry_unknown": unknown}
+
+
+def trailing_clean(rows: list[dict], restart_run: str | None, false_skip_groups: set[str]) -> dict:
+    """The run of clean pairs that ends at the newest pair, counted from the
+    restart pair at the earliest: clean is no unreached executable and no
+    false skip. `broken_by` names the newest pair that is not clean."""
+    start = next((i for i, r in enumerate(rows) if str(r["group_run_id"]) == str(restart_run)), None) \
+        if restart_run else 0
+    if start is None:
+        return {"count": None, "restart_found": False, "broken_by": None}
+    count, broken = 0, None
+    for r in reversed(rows[start:]):
+        if r["unreached"] or str(r["group_run_id"]) in false_skip_groups:
+            broken = {"pr": r["pr"], "group_run_id": r["group_run_id"]}
+            break
+        count += 1
+    return {"count": count, "restart_found": True, "broken_by": broken}
+
+
+def data_scan_control(corpus_dir: Path, corpus, repo: Path = REPO_ROOT, gh: "GitHub | None" = None) -> dict:
+    """Stage 0's detected-reader control, list by list: every script-input
+    list at a content-keyed pair's head or group checkout that declares a
+    data scan either shows it saw its known readers or is read as no scan.
+    The negative control counts pairs on a failing list that the replay
+    nevertheless read as scanned; it must be 0."""
+    collector = Collector.__new__(Collector)
+    collector.repo, collector.cache, collector.gh = repo, corpus_dir / "cache", gh
+    collector._git_lock, collector._commit_cache = threading.Lock(), {}
+    shas: set[str] = set()
+    v2 = []
+    for pair in corpus.pairs:
+        keys = pair.get("source_key") or {}
+        if keys.get("content_keyed") is not True:
+            continue
+        v2.append(pair)
+        for run_id in (pair.get("group_run_id"), pair.get("source_key_head_run_id")):
+            run = corpus.run(run_id)
+            if run and run.get("checkout_sha"):
+                shas.add(run["checkout_sha"])
+    out = {"lists": len(shas), "declaring": 0, "holds": 0, "unreadable": 0, "no_data_scan": 0,
+           "fails": {}}
+    failing: set[str] = set()
+    for sha in sorted(shas):
+        doc = collector.script_inputs_at(sha)
+        if doc is None:
+            out["unreadable"] += 1
+            continue
+        if "data" not in (doc.get("executables_scanned_for") or []):
+            out["no_data_scan"] += 1
+            continue
+        out["declaring"] += 1
+        entries = dict(doc.get("executables") or {})
+        if data_scan_saw_readers(entries):
+            out["holds"] += 1
+            continue
+        failing.add(sha)
+        declared = [e for e in entries.values() if e.get("data") == "declared"]
+        why = ("no declared readers" if not declared else
+               "detected_sources absent" if any("detected_sources" not in e for e in declared) else
+               "below the detected-reader threshold")
+        out["fails"][why] = out["fails"].get(why, 0) + 1
+    on_failing = [p for p in v2 if (corpus.run(p.get("group_run_id")) or {}).get("checkout_sha") in failing]
+    out["pairs_on_failing_list"] = len(on_failing)
+    out["read_as_scanned_on_failing_list"] = sum(
+        1 for p in on_failing if (p["source_key"].get(STAGE0_VARIANT) or {}).get("data_scanned"))
     return out
 
 

@@ -32,6 +32,7 @@
 #include <pulp/host/signal_graph.hpp>
 
 #include "support/thread_progress.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -58,13 +59,7 @@ namespace {
 struct ScratchDir {
     fs::path path;
     explicit ScratchDir(const char* stem) {
-        auto counter = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path()
-             / (std::string("pulp-host-regression-") + stem + "-"
-                + std::to_string(counter));
-        std::error_code ec;
-        fs::remove_all(path, ec);
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(std::string("pulp-host-regression-") + stem);
     }
     ~ScratchDir() { std::error_code ec; fs::remove_all(path, ec); }
     ScratchDir(const ScratchDir&) = delete;
@@ -1195,11 +1190,7 @@ TEST_CASE("PluginScanner::scan honors only_extra_paths",
     using pulp::host::PluginScanner;
     using pulp::host::ScanOptions;
 
-    auto scratch = std::filesystem::temp_directory_path() /
-        ("pulp-scanner-hermetic-" +
-         std::to_string(static_cast<uint64_t>(std::chrono::steady_clock::now()
-             .time_since_epoch().count())));
-    std::filesystem::create_directories(scratch);
+    auto scratch = pulp::test::make_unique_temp_dir("pulp-scanner-hermetic");
 
     ScanOptions opts;
     opts.scan_vst3 = true;
