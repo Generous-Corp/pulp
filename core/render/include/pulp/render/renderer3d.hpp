@@ -155,6 +155,12 @@ public:
     static Scene3DRenderResult render_scene_data(
         const scene::SceneData& scene,
         const SceneDataRenderConfig& config = {});
+
+    // Whether a completed readback holds a drawn frame: more than one colour,
+    // some coverage, and an adapter that draws. Dawn's Null adapter accepts
+    // and submits commands but draws nothing, so its readback bytes are not a
+    // frame, whatever they happen to contain.
+    static bool readback_holds_frame(const Scene3DRenderResult& result);
 };
 
 } // namespace pulp::render

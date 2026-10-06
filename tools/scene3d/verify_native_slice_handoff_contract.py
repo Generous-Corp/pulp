@@ -36,6 +36,8 @@ def copy_required_repo_bits(source_root, target_root):
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
+    # The copy stands in for a checked-out planning submodule.
+    write_text(target_root / "planning" / ".git", "gitdir: ../.git/modules/planning\n")
 
 
 def run_verifier(verifier, repo_root, ctest_files, doc_file):
@@ -149,6 +151,13 @@ def main():
             print(f"ctest_file_exists=false path={path}")
             return 2
 
+    # Without the private planning submodule there is no plan to copy into
+    # the cases; say so rather than fail every case on a missing file.
+    if not (args.repo_root / "planning" / ".git").exists():
+        print(f"native_slice_handoff_contract_skipped={args.repo_root / 'planning'} is not a checked-out "
+              "submodule (no .git), so the plan cannot be read")
+        return 0
+
     errors = []
     with tempfile.TemporaryDirectory() as tmp:
         tmp_root = Path(tmp)
@@ -178,6 +187,10 @@ def main():
              "missing native slice doc token: runtime_evidence_url_invalid"),
             ("missing-final-gate-doc", "final-gate", 1,
              "missing native slice doc token: scene3d-renderer-probe-final-software-gate"),
+            ("planning-not-checked-out", "planning-absent", 0,
+             "native_slice_handoff_skipped="),
+            ("planning-checked-out-without-plan", "plan-missing", 1,
+             "threejs-webgpu-gltf-bake-plan.md"),
         ]
 
         for name, drift, expected_code, expected_text in cases:
@@ -223,6 +236,11 @@ def main():
                     "Wire `GLTFExporter` in the Live lane to emit GLB")
             elif drift == "url-gate":
                 remove_doc_token(doc_file, "runtime_evidence_url_invalid")
+            elif drift == "planning-absent":
+                shutil.rmtree(case_root / "planning")
+                (case_root / "planning").mkdir()
+            elif drift == "plan-missing":
+                (case_root / "planning/threejs-webgpu-gltf-bake-plan.md").unlink()
             elif drift == "final-gate":
                 remove_doc_token(
                     doc_file, "scene3d-renderer-probe-final-software-gate")

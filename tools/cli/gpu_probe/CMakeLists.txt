@@ -17,6 +17,9 @@ target_include_directories(pulp-tool-gpu-probe-model
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     PRIVATE
         $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+        # Header-only use of pulp/runtime/safe_relative_path.hpp; the model
+        # library stays free of a pulp::runtime link.
+        "${CMAKE_SOURCE_DIR}/core/runtime/include"
         "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(PULP_ENABLE_GPU)
     target_compile_definitions(pulp-tool-gpu-probe-model PUBLIC

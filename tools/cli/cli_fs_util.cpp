@@ -4,6 +4,8 @@
 
 #include "cli_fs_util.hpp"
 
+#include <pulp/runtime/safe_relative_path.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <string>
@@ -22,12 +24,7 @@ bool path_is_within(const fs::path& path, const fs::path& root) {
 }
 
 bool safe_archive_rel(const fs::path& rel) {
-    if (rel.empty() || rel.is_absolute()) return false;
-    for (const auto& part : rel) {
-        const auto s = part.string();
-        if (s.empty() || s == "." || s == "..") return false;
-    }
-    return true;
+    return pulp::runtime::is_safe_relative_path(rel);
 }
 
 bool is_package_archive_path(const fs::path& path) {

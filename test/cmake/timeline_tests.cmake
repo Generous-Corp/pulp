@@ -663,6 +663,14 @@ target_link_libraries(pulp-test-timeline-phase1-examples PRIVATE
 target_include_directories(pulp-test-timeline-phase1-examples PRIVATE
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1
     ${CMAKE_SOURCE_DIR}/test)
+# A step-sequencer processor is about 400 KB, so a test case holding a few on
+# its stack overflows the 1 MB main-thread stack MSVC links by default while
+# passing under the 8 MB macOS default. Linking this binary with the Windows
+# size makes the required macOS lane fail the same way.
+if(APPLE)
+    target_link_options(pulp-test-timeline-phase1-examples PRIVATE
+        -Wl,-stack_size,0x100000)
+endif()
 catch_discover_tests(pulp-test-timeline-phase1-examples)
 
 # The Timeline API-contract checker only ever runs inside build-api-docs.sh,

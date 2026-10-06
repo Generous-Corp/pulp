@@ -2,6 +2,8 @@
 #include "import_emit.hpp"
 #include "json_parser.hpp"
 
+#include <pulp/runtime/safe_relative_path.hpp>
+
 namespace pulp::cli::import_emit {
 
 using pulp::cli::pkg::JsonParser;
@@ -189,20 +191,10 @@ Manifest parse_manifest(const std::string& result_json) {
 
 namespace {
 
-// A normalized, output-dir-relative path is safe when it neither is absolute
-// nor traverses above the output dir via `..`.
+// A manifest path is safe once normalized (so `a/../b` and `./b` name `b`) when
+// it is a screened relative path that stays beneath the output dir.
 bool is_safe_relative(const fs::path& rel) {
-    if (rel.is_absolute()) return false;
-    int depth = 0;
-    for (const auto& part : rel) {
-        const std::string s = part.string();
-        if (s == "..") {
-            if (--depth < 0) return false;
-        } else if (s != "." && !s.empty()) {
-            ++depth;
-        }
-    }
-    return true;
+    return pulp::runtime::is_safe_relative_path(rel.lexically_normal());
 }
 
 }  // namespace
@@ -226,6 +218,10 @@ WritePlan compute_write_plan(const Manifest& manifest, const fs::path& output_di
 
         WriteAction act;
         act.dest = (out / rel).lexically_normal();
+        if (!pulp::runtime::is_within_directory(out, act.dest)) {
+            plan.error = "manifest file path escapes the output dir: " + f.path;
+            return plan;
+        }
         act.provenance = f.provenance;
         act.file = &f;
 

@@ -171,6 +171,9 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertTrue(self.policy["baseline_tests"])
         self.assertTrue(self.policy["baseline_build_targets"])
         self.assertIn("changed-surface-policy-selftest", self.policy["baseline_tests"])
+        # The live-tree inventory check (--build-dir under Shipyard's
+        # PULP_CHANGED_SURFACE_INVENTORY_TARGET) is what a bounded leg relies on.
+        self.assertIn("changed-surface-policy-inventory", self.policy["baseline_tests"])
         self.assertTrue(self.policy["families"])
         self.assertNotIn("**", self.policy.get("baseline_only_paths", []))
         for family in self.policy["families"]:
@@ -278,7 +281,7 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertEqual(family["risk_class"], "low")
 
         selected_tests = set(self.policy["baseline_tests"]) | set(family["tests"])
-        self.assertEqual(len(selected_tests), 56)
+        self.assertEqual(len(selected_tests), 57)
         self.assertEqual(
             selected_build_targets(self.policy, family["name"]),
             {"pulp-test-build-check", "pulp-cli", "pulp-test-child-process"},

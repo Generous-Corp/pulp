@@ -1972,7 +1972,8 @@ class ExecutableReuseTest(unittest.TestCase):
                 with self.subTest(bad=bad), self.assertRaises(runner.SelectionExecutionError):
                     runner.validate_executable_reuse_binding({**good, "audit": bad})
 
-    def derive_with_audit(self, audit: dict | None, report: bytes | None, accepts: bool = True):
+    def derive_with_audit(self, audit: dict | None, report: bytes | None, accepts: bool = True,
+                          unreadable: bool = False):
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
         build, code = self.tree(Path(directory))
@@ -1983,6 +1984,8 @@ class ExecutableReuseTest(unittest.TestCase):
         result.mkdir()
         if report is not None:
             (result / "read-audit.json").write_bytes(report)
+        if unreadable:
+            (result / "read-audit.json").mkdir()  # reading a directory raises
         binding = self.binding(build, code)
         if audit is not None:
             binding["audit"] = audit
@@ -2012,13 +2015,25 @@ class ExecutableReuseTest(unittest.TestCase):
     def test_a_staged_report_missing_or_altered_is_a_loud_mismatch(self) -> None:
         for report, actual in ((None, None), (b"{}\n", hashlib.sha256(b"{}\n").hexdigest())):
             with self.subTest(report=report):
-                derived, keys, _, stderr = self.derive_with_audit(self.staged(), report)
+                derived, keys, result, stderr = self.derive_with_audit(self.staged(), report)
                 self.assertEqual(derived["status"], "derived", derived)  # keyed, and fails closed
                 self.assertNotIn("--audit-report", keys)
                 self.assertEqual((derived["audit"]["status"], derived["audit"]["expected_sha256"],
                                   derived["audit"]["actual_sha256"]),
                                  ("report_mismatch", hashlib.sha256(self.REPORT).hexdigest(), actual))
-                self.assertIn("audit report mismatch", stderr)
+                line = next(l for l in stderr.splitlines() if "audit report mismatch" in l)
+                self.assertIn(f"expected {hashlib.sha256(self.REPORT).hexdigest()}", line)
+                self.assertIn(f"actual {actual}" if actual else f"missing {result / 'read-audit.json'}", line)
+
+    def test_an_unreadable_staged_report_is_a_loud_finding(self) -> None:
+        derived, keys, result, stderr = self.derive_with_audit(self.staged(), None, unreadable=True)
+        self.assertEqual(derived["status"], "derived", derived)  # keyed, and fails closed
+        self.assertNotIn("--audit-report", keys)
+        self.assertEqual((derived["audit"]["status"], derived["audit"]["expected_sha256"]),
+                         ("report_unreadable", hashlib.sha256(self.REPORT).hexdigest()))
+        line = next(l for l in stderr.splitlines() if "audit report mismatch" in l)
+        self.assertIn(f"expected {hashlib.sha256(self.REPORT).hexdigest()}", line)
+        self.assertIn(f"unreadable {result / 'read-audit.json'}", line)
 
     def test_a_base_whose_key_code_predates_the_audit_keys_without_the_flag(self) -> None:
         derived, keys, _, _ = self.derive_with_audit(self.staged(), self.REPORT, accepts=False)
