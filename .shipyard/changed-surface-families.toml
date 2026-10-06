@@ -41,6 +41,7 @@ paths = [
   "tools/scripts/frontend_ir_tweaks.py",
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_p2_campaign.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
@@ -499,33 +500,6 @@ tests = [
   "reuse-policy-replay-selftest",
   "source-selftest-lane-contract",
   "source-selftest-lane-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-e7e7773ffded"
-paths = ["tools/scripts/gpu_audio_p2_campaign.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "pulp-gpu-audio-p2-campaign-contract",
-  "reuse-policy-replay-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5354,7 +5328,6 @@ tests = [
   "minos-registry-absent-selftest",
   "msvc-string-literal-guard",
   "planning-gitlink-guard-selftest",
-  "pulp-gpu-shared-io-paced-convolution-probe",
   "raw-this-async-check",
   "raw-this-async-selftest",
   "release-trailer-guard-selftest",
@@ -5387,7 +5360,6 @@ tests = [
 ]
 build_targets = [
   "pulp-cli",
-  "pulp-gpu-shared-io-paced-convolution-probe",
   "pulp-timeline-schema-emit",
 ]
 supported_build_types = [
@@ -5834,17 +5806,11 @@ tests = [
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
-  "pulp-gpu-dawn-shared-io-provider-lifecycle",
-  "pulp-gpu-shared-io-paced-convolution-probe",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
   "pulp_bundle_threejs_for_jsc_smoke",
 ]
-build_targets = [
-  "pulp-cli",
-  "pulp-gpu-dawn-shared-io-provider-probe",
-  "pulp-gpu-shared-io-paced-convolution-probe",
-]
+build_targets = ["pulp-cli"]
 supported_build_types = [
   "debug",
   "release",
