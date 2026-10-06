@@ -215,6 +215,12 @@ def trace_analyzer_identity(
     return {"path": str(path.resolve()), "sha256": digest}
 
 
+def _has_executable_bit() -> bool:
+    """Windows has no executable bit; a script there is launched through its
+    interpreter, so the bit is required only where it exists."""
+    return os.name != "nt"
+
+
 def snapshot_regular(
     source_root: Path, relative: Any, destination: Path, label: str, *,
     max_bytes: int, expected_sha256: str, expected_bytes: int,
@@ -223,7 +229,7 @@ def snapshot_regular(
     """Snapshot one held, bounded regular file into a new runner-owned file."""
     source = checked_regular_path(source_root, relative, label)
     descriptor, before = _open_regular(source, label)
-    if executable and not before.st_mode & 0o111:
+    if executable and _has_executable_bit() and not before.st_mode & 0o111:
         os.close(descriptor)
         raise V2EvidenceError(f"{label} is not executable")
     destination.parent.mkdir(parents=True, exist_ok=True)
