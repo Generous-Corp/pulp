@@ -200,10 +200,16 @@ export function materializedSourceRecord(value, label = 'source') {
     ? { ...value, ...value.source } : value;
   if (!source || typeof source !== 'object' || Array.isArray(source))
     return null;
-  const fields = [source.component, source.component_name,
-    source.source_component_name, source.local_path, source.localPath,
-    source.source_local_path, source.content_hash, source.contentHash];
-  if (fields.every(field => field === undefined || field === null || field === ''))
+  const component = source.component ?? source.component_name ??
+    source.source_component_name;
+  const localPath = source.local_path ?? source.localPath ??
+    source.source_local_path;
+  const contentHash = source.content_hash ?? source.contentHash;
+  // Structural capture rows may carry only part of the source metadata. They
+  // remain positional until a later normalization stage can supply the full
+  // identity tuple; do not turn an incomplete row into a hard import failure.
+  if ([component, localPath, contentHash].some(field =>
+    field === undefined || field === null || field === ''))
     return null;
   return sourceRecord(source, label);
 }

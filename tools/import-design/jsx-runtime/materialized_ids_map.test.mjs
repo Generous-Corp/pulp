@@ -148,3 +148,17 @@ test('applyMaterializedIdsMap updates only source-addressed bindings', () => {
   assert.equal(result.document.layout_bindings[1].data_pulp_id, undefined);
   assert.equal(result.assignments.length, 1);
 });
+
+test('partial source metadata remains positional instead of aborting import', () => {
+  const result = applyMaterializedIdsMap({
+    layout_bindings: [{
+      component_name: 'Panel', anchor: '#root', path: [], box: {},
+    }, {
+      local_path: 'Panel.tsx#button', content_hash: HASH_A,
+      anchor: '#button', path: [], box: {},
+    }],
+  });
+  assert.equal(result.document.layout_bindings[0].data_pulp_id, undefined);
+  assert.equal(result.document.layout_bindings[1].data_pulp_id, undefined);
+  assert.equal(result.assignments.length, 0);
+});
