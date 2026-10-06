@@ -173,6 +173,7 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
             applied_receipt["receipt_id"].getString());
     REQUIRE(applied_receipt["detail"]["applied"].getInt64() == 1);
     REQUIRE(applied_receipt["detail"]["generation"].getInt64() >= 1);
+    const auto applied_generation = applied_receipt["detail"]["generation"].getInt64();
     const auto applied_operation =
         wait_terminal_receipt(daemon.state_directory() / "operations",
                               std::string(applied_receipt["receipt_id"].getString()));
@@ -180,6 +181,17 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     CHECK(applied_operation["manifest_digest"].getString() == manifest_digest);
     CHECK(applied_operation["producer_artifact_digest"].getString() == *source_digest);
     CHECK_FALSE(applied_operation["instance_generation"].getString().empty());
+
+    // A route identity can only be inserted once.  The authority must reject
+    // a duplicate without publishing a new graph generation or silently
+    // stacking a second route.
+    const auto duplicate_insert = call(
+        R"({"commands":[{"kind":"insert","source":1,"source_port":0,"destination":2,"parameter_id":7,"range_lo":0,"range_hi":1,"smoothing_ms":10}]})");
+    const auto duplicate_diagnostics =
+        cli_failure_diagnostics(duplicate_insert, daemon.state_directory() / "operations");
+    INFO(duplicate_diagnostics);
+    REQUIRE(duplicate_insert.exit_code != 0);
+    REQUIRE(duplicate_diagnostics.find("result_code=invalid_request") != std::string::npos);
 
     const auto release_for_mcp =
         run(cli, root.runtime,
@@ -195,12 +207,32 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
         mcp_call(2, "pulp_control_session_control", instance, R"({"action":"acquire"})") +
             mcp_call(
                 3, "pulp_control_graph_modulation_route_edit", instance,
+                R"({"commands":[{"kind":"insert","source":1,"source_port":0,"destination":2,"parameter_id":7,"range_lo":0.0,"range_hi":1.0,"smoothing_ms":10.0}]})") +
+            mcp_call(
+                4, "pulp_control_graph_modulation_route_edit", instance,
                 R"({"commands":[{"kind":"rewire","source":1,"source_port":0,"destination":2,"parameter_id":7,"previous_source":1,"previous_source_port":0,"range_lo":0.0,"range_hi":1.0}]})") +
-            mcp_call(4, "pulp_control_session_control", instance, R"({"action":"release"})"));
-    REQUIRE(mcp_rewired.size() == 3);
+            mcp_call(5, "pulp_control_session_control", instance, R"({"action":"release"})"));
+    REQUIRE(mcp_rewired.size() == 4);
     REQUIRE_FALSE(mcp_rewired[0]["result"]["isError"].getWithDefault<bool>(false));
     REQUIRE(mcp_rewired[0]["result"]["structuredContent"]["state"].getString() == "completed");
-    const auto& mcp_response = mcp_rewired[1];
+    // MCP must expose the same refusal and no-mutation proof as the CLI:
+    // failed duplicate insertion, zero applied commands, and unchanged
+    // generation in the typed receipt.
+    const auto& mcp_duplicate = mcp_rewired[1];
+    REQUIRE(mcp_duplicate["result"]["isError"].getWithDefault<bool>(false));
+    const auto mcp_duplicate_error = mcp_duplicate["result"]["structuredContent"];
+    REQUIRE_FALSE(mcp_duplicate_error["ok"].getBool());
+    REQUIRE(mcp_duplicate_error["error"]["code"].getString() == "invalid_request");
+    const auto mcp_duplicate_structured = mcp_duplicate_error["error"]["data"];
+    REQUIRE(mcp_duplicate_structured["schema"].getString() == "dev.pulp.control/mcp-receipt@1");
+    REQUIRE(mcp_duplicate_structured["operation_id"].getString() ==
+            "dev.pulp.graph/modulation-route.edit@1");
+    REQUIRE(mcp_duplicate_structured["state"].getString() == "failed");
+    REQUIRE(mcp_duplicate_structured["result"]["code"].getString() == "invalid-command");
+    REQUIRE(mcp_duplicate_structured["result"]["applied"].getInt64() == 0);
+    REQUIRE(mcp_duplicate_structured["result"]["generation"].getInt64() == applied_generation);
+
+    const auto& mcp_response = mcp_rewired[2];
     REQUIRE_FALSE(mcp_response["result"]["isError"].getWithDefault<bool>(false));
     const auto mcp_structured = mcp_response["result"]["structuredContent"];
     REQUIRE(mcp_structured["schema"].getString() == "dev.pulp.control/mcp-receipt@1");
@@ -212,8 +244,8 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     REQUIRE(mcp_result["generation"].getInt64() >=
             applied_receipt["detail"]["generation"].getInt64());
     REQUIRE(mcp_result["applied"].getInt64() == 1);
-    REQUIRE_FALSE(mcp_rewired[2]["result"]["isError"].getWithDefault<bool>(false));
-    REQUIRE(mcp_rewired[2]["result"]["structuredContent"]["state"].getString() == "completed");
+    REQUIRE_FALSE(mcp_rewired[3]["result"]["isError"].getWithDefault<bool>(false));
+    REQUIRE(mcp_rewired[3]["result"]["structuredContent"]["state"].getString() == "completed");
 
     const auto reacquired =
         run(cli, root.runtime,
