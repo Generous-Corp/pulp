@@ -3492,6 +3492,33 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-44aeeff13eeb"
+paths = ["tools/scripts/test_script_argv.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "script-argv-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-c41b916f43f0"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
@@ -4808,6 +4835,7 @@ tests = [
   "reuse-record-selftest",
   "runner-topology-selftest",
   "runner-topology-static-selftest",
+  "script-argv-selftest",
   "sequencer-control-skill-coverage",
   "sequencer-control-skill-coverage-selftest",
   "skills-doc-check-selftest",
@@ -5164,6 +5192,7 @@ paths = [
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
+  "tools/scripts/test_script_argv.py",
   "tools/scripts/test_script_test_inputs.py",
   "tools/scripts/test_sdk_capability_handoff.py",
   "tools/scripts/test_sdk_consumer_sweep.py",
@@ -5664,6 +5693,7 @@ paths = [
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
+  "tools/scripts/test_script_argv.py",
   "tools/scripts/test_script_test_inputs.py",
   "tools/scripts/test_sdk_capability_handoff.py",
   "tools/scripts/test_sdk_consumer_sweep.py",
