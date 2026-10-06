@@ -5,6 +5,7 @@
 #include <functional>
 #include <limits>
 #include <queue>
+#include <tuple>
 #include <utility>
 
 namespace pulp::graph {
@@ -204,6 +205,7 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                 spec.feedback,
                 spec.kind,
                 spec.automation,
+                spec.sidechain,
             });
             ++outbound_counts[source_index];
             ++inbound_counts[dest_index];
@@ -235,6 +237,58 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             const auto inbound_index = dest.first_inbound_connection +
                 inbound_cursor[connection.dest_index]++;
             result.plan.inbound_connection_indices[inbound_index] = i;
+        }
+
+        // Ordinary main-bus audio fan-in is an arithmetic reduction. Its
+        // floating-point result depends on edge order, so canonicalize those
+        // adjacency entries by stable endpoint identity. Keep every other
+        // authored lane in place: MIDI/event, automation, feedback, and
+        // sidechain edges carry ordering semantics of their own. One comparator
+        // is shared by inbound and outbound slices so both views agree on the
+        // same connection identity ordering.
+        const auto connection_less = [&](std::uint32_t lhs, std::uint32_t rhs) {
+            const auto& left = result.plan.connections[lhs];
+            const auto& right = result.plan.connections[rhs];
+            const auto left_key = std::tuple{
+                result.plan.nodes[left.source_index].id,
+                left.source_port,
+                result.plan.nodes[left.dest_index].id,
+                left.dest_port,
+            };
+            const auto right_key = std::tuple{
+                result.plan.nodes[right.source_index].id,
+                right.source_port,
+                result.plan.nodes[right.dest_index].id,
+                right.dest_port,
+            };
+            if (left_key != right_key) return left_key < right_key;
+            return lhs < rhs;
+        };
+        const auto ordinary_audio = [&](std::uint32_t connection_index) {
+            const auto& connection = result.plan.connections[connection_index];
+            return carries_audio(connection) && !connection.feedback && !connection.sidechain;
+        };
+        const auto canonicalize_slice = [&](std::uint32_t first,
+                                            std::uint32_t count,
+                                            std::vector<std::uint32_t>& adjacency) {
+            std::vector<std::uint32_t> ordinary;
+            ordinary.reserve(count);
+            for (std::uint32_t offset = 0; offset < count; ++offset) {
+                const auto connection_index = adjacency[first + offset];
+                if (ordinary_audio(connection_index)) ordinary.push_back(connection_index);
+            }
+            std::sort(ordinary.begin(), ordinary.end(), connection_less);
+            std::size_t ordinary_index = 0;
+            for (std::uint32_t offset = 0; offset < count; ++offset) {
+                if (ordinary_audio(adjacency[first + offset]))
+                    adjacency[first + offset] = ordinary[ordinary_index++];
+            }
+        };
+        for (const auto& node : result.plan.nodes) {
+            canonicalize_slice(node.first_inbound_connection, node.inbound_connection_count,
+                               result.plan.inbound_connection_indices);
+            canonicalize_slice(node.first_outbound_connection, node.outbound_connection_count,
+                               result.plan.outbound_connection_indices);
         }
 
         std::vector<std::uint32_t> indegree(result.plan.nodes.size(), 0);

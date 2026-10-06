@@ -94,6 +94,11 @@ struct GraphRuntimeConnectionSpec {
     // parameter mapping when kind == Automation.
     GraphRuntimeConnectionKind kind = GraphRuntimeConnectionKind::Audio;
     GraphRuntimeAutomationSpec automation;
+    // Sidechain is still plain audio, but its authored order is meaningful to
+    // the host's bus wiring. Keep the lane marker separate from `kind` so the
+    // runtime planner can canonicalize ordinary main-bus fan-in without
+    // reordering sidechain edges.
+    bool sidechain = false;
 };
 
 struct GraphRuntimeNodePlan {
@@ -122,6 +127,8 @@ struct GraphRuntimeConnectionPlan {
     // Carried from GraphRuntimeConnectionSpec; see that field.
     GraphRuntimeConnectionKind kind = GraphRuntimeConnectionKind::Audio;
     GraphRuntimeAutomationSpec automation;
+    // Carried from GraphRuntimeConnectionSpec; see that field.
+    bool sidechain = false;
 };
 
 // Lane accessors shared by GraphRuntimeConnectionSpec and
@@ -150,7 +157,8 @@ struct GraphRuntimePlan {
     // Dense node indices into `nodes`, not NodeIds. The walk is a stable
     // topological order: when several nodes are ready, the node with the
     // lowest NodeId is selected. This keeps equivalent plans independent of
-    // authored dense-vector order without changing connection insertion order.
+    // authored dense-vector order; non-audio adjacency keeps authored order,
+    // while ordinary audio fan-in is canonicalized for deterministic mixing.
     std::vector<std::uint32_t> processing_order_indices;
 
     void clear();

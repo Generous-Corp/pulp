@@ -132,6 +132,67 @@ TEST_CASE("GraphRuntimePlan selects ready nodes by stable NodeId",
     REQUIRE(changed_ids == std::vector<pulp::graph::NodeId>{40, 50, 60, 20, 30});
 }
 
+TEST_CASE("GraphRuntimePlan canonicalizes ordinary audio fan-in only",
+          "[graph][graph-runtime][plan][determinism]") {
+    using namespace pulp::graph;
+    // Three distinct sources feed one destination port. A non-associative
+    // reduction must see the same source order when the connection records are
+    // replayed in a different authored order.
+    const std::array nodes = {
+        node(40, 0, 1, GraphRuntimeNodeKind::AudioInput),
+        node(10, 0, 1, GraphRuntimeNodeKind::AudioInput),
+        node(30, 0, 1, GraphRuntimeNodeKind::AudioInput),
+        node(20, 1, 0, GraphRuntimeNodeKind::AudioOutput),
+    };
+    const std::array first_order = {
+        connect(30, 0, 20, 0),
+        connect(10, 0, 20, 0),
+        connect(40, 0, 20, 0),
+    };
+    const std::array replay_order = {
+        first_order[2],
+        first_order[0],
+        first_order[1],
+    };
+
+    const auto source_ids = [](const auto& result) {
+        std::vector<NodeId> ids;
+        const auto& destination = result.plan.nodes[3];
+        for (std::uint32_t offset = 0; offset < destination.inbound_connection_count; ++offset) {
+            const auto connection_index = result.plan.inbound_connection_indices[
+                destination.first_inbound_connection + offset];
+            ids.push_back(result.plan.nodes[result.plan.connections[connection_index].source_index].id);
+        }
+        return ids;
+    };
+
+    const auto first = build_graph_runtime_plan(nodes, first_order);
+    const auto replay = build_graph_runtime_plan(nodes, replay_order);
+    REQUIRE(first.ok());
+    REQUIRE(replay.ok());
+    REQUIRE(source_ids(first) == std::vector<NodeId>{10, 30, 40});
+    REQUIRE(source_ids(replay) == source_ids(first));
+
+    // Sidechain is a plain-audio lane, but its authored order is part of the
+    // bus contract. It must remain insertion-ordered even when replayed with a
+    // different connection permutation.
+    auto sidechain_a = connect(30, 0, 20, 0);
+    auto sidechain_b = connect(10, 0, 20, 0);
+    auto sidechain_c = connect(40, 0, 20, 0);
+    sidechain_a.sidechain = true;
+    sidechain_b.sidechain = true;
+    sidechain_c.sidechain = true;
+    const std::array sidechain_order = {sidechain_a, sidechain_b, sidechain_c};
+    const std::array sidechain_replay_order = {sidechain_c, sidechain_a, sidechain_b};
+    const auto sidechain = build_graph_runtime_plan(nodes, sidechain_order);
+    const auto sidechain_replay = build_graph_runtime_plan(nodes, sidechain_replay_order);
+    REQUIRE(sidechain.ok());
+    REQUIRE(sidechain_replay.ok());
+    REQUIRE(source_ids(sidechain) == std::vector<NodeId>{30, 10, 40});
+    REQUIRE(source_ids(sidechain_replay) == std::vector<NodeId>{40, 30, 10});
+    CHECK(source_ids(sidechain_replay) != source_ids(sidechain));
+}
+
 TEST_CASE("GraphRuntimePlan rejects duplicate and reserved node ids",
           "[graph][graph-runtime][plan]") {
     const std::array duplicate_nodes = {

@@ -33,6 +33,7 @@ ConnectionClass classify(const Connection& c) {
                    : graph::GraphRuntimeConnectionKind::Audio;
     cls.feedback = c.feedback;
     cls.audio_rate = c.audio_rate_modulation;
+    cls.sidechain = c.sidechain;
     return cls;
 }
 
@@ -324,6 +325,7 @@ ExecutorPlanShape make_executor_plan_shape(
         spec.dest_port = connection.dest_port;
         spec.feedback = cls.feedback;
         spec.kind = cls.kind;
+        spec.sidechain = cls.sidechain;
         if (cls.kind == gr::GraphRuntimeConnectionKind::Automation) {
             spec.automation.param_id = connection.automation_param_id;
             spec.automation.range_lo = connection.automation_range_lo;
