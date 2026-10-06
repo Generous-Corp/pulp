@@ -15,7 +15,11 @@
                 set_tests_properties(scene3d-renderer-probe-hardcoded-manifest
                     PROPERTIES
                     PASS_REGULAR_EXPRESSION
-                        "renderer_probe_verified=hardcoded_textured_cube")
+                        "renderer_probe_verified=hardcoded_textured_cube"
+                    # Off macOS the verifier states that another adapter
+                    # cannot judge this macOS Metal golden.
+                    SKIP_REGULAR_EXPRESSION
+                        "renderer_probe_golden_not_applicable=")
 
                 add_test(NAME scene3d-renderer-probe-boxtextured-manifest
                     COMMAND ${Python3_EXECUTABLE}
@@ -32,7 +36,9 @@
         set_tests_properties(scene3d-renderer-probe-boxtextured-manifest
             PROPERTIES
             PASS_REGULAR_EXPRESSION
-                "renderer_probe_verified=official_boxtextured_fixture")
+                "renderer_probe_verified=official_boxtextured_fixture"
+            SKIP_REGULAR_EXPRESSION
+                "renderer_probe_golden_not_applicable=")
 
         add_test(NAME scene3d-renderer-probe-material-floor-contract
             COMMAND ${Python3_EXECUTABLE}
