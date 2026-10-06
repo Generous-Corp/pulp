@@ -1,3 +1,7 @@
+#if defined(_WIN32)
+#include <winsock2.h>
+#pragma comment(lib, "ws2_32.lib")
+#endif
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/events/child_process_manager.hpp>
 #include <pulp/events/interprocess_connection.hpp>
@@ -2572,3 +2576,119 @@ TEST_CASE("IPC destruction waits for an in-flight disconnect callback",
     server.disconnect_accepted();
     server.stop();
 }
+
+#if defined(_WIN32)
+#include <pulp/runtime/socket.hpp>
+#include <cstdio>
+
+// proof-only: what Winsock does with the two primitives the IPC teardown and
+// write deadline rely on.
+TEST_CASE("proof-only winsock: local shutdown wakes a blocked receive", "[proof-winsock]") {
+    using pulp::runtime::Socket;
+    using pulp::runtime::SocketType;
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("127.0.0.1", listener.local_port(), std::chrono::milliseconds(2000)));
+    auto server = listener.accept(std::chrono::milliseconds(2000));
+    REQUIRE(server.has_value());
+    std::atomic<bool> done{false};
+    std::atomic<int> rc{-99};
+    std::atomic<int> err{0};
+    std::thread reader([&] {
+        std::uint8_t byte[16];
+        rc = client.receive(byte, sizeof(byte));
+        err = ::WSAGetLastError();
+        done = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    auto wait_done = [&](int ms) {
+        for (int i = 0; i < ms && !done; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return done.load();
+    };
+    client.shutdown();
+    const bool after_shutdown = wait_done(2000);
+    std::fprintf(stderr, "[proof-winsock] after local shutdown: woke=%d rc=%d wsa=%d\n",
+                 after_shutdown ? 1 : 0, rc.load(), err.load());
+    if (!after_shutdown) {
+        server->shutdown();
+        const bool after_peer = wait_done(2000);
+        std::fprintf(stderr, "[proof-winsock] after peer shutdown: woke=%d rc=%d wsa=%d\n",
+                     after_peer ? 1 : 0, rc.load(), err.load());
+    }
+    if (!done) {
+        server->close();
+        const bool after_peer_close = wait_done(2000);
+        std::fprintf(stderr, "[proof-winsock] after peer close: woke=%d rc=%d wsa=%d\n",
+                     after_peer_close ? 1 : 0, rc.load(), err.load());
+    }
+    if (!done)
+        client.close();
+    reader.join();
+}
+
+TEST_CASE("proof-only winsock: one large send under SO_SNDTIMEO", "[proof-winsock]") {
+    WSADATA wsa_data{};
+    REQUIRE(::WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0);
+    SOCKET listener = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    REQUIRE(listener != INVALID_SOCKET);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    REQUIRE(::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+    int address_size = sizeof(address);
+    REQUIRE(::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &address_size) == 0);
+    REQUIRE(::listen(listener, 1) == 0);
+    SOCKET client = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    REQUIRE(client != INVALID_SOCKET);
+    REQUIRE(::connect(client, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+    SOCKET server = ::accept(listener, nullptr, nullptr);
+    REQUIRE(server != INVALID_SOCKET);
+    const DWORD timeout_ms = 60;
+    REQUIRE(::setsockopt(client, SOL_SOCKET, SO_SNDTIMEO,
+                         reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms)) == 0);
+    int sndbuf = -1;
+    int sndbuf_size = sizeof(sndbuf);
+    ::getsockopt(client, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<char*>(&sndbuf), &sndbuf_size);
+    std::fprintf(stderr, "[proof-winsock] SO_SNDBUF=%d SO_SNDTIMEO=%lu\n", sndbuf,
+                 static_cast<unsigned long>(timeout_ms));
+    std::atomic<bool> stop{false};
+    std::atomic<long long> drained{0};
+    std::thread peer([&] {
+        std::vector<char> buffer(64u * 1024u);
+        while (!stop) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            const int got = ::recv(server, buffer.data(), static_cast<int>(buffer.size()), 0);
+            if (got <= 0)
+                break;
+            drained += got;
+        }
+    });
+    const std::vector<char> payload(32u * 1024u * 1024u, 0x5a);
+    for (std::size_t chunk : {std::size_t{64u * 1024u}, std::size_t{4u * 1024u * 1024u},
+                              payload.size()}) {
+        const auto started = std::chrono::steady_clock::now();
+        const int rc = ::send(client, payload.data(), static_cast<int>(chunk), 0);
+        const int wsa = rc == SOCKET_ERROR ? ::WSAGetLastError() : 0;
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - started)
+                            .count();
+        std::fprintf(stderr,
+                     "[proof-winsock] send(%zu) rc(bytes accepted)=%d wsa=%d elapsed_ms=%lld "
+                     "peer_drained=%lld\n",
+                     chunk, rc, wsa, static_cast<long long>(ms), drained.load());
+        if (rc == SOCKET_ERROR)
+            break;
+    }
+    stop = true;
+    ::closesocket(client);
+    ::closesocket(server);
+    ::closesocket(listener);
+    peer.join();
+    ::WSACleanup();
+}
+#endif
