@@ -29,12 +29,18 @@ class GpuConvolver;
 
 namespace detail {
 struct RealtimeGpuNodePath;
+struct SharedIoProviderIdentity;
+SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode*) noexcept;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
 struct GpuConvolverTrialConfig;
 struct SharedIoTraceRecord;
+struct SharedIoTraceAdmission;
 class StagedAsyncTrialState;
 bool configure_gpu_convolver_trial(GpuConvolver&, const GpuConvolverTrialConfig&) noexcept;
 bool drain_gpu_convolver_trial_records(GpuConvolver&, std::vector<SharedIoTraceRecord>&) noexcept;
+bool drain_gpu_convolver_trial_admissions(GpuConvolver&,
+                                          std::vector<SharedIoTraceAdmission>&) noexcept;
+std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 } // namespace detail
 
 /// First real GPU audio node: FFT-based (overlap-add) convolution of the input
@@ -254,14 +260,20 @@ class GpuConvolver : public GpuAudioNode {
                                             std::uint64_t result_visible_ns) noexcept;
     static std::uint64_t next_realtime_shared_io_sequence(void*) noexcept;
     bool has_realtime_shared_io() const noexcept;
+    detail::SharedIoProviderIdentity provider_identity_for_diagnostics() const noexcept;
 
     friend detail::RealtimeGpuNodePath detail::realtime_gpu_node_path(GpuAudioNode*) noexcept;
+    friend detail::SharedIoProviderIdentity
+    detail::realtime_gpu_provider_identity(GpuAudioNode*) noexcept;
     friend bool
     detail::configure_gpu_convolver_trial(GpuConvolver&,
                                           const detail::GpuConvolverTrialConfig&) noexcept;
     friend bool
     detail::drain_gpu_convolver_trial_records(GpuConvolver&,
                                               std::vector<detail::SharedIoTraceRecord>&) noexcept;
+    friend bool detail::drain_gpu_convolver_trial_admissions(
+        GpuConvolver&, std::vector<detail::SharedIoTraceAdmission>&) noexcept;
+    friend std::uint64_t detail::gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 
     struct SharedIoState;
 

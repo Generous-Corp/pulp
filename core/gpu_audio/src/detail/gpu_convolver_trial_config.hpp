@@ -89,7 +89,22 @@ struct GpuConvolverTrialConfig {
     DawnSharedIoProvider::CompletionPolicy completion_policy =
         DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
     std::uint64_t completion_wait_ns = 0;
+    // Diagnostic campaign slot capacity. Zero preserves the production
+    // default. Non-zero values are accepted only by the private probe and are
+    // passed through to the prepared shared-I/O session; the public runtime
+    // ABI remains unchanged.
+    std::uint32_t slots = 0;
 };
+
+// Quiescent diagnostic drain for the complete admission census. This remains
+// private/default-off and is intentionally separate from terminal records so
+// consumers can prove admission/terminal/delivery identity multisets.
+bool drain_gpu_convolver_trial_admissions(GpuConvolver&,
+                                          std::vector<SharedIoTraceAdmission>&) noexcept;
+
+// Quiescent diagnostic identity accessor. Zero means the prepared trace did
+// not expose an authenticated engine identity and must fail closed.
+std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 
 // Must be called while the node is quiescent, before the next prepare(). The
 // normal staged path uses the authenticated asynchronous ledger; the explicit
