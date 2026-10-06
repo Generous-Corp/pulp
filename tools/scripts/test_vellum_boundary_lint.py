@@ -94,6 +94,18 @@ def main() -> int:
             print("require negative control did not fail closed", file=sys.stderr)
             print(require.stdout, require.stderr, file=sys.stderr)
             return 1
+        # Reverse-boundary controls must resolve the include relative to the
+        # source file and must cover Objective-C++ platform sources as well as
+        # C/C++ files. This traversal lands in tools/import-design despite its
+        # deliberately misleading spelling.
+        write(root / "core/view/src/planted.mm",
+              '#include "../../../tools/import-design/private.hpp"\n')
+        reverse = run(root)
+        if reverse.returncode == 0 or "core/view reaches extractable package" not in reverse.stderr:
+            print("reverse-boundary traversal/.mm negative control did not fail closed",
+                  file=sys.stderr)
+            print(reverse.stdout, reverse.stderr, file=sys.stderr)
+            return 1
         print("vellum_boundary_contract_verified=valid-current;planted-private-include")
         return 0
 

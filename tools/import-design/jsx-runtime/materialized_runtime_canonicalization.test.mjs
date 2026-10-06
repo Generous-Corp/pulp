@@ -202,3 +202,13 @@ test('preserves vendor assets in unquoted and CSS references', () => {
   assert.match(result.html, /src=react/);
   assert.match(result.html, /url\(react\)/);
 });
+
+test('preserves vendor assets in an unquoted attribute reference alone', () => {
+  const react = trustedReact();
+  const result = canonicalizeSynthetic({
+    html: '<img src=react><script src="react"></script>',
+    assets: [vendorAsset('react', react, 'react')],
+  });
+  assert.equal(result.assets.length, 1);
+  assert.match(result.html, /src=react/);
+});

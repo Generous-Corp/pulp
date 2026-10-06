@@ -21,6 +21,7 @@ SCHEMA = "pulp.ui.package.v1"
 _MANIFEST_NAME = "pulp-package.json"
 _SOURCE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
+    ".m", ".mm",
     ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py",
 }
 _INCLUDE_RE = re.compile(r"(?:#\s*include|(?:import|export)\s+(?:[^\n]*?\s+from\s+)?)[ \t]*[<\"']([^>\"']+)[>\"']")
@@ -92,6 +93,16 @@ def _normalise(value: str) -> str:
     return value.replace("\\", "/").lstrip("./")
 
 
+def _resolved_repo_target(root: Path, source: Path, target: str) -> str | None:
+    """Resolve a source reference to a repository-relative path when possible."""
+    raw = Path(target)
+    candidate = (source.parent / raw) if target.startswith((".", "/")) else (root / raw)
+    try:
+        return candidate.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
 def _is_private_core_view_target(target: str) -> bool:
     normalised = _normalise(target)
     return ("core/view/src/" in normalised or
@@ -109,12 +120,14 @@ def _violations(root: Path, manifest: Manifest) -> list[str]:
             problems.append(f"{rel}: source is not UTF-8")
             continue
         for match in _INCLUDE_RE.finditer(text):
-            target = _normalise(match.group(1))
+            raw_target = match.group(1)
+            target = _resolved_repo_target(root, source, raw_target) or _normalise(raw_target)
             # A package may consume only the public installed-header surface.
             if _is_private_core_view_target(target):
                 problems.append(f"{rel}: private core/view include {target!r}")
         for match in _DYNAMIC_MODULE_RE.finditer(text):
-            target = match.group(2)
+            raw_target = match.group(2)
+            target = _resolved_repo_target(root, source, raw_target) or _normalise(raw_target)
             if _is_private_core_view_target(target):
                 problems.append(f"{rel}: private core/view module reference {target!r}")
     return problems
@@ -133,11 +146,13 @@ def _core_view_references(root: Path, manifests: tuple[Manifest, ...]) -> list[s
         except UnicodeDecodeError:
             continue
         for match in _INCLUDE_RE.finditer(text):
-            target = _normalise(match.group(1))
+            raw_target = match.group(1)
+            target = _resolved_repo_target(root, source, raw_target) or _normalise(raw_target)
             if any(target == prefix or target.startswith(prefix + "/") for prefix in forbidden):
                 problems.append(f"{rel}: core/view reaches extractable package {target!r}")
         for match in _DYNAMIC_MODULE_RE.finditer(text):
-            target = _normalise(match.group(2))
+            raw_target = match.group(2)
+            target = _resolved_repo_target(root, source, raw_target) or _normalise(raw_target)
             if any(target == prefix or target.startswith(prefix + "/") for prefix in forbidden):
                 problems.append(f"{rel}: core/view reaches extractable package {target!r}")
     return problems

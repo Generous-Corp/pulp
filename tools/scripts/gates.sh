@@ -132,6 +132,7 @@ LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
 VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
 VELLUM_BOUNDARY="$ROOT/tools/scripts/vellum_boundary_lint.py"
 CLEAN_OUTPUT_LINT="$ROOT/tools/ui-build/lint/clean_output_lint.py"
+CLEAN_OUTPUT_CORPUS="$ROOT/tools/ui-build/lint/fixtures/generated"
 CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -252,20 +253,25 @@ else
 fi
 
 # ── 0e. clean-output source fixture ────────────────────────────────────────
-# Exercise the reusable importer-output lint in the cheap gate. The linter is
-# fail-closed for both a missing and an empty source root, so invoke it even
-# when the checked-in fixture has disappeared. A conditional directory check
+# Exercise the reusable importer-output lint in the cheap gate against both the
+# small semantic fixture and the captured generated-output corpus. The linter
+# is fail-closed for both a missing and an empty source root, so invoke it even
+# when either checked-in root has disappeared. A conditional directory check
 # would turn that omission into a silent green gate. The companion unittest
 # plants every lint class and the missing/empty negative controls.
 if [ ! -f "$CLEAN_OUTPUT_LINT" ]; then
     echo "gates: clean-output linter is missing: $CLEAN_OUTPUT_LINT" >&2
     fail=1
 else
-    echo "" >&2
-    echo "▸ clean-output source fixture" >&2
-    if ! "$PYTHON" "$CLEAN_OUTPUT_LINT" "$ROOT/tools/ui-build/lint/fixtures/clean"; then
-        fail=1
-    fi
+    for clean_output_root in \
+        "$ROOT/tools/ui-build/lint/fixtures/clean" \
+        "$CLEAN_OUTPUT_CORPUS"; do
+        echo "" >&2
+        echo "▸ clean-output source root: $clean_output_root" >&2
+        if ! "$PYTHON" "$CLEAN_OUTPUT_LINT" "$clean_output_root"; then
+            fail=1
+        fi
+    done
 fi
 
 # ── 1. skill-sync ──────────────────────────────────────────────────────────

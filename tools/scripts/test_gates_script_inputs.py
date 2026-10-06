@@ -125,6 +125,14 @@ class GatesScriptInputsTests(unittest.TestCase):
             "style={{color: tokens.text}}>{value}</button>;\n"
             "}\n",
         )
+        self.write(
+            "tools/ui-build/lint/fixtures/generated/CapturedFilterPanel.tsx",
+            "export function CapturedFilterPanel({value, tokens}: "
+            "{value: number; tokens: {text: string}}) {\n"
+            "  return <button data-pulp-action=\"filter\" aria-label=\"Filter\" "
+            "style={{color: tokens.text}}>{value}</button>;\n"
+            "}\n",
+        )
         self.write("tools/ci/source_selftests.json", json.dumps({"schema_version": 1, "tests": [
             {"name": "beta", "argv": ["{repo}/tools/ci/test_beta.py"], "timeout": 120.0}]}) + "\n")
         inventory = {"tests": [

@@ -159,8 +159,8 @@ export function canonicalizeMaterializedRuntimeDocument(document, options = {}) 
       // "react-dom". Quotes, CSS delimiters, and tag whitespace remain valid
       // boundaries, while path/query characters remain part of the token.
       const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`(?:^|[^A-Za-z0-9_./?&=:+%\\-])${escaped}` +
-        `(?=$|[^A-Za-z0-9_./?&=:+%\\-])`).test(probe);
+      return new RegExp(`(?:^|[^A-Za-z0-9_./?&:+%\\-])${escaped}` +
+        `(?=$|[^A-Za-z0-9_./?&:+%\\-])`).test(probe);
     })();
   const removableIds = new Set([...removable].filter(([id, kind]) =>
     (kind !== 'babel' || babelCount > 0) &&
