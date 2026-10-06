@@ -9,6 +9,28 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09180"></a>
+## [0.918.0] - 2026-10-06
+
+- ci/cross platform check per ref concurrency ([#9647](https://github.com/Generous-Corp/pulp/pull/9647))
+- release/version bump ([#9716](https://github.com/Generous-Corp/pulp/pull/9716))
+- ci/merge group bootstrap cancelled ([#9689](https://github.com/Generous-Corp/pulp/pull/9689))
+- codex/b3 heapprofd current main 20261005 ([#9657](https://github.com/Generous-Corp/pulp/pull/9657))
+- fix/timeline phase1 tests heap processors ([#9644](https://github.com/Generous-Corp/pulp/pull/9644))
+- fix/scene3d null adapter frame ([#9675](https://github.com/Generous-Corp/pulp/pull/9675))
+- fix/settings section core destructible ([#9638](https://github.com/Generous-Corp/pulp/pull/9638))
+- fix/gpu probe software adapter ([#9682](https://github.com/Generous-Corp/pulp/pull/9682))
+- fix/scene3d host contracts ([#9678](https://github.com/Generous-Corp/pulp/pull/9678))
+- fix/pr test own repo ([#9671](https://github.com/Generous-Corp/pulp/pull/9671))
+- fix/gpu compute software adapter ([#9677](https://github.com/Generous-Corp/pulp/pull/9677))
+- release/version bump ([#9711](https://github.com/Generous-Corp/pulp/pull/9711))
+- fix/audit mismatch line ([#9708](https://github.com/Generous-Corp/pulp/pull/9708))
+- fix/safe relative path helper ([#9653](https://github.com/Generous-Corp/pulp/pull/9653))
+- fix/runner derive absolute build main ([#9687](https://github.com/Generous-Corp/pulp/pull/9687))
+- fix/windows scene3d tool launch ([#9692](https://github.com/Generous-Corp/pulp/pull/9692))
+- fix/msvc c2975 reverse buffer test ([#9698](https://github.com/Generous-Corp/pulp/pull/9698))
+- fix/portable pid alive ([#9697](https://github.com/Generous-Corp/pulp/pull/9697))
+
 <a id="v09170"></a>
 ## [0.917.0] - 2026-10-06
 
@@ -9906,6 +9928,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.918.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.918.0
 [0.917.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.917.0
 [0.916.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.916.0
 [0.915.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.915.0
