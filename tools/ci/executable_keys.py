@@ -97,14 +97,14 @@ sys.path.insert(0, str(HERE))
 import link_members  # noqa: E402
 import object_deps  # noqa: E402
 from spawn_closure import SpawnIndex  # noqa: E402
-from test_receipts_shadow import ALWAYS_RUN_NAME_RE  # noqa: E402
+from always_run_names import ALWAYS_RUN_NAME_RE  # noqa: E402
 
 SCHEMA = "pulp-executable-keys/v1"
 KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
 # The files whose base copy computes the keys and the selection over them;
 # touching any of them makes a plan select everything.
 KEY_CODE_PATHS = ("tools/ci/executable_keys.py", "tools/ci/link_members.py", "tools/ci/object_deps.py",
-                  "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/test_receipts_shadow.py",
+                  "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/always_run_names.py",
                   "tools/ci/executable_selection.py", "tools/ci/key_blind_executables.json")
 # Executables whose recorded bytes changed while their content-keyed source
 # key did not, as the reuse replay measured them (reuse_policy_replay.py

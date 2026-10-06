@@ -81,6 +81,10 @@ GATE_BUILD_SCOPE = {"PULP_BUILD_TESTS": "ON", "PULP_BUILD_EXAMPLES": "OFF"}
 # list is generated from the gate's configure, so a build of any other shape
 # cannot be compared with it, or written into it.
 SKIP_EXIT = 77
+# The list is written from the required macOS gate's configure. Another
+# platform registers a different set of tests (Linux-only selftests, other
+# feature switches), so its registrations cannot be compared with the list.
+GATE_SYSTEM_NAME = "Darwin"
 # Prefixes a literal string must start with to count as a repository path.
 REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/", "ship/",
                  "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
@@ -162,6 +166,31 @@ def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
     if build_type and build_type != "Release":
         reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
     return reasons
+
+
+def configured_system(build_dir: Path) -> str | None:
+    """CMAKE_SYSTEM_NAME as the configure recorded it. It is not a cache
+    variable: CMake writes it to CMakeFiles/<version>/CMakeSystem.cmake."""
+    for path in sorted(build_dir.glob("CMakeFiles/*/CMakeSystem.cmake"),
+                       key=lambda q: q.stat().st_mtime, reverse=True):
+        try:
+            m = re.search(r'set\(CMAKE_SYSTEM_NAME "([^"]*)"\)', path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if m:
+            return m.group(1)
+    return None
+
+
+def outside_gate_platform(build_dir: Path | None) -> str | None:
+    """Why this build cannot be compared with the list at all: it targets a
+    different system than the gate's. None for a gate-platform build, and for
+    one with no CMakeCache.txt to read."""
+    system = configured_system(build_dir) if build_dir else None
+    if not system or system == GATE_SYSTEM_NAME:
+        return None
+    return (f"CMAKE_SYSTEM_NAME={system} (the list is written from the {GATE_SYSTEM_NAME} gate's "
+            "configure, and another platform registers different tests)")
 
 
 def registered_from(test: dict, inventory: dict) -> str | None:
@@ -380,11 +409,25 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
+# A test run through the temp-leak guard (`python tmp_leak_guard.py [opts] --
+# CMD...`) is declared as the command it wraps; the guard is one more input.
+TMP_LEAK_GUARD = "tmp_leak_guard.py"
+
+
+def unwrap_guard(command: list[str]) -> tuple[list[str], list[str]]:
+    """(the wrapped command, the guard scripts that wrapped it)."""
+    if (len(command) > 2 and os.path.basename(command[0]).startswith("python")
+            and os.path.basename(command[1]) == TMP_LEAK_GUARD and "--" in command[2:]):
+        return command[command.index("--", 2) + 1:], [command[1]]
+    return command, []
+
+
 def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
                walker: Walker | None = None, tracked: set[str] | None = None) -> dict | None:
     props = {p["name"]: p["value"] for p in test.get("properties", [])}
     wd = Path(props.get("WORKING_DIRECTORY") or root)
-    kind, entry, args = classify(test.get("command") or [], root)
+    command, guards = unwrap_guard(test.get("command") or [])
+    kind, entry, args = classify(command, root)
     if kind == "undeclarable":
         return None
     w = walker or Walker(root)
@@ -417,6 +460,8 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
         w.walk_node(entry, seen)
     else:
         w.walk_shell(entry, seen)
+    for guard in guards:
+        w.walk_python(Path(guard) if os.path.isabs(guard) else wd / guard, search, seen)
     for a in args:
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
@@ -1083,6 +1128,15 @@ def main(argv: list[str]) -> int:
             return 2
         print(json.dumps(summary, indent=1, sort_keys=True))
         return 0
+    off_platform = outside_gate_platform(build_dir)
+    if off_platform and a.write:
+        print("script-test-inputs: refusing to write: " + off_platform + ".\nRegenerate from a "
+              f"{GATE_SYSTEM_NAME} gate-profile configure.", file=sys.stderr)
+        return 2
+    if off_platform:
+        print("script-test-inputs: SKIPPED: " + off_platform + ". The required gate checks the list; "
+              "this is a skip, not a pass.")
+        return SKIP_EXIT
     current = build_list(inventory, root, build_dir)
     off_profile = outside_gate_profile_build(build_dir) if "executables" in current else []
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and

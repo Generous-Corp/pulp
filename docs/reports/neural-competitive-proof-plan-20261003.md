@@ -1,4 +1,4 @@
-# Neural real-time competitive proof plan (2026-10-03)
+# Neural real-time competitive proof plan (2026-10-05 post-merge refresh)
 
 This document defines the evidence required before Pulp claims that a neural
 audio path outperforms an audited real-time engine or service. It is a proof
@@ -8,11 +8,14 @@ counter, or a model that merely produces plausible audio is insufficient.
 ## Current source boundary
 
 The source snapshot for this plan is `origin/main` at
-`b038559ab2d019566c4964d42c0786310c139860`. It includes the private CPU
+[`b09ce24505ef2325554688d6740118e6771b2302`](https://github.com/Generous-Corp/pulp/commit/b09ce24505ef2325554688d6740118e6771b2302). It includes the private CPU
 neural lifecycle facade, manifest/installed-asset admission, serialized NAM/TCN
 CPU bridge, the tools-only `tools/validation/mlx_worker_harness.py` probe,
-the Apple host-tier planning matrix, and the later CI/pluginval and CLAP-width
-refusals through merged PR9591. The MLX probe is
+the Apple host-tier planning matrix, the minimum-lead GPU proxy (PR9582),
+transactional NAM/TCN lifecycle (PR9622), hardened MLX named-model harness
+(PR9624), Apple Silicon serviceability record (PR9625), and the later
+CI/pluginval, host-scheduling, GPU-batching, and Windows portability merges.
+The MLX probe is
 default-off synthetic scheduling evidence; it is not wired into a plugin build
 and is not a shipped product/provider. The processor facade still executes CPU
 and records non-CPU requests as fallback or unavailable, so every MLX, Dawn,

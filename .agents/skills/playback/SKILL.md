@@ -1502,6 +1502,12 @@ by moving an assertion. Things to know before touching it:
   time order must sort, and a decoder that enforced sorted order would refuse
   every multi-lane program the compiler emits today.
 
+Allocate an aligned wire buffer with `::operator new[](bytes, std::align_val_t{N})`
+and free it with the matching `::operator delete[](p, std::align_val_t{N})`. The
+new-expression form `new (std::align_val_t{N}) std::byte[n]` compiles on Clang and
+GCC but MSVC rejects it (C2956: the usual aligned `operator delete[]` would be chosen
+as the placement deallocation function), so it breaks only the Windows build.
+
 ## Nested gain composes by multiplying; a placement fade rides beside the leaf; pan does neither
 
 `sequence_content_lowerer.cpp` flattens a `SequenceRef` into leaf clips on the

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
+import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -38,6 +40,18 @@ class WebclapRelevanceTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertFalse(webclap_relevance.is_relevant(path))
+
+    def test_required_job_is_hosted_unless_the_routing_variable_is_set(self) -> None:
+        # With PULP_WCLAP_RUNS_ON_JSON unset the expression's fallback is what
+        # GitHub parses; it must be the hosted label, as JSON.
+        workflow = (
+            Path(__file__).resolve().parents[2] / ".github" / "workflows" / "wclap-cloudflare.yml"
+        ).read_text(encoding="utf-8")
+        match = re.search(
+            r"runs-on: \$\{\{ fromJSON\(vars\.PULP_WCLAP_RUNS_ON_JSON \|\| '([^']*)'\) \}\}", workflow)
+        self.assertIsNotNone(match, "the job must route through PULP_WCLAP_RUNS_ON_JSON")
+        self.assertEqual(json.loads(match.group(1)), "ubuntu-latest")
+        self.assertEqual(workflow.count("runs-on:"), 1)
 
     def test_expensive_workflow_steps_are_guarded(self) -> None:
         workflow = (

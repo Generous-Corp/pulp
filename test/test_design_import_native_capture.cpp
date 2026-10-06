@@ -5,7 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
+#include "support/unique_temp_dir.hpp"
 #include <filesystem>
 #include <fstream>
 
@@ -15,14 +15,9 @@ namespace fs = std::filesystem;
 namespace {
 
 struct TemporaryDirectory {
-    fs::path path =
-        fs::temp_directory_path() /
-        ("pulp-design-ir-asset-base-" +
-         std::to_string(std::chrono::steady_clock::now()
-                            .time_since_epoch()
-                            .count()));
+    fs::path path = pulp::test::make_unique_temp_dir("pulp-design-ir-asset-base");
 
-    TemporaryDirectory() { fs::create_directories(path); }
+    TemporaryDirectory() = default;
     ~TemporaryDirectory() {
         std::error_code error;
         fs::remove_all(path, error);

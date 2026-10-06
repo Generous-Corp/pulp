@@ -84,6 +84,277 @@ def corpus(tests: list[dict], **pair_kw) -> rpr.Corpus:
     return rpr.Corpus([group(), head()], [pair(**pair_kw)], tests={"g1": tests})
 
 
+class CutoffTests(unittest.TestCase):
+    FIX = "f1x"
+
+    @staticmethod
+    def corpus(checkouts):
+        runs = [group(run_id=f"g{i}", checkout_sha=sha, created_at=f"2026-10-0{i}T12:00:00Z")
+                for i, sha in enumerate(checkouts, start=1)]
+        return rpr.Corpus(runs + [head()], [])
+
+    def contains(self, after_fix):
+        return lambda commit, checkout: after_fix.get(checkout)
+
+    def test_the_cutoff_is_the_first_group_containing_the_fix(self):
+        c = self.corpus(["a", "b", "c", "d"])
+        cut = rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": True, "c": True, "d": True}))
+        self.assertEqual((cut["since"], cut["group_run_id"], cut["groups_after"]),
+                         ("2026-10-02T12:00:00Z", "g2", 3))
+
+    def test_a_later_group_without_the_fix_leaves_no_time_window(self):
+        c = self.corpus(["a", "b", "c"])
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "do not contain it.*g3"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": True, "c": False}))
+
+    def test_an_unknown_answer_is_not_a_no(self):
+        c = self.corpus(["a", "b"])
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "cannot tell.*g1"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": None, "b": True}))
+        with self.assertRaisesRegex(rpr.CutoffUnproven, "no merge group"):
+            rpr.cutoff_after(c, self.FIX, self.contains({"a": False, "b": False}))
+
+    def test_the_cli_derives_since_from_the_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "c"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(run_id="g1", checkout_sha="old", created_at="2026-10-01T12:00:00Z"),
+                                                     group(run_id="g2", checkout_sha="new", created_at="2026-10-05T12:00:00Z"),
+                                                     head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [KeyBlindTests.pair(1, ["test/old-miss"]) | {"group_run_id": "g1"},
+                                                     KeyBlindTests.pair(2, []) | {"group_run_id": "g2"}])
+            listed = Path(tmp) / "list.json"
+            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}))
+            argv = ["key-blind", "--corpus", str(corpus), "--list", str(listed)]
+            answers = {"old": False, "new": True}
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX]), 0)
+            self.assertIn("since 2026-10-05T12:00:00Z: first group containing f1x is run g2", out.getvalue())
+            answers["new"] = None
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX]), 2)
+            self.assertIn("CUTOFF UNPROVEN", err.getvalue())
+            answers["new"] = True
+            with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
+                    mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                self.assertEqual(rpr.main(argv + ["--since-commit", self.FIX, "--since", "2026-10-01"]), 2)
+            self.assertIn("exclusive", err.getvalue())
+
+
+class SameBytesTests(unittest.TestCase):
+    T = "a test"
+
+    def run_with(self, digests, outcomes):
+        """digests: run -> sha of the test's executable (None: no record);
+        outcomes: run -> the test's outcome in that run's rows."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runs = [group(run_id="g1", created_at="2026-10-05T12:00:00Z"), head(run_id="p1")]
+            runs += [head(run_id=r, created_at=f"2026-10-0{i}T00:00:00Z") for i, r in enumerate(("w1", "w2"), 1)]
+            for run_id, outcome in outcomes.items():
+                rpr.write_jsonl(root / "tests" / f"{run_id}.jsonl.gz", [t("other"), t(self.T, outcome)])
+            corpus = rpr.Corpus(runs, [dict(pair(), source_key_head_run_id="p1")])
+            records = {r: None if d is None else {"executables": {self.T: "test/x"}, "binaries": {"test/x": d}}
+                       for r, d in digests.items()}
+            row = {"pr": 1, "group_run_id": "g1", "test_id": self.T, "outcome": "fail", "attempts": 2, "reason": "r"}
+            with mock.patch.object(rrc.Collector, "reuse_record", lambda self, run_id: records.get(run_id)):
+                (out,) = rrc.same_bytes_evidence(root, corpus, [row])
+            return out
+
+    def test_identical_bytes_and_a_third_run_passing_on_them_qualifies(self):
+        out = self.run_with({"p1": "aa", "g1": "aa", "w1": "bb", "w2": "aa"},
+                            {"p1": "pass", "g1": "fail", "w1": "pass", "w2": "pass"})
+        self.assertEqual((out["qualifies"], out["witness_run_id"]), (True, "w2"))   # w1 passed on other bytes
+
+    def test_bytes_that_moved_do_not_qualify(self):
+        out = self.run_with({"p1": "aa", "g1": "cc", "w1": "cc"}, {"p1": "pass", "g1": "fail", "w1": "pass"})
+        self.assertEqual((out["qualifies"], out["witness_run_id"]), (False, None))
+
+    def test_the_head_pass_alone_is_not_a_witness(self):
+        out = self.run_with({"p1": "aa", "g1": "aa", "w1": "aa"}, {"p1": "pass", "g1": "fail", "w1": "fail"})
+        self.assertEqual(out["qualifies"], False)
+
+    def test_a_missing_record_is_no_evidence(self):
+        out = self.run_with({"p1": None, "g1": "aa", "w1": "aa"}, {"p1": "pass", "g1": "fail", "w1": "pass"})
+        self.assertEqual((out["head_digest"], out["qualifies"]), (None, False))
+
+    def test_score_reports_the_line_and_still_fails_on_every_false_skip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "c"
+            rpr.write_jsonl(root / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(root / "pairs.jsonl", [pair()])
+            rpr.write_jsonl(root / "tests" / "g1.jsonl.gz", [t("skills-doc-sync", "fail", 2), t("other")])
+            evidence = lambda corpus_dir, corpus, rows, gh=None: [dict(r, head_run_id="p1", head_digest="aa",
+                                                                         group_digest="aa", witness_run_id="w",
+                                                                         qualifies=True) for r in rows]
+            argv = ["score", "--corpus", str(root), "--policy", "inert-drift"]
+            with mock.patch.object(rrc, "same_bytes_evidence", evidence), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv + ["--same-bytes"]), 1)
+            self.assertIn("same-bytes nondeterministic 1 of 1 false skips (net 0)", out.getvalue())
+            self.assertIn("witness w", out.getvalue())
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(rpr.main(argv), 1)
+            self.assertNotIn("same-bytes", out.getvalue())
+
+
+class Stage0Tests(unittest.TestCase):
+    W = ["pulp-test-a", "pulp-test-b"]
+
+    @staticmethod
+    def v2(group_run, head_run, unreached=(), rebuilt=(), scanned=False):
+        return {"pr": int(group_run[1:]), "group_run_id": group_run, "source_key_head_run_id": head_run,
+                "source_key": {"content_keyed": True, "cmake-codemodel-recorded": {
+                    "unreached_changed_binaries": [f"test/{u}" for u in unreached],
+                    "rebuilt": [f"test/{r}" for r in rebuilt], "data_scanned": scanned}}}
+
+    @staticmethod
+    def rec(binaries, bound=()):
+        return {"link": {f"test/{n}": {} for n in binaries}, "binaries": {f"test/{n}": d for n, d in binaries.items()},
+                "declared_commit_bound": [f"test/{b}" for b in bound]}
+
+    def stage0(self, pairs, records, checkouts, inside, lists):
+        runs = [group(run_id=g, checkout_sha=sha, created_at=f"2026-10-0{i}T12:00:00Z")
+                for i, (g, sha) in enumerate(checkouts.items(), start=1)]
+        corpus = rpr.Corpus(runs, pairs)
+        with mock.patch.object(rrc.Collector, "reuse_record", lambda self, run_id: records.get(run_id)), \
+                mock.patch.object(rrc, "key_blind_list_at", lambda collector, sha: lists.get(sha)):
+            return rrc.stage0_pairs(Path("/nonexistent"), corpus, "fix", self.W,
+                                    lambda fix, sha: inside.get(sha))
+
+    def test_each_watched_executable_is_classified_once(self):
+        records = {"h1": self.rec({"pulp-test-a": "x", "pulp-test-b": "y"}),
+                   "g1": self.rec({"pulp-test-a": "x", "pulp-test-b": "z"}, bound=["pulp-test-a"]),
+                   "h2": self.rec({"pulp-test-a": "x", "pulp-test-b": "y"}),
+                   "g2": self.rec({"pulp-test-a": "q", "pulp-test-b": "y"}),
+                   "h3": self.rec({"pulp-test-a": "x"}), "g3": self.rec({"pulp-test-a": "x", "pulp-test-b": "y"})}
+        out = self.stage0([self.v2("g1", "h1", rebuilt=["pulp-test-b"]),
+                           self.v2("g2", "h2", unreached=["pulp-test-a", "pulp-test-c"]),
+                           self.v2("g3", "h3"),
+                           self.v2("g4", "h4"), self.v2("g5", "h5"),
+                           dict(self.v2("g6", "h6"), source_key={"content_keyed": False})],
+                          records, {"g1": "s1", "g2": "s2", "g3": "s3", "g4": "s4", "g5": "s5", "g6": "s6"},
+                          {"s1": True, "s2": True, "s3": True, "s4": False, "s5": None, "s6": True},
+                          {"s1": {"pulp-test-a"}, "s2": set(), "s3": None})
+        rows = {r["group_run_id"]: r for r in out["pairs"]}
+        self.assertEqual(sorted(rows), ["g1", "g2", "g3"])           # g4 lacks the fix, g6 is not content-keyed
+        self.assertEqual(out["ancestry_unknown"], ["g5"])
+        self.assertEqual((rows["g1"]["relinked_identical"], rows["g1"]["rebuilt"], rows["g1"]["commit_bound"],
+                          rows["g1"]["key_blind"], rows["g1"]["relinked_clean"]),
+                         (["pulp-test-a"], ["pulp-test-b"], 1, 1, False))
+        self.assertEqual((rows["g2"]["regression"], rows["g2"]["relinked_identical"], rows["g2"]["unreached_outside"],
+                          rows["g2"]["key_blind"]), (["pulp-test-a"], ["pulp-test-b"], ["pulp-test-c"], 0))
+        self.assertEqual((rows["g3"]["missing"], rows["g3"]["key_blind"]), (["pulp-test-b"], None))
+
+    def test_a_pair_with_both_relinked_identically_is_relinked_clean(self):
+        records = {"h1": self.rec({"pulp-test-a": "x", "pulp-test-b": "y"}),
+                   "g1": self.rec({"pulp-test-a": "x", "pulp-test-b": "y"})}
+        (row,) = self.stage0([self.v2("g1", "h1")], records, {"g1": "s1"}, {"s1": True}, {"s1": set()})["pairs"]
+        self.assertTrue(row["relinked_clean"])
+        # Equal bytes the key still reports unreached are not evidence of a
+        # clean relink: the record and the key disagree.
+        (row,) = self.stage0([self.v2("g1", "h1", unreached=["pulp-test-a"])], records, {"g1": "s1"},
+                             {"s1": True}, {"s1": set()})["pairs"]
+        self.assertEqual((row["relinked_clean"], row["missing"]), (False, ["pulp-test-a"]))
+
+    def test_the_trailing_clean_run_ends_at_the_newest_pair(self):
+        rows = [{"pr": i, "group_run_id": f"g{i}", "unreached": u} for i, u in enumerate([[], ["x"], [], [], []])]
+        self.assertEqual(rrc.trailing_clean(rows, "g0", set()),
+                         {"count": 3, "restart_found": True, "broken_by": {"pr": 1, "group_run_id": "g1"}})
+        self.assertEqual(rrc.trailing_clean(rows, "g2", set())["count"], 3)     # counted from the restart
+        self.assertEqual(rrc.trailing_clean(rows, "g2", {"g4"})["count"], 0)     # a false skip breaks it
+        self.assertEqual(rrc.trailing_clean(rows, "g9", set())["restart_found"], False)
+        all_clean = [dict(r, unreached=[]) for r in rows]
+        self.assertEqual(rrc.trailing_clean(all_clean, "g2", set())["count"], 3)   # never past the restart
+
+    def test_the_detected_reader_control_reads_every_list_and_its_negative_control(self):
+        declared = lambda n, seen: {f"e{i}": {"data": "declared", "detected_sources": ["s"] if i < seen else []}
+                                    for i in range(n)}
+        docs = {"s1": {"executables_scanned_for": ["data"], "executables": declared(20, 20)},
+                "s2": {"executables_scanned_for": ["data"], "executables": {"e": {"data": "declared"}}},
+                "s3": {"executables_scanned_for": ["data"], "executables": declared(30, 10)},
+                "s4": {"executables_scanned_for": ["spawns"], "executables": {}}, "s5": None}
+        runs = [group(run_id=g, checkout_sha=sha) for g, sha in
+                (("g1", "s1"), ("g2", "s2"), ("g3", "s3"), ("g4", "s4"), ("g5", "s5"))]
+        pairs = [self.v2("g1", None, scanned=True), self.v2("g2", None, scanned=True), self.v2("g3", None),
+                 self.v2("g4", None), self.v2("g5", None)]
+        with mock.patch.object(rrc.Collector, "script_inputs_at", lambda self, sha: docs.get(sha)):
+            out = rrc.data_scan_control(Path("/nonexistent"), rpr.Corpus(runs, pairs))
+        self.assertEqual((out["lists"], out["declaring"], out["holds"], out["no_data_scan"], out["unreadable"]),
+                         (5, 3, 1, 1, 1))
+        self.assertEqual(out["fails"], {"detected_sources absent": 1, "below the detected-reader threshold": 1})
+        self.assertEqual((out["pairs_on_failing_list"], out["read_as_scanned_on_failing_list"]), (2, 1))
+
+    def test_a_missing_commit_is_not_a_tree_without_the_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "r"
+            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / "README").write_text("x")
+            subprocess.run(git + ["add", "README"], check=True)
+            subprocess.run(git + ["commit", "-q", "-m", "a"], check=True)
+            before = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            (repo / "tools" / "ci").mkdir(parents=True)
+            (repo / rrc.KEY_BLIND_LIST_PATH).write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {
+                "test/pulp-test-a": {}}}))
+            subprocess.run(git + ["add", rrc.KEY_BLIND_LIST_PATH], check=True)
+            subprocess.run(git + ["commit", "-q", "-m", "b"], check=True)
+            after = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            c = rrc.Collector.__new__(rrc.Collector)
+            c.repo, c.cache, c.gh = repo, Path(tmp) / "cache", None
+            self.assertEqual(rrc.key_blind_list_at(c, before), set())
+            self.assertEqual(rrc.key_blind_list_at(c, after), {"pulp-test-a"})
+            self.assertIsNone(rrc.key_blind_list_at(c, "0" * 40))   # git says "not in"; the commit is not here
+
+    def test_the_cli_reads_the_control_again_over_the_window_pairs_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "c"
+            rpr.write_jsonl(root / "runs.jsonl", [group(run_id="g1"), group(run_id="g2"), head()])
+            rpr.write_jsonl(root / "pairs.jsonl", [dict(pair(), group_run_id="g1"), dict(pair(), group_run_id="g2")])
+            seen = []
+            control = {"lists": 1, "declaring": 1, "holds": 1, "fails": {}, "no_data_scan": 0, "unreadable": 0,
+                       "pairs_on_failing_list": 0, "read_as_scanned_on_failing_list": 0}
+
+            def record(corpus_dir, corpus, repo, gh):
+                seen.append(sorted(p["group_run_id"] for p in corpus.pairs))
+                return control
+            row = {"pr": 1, "group_run_id": "g2", "unreached": [], "regression": [], "key_blind": 0, "commit_bound": 0,
+                   "relinked_clean": True, "rebuilt": [], "unreached_outside": []}
+            with mock.patch.object(rrc, "GitHub"), mock.patch.object(rrc, "ancestry"), \
+                    mock.patch.object(rrc, "stage0_pairs", return_value={"pairs": [row], "ancestry_unknown": []}), \
+                    mock.patch.object(rrc, "data_scan_control", record), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(rpr.main(["stage0", "--corpus", str(root), "--fix", "f", "--restart-run", "g2",
+                                           "--watch", "pulp-test-a"]), 0)
+            self.assertEqual(seen, [["g1", "g2"], ["g2"]])
+
+    def test_the_cli_exit_codes(self):
+        base = {"pairs": [], "ancestry_unknown": []}
+        clean = {"count": 3, "restart_found": True, "broken_by": None}
+        control = {"lists": 1, "declaring": 1, "holds": 1, "fails": {}, "no_data_scan": 0, "unreadable": 0,
+                   "pairs_on_failing_list": 0, "read_as_scanned_on_failing_list": 0}
+        regression = {"pr": 1, "group_run_id": "g1", "regression": ["pulp-test-a"], "key_blind": 0,
+                      "commit_bound": 0, "relinked_clean": False, "rebuilt": [], "unreached_outside": []}
+        cases = [(base, clean, control, 0), (dict(base, ancestry_unknown=["g1"]), clean, control, 2),
+                 (base, dict(clean, restart_found=False), control, 2), (dict(base, pairs=[regression]), clean, control, 1),
+                 (base, clean, dict(control, read_as_scanned_on_failing_list=1), 1)]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "c"
+            rpr.write_jsonl(root / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(root / "pairs.jsonl", [pair()])
+            for st, run, dc, code in cases:
+                with mock.patch.object(rrc, "GitHub"), mock.patch.object(rrc, "ancestry"), \
+                        mock.patch.object(rrc, "stage0_pairs", return_value=st), \
+                        mock.patch.object(rrc, "trailing_clean", return_value=run), \
+                        mock.patch.object(rrc, "data_scan_control", return_value=dc), \
+                        mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                    self.assertEqual(rpr.main(["stage0", "--corpus", str(root), "--fix", "f", "--watch", "pulp-test-a"]),
+                                     code, (st, run, dc))
+                self.assertIn("(c) detected-reader control", out.getvalue())
+                self.assertIn("(c) within the (b) window", out.getvalue())
+
+
 class KeyBlindTests(unittest.TestCase):
     @staticmethod
     def pair(pr, unreached, content_keyed=True):
@@ -1447,26 +1718,32 @@ class ScriptInputsTests(unittest.TestCase):
 
 
 class RunListingTests(unittest.TestCase):
-    def collector(self, tmp, pages):
+    def collector(self, tmp, pages, totals=None):
+        # Each response states a total_count: the given one, or by default
+        # the page's own length (every listing here is one page unless the
+        # test says otherwise).
         c = rrc.Collector.__new__(rrc.Collector)
         c.cache = Path(tmp)
+        c.listing_shortfalls = []
         calls = []
         gh = mock.Mock()
         gh.repository = "o/r"
 
         def json_(path):
             calls.append(path)
-            return {"workflow_runs": pages.pop(0) if pages else []}
+            batch = pages.pop(0) if pages else []
+            total = totals.pop(0) if totals else len(batch)
+            return {"workflow_runs": batch} | ({} if total is None else {"total_count": total})
         gh.json = json_
         c.gh = gh
         return c, calls
 
-    def listed(self, day):
-        return {"id": 1, "head_sha": "s", "head_branch": "b", "created_at": f"{day}T12:00:00Z", "updated_at": None,
+    def listed(self, day, run_id=1):
+        return {"id": run_id, "head_sha": "s", "head_branch": "b", "created_at": f"{day}T12:00:00Z", "updated_at": None,
                 "status": "completed", "conclusion": "success", "event": "pull_request", "run_attempt": 1, "path": "p"}
 
-    def listing(self, tmp, day, pages):
-        c, calls = self.collector(tmp, pages)
+    def listing(self, tmp, day, pages, totals=None):
+        c, calls = self.collector(tmp, pages, totals)
         start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
         runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
         return runs, calls, (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists()
@@ -1502,6 +1779,82 @@ class RunListingTests(unittest.TestCase):
             runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
             self.assertEqual(len(runs), 1)
             self.assertEqual(len(calls), 1)
+
+    def old_day(self):
+        return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).date().isoformat()
+
+    def test_a_listing_short_of_its_total_count_is_asked_again_then_fails_loudly(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort) as caught:
+                self.listing(tmp, day, [[self.listed(day)], [self.listed(day)]], totals=[2, 2])
+            self.assertIn(f"pull_request runs created {day}: listed 1 of total_count 2", str(caught.exception))
+            self.assertFalse((Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists())
+
+    def test_a_short_listing_that_is_whole_when_asked_again_is_used_and_recorded(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            whole = [self.listed(day, 1), self.listed(day, 2)]
+            c, calls = self.collector(tmp, [[self.listed(day)], whole], [2, 2])
+            start = dt.datetime.fromisoformat(day + "T00:00:00+00:00")
+            runs = c.list_runs("pull_request", start, start + dt.timedelta(hours=23))
+            cached = (Path(tmp) / "runs" / f"pull_request-{day}.json.gz").exists()
+            self.assertEqual(([r["id"] for r in runs], len(calls), cached), ([1, 2], 2, True))
+            self.assertEqual(c.listing_shortfalls, [{"event": "pull_request", "day": day, "listed": 1,
+                                                     "total_count": 2, "page": 1,
+                                                     "whole_when_asked_again": True}])
+
+    def test_a_truncated_later_page_fails(self):
+        day = self.old_day()
+        full = [self.listed(day, n) for n in range(100)]
+        with tempfile.TemporaryDirectory() as tmp:
+            runs, calls, _ = self.listing(tmp, day, [full, [self.listed(day, 100)]], totals=[101, 101])
+            self.assertEqual((len(runs), len(calls)), (101, 2))
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort) as caught:
+                self.listing(tmp, day, [full, [], full, []], totals=[101, 101, 101, 101])
+            self.assertIn("listed 100 of total_count 101 after page 2", str(caught.exception))
+
+    def test_a_repeated_run_does_not_count_twice(self):
+        # A run created while the pages are read shifts the next page by one,
+        # so its first row repeats; repeats must not make up a shortfall.
+        day = self.old_day()
+        full = [self.listed(day, n) for n in range(100)]
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort):
+                self.listing(tmp, day, [full, [self.listed(day, 99)], full, [self.listed(day, 99)]],
+                             totals=[101, 101, 101, 101])
+
+    def test_a_response_without_a_total_count_fails(self):
+        day = self.old_day()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rrc.ListingShort):
+                self.listing(tmp, day, [[self.listed(day)], [self.listed(day)]], totals=[None, None])
+
+    def test_the_cli_reports_a_recovered_shortfall(self):
+        manifest = {"merge_groups": 1, "pairs_with_head_run": 1, "record_coverage": {},
+                    "listing_shortfalls": [{"event": "pull_request", "day": "2026-10-05", "listed": 1,
+                                            "total_count": 2, "page": 1, "whole_when_asked_again": True}]}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc, "GitHub"), \
+                mock.patch.object(rrc.Collector, "collect", return_value=manifest), \
+                mock.patch("sys.stdout", new_callable=io.StringIO), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = rpr.main(["collect", "--since", "2026-10-05", "--out", str(Path(tmp) / "c")])
+        self.assertEqual(code, 0)
+        self.assertIn("instrument event: pull_request runs created 2026-10-05 listed 1 of total_count 2",
+                      stderr.getvalue())
+
+    def test_the_cli_exits_non_zero_naming_the_day(self):
+        err = rrc.ListingShort("pull_request", "2026-10-05", 1, 2, 1)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc, "GitHub"), \
+                mock.patch.object(rrc.Collector, "collect", side_effect=err), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = rpr.main(["collect", "--since", "2026-10-05", "--out", str(Path(tmp) / "c")])
+        self.assertEqual(code, 1)
+        self.assertIn("LISTING SHORT: pull_request runs created 2026-10-05: listed 1 of total_count 2",
+                      stderr.getvalue())
 
 
 class GraftTests(unittest.TestCase):

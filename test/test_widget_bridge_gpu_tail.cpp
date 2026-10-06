@@ -1,3 +1,4 @@
+#include "support/unique_temp_dir.hpp"
 #include "widget_bridge_test_support.hpp"
 
 template <typename Body>
@@ -629,9 +630,7 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
     // `assets/<file>` next to the ui.js; hosts publish the script's directory
     // via set_script_base_dir so those references resolve regardless of the
     // process CWD.
-    const auto base = fs::temp_directory_path()
-        / ("pulp-bridge-script-base-"
-           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto base = pulp::test::make_unique_temp_dir("pulp-bridge-script-base");
     fs::create_directories(base / "assets");
     { std::ofstream f(base / "assets" / "hero.png", std::ios::binary); f << "png"; }
     const auto reviewed_root = base / "reviewed";

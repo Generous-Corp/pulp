@@ -9,6 +9,76 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09160"></a>
+## [0.916.0] - 2026-10-05
+
+- release/version bump ([#9694](https://github.com/Generous-Corp/pulp/pull/9694))
+- fix/midi routing heap ledger ([#9667](https://github.com/Generous-Corp/pulp/pull/9667))
+- test/shared unique temp dir ([#9668](https://github.com/Generous-Corp/pulp/pull/9668))
+- fix/browser probe failure detail ([#9673](https://github.com/Generous-Corp/pulp/pull/9673))
+- ci/prepush format enforce ([#9674](https://github.com/Generous-Corp/pulp/pull/9674))
+- ci/key digest drop receipts shadow ([#9664](https://github.com/Generous-Corp/pulp/pull/9664))
+- fix/build fingerprint msvc lang ([#9643](https://github.com/Generous-Corp/pulp/pull/9643))
+- fix/macpro proxmox drift guard ([#9670](https://github.com/Generous-Corp/pulp/pull/9670))
+- ci/replay stage0 readback ([#9666](https://github.com/Generous-Corp/pulp/pull/9666))
+- fix/gcc fp contract off ([#9630](https://github.com/Generous-Corp/pulp/pull/9630))
+- codex/neural status postmerge refresh 20261005 successor4 ([#9665](https://github.com/Generous-Corp/pulp/pull/9665))
+- codex/neural status postmerge refresh 20261005 successor2 ([#9661](https://github.com/Generous-Corp/pulp/pull/9661))
+- codex/gpu batching prediction fresh 20261005 ([#9635](https://github.com/Generous-Corp/pulp/pull/9635))
+- release/version bump ([#9656](https://github.com/Generous-Corp/pulp/pull/9656))
+- test/minos pin linux arm64 ([#9617](https://github.com/Generous-Corp/pulp/pull/9617))
+- fix/windows pid probe no ctrl c ([#9623](https://github.com/Generous-Corp/pulp/pull/9623))
+- codex/dspx04 minimal host ([#9496](https://github.com/Generous-Corp/pulp/pull/9496))
+- test/hydrate fetch budget spent ([#9646](https://github.com/Generous-Corp/pulp/pull/9646))
+- test/dbus honest fail owns no bus ([#9618](https://github.com/Generous-Corp/pulp/pull/9618))
+- fix/script inputs skip other platforms ([#9627](https://github.com/Generous-Corp/pulp/pull/9627))
+- ci/replay readback derived ([#9645](https://github.com/Generous-Corp/pulp/pull/9645))
+- fix/gpu trace overhead resource import ([#9641](https://github.com/Generous-Corp/pulp/pull/9641))
+
+<a id="v09150"></a>
+## [0.915.0] - 2026-10-05
+
+- release/version bump ([#9642](https://github.com/Generous-Corp/pulp/pull/9642))
+- fix/build dir lock test start order ([#9640](https://github.com/Generous-Corp/pulp/pull/9640))
+- fix/windows dawn kernelbase link ([#9610](https://github.com/Generous-Corp/pulp/pull/9610))
+- fix/windows aligned new wire test ([#9614](https://github.com/Generous-Corp/pulp/pull/9614))
+- fix/windows portable test env ([#9608](https://github.com/Generous-Corp/pulp/pull/9608))
+- fix/windows near macro tests ([#9606](https://github.com/Generous-Corp/pulp/pull/9606))
+- fix/windows catch literal zero ([#9615](https://github.com/Generous-Corp/pulp/pull/9615))
+- fix/windows test link gaps ([#9613](https://github.com/Generous-Corp/pulp/pull/9613))
+- ci/replay listing total count ([#9636](https://github.com/Generous-Corp/pulp/pull/9636))
+
+<a id="v09140"></a>
+## [0.914.0] - 2026-10-05
+
+- release/version bump ([#9637](https://github.com/Generous-Corp/pulp/pull/9637))
+- codex/p4 host scheduling after p3 20261005 ([#9620](https://github.com/Generous-Corp/pulp/pull/9620))
+- ci/delist objc stubs key blind ([#9634](https://github.com/Generous-Corp/pulp/pull/9634))
+- fix/hydrate unshallow fetch timeout ([#9632](https://github.com/Generous-Corp/pulp/pull/9632))
+- codex/gpu batching prediction 20261005 ([#9631](https://github.com/Generous-Corp/pulp/pull/9631))
+- ci/nightly windows test after partial build ([#9626](https://github.com/Generous-Corp/pulp/pull/9626))
+- fix/governed build grep sigpipe ([#9633](https://github.com/Generous-Corp/pulp/pull/9633))
+- codex/gpu audio minlead sr 20261005 ([#9582](https://github.com/Generous-Corp/pulp/pull/9582))
+- codex/nam tcn lifecycle 20261005 ([#9622](https://github.com/Generous-Corp/pulp/pull/9622))
+
+<a id="v09131"></a>
+## [0.913.1] - 2026-10-05
+
+- release/version bump ([#9628](https://github.com/Generous-Corp/pulp/pull/9628))
+- fix/forge prompt by file ([#9621](https://github.com/Generous-Corp/pulp/pull/9621))
+- codex/neural host serviceability 20261005 ([#9625](https://github.com/Generous-Corp/pulp/pull/9625))
+- codex/neural mlx harness hardening 20261005 ([#9624](https://github.com/Generous-Corp/pulp/pull/9624))
+- codex/dsp e042 tempo delay wrapper 20261004 ([#9540](https://github.com/Generous-Corp/pulp/pull/9540))
+- fix/daw smoke copy off macos ([#9616](https://github.com/Generous-Corp/pulp/pull/9616))
+- fix/script inputs linux legs ([#9607](https://github.com/Generous-Corp/pulp/pull/9607))
+- test/rack maker intent arch ([#9612](https://github.com/Generous-Corp/pulp/pull/9612))
+- perf/families word set ([#9609](https://github.com/Generous-Corp/pulp/pull/9609))
+- ci/replay runs cache settle ([#9597](https://github.com/Generous-Corp/pulp/pull/9597))
+- codex/neural provenance refresh 20261005 ([#9605](https://github.com/Generous-Corp/pulp/pull/9605))
+- fix/node tests prefer managed chrome ([#9603](https://github.com/Generous-Corp/pulp/pull/9603))
+- codex/mlx named model implementation 20261005 ([#9577](https://github.com/Generous-Corp/pulp/pull/9577))
+- test/spawn scan loader coverage ([#9604](https://github.com/Generous-Corp/pulp/pull/9604))
+
 <a id="v09130"></a>
 ## [0.913.0] - 2026-10-05
 
@@ -9823,6 +9893,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.916.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.916.0
+[0.915.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.915.0
+[0.914.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.914.0
+[0.913.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.913.1
 [0.913.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.913.0
 [0.912.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.912.0
 [0.911.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.911.0

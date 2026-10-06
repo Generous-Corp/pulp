@@ -28,6 +28,10 @@ add_executable(pulp-test-wam-adapter test_wam_adapter.cpp ${CMAKE_SOURCE_DIR}/co
 target_link_libraries(pulp-test-wam-adapter PRIVATE Catch2::Catch2WithMain pulp::format pulp::state pulp::runtime pulp::events pulp::midi pulp::audio)
 catch_discover_tests(pulp-test-wam-adapter)
 
+pulp_add_test_suite(pulp-test-signal-graph-control-authority
+    SOURCES test_signal_graph_control_authority.cpp
+    LIBRARIES pulp::host pulp::signal pulp::inspect-graph-runtime)
+
 # Parameter attachment tests
 pulp_add_test_suite(pulp-test-param-attachment GROUP pulp-test-group-app-view
     LIBRARIES pulp::view)
@@ -579,7 +583,15 @@ target_include_directories(pulp-test-audio-matrix PRIVATE ${CMAKE_SOURCE_DIR}/ex
 catch_discover_tests(pulp-test-audio-matrix)
 # Cross-platform byte golden. Keep contraction policy target-local: this test
 # owns a deliberately exact arithmetic contract; unrelated production/test
-# targets retain the project's normal optimization policy.
+# targets retain the project's normal optimization policy. It is stricter than
+# tools/cmake/PulpFloatingPointContraction.cmake, which turns contraction off
+# only for GCC and leaves Clang/AppleClang contracting within one expression.
+# It is not load-bearing on AppleClang today: removing it leaves the golden
+# byte-exact (measured 2026-10-05). It guards the golden
+# (test/fixtures/audio/cross_platform_signal_chain.wav) against a future
+# in-expression a*b+c that AppleClang's default `on` would fuse, because the
+# golden's contract is byte stability across compilers. GCC gets `off` from the
+# project policy; MSVC keeps /fp:strict.
 add_executable(pulp-test-cross-platform-audio-golden
     test_cross_platform_audio_golden.cpp)
 target_link_libraries(pulp-test-cross-platform-audio-golden
