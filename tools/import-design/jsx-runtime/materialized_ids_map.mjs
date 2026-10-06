@@ -350,6 +350,12 @@ export function assignMaterializedSourceIds(sources, previous = undefined) {
         local_path: owner.local_path,
         content_hash: owner.content_hash,
       };
+      // A historical key can become current again after a source edit is
+      // reverted. Remove the promoted key from aliases before retaining the
+      // displaced current record; otherwise canonical validation sees the new
+      // current key duplicated as both current and historical.
+      owner.aliases = (owner.aliases ?? []).filter(alias =>
+        !sameSource(alias, row.record) && !sameSource(alias, prior));
       owner.component = row.record.component;
       owner.local_path = row.record.local_path;
       owner.content_hash = row.record.content_hash;

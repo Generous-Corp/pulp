@@ -64,6 +64,23 @@ test('mints deterministic ids and carries them through path and content edits', 
   assert.equal(editedEntry.aliases[0].local_path, 'Button.tsx#0');
 });
 
+test('historical source keys can reactivate without duplicate aliases', () => {
+  const first = assignMaterializedSourceIds([
+    source('Panel', 'Panel.tsx#button'),
+  ]);
+  const edited = assignMaterializedSourceIds([
+    source('Panel', 'Panel.tsx#renamed', HASH_A),
+  ], first.map);
+  const restored = assignMaterializedSourceIds([
+    source('Panel', 'Panel.tsx#button'),
+  ], edited.map);
+  assert.equal(restored.assignments[0].id, first.assignments[0].id);
+  assert.doesNotThrow(() => normalizeMaterializedIdsMap(restored.map));
+  assert.equal(restored.map.entries[0].local_path, 'Panel.tsx#button');
+  assert.equal(restored.map.entries[0].aliases.length, 1);
+  assert.equal(restored.map.entries[0].aliases[0].local_path, 'Panel.tsx#renamed');
+});
+
 test('exact source keys reuse their prior id without minting or mutation', () => {
   const first = assignMaterializedSourceIds([
     source('Header', 'Header.tsx#title'),
