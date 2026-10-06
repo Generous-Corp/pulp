@@ -1,6 +1,7 @@
 #include <pulp/audio/sample_bank.hpp>
 
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/safe_relative_path.hpp>
 
 #include <choc/text/choc_JSON.h>
 #include <choc/text/choc_UTF8.h>
@@ -108,18 +109,8 @@ bool safe_identifier(std::string_view value) {
 }
 
 bool safe_relative_path(std::string_view value) {
-    if (value.empty() || value.front() == '/' || value.find('\\') != value.npos ||
-        value.find(':') != value.npos || value.find('\0') != value.npos)
-        return false;
-    std::filesystem::path path(value);
-    if (path.is_absolute())
-        return false;
-    for (const auto& component : path) {
-        const auto text = component.string();
-        if (text.empty() || text == "." || text == "..")
-            return false;
-    }
-    return path.generic_string() == value;
+    const std::filesystem::path path(value);
+    return pulp::runtime::is_safe_relative_path(path) && path.generic_string() == value;
 }
 
 /// choc's JSON parser rejects malformed UTF-8 outright, but the writer passes

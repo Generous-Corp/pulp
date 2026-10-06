@@ -97,3 +97,12 @@ the shared contract in
 - [`kits`](../kits/SKILL.md) — reusable Pulp code/UI/templates → a project
 - [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
 - [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar
+
+## Archive entry names are screened portably
+
+Content-pack archive entries pass through `pulp::runtime::is_safe_relative_path`
+before extraction and `path_within` after the join. The helper refuses rooted
+forms (`/x`, `\x`, `C:x`, `\\server\share`), `.`/`..`/empty components, and any
+`\` or `:` inside a component on every OS, so a pack whose names would escape on
+Windows is refused on macOS and Linux as well. A pack authored with backslash
+separators or colons in file names therefore fails validation everywhere.
