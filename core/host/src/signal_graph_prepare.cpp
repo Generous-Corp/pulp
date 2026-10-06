@@ -20,6 +20,7 @@
 #include <pulp/runtime/log.hpp>
 #include <queue>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -758,6 +759,50 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                                                 0.0f);
                 rt.audio_rate_accum.resize(ids.size());
             }
+        }
+    }
+
+    // Keep the serial reference walk's ordinary main-bus audio fan-in in the
+    // same canonical endpoint order as the routed runtime plan. The reduction
+    // is floating-point and therefore order-sensitive; sorting the whole lane
+    // would change authored MIDI, automation, feedback, or sidechain order, so
+    // only ordinary (feedforward, non-sidechain) audio entries are replaced in
+    // their existing positions. The connection index is the deterministic
+    // tie-breaker for duplicate endpoint identities, matching the graph plan.
+    const auto ordinary_audio = [&](const NodeRuntime::EdgeRef& edge) {
+        const auto& connection = cg->connections[edge.connection_index];
+        return !connection.feedback && !connection.midi && !connection.automation &&
+               !connection.audio_rate_modulation && !connection.sidechain;
+    };
+    const auto connection_less = [&](const NodeRuntime::EdgeRef& lhs,
+                                     const NodeRuntime::EdgeRef& rhs) {
+        const auto& left = cg->connections[lhs.connection_index];
+        const auto& right = cg->connections[rhs.connection_index];
+        const auto left_key = std::tuple{
+            left.source_node,
+            left.source_port,
+            left.dest_node,
+            left.dest_port,
+        };
+        const auto right_key = std::tuple{
+            right.source_node,
+            right.source_port,
+            right.dest_node,
+            right.dest_port,
+        };
+        if (left_key != right_key) return left_key < right_key;
+        return lhs.connection_index < rhs.connection_index;
+    };
+    for (auto& [_, rt] : cg->runtime) {
+        std::vector<NodeRuntime::EdgeRef> ordinary;
+        ordinary.reserve(rt.inbound_audio_edges.size());
+        for (const auto& edge : rt.inbound_audio_edges) {
+            if (ordinary_audio(edge)) ordinary.push_back(edge);
+        }
+        std::sort(ordinary.begin(), ordinary.end(), connection_less);
+        std::size_t ordinary_index = 0;
+        for (auto& edge : rt.inbound_audio_edges) {
+            if (ordinary_audio(edge)) edge = ordinary[ordinary_index++];
         }
     }
 
