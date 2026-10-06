@@ -58,6 +58,27 @@ def _materialized_contract_required(prefix: Path, source: Path) -> bool:
     return _version_tuple(version) >= _version_tuple(floor)
 
 
+def _runtime_manifest(source_runtime: Path) -> list[Path]:
+    """Return the shipped runtime paths from the source manifest.
+
+    The manifest is authoritative because the runtime contains both modules
+    and data files (currently a JSON interaction protocol). Enumerating only
+    ``*.mjs`` silently lets a stale JSON payload pass the SDK completeness
+    check.
+    """
+    manifest = source_runtime / "runtime_manifest.txt"
+    entries: list[Path] = []
+    for raw in manifest.read_text(encoding="utf-8").splitlines():
+        value = raw.split("#", 1)[0].strip()
+        if not value:
+            continue
+        relative = Path(value)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"invalid runtime manifest entry: {value!r}")
+        entries.append(relative)
+    return entries
+
+
 def check(prefix: Path, source: Path) -> list[str]:
     """Return a list of problems; empty means the SDK is consistent."""
     problems: list[str] = []
@@ -104,31 +125,29 @@ def check(prefix: Path, source: Path) -> list[str]:
             f"(copy {src_contract} -> {contract})"
         )
 
-    # The manifest is the shipping contract, including non-JavaScript assets
-    # such as interaction_plan_protocol.json. Checking only *.mjs lets a stale
-    # JSON protocol survive an otherwise byte-identical SDK check.
-    manifest = src_runtime / "runtime_manifest.txt"
-    if not manifest.is_file():
-        problems.append(f"runtime manifest missing from source: {manifest}")
+    try:
+        shipped = _runtime_manifest(src_runtime)
+    except (OSError, ValueError) as exc:
+        problems.append(f"cannot read source runtime manifest: {exc}")
         return problems
-    shipped_names = tuple(
-        line.strip() for line in manifest.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    )
-    if not shipped_names:
-        problems.append(f"runtime manifest is empty: {manifest}")
+    if not shipped:
+        problems.append(f"source runtime manifest is empty: {src_runtime}")
         return problems
 
-    for name in shipped_names:
-        src = src_runtime / name
-        installed = runtime / name
+    for relative in shipped:
+        src = src_runtime / relative
+        installed = runtime / relative
         if not src.is_file():
-            problems.append(f"source runtime manifest entry is missing: {name}")
-        elif not installed.is_file():
-            problems.append(f"runtime asset missing from the SDK: {name}")
+            problems.append(f"runtime file missing from source tree: {relative}")
+            continue
+        if not installed.exists():
+            problems.append(f"runtime file missing from the SDK: {relative}")
         elif not filecmp.cmp(src, installed, shallow=False):
+            # The message names the fix, because the instinct on seeing this is
+            # to rebuild the binary — which is already current and is not what
+            # drifted.
             problems.append(
-                f"runtime asset is STALE in the SDK: {name} "
+                f"runtime module is STALE in the SDK: {src.name} "
                 f"(copy {src} -> {installed}; rebuilding the binary will not "
                 "fix it)")
 

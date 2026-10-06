@@ -22,6 +22,15 @@ class CheckSdkCompleteTests(unittest.TestCase):
         source_runtime.mkdir(parents=True)
         (self.prefix / "bin/pulp-import-design").write_text("importer")
         (source_runtime / "capture.mjs").write_text("capture")
+        (source_runtime / "interaction_plan_protocol.json").write_text(
+            '{"version":1}\n'
+        )
+        (runtime / "interaction_plan_protocol.json").write_text(
+            '{"version":1}\n'
+        )
+        (source_runtime / "runtime_manifest.txt").write_text(
+            "capture.mjs\ninteraction_plan_protocol.json\n"
+        )
         (runtime / "capture.mjs").write_text("capture")
         (source_runtime / "interaction_plan_protocol.json").write_text("protocol")
         (runtime / "interaction_plan_protocol.json").write_text("protocol")
@@ -84,6 +93,16 @@ class CheckSdkCompleteTests(unittest.TestCase):
         )
         problems = complete.check(self.prefix, self.source)
         self.assertTrue(any("contract is STALE" in problem for problem in problems))
+
+    def test_manifest_json_stale_bytes_are_rejected(self) -> None:
+        (self.prefix / "version.txt").write_text("0.918.0\n")
+        (self.prefix / "bin/browser_capture-v1/interaction_plan_protocol.json").write_text(
+            '{"version":0}\n'
+        )
+        problems = complete.check(self.prefix, self.source)
+        self.assertTrue(
+            any("interaction_plan_protocol.json" in problem for problem in problems)
+        )
 
     def test_historical_matrix_without_floor_keeps_node_optional(self) -> None:
         (self.prefix / "version.txt").write_text("0.790.1\n")
