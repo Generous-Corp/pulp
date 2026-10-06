@@ -588,6 +588,27 @@
       ]
     },
     {
+      "name": "pulp-editor-bridge-contract-gate-selftest",
+      "argv": [
+        "{repo}/tools/bridge/bridge_contract_gate_checks.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "pulp-editor-bridge-contract-safety-selftest",
+      "argv": [
+        "{repo}/tools/bridge/bridge_contract_safety_checks.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "pulp-editor-bridge-generator-selftest",
+      "argv": [
+        "{repo}/tools/bridge/bridge_gen_checks.py"
+      ],
+      "timeout": 60.0
+    },
+    {
       "name": "queue-batch-attribute-selftest",
       "argv": [
         "{repo}/tools/scripts/test_queue_batch_attribute.py"

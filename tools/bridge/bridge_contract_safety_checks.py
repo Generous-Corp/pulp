@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Positive and planted-negative checks for bridge contract safety auditing."""
 
+# CTest input tracking: safety is defined by the generator's transformed names
+# and the checked-in contract source.
+# "tools/bridge/bridge_contract_safety.py"
+# "tools/bridge/bridge_gen.py"
+# "tools/bridge/bridge.toml"
+
 from __future__ import annotations
 
 import importlib.util
@@ -47,10 +53,46 @@ class BridgeContractSafetyChecks(unittest.TestCase):
         self.assertIn("generated TypeScript wrapper collision: fooBar", problems)
 
     def test_reserved_typescript_wrapper_is_rejected(self) -> None:
+        for name in ("class", "eval", "arguments"):
+            data = load_contract(
+                'version = 1\nname = "editor"\n[[commands]]\nname = "'
+                f'{name}"\n'
+            )
+            self.assertIn(
+                f"wrapper '{name}' is reserved in TypeScript",
+                "\n".join(auditor.audit(data)),
+            )
+
+    def test_reserved_typescript_request_parameters_are_rejected(self) -> None:
+        for name in ("interface", "await", "var", "yield", "abstract", "eval", "arguments"):
+            data = load_contract(
+                'version = 1\nname = "editor"\n[[commands]]\nname = "set_value"\n'
+                f'request = [{{name="{name}", type="string"}}]\n'
+            )
+            problems = "\n".join(auditor.audit(data))
+            self.assertIn(
+                f"field '{name}' is reserved in TypeScript parameter position",
+                problems,
+            )
+
+    def test_contextual_typescript_identifiers_remain_valid_parameters(self) -> None:
         data = load_contract(
-            'version = 1\nname = "editor"\n[[commands]]\nname = "class"\n'
+            'version = 1\nname = "editor"\n[[commands]]\nname = "set_value"\n'
+            'request = [{name="type", type="string"}, '
+            '{name="get", type="string"}, {name="from", type="string"}, '
+            '{name="is", type="string"}]\n'
         )
-        self.assertIn("wrapper 'class' is reserved in TypeScript", "\n".join(auditor.audit(data)))
+        self.assertEqual(auditor.audit(data), [])
+
+    def test_transport_request_parameter_cannot_shadow_wrapper_transport(self) -> None:
+        data = load_contract(
+            'version = 1\nname = "editor"\n[[commands]]\nname = "set_value"\n'
+            'request = [{name="transport", type="string"}]\n'
+        )
+        self.assertIn(
+            "'transport' collides with the generated TypeScript transport parameter",
+            "\n".join(auditor.audit(data)),
+        )
 
     def test_empty_transformed_names_are_rejected(self) -> None:
         data = load_contract(

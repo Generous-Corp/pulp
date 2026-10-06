@@ -8,6 +8,15 @@ names are unsafe.  ``--write`` is provided for local regeneration after the
 source has passed the same safety audit.
 """
 
+# CTest input tracking: keep dynamic module loading visible to the affected
+# test selector so safety or generator changes rerun this production gate.
+# "tools/bridge/bridge_contract_safety.py"
+# "tools/bridge/bridge_gen.py"
+# "tools/bridge/bridge.toml"
+# "tools/bridge/generated_editor_bridge.hpp"
+# "tools/bridge/generated_editor_bridge.ts"
+# "docs/reference/generated-editor-bridge-contract.md"
+
 from __future__ import annotations
 
 import argparse

@@ -43,13 +43,18 @@ CPP_KEYWORDS = frozenset(
 
 TS_KEYWORDS = frozenset(
     """
-    any await boolean break case catch class const continue debugger declare default
-    delete do else enum export extends false finally for from function if implements
-    import in infer instanceof interface let module namespace never new null number object
-    package private protected public readonly return satisfies static string super switch
-    symbol this throw true try type typeof undefined unique unknown var void while with yield
+    abstract await break case catch class const continue debugger default delete do
+    else enum export extends false finally for function if implements import in
+    instanceof interface let new null package private protected public return static
+    super switch this throw true try typeof var void while with yield
     """.split()
 )
+
+# Contextual TypeScript words (for example ``type``, ``get``, ``from`` and
+# ``is``) remain legal binding identifiers.  Only strict/future-reserved words
+# plus the two strict-mode restricted bindings are rejected here.
+TS_PARAMETER_KEYWORDS = TS_KEYWORDS | frozenset({"arguments", "eval"})
+TS_WRAPPER_RESERVED = TS_PARAMETER_KEYWORDS
 
 TS_GENERATED_ALIASES = {
     "EditorBridgeCommand",
@@ -103,6 +108,17 @@ def audit(data: dict[str, Any]) -> list[str]:
                     f"{section}.{row['name']}.{field_key} field "
                     f"'{name}' is reserved in C++"
                 )
+            if section == "commands" and field_key == "request":
+                if name in TS_PARAMETER_KEYWORDS:
+                    problems.append(
+                        f"{section}.{row['name']}.{field_key} field "
+                        f"'{name}' is reserved in TypeScript parameter position"
+                    )
+                if name == "transport":
+                    problems.append(
+                        f"{section}.{row['name']}.{field_key} field "
+                        "'transport' collides with the generated TypeScript transport parameter"
+                    )
 
     for row in data["commands"]:
         title = generator.type_name(row["name"])
@@ -113,7 +129,7 @@ def audit(data: dict[str, Any]) -> list[str]:
         wrapper = generator.camel_name(row["name"])
         if not wrapper:
             problems.append(f"commands.{row['name']} produces an empty TypeScript wrapper name")
-        elif wrapper in TS_KEYWORDS:
+        elif wrapper in TS_WRAPPER_RESERVED:
             problems.append(
                 f"commands.{row['name']} wrapper '{wrapper}' is reserved in TypeScript"
             )
