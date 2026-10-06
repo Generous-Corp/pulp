@@ -216,11 +216,13 @@ def producer_targets(tests: list[dict], model: inventory.CodeModel) -> tuple[dic
     """The CMake targets whose products each test runs, and the tests a
     bounded run cannot be trusted to satisfy.
 
-    A test is unsatisfiable when it needs a CTest fixture (a bounded run does
-    not set fixtures up), or names a build-tree file that no non-example
-    target produces. Example targets exist only when examples are configured,
-    so a reader of their products would map differently per configuration;
-    it blocks instead, in every configuration alike."""
+    A test is unsatisfiable when it needs a CTest fixture whose setup is not
+    registered in this CTest inventory, or names a build-tree file that no
+    non-example target produces. CTest runs a registered FIXTURES_SETUP test
+    automatically for a bounded selection, so a complete fixture graph is
+    safe to map. Example targets exist only when examples are configured, so a
+    reader of their products would map differently per configuration; it
+    blocks instead, in every configuration alike."""
     owner: dict[str, str] = {}
     for target in model.targets.values():
         if target.source_dir == "examples" or target.source_dir.startswith("examples/"):
@@ -231,9 +233,24 @@ def producer_targets(tests: list[dict], model: inventory.CodeModel) -> tuple[dic
     build_root = os.path.normpath(model.build_root)
     targets: dict[str, set[str]] = {}
     unsatisfiable: set[str] = set()
+    provided_fixtures: set[str] = set()
     for test in tests:
         props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
-        if props.get("FIXTURES_REQUIRED"):
+        setup = props.get("FIXTURES_SETUP")
+        if isinstance(setup, list):
+            provided_fixtures.update(str(fixture) for fixture in setup)
+        elif setup:
+            provided_fixtures.add(str(setup))
+    for test in tests:
+        props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
+        required = props.get("FIXTURES_REQUIRED")
+        if isinstance(required, list):
+            required_fixtures = {str(fixture) for fixture in required}
+        elif required:
+            required_fixtures = {str(required)}
+        else:
+            required_fixtures = set()
+        if required_fixtures - provided_fixtures:
             unsatisfiable.add(test["name"])
         words = list(test.get("command") or [])
         for key in ("ENVIRONMENT", "REQUIRED_FILES"):

@@ -24,7 +24,8 @@ BUILD = "/b"
 
 
 def ctest(name: str, *command: str, labels: list[str] | None = None,
-          fixtures: list[str] | None = None, lock: list[str] | None = None) -> dict:
+          fixtures: list[str] | None = None, fixture_setup: list[str] | None = None,
+          lock: list[str] | None = None) -> dict:
     properties = [{"name": "WORKING_DIRECTORY", "value": "/repo"}]
     if lock:
         properties.append({"name": "RESOURCE_LOCK", "value": lock})
@@ -32,6 +33,8 @@ def ctest(name: str, *command: str, labels: list[str] | None = None,
         properties.append({"name": "LABELS", "value": labels})
     if fixtures:
         properties.append({"name": "FIXTURES_REQUIRED", "value": fixtures})
+    if fixture_setup:
+        properties.append({"name": "FIXTURES_SETUP", "value": fixture_setup})
     return {"name": name, "command": list(command or ["python3", "x.py"]), "properties": properties}
 
 
@@ -66,11 +69,12 @@ class FamilyFixture(unittest.TestCase):
 
     def script_test(self, name: str, entry: str, inputs: list[str] | None = None,
                     labels: list[str] | None = None, command: list[str] | None = None,
-                    fixtures: list[str] | None = None, lock: list[str] | None = None) -> None:
+                    fixtures: list[str] | None = None, fixture_setup: list[str] | None = None,
+                    lock: list[str] | None = None) -> None:
         self.declared[name] = {"entry": entry, "inputs": sorted(set((inputs or []) + [entry])),
                                "kind": "python"}
         self.tests.append(ctest(name, *(command or ["python3", entry]), labels=labels,
-                                fixtures=fixtures, lock=lock))
+                                fixtures=fixtures, fixture_setup=fixture_setup, lock=lock))
 
     def generate(self, *targets: tuple[str, str]) -> dict[str, dict]:
         self.write("test/ctest_script_inputs.json",
@@ -366,6 +370,15 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.script_test("fixture-selftest", "tools/scripts/test_fixture.py", fixtures=["setup"])
         generated = self.generate()
         self.assertEqual(self.family_for(generated, "tools/scripts/test_fixture.py"), [])
+
+    def test_reader_with_a_registered_fixture_setup_is_mappable(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_setup.py", "")
+        self.write("tools/scripts/test_fixture.py", "")
+        self.script_test("fixture-setup", "tools/scripts/test_setup.py", fixture_setup=["setup"])
+        self.script_test("fixture-selftest", "tools/scripts/test_fixture.py", fixtures=["setup"])
+        generated = self.generate()
+        self.assertNotEqual(self.family_for(generated, "tools/scripts/test_fixture.py"), [])
 
     def test_reader_outside_the_authoritative_corpus_is_not_selected(self) -> None:
         self.add_whole_tree()

@@ -5496,6 +5496,7 @@ tests = [
   "minos-registry-absent-selftest",
   "msvc-string-literal-guard",
   "planning-gitlink-guard-selftest",
+  "pulp-gpu-shared-io-paced-convolution-probe",
   "raw-this-async-check",
   "raw-this-async-selftest",
   "release-trailer-guard-selftest",
@@ -5528,6 +5529,7 @@ tests = [
 ]
 build_targets = [
   "pulp-cli",
+  "pulp-gpu-shared-io-paced-convolution-probe",
   "pulp-timeline-schema-emit",
 ]
 supported_build_types = [
@@ -5974,11 +5976,17 @@ tests = [
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
+  "pulp-gpu-dawn-shared-io-provider-lifecycle",
+  "pulp-gpu-shared-io-paced-convolution-probe",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
   "pulp_bundle_threejs_for_jsc_smoke",
 ]
-build_targets = ["pulp-cli"]
+build_targets = [
+  "pulp-cli",
+  "pulp-gpu-dawn-shared-io-provider-probe",
+  "pulp-gpu-shared-io-paced-convolution-probe",
+]
 supported_build_types = [
   "debug",
   "release",
