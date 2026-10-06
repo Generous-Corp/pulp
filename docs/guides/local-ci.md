@@ -452,10 +452,23 @@ The supervisor publishes a root-owned per-generation lease while it owns a
 clone. `pulp-ephemeral-reap.timer` is the crash-recovery backstop: after one
 hour it considers only an ownerless Pulp slot, then requires the exact GitHub
 registration to be idle, one `Runner.Listener --jitconfig`, no worker or
-configuration process, and an empty `_work`. Execution first replaces all
-routing labels with a shutdown fence, proves the idle state twice, stops and
-deregisters the runner, and rechecks the unchanged VM config under the VMID
-allocation lock before destroy. Missing, duplicate, unreachable, busy, or
+configuration process, and an empty `_work`. Execution rechecks the unchanged
+VM config under the VMID allocation lock, then fences dispatch by deregistering
+the runner, and logs each of the four steps as `FENCE <vmid> n/4`:
+
+1. Read the runner and require `busy=false`.
+2. `DELETE` the registration. GitHub refuses to delete a runner that is running
+   a job, so a refusal leaves the clone for the next pass, and a success proves
+   no job held it.
+3. Require the runner to return 404, and require that no in-progress job in the
+   repository names it. The second check guards against a 404 that only means
+   the wrong id was read.
+4. Re-probe the guest for no worker and an untouched `_work`, then destroy it.
+
+A label fence cannot work here: a JIT runner's labels are read-only, so
+replacing them never removes a routing label. The supervisor's own shutdown
+uses the same deregistration fence, and hands a runner GitHub reports busy to
+its deferred cleanup. Missing, duplicate, unreachable, busy, or
 otherwise ambiguous evidence always preserves the VM. Run
 `pulp-ephemeral-reap.sh` without arguments for a non-mutating report.
 After a controller reboot leaves an `onboot=0` clone stopped, recovery accepts
@@ -577,6 +590,44 @@ count at the moment you flip rather than trusting any number written here:
 ```sh
 ssh macpro 'systemctl list-units "*ephemeral-pool@*" --all'
 ```
+### The preamble slot
+
+`build.yml`'s preamble jobs (`resolve-provider`, `classify`,
+`protected-receipt-reuse`) finish in seconds but gate every merge-group run.
+Pointed at the build labels, they queue behind hours-long Linux builds. macpro
+therefore runs one dedicated tiny slot for them:
+
+| | |
+|---|---|
+| Unit | `pulp-ephemeral-pool@preamble.service` |
+| Profile | `tools/ci/linux-runner-group-preamble.env` → `/etc/pulp/linux-runner-group-preamble.env` (mode 0600) |
+| Clone | VMID 203, 1 core, 2048 MB, golden 9005, `192.168.86.254`, MAC `02:50:55:4c:50:03` |
+| Labels | `["self-hosted","Linux","X64","pulp-preamble-macpro"]` |
+
+The profile reuses the generic supervisor. That gives it the same lease,
+generation description, reaper coverage, and deregistration on shutdown as
+the build slots. Three supervisor settings make it small and disjoint:
+
+- `TARTCI_PROXMOX_CORES` / `TARTCI_PROXMOX_MEMORY_MB` set the clone size
+  (default 4 cores, 8192 MB).
+- `TARTCI_PROXMOX_GUEST_INDEX_BASE` sets the VMID the LAN identity is indexed
+  from (default the slot's own `CLONE_BASE`). The preamble profile sets it to
+  200, so VMID 203 takes `.254` instead of colliding with slot 200's `.251` and
+  MAC.
+
+The slot carries neither `pulp-build-linux-x64` nor `pulp-host-macpro`, so no
+build can take it. Point a workflow at it only through
+`PULP_PREAMBLE_RUNS_ON_JSON`. Changing that variable is a repository settings
+change; check that the slot is registered first:
+
+```sh
+ghapp api repos/Generous-Corp/pulp/actions/runners \
+  --jq '[.runners[] | select(any(.labels[]; .name == "pulp-preamble-macpro"))] | length'
+```
+
+Its 2 GB fits beside one build slot and the 10 GB Windows VM, but a second
+build slot does not, so check `macpro-governor.sh status` before enabling one.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
@@ -970,7 +1021,16 @@ was unknown. Each run ends with one
 platform registers was audited, and no audited executable has a finding.
 `incomplete` means the run cannot vouch for itself. The nightly passes `--fail-on-findings`, so its
 exit follows that verdict: 0 for clean, 1 for findings, 2 for incomplete. A
-red nightly therefore means the streak of clean runs is broken.
+red nightly therefore means the streak of clean runs is broken. A clean run's
+stage0 block also publishes `covered`, the executables it observed with no
+finding. The key manifest (`tools/ci/executable_keys.py --audit-report`) marks
+any executable outside that set always_run `audit_uncovered`, and every
+executable when no clean report is handed in. So a lane never skips a test
+whose reads no audit has observed, such as the macOS-only executables Linux
+does not register. The `rederive` command in `.shipyard/config.toml` passes the
+same report as `--audit-report {audit_report}`; the flag and the key code that
+accepts it change together, because a host re-derives with the base's command
+against the base's key code.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
@@ -2124,7 +2184,11 @@ cannot allowlist its own regression; owners delete their row when they fix the
 test.
 
 The mandatory kernel always runs, including the selector's own
-`changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
+`changed-surface-policy-selftest` (the policy tables, from source) and
+`changed-surface-policy-inventory` (the live-tree inventory check: it takes
+`--build-dir` only under `PULP_CHANGED_SURFACE_INVENTORY_TARGET` and runs bare
+elsewhere; the selftest takes no build-tree argument because it is also a
+source-lane test). Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes
 require the full suite; unknown paths fail safely to full as well. Reviewed
 bounded families cover Forge/DSP catalog projection commands, the isolated
@@ -6737,16 +6801,14 @@ A running clone with a registered, idle runner must be deregistered first
 (`ghapp api --method DELETE repos/Generous-Corp/pulp/actions/runners/<id>`) so
 GitHub cannot assign it a job while it stops.
 
-**The reaper cannot yet reclaim an idle-listener JIT orphan.** Proving a
-generation is not enough on its own. For a running clone whose runner is still
-listening, `--yes` first fences dispatch by replacing the runner's labels, then
-requires that only `self-hosted`, `Linux`, `X64` and `pulp-shutdown-fenced`
-remain. Labels set through a JIT configuration are read-only, so
-`pulp-build-linux-x64` and `pulp-host-macpro` survive the `PUT` and every pass
-logs `SKIP <id> — dispatch fence could not be proved`. Report mode still says
-`WOULD REAP`. Post-job clones (listener exited, registration gone) and stopped
-clones do reap. Until the fence is redesigned, an idle orphan whose supervisor
-was killed needs the manual deregister-then-destroy above.
+**An idle JIT orphan is reclaimed by deregistering it.** JIT runner labels are
+read-only, so a label fence can never strip `pulp-build-linux-x64` or
+`pulp-host-macpro`. An earlier reaper relied on one and logged `dispatch fence
+could not be proved` on every pass. The reaper and the supervisor's shutdown
+now fence by `DELETE`, which GitHub refuses for a busy runner. Each step is
+logged as `FENCE <vmid> n/4` (reaper) or `JIT fence n/4` (supervisor); see the
+reaper description above. A `SKIP ... JIT fence 2/4: GitHub refused` line
+means the runner was busy, and the next pass retries it.
 
 **The trusted role fails closed against the live runner group.**
 `verify_linux_runner_group.py --policy trusted` requires group

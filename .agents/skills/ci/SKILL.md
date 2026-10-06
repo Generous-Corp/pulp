@@ -593,7 +593,7 @@ that failed to write never changes the lane's verdict; read the run log's last
 
 `[targets.mac.changed_surface_selection.executable_reuse]` makes Shipyard copy
 `derivation_paths` from the protected base into a bare directory and run the
-key code there with `python3 -I`. Three mistakes do not error at configure
+key code there with `python3 -I`. Four mistakes do not error at configure
 time; they make every keyed run fail to derive or every re-derivation refuse:
 
 - **`derivation_paths` is exactly the key code's import closure plus the
@@ -614,6 +614,13 @@ time; they make every keyed run fail to derive or every re-derivation refuse:
   Shipyard predates `executable_reuse` cannot parse the policy at all, so the
   changed-surface plan falls back to full on every PR. Bump the pinned
   Shipyard on the lane hosts before the table lands on main.
+- **A new flag in the `rederive` command lands with the key code that accepts
+  it.** The host re-derives with the base's command against the base's copy,
+  so `--audit-report {audit_report}` on a main whose `executable_keys.py`
+  lacks the argument makes argparse exit 2 on every re-derivation, and the
+  second refusal turns `PULP_REUSE_LIVE` off.
+  `test_the_configured_rederive_command_parses_with_this_key_code` parses the
+  configured command with the same copy's parser.
 
 ## Performance lanes report; they never gate
 
@@ -7603,7 +7610,16 @@ executable's cases are one row keyed by the executable.
 `test_changed_surface_policy.py --build-dir build` now checks the live tree
 only: every registration has a command after the build, no composite identity
 is ambiguous, and every literal test the policy names exists. A run bare
-checks the policy tables alone.
+checks the policy tables alone. The two are separate ctests:
+`changed-surface-policy-selftest` is always the bare run (it is also a
+source-lane test, and the source lane refuses a build-tree argument), and
+`changed-surface-policy-inventory` adds `--build-dir` under
+`PULP_CHANGED_SURFACE_INVENTORY_TARGET`, which Shipyard's configure sets (it is
+registered bare everywhere else, so the generated script-input and family
+lists, keyed by test name, do not differ between the required gate and the
+Shipyard lane). One
+registration that took `--build-dir` under that flag made
+`source-selftest-lane-contract` red on every Shipyard local lane run.
 
 The selftest also runs inside a bounded leg, where only the selected targets
 are built, so a registration without a command passes only with the runner's

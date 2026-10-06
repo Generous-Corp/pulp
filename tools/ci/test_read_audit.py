@@ -222,6 +222,12 @@ class Stage0Tests(unittest.TestCase):
                          ("clean", 3, 2, 2))
         self.assertEqual(got["declared_not_registered"], ["mac-only"])
 
+    def test_the_covered_set_is_every_audited_executable_without_a_finding(self) -> None:
+        bad = {"status": "audited", "findings": [{"path": "x"}]}
+        got = ra.stage0(self.report(a={"status": "audited"}, b=bad, c={"status": "unobserved"},
+                                    z={"status": "audited"}), {"a", "b"})
+        self.assertEqual(got["covered"], ["a", "z"])
+
     def test_a_finding_anywhere_is_not_clean(self) -> None:
         bad = {"status": "audited", "findings": [{"path": "x"}]}
         got = ra.stage0(self.report(a={"status": "audited"}, z=bad), {"a"})

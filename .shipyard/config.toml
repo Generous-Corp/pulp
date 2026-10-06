@@ -365,6 +365,7 @@ baseline_tests = [
   "agent-hook-paths",
   "cli-help",
   "changed-surface-policy-selftest",
+  "changed-surface-policy-inventory",
 ]
 baseline_build_targets = ["pulp-test-build-check", "pulp-cli"]
 baseline_only_paths = [
@@ -580,7 +581,9 @@ command = "python3 tools/scripts/run_changed_surface_tests.py --selection-receip
 # no keyed run skips any build or test. The list is the key code's import
 # closure (tools/scripts is on its path), the adapter, and the key-blind list
 # the adapter reads from this base copy (so a PR cannot exempt its own
-# executable).
+# executable). `{audit_report}` is the read-audit report the plan staged;
+# Shipyard drops it with its flag when the plan bound none, and the key code
+# then marks every executable audit_uncovered.
 [targets.mac.changed_surface_selection.executable_reuse]
 switch_variable = "PULP_REUSE_LIVE"
 derivation_paths = [
@@ -605,7 +608,7 @@ sample_percent = 5
 # configured (the toolchain is the adapter's to read after configure).
 platform_probe = ["python3", "-I", "tools/ci/executable_keys.py", "--print-toolchain", "--build-dir", "{build_dir}"]
 rederive = [
-    ["python3", "-I", "tools/ci/executable_keys.py", "--source-root", "{source_root}", "--base-sha", "{base_sha}", "--head-sha", "{head_sha}", "--base-record", "{base_record_dir}", "--base-record-run-id", "{base_record_run_id}", "--head-codemodel", "{result_dir}/codemodel-digest.json", "--ctest-json", "{result_dir}/ctest-listing.json", "--build-dir", "{build_dir}", "--toolchain-json", "{result_dir}/toolchain.json", "--out", "{out_dir}/executable-keys.json"],
+    ["python3", "-I", "tools/ci/executable_keys.py", "--source-root", "{source_root}", "--base-sha", "{base_sha}", "--head-sha", "{head_sha}", "--base-record", "{base_record_dir}", "--base-record-run-id", "{base_record_run_id}", "--head-codemodel", "{result_dir}/codemodel-digest.json", "--ctest-json", "{result_dir}/ctest-listing.json", "--build-dir", "{build_dir}", "--toolchain-json", "{result_dir}/toolchain.json", "--audit-report", "{audit_report}", "--out", "{out_dir}/executable-keys.json"],
     ["python3", "-I", "tools/ci/executable_selection.py", "--manifest", "{out_dir}/executable-keys.json", "--head-codemodel", "{result_dir}/codemodel-digest.json", "--ctest-json", "{result_dir}/ctest-listing.json", "--seed", "{sample_seed}", "--percent", "{sample_percent}", "--out", "{out_dir}/selection.json"],
 ]
 

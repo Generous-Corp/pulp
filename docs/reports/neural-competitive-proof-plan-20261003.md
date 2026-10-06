@@ -1,4 +1,4 @@
-# Neural real-time competitive proof plan (2026-10-05 post-merge refresh)
+# Neural real-time competitive proof plan (2026-10-06 protected-head successor)
 
 This document defines the evidence required before Pulp claims that a neural
 audio path outperforms an audited real-time engine or service. It is a proof
@@ -7,8 +7,8 @@ counter, or a model that merely produces plausible audio is insufficient.
 
 ## Current source boundary
 
-The source snapshot for this plan is `origin/main` at
-[`b09ce24505ef2325554688d6740118e6771b2302`](https://github.com/Generous-Corp/pulp/commit/b09ce24505ef2325554688d6740118e6771b2302). It includes the private CPU
+The source snapshot for this plan is the fetched protected `origin/main` at
+[`f1b0b1580bdb8a05702aa3f19e425f4070aac2d4`](https://github.com/Generous-Corp/pulp/commit/f1b0b1580bdb8a05702aa3f19e425f4070aac2d4). It includes the private CPU
 neural lifecycle facade, manifest/installed-asset admission, serialized NAM/TCN
 CPU bridge, the tools-only `tools/validation/mlx_worker_harness.py` probe,
 the Apple host-tier planning matrix, the minimum-lead GPU proxy (PR9582),
@@ -130,7 +130,7 @@ quality metric is within the predeclared tolerance.
 ## Apple Silicon service matrix
 
 M1, M3, and M5 are valid experiment hosts, but a control-path measurement is
-not a neural-provider support claim. The current protected source is
+not a neural-provider support claim. The historical source anchor below is retained for provenance; current protected source is [`f1b0b1580bdb8a05702aa3f19e425f4070aac2d4`](https://github.com/Generous-Corp/pulp/commit/f1b0b1580bdb8a05702aa3f19e425f4070aac2d4). The historical source anchor is
 [`b038559ab2d019566c4964d42c0786310c139860`](https://github.com/Generous-Corp/pulp/commit/b038559ab2d019566c4964d42c0786310c139860),
 which includes the named-model MLX, host-evidence, GPU lifecycle, and provenance
 merges ([PR 9577](https://github.com/Generous-Corp/pulp/pull/9577), [PR 9602](https://github.com/Generous-Corp/pulp/pull/9602), [PR 9525](https://github.com/Generous-Corp/pulp/pull/9525), and [PR 9605](https://github.com/Generous-Corp/pulp/pull/9605)). Existing native-control observations
