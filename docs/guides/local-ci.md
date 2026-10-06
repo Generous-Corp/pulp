@@ -587,6 +587,44 @@ count at the moment you flip rather than trusting any number written here:
 ```sh
 ssh macpro 'systemctl list-units "*ephemeral-pool@*" --all'
 ```
+### The preamble slot
+
+`build.yml`'s preamble jobs (`resolve-provider`, `classify`,
+`protected-receipt-reuse`) finish in seconds but gate every merge-group run.
+Pointed at the build labels, they queue behind hours-long Linux builds. macpro
+therefore runs one dedicated tiny slot for them:
+
+| | |
+|---|---|
+| Unit | `pulp-ephemeral-pool@preamble.service` |
+| Profile | `tools/ci/linux-runner-group-preamble.env` → `/etc/pulp/linux-runner-group-preamble.env` (mode 0600) |
+| Clone | VMID 203, 1 core, 2048 MB, golden 9005, `192.168.86.254`, MAC `02:50:55:4c:50:03` |
+| Labels | `["self-hosted","Linux","X64","pulp-preamble-macpro"]` |
+
+The profile reuses the generic supervisor. That gives it the same lease,
+generation description, reaper coverage, and deregistration on shutdown as
+the build slots. Three supervisor settings make it small and disjoint:
+
+- `TARTCI_PROXMOX_CORES` / `TARTCI_PROXMOX_MEMORY_MB` set the clone size
+  (default 4 cores, 8192 MB).
+- `TARTCI_PROXMOX_GUEST_INDEX_BASE` sets the VMID the LAN identity is indexed
+  from (default the slot's own `CLONE_BASE`). The preamble profile sets it to
+  200, so VMID 203 takes `.254` instead of colliding with slot 200's `.251` and
+  MAC.
+
+The slot carries neither `pulp-build-linux-x64` nor `pulp-host-macpro`, so no
+build can take it. Point a workflow at it only through
+`PULP_PREAMBLE_RUNS_ON_JSON`. Changing that variable is a repository settings
+change; check that the slot is registered first:
+
+```sh
+ghapp api repos/Generous-Corp/pulp/actions/runners \
+  --jq '[.runners[] | select(any(.labels[]; .name == "pulp-preamble-macpro"))] | length'
+```
+
+Its 2 GB fits beside one build slot and the 10 GB Windows VM, but a second
+build slot does not, so check `macpro-governor.sh status` before enabling one.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no

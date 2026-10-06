@@ -964,6 +964,99 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             "only as unversioned host state: " + ", ".join(missing),
         )
 
+    def test_clone_size_and_lan_index_are_profile_settings_with_build_defaults(self) -> None:
+        self.assertIn('CORES="${TARTCI_PROXMOX_CORES:-4}"', self.script)
+        self.assertIn('MEM_MB="${TARTCI_PROXMOX_MEMORY_MB:-8192}"', self.script)
+        self.assertIn(
+            'GUEST_INDEX_BASE="${TARTCI_PROXMOX_GUEST_INDEX_BASE:-$CLONE_BASE}"', self.script
+        )
+        self.assertIn("SLOT_INDEX=$((VMID - GUEST_INDEX_BASE))", self.script)
+        self.assertIn("clone cores and memory must be positive integers", self.script)
+        self.assertIn("guest index base must be a VMID at or below the clone range", self.script)
+        self.assertIn("would derive a LAN address past", self.script)
+
+    def _lane_env(self, **overrides: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.update(overrides)
+        return subprocess.run(
+            ["/bin/bash", str(SCRIPT)],
+            capture_output=True, text=True, env=env, timeout=10,
+        )
+
+    def test_invalid_clone_size_or_index_base_is_refused_before_any_host_action(self) -> None:
+        for overrides, message in (
+            ({"TARTCI_PROXMOX_CORES": "0"}, "positive integers"),
+            ({"TARTCI_PROXMOX_MEMORY_MB": "2G"}, "positive integers"),
+            (
+                {"TARTCI_PROXMOX_CLONE_BASE": "203", "TARTCI_PROXMOX_CLONE_MAX": "203",
+                 "TARTCI_PROXMOX_GUEST_INDEX_BASE": "204"},
+                "guest index base",
+            ),
+        ):
+            with self.subTest(overrides=overrides):
+                result = self._lane_env(**overrides)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stdout + result.stderr)
+
+    def test_preamble_profile_is_a_tiny_disjoint_slot(self) -> None:
+        profile = (ROOT / "tools" / "ci" / "linux-runner-group-preamble.env").read_text(
+            encoding="utf-8"
+        )
+        values = dict(
+            line.split("=", 1) for line in profile.splitlines()
+            if line and not line.startswith("#")
+        )
+        labels = values["TARTCI_RUNNER_LABELS"].split(",")
+        self.assertEqual(labels, ["self-hosted", "Linux", "X64", "pulp-preamble-macpro"])
+        # No build label: a long Linux build must never land on the preamble slot.
+        self.assertNotIn("pulp-build-linux-x64", labels)
+        self.assertNotIn("pulp-host-macpro", labels)
+        self.assertEqual(values["PULP_LINUX_RUNNER_GROUP_ID"], "")
+        base, top = int(values["TARTCI_PROXMOX_CLONE_BASE"]), int(values["TARTCI_PROXMOX_CLONE_MAX"])
+        # Disjoint from the build slots' default 200..202, inside the reaper's 200..219.
+        self.assertGreater(base, 202)
+        self.assertLessEqual(top, 219)
+        index_base = int(values["TARTCI_PROXMOX_GUEST_INDEX_BASE"])
+        self.assertEqual(index_base, 200)
+        self.assertLessEqual(251 + top - index_base, 254)
+        self.assertEqual(values["TARTCI_PROXMOX_CORES"], "1")
+        self.assertLessEqual(int(values["TARTCI_PROXMOX_MEMORY_MB"]), 2048)
+
+    def test_clone_apt_timers_are_quiesced_before_a_job_is_assigned(self) -> None:
+        quiesce = self.script.index("sudo -n systemctl stop apt-daily.timer apt-daily-upgrade.timer")
+        self.assertLess(quiesce, self.script.index('log "minting JIT runner configuration"'))
+        block = self.script[quiesce : self.script.index('log "minting JIT runner configuration"')]
+        self.assertIn("systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service", block)
+        # The shutdown hook is always active; waiting on it would stall every clone.
+        self.assertNotIn("is-active --quiet unattended-upgrades", block)
+        # A running upgrade is waited for, never killed mid-dpkg.
+        self.assertNotIn("systemctl kill", block)
+        self.assertIn("cloud-init status --wait", block)
+        # A clone still running apt after the wait is discarded, never handed a job.
+        self.assertIn('|| die "apt maintenance in clone $VMID was still running', self.script)
+        self.assertNotIn("WARN: apt maintenance", self.script)
+
+    def _qm_set_sizing_argv(self) -> list[str]:
+        """The clone-sizing `qm set` invocation, continuation lines joined, as argv."""
+        import shlex
+        lines = self.script.splitlines()
+        start = next(i for i, line in enumerate(lines)
+                     if line.startswith('qm set "$VMID" --cores'))
+        command = []
+        for line in lines[start:]:
+            command.append(line.rstrip("\\").strip())
+            if not line.rstrip().endswith("\\"):
+                break
+        joined = " ".join(command).split(">/dev/null")[0]
+        return shlex.split(joined)
+
+    def test_clone_disables_cloud_init_first_boot_upgrade(self) -> None:
+        # The comment above the call mentions the flag too, so only the argv counts.
+        argv = self._qm_set_sizing_argv()
+        self.assertEqual(argv[:3], ["qm", "set", "$VMID"])
+        self.assertIn("--ciupgrade", argv)
+        self.assertEqual(argv[argv.index("--ciupgrade") + 1], "0")
+
     def test_engine_is_present_and_syntactically_valid(self) -> None:
         """The engine both wrappers exec must be committed, executable, and parse."""
         self.assertTrue(

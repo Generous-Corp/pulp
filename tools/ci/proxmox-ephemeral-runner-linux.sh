@@ -31,8 +31,16 @@ ISOLATED_BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"
 LEGACY_GUEST_IPV4_PREFIX=192.168.86
 LEGACY_GUEST_IPV4_FIRST_OCTET=251
 LEGACY_GUEST_IPV4_GATEWAY=192.168.86.1
-CORES=4
-MEM_MB=8192
+# Per-clone size. A build slot needs 4c/8G; a slot that only runs seconds-long
+# preamble jobs (checkout plus a Python classifier) fits in 1c/2G, which lets
+# it share the host with a build slot and the Windows VM.
+CORES="${TARTCI_PROXMOX_CORES:-4}"
+MEM_MB="${TARTCI_PROXMOX_MEMORY_MB:-8192}"
+# The legacy LAN identity is indexed from this VMID (default: the slot's own
+# CLONE_BASE). A second pool on the bridged network sets it to the first pool's
+# base so the two never derive the same address or MAC: with base 200, VMIDs
+# 200..203 map to 192.168.86.251..254.
+GUEST_INDEX_BASE="${TARTCI_PROXMOX_GUEST_INDEX_BASE:-$CLONE_BASE}"
 REPO="${TARTCI_RUNNER_REPO:-${PULP_RUNNER_REPO:-Generous-Corp/pulp}}"
 ORG="${REPO%%/*}"
 BASE_LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
@@ -400,6 +408,10 @@ esac
 [ "$CLONE_BASE" -ge 1 ] && [ "$CLONE_MAX" -le 254 ] \
     && [ "$CLONE_BASE" -le "$CLONE_MAX" ] \
     || die "clone VMID range must be ordered within 1..254"
+[[ "$CORES" =~ ^[1-9][0-9]*$ && "$MEM_MB" =~ ^[1-9][0-9]*$ ]] \
+    || die "clone cores and memory must be positive integers"
+[[ "$GUEST_INDEX_BASE" =~ ^[0-9]+$ ]] && [ "$GUEST_INDEX_BASE" -le "$CLONE_BASE" ] \
+    || die "guest index base must be a VMID at or below the clone range"
 [[ "$RUNNER_NAME_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] \
     || die "runner name prefix must be shell-safe"
 [[ "$VM_NAME_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] \
@@ -546,8 +558,8 @@ done
 
 # A fresh random MAC per clone consumed a new DHCP lease per job until the LAN
 # pool was exhausted on 2026-08-02. Keep both network identities deterministic:
-# VMIDs 200..202 map to 192.168.86.251..253 and locally administered MACs.
-SLOT_INDEX=$((VMID - CLONE_BASE))
+# VMIDs 200..203 map to 192.168.86.251..254 and locally administered MACs.
+SLOT_INDEX=$((VMID - GUEST_INDEX_BASE))
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     NETWORK_BRIDGE="${ISOLATED_BRIDGE_PREFIX}${VMID}"
     GUEST_IP="${GUEST_IPV4_PREFIX}.${VMID}.2"
@@ -556,6 +568,8 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     GUEST_DNS_SERVER="$AUTOMATIC_GUEST_DNS_SERVER"
 else
     NETWORK_BRIDGE=vmbr0
+    [ $((LEGACY_GUEST_IPV4_FIRST_OCTET + SLOT_INDEX)) -le 254 ] \
+        || { flock -u 9; die "VMID $VMID would derive a LAN address past ${LEGACY_GUEST_IPV4_PREFIX}.254"; }
     GUEST_IP="${LEGACY_GUEST_IPV4_PREFIX}.$((LEGACY_GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
     GUEST_IPV4_GATEWAY="$LEGACY_GUEST_IPV4_GATEWAY"
     GUEST_IPV4_PREFIX_LENGTH=24
@@ -819,8 +833,10 @@ EOF
     rm -f "$VM_FIREWALL_TMP"
     NET0="${NET0},firewall=1"
 fi
+# --ciupgrade 0: Proxmox's cloud-init default runs a full apt upgrade on first
+# boot, which holds the dpkg lock while the job's own apt-get runs.
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
-    --cpuunits 50 --balloon 0 --onboot 0 \
+    --cpuunits 50 --balloon 0 --onboot 0 --ciupgrade 0 \
     --net0 "$NET0" \
     --ipconfig0 "ip=${GUEST_IP}/${GUEST_IPV4_PREFIX_LENGTH},gw=${GUEST_IPV4_GATEWAY}" \
     --nameserver "$GUEST_DNS_SERVER" >/dev/null \
@@ -947,6 +963,28 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
         gh auth status --show-token 2>&1 \
         | grep -Eq "^[[:space:]-]*Token:"
 ' || die "golden $GOLDEN lacks an uncredentialed gh CLI"
+
+# Two things run apt in a fresh clone. Cloud-init's first-boot module upgrades
+# packages unless --ciupgrade 0 is set above, and the golden's apt timers last
+# ran when it was baked, so Persistent=true starts apt-daily-upgrade about a
+# minute after every clone boots. It holds the dpkg
+# lock while the job's own apt-get runs, and the job fails on "Could not get
+# lock /var/lib/dpkg/lock-frontend". Stop the timers in this throwaway clone and
+# let any apt run that already started finish (killing it mid-dpkg would break
+# the clone) before a job can be assigned.
+ssh -o BatchMode=yes "ci@$GUEST_IP" '
+    sudo -n systemctl stop apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+    # First-boot cloud-init may still be running apt for the golden.
+    timeout 600 cloud-init status --wait >/dev/null 2>&1 || true
+    for _ in $(seq 1 120); do
+        # unattended-upgrades.service is only a shutdown hook and stays active;
+        # the upgrade itself runs inside apt-daily-upgrade.service.
+        systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service \
+            2>/dev/null || exit 0
+        sleep 5
+    done
+    exit 1
+' || die "apt maintenance in clone $VMID was still running after 10 minutes; discarding it rather than hand a job a held dpkg lock"
 
 # GitHub's JIT endpoint creates one exact ephemeral registration. The
 # generation UUID in RUNNER_NAME prevents a stale registration from causing a
