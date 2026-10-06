@@ -63,11 +63,11 @@ struct Config {
 };
 
 constexpr auto kPostCallbackDrainTimeout = std::chrono::seconds{2};
-// Keep long-tail campaigns bounded while allowing a 100,000-block run at the
-// smallest supported block size. The probe retains input, output, and per-block
-// records in memory, so this is deliberately below the point where a routine
-// campaign becomes a multi-hundred-megabyte allocation.
-constexpr std::uint32_t kMaximumMeasuredBlocks = 100'000;
+// Keep long-tail campaigns bounded while allowing five steady repetitions of
+// the required 100,000 measured blocks. The probe retains input, output, and
+// per-block records in memory, so this caps a single process at 500,000 blocks
+// instead of allowing an unbounded steady run.
+constexpr std::uint32_t kMaximumMeasuredBlocks = 500'000;
 
 bool parse(int argc, char** argv, Config& config) {
     for (int i = 1; i < argc; ++i) {
