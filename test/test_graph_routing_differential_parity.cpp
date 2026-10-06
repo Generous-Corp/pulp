@@ -248,8 +248,7 @@ struct ThreeWayFanIn {
     static constexpr std::uint32_t kOutputId = 5;
 };
 
-std::vector<float> signal_graph_three_way_fan_in(const std::array<int, 3>& order,
-                                                 int frames) {
+std::vector<float> signal_graph_three_way_fan_in(const std::array<int, 3>& order, int frames) {
     pulp::host::SignalGraph g;
     const auto input = g.add_input_node(1, "In");
     const std::array branches{
@@ -258,8 +257,10 @@ std::vector<float> signal_graph_three_way_fan_in(const std::array<int, 3>& order
         g.add_gain_node("C"),
     };
     const auto output = g.add_output_node(1, "Out");
-    for (const auto branch : branches) REQUIRE(g.connect(input, 0, branch, 0));
-    for (const int index : order) REQUIRE(g.connect(branches[index], 0, output, 0));
+    for (const auto branch : branches)
+        REQUIRE(g.connect(input, 0, branch, 0));
+    for (const int index : order)
+        REQUIRE(g.connect(branches[index], 0, output, 0));
     for (std::size_t i = 0; i < branches.size(); ++i)
         REQUIRE(g.set_node_gain(branches[i], ThreeWayFanIn::kGains[i]));
     REQUIRE(g.prepare(kSr, frames));
@@ -268,10 +269,9 @@ std::vector<float> signal_graph_three_way_fan_in(const std::array<int, 3>& order
     std::vector<float> y(static_cast<std::size_t>(frames), 0.0f);
     std::array<const float*, 1> in_ch{x.data()};
     std::array<float*, 1> out_ch{y.data()};
-    pulp::audio::BufferView<const float> in_view(
-        in_ch.data(), 1, static_cast<std::uint32_t>(frames));
-    pulp::audio::BufferView<float> out_view(
-        out_ch.data(), 1, static_cast<std::uint32_t>(frames));
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 1,
+                                                 static_cast<std::uint32_t>(frames));
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 1, static_cast<std::uint32_t>(frames));
     g.set_canonical_executor_routing_enabled(false);
     g.set_parallel_routing_enabled(false);
     g.set_anticipation_enabled(false);
@@ -310,8 +310,7 @@ ThreeWayRuntime make_three_way_runtime(const std::array<int, 3>& order,
         states[i].gain = ThreeWayFanIn::kGains[i];
     result.bindings.push_back({ThreeWayFanIn::kInputId, nullptr, nullptr, false});
     for (std::size_t i = 0; i < states.size(); ++i) {
-        result.bindings.push_back({ThreeWayFanIn::kBranchIds[i], routing_gain,
-                                   &states[i], true});
+        result.bindings.push_back({ThreeWayFanIn::kBranchIds[i], routing_gain, &states[i], true});
     }
     result.bindings.push_back({ThreeWayFanIn::kOutputId, nullptr, nullptr, false});
     return result;
@@ -452,7 +451,8 @@ TEST_CASE("Three-way ordinary audio fan-in is permutation-invariant across walk 
         CAPTURE(order[0], order[1], order[2]);
         const auto ref = signal_graph_three_way_fan_in(order, kFrames);
         REQUIRE_FALSE(ref.empty());
-        for (const float value : ref) REQUIRE(value == 1.0f);
+        for (const float value : ref)
+            REQUIRE(value == 1.0f);
 
         std::vector<GainState> states;
         const auto specs = make_three_way_runtime(order, states);

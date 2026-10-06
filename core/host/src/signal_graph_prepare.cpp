@@ -790,19 +790,22 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             right.dest_node,
             right.dest_port,
         };
-        if (left_key != right_key) return left_key < right_key;
+        if (left_key != right_key)
+            return left_key < right_key;
         return lhs.connection_index < rhs.connection_index;
     };
     for (auto& [_, rt] : cg->runtime) {
         std::vector<NodeRuntime::EdgeRef> ordinary;
         ordinary.reserve(rt.inbound_audio_edges.size());
         for (const auto& edge : rt.inbound_audio_edges) {
-            if (ordinary_audio(edge)) ordinary.push_back(edge);
+            if (ordinary_audio(edge))
+                ordinary.push_back(edge);
         }
         std::sort(ordinary.begin(), ordinary.end(), connection_less);
         std::size_t ordinary_index = 0;
         for (auto& edge : rt.inbound_audio_edges) {
-            if (ordinary_audio(edge)) edge = ordinary[ordinary_index++];
+            if (ordinary_audio(edge))
+                edge = ordinary[ordinary_index++];
         }
     }
 
