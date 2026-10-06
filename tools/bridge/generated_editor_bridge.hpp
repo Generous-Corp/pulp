@@ -55,6 +55,7 @@ inline constexpr std::array<HandlerSpec, 4> kHandlers{{
     {"set_parameter", Direction::Command, "SetParameterRequest", "SetParameterResponse"},
 }};
 
+// Canonical wrapped initializer keeps generated diffs readable.
 inline constexpr std::array<std::string_view, 3> kCommandNames{
     {"begin_gesture", "end_gesture", "set_parameter"}};
 inline constexpr std::array<std::string_view, 1> kPublicationNames{{"parameter_changed"}};

@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """Focused positive and planted-negative checks for the bridge generator."""
 
+# CTest input tracking: this selftest exercises the checked-in generator and
+# contract outputs as well as its own source.
+# "tools/bridge/bridge_gen.py"
+# "tools/bridge/bridge.toml"
+# "tools/bridge/generated_editor_bridge.hpp"
+# "tools/bridge/generated_editor_bridge.ts"
+# "docs/reference/generated-editor-bridge-contract.md"
+
 from __future__ import annotations
 
 import importlib.util
@@ -47,13 +55,6 @@ class BridgeGeneratorChecks(unittest.TestCase):
             expected = outputs[generator.OUTPUTS["cpp"]]
             path.write_text(expected.replace("set_parameter", "set_paramter", 1), encoding="utf-8")
             self.assertFalse(generator.check({path: expected}))
-
-    def test_planted_missing_handler_negative_control(self) -> None:
-        data = generator.load_contract()
-        declared = [row["name"] for row in data["commands"]]
-        registered = declared[:-1]
-        self.assertNotEqual(registered, declared)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -6729,6 +6729,54 @@
    ],
    "kind": "shell"
   },
+  "pulp-editor-bridge-contract-check": {
+   "entry": "tools/bridge/bridge_contract_check.py",
+   "inputs": [
+    "docs/reference/generated-editor-bridge-contract.md",
+    "tools/bridge/bridge.toml",
+    "tools/bridge/bridge_contract_check.py",
+    "tools/bridge/bridge_contract_safety.py",
+    "tools/bridge/bridge_gen.py",
+    "tools/bridge/generated_editor_bridge.hpp",
+    "tools/bridge/generated_editor_bridge.ts"
+   ],
+   "kind": "python"
+  },
+  "pulp-editor-bridge-contract-gate-selftest": {
+   "entry": "tools/bridge/bridge_contract_gate_checks.py",
+   "inputs": [
+    "tools/bridge/bridge.toml",
+    "tools/bridge/bridge_contract_check.py",
+    "tools/bridge/bridge_contract_gate_checks.py",
+    "tools/bridge/bridge_contract_safety.py",
+    "tools/bridge/bridge_gen.py",
+    "tools/bridge/generated_editor_bridge.hpp",
+    "tools/bridge/generated_editor_bridge.ts",
+    "tools/scripts/script_test_inputs.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-editor-bridge-contract-safety-selftest": {
+   "entry": "tools/bridge/bridge_contract_safety_checks.py",
+   "inputs": [
+    "tools/bridge/bridge.toml",
+    "tools/bridge/bridge_contract_safety.py",
+    "tools/bridge/bridge_contract_safety_checks.py",
+    "tools/bridge/bridge_gen.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-editor-bridge-generator-selftest": {
+   "entry": "tools/bridge/bridge_gen_checks.py",
+   "inputs": [
+    "tools/bridge/bridge.toml",
+    "tools/bridge/bridge_gen.py",
+    "tools/bridge/bridge_gen_checks.py",
+    "tools/bridge/generated_editor_bridge.hpp",
+    "tools/bridge/generated_editor_bridge.ts"
+   ],
+   "kind": "python"
+  },
   "pulp-fig-decode-unit": {
    "entry": "tools/import-design/fig/fig.test.mjs",
    "inputs": [

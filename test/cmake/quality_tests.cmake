@@ -28,6 +28,30 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    # The typed editor bridge is generated from one TOML contract. Keep the
+    # safety audit and its production-path gate in the configured test graph so
+    # a contract that is valid TOML but unsafe after C++/TypeScript name
+    # transformation cannot reach checked-in outputs or a plugin build.
+    add_test(NAME pulp-editor-bridge-generator-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/bridge/bridge_gen_checks.py")
+    add_test(NAME pulp-editor-bridge-contract-safety-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/bridge/bridge_contract_safety_checks.py")
+    add_test(NAME pulp-editor-bridge-contract-gate-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/bridge/bridge_contract_gate_checks.py")
+    add_test(NAME pulp-editor-bridge-contract-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/bridge/bridge_contract_check.py"
+            --docs "${CMAKE_SOURCE_DIR}/docs/reference/generated-editor-bridge-contract.md")
+    set_tests_properties(
+        pulp-editor-bridge-generator-selftest
+        pulp-editor-bridge-contract-safety-selftest
+        pulp-editor-bridge-contract-gate-selftest
+        pulp-editor-bridge-contract-check
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
     # Private MLX validation stays tools-only/default-off. Register the test so
     # the repository-wide test-registration guard and generated script-input
     # manifest observe the harness on every configured platform. The test

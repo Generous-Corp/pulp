@@ -168,7 +168,9 @@ def render_cpp(data: dict[str, Any]) -> str:
         + f"inline constexpr std::array<HandlerSpec, {len(entries)}> kHandlers{{{{\n"
         + "\n".join(entries)
         + "\n}};\n\n"
-        + f"inline constexpr std::array<std::string_view, {len(commands)}> kCommandNames{{{{{command_names}}}}};\n"
+        + "// Canonical wrapped initializer keeps generated diffs readable.\n"
+        + f"inline constexpr std::array<std::string_view, {len(commands)}> kCommandNames{{\n"
+        + "    {" + command_names + "}};\n"
         + f"inline constexpr std::array<std::string_view, {len(publications)}> kPublicationNames{{{{{publication_names}}}}};\n\n"
         + "} // namespace pulp::view::editor_bridge_contract\n"
     )
