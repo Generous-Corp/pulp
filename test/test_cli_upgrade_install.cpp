@@ -94,20 +94,18 @@ void copy_source_browser_capture_runtime(const fs::path& runtime) {
 }
 
 void copy_source_materialized_contract(const fs::path& root) {
-    const auto source = fs::path{PULP_REPO_ROOT} / "tools" / "import-design" /
-        "jsx-runtime" / "materialized_binding_contract.mjs";
+    const auto source = fs::path{PULP_REPO_ROOT} / "tools" / "import-design" / "jsx-runtime" /
+                        "materialized_binding_contract.mjs";
     fs::create_directories(root / "jsx-runtime");
-    fs::copy_file(source, root / "jsx-runtime" /
-        "materialized_binding_contract.mjs",
-        fs::copy_options::overwrite_existing);
+    fs::copy_file(source, root / "jsx-runtime" / "materialized_binding_contract.mjs",
+                  fs::copy_options::overwrite_existing);
 }
 
 std::string read_file(const fs::path& path);
 
 std::set<fs::path> unresolved_relative_runtime_modules(
     const fs::path& runtime) {
-    static const std::regex relative_module{
-        R"pulp(["']((?:\./|\.\./)[^"']+\.mjs)["'])pulp"};
+    static const std::regex relative_module{R"pulp(["']((?:\./|\.\./)[^"']+\.mjs)["'])pulp"};
     std::set<fs::path> unresolved;
     for (const auto& entry : fs::recursive_directory_iterator(runtime)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".mjs")
@@ -204,24 +202,18 @@ TEST_CASE("upgrade-installed browser runtime rejects a missing materialized cont
           "[cli][upgrade][import-design][manifest][negative]") {
     auto incoming = make_tmpdir("browser-runtime-graph-negative-incoming");
     auto install = make_tmpdir("browser-runtime-graph-negative-install");
-    const auto import_source =
-        incoming / ui::import_design_binary_name();
-    const auto runtime_source =
-        incoming / ui::browser_capture_runtime_name();
+    const auto import_source = incoming / ui::import_design_binary_name();
+    const auto runtime_source = incoming / ui::browser_capture_runtime_name();
     write_file(import_source, "import-helper");
     copy_source_browser_capture_runtime(runtime_source);
-    ui::install_import_design_protocol_runtime(
-        install, import_source, runtime_source);
+    ui::install_import_design_protocol_runtime(install, import_source, runtime_source);
     copy_source_materialized_contract(install);
     std::error_code remove_error;
-    fs::remove(install / "jsx-runtime" / "materialized_binding_contract.mjs",
-               remove_error);
+    fs::remove(install / "jsx-runtime" / "materialized_binding_contract.mjs", remove_error);
     REQUIRE_FALSE(remove_error);
 
-    const auto installed_runtime =
-        install / ui::browser_capture_runtime_install_name();
-    const auto unresolved =
-        unresolved_relative_runtime_modules(installed_runtime);
+    const auto installed_runtime = install / ui::browser_capture_runtime_install_name();
+    const auto unresolved = unresolved_relative_runtime_modules(installed_runtime);
     CHECK(unresolved.contains("../jsx-runtime/materialized_binding_contract.mjs"));
 
     fs::remove_all(incoming);

@@ -124,7 +124,7 @@ class LinuxRuntimeNodeProvisioningTest(unittest.TestCase):
     def test_setup_node_is_linux_only_and_pinned(self) -> None:
         self.assertEqual(self.setup["if"], "runner.os == 'Linux'")
         self.assertEqual(self.setup["uses"], "actions/setup-node@v4")
-        self.assertEqual(self.setup["with"]["node-version"], "22.14.0")
+        self.assertEqual(self.setup["with"]["node-version"], "22.15.0")
         self.assertEqual(self.setup["with"]["cache"], "npm")
         self.assertEqual(
             self.setup["with"]["cache-dependency-path"],
@@ -136,6 +136,12 @@ class LinuxRuntimeNodeProvisioningTest(unittest.TestCase):
         self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", self.install["run"])
         names = [step.get("name") for step in _workflow()["jobs"]["build"]["steps"]]
         self.assertLess(names.index(self.setup["name"]), names.index(self.install["name"]))
+
+    def test_runtime_install_is_present_for_macos(self) -> None:
+        steps = _build_steps()
+        install = steps["Install materialized runtime Node test dependencies (macOS)"]
+        self.assertEqual(install["if"], "runner.os == 'macOS'")
+        self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", install["run"])
 
     def test_other_matrix_legs_do_not_claim_linux_runtime_install(self) -> None:
         self.assertNotIn("runner.os != 'Linux'", str(self.install["if"]))
