@@ -171,7 +171,12 @@ fn path_entry_exists(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
 
-fn publish_staged(staged: &Path, destination: &Path, backup: &Path) -> Result<PublishedPath> {
+fn publish_staged(
+    staged: &Path,
+    destination: &Path,
+    backup: &Path,
+    preserve_transaction_for_recovery: &mut bool,
+) -> Result<PublishedPath> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             CliError::Other(format!(
@@ -192,7 +197,9 @@ fn publish_staged(staged: &Path, destination: &Path, backup: &Path) -> Result<Pu
     }
     if let Err(error) = fs::rename(staged, destination) {
         if had_previous {
-            let _ = fs::rename(backup, destination);
+            if fs::rename(backup, destination).is_err() {
+                *preserve_transaction_for_recovery = true;
+            }
         }
         return Err(CliError::Other(format!(
             "could not install {}: {error}",
@@ -257,7 +264,13 @@ where
     let contract_dst = install_dir
         .join(JSX_RUNTIME_ARCHIVE_DIR)
         .join(MATERIALIZED_BINDING_CONTRACT);
+    let contract_parent = contract_dst
+        .parent()
+        .expect("materialized binding contract has a parent")
+        .to_owned();
+    let contract_parent_existed = path_entry_exists(&contract_parent);
     let mut published = Vec::new();
+    let mut preserve_transaction_for_recovery = false;
 
     let result = (|| -> Result<()> {
         copy_with_exec(new_helper, &helper_staged)?;
@@ -290,11 +303,13 @@ where
             &runtime_staged,
             &runtime_dst,
             &transaction.join("previous-runtime"),
+            &mut preserve_transaction_for_recovery,
         )?);
         published.push(publish_staged(
             &contract_staged,
             &contract_dst,
             &transaction.join("previous-contract"),
+            &mut preserve_transaction_for_recovery,
         )?);
         observe_phase(InstallPhase::RuntimeAvailable)?;
 
@@ -302,14 +317,18 @@ where
             &helper_staged,
             &helper_dst,
             &transaction.join("previous-helper"),
+            &mut preserve_transaction_for_recovery,
         )?);
         observe_phase(InstallPhase::HelperPublished)?;
         Ok(())
     })();
 
     if result.is_err() {
-        if !rollback_published(&mut published) {
+        if !rollback_published(&mut published) && !preserve_transaction_for_recovery {
             remove_path_best_effort(&transaction);
+        }
+        if !contract_parent_existed {
+            let _ = fs::remove_dir(&contract_parent);
         }
     } else {
         remove_path_best_effort(&transaction);
@@ -355,9 +374,8 @@ mod tests {
 
     #[test]
     fn runtime_file_list_matches_import_design_manifest() {
-        let manifest = include_str!(
-            "../../../tools/import-design/browser_capture/runtime_manifest.txt"
-        );
+        let manifest =
+            include_str!("../../../tools/import-design/browser_capture/runtime_manifest.txt");
         let names: Vec<_> = manifest
             .lines()
             .map(str::trim)
