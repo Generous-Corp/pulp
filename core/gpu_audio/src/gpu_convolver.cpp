@@ -54,6 +54,51 @@ bool expected_dawn_revision_available() noexcept {
 } // namespace
 #endif
 
+namespace {
+constexpr std::uint8_t kTrialPathMask = 0x07;
+constexpr std::uint8_t kTrialSlotsShift = 3;
+constexpr std::uint64_t kTrialWaitMask = UINT64_C(0xffffffff);
+constexpr unsigned kTrialRetentionShift = 32;
+
+std::uint8_t encode_trial_path_and_slots(detail::SharedIoRequest path,
+                                         std::uint32_t slots) noexcept {
+    std::uint8_t slot_code = 0;
+    switch (slots) {
+    case 2:
+        slot_code = 1;
+        break;
+    case 4:
+        slot_code = 2;
+        break;
+    case 8:
+        slot_code = 3;
+        break;
+    case 16:
+        slot_code = 4;
+        break;
+    default:
+        break;
+    }
+    return static_cast<std::uint8_t>(path) |
+           static_cast<std::uint8_t>(slot_code << kTrialSlotsShift);
+}
+
+std::uint32_t decode_trial_slots(std::uint8_t encoded) noexcept {
+    switch (encoded >> kTrialSlotsShift) {
+    case 1:
+        return 2;
+    case 2:
+        return 4;
+    case 3:
+        return 8;
+    case 4:
+        return 16;
+    default:
+        return 0;
+    }
+}
+} // namespace
+
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
     : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response), kLatencyBlocks) {
@@ -90,7 +135,18 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
         return false;
     if (config.generation == 0)
         return false;
-    convolver.trial_requested_path_ = static_cast<std::uint8_t>(config.requested_path);
+    if (config.slots != 0 && config.slots != 2 && config.slots != 4 && config.slots != 8 &&
+        config.slots != 16)
+        return false;
+    // The private packed wait field preserves the exported object layout. The
+    // provider contract caps waits well below this boundary; reject rather
+    // than silently truncating an out-of-range diagnostic value.
+    if (config.completion_wait_ns > kTrialWaitMask)
+        return false;
+    // Preserve the public class layout while carrying this private probe-only
+    // capacity alongside the existing private path selector.
+    convolver.trial_requested_path_ =
+        encode_trial_path_and_slots(config.requested_path, config.slots);
     convolver.trial_generation_ = config.generation;
     convolver.trial_configured_ = true;
     convolver.trial_enable_trace_ = config.enable_trace;
@@ -99,7 +155,11 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_staged_sync_reference_ = config.staged_sync_reference;
     convolver.trial_success_stride_ = std::max<std::uint32_t>(1, config.success_stride);
     convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
-    convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
+    // Pack the two private diagnostic values into the pre-existing field so
+    // the exported GpuConvolver object layout remains unchanged.
+    convolver.trial_completion_wait_ns_ =
+        (config.completion_wait_ns & kTrialWaitMask) |
+        (static_cast<std::uint64_t>(config.retention_capacity) << kTrialRetentionShift);
     return true;
 }
 
@@ -137,6 +197,8 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
     try {
         if (convolver.shared_io_->session->prepared() && !convolver.shared_io_->session->release())
             return false;
+        if (convolver.shared_io_->session->last_closed_trace_retention_overflow())
+            return false;
         records = convolver.shared_io_->session->take_last_closed_trace_records();
         return !records.empty();
     } catch (...) {
@@ -146,6 +208,40 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
 #else
     (void)convolver;
     return false;
+#endif
+}
+
+bool drain_gpu_convolver_trial_admissions(
+    GpuConvolver& convolver, std::vector<SharedIoTraceAdmission>& admissions) noexcept {
+    admissions.clear();
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (!convolver.shared_io_ || !convolver.shared_io_->session)
+        return false;
+    try {
+        if (convolver.shared_io_->session->prepared() && !convolver.shared_io_->session->release())
+            return false;
+        if (convolver.shared_io_->session->last_closed_trace_retention_overflow())
+            return false;
+        admissions = convolver.shared_io_->session->take_last_closed_trace_admissions();
+        return !admissions.empty();
+    } catch (...) {
+        admissions.clear();
+        return false;
+    }
+#else
+    (void)convolver;
+    return false;
+#endif
+}
+
+std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver& convolver) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (!convolver.shared_io_ || !convolver.shared_io_->session)
+        return 0;
+    return convolver.shared_io_->session->provider_diagnostics().engine_id;
+#else
+    (void)convolver;
+    return 0;
 #endif
 }
 
@@ -210,7 +306,9 @@ bool GpuConvolver::prepare() {
     init_fallback();
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_);
+    auto requested_path =
+        static_cast<detail::SharedIoRequest>(trial_requested_path_ & kTrialPathMask);
+    const auto trial_slots = decode_trial_slots(trial_requested_path_);
     // Diagnostic trial configuration is deliberately authoritative when it is
     // present. Normal SDK callers use the public host-only policy below.
     if (!trial_configured_) {
@@ -265,7 +363,8 @@ bool GpuConvolver::prepare() {
                                       : detail::DawnSharedIoProvider::CompletionPolicy::
                                             ProcessEvents,
                               .completion_wait_ns =
-                                  trial_configured_ ? trial_completion_wait_ns_ : 0},
+                                  trial_configured_ ? (trial_completion_wait_ns_ & kTrialWaitMask)
+                                                    : 0},
                          .session = {.pipeline = {.capacity = shared_capacity,
                                                   .channels = channels_,
                                                   .block_size = block_,
@@ -274,9 +373,15 @@ bool GpuConvolver::prepare() {
                                                   .lead_blocks = latency_blocks_,
                                                   .capture_callback_timing =
                                                       trial_capture_callback_timing_},
-                                     .slots = kSharedIoSlots,
+                                     .slots = trial_slots != 0 ? trial_slots : kSharedIoSlots,
                                      .sample_rate = sample_rate_,
                                      .trace = {.success_stride = trial_success_stride_,
+                                               .retention_capacity =
+                                                   trial_configured_
+                                                       ? static_cast<std::uint32_t>(
+                                                             trial_completion_wait_ns_ >>
+                                                             kTrialRetentionShift)
+                                                       : 0,
                                                .capture_admissions = trial_capture_admissions_,
                                                .enabled = pulp::runtime::kTracingEnabled ||
                                                           trial_enable_trace_}},
@@ -465,6 +570,14 @@ bool GpuConvolver::has_realtime_shared_io() const noexcept {
 #else
     return false;
 #endif
+}
+
+detail::SharedIoProviderIdentity GpuConvolver::provider_identity_for_diagnostics() const noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (shared_io_ != nullptr && shared_io_->session != nullptr)
+        return shared_io_->session->provider_identity();
+#endif
+    return {};
 }
 
 void GpuConvolver::process_block(const audio::BufferView<const float>& input,
