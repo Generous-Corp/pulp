@@ -282,6 +282,12 @@ GpuConvolverRawManifest raw_manifest() {
     value.expected_blocks_per_trial = 1;
     value.bootstrap_resamples = 100;
     value.paced = true;
+    value.worker_scheduling = "ordinary_worker";
+    value.host_contention = "quiet";
+    value.host_thermal_state = "nominal";
+    value.power_state = "automatic";
+    value.worker_workgroup_joined = false;
+    value.worker_workgroup_join_failures = 0;
     value.block_frames = 1;
     value.sample_rate_hz = 48000;
     value.channels = 2;
