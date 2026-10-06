@@ -350,6 +350,8 @@ jobs:
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest
           python3 tools/scripts/framework_neutrality_check.py --selftest
+          python3 tools/scripts/test_process_liveness.py
+          python3 tools/scripts/raw_pid_probe_lint.py
 
       - name: Source-only selftests (moved off the macOS gate)
         # The registrations in tools/ci/source_selftests.json read only the

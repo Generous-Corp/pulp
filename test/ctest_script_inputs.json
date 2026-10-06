@@ -3190,7 +3190,8 @@
    "entry": "tools/ci/test_build_dir_lock.py",
    "inputs": [
     "tools/ci/build_dir_lock.py",
-    "tools/ci/test_build_dir_lock.py"
+    "tools/ci/test_build_dir_lock.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },
@@ -3367,6 +3368,7 @@
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/generate_widget_bridge_api.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_changed_surface_policy.py",
@@ -3420,6 +3422,7 @@
     "tools/cmake/PulpWgpuUniversal.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/gate_common.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_run_changed_surface_tests.py"
@@ -4624,7 +4627,8 @@
   "governed-build-selftest": {
    "entry": "tools/ci/test_governed_build.py",
    "inputs": [
-    "tools/ci/test_governed_build.py"
+    "tools/ci/test_governed_build.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },
@@ -4650,6 +4654,7 @@
     "tools/deps/manifest.json",
     "tools/scripts",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
    ],
    "kind": "python"
@@ -6467,6 +6472,7 @@
     "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/gpu_audio_provider_identity.py",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_build_time_report.py",
@@ -9099,6 +9105,7 @@
     "external/skia-build",
     "tools/deps/manifest.json",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
    ],
    "kind": "python"
@@ -9109,6 +9116,7 @@
     "external/skia-build",
     "tools/deps/manifest.json",
     "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
    ],
    "kind": "python"
