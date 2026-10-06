@@ -548,13 +548,13 @@ def resolve_audit(binding: dict[str, Any], code: Path, result_dir: Path) -> tupl
     except FileNotFoundError:
         actual = None
     except OSError as error:
-        print(f"executable-reuse: audit report {report} is unreadable ({error}); keying without it",
-              file=sys.stderr)
+        print(f"executable-reuse: audit report mismatch: expected {audit['report_sha256']}, "
+              f"actual unreadable {report} ({error}); keying without it", file=sys.stderr)
         return {"status": "report_unreadable", **bound, "expected_sha256": audit["report_sha256"],
                 "error": str(error)}, None
     if actual != audit["report_sha256"]:
         print(f"executable-reuse: audit report mismatch: expected {audit['report_sha256']}, "
-              f"actual {actual or 'missing'}; keying without it", file=sys.stderr)
+              f"actual {actual or f'missing {report}'}; keying without it", file=sys.stderr)
         return {"status": "report_mismatch", **bound, "expected_sha256": audit["report_sha256"],
                 "actual_sha256": actual}, None
     # A base whose key code predates the audit rule rejects the argument; it
@@ -609,7 +609,11 @@ def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[
     # The key code's own probe reads the compiler this build directory
     # recorded; an older base copy takes no argument.
     candidates = binding["candidates"]
-    picked = json.loads(step(["-c", PICK_SCRIPT, binding["build_dir"],
+    # The steps run in the derivation code directory, so a relative bound
+    # path would name a directory there; every step gets the lane's absolute
+    # build directory, the same string its ctest listing's commands carry.
+    bound_build = os.path.abspath(build_dir)
+    picked = json.loads(step(["-c", PICK_SCRIPT, bound_build,
                               json.dumps([c["record_path"] for c in candidates])], "toolchain pick"))
     files["toolchain.json"].write_text(json.dumps(picked["toolchain"], sort_keys=True) + "\n", encoding="utf-8")
     pick = candidates[picked["pick"]["index"]] if picked["pick"] is not None else None
@@ -618,7 +622,6 @@ def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[
     # With no candidate on this toolchain the first one still keys, so every
     # executable carries base_other_toolchain and the reason names a record.
     used = pick or (candidates[0] if candidates else None)
-    bound_build = binding["build_dir"]
     step([str(scripts["codemodel"]), "--build-dir", bound_build, "--source-root", str(REPO_ROOT),
           "--ctest-json", str(files["ctest-listing.json"]), "--out", str(files["codemodel-digest.json"])],
          "codemodel digest")
@@ -657,6 +660,8 @@ def _derive(binding, head_sha, base_sha, build_dir, result_dir, runner) -> dict[
         "would_skip_count": len(selection["would_skip"]),
         "sampled_count": len(selection["sampled_executables"]),
         "reasons": manifest.get("reasons"),
+        # The build directory every step was given, for the host's rederive.
+        "build_dir": bound_build,
         "audit": audit,
     }
 

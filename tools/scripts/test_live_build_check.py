@@ -72,13 +72,16 @@ class WindowsLivenessProbeTests(unittest.TestCase):
             asked.append(pid)
             return True
 
+        liveness = sys.modules["process_liveness"]
         real_name, real_kill = module.os.name, module.os.kill
+        real_probe = liveness._windows_pid_alive
         module.os.name, module.os.kill = "nt", tripwire
-        module._windows_pid_alive = windows_probe
+        liveness._windows_pid_alive = windows_probe
         try:
             self.assertTrue(module.pid_is_alive(4242))
         finally:
             module.os.name, module.os.kill = real_name, real_kill
+            liveness._windows_pid_alive = real_probe
         self.assertEqual(asked, [4242])
 
     def test_posix_route_still_probes_with_signal_zero(self) -> None:

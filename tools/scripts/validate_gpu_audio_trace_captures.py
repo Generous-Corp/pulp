@@ -14,6 +14,8 @@ import argparse
 import os
 import re
 import subprocess
+
+from script_argv import argv_for
 import sys
 import tempfile
 from pathlib import Path
@@ -39,7 +41,7 @@ def _require_pinned_processor(processor: Path) -> None:
     _require_regular_file(processor, "trace_processor", executable=True)
     try:
         completed = subprocess.run(
-            [str(processor), "--version"],
+            [*argv_for(processor), "--version"],
             check=False,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -221,7 +223,7 @@ def _query_metrics(
         query_file.write_text(f"{definitions_text}\n\n{query}", encoding="utf-8")
         try:
             completed = subprocess.run(
-                [str(processor), "query", "-f", str(query_file), str(trace)],
+                [*argv_for(processor), "query", "-f", str(query_file), str(trace)],
                 check=False,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,

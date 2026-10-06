@@ -3,6 +3,7 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from scene3d_launch import argv_for
 
 
 EXPORTED_AT = "2026-06-03T00:00:00Z"
@@ -50,7 +51,7 @@ def main():
     errors = []
 
     valid = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "khronos-boxtextured",
         "--exported-at",
@@ -73,7 +74,7 @@ def main():
     )
 
     missing_exported_at = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "khronos-boxtextured",
         str(args.fixture),
@@ -87,7 +88,7 @@ def main():
     )
 
     empty_exported_at = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "khronos-boxtextured",
         "--exported-at",
@@ -103,7 +104,7 @@ def main():
     )
 
     empty_exporter = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--exporter",
         "",
         "--exported-at",
@@ -119,7 +120,7 @@ def main():
     )
 
     empty_source_defaults = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "",
         "--exported-at",

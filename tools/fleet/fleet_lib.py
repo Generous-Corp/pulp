@@ -34,6 +34,15 @@ import tempfile
 import time
 from pathlib import Path
 
+# fleet_lib also runs from scripts installed outside a checkout, so the shared
+# launcher helper is optional; without it a path is launched directly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+try:
+    from script_argv import argv_for  # noqa: E402
+except ImportError:  # pragma: no cover - only outside a checkout
+    def argv_for(executable):  # type: ignore[no-redef]
+        return [str(executable)]
+
 try:
     import tomllib
 except ImportError:  # stdlib only from 3.11; macOS ships 3.9
@@ -394,7 +403,7 @@ def _runner_version(runner_dir):
     if not listener.is_file():
         return None
     proc = subprocess.run(
-        [str(listener), "--version"], capture_output=True, text=True, timeout=15
+        [*argv_for(listener), "--version"], capture_output=True, text=True, timeout=15
     )
     if proc.returncode != 0:
         return None

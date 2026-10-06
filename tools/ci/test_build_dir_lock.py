@@ -244,9 +244,7 @@ class NoWaitTest(unittest.TestCase):
         # to keep writing into a tree whose lock had just been released.
         deadline = time.monotonic() + 5
         while True:
-            try:
-                os.kill(build_pid, 0)
-            except ProcessLookupError:
+            if build_dir_lock.pid_alive(build_pid) is False:
                 break
             self.assertLess(time.monotonic(), deadline, "build outlived its lock holder")
             time.sleep(0.02)

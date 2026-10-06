@@ -10916,7 +10916,12 @@ downstream consumer of the installed headers — so only someone building a
 plug-in against a `cmake --install`ed SDK hits it.
 
 `tools/scripts/win32_include_lint.py` guards `core/*/include` whole-tree in
-`gates.sh`. Always use `pulp/platform/win32_sane.hpp`, which pre-sets `NOMINMAX`
+`gates.sh`. Its sibling `tools/scripts/safe_path_guard_lint.py` (also in
+`gates.sh` and `version-skill-check.yml`) fails any boolean `*safe*` path guard
+in `core/` or `tools/cli/` that tests `is_absolute()`/`is_relative()` without
+calling `pulp::runtime::is_safe_relative_path`: on Windows `/x`, `\x` and `C:x`
+are not absolute, so a bare check lets an untrusted name replace the
+destination's root. Always use `pulp/platform/win32_sane.hpp`, which pre-sets `NOMINMAX`
 and `WIN32_LEAN_AND_MEAN`. Sources are deliberately out of scope: a `.cpp` that
 leaks breaks only itself, immediately; a header exports the hazard.
 
@@ -11699,3 +11704,17 @@ its fetches and then lets its fail-closed checks decide) and give the step a
 jobs with `filter=all`: the jobs API defaults to the latest attempt, which hides the
 cancelled attempt you are looking for.
 
+
+## Probe a pid through `process_liveness.pid_alive`, never `os.kill(pid, 0)`
+
+On Windows `os.kill(pid, 0)` is `os.kill(pid, signal.CTRL_C_EVENT)`: Python
+calls `GenerateConsoleCtrlEvent`, which sends Ctrl+C to every process on the
+console instead of testing the pid, and a probe in any ctest-run script kills
+the whole Windows ctest run (`0xC000013A`). With `ctest -j` the casualty
+reported at the kill is often not the culprit: look for a parallel test that
+probes a pid. `tools/scripts/process_liveness.pid_alive` is the one probe
+(OpenProcess + exit code on Windows; True, False, or None for "cannot tell").
+`raw_pid_probe_lint.py` in `gates.sh` and `version-skill-check` rejects any
+other `os.kill(<pid>, 0)`. A script that is copied into fixtures or imported as
+`tools.scripts.*` (`build_dir_lock.py`, the fetch scripts) imports it with a
+fallback that answers None, and None must never mean "dead".

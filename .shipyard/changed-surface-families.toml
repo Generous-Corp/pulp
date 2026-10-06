@@ -178,6 +178,7 @@ paths = [
   "tools/scripts/test_preamble_python_stable_cwd.py",
   "tools/scripts/test_prepare_logic_hostbench_au.py",
   "tools/scripts/test_prepare_node_runtime.py",
+  "tools/scripts/test_process_liveness.py",
   "tools/scripts/test_promote_quirk_tiers.py",
   "tools/scripts/test_pulp_lldb.py",
   "tools/scripts/test_pulp_tooling_disposition.py",
@@ -210,6 +211,7 @@ paths = [
   "tools/scripts/test_run_software_gpu_break_confirm.py",
   "tools/scripts/test_run_swift_coverage.py",
   "tools/scripts/test_run_swift_coverage_extra.py",
+  "tools/scripts/test_safe_path_guard_lint.py",
   "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
@@ -3610,6 +3612,34 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-d1abda652602"
+paths = ["tools/scripts/test_script_argv.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "script-argv-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-4c4cc28797ab"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
@@ -4973,6 +5003,7 @@ tests = [
   "reuse-record-selftest",
   "runner-topology-selftest",
   "runner-topology-static-selftest",
+  "script-argv-selftest",
   "sequencer-control-skill-coverage",
   "sequencer-control-skill-coverage-selftest",
   "skills-doc-check-selftest",
@@ -5278,6 +5309,7 @@ paths = [
   "tools/scripts/test_prepush_format_gate.py",
   "tools/scripts/test_prepush_gate_output.py",
   "tools/scripts/test_prepush_queue_rebase_hint.py",
+  "tools/scripts/test_process_liveness.py",
   "tools/scripts/test_promote_quirk_tiers.py",
   "tools/scripts/test_protected_merge_receipt.py",
   "tools/scripts/test_pulp_lldb.py",
@@ -5322,12 +5354,14 @@ paths = [
   "tools/scripts/test_runner_topology_check.py",
   "tools/scripts/test_runner_topology_static.py",
   "tools/scripts/test_rust_cli_build_edge_check.py",
+  "tools/scripts/test_safe_path_guard_lint.py",
   "tools/scripts/test_sample_region_catalogs.py",
   "tools/scripts/test_sample_region_compat_baseline.py",
   "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
+  "tools/scripts/test_script_argv.py",
   "tools/scripts/test_script_test_inputs.py",
   "tools/scripts/test_sdk_capability_handoff.py",
   "tools/scripts/test_sdk_consumer_sweep.py",
@@ -5778,6 +5812,7 @@ paths = [
   "tools/scripts/test_prepush_format_gate.py",
   "tools/scripts/test_prepush_gate_output.py",
   "tools/scripts/test_prepush_queue_rebase_hint.py",
+  "tools/scripts/test_process_liveness.py",
   "tools/scripts/test_promote_quirk_tiers.py",
   "tools/scripts/test_protected_merge_receipt.py",
   "tools/scripts/test_pulp_lldb.py",
@@ -5822,12 +5857,14 @@ paths = [
   "tools/scripts/test_runner_topology_check.py",
   "tools/scripts/test_runner_topology_static.py",
   "tools/scripts/test_rust_cli_build_edge_check.py",
+  "tools/scripts/test_safe_path_guard_lint.py",
   "tools/scripts/test_sample_region_catalogs.py",
   "tools/scripts/test_sample_region_compat_baseline.py",
   "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
+  "tools/scripts/test_script_argv.py",
   "tools/scripts/test_script_test_inputs.py",
   "tools/scripts/test_sdk_capability_handoff.py",
   "tools/scripts/test_sdk_consumer_sweep.py",
