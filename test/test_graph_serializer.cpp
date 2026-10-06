@@ -408,11 +408,12 @@ TEST_CASE("SignalGraph D1 replay probe separates plan determinism from persisten
         REQUIRE(render_replay_graph(replay) == baseline_render);
     }
 
-    // The serializer intentionally preserves authored edge order until the
-    // graph gains a stable connection-lineage field. This probe records the
-    // remaining persistence sensitivity instead of silently claiming canonical
-    // bytes that could change audio fan-in rounding or control-edge semantics.
-    REQUIRE(persisted_forms.size() > 1);
+    // Ordinary graph serialization is a canonical content contract: authored
+    // insertion order remains available to editing, while equivalent edge
+    // permutations emit identical persisted bytes. Keep this assertion beside
+    // the plan and audio checks so a future serializer regression cannot hide
+    // behind a runtime-only determinism result.
+    REQUIRE(persisted_forms.size() == 1);
 
     // Negative control: a real topology change must still change the persisted
     // graph, plan fingerprint, and rendered bytes. A test that only checked
