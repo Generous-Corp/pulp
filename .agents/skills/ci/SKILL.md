@@ -780,6 +780,18 @@ executables; the bootstrap consumes only the newly derived merge-group
 decision. Missing, ambiguous, expired, or mutated evidence must leave the
 original matrix entry in place. Never make the PR receipt itself a required
 context, and never execute the candidate's verifier as the authority.
+**Every required job on a hosted label can eject a group when GitHub cannot
+assign hosted runners.** The job is cancelled after about fifteen minutes with
+no `runner_name`, and the queue ejects on that non-success. `drift-fast` and the
+wclap job route through `PULP_DRIFT_FAST_RUNS_ON_JSON` / `PULP_WCLAP_RUNS_ON_JSON`
+(unset = `ubuntu-latest`). A self-hosted target must admit the workflow in its
+runner group: `pulp-trusted-build` admits neither, and refuses the wclap
+workflow because it holds a deploy secret; a job routed to a group that does
+not admit it waits forever. `version-skill-check.yml` and
+`vellum-freeze-check.yml` route only when `github.workflow_ref` is the main
+definition, which a merge_group or pull_request event never is, so they run
+hosted in practice.
+
 `tools/scripts/test_required_macos_alias.py` and
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
