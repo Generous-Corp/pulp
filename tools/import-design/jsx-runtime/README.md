@@ -107,3 +107,21 @@ sidecar copies that role into `asset.vendor_kind`. The canonicalizer refuses
 unknown roles, authored script bodies, mixed references, and marker-only
 content. Older sidecars without this metadata remain loadable and retain their
 assets until an adapter re-captures them with the explicit role.
+
+## Stable source ids
+
+`materialized_ids_map.mjs` owns the persistent `ids.map.json` contract used by
+the materialized emitter. Each entry maps a source tuple — `component`,
+`local_path`, and lowercase SHA-256 `content_hash` — to one source id. Entries
+are sorted before serialization, and prior keys are retained as `aliases` when
+one unambiguous content or component-local-path match carries an id through a
+source edit. A repeated candidate is rejected instead of guessed; structural
+capture paths are never used as a replacement source identity.
+
+The module is intentionally separate from the v2 runtime binding map: one
+source id may be projected into multiple binding streams, where
+`materialized_binding_contract.mjs` adds the stream-specific prefix. Source
+emitters should call `assignMaterializedSourceIds()` and persist
+`serializeMaterializedIdsMap()` before schema-v2 normalization. Bindings that
+lack all three source fields remain positional and must be reported by the
+emitter rather than silently receiving a guessed id.
