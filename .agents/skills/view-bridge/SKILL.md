@@ -3388,3 +3388,12 @@ pointer (a settings panel's `add_section`), call `section.take_view()`; moving
 section with a view through `SettingsSection(title, std::unique_ptr<view::View>)`,
 which installs the deleter where View is complete.
 
+
+## Typed imported-editor bridge contracts
+
+The design-import bridge contract is generated from `tools/bridge/bridge.toml`
+into sorted C++/TypeScript/docs artifacts. Keep `EditorBridge::handlers()`
+ordered and deterministic, validate generated output with the bridge drift and
+missing-handler controls, and keep inbound commands distinct from outbound
+publications. This seed contract does not replace payload parsing or handler
+registration for existing plugins.

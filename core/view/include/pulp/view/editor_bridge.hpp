@@ -50,6 +50,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulp::view {
 
@@ -117,6 +118,13 @@ public:
 
     /// Number of registered handlers.
     std::size_t handler_count() const noexcept;
+
+    /// Return the registered message types in canonical lexicographic order.
+    ///
+    /// This snapshot is intended for contract/parity checks and diagnostics;
+    /// callers may retain it across bridge mutations without observing
+    /// dangling views or a partially updated table.
+    std::vector<std::string> handlers() const;
 
     /// Dispatch an already-parsed envelope. The caller has already
     /// extracted `type` and `payload` from the JSON envelope.

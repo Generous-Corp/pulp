@@ -87,6 +87,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME import-validation-source-contract-schema-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_source_contract_schema.py")
     set_tests_properties(import-validation-source-contract-schema-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME import-validation-browser-fidelity-receipt-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_verify_browser_fidelity_receipt.py")
+    set_tests_properties(import-validation-browser-fidelity-receipt-selftest PROPERTIES
+        LABELS "tools;selftest" TIMEOUT 120 ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/import-validation")
     add_test(NAME import-project-import-ir-schema-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import/test_project_import_ir_schema.py")
     set_tests_properties(import-project-import-ir-schema-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

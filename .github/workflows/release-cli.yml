@@ -675,6 +675,9 @@ jobs:
           selected["control_standalone_host_floor"] = authoritative[
               "control_standalone_host_floor"
           ]
+          selected["materialized_binding_contract_floor"] = authoritative[
+              "materialized_binding_contract_floor"
+          ]
           selected_platforms = set(selected["platforms"])
           for key, value in authoritative["platform_library_stems"].items():
               if key in selected_platforms:
@@ -1061,6 +1064,14 @@ jobs:
               --import-design-binary build/tools/import-design/pulp-import-design
               --import-design-runtime-dir build/tools/import-design/browser_capture-v1
             )
+            if python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "0.918.0"; then
+              test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
+              import_design_args+=(
+                --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
+              )
+            else
+              import_design_args+=(--allow-missing-import-design-contract)
+            fi
             if [ -n "${PULP_NODE_RUNTIME_EXECUTABLE:-}" ]; then
               import_design_args+=(
                 --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE"
@@ -1095,6 +1106,8 @@ jobs:
 
       - name: Package CLI (Windows)
         if: runner.os == 'Windows'
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           $importDesignArgs = @()
           if ((Test-Path build/tools/import-design/Release/pulp-import-design.exe) `
@@ -1105,6 +1118,17 @@ jobs:
               '--import-design-runtime-dir',
               'build/tools/import-design/Release/browser_capture-v1'
             )
+            if ([version]$env:RELEASE_TAG.TrimStart('v') -ge [version]'0.918.0') {
+              if (!(Test-Path build/tools/import-design/Release/jsx-runtime/materialized_binding_contract.mjs)) {
+                throw 'materialized binding contract missing from import-design build staging'
+              }
+              $importDesignArgs += @(
+                '--import-design-contract',
+                'build/tools/import-design/Release/jsx-runtime/materialized_binding_contract.mjs'
+              )
+            } else {
+              $importDesignArgs += '--allow-missing-import-design-contract'
+            }
             if ($env:PULP_NODE_RUNTIME_EXECUTABLE) {
               $importDesignArgs += @(
                 '--node-runtime',
@@ -1617,6 +1641,7 @@ jobs:
           if [ -x /tmp/pulp-smoke/pulp-import-design ]; then
             CLI_ARTIFACTS+=(pulp-import-design)
             test -s /tmp/pulp-smoke/browser_capture/capture.mjs
+            test -s /tmp/pulp-smoke/jsx-runtime/materialized_binding_contract.mjs
             /tmp/pulp-smoke/pulp import-design --help >/tmp/pulp-import-delegate.out
           fi
           for ART in "${CLI_ARTIFACTS[@]}"; do
@@ -1756,6 +1781,9 @@ jobs:
               $artCmd["pulp-import-design.exe"] = "--help"
               if (-not (Test-Path "$env:TEMP\pulp-smoke\browser_capture\capture.mjs")) {
                   throw "browser capture runtime missing from archive"
+              }
+              if (-not (Test-Path "$env:TEMP\pulp-smoke\jsx-runtime\materialized_binding_contract.mjs")) {
+                  throw "materialized binding contract missing from archive"
               }
               & "$env:TEMP\pulp-smoke\pulp.exe" import-design --help
               if ($LASTEXITCODE -ne 0) { throw "pulp import-design delegate smoke failed" }
@@ -2187,6 +2215,7 @@ jobs:
           python3 tools/scripts/release_artifact_contents.py release-assets \
             --all-platforms --version "${TAG#v}" \
             --source-sha "$(git rev-parse "${TAG}^{commit}")" \
+            --source-dir . \
             --matrix "$publication_matrix" \
             "${control_registry_args[@]}"
 

@@ -106,3 +106,10 @@ forms (`/x`, `\x`, `C:x`, `\\server\share`), `.`/`..`/empty components, and any
 `\` or `:` inside a component on every OS, so a pack whose names would escape on
 Windows is refused on macOS and Linux as well. A pack authored with backslash
 separators or colons in file names therefore fails validation everywhere.
+
+## Design-import UI source snapshots stay out of content-pack extraction
+
+The design-import `pulp ui build/check` surface emits and verifies an owned UI
+source snapshot with a deterministic manifest. Keep its source/build contract
+and clean-output validation in the UI/importer lane; do not route generated UI
+source through content-pack extraction.

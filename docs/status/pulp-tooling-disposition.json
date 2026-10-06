@@ -4148,6 +4148,55 @@
         ]
       },
       {
+        "name": "ui",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "build",
+            "arguments": [
+              {
+                "name": "--source",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--json",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "check",
+            "arguments": [
+              {
+                "name": "--source",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--json",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "update",
         "disposition": "pulp-owned",
         "arguments": [

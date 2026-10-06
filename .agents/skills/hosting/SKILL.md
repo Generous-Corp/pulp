@@ -33,6 +33,17 @@ registry and no plug-in-per-file hooks; adding a format means:
 
 Everything else — tests, scanner, graph wiring — is format-agnostic.
 
+### SignalGraph determinism and replay
+
+When changing `SignalGraph` topology or its runtime plan, preserve canonical
+ordering for ordinary audio edges. Equal-priority ready nodes must use their
+stable `NodeId` tie-break, and serializer / compiled traversal order must use
+the same connection comparator. Keep authored automation, MIDI, feedback, and
+sidechain ordering semantics explicit; do not sort those streams as ordinary
+audio edges. Add a permutation replay with a topology mutation negative control
+when changing this path so agents can distinguish deterministic replay from a
+test that only passes for one insertion order.
+
 ## CLAP reference backend
 
 `plugin_slot_clap.cpp` is the simplest backend to study for dlopen,

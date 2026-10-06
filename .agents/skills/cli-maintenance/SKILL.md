@@ -3806,6 +3806,14 @@ opens the process with `PROCESS_QUERY_LIMITED_INFORMATION` and reads
 copied as a single sealed file into evidence and so keeps its own Windows route
 with a lint skip.
 
+## Browser capture runtime dependency closure
+
+When `tools/import-design/browser_capture/capture.mjs` gains a relative `.mjs`
+import, add that module to `runtime_manifest.txt`,
+`tools/cli/upgrade_install.hpp`, and the release product matrix together. Run
+the upgrade runtime graph test so staged installs fail before shipping with an
+unresolved module.
+
 ## Untrusted paths go through `pulp::runtime::is_safe_relative_path`
 
 An archive entry, manifest member, template path or registry location that the
@@ -3818,3 +3826,4 @@ check `pulp::runtime::is_within_directory` after the join.
 helper. A source-compiled test target that does not link `pulp::runtime`
 (`pulp-test-cli-import-emit`, the gpu-probe model library) needs
 `core/runtime/include` on its include path for the header.
+

@@ -89,7 +89,7 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
             "add", "audit", "ci-host", "ci-local", "config", "content",
             "docs", "fmt", "help", "identity", "kit", "list", "loop",
             "macos", "minos", "overflow", "pr", "project", "projects",
-            "remove", "search", "suggest", "target", "tool", "tweaks",
+            "remove", "search", "suggest", "target", "tool", "tweaks", "ui",
             "update",
         },
         "excluded": {"audio", "bake", "host", "import", "scan"},

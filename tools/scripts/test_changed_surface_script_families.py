@@ -426,6 +426,40 @@ class GeneratedFamiliesTest(FamilyFixture):
     def test_the_families_file_is_what_the_gate_widening_treats_as_selection_only(self) -> None:
         self.assertEqual(str(families.FAMILIES_FILE), wide_non_native.SELECTOR_FAMILIES_FILE)
 
+    def test_optional_environment_tests_are_excluded_from_the_generated_family(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/optional_test.py", "")
+        self.script_test("optional-selftest", "tools/scripts/optional_test.py",
+                         labels=["browser-capture"])
+        # Real CTest JSON commonly exports this property as the string
+        # ``TRUE``.  Keep the native-bool form covered by the fixture helper's
+        # older contract in a separate test below.
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": "TRUE"})
+        self.write("tools/scripts/required_test.py", "")
+        self.script_test("required-selftest", "tools/scripts/required_test.py",
+                         labels=["browser-capture"])
+        generated = self.generate()
+        self.assertEqual(generated["script-surface-environment-bound"]["tests"],
+                         ["required-selftest"])
+
+    def test_optional_environment_normalization_keeps_false_required(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/optional_true.py", "")
+        self.script_test("optional-true", "tools/scripts/optional_true.py",
+                         labels=["browser-capture"])
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": " true "})
+        self.write("tools/scripts/optional_false.py", "")
+        self.script_test("optional-false", "tools/scripts/optional_false.py",
+                         labels=["browser-capture"])
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": "FALSE"})
+        self.write("tools/scripts/native_bool.py", "")
+        self.script_test("native-bool", "tools/scripts/native_bool.py",
+                         labels=["browser-capture"])
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": True})
+        generated = self.generate()
+        self.assertEqual(generated["script-surface-environment-bound"]["tests"],
+                         ["optional-false"])
+
     def test_no_whole_tree_test_refuses_to_bound_anything(self) -> None:
         self.write("tools/scripts/test_alone.py", "")
         self.script_test("alone-selftest", "tools/scripts/test_alone.py")

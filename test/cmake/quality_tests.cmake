@@ -35,6 +35,43 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME mlx-named-model-harness-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
+
+    # The importer, UI compiler and SDK are extractable packages.  Keep their
+    # dependency seam executable in every configured tree, including trees
+    # without a JavaScript toolchain; the self-test plants a private include
+    # and proves the same instrument fails closed.
+    add_test(NAME vellum-boundary-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_boundary_lint.py")
+    add_test(NAME vellum-boundary-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_boundary_lint.py")
+    set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
+    # Keep one checked-in, license-free source fixture on the same instrument
+    # as the importer output gate. The companion unittest plants every lint
+    # class and must turn red, so a vacuous clean fixture cannot make this gate
+    # appear healthy.
+    add_test(NAME pulp-ui-clean-output-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/clean_output_lint.py"
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/fixtures/clean")
+    add_test(NAME pulp-ui-clean-output-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/test_clean_output_lint.py")
+    set_tests_properties(pulp-ui-clean-output-lint
+        pulp-ui-clean-output-lint-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+    # The source emitter is the smallest executable WP-2a seam.  It owns
+    # deterministic snapshot output and a fail-closed drift check while the
+    # future TSX/runtime compiler is developed behind the same command.
+    add_test(NAME pulp-ui-build-contracts
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/test_ui_build.py")
+    set_tests_properties(pulp-ui-build-contracts PROPERTIES
+        LABELS "pr;design-import" TIMEOUT 60)
+
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")
@@ -1283,8 +1320,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         # Two cases walk the whole tracked tree for configured reachability,
-        # once, shared; about 50 s on m3.
-        set_tests_properties(changed-surface-script-families-selftest PROPERTIES TIMEOUT 120)
+        # once, shared. The matcher is cached, but hosted runners can still be
+        # several times slower than the owner's machine as the script corpus
+        # grows; keep the contract bounded without making normal runs brittle.
+        set_tests_properties(changed-surface-script-families-selftest PROPERTIES TIMEOUT 300)
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
         # The lane runner's own contract: base provisioning and configure-shape

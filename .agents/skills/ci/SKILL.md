@@ -11747,3 +11747,6 @@ probes a pid. `tools/scripts/process_liveness.pid_alive` is the one probe
 other `os.kill(<pid>, 0)`. A script that is copied into fixtures or imported as
 `tools.scripts.*` (`build_dir_lock.py`, the fetch scripts) imports it with a
 fallback that answers None, and None must never mean "dead".
+## Design-import clean-output and Vellum boundary gates
+
+The design-import refactor adds two cheap, source-only checks to `tools/scripts/gates.sh`: `vellum_boundary_lint.py` verifies that extractable importer packages use only declared public Pulp view interfaces, and `tools/ui-build/lint/clean_output_lint.py` checks a deterministic clean source fixture. Keep both checks in the gate whenever these package or importer paths change; their planted negative controls are registered in the quality CTest manifest.
