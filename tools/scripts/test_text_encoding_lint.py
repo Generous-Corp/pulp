@@ -64,6 +64,18 @@ class DetectionTests(unittest.TestCase):
     def test_binary_modes_explicit_encodings_and_non_file_opens_are_clean(self) -> None:
         self.assertEqual(lint.scan_text(CLEAN), [])
 
+    def test_a_positional_encoding_or_a_same_named_helper_is_clean(self) -> None:
+        source = (
+            'import pathlib\n'
+            'p = pathlib.Path("x")\n'
+            'a = p.read_text("utf-8")\n'
+            'p.write_text("y", "utf-8")\n'
+            'b = families.read_text(root, rel)\n'
+        )
+        self.assertEqual(lint.scan_text(source), [])
+        fixed, count = lint.fix_text(source)
+        self.assertEqual((fixed, count), (source, 0))
+
 
 class FixTests(unittest.TestCase):
     def test_fix_inserts_encoding_and_leaves_unknown_modes(self) -> None:

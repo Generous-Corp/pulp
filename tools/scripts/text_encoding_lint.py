@@ -72,6 +72,11 @@ def flag(node: ast.Call) -> str | None:
         return None
     func = node.func
     if isinstance(func, ast.Attribute) and func.attr in ("read_text", "write_text"):
+        # Path.read_text(encoding) and Path.write_text(data, encoding) also take
+        # the encoding positionally; a call with that argument names it, and a
+        # helper of the same name with more arguments is not Path's.
+        if len(node.args) > (0 if func.attr == "read_text" else 1):
+            return None
         return f".{func.attr}() without encoding="
     if isinstance(func, ast.Name) and func.id == "open":
         return "open() in text mode without encoding=" if _open_needs_encoding(node, 1) else None
