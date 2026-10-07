@@ -20,9 +20,10 @@ import read_audit_cadence as rac  # noqa: E402
 START = dt.date(2026, 10, 3)
 
 
-def run(i, created, conclusion="success", event="schedule", branch="main", status="completed", sha="aaaa"):
-    return {"id": i, "created_at": created, "conclusion": conclusion, "event": event,
-            "head_branch": branch, "status": status, "head_sha": sha}
+def run(i, created, conclusion="success", event="schedule", branch="main", status="completed", sha="aaaa",
+        completed=None):
+    return {"id": i, "created_at": created, "updated_at": completed or created, "conclusion": conclusion,
+            "event": event, "head_branch": branch, "status": status, "head_sha": sha}
 
 
 def now(stamp):
@@ -85,10 +86,12 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(counted(doc), [("2026-10-03", 2)])
         self.assertEqual([r["verdict"] for r in doc["days"]], ["clean", "pending"])
         self.assertEqual({r["id"] for r in doc["days"][0]["ignored"]}, {1, 3})
-        # Two scheduled runs on one day: the first created counts.
-        doc = rac.ledger([run(4, "2026-10-03T14:25:00Z"), run(5, "2026-10-03T20:25:00Z", "failure")],
+        # Two scheduled runs on one day: the first to complete counts.
+        doc = rac.ledger([run(4, "2026-10-03T14:25:00Z", completed="2026-10-03T22:00:00Z"),
+                          run(5, "2026-10-03T15:25:00Z", "failure", completed="2026-10-03T17:00:00Z")],
                          START, now("2026-10-04T12:00:00"))
-        self.assertEqual(counted(doc), [("2026-10-03", 4)])
+        self.assertEqual([r["verdict"] for r in doc["days"]], ["not_clean", "pending"])
+        self.assertEqual(doc["days"][0]["run"]["id"], 5)
 
     def test_a_day_with_neither_is_a_gap_and_resets(self):
         doc = rac.ledger([run(1, "2026-10-03T14:00:00Z"), run(2, "2026-10-05T14:00:00Z")],

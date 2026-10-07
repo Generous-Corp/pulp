@@ -8,7 +8,7 @@ the UTC date the scheduled run was created, not the cron hour. At most one run
 counts per day:
 
     the scheduled run      the run with event `schedule` created that day; if
-                           there were two, the first created
+                           there were two, the first to complete
     a replacing dispatch   counts in its place only when that day's scheduled
                            run was cancelled and the dispatch ran on the same
                            head sha after it (the per-ref cancel-in-progress
@@ -98,7 +98,10 @@ def assign(runs: list[dict], verdicts: dict[str, str]) -> tuple[dict[dt.date, di
     ignored: dict[dt.date, list[dict]] = {}
     used: set = set()
     ordered = sorted(runs, key=lambda r: r["created_at"])
-    schedules = [r for r in ordered if r.get("event") == "schedule"]
+    # If GitHub ever creates two scheduled runs on one day, the first to
+    # complete counts.
+    schedules = sorted((r for r in ordered if r.get("event") == "schedule"),
+                       key=lambda r: (r.get("updated_at") or r["created_at"], r["created_at"]))
     for sched in schedules:
         day = _date(sched["created_at"])
         if day in counted:
