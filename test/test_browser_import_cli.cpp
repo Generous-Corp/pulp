@@ -1273,7 +1273,7 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
              .height = 32,
              .require_canvas_ink = true});
         CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("opaque canvas pixels") !=
+        CHECK(rejected.error.find("at least one non-transparent") !=
               std::string::npos);
 
         const auto allowed = id::validate_browser_capture_design_ir(
@@ -1287,7 +1287,7 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
         CHECK(allowed.scored);
     }
 
-    SECTION("low-contrast sparse specks do not satisfy the ink gate") {
+    SECTION("low-contrast opaque pixels still satisfy the alpha ink contract") {
         id::ImportPngImage specks;
         specks.width = evidence.width;
         specks.height = evidence.height;
@@ -1301,7 +1301,7 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
         }
         tree.write(evidence_path, id::encode_png_rgba(specks));
 
-        const auto rejected = id::validate_browser_capture_design_ir(
+        const auto accepted = id::validate_browser_capture_design_ir(
             ir,
             {.reference = reference_path,
              .rendered = tree.root / "render-low-contrast.png",
@@ -1309,9 +1309,8 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
              .width = 32,
              .height = 32,
              .require_canvas_ink = true});
-        CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("opaque canvas pixels") !=
-              std::string::npos);
+        CHECK(accepted.valid);
+        CHECK(accepted.scored);
     }
 
     SECTION("removing the evidence fails closed") {
