@@ -114,8 +114,7 @@ struct Instance {
     float last_output_gain = std::numeric_limits<float>::quiet_NaN();
     float last_mix = std::numeric_limits<float>::quiet_NaN();
 };
-template <typename Fn>
-inline void forward_if_changed(float& last, float value, Fn&& apply) {
+template <typename Fn> inline void forward_if_changed(float& last, float value, Fn&& apply) {
     if (value == last)
         return;
     last = value;

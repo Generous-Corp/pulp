@@ -57,8 +57,6 @@ bool valid_impulse_response(const ImpulseResponse& ir) {
 /// each of these is documented by the DSP as taking effect on the next load, so
 /// none of them can be a param.
 
-
-
 /// Worst-case linear gain for the Forge registry (series law 8).
 ///
 /// The wet bound is not computed here: the DSP measures `ir_gain * ||h||_1` AT
@@ -199,8 +197,6 @@ int gpu_internal_block_size(int max_block) noexcept {
         return 0;
     return static_cast<int>(quantum);
 }
-
-
 
 // Fixed POD schema. Lane counters count transport quanta, not arbitrary host
 // callbacks. Both mono lanes stay separate; worker output is not GPU delivery.
@@ -448,9 +444,6 @@ using ::pulp::host::space::nonlin_ambience::kWidthPct;
 /// `last` starts as NaN so the first sample always forwards (`x == NaN` is
 /// false for every x, including NaN).
 
-
-
-
 /// Worst-case linear gain for the Forge registry (series law 8).
 ///
 /// The DSP ships the bound as a closed form of its own shipped constants —
@@ -645,8 +638,6 @@ using ::pulp::host::space::cabinet::kResonanceTrimSt;
 using ::pulp::host::space::cabinet::kTrebleHz;
 using ::pulp::host::space::cabinet::kTypeId;
 using ::pulp::host::space::cabinet::kVolumeL;
-
-
 
 float speaker_cabinet_worst_case_gain() {
     return static_cast<float>(Engine{}.worst_case_gain() *
