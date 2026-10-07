@@ -2635,3 +2635,13 @@ caller promise, not a request to stop processing or a proof of worker drain.
 Read selected-delivery totals after joining the sole process caller and before
 release resets them; keep worker output distinct from authenticated GPU-selected
 output. See [the query contract](../../../docs/guides/custom-node-diagnostics.md).
+
+## SignalGraph authoring receipts
+
+Consumers that only capture or validate graph authoring lineage should include
+`<pulp/host/signal_graph_authoring.hpp>` instead of pulling in the full runtime
+header. The existing namespace-level `GraphAuthoringReceipt` and
+`GraphAuthoringReceiptStatus` names and the `signal_graph.hpp` compatibility
+umbrella remain stable; the focused header is a type/ownership boundary and
+must not be treated as proof of a compile-time speedup without a fresh fan-out
+or `-ftime-trace` measurement.
