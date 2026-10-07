@@ -1,7 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include <pulp/host/signal_graph_node.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/state/parameter.hpp>
 
@@ -44,17 +43,6 @@ TEST_CASE("DSPX-09 independent allpass oracle preserves sinusoid magnitude",
     const double magnitude_squared = output_energy / input_energy;
     // Independent frequency-domain oracle: an allpass has unity magnitude.
     CHECK_THAT(magnitude_squared, WithinAbs(1.0, 0.02));
-}
-
-TEST_CASE("DSPX-09 retained-history refusal is explicit and bounded", "[dspx-09][negative]") {
-    pulp::host::RetainedHistoryPolicy policy;
-    policy.mode = pulp::host::RetainedHistoryMode::Refuse;
-    policy.max_bytes = 1024;
-    CHECK(policy.mode == pulp::host::RetainedHistoryMode::Refuse);
-    CHECK(policy.max_bytes == 1024);
-
-    // A refusal policy must remain bounded and must not silently become Adopt.
-    CHECK(policy.mode != pulp::host::RetainedHistoryMode::Adopt);
 }
 
 TEST_CASE("DSPX-09 automation base and offset oracle rejects malformed values",

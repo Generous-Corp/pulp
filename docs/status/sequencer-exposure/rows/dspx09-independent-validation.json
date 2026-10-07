@@ -17,10 +17,15 @@
       "path": "test/test_dspx09_independent_validation.cpp",
       "needles": [
         "DSPX-09 independent allpass oracle",
-        "DSPX-09 retained-history refusal",
         "DSPX-09 automation base and offset oracle",
-        "RetainedHistoryMode::Refuse",
         "BaseOffsetRefusal::NonFiniteBase"
+      ]
+    },
+    {
+      "path": "test/test_retained_history_dspx03.cpp",
+      "needles": [
+        "DSPX-09 retained-history refusal reaches the live swap path",
+        "RetainedHistoryMode::Refuse"
       ]
     },
     {
