@@ -112,7 +112,9 @@ import json
 import pathlib
 import re
 
-root = pathlib.Path("/home/ci/actions-runner")
+import os
+
+root = pathlib.Path(os.environ.get("TARTCI_PROBE_RUNNER_ROOT", "/home/ci/actions-runner"))
 identity = ""
 if (root / ".runner").exists():
     try:
@@ -122,11 +124,28 @@ if (root / ".runner").exists():
         raise SystemExit(2)
     if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", identity):
         raise SystemExit(2)
+else:
+    # A JIT runner deletes .runner when its one job ends, so a finished clone has
+    # none. Its listener log still names the runner it ran as. Take that name
+    # only when every listener log agrees on exactly one, so the caller can
+    # match it against the host's recorded generation.
+    names = set()
+    for log in sorted((root / "_diag").glob("Runner_*.log")):
+        try:
+            text = log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        names.update(re.findall(r'"AgentName":\s*"([A-Za-z0-9._-]+)"', text))
+    if len(names) == 1:
+        identity = names.pop()
+    elif len(names) > 1:
+        raise SystemExit(2)
 
 listeners = []
 workers = 0
 configurers = 0
-for proc in pathlib.Path("/proc").iterdir():
+proc_root = pathlib.Path("/proc")
+for proc in (proc_root.iterdir() if proc_root.is_dir() else ()):
     if not proc.name.isdigit():
         continue
     try:
