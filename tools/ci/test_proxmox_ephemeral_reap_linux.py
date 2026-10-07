@@ -456,7 +456,8 @@ class GuestProbeIdentityTests(unittest.TestCase):
 
     def _probe_source(self) -> str:
         text = REAPER.read_text(encoding="utf-8")
-        start = text.index("python3 - <<'PY'\n") + len("python3 - <<'PY'\n")
+        marker = "python3 - /home/ci/actions-runner <<'PY'\n"
+        start = text.index(marker) + len(marker)
         return text[start:text.index("\nPY\n", start)]
 
     def _run(self, files: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -467,10 +468,11 @@ class GuestProbeIdentityTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(body, encoding="utf-8")
             root.mkdir(exist_ok=True)
+            # A forged root in the environment must be ignored; argv decides.
             return subprocess.run(
-                ["python3", "-c", self._probe_source()],
+                ["python3", "-c", self._probe_source(), str(root)],
                 capture_output=True, text=True,
-                env={**os.environ, "TARTCI_PROBE_RUNNER_ROOT": str(root)},
+                env={**os.environ, "TARTCI_PROBE_RUNNER_ROOT": "/nonexistent-forged-root"},
             )
 
     @staticmethod
@@ -494,6 +496,12 @@ class GuestProbeIdentityTests(unittest.TestCase):
             "_diag/Runner_b.log": '"AgentName": "pulp-ci-ephemeral-201-b"',
         })
         self.assertEqual(result.returncode, 2)
+
+    def test_the_runner_root_is_host_argv_not_guest_environment(self) -> None:
+        text = REAPER.read_text(encoding="utf-8")
+        self.assertIn('"ci@${ip}" python3 - /home/ci/actions-runner <<', text)
+        self.assertNotIn("TARTCI_PROBE_RUNNER_ROOT", text)
+        self.assertNotIn("os.environ", self._probe_source())
 
     def test_no_runner_file_and_no_log_is_an_empty_identity(self) -> None:
         self.assertEqual(self._identity(self._run({})), "")

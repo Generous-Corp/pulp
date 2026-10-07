@@ -107,14 +107,17 @@ guest_probe() {
     local ip="$1"
     "$SSH" -o BatchMode=yes -o StrictHostKeyChecking=yes \
         -o UserKnownHostsFile=/root/.ssh/known_hosts -o ConnectTimeout=8 \
-        "ci@${ip}" python3 - <<'PY'
+        "ci@${ip}" python3 - /home/ci/actions-runner <<'PY'
 import json
 import pathlib
 import re
 
-import os
+import sys
 
-root = pathlib.Path(os.environ.get("TARTCI_PROBE_RUNNER_ROOT", "/home/ci/actions-runner"))
+# The runner root comes from the host as argv, never from the guest's
+# environment: a job can set variables in ~/.bashrc, which non-interactive ssh
+# shells source, and point the probe at a root it controls.
+root = pathlib.Path(sys.argv[1])
 identity = ""
 if (root / ".runner").exists():
     try:
