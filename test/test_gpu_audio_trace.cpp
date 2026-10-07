@@ -1314,6 +1314,8 @@ TEST_CASE("staged async records require quiescent ownership before producer drai
 }
 
 TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trace][p4]") {
+    static_assert(noexcept(valid_provider_receipt_digest(
+        std::declval<const SharedIoProviderIdentity&>(), std::string_view{}, std::string_view{})));
     GpuConvolverTrialContext context;
     context.trial_id = context.pair_id = 1;
     context.block_frames = context.channels = context.ir_frames = 1;
@@ -1358,6 +1360,11 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     auto control_runtime_revision = context;
     control_runtime_revision.native_runtime_revision = std::string{"runtime\x01-rev"};
     CHECK_FALSE(valid_gpu_convolver_trial_context(control_runtime_revision));
+    // Allocation failure is not safely injectable in a process-wide allocator;
+    // the noexcept contract plus malformed-revision rejection are the bounded
+    // regression for the catch-all fail-closed digest boundary.
+    CHECK_FALSE(valid_provider_receipt_digest(context.provider_identity, "runtime\"-rev",
+                                              context.immutable_receipt_digest));
     context.native_runtime_revision.clear();
     CHECK_FALSE(valid_gpu_convolver_trial_context(context));
 }

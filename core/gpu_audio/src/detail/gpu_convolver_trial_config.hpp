@@ -74,7 +74,8 @@ inline bool valid_provider_receipt_digest(const SharedIoProviderIdentity& identi
             return false;
     }
     try {
-        return immutable_receipt_digest == provider_receipt_digest(identity, native_runtime_revision);
+        return immutable_receipt_digest ==
+               provider_receipt_digest(identity, native_runtime_revision);
     } catch (...) {
         // Receipt validation is a fail-closed boundary. Canonicalization uses
         // allocating std::string operations, so allocation or hashing failures
