@@ -1669,7 +1669,9 @@ endif()
 # setup.sh's shared source cache after a killed priming run: a lock whose owner
 # is gone is reclaimed (a live one never is), and a half-populated cache is
 # re-fetched rather than trusted. Windows runs it under Git for Windows' bash,
-# located beside git rather than on PATH, where bash.exe may be WSL's.
+# located beside git rather than on PATH, where bash.exe may be WSL's. git may
+# resolve to Git\cmd, Git\bin or, when configured from a Git Bash shell whose
+# PATH leads with mingw64, Git\mingw64\bin; bash is looked for under each root.
 if(UNIX)
     add_test(NAME setup-cache-lock
         COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
@@ -1679,7 +1681,11 @@ elseif(WIN32)
     if(GIT_FOUND)
         get_filename_component(_pulp_git_bin_dir "${GIT_EXECUTABLE}" DIRECTORY)
         get_filename_component(_pulp_git_root "${_pulp_git_bin_dir}" DIRECTORY)
-        find_program(PULP_GIT_BASH bash HINTS "${_pulp_git_root}/bin" NO_DEFAULT_PATH)
+        find_program(PULP_GIT_BASH bash
+            HINTS "${_pulp_git_root}/bin" "${_pulp_git_root}/../bin"
+                  "${_pulp_git_root}/usr/bin" "${_pulp_git_root}/../usr/bin"
+            NO_DEFAULT_PATH)
+        message(STATUS "setup-cache-lock: git=${GIT_EXECUTABLE} bash=${PULP_GIT_BASH}")
         if(PULP_GIT_BASH)
             add_test(NAME setup-cache-lock
                 COMMAND "${PULP_GIT_BASH}" "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
