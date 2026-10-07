@@ -5,6 +5,8 @@
 #include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
 
+#include <pulp/runtime/crypto.hpp>
+
 #include <cstdint>
 #include <vector>
 
@@ -45,6 +47,43 @@ inline bool valid_provider_identity_component(const std::string& value) noexcept
     return !value.empty();
 }
 
+inline std::string provider_receipt_digest(const SharedIoProviderIdentity& identity,
+                                           std::string_view native_runtime_revision) {
+    const auto receipt = std::string{"pulp.gpu-audio.provider.v1\n"} +
+                         "authenticated=" + (identity.authenticated ? "true\n" : "false\n") +
+                         "provider_revision=" + identity.provider_revision + "\n" +
+                         "adapter_name=" + identity.adapter_name + "\n" +
+                         "adapter_backend=" + identity.adapter_backend + "\n" +
+                         "adapter_vendor_id=" + std::to_string(identity.adapter_vendor_id) +
+                         "\nadapter_device_id=" + std::to_string(identity.adapter_device_id) +
+                         "\nnative_runtime_name=" + identity.native_runtime_name +
+                         "\nnative_runtime_backend=" + identity.native_runtime_backend +
+                         "\nnative_runtime_authenticated=" +
+                         (identity.native_runtime_authenticated ? "true\n" : "false\n") +
+                         "\nnative_runtime_revision=" + std::string(native_runtime_revision) + "\n";
+    return pulp::runtime::sha256_hex(receipt);
+}
+
+inline bool valid_provider_receipt_digest(const SharedIoProviderIdentity& identity,
+                                          std::string_view native_runtime_revision,
+                                          std::string_view immutable_receipt_digest) noexcept {
+    if (immutable_receipt_digest.size() != 64)
+        return false;
+    for (const auto c : immutable_receipt_digest) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            return false;
+    }
+    try {
+        return immutable_receipt_digest ==
+               provider_receipt_digest(identity, native_runtime_revision);
+    } catch (...) {
+        // Receipt validation is a fail-closed boundary. Canonicalization uses
+        // allocating std::string operations, so allocation or hashing failures
+        // must reject the receipt rather than escape into the trace writer.
+        return false;
+    }
+}
+
 struct GpuConvolverTrialContext {
     std::uint64_t trial_id = 0;
     std::uint64_t pair_id = 0;
@@ -68,6 +107,10 @@ struct GpuConvolverTrialContext {
     // Receipts require an authenticated provider identity; missing identity
     // fails closed and cannot be interpreted as physical GPU evidence.
     SharedIoProviderIdentity provider_identity;
+    // These receipt fields are private to the trial context. They must not be
+    // added to SharedIoProviderIdentity, which crosses an existing ABI seam.
+    std::string native_runtime_revision;
+    std::string immutable_receipt_digest;
 };
 
 inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
@@ -84,6 +127,11 @@ inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& co
            valid_provider_identity_component(context.provider_identity.adapter_backend) &&
            context.provider_identity.adapter_vendor_id != 0 &&
            context.provider_identity.adapter_device_id != 0 &&
+           // This value is projected verbatim into the private JSONL receipt;
+           // reject unsafe bytes before digest validation or serialization.
+           valid_provider_identity_component(context.native_runtime_revision) &&
+           valid_provider_receipt_digest(context.provider_identity, context.native_runtime_revision,
+                                         context.immutable_receipt_digest) &&
            context.provider_identity.native_runtime_authenticated &&
            valid_provider_identity_component(context.provider_identity.native_runtime_name) &&
            valid_provider_identity_component(context.provider_identity.native_runtime_backend) &&
