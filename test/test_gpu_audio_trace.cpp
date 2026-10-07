@@ -1334,6 +1334,12 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     auto uppercase_digest = context;
     uppercase_digest.immutable_receipt_digest[0] = 'A';
     CHECK_FALSE(valid_gpu_convolver_trial_context(uppercase_digest));
+    auto forged_authentication = context;
+    forged_authentication.provider_identity.authenticated = false;
+    CHECK_FALSE(valid_gpu_convolver_trial_context(forged_authentication));
+    auto forged_runtime_authentication = context;
+    forged_runtime_authentication.provider_identity.native_runtime_authenticated = false;
+    CHECK_FALSE(valid_gpu_convolver_trial_context(forged_runtime_authentication));
     context.max_inflight = 3;
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
     context.max_inflight = 2;

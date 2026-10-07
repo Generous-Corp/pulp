@@ -50,6 +50,7 @@ inline bool valid_provider_identity_component(const std::string& value) noexcept
 inline std::string provider_receipt_digest(const SharedIoProviderIdentity& identity,
                                            std::string_view native_runtime_revision) {
     const auto receipt = std::string{"pulp.gpu-audio.provider.v1\n"} +
+                         "authenticated=" + (identity.authenticated ? "true\n" : "false\n") +
                          "provider_revision=" + identity.provider_revision + "\n" +
                          "adapter_name=" + identity.adapter_name + "\n" +
                          "adapter_backend=" + identity.adapter_backend + "\n" +
@@ -57,6 +58,8 @@ inline std::string provider_receipt_digest(const SharedIoProviderIdentity& ident
                          "\nadapter_device_id=" + std::to_string(identity.adapter_device_id) +
                          "\nnative_runtime_name=" + identity.native_runtime_name +
                          "\nnative_runtime_backend=" + identity.native_runtime_backend +
+                         "\nnative_runtime_authenticated=" +
+                         (identity.native_runtime_authenticated ? "true\n" : "false\n") +
                          "\nnative_runtime_revision=" + std::string(native_runtime_revision) + "\n";
     return pulp::runtime::sha256_hex(receipt);
 }
