@@ -4769,6 +4769,40 @@ pulp doctor --versions       # CLI vs project vs installed
 ```
 If you ran `pulp upgrade` recently, the CLI bumped but the SDK might not have. Use `pulp sdk install` to pull the latest SDK matching the CLI.
 
+### Authored JSX/TSX re-import receipt (old/new artifact plus screenshot)
+
+The authored-source lane has a different closeout contract from a Figma golden.
+It proves that a selected component can be re-imported without rewriting its
+neighbours, then proves the browser result. Keep one machine-readable receipt
+for each run with:
+
+- the source commit, manifest hash, base artifact hash/size, and re-imported
+  artifact hash/size;
+- selected component names and source/TSX/module hashes, including dependency
+  edges and unresolved/external bindings;
+- a script-span comparison showing that non-selected scripts are byte-identical
+  and the selected span is the only changed region;
+- old and new browser captures at the same viewport/device scale, with
+  `pixel_identical`, `difference_bbox`, image dimensions, panel dimensions, and
+  the screenshot hash; and
+- explicit scope fields for `editor_html`/Vellum changes, app mount,
+  `full_editor_parity`, `native_parity`, and whether patch scripts were retired.
+
+The old/new screenshot is browser evidence. A pixel-identical side-by-side
+proves that the selected re-import did not alter the captured browser panel; it
+does not prove native Skia/Dawn rendering, an editor mount, or production
+cutover. Keep those claims false unless their independent receipts exist.
+Likewise, a component declaration executing in a full artifact shell is useful
+evidence but is not an App/ReactDOM mount. Record that limitation instead of
+promoting the run to full-editor parity.
+
+Require at least one planted mutation in a selected module (for example a
+single CSS height or SVG stroke-width change) and record that the old/new
+comparison detects it. A green import with no negative control can be an
+unchanged artifact. Preserve the original authored source and generated
+`editor.html`; if the run needs either file or a Vellum path changed, stop and
+route that work before claiming a reproducible authored re-import.
+
 ### Diff loop
 
 After generating Pulp code, ALWAYS validate by comparing with the source design:
