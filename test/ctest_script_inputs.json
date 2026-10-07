@@ -4692,6 +4692,13 @@
    ],
    "kind": "python"
   },
+  "gates-sh-fail-flag-selftest": {
+   "entry": "tools/scripts/test_gates_lint_blocks.py",
+   "inputs": [
+    "tools/scripts/test_gates_lint_blocks.py"
+   ],
+   "kind": "python"
+  },
   "git-read-memo-selftest": {
    "entry": "tools/scripts/test_git_read_memo.py",
    "inputs": [
