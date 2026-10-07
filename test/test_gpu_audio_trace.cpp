@@ -403,6 +403,24 @@ TEST_CASE("host scheduling snapshot authenticates immutable policy context",
         .thermal = SharedIoHostThermal::Nominal,
     };
     CHECK_FALSE(incomplete.authenticated());
+
+    const auto invalid_contention = SharedIoHostSchedulingSnapshot{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = static_cast<SharedIoHostContention>(0xff),
+        .thermal = SharedIoHostThermal::Nominal,
+    };
+    CHECK_FALSE(invalid_contention.authenticated());
+
+    const auto invalid_thermal = SharedIoHostSchedulingSnapshot{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = SharedIoHostContention::Graphics,
+        .thermal = static_cast<SharedIoHostThermal>(0xff),
+    };
+    CHECK_FALSE(invalid_thermal.authenticated());
 }
 
 TEST_CASE("strict P4 raw writer rejects duplicate terminal or delivery identities",

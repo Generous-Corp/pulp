@@ -33,13 +33,22 @@ struct SharedIoHostSchedulingSnapshot {
     SharedIoHostThermal thermal = SharedIoHostThermal::Unavailable;
     bool audio_workgroup_joined = false;
 
-    // A receipt may only claim a host-policy observation when all identity and
-    // timing fields are present. Missing host state remains explicitly
-    // unavailable and therefore fails closed for promotion.
+    static constexpr bool valid_contention(SharedIoHostContention value) noexcept {
+        return value == SharedIoHostContention::Quiet || value == SharedIoHostContention::Cpu ||
+               value == SharedIoHostContention::Graphics || value == SharedIoHostContention::Memory;
+    }
+
+    static constexpr bool valid_thermal(SharedIoHostThermal value) noexcept {
+        return value == SharedIoHostThermal::Nominal || value == SharedIoHostThermal::Elevated ||
+               value == SharedIoHostThermal::Critical;
+    }
+
+    // A receipt may only claim a complete host-policy observation when all
+    // fields are present and enum values are recognized. This authenticates
+    // metadata completeness only; it does not prove physical host provenance.
     constexpr bool authenticated() const noexcept {
         return captured_ns != 0 && callback_period_ns != 0 && scheduler_policy_id != 0 &&
-               contention != SharedIoHostContention::Unavailable &&
-               thermal != SharedIoHostThermal::Unavailable;
+               valid_contention(contention) && valid_thermal(thermal);
     }
 };
 
