@@ -380,6 +380,24 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
         "${_shipping_dir}/${_shipping_manifest_stem}.control-shipping.json")
     file(GENERATE OUTPUT "${_shipping_manifest}" CONTENT "${_shipping_manifest_content}")
 
+    # Apple app-extension bundles treat files beside the executable as code
+    # objects during signing. Keep the control manifests and scan report in
+    # the bundle's Resources directory so Xcode's CodeSign phase seals them as
+    # resources rather than rejecting them as unsigned subcomponents. Other
+    # artifact shapes retain the historical target-directory sidecars.
+    get_target_property(_artifact_is_bundle ${artifact_target} BUNDLE)
+    set(_artifact_output_dir "$<TARGET_FILE_DIR:${artifact_target}>")
+    if(_artifact_is_bundle)
+        set(_artifact_output_dir
+            "$<TARGET_FILE_DIR:${artifact_target}>/Resources")
+    endif()
+    set(PULP_${artifact_target}_CONTROL_SHIPPING_OUTPUT_DIR
+        "${_artifact_output_dir}" CACHE INTERNAL "" FORCE)
+    set(_shipping_report
+        "${_artifact_output_dir}/${_shipping_manifest_stem}.control-shipping-report.json")
+    set(PULP_${artifact_target}_CONTROL_SHIPPING_REPORT
+        "${_shipping_report}" CACHE INTERNAL "" FORCE)
+
     # This translation unit carries artifact identity only. Endpoint and
     # capability markers must come from the linked implementations themselves;
     # synthesizing them here would let an empty target satisfy its declaration.
@@ -395,18 +413,20 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     target_sources(${artifact_target} PRIVATE "${_marker_source}")
 
     add_custom_command(TARGET ${artifact_target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "${_artifact_output_dir}"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${_control_manifest}"
-            "$<TARGET_FILE_DIR:${artifact_target}>/${target}.inspector-capabilities.json"
+            "${_artifact_output_dir}/${target}.inspector-capabilities.json"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${_shipping_manifest}"
-            "$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping.json"
+            "${_artifact_output_dir}/${_shipping_manifest_stem}.control-shipping.json"
         COMMAND "${CMAKE_COMMAND}"
             -DARTIFACT=$<TARGET_FILE:${artifact_target}>
             -DMANIFEST=${_control_manifest}
             -DSHIPPING_MANIFEST=${_shipping_manifest}
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping-report.json
+            -DREPORT=${_shipping_report}
             -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
         VERBATIM)
@@ -430,7 +450,7 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
             -DMANIFEST=${_control_manifest}
             -DSHIPPING_MANIFEST=${_shipping_manifest}
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping-report.json
+            -DREPORT=${_shipping_report}
             -DSKIP_IF_FRESH_STAMP=${_scan_stamp}
             -P "${_scanner}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"

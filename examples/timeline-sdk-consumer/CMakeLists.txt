@@ -102,6 +102,7 @@ set(_expected_engine_closure
     Pulp::platform
     Pulp::playback
     Pulp::runtime
+    Pulp::simd
     Pulp::signal
     Pulp::state
     Pulp::timebase
@@ -150,6 +151,7 @@ set(_expected_project_package_closure
     Pulp::platform
     Pulp::project-package
     Pulp::runtime
+    Pulp::simd
     Pulp::timebase
     Pulp::timeline
 )
@@ -179,6 +181,7 @@ set(_expected_smf_codec_closure
     Pulp::platform
     Pulp::runtime
     Pulp::smf-interop
+    Pulp::simd
     Pulp::timebase
     Pulp::timeline
 )
@@ -227,6 +230,7 @@ set(_expected_daw_export_closure
     Pulp::p256m
     Pulp::platform
     Pulp::runtime
+    Pulp::simd
     Pulp::timebase
     Pulp::timeline
 )
@@ -263,6 +267,7 @@ set(_expected_importer_closure
     Pulp::p256m
     Pulp::platform
     Pulp::runtime
+    Pulp::simd
     Pulp::signal
     Pulp::state
     Pulp::timebase
