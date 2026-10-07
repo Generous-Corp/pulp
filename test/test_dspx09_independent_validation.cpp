@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/host/signal_graph_node.hpp>
 #include <pulp/signal/tpt_filter.hpp>
@@ -8,6 +9,8 @@
 #include <limits>
 
 namespace {
+
+using Catch::Matchers::WithinAbs;
 
 constexpr float kPi = 3.14159265358979323846f;
 
@@ -40,7 +43,7 @@ TEST_CASE("DSPX-09 independent allpass oracle preserves sinusoid magnitude",
     REQUIRE(input_energy > 0.0);
     const double magnitude_squared = output_energy / input_energy;
     // Independent frequency-domain oracle: an allpass has unity magnitude.
-    CHECK(magnitude_squared == Catch::Approx(1.0).margin(0.02));
+    CHECK_THAT(magnitude_squared, WithinAbs(1.0, 0.02));
 }
 
 TEST_CASE("DSPX-09 retained-history refusal is explicit and bounded", "[dspx-09][negative]") {
@@ -60,8 +63,8 @@ TEST_CASE("DSPX-09 automation base and offset oracle rejects malformed values",
     using pulp::state::BaseOffsetValue;
 
     const BaseOffsetValue authored{0.5f, 0.2f};
-    CHECK(authored.effective() == Catch::Approx(0.7f));
-    CHECK(authored.without_offset().effective() == Catch::Approx(0.5f));
+    CHECK_THAT(authored.effective(), WithinAbs(0.7f, 0.0001f));
+    CHECK_THAT(authored.without_offset().effective(), WithinAbs(0.5f, 0.0001f));
     CHECK(pulp::state::validate_base_offset(authored, 0.0f, 1.0f) == BaseOffsetRefusal::None);
 
     const BaseOffsetValue nan_base{std::numeric_limits<float>::quiet_NaN(), 0.0f};
