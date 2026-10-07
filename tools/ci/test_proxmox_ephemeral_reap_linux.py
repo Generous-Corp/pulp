@@ -472,7 +472,7 @@ class GuestProbeIdentityTests(unittest.TestCase):
             return subprocess.run(
                 ["python3", "-c", self._probe_source(), str(root)],
                 capture_output=True, text=True,
-                env={**os.environ, "TARTCI_PROBE_RUNNER_ROOT": "/nonexistent-forged-root"},
+                env={**os.environ, "TARTCI_PROBE_RUNNER_ROOT": "/nonexistent-forged-root"}, encoding="utf-8"
             )
 
     @staticmethod

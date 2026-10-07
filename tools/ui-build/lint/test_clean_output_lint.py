@@ -131,21 +131,21 @@ export function Other() {
             write_manifest(["Alpha.tsx"])
             omitted = subprocess.run(
                 [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
-                text=True, capture_output=True, check=False)
+                text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertNotEqual(omitted.returncode, 0)
             self.assertIn("omits source file(s): Beta.tsx", omitted.stdout)
 
             write_manifest(["Beta.tsx", "Alpha.tsx"])
             unsorted = subprocess.run(
                 [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
-                text=True, capture_output=True, check=False)
+                text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertNotEqual(unsorted.returncode, 0)
             self.assertIn("file paths are not sorted", unsorted.stdout)
 
             write_manifest(["Alpha.tsx", "Alpha.tsx"])
             duplicate = subprocess.run(
                 [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
-                text=True, capture_output=True, check=False)
+                text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertNotEqual(duplicate.returncode, 0)
             self.assertIn("duplicate file path", duplicate.stdout)
 
@@ -168,7 +168,7 @@ export function Other() {
                 }), encoding="utf-8")
                 return subprocess.run(
                     [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
-                    text=True, capture_output=True, check=False)
+                    text=True, capture_output=True, check=False, encoding="utf-8")
 
             noncanonical = run_with_path("./Captured.tsx")
             self.assertNotEqual(noncanonical.returncode, 0)
@@ -177,7 +177,7 @@ export function Other() {
             manifest.write_text("[]", encoding="utf-8")
             non_object = subprocess.run(
                 [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
-                text=True, capture_output=True, check=False)
+                text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertNotEqual(non_object.returncode, 0)
             self.assertIn("manifest must be a JSON object", non_object.stdout)
 

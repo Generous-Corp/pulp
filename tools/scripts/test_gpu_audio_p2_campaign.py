@@ -316,7 +316,7 @@ class P2CampaignContractTests(unittest.TestCase):
     def test_source_provenance_rejects_untracked_driver_copy(self):
         with tempfile.TemporaryDirectory() as root:
             copied = Path(root) / "gpu_audio_p2_campaign.py"
-            copied.write_text("# copied driver\n")
+            copied.write_text("# copied driver\n", encoding="utf-8")
             with patch.object(campaign, "DRIVER_PATH", copied):
                 clean = type("Result", (), {"returncode": 0, "stdout": ""})()
                 with patch.object(campaign.subprocess, "run", return_value=clean):

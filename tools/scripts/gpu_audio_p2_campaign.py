@@ -173,7 +173,7 @@ def _source_provenance() -> tuple[str, str]:
     tracked = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "--error-unmatch", "--stage", "--",
          str(DRIVER_RELATIVE_PATH)],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, encoding="utf-8"
     )
     if tracked.returncode != 0 or not tracked.stdout.strip():
         raise RuntimeError("campaign driver is not tracked by the source repository")
@@ -183,11 +183,11 @@ def _source_provenance() -> tuple[str, str]:
     try:
         head_blob = subprocess.check_output(
             ["git", "-C", str(REPO_ROOT), "rev-parse", f"HEAD:{DRIVER_RELATIVE_PATH}"],
-            text=True,
+            text=True, encoding="utf-8"
         ).strip()
         worktree_blob = subprocess.check_output(
             ["git", "-C", str(REPO_ROOT), "hash-object", "--", str(DRIVER_PATH)],
-            text=True,
+            text=True, encoding="utf-8"
         ).strip()
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("unable to establish tracked campaign driver blob") from exc
