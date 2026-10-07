@@ -137,7 +137,7 @@ def render_set_parameter_helpers(data: dict[str, Any]) -> str:
     """Emit the first typed production helper for the canonical command."""
     if not canonical_set_parameter(data):
         return ""
-    return """// The canonical parameter command has a real typed production seam. The
+    helpers = """// The canonical parameter command has a real typed production seam. The
 // callback owns parameter identity (for example, a StateStore name→ParamID
 // lookup); this generated layer owns envelope validation and response shape.
 using SetParameterHandler = std::function<bool(const SetParameterRequest&)>;
@@ -207,7 +207,59 @@ inline void register_set_parameter(EditorBridge& bridge, SetParameterHandler han
                            return set_parameter_response(handler(request));
                        });
 }
+
+// A stable key map is the explicit identity boundary for imported controls.
+// The generated bridge never guesses a ParamID from a display name. Callers
+// provide the immutable one-to-one wire key→ParamID table once during plugin
+// setup; the helper validates every target before registering any handler, then routes
+// set through StateStore. Gesture commands stay explicit contract declarations
+// until a host-owned lifecycle adapter is supplied.
+struct StateStoreParameterBinding {
+    std::string key;
+    state::ParamID id = 0;
+};
+
+inline bool register_state_store_set_parameter_handler(
+    EditorBridge& bridge, state::StateStore& store, runtime::AliveToken::Handle owner_alive,
+    std::initializer_list<StateStoreParameterBinding> bindings) {
+    if (!runtime::AliveToken::is_alive(owner_alive))
+        return false;
+    auto key_to_id = std::make_shared<std::map<std::string, state::ParamID>>();
+    std::set<state::ParamID> ids;
+    for (const auto& binding : bindings) {
+        if (binding.key.empty())
+            return false;
+        if (store.info(binding.id) == nullptr)
+            return false;
+        if (!ids.emplace(binding.id).second)
+            return false;
+        if (!key_to_id->emplace(binding.key, binding.id).second)
+            return false;
+    }
+    if (key_to_id->empty())
+        return false;
+
+    register_set_parameter(bridge,
+                           [&store, owner_alive, key_to_id](const SetParameterRequest& request) {
+                               if (!runtime::AliveToken::is_alive(owner_alive))
+                                   return false;
+                               const auto found = key_to_id->find(request.key);
+                               if (found == key_to_id->end())
+                                   return false;
+                               const auto value = static_cast<float>(request.value);
+                               // The wire contract carries a double, while StateStore stores
+                               // float. A finite double can still overflow during narrowing;
+                               // reject it instead of letting StateStore sanitize it to the
+                               // parameter default while reporting accepted=true.
+                               if (!std::isfinite(value))
+                                   return false;
+                               store.set_value(found->second, value);
+                               return true;
+                           });
+    return true;
+}
 """
+    return helpers
 
 
 def render_cpp(data: dict[str, Any]) -> str:
@@ -241,10 +293,16 @@ def render_cpp(data: dict[str, Any]) -> str:
         "#include <array>\n"
         "#include <cmath>\n"
         "#include <functional>\n"
+        "#include <initializer_list>\n"
+        "#include <map>\n"
+        "#include <memory>\n"
+        "#include <set>\n"
         "#include <string>\n"
         "#include <string_view>\n"
         "#include <utility>\n\n"
         "#include <choc/containers/choc_Value.h>\n"
+        "#include <pulp/runtime/alive_token.hpp>\n"
+        "#include <pulp/state/store.hpp>\n"
         "#include <pulp/view/editor_bridge.hpp>\n\n"
         "namespace pulp::view::editor_bridge_contract {\n\n"
         f"inline constexpr int kVersion = {data['version']};\n"
@@ -324,9 +382,9 @@ def render_docs(data: dict[str, Any]) -> str:
         "",
         f"# {data['name'].title()} bridge contract",
         "",
-        "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.",
+        "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and registration helpers; the callback remains responsible for resolving the key into plugin state.",
         "",
-        "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.",
+        "`register_state_store_set_parameter_handler` is the smallest production adoption path: a plugin supplies an immutable one-to-one wire key→`ParamID` initializer list plus its `AliveToken`, the helper validates every target before registration, and `set_parameter` routes through `StateStore` while failing closed after owner teardown. Duplicate keys or IDs are rejected so imported identity stays deterministic. `begin_gesture` and `end_gesture` remain declarations until a host-owned lifecycle adapter can guarantee main-thread ordering and shared-editor lease semantics. The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. SDK packaging/export, an installed generation workflow, and `@pulp/react` integration remain follow-up boundaries.",
         "",
         "## Commands",
         "",

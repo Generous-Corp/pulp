@@ -2,9 +2,9 @@
 
 # Editor bridge contract
 
-The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.
+The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and registration helpers; the callback remains responsible for resolving the key into plugin state.
 
-The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.
+`register_state_store_set_parameter_handler` is the smallest production adoption path: a plugin supplies an immutable one-to-one wire key→`ParamID` initializer list plus its `AliveToken`, the helper validates every target before registration, and `set_parameter` routes through `StateStore` while failing closed after owner teardown. Duplicate keys or IDs are rejected so imported identity stays deterministic. `begin_gesture` and `end_gesture` remain declarations until a host-owned lifecycle adapter can guarantee main-thread ordering and shared-editor lease semantics. The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. SDK packaging/export, an installed generation workflow, and `@pulp/react` integration remain follow-up boundaries.
 
 ## Commands
 

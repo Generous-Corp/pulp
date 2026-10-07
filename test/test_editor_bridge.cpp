@@ -38,6 +38,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 // Concrete JsRuntime definition so attach_native_runtime can link in
 // tests. The framework forward-declares JsRuntime; the stub body
@@ -270,6 +271,61 @@ TEST_CASE("generated set_parameter dispatch updates a real StateStore",
     const auto response_value = choc::json::parse(response);
     REQUIRE(response_value["accepted"].getBool());
     CHECK(store.get_value(1) == Approx(-6.25f));
+}
+
+TEST_CASE("generated StateStore registration routes stable keys safely",
+          "[editor_bridge][typed-contract][state]") {
+    pulp::state::StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
+    store.add_parameter({.id = 2, .name = "Mix", .unit = "%", .range = {0.0f, 1.0f, 0.5f}});
+    pulp::runtime::AliveToken owner_alive;
+
+    EditorBridge bridge;
+    REQUIRE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        bridge, store, owner_alive.capture(), {{"gain", 1}, {"mix", 2}}));
+
+    CHECK(response_ok(bridge.dispatch_json(
+        R"({"type":"set_parameter","payload":{"key":"gain","value":-6.25}})")));
+    CHECK(store.get_value(1) == Approx(-6.25f));
+
+    // Unknown keys fail closed and cannot mutate an unrelated parameter.
+    const auto before = store.get_value(1);
+    const auto unknown_set =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"missing","value":4.0}})");
+    CHECK(response_ok(unknown_set));
+    CHECK_FALSE(choc::json::parse(unknown_set)["accepted"].getBool());
+    CHECK(store.get_value(1) == Approx(before));
+
+    // A finite JSON double can overflow the StateStore float representation;
+    // reject it before narrowing so accepted=true never hides a reset to the
+    // parameter default.
+    const auto overflow =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":1e300}})");
+    CHECK(response_ok(overflow));
+    CHECK_FALSE(choc::json::parse(overflow)["accepted"].getBool());
+    CHECK(store.get_value(1) == Approx(before));
+
+    // The liveness handle makes the callback fail closed before it touches
+    // StateStore when a plugin retires its owner during editor teardown.
+    owner_alive.retire();
+    const auto retired =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":2.0}})");
+    CHECK(response_ok(retired));
+    CHECK_FALSE(choc::json::parse(retired)["accepted"].getBool());
+    CHECK(store.get_value(1) == Approx(before));
+
+    // Registration validates the complete identity table before mutating the
+    // bridge, so a missing target cannot leave a half-installed command set.
+    EditorBridge rejected;
+    CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        rejected, store, owner_alive.capture(), {{"gain", 1}, {"missing", 999}}));
+    CHECK(rejected.handler_count() == 0);
+
+    EditorBridge duplicate;
+    pulp::runtime::AliveToken duplicate_alive;
+    CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        duplicate, store, duplicate_alive.capture(), {{"gain", 1}, {"gain_alias", 1}}));
+    CHECK(duplicate.handler_count() == 0);
 }
 
 TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
