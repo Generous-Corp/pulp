@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261007-refactor-governed-import-validation-20261007-watch",
+  "created_at": "2026-10-07T04:22:48Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "visual-proof-harness"
+  ],
+  "rationale": "The import-validation harnesses now route their existing Pulp targets through governed-build.sh, which centralizes fair-share parallelism and emits the normal build receipt. The scripts retain the same targets, fixtures, visual checks, and external Spectr build boundary; no importer format, generated output, rendering authority, or Vellum ownership changes. This watch-only record covers the path-family selectors crossed by the harness files.",
+  "tests": [
+    "python3 tools/ci/test_build_governance_paths.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
