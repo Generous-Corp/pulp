@@ -690,11 +690,20 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
 pulp_add_test_suite(pulp-test-gpu-wavenet-session
     SOURCES test_gpu_wavenet_session.cpp
     LIBRARIES pulp::gpu-audio
-    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include)
+    INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+        ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     target_compile_definitions(pulp-test-gpu-wavenet-session
         PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
 endif()
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    target_compile_definitions(pulp-test-gpu-wavenet-session
+        PRIVATE PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=1)
+    target_compile_definitions(pulp-test-gpu-wavenet-session
+        PRIVATE PULP_GPU_AUDIO_NAM_FIXTURE="${PROJECT_SOURCE_DIR}/test/fixtures/neural/example.nam")
+endif()
+pulp_test_data(pulp-test-gpu-wavenet-session PATHS test/fixtures/neural/example.nam)
 
 # Dawn-free shape contract for the future provider-owned WaveNet program. This
 # validates model metadata before any provider resource or handle is created.
