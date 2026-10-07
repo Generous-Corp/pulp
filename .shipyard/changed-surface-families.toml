@@ -484,7 +484,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c919a9d1d6f7"
+name = "script-readers-f6ccd00883bf"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -503,6 +503,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "source-selftest-lane-contract",
@@ -2209,7 +2210,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cef6e193a96d"
+name = "script-readers-431498a2331e"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2226,6 +2227,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "source-selftest-lane-contract",
@@ -5106,6 +5108,7 @@ tests = [
   "ios-gate-digest-selftest",
   "local-diff-cover-selftest",
   "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-cannot-measure",
   "prepush-format-gate-wiring",
   "prepush-gate-output",
@@ -6096,16 +6099,11 @@ tests = [
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
-  "pulp-gpu-dawn-shared-io-provider-lifecycle",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
   "pulp_bundle_threejs_for_jsc_smoke",
 ]
-build_targets = [
-  "pulp-cli",
-  "pulp-gpu-dawn-shared-io-provider-probe",
-  "pulp-gpu-host-mapped-pointer-probe",
-]
+build_targets = ["pulp-cli"]
 supported_build_types = [
   "debug",
   "release",
