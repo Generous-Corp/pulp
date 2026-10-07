@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09301"></a>
+## [0.930.1] - 2026-10-07
+
+- release/version bump ([#9820](https://github.com/Generous-Corp/pulp/pull/9820))
+- codex/release runtime matrix fix 20261007 ([#9818](https://github.com/Generous-Corp/pulp/pull/9818))
+- fix/text encoding ratchet ([#9683](https://github.com/Generous-Corp/pulp/pull/9683))
+- codex/neural wavenet dawn impl 20261007 ([#9809](https://github.com/Generous-Corp/pulp/pull/9809))
+- codex/governed emitter cli sdk 20261007 ([#9819](https://github.com/Generous-Corp/pulp/pull/9819))
+
 <a id="v09300"></a>
 ## [0.930.0] - 2026-10-07
 
@@ -10084,6 +10093,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.930.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.930.1
 [0.930.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.930.0
 [0.929.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.929.0
 [0.928.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.928.0
