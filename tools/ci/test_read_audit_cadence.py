@@ -72,6 +72,17 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(counted(doc), [("2026-10-03", 2)])
         self.assertEqual(doc["days"][0]["run"]["reason"], "replaces cancelled scheduled run 1")
         self.assertEqual([r["id"] for r in doc["days"][0]["ignored"]], [3])
+        # A skipped scheduled run is not replaceable: only a cancelled one is.
+        doc = rac.ledger([run(1, "2026-10-03T14:25:00Z", "skipped", sha="bbbb"),
+                          run(2, "2026-10-03T14:26:00Z", event="workflow_dispatch", sha="bbbb")],
+                         START, now("2026-10-04T12:00:00"))
+        self.assertEqual((doc["streak"]["count"], doc["missing"]), (0, ["2026-10-03"]))
+        self.assertEqual([r["id"] for r in doc["days"][0]["ignored"]], [2])
+        # A later day's dispatch does not fill an earlier day's gap.
+        doc = rac.ledger([run(1, "2026-10-03T23:50:00Z", "cancelled", sha="bbbb"),
+                          run(5, "2026-10-04T00:10:00Z", event="workflow_dispatch", sha="bbbb")],
+                         START, now("2026-10-04T12:00:00"))
+        self.assertEqual((doc["streak"]["count"], doc["missing"]), (0, ["2026-10-03"]))
         # A dispatch from before the cancelled schedule did not replace it.
         doc = rac.ledger([run(1, "2026-10-03T14:25:00Z", "cancelled", sha="bbbb"),
                           run(4, "2026-10-03T09:00:00Z", event="workflow_dispatch", sha="bbbb")],

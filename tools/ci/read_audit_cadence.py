@@ -11,8 +11,9 @@ counts per day:
                            there were two, the first to complete
     a replacing dispatch   counts in its place only when that day's scheduled
                            run was cancelled and the dispatch ran on the same
-                           head sha after it (the per-ref cancel-in-progress
-                           replacement); the first such dispatch
+                           head sha after it on the same day (the per-ref
+                           cancel-in-progress replacement); the first such
+                           dispatch
     anything else          ignored and listed with its reason: any other
                            dispatch is a canary precondition or a control,
                            never a day
@@ -117,7 +118,8 @@ def assign(runs: list[dict], verdicts: dict[str, str]) -> tuple[dict[dt.date, di
             continue  # skipped or otherwise silent: the day may still have another scheduled run
         for r in ordered:
             if (r.get("event") != "schedule" and r["id"] not in used and r.get("head_sha")
-                    and r.get("head_sha") == sched.get("head_sha") and r["created_at"] >= sched["created_at"]):
+                    and r.get("head_sha") == sched.get("head_sha") and r["created_at"] >= sched["created_at"]
+                    and _date(r["created_at"]) == day):
                 verdict = run_verdict(r, verdicts)
                 if verdict is not None:
                     counted[day] = _entry(r, verdict, f"replaces cancelled scheduled run {sched['id']}")

@@ -34,8 +34,9 @@ jobs:
     name: Check every day has a scheduled read audit run
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # The first day of the Stage 0 streak.
-      STREAK_START: '2026-10-03'
+      # The first day of the Stage 0 streak: the day of the first scheduled
+      # run (37205541018). Days before it had no schedule to count.
+      STREAK_START: '2026-10-04'
       TRACKING_TITLE: 'Read audit: a day passed with no run on main'
     steps:
       - uses: actions/checkout@v5

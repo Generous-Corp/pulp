@@ -1034,7 +1034,7 @@ counts clean cron days on main, and only the schedule speaks for a day: the
 counted run is that day's run with event `schedule`, and the day is the UTC
 date that run was created (GitHub fires the cron hours late, so the cron hour
 says nothing). A dispatch counts in its place only when that day's scheduled
-run was cancelled and the dispatch ran on the same head sha after it, which is
+run was cancelled and the dispatch ran on the same head sha after it that day, which is
 the per-ref cancel-in-progress replacement. Every other dispatch is a canary
 precondition or a control and never counts. A day with no counted run is a gap
 and resets the streak like a finding.
