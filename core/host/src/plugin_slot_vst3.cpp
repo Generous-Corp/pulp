@@ -85,11 +85,14 @@ std::string resolve_vst3_binary(const std::string& path) {
     auto contents = p / "Contents";
     if (fs::is_directory(contents, ec)) {
         for (const auto& entry : fs::directory_iterator(contents, ec)) {
-            if (ec || !entry.is_directory(ec)) continue;
+            if (ec || !entry.is_directory(ec))
+                continue;
             const auto arch = entry.path().filename().string();
-            if (arch.size() < 4 || arch.substr(arch.size() - 4) != "-win") continue;
+            if (arch.size() < 4 || arch.substr(arch.size() - 4) != "-win")
+                continue;
             auto candidate = entry.path() / (stem + ".vst3");
-            if (fs::exists(candidate, ec)) return candidate.string();
+            if (fs::exists(candidate, ec))
+                return candidate.string();
         }
     }
     auto inner = p / (stem + ".dll");
