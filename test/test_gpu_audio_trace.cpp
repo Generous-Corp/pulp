@@ -1,6 +1,7 @@
 #include "detail/gpu_convolver_raw_trace_jsonl.hpp"
 #include "detail/gpu_convolver_trace_jsonl.hpp"
 #include "detail/shared_io_convolution_session.hpp"
+#include "detail/shared_io_host_scheduling.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
 #include "harness/rt_allocation_probe.hpp"
@@ -375,6 +376,51 @@ TEST_CASE("strict P4 raw writer rejects unavailable callback timing before outpu
     std::ostringstream output;
     REQUIRE_FALSE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
     REQUIRE(output.str().empty());
+}
+
+TEST_CASE("host scheduling snapshot authenticates immutable policy context",
+          "[gpu_audio][trace][host_scheduling]") {
+    const SharedIoHostSchedulingSnapshot unavailable{};
+    CHECK_FALSE(unavailable.authenticated());
+
+    const SharedIoHostSchedulingSnapshot snapshot{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = SharedIoHostContention::Graphics,
+        .thermal = SharedIoHostThermal::Nominal,
+        .audio_workgroup_joined = true,
+    };
+    CHECK(snapshot.authenticated());
+    CHECK(snapshot.scheduler_policy_id == 42);
+    CHECK(snapshot.contention == SharedIoHostContention::Graphics);
+
+    const SharedIoHostSchedulingSnapshot incomplete{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = SharedIoHostContention::Unavailable,
+        .thermal = SharedIoHostThermal::Nominal,
+    };
+    CHECK_FALSE(incomplete.authenticated());
+
+    const auto invalid_contention = SharedIoHostSchedulingSnapshot{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = static_cast<SharedIoHostContention>(0xff),
+        .thermal = SharedIoHostThermal::Nominal,
+    };
+    CHECK_FALSE(invalid_contention.authenticated());
+
+    const auto invalid_thermal = SharedIoHostSchedulingSnapshot{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = SharedIoHostContention::Graphics,
+        .thermal = static_cast<SharedIoHostThermal>(0xff),
+    };
+    CHECK_FALSE(invalid_thermal.authenticated());
 }
 
 TEST_CASE("strict P4 raw writer rejects duplicate terminal or delivery identities",
