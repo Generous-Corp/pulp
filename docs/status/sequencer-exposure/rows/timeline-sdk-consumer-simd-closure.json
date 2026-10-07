@@ -1,0 +1,43 @@
+{
+  "id": "timeline-sdk-consumer-simd-closure",
+  "title": "Timeline SDK closure expectations track the exported SIMD dependency",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "timeline-sdk-consumer-simd-closure-20261007",
+  "owned_paths": [
+    "examples/timeline-sdk-consumer/CMakeLists.txt",
+    "docs/status/sequencer-exposure/rows/timeline-sdk-consumer-simd-closure.json"
+  ],
+  "evidence": [
+    {
+      "path": "examples/timeline-sdk-consumer/CMakeLists.txt",
+      "needles": [
+        "set(_expected_engine_closure",
+        "Pulp::simd",
+        "set(_expected_importer_closure"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The change updates the installed-consumer closure assertion; it does not add or alter an SDK header, target, symbol, or artifact."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command, flag, handler, or document operation changes; only the CMake fixture expectation is corrected."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The test contract publishes no capability, operation, executor binding, grant, or policy."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest changes."
+    }
+  }
+}
