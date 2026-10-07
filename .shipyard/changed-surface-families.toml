@@ -196,7 +196,6 @@ paths = [
   "tools/scripts/test_required_gate_liveness.py",
   "tools/scripts/test_required_macos_alias.py",
   "tools/scripts/test_resign_macos_release_tree.py",
-  "tools/scripts/test_resolve_classify_base.py",
   "tools/scripts/test_resolve_linux_route.py",
   "tools/scripts/test_resolve_provider_busy_probe.py",
   "tools/scripts/test_resolve_release_runners.py",
@@ -3434,6 +3433,34 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "repo-source-scan",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-b73b58bf0e45"
+paths = ["tools/scripts/test_resolve_classify_base.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "resolve-classify-base-selftest",
   "reuse-policy-replay-selftest",
 ]
 build_targets = ["pulp-cli"]

@@ -27,10 +27,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from resolve_classify_base import DEFAULT_BASE, ZERO_SHA, resolve_base  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
-SHIPYARD_PROFILE = (
-    REPO_ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml"
-)
+# Spelled as whole literals so test/ctest_script_inputs.json records them as
+# this test's inputs: a change to either file then selects this test.
+BUILD_WORKFLOW = REPO_ROOT / ".github/workflows/build.yml"
+SHIPYARD_PROFILE = REPO_ROOT / ".shipyard/ci-profiles/normal-local-fast.toml"
 SCRIPT = Path(__file__).with_name("resolve_classify_base.py")
 
 BASE_SHA = "a" * 40

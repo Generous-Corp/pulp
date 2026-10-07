@@ -8351,6 +8351,15 @@
    ],
    "kind": "python"
   },
+  "resolve-classify-base-selftest": {
+   "entry": "tools/scripts/test_resolve_classify_base.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/scripts/resolve_classify_base.py",
+    "tools/scripts/test_resolve_classify_base.py"
+   ],
+   "kind": "python"
+  },
   "retry-git-clone": {
    "entry": "test/test_retry_git_clone.sh",
    "inputs": [
