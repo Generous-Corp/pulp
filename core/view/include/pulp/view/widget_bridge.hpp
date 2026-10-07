@@ -333,10 +333,10 @@ public:
     // per bridge so deterministic import benchmarks can measure mount and
     // step work without a process-global counter.
     std::uint64_t bridge_call_count() const noexcept {
-        return bridge_call_count_.load(std::memory_order_relaxed);
+        return bridge_call_count_->load(std::memory_order_relaxed);
     }
     void reset_bridge_call_count() noexcept {
-        bridge_call_count_.store(0, std::memory_order_relaxed);
+        bridge_call_count_->store(0, std::memory_order_relaxed);
     }
 
     // Deliver `paramchange` to JS subscriptions whose param moved since the
@@ -623,7 +623,8 @@ private:
     // keeps drawing on every poll.
     bool frames_drained_by_service_ = false;
     bool frame_pump_live_ = false;  // set by the first host frame service
-    std::atomic<std::uint64_t> bridge_call_count_{0};
+    std::shared_ptr<std::atomic<std::uint64_t>> bridge_call_count_ =
+        std::make_shared<std::atomic<std::uint64_t>>(0);
     // Requested by __pulpRuntimeSettle__ while QuickJS is inside a native
     // callback. Drained only from the outer host-frame boundary; this is a
     // budget, not a synchronous recursion request.

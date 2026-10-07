@@ -19,7 +19,7 @@ namespace pulp::view {
 
 struct BridgeApiContext {
     ScriptEngine& engine;
-    std::atomic<std::uint64_t>* bridge_call_count;
+    std::shared_ptr<std::atomic<std::uint64_t>> bridge_call_count;
 
     explicit BridgeApiContext(ScriptEngine& e)
         : engine(e), bridge_call_count(e.bridge_call_counter()) {}
@@ -30,14 +30,14 @@ struct BridgeApiContext {
 // therefore do not pass through register_bridge_function().  Wrapping them
 // here makes the counter describe JS-to-native dispatches rather than only the
 // large direct-function registry.
-inline void count_bridge_call(std::atomic<std::uint64_t>* counter) noexcept {
+inline void count_bridge_call(const std::shared_ptr<std::atomic<std::uint64_t>>& counter) noexcept {
     if (counter != nullptr)
         counter->fetch_add(1, std::memory_order_relaxed);
 }
 
-inline NativeFunction counted_bridge_function(std::atomic<std::uint64_t>* counter,
+inline NativeFunction counted_bridge_function(std::shared_ptr<std::atomic<std::uint64_t>> counter,
                                               NativeFunction fn) {
-    return [counter, fn = std::move(fn)](const choc::value::Value* args, size_t num_args) mutable {
+    return [counter = std::move(counter), fn = std::move(fn)](const choc::value::Value* args, size_t num_args) mutable {
         count_bridge_call(counter);
         return fn(args, num_args);
     };
@@ -46,12 +46,11 @@ inline NativeFunction counted_bridge_function(std::atomic<std::uint64_t>* counte
 // Every JS->C++ native is registered through this one call, so a span wrapped
 // here attributes the native half of a script handler by function name with no
 // per-call-site edit — which is the only way to see inside `dom_event_evaluate`
-// for a script this repo does not own. It is compiled out entirely when tracing
-// is off, so a shipping build registers the original callable with no added
-// indirection.
+// for a script this repo does not own. Trace spans are compiled out when tracing
+// is off; the dispatch counter remains available in shipping builds.
 template <typename Fn>
 void register_bridge_function(BridgeApiContext& context, std::string_view name, Fn&& fn) {
-    auto* counter = context.bridge_call_count;
+    auto counter = context.bridge_call_count;
     auto count_call = [counter] { count_bridge_call(counter); };
 #if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED
     if constexpr (std::is_convertible_v<Fn&&, choc::javascript::Context::NativeFunction>) {
@@ -108,7 +107,7 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
 inline void register_bridge_host_object(BridgeApiContext& context,
                                         std::string_view name,
                                         HostObjectDescriptor descriptor) {
-    auto* counter = context.bridge_call_count;
+    auto counter = context.bridge_call_count;
     for (auto& method : descriptor.methods)
         method.fn = counted_bridge_function(counter, std::move(method.fn));
     context.engine.register_host_object(std::string(name), std::move(descriptor));

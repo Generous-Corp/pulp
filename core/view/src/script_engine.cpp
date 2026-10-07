@@ -19,17 +19,14 @@ ScriptEngine::ScriptEngine(JsEngineType engine_type)
 ScriptEngine::~ScriptEngine() = default;
 
 ScriptEngine::ScriptEngine(ScriptEngine&& other) noexcept
-    : engine_(std::move(other.engine_)), bridge_call_counter_(other.bridge_call_counter_),
-      choc_context_(other.choc_context_) {
-    other.bridge_call_counter_ = nullptr;
-}
+    : engine_(std::move(other.engine_)), bridge_call_counter_(std::move(other.bridge_call_counter_)),
+      choc_context_(other.choc_context_) {}
 
 ScriptEngine& ScriptEngine::operator=(ScriptEngine&& other) noexcept {
     if (this != &other) {
         engine_ = std::move(other.engine_);
         choc_context_ = other.choc_context_;
-        bridge_call_counter_ = other.bridge_call_counter_;
-        other.bridge_call_counter_ = nullptr;
+        bridge_call_counter_ = std::move(other.bridge_call_counter_);
     }
     return *this;
 }
