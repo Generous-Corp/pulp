@@ -1267,7 +1267,7 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
              .height = 32,
              .require_canvas_ink = true});
         CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("requires at least one non-transparent") !=
+        CHECK(rejected.error.find("meaningful ink pixels") !=
               std::string::npos);
 
         const auto allowed = id::validate_browser_capture_design_ir(
@@ -1279,6 +1279,33 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
              .height = 32});
         CHECK(allowed.valid);
         CHECK(allowed.scored);
+    }
+
+    SECTION("low-contrast sparse specks do not satisfy the ink gate") {
+        id::ImportPngImage specks;
+        specks.width = evidence.width;
+        specks.height = evidence.height;
+        specks.rgba.resize(evidence.rgba.size(), 0);
+        for (std::size_t pixel = 0; pixel < 16; ++pixel) {
+            const auto offset = pixel * 4;
+            specks.rgba[offset] = 39;
+            specks.rgba[offset + 1] = 39;
+            specks.rgba[offset + 2] = 39;
+            specks.rgba[offset + 3] = 255;
+        }
+        tree.write(evidence_path, id::encode_png_rgba(specks));
+
+        const auto rejected = id::validate_browser_capture_design_ir(
+            ir,
+            {.reference = reference_path,
+             .rendered = tree.root / "render-low-contrast.png",
+             .diff = tree.root / "diff-low-contrast.png",
+             .width = 32,
+             .height = 32,
+             .require_canvas_ink = true});
+        CHECK_FALSE(rejected.valid);
+        CHECK(rejected.error.find("meaningful ink pixels") !=
+              std::string::npos);
     }
 
     SECTION("removing the evidence fails closed") {
