@@ -19,7 +19,6 @@ fi
 
 BUILD_DIR="${PULP_BUILD_DIR:-$PULP_DIR/build-designmd-import}"
 BUILD_TYPE="${PULP_BUILD_TYPE:-Debug}"
-BUILD_JOBS="${PULP_BUILD_JOBS:-1}"
 PARSER_ONLY=0
 SKIP_BUILD=0
 COVERAGE=0
@@ -34,7 +33,7 @@ Env:
   PULP_DIR            Pulp checkout path
   PULP_BUILD_DIR      CMake build dir
   PULP_BUILD_TYPE     CMake build type (default: Debug)
-  PULP_BUILD_JOBS     CMake build parallelism (default: 1)
+  PULP_BUILD_JOBS     deprecated; governed-build selects parallelism
   PULP_DIFF_COVER_CTEST_REGEX  override the focused coverage CTest regex
 EOF
 }
@@ -78,7 +77,7 @@ find_test_exe() {
 
 if [[ $SKIP_BUILD -eq 0 ]]; then
   cmake -S "$PULP_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
-  cmake --build "$BUILD_DIR" --parallel "$BUILD_JOBS" \
+  bash "$PULP_DIR/tools/ci/governed-build.sh" cmake --build "$BUILD_DIR" \
     --target pulp-test-design-import-designmd
 fi
 
