@@ -1014,6 +1014,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`
 - Run the deterministic materialized-runtime contract and its planted vendor-tag negative control. → `tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs`
 - Preserve executable React behavior behind a Chromium-computed DesignIR without making the behavior tree the visual authority. → `tools/import-design/jsx-runtime/materialized-runtime-transform.mjs`
+- Emit a captured materialized browser document as an owned, reviewable TSX source tree with deterministic bindings and optional stable IDs. → `tools/import-design/jsx-runtime/materialized_source_emitter.mjs`
+  - ⚠ **Cannot see:** The emitted TSX keeps captured HTML as the visual authority; it does not infer component boundaries or prove browser/native rendering parity. Use the browser capture and native parity checks for those claims.
 - Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically. → `tools/import-design/reembed_mtk.py`
 
 **import-roundtrip** — validate an import lane end to end

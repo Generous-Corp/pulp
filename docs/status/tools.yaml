@@ -280,6 +280,17 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: materialized-source-emitter
+  path: tools/import-design/jsx-runtime/materialized_source_emitter.mjs
+  category: design-import
+  use_when: Emit a captured materialized browser document as an owned, reviewable TSX source tree with deterministic bindings and optional stable IDs.
+  invocation: node tools/import-design/jsx-runtime/materialized_source_emitter.mjs --help
+  inputs: A materialized-browser-document-v1/v2 JSON capture, an output directory, and optionally a stable ids map.
+  outputs: A deterministic source tree containing MaterializedDocument.tsx, tokens.css, bindings, the runtime document, build.toml, and an ids map in stable mode.
+  caveat: The emitted TSX keeps captured HTML as the visual authority; it does not infer component boundaries or prove browser/native rendering parity. Use the browser capture and native parity checks for those claims.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: materialized-runtime-conformance
   path: tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs
   category: design-import
