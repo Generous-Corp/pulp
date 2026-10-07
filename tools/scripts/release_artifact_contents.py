@@ -661,7 +661,6 @@ def sdk_import_design_runtime_members(
             for member in resources
             if member.startswith("jsx-runtime/")
         )
-        )
     return frozenset(members)
 
 
