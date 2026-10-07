@@ -85,6 +85,22 @@ class BridgeContractGateChecks(unittest.TestCase):
             self.assertEqual(gate.run(source, outputs, write=True, stream=io.StringIO()), 0)
             self.assertEqual(gate.run(source, outputs, stream=io.StringIO()), 0)
 
+    def test_production_path_rejects_drifted_canonical_set_parameter(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, outputs = write_contract(
+                root,
+                "drifted-canonical",
+                'version = 1\nname = "editor"\n[[commands]]\n'
+                'name = "set_parameter"\n'
+                'request = [{name="key", type="string"}]\n'
+                'response = [{name="accepted", type="boolean"}]\n',
+            )
+            stream = io.StringIO()
+            self.assertEqual(gate.run(source, outputs, stream=stream), 1)
+            self.assertIn("canonical request", stream.getvalue())
+            self.assertFalse(any(path.exists() for path in outputs.values()))
+
     def test_production_path_rejects_reserved_identifier(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
