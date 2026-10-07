@@ -416,6 +416,10 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
     return results
 
 
+NOT_COMPARABLE = ("base verdict not comparable (diff-scoped check): its base re-run sees an "
+                  "empty diff and passes by construction")
+
+
 def label_base_failures(build: Path, failed: list[str], base_ref: str) -> dict[str, tuple[bool, str]]:
     """Which failures main already had: test name → (pre-existing, why).
 
@@ -434,9 +438,12 @@ def label_base_failures(build: Path, failed: list[str], base_ref: str) -> dict[s
     out = subprocess.run(["ctest", "--test-dir", str(build), "-N", "--show-only=json-v1"],
                          capture_output=True, text=True, check=True).stdout
     entries = {}
+    diff_scoped = set()
     for test in json.loads(out).get("tests", []):
         if test.get("name") in failed and test.get("command"):
             props = {p["name"]: p["value"] for p in test.get("properties", [])}
+            if str(props.get("PULP_DIFF_SCOPED", "")).strip().upper() in ("TRUE", "ON", "1"):
+                diff_scoped.add(test["name"])
             entries[test["name"]] = lane._entry_from_command(
                 test["name"], test["command"], props, REPO_ROOT, build)
     verdicts: dict[str, tuple[bool, str]] = {}
@@ -446,6 +453,11 @@ def label_base_failures(build: Path, failed: list[str], base_ref: str) -> dict[s
         executable = Path(entry["argv"][0]) if entry else None
         if entry is None:
             verdicts[name] = (False, "not in the ctest inventory")
+        elif name in diff_scoped:
+            # The base checkout sits at the merge-base, so a check that blocks
+            # only on what the change touches sees no change there and passes
+            # whatever the base's state; its base run is no evidence either way.
+            verdicts[name] = (False, NOT_COMPARABLE)
         elif executable is not None and executable.resolve().is_relative_to(build.resolve()):
             verdicts[name] = (False, "a compiled test; its binary comes from this build")
         elif not any("{repo}" in arg for arg in entry["argv"][1:]):

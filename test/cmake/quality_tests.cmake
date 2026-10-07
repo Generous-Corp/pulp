@@ -1392,8 +1392,9 @@ if(Python3_Interpreter_FOUND)
             add_test(NAME changed-surface-script-families-drift COMMAND ${Python3_EXECUTABLE}
                 "${CMAKE_SOURCE_DIR}/tools/scripts/changed_surface_script_families.py"
                 --repo-root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}" --check)
+            # Diff-scoped like script-test-inputs-drift; see PULP_DIFF_SCOPED there.
             set_tests_properties(changed-surface-script-families-drift PROPERTIES
-                TIMEOUT 120 SKIP_RETURN_CODE 77)
+                TIMEOUT 120 SKIP_RETURN_CODE 77 PULP_DIFF_SCOPED TRUE)
             # A bounded run's base configure is FetchContent-disconnected, so a
             # marked dependency must download only through FetchContent. This
             # configured tree must hold its source, so an absent tree fails.
