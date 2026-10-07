@@ -1530,6 +1530,12 @@ static bool emit_materialized_runtime_source(pulp::import_design::BrowserImportS
     }
     const fs::path temporary = document.parent_path() / "materialized-source-staging";
     fs::remove_all(temporary, ec);
+    if (ec) {
+        diagnostics << "Error: could not clear materialized source staging directory: "
+                    << ec.message() << "\n";
+        return false;
+    }
+    ec.clear();
     fs::create_directories(temporary, ec);
     if (ec) {
         diagnostics << "Error: could not create materialized source staging directory: "
