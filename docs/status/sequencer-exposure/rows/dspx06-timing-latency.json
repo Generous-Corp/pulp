@@ -14,9 +14,9 @@
     "docs/guides/latency-proof.md"
   ],
   "evidence": [
-    {"path": "core/host/include/pulp/host/graph_timing_contract.hpp", "needles": ["GraphTimingDeclaration", "GraphTimingDisposition", "SemanticDelayUnmeasured", "HostPdcUnmeasured", "FractionalDelay", "MultiTap"]},
-    {"path": "core/host/src/graph_timing_contract.cpp", "needles": ["evaluate_graph_timing_contract", "SchedulingUnavailable", "PartitionUnsupported", "TailUnsupported"]},
-    {"path": "test/test_dspx06_graph_timing.cpp", "needles": ["typed integer graph timing", "unmeasured semantic delay", "partition, tail, and scheduling", "state change"]},
+    {"path": "core/host/include/pulp/host/graph_timing_contract.hpp", "needles": ["GraphTimingDeclaration", "GraphTimingDisposition", "GraphTimingMeasurements", "SemanticDelayUnmeasured", "HostPdcUnmeasured", "FractionalDelay", "MultiTap"]},
+    {"path": "core/host/src/graph_timing_contract.cpp", "needles": ["evaluate_graph_timing_contract", "SchedulingUnavailable", "PartitionUnsupported", "TailUnsupported", "GroupDelayUnmeasured", "MeasurementMismatch"]},
+    {"path": "test/test_dspx06_graph_timing.cpp", "needles": ["typed integer graph timing", "unmeasured semantic delay", "partition, tail, and scheduling", "independent impulse", "runtime snapshot", "state change"]},
     {"path": "docs/guides/latency-proof.md", "needles": ["DSPX-06", "semantic delay", "installed SDK"]}
   ],
   "surfaces": {

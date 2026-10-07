@@ -350,8 +350,11 @@ want that, say so — it is a packaging decision, not a technical obstacle.
 
 The graph timing contract is a control-thread, integer-sample receipt exposed by
 `pulp/host/graph_timing_contract.hpp`. It records semantic delay separately from
-algorithmic latency and host PDC, checks the prepared partition/block capacity,
-tail declaration, and routed scheduling readiness, and preserves graph state.
+algorithmic latency and host PDC, and accepts only an explicit
+`GraphTimingMeasurements` bundle. The supported proof uses an independent
+impulse/group-delay oracle on a zero-delay Gain graph, checks the prepared
+partition/block capacity, tail declaration, and routed scheduling readiness, and
+pins the prepared runtime snapshot while preserving graph state.
 The direct proof is:
 
 ```bash
@@ -359,9 +362,11 @@ The direct proof is:
 ```
 
 A declaration is refused when the graph is unprepared, the block exceeds the
-prepared capacity, fields are invalid, semantic delay or host PDC is not
-independently measured, the algorithmic latency disagrees with the graph, or the
-required routed path is unavailable. Fractional delay and multi-tap declarations
+prepared capacity, fields are invalid, any of semantic delay, algorithmic
+latency, host PDC, or impulse group delay is not independently measured, a
+measurement disagrees with the declaration or aggregate impulse delay, the
+algorithmic latency disagrees with the graph, or the required routed path is
+unavailable. Fractional delay and multi-tap declarations
 are typed `Unsupported` and are never rounded into an integer proof. Partition
 sizes other than the prepared capacity and non-zero tails are also explicitly
 unsupported. The installed SDK boundary is the claim-owned host header; there is

@@ -8,12 +8,13 @@
 namespace pulp::host {
 
 GraphTimingEvidence
-evaluate_graph_timing_contract(const SignalGraph& graph,
-                               const GraphTimingDeclaration& declaration) noexcept {
+evaluate_graph_timing_contract(const SignalGraph& graph, const GraphTimingDeclaration& declaration,
+                               const GraphTimingMeasurements& measurements) noexcept {
     GraphTimingEvidence evidence;
-    evidence.semantic_delay_samples = declaration.semantic_delay_samples;
-    evidence.algorithmic_latency_samples = declaration.algorithmic_latency_samples;
-    evidence.host_pdc_samples = declaration.host_pdc_samples;
+    evidence.semantic_delay_samples = measurements.semantic_delay_samples;
+    evidence.algorithmic_latency_samples = measurements.algorithmic_latency_samples;
+    evidence.host_pdc_samples = measurements.host_pdc_samples;
+    evidence.impulse_group_delay_samples = measurements.impulse_group_delay_samples;
     evidence.partition_size = declaration.partition_size;
     evidence.tail_samples = declaration.tail_samples;
     evidence.block_size = declaration.block_size;
@@ -45,7 +46,9 @@ evaluate_graph_timing_contract(const SignalGraph& graph,
     }
 
     const int prepared_block = graph.prepared_max_block_size();
-    if (prepared_block <= 0 || declaration.partition_size != prepared_block) {
+    evidence.runtime_snapshot_available = static_cast<bool>(graph.live_snapshot_handle());
+    if (prepared_block <= 0 || !evidence.runtime_snapshot_available ||
+        declaration.partition_size != prepared_block) {
         evidence.disposition = GraphTimingDisposition::Unsupported;
         evidence.reason = GraphTimingReason::PartitionUnsupported;
         return evidence;
@@ -55,9 +58,37 @@ evaluate_graph_timing_contract(const SignalGraph& graph,
         evidence.reason = GraphTimingReason::TailUnsupported;
         return evidence;
     }
-    // SignalGraph exposes one measured graph latency, not independent
-    // semantic-delay or host-PDC measurements. Never turn caller metadata into
-    // proof: a non-zero value in either unmeasured domain is refused.
+    // Every timing domain must come from an independent control-side
+    // measurement. Declaration metadata is never promoted to evidence.
+    if (!measurements.semantic_delay_measured) {
+        evidence.reason = GraphTimingReason::SemanticDelayUnmeasured;
+        return evidence;
+    }
+    if (!measurements.algorithmic_latency_measured) {
+        evidence.reason = GraphTimingReason::AlgorithmicLatencyUnmeasured;
+        return evidence;
+    }
+    if (!measurements.host_pdc_measured) {
+        evidence.reason = GraphTimingReason::HostPdcUnmeasured;
+        return evidence;
+    }
+    if (!measurements.impulse_group_delay_measured) {
+        evidence.reason = GraphTimingReason::GroupDelayUnmeasured;
+        return evidence;
+    }
+    if (measurements.semantic_delay_samples != declaration.semantic_delay_samples ||
+        measurements.algorithmic_latency_samples != declaration.algorithmic_latency_samples ||
+        measurements.host_pdc_samples != declaration.host_pdc_samples ||
+        measurements.impulse_group_delay_samples != measurements.semantic_delay_samples +
+                                                        measurements.algorithmic_latency_samples +
+                                                        measurements.host_pdc_samples) {
+        evidence.reason = GraphTimingReason::MeasurementMismatch;
+        return evidence;
+    }
+    // The current graph API does not independently measure non-zero semantic
+    // delay or host PDC. Keep those domains fail-closed until their dedicated
+    // graph/host probes exist; zero values are certifiable only with the
+    // explicit measurements above.
     if (declaration.semantic_delay_samples != 0) {
         evidence.reason = GraphTimingReason::SemanticDelayUnmeasured;
         return evidence;
