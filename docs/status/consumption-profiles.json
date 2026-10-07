@@ -449,6 +449,7 @@
       "pulp/host/graph_runtime_plan.hpp",
       "pulp/host/graph_runtime_queue.hpp",
       "pulp/host/graph_serializer.hpp",
+      "pulp/host/graph_timing_contract.hpp",
       "pulp/host/graph_types.hpp",
       "pulp/host/hosted_editor_container.hpp",
       "pulp/host/isolated_scanner.hpp",

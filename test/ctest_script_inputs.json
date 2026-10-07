@@ -2463,6 +2463,7 @@
   "pulp-test-design-tokens-w3c",
   "pulp-test-dsl-processor",
   "pulp-test-dsp-runtime-no-alloc",
+  "pulp-test-dspx06-graph-timing",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",

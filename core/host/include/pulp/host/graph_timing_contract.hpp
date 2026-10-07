@@ -1,0 +1,75 @@
+#pragma once
+
+// Control-side timing evidence for a prepared SignalGraph.  This header is a
+// deliberately small public seam: it keeps the typed timing contract out of
+// the large SignalGraph runtime declaration and has no audio-thread API.
+
+#include <cstdint>
+
+namespace pulp::host {
+
+class SignalGraph;
+
+enum class GraphTimingDisposition : std::uint8_t {
+    Proven,
+    Refused,
+    Unsupported,
+};
+
+enum class GraphTimingReason : std::uint8_t {
+    None,
+    Unprepared,
+    InvalidField,
+    BlockCapacity,
+    LatencyMismatch,
+    SchedulingUnavailable,
+    PartitionUnsupported,
+    TailUnsupported,
+    FractionalDelay,
+    MultiTap,
+    SemanticDelayUnmeasured,
+    HostPdcUnmeasured,
+};
+
+// A declaration keeps semantic delay (the musical/audio meaning of a delay)
+// separate from algorithmic latency and host PDC.  Only integer, zero-tail,
+// fixed-partition declarations are currently certifiable by this evaluator.
+struct GraphTimingDeclaration {
+    int semantic_delay_samples = 0;
+    int algorithmic_latency_samples = 0;
+    int host_pdc_samples = 0;
+    int partition_size = 0;
+    int tail_samples = 0;
+    int block_size = 0;
+    bool scheduling_guaranteed = false;
+    bool anticipation_required = false;
+    bool fractional_delay = false;
+    bool multi_tap = false;
+};
+
+struct GraphTimingEvidence {
+    GraphTimingDisposition disposition = GraphTimingDisposition::Refused;
+    GraphTimingReason reason = GraphTimingReason::InvalidField;
+    int measured_latency_samples = 0;
+    int semantic_delay_samples = 0;
+    int algorithmic_latency_samples = 0;
+    int host_pdc_samples = 0;
+    int partition_size = 0;
+    int tail_samples = 0;
+    int block_size = 0;
+    bool scheduling_guaranteed = false;
+    bool anticipation_required = false;
+
+    constexpr explicit operator bool() const noexcept {
+        return disposition == GraphTimingDisposition::Proven;
+    }
+};
+
+// Evaluate one declaration against the graph's immutable prepared snapshot.
+// This is observational and control-thread only: no topology, authoring
+// generation, or execution state is changed by a call.
+GraphTimingEvidence
+evaluate_graph_timing_contract(const SignalGraph& graph,
+                               const GraphTimingDeclaration& declaration) noexcept;
+
+} // namespace pulp::host
