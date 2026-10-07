@@ -233,8 +233,8 @@ inline void register_set_parameter(EditorBridge& bridge, SetParameterHandler han
 
 // A stable key map is the explicit identity boundary for imported controls.
 // The generated bridge never guesses a ParamID from a display name. Callers
-// provide the immutable wire key→ParamID table once during plugin setup; the
-// helper validates every target before registering any handler, then routes
+// provide the immutable one-to-one wire key→ParamID table once during plugin
+// setup; the helper validates every target before registering any handler, then routes
 // set through StateStore. Gesture commands stay explicit contract declarations
 // until a host-owned lifecycle adapter is supplied.
 struct StateStoreParameterBinding {
@@ -248,10 +248,13 @@ inline bool register_state_store_set_parameter_handler(
     if (!runtime::AliveToken::is_alive(owner_alive))
         return false;
     auto key_to_id = std::make_shared<std::map<std::string, state::ParamID>>();
+    std::set<state::ParamID> ids;
     for (const auto& binding : bindings) {
         if (binding.key.empty())
             return false;
         if (store.info(binding.id) == nullptr)
+            return false;
+        if (!ids.emplace(binding.id).second)
             return false;
         if (!key_to_id->emplace(binding.key, binding.id).second)
             return false;
@@ -316,6 +319,7 @@ def render_cpp(data: dict[str, Any]) -> str:
         "#include <initializer_list>\n"
         "#include <map>\n"
         "#include <memory>\n"
+        "#include <set>\n"
         "#include <string>\n"
         "#include <string_view>\n"
         "#include <utility>\n\n"
@@ -410,7 +414,7 @@ def render_docs(data: dict[str, Any]) -> str:
         intro = [
             "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.",
             "",
-            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.",
+            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. The production helper accepts an immutable one-to-one wire key→`ParamID` table and rejects duplicate keys or IDs before registration. SDK packaging/export, an installed generation workflow, and `@pulp/react` integration remain follow-up boundaries.",
             "",
         ]
     else:
