@@ -219,7 +219,8 @@ if [[ "${PULP_IOS_AUV3_SMOKE_BUILD:-1}" == "1" ]]; then
     # AudioComponentDescription so AVAudioUnitComponentManager filters
     # resolve. Probe the manufacturer / subtype codes that the
     # PulpSineSynth example wires.
-    if ! /usr/bin/plutil -p "${hostapp_path}/Info.plist" | grep -q '"subtype" => "PsSn"'; then
+    hostapp_plist_dump=$(/usr/bin/plutil -p "${hostapp_path}/Info.plist")
+    if ! grep -q '"subtype" => "PsSn"' <<<"${hostapp_plist_dump}"; then
         echo "FAIL: HostApp Info.plist missing AudioComponents.subtype 'PsSn'"
         /usr/bin/plutil -p "${hostapp_path}/Info.plist" >&2
         exit 1
