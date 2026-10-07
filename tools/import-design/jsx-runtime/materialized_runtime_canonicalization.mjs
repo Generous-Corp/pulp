@@ -95,10 +95,26 @@ function rewriteScripts(html, rewrite) {
 export function canonicalizeMaterializedRuntimeDocument(document, options = {}) {
   const payloadTrust = options.vendorPayloadTrust || trustedCapturedVendorPayload;
   const assets = Array.isArray(document.assets) ? document.assets : [];
+  // Asset ids are the only join key between the HTML reference and the
+  // payload table.  A malformed or adversarial document can repeat an id with
+  // different bytes; removing by id in that case would drop an authored asset
+  // merely because a trusted vendor happened to occupy the same key.  Keep
+  // every colliding id in the document and report it through the existing
+  // canonicalization metadata.  Capture-produced documents use unique ids, so
+  // this is a fail-closed guard with no cost on the normal path.
+  const assetIdCounts = new Map();
+  for (const asset of assets) {
+    const id = String(asset?.id ?? '');
+    assetIdCounts.set(id, (assetIdCounts.get(id) || 0) + 1);
+  }
+  const duplicateAssetIds = new Set(
+    [...assetIdCounts].filter(([, count]) => count > 1).map(([id]) => id));
   const removable = new Map();
   for (const asset of assets) {
+    const id = String(asset?.id ?? '');
+    if (duplicateAssetIds.has(id)) continue;
     const kind = nativeVendorKind(asset, payloadTrust);
-    if (kind) removable.set(String(asset.id), kind);
+    if (kind) removable.set(id, kind);
   }
 
   let babelCount = 0;
@@ -185,6 +201,9 @@ export function canonicalizeMaterializedRuntimeDocument(document, options = {}) 
     runtime_canonicalization: {
       jsx_scripts_compiled: babelCount,
       browser_vendor_assets_removed: removableIds.size,
+      ...(duplicateAssetIds.size > 0
+        ? { duplicate_asset_ids_preserved: duplicateAssetIds.size }
+        : {}),
     },
   };
 }

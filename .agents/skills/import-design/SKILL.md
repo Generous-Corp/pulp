@@ -101,6 +101,14 @@ each script and preserving `jsx_scripts_compiled` as the script count. Keep
 the cache scoped to the call so one untrusted document cannot retain another
 document's source or grow across imports.
 
+**Canonicalization must fail closed on duplicate asset IDs.** Asset IDs join
+HTML references to captured payloads. If malformed input repeats an ID, do not
+let a trusted vendor payload remove an authored payload that shares the key;
+preserve all colliding assets and report the collision in
+`runtime_canonicalization.duplicate_asset_ids_preserved`. Capture-produced
+documents have unique IDs, so this guard is transparent on the normal path.
+Keep a planted collision regression alongside the canonicalization tests.
+
 **Pixel comparison cannot see a bad palette.** Every visual gate above scores
 agreement with the source, so a colour defect the source ALREADY had — an accent
 that swallows its own ramp, a caption tier under its contrast bar — reproduces
