@@ -1267,8 +1267,7 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
                  .height = 32,
                  .require_canvas_ink = true});
         CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("at least 256 opaque canvas pixels") !=
-              std::string::npos);
+        CHECK(rejected.error.find("at least 256 opaque canvas pixels") != std::string::npos);
 
         const auto allowed = id::validate_browser_capture_design_ir(
             ir, {.reference = reference_path,
@@ -1304,8 +1303,7 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
                  .height = 32,
                  .require_canvas_ink = true});
         CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("at least 256 opaque canvas pixels") !=
-              std::string::npos);
+        CHECK(rejected.error.find("at least 256 opaque canvas pixels") != std::string::npos);
     }
 
     SECTION("removing the evidence fails closed") {

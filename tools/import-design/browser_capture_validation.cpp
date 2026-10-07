@@ -115,7 +115,7 @@ std::string extent(int width, int height) {
 // known blank-frame false positive (127 isolated specks), and add a small
 // viewport-relative floor so the contract remains meaningful on large pages.
 constexpr std::uint64_t kMinimumCanvasInkPixels = 256;
-constexpr std::uint64_t kCanvasInkCoverageDenominator = 1000;  // 0.1%
+constexpr std::uint64_t kCanvasInkCoverageDenominator = 1000; // 0.1%
 
 bool compose_materialized_canvas_evidence(const pulp::view::DesignIR& ir,
                                           std::vector<std::uint8_t>& rendered, std::string& error,
@@ -304,15 +304,11 @@ bool compose_materialized_canvas_evidence(const pulp::view::DesignIR& ir,
         ++composed;
     }
     if (require_canvas_ink) {
-        const auto total_pixels = static_cast<std::uint64_t>(
-            destination.rgba.size() / 4);
-        const auto coverage_pixels =
-            (total_pixels / kCanvasInkCoverageDenominator) +
-            (total_pixels % kCanvasInkCoverageDenominator != 0 ? 1 : 0);
-        const auto minimum_ink_pixels =
-            std::max(kMinimumCanvasInkPixels, coverage_pixels);
-        if (!saw_sparse_composite ||
-            sparse_composite_ink_pixels < minimum_ink_pixels) {
+        const auto total_pixels = static_cast<std::uint64_t>(destination.rgba.size() / 4);
+        const auto coverage_pixels = (total_pixels / kCanvasInkCoverageDenominator) +
+                                     (total_pixels % kCanvasInkCoverageDenominator != 0 ? 1 : 0);
+        const auto minimum_ink_pixels = std::max(kMinimumCanvasInkPixels, coverage_pixels);
+        if (!saw_sparse_composite || sparse_composite_ink_pixels < minimum_ink_pixels) {
             error = "materialized canvas validation requires at least " +
                     std::to_string(minimum_ink_pixels) +
                     " opaque canvas pixels (including a 0.1% viewport coverage "
