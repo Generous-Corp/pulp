@@ -89,7 +89,9 @@ public:
 
     /// Apply a blocking write deadline for socket transports. A timed-out
     /// frame poisons and closes the connection so no later frame can be
-    /// appended to a truncated stream.
+    /// appended to a truncated stream. The deadline bounds how long a writer
+    /// is held: on POSIX it cuts a write the kernel would hold, and on Windows
+    /// the kernel accepts the whole frame, so the bound is met at acceptance.
     void set_write_timeout(std::chrono::milliseconds timeout);
 
     /// Bound a frame once its first byte arrives. Idle connections may wait
