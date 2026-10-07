@@ -131,7 +131,6 @@ void value_channel_telemetry_index_add(ValueChannelTelemetryControl*, std::strin
 std::ptrdiff_t value_channel_telemetry_index_lookup(const ValueChannelTelemetryControl*,
                                                     std::string_view name,
                                                     ValueChannelShape shape) noexcept;
-void value_channel_telemetry_index_release(const ValueChannelTelemetryControl*) noexcept;
 std::shared_ptr<ValueChannelTelemetryState> make_scalar_telemetry_state();
 std::shared_ptr<ValueChannelTelemetryState> make_meter_telemetry_state();
 std::shared_ptr<ValueChannelTelemetryState> make_vector_telemetry_state();

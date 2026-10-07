@@ -2,8 +2,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <functional>
-#include <mutex>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -35,13 +33,6 @@ struct ContinuousSnapshot {
 
 } // namespace
 
-class ValueChannelTelemetryControl {
-public:
-    const std::uint64_t generation_identity =
-        next_value_channel_set_identity.fetch_add(1, std::memory_order_relaxed);
-    std::atomic<bool> claimed{false};
-};
-
 namespace {
 
 struct ChannelNameHash {
@@ -65,22 +56,18 @@ struct ChannelIndexEntry {
 };
 using ChannelIndex =
     std::unordered_map<std::string, ChannelIndexEntry, ChannelNameHash, ChannelNameEqual>;
-struct RegisteredChannelIndex {
-    std::uint64_t generation;
+} // namespace
+
+class ValueChannelTelemetryControl {
+public:
+    const std::uint64_t generation_identity =
+        next_value_channel_set_identity.fetch_add(1, std::memory_order_relaxed);
+    std::atomic<bool> claimed{false};
+    // Declarations are completed before audio/UI readers start. Keeping this
+    // index on the existing per-set control makes steady-state lookups direct
+    // and lock-free while preserving ValueChannelSet's public layout.
     ChannelIndex channels;
 };
-struct ChannelIndexRegistry {
-    std::mutex mutex;
-    std::unordered_map<const ValueChannelTelemetryControl*, RegisteredChannelIndex> indices;
-};
-ChannelIndexRegistry& channel_index_registry() {
-    // The registry intentionally lives until process exit so ValueChannelSet
-    // teardown cannot race static destruction in this translation unit.
-    static auto* registry = new ChannelIndexRegistry;
-    return *registry;
-}
-
-} // namespace
 
 class ValueChannelTelemetryState {
 public:
@@ -225,14 +212,7 @@ void value_channel_telemetry_index_add(ValueChannelTelemetryControl* control, st
                                        ValueChannelShape shape, std::size_t index) {
     if (!control)
         return;
-    auto& registry = channel_index_registry();
-    std::lock_guard lock(registry.mutex);
-    auto& registered = registry.indices[control];
-    if (registered.generation != control->generation_identity) {
-        registered.generation = control->generation_identity;
-        registered.channels.clear();
-    }
-    registered.channels.emplace(std::string(name), ChannelIndexEntry{index, shape});
+    control->channels.emplace(std::string(name), ChannelIndexEntry{index, shape});
 }
 
 std::ptrdiff_t value_channel_telemetry_index_lookup(const ValueChannelTelemetryControl* control,
@@ -240,26 +220,10 @@ std::ptrdiff_t value_channel_telemetry_index_lookup(const ValueChannelTelemetryC
                                                     ValueChannelShape shape) noexcept {
     if (!control)
         return -1;
-    auto& registry = channel_index_registry();
-    std::lock_guard lock(registry.mutex);
-    const auto registered = registry.indices.find(control);
-    if (registered == registry.indices.end() ||
-        registered->second.generation != control->generation_identity)
-        return -1;
-    const auto it = registered->second.channels.find(name);
-    if (it == registered->second.channels.end() || it->second.shape != shape)
+    const auto it = control->channels.find(name);
+    if (it == control->channels.end() || it->second.shape != shape)
         return -1;
     return static_cast<std::ptrdiff_t>(it->second.index);
-}
-
-void value_channel_telemetry_index_release(const ValueChannelTelemetryControl* control) noexcept {
-    if (!control)
-        return;
-    auto& registry = channel_index_registry();
-    std::lock_guard lock(registry.mutex);
-    const auto it = registry.indices.find(control);
-    if (it != registry.indices.end() && it->second.generation == control->generation_identity)
-        registry.indices.erase(it);
 }
 
 std::shared_ptr<ValueChannelTelemetryState> make_scalar_telemetry_state() {

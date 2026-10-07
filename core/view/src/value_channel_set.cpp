@@ -4,10 +4,6 @@
 
 namespace pulp::view {
 
-ValueChannelSet::~ValueChannelSet() {
-    detail::value_channel_telemetry_index_release(telemetry_control_.get());
-}
-
 std::uint64_t ValueChannelSet::generation_identity() const noexcept {
     return detail::value_channel_telemetry_control_identity(
         telemetry_control_.get());
@@ -53,6 +49,8 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
         if (entries_.size() >= infos_.size())
             entries_.pop_back();
         infos_.pop_back();
+        if (infos_.empty())
+            telemetry_control_.reset();
         throw;
     }
     if (error) *error = DeclareError::ok;
@@ -111,9 +109,9 @@ std::ptrdiff_t ValueChannelSet::index_of(std::string_view name,
         detail::value_channel_telemetry_index_lookup(telemetry_control_.get(), name, shape);
     if (indexed >= 0)
         return indexed;
-    // A control created by an older SDK has no side-table entry. Keep the
-    // source-compatible behavior correct for that case; new declarations use
-    // the O(1) index above and only misses pay this compatibility scan.
+    // A control created by an older SDK may not have a populated side index.
+    // Keep the source-compatible behavior correct for that case; new
+    // declarations use the O(1) index above and only misses pay this scan.
     for (std::size_t i = 0; i < infos_.size(); ++i) {
         if (infos_[i].name == name && infos_[i].shape == shape)
             return static_cast<std::ptrdiff_t>(i);

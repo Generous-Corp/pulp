@@ -1256,6 +1256,26 @@ TEST_CASE("ValueChannelSet refuses declarations that would break lookup",
     CHECK(channels.size() == 1);
 }
 
+TEST_CASE("ValueChannelSet failed first declaration leaves no telemetry identity",
+          "[view][value-channel][binding]") {
+    ValueChannelSet channels;
+    using Err = ValueChannelSet::DeclareError;
+    Err err = Err::ok;
+
+    // Negative control for the first-declaration transaction: a refused setup
+    // must not create a claimable empty telemetry sidecar.
+    CHECK(channels.declare_scalar("", "", 0.0f, &err) == nullptr);
+    CHECK(err == Err::empty_name);
+    CHECK(channels.generation_identity() == 0);
+    CHECK_FALSE(channels.attach_telemetry().valid());
+
+    // A later valid declaration still gets a fresh identity and indexed lookup.
+    REQUIRE(channels.declare_scalar("gain", "dB", 0.0f, &err) != nullptr);
+    CHECK(err == Err::ok);
+    CHECK(channels.generation_identity() != 0);
+    CHECK(channels.scalar("gain") != nullptr);
+}
+
 TEST_CASE("a processor that declares no channels holds nothing",
           "[view][value-channel]") {
     // Zero cost when undeclared is structural: there is no set to skip, no hook
