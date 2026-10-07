@@ -3816,6 +3816,8 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - Raw Figma Make defaults are intentionally rejected until a preprocessing step exists: unresolved `figma:asset/*` imports, versioned import paths like `<package>@<semver>`, Tailwind `className` utilities, Radix primitives, Code Connect glue files, Next.js wrappers, custom JSX components, non-range inputs, and network/storage/worker APIs.
 - Representative fixtures live under `planning/fixtures/figma/`; the primary one is `level-meter-panel.tsx`. Run `tools/import-validation/figma-roundtrip.sh --parser-only` for the parser/dispatch gate, `tools/import-validation/figma-roundtrip.sh` for parser-emitted screenshot diff, and `tools/import-validation/figma-roundtrip.sh --coverage` before pushing parser PRs.
 
+**Governed validation builds:** every `tools/import-validation/*-roundtrip.sh` build step must invoke `tools/ci/governed-build.sh cmake --build`; do not add a raw `cmake --build`, `-j`, or `--parallel` flag. The governor owns the host lease and `CMAKE_BUILD_PARALLEL_LEVEL`, including the external Spectr checkout; keep the existing fixture, target, and artifact behavior unchanged.
+
 **Stitch (MCP available)**:
 - Use `mcp__stitch__list_screens` to show available screens
 - Use `mcp__stitch__get_screen` to read the selected screen
