@@ -4,10 +4,16 @@ change moved on one platform, and refusing to name them when it cannot."""
 from __future__ import annotations
 
 import copy
+import gzip
 import json
 import sys
 import unittest
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    tomllib = None
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -272,6 +278,65 @@ class ClosureTests(unittest.TestCase):
     def test_an_explicit_target_is_a_dependency_target(self):
         idx = index()
         self.assertEqual(idx.targets_of("WOFF2"), {"pulp-canvas"})
+
+
+def pointer(doc, path: str):
+    for part in path.strip("/").split("/"):
+        if not isinstance(doc, dict) or part not in doc:
+            raise KeyError(path)
+        doc = doc[part]
+    return doc
+
+
+class RealRecordTests(unittest.TestCase):
+    """A record written before this rule, reduced to what the closure reads
+    (tools/ci/fixtures/dependency_pins/record-11ca217e.json.gz). The rule
+    changes how a record is read, never what one holds, so such a record
+    stays bindable and is keyed by the finer rule."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.record = json.loads(gzip.decompress((FIXTURES / "record-11ca217e.json.gz").read_bytes()))
+        targets = cls.record["targets"]
+        cls.index = dp.DependencyIndex(MAP, "darwin", targets, targets, cls.record["links"])
+        cls.executables = {a.removeprefix("<build>/"): n for n, t in targets.items()
+                           if t["type"] in ("EXECUTABLE", "MODULE_LIBRARY") for a in t["artifacts"]}
+
+    def rekeyed(self, pins: dp.Pins) -> int:
+        pins = dp.resolve(pins, self.index)
+        if pins.scope == "all":
+            return len(self.executables)
+        return sum(self.index.reaches(a, t, pins.names) for a, t in self.executables.items())
+
+    def test_the_windows_skia_change_rekeys_no_mac_executable_of_a_real_record(self):
+        base, head = sides((real("manifest.base.json"), real("manifest.head.json")),
+                           (real("PulpDependencies.base.cmake.txt"), real("PulpDependencies.head.cmake.txt")))
+        self.assertEqual(self.rekeyed(dp.attribute(base, head, "darwin", MAP)), 0)
+        # The control: a mac Skia asset reaches exactly the record's Skia linkers.
+        def bump(entries):
+            entries["Skia"]["determinism"]["release_assets"]["mac-arm64"]["sha256"] = "0" * 64
+        mac = sides((real("manifest.head.json"), edit_manifest(real("manifest.head.json"), bump)))
+        linkers = sum(any("/pulp/skia/" in a for a in rec["archives"])
+                      for exe, rec in self.record["links"].items() if exe.removeprefix("<build>/") in self.executables)
+        self.assertEqual(self.rekeyed(dp.attribute(*mac, "darwin", MAP)), linkers)
+        self.assertGreater(linkers, 100)
+        self.assertLess(linkers, len(self.executables))
+
+    @unittest.skipIf(tomllib is None, "tomllib unavailable; cannot read .shipyard/config.toml")
+    def test_the_record_still_binds_under_this_base_record_policy(self):
+        # rules_digest hashes this table; a fact added to strand older records
+        # would fail here.
+        with (HERE.parents[1] / ".shipyard" / "config.toml").open("rb") as handle:
+            config = tomllib.load(handle)
+        policy = config["targets"]["mac"]["changed_surface_selection"]["executable_reuse"]["base_record"]
+        job = self.record["job"]
+        self.assertEqual(pointer(job, policy["platform"]), "darwin-arm64")
+        pointer(job, policy["toolchain"])
+        for fact in policy["require"]:
+            with self.subTest(fact=fact["pointer"]):
+                value = pointer(job, fact["pointer"])
+                if "equals" in fact:
+                    self.assertEqual(value, fact["equals"])
 
 
 ROOT = """project(x)
