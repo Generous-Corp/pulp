@@ -1629,7 +1629,18 @@ async function runCapture(options) {
       captureWidth, captureHeight, dpr, "final capture extent");
     const screenshotOptions = {
       format: "png",
-      captureBeyondViewport: true,
+      // Chrome may dispatch a viewport resize while producing a
+      // captureBeyondViewport screenshot. Canvas-backed panels commonly use
+      // that event to reset their backing store; with page animation frozen
+      // there is no subsequent rAF to repaint it, so the accepted frame would
+      // silently lose the canvas. The settled extent equals the authored
+      // viewport for the common full-panel case (including Spectr), where a
+      // viewport screenshot is both complete and preserves the painted
+      // backing stores. Only request beyond-viewport capture when content
+      // actually exceeds the active viewport.
+      captureBeyondViewport:
+        captureWidth > resolvedViewportWidth ||
+        captureHeight > resolvedViewportHeight,
       fromSurface: true,
       clip: {
         x: 0,
