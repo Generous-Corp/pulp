@@ -1120,7 +1120,7 @@ std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_convolution_
 }
 
 std::unique_ptr<SharedIoPreparedProgram>
-DawnSharedIoProvider::make_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec) noexcept {
+DawnSharedIoProvider::make_wavenet_program(const WavenetProgramSpec& spec) noexcept {
     // The submit token currently carries no stream-instance identity. Refuse
     // multi-instance plans rather than risking causal-history aliasing.
     if (spec.stream_instances != 1)
@@ -1680,10 +1680,9 @@ bool DawnSharedIoProvider::prepare_convolution_program(
 }
 
 bool DawnSharedIoProvider::prepare_wavenet_program(
-    const DawnSharedIoWavenetProgramSpec& spec,
-    std::span<const SlotBufferHandle> handles) noexcept {
+    const WavenetProgramSpec& spec, std::span<const SlotBufferHandle> handles) noexcept {
     if (!impl_ || !impl_->accepting || impl_->wavenet || handles.empty() ||
-        !validate_dawn_shared_io_wavenet_spec(spec).accepted() || spec.stream_instances != 1)
+        !validate_wavenet_spec(spec).accepted() || spec.stream_instances != 1)
         return false;
     try {
         auto plan = std::make_unique<Impl::WavenetPlan>();

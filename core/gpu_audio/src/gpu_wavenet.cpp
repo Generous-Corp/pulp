@@ -50,7 +50,7 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
 #else
     try {
         std::vector<std::vector<std::uint32_t>> dilations;
-        std::vector<detail::DawnSharedIoWavenetLayerSpec> arrays;
+        std::vector<detail::WavenetLayerSpec> arrays;
         dilations.reserve(config.descriptor.layers.size());
         arrays.reserve(config.descriptor.layers.size());
         for (const auto& layer : config.descriptor.layers) {
@@ -68,14 +68,14 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
                               .dilations = dilations.back()});
         }
 
-        const detail::DawnSharedIoWavenetProgramSpec spec{
+        const detail::WavenetProgramSpec spec{
             .block_size = config.descriptor.block_size,
             .head_scale = config.descriptor.head_scale,
             .stream_instances = config.descriptor.stream_instances,
             .arrays = arrays,
             .weights = config.weights,
         };
-        if (!detail::validate_dawn_shared_io_wavenet_spec(spec).accepted()) {
+        if (!detail::validate_wavenet_spec(spec).accepted()) {
             result.error = GpuWaveNetSessionError::InvalidDescriptor;
             return result;
         }
