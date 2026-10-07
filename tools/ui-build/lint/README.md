@@ -7,6 +7,12 @@ semantic names, leaves static style objects or colour literals inline, emits
 duplicate markup, creates non-semantic click targets, or depends on an
 unseeded clock/random source.
 
+When `--manifest` is supplied for a captured output corpus, the gate also
+binds the manifest to the complete source tree: every supported source file
+must appear exactly once with a canonical sorted relative path and a matching
+SHA-256. Missing, extra, duplicate, non-canonical, or symlinked entries fail
+closed so a corpus cannot silently drift outside the recorded artifact set.
+
 ```sh
 python3 tools/ui-build/lint/clean_output_lint.py native-ui/src --json
 ```

@@ -171,6 +171,11 @@ an import or interaction when collecting deterministic work counts. The
 counter is instrumentation only and does not change engine selection or
 runtime behavior.
 
+Registered functions retain shared counter state until their engine releases
+them. Do not replace that capture with a pointer into `WidgetBridge`: a retained
+stateless function or queued Promise can run after the bridge is destroyed.
+Counter ownership does not extend the lifetime of the bridge or its widgets.
+
 ## Commands
 
 ### `status` — Show current engine configuration

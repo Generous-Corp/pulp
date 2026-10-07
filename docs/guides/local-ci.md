@@ -273,6 +273,30 @@ never 0. A merge to `main` that changes one of these files makes the host
 report drift until it is reinstalled, which is the intent: the host should run
 what `main` says.
 
+Drift is never installed automatically, because a merge to `tools/ci` should not
+become root code on the host until someone chooses to run it. The guard instead
+makes the reinstall a single verified command:
+
+- `/var/lib/pulp-ci-host/drift.state` records when drift was first seen and
+  the `main` commit it was compared against. A later merge updates the commit
+  but keeps the first-seen time, and the next drift-free check deletes the file.
+- On drift, the check stages the table's files at that exact commit under
+  `/root/pulp-deploy-staged/<sha>`, verifies each file's blob id against the
+  commit, and deletes any other stage. A fetch that does not verify stages
+  nothing.
+- `pulp-proxmox-host-health.sh --install-staged` installs that stage after
+  verifying it again against `main` as it is at that moment. It refuses when
+  `main` has moved past the stage or a staged file changed, so it installs
+  exactly what the guard compared against. The `UNHEALTHY` line prints this
+  command whenever a stage is ready.
+- `pulp-proxmox-host-health.sh --json` runs the same check and prints one JSON
+  object (`schema: 1`). It includes `state` (`healthy`, `unhealthy` or
+  `unverified`), `ref_sha`, `drift.first_seen` and `drift.age_seconds`, each
+  drifted file with its installed and expected blobs, failed slots, disk fill,
+  the stage, and `reinstall_command`. It uses the same exit codes as the text
+  check. Fleet monitoring reads this over SSH to report drift that has lasted
+  more than an hour.
+
 Create separate root-owned role environments; never share one:
 
 ```sh
@@ -464,6 +488,14 @@ the runner, and logs each of the four steps as `FENCE <vmid> n/4`:
    repository names it. The second check guards against a 404 that only means
    the wrong id was read.
 4. Re-probe the guest for no worker and an untouched `_work`, then destroy it.
+
+A finished JIT clone (listener exited, registration gone) is reaped once the
+guest's identity matches the host's recorded generation. JIT runners delete
+`.runner` when their one job ends, so for such a clone the guest probe reads the
+name from the listener logs under `_diag`, and only when every log agrees on
+one name. Before this, every finished JIT clone failed with
+`post-job guest identity does not match the host generation` and stayed until
+someone removed it by hand.
 
 A label fence cannot work here: a JIT runner's labels are read-only, so
 replacing them never removes a routing label. The supervisor's own shutdown

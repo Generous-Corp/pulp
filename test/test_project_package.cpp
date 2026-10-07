@@ -1512,6 +1512,40 @@ TEST_CASE("Package writer files match direct-child Linux ACL and setgid inherita
 }
 #endif
 
+#if defined(_WIN32)
+TEST_CASE("Private staging accepts a parent owned by the caller, SYSTEM or Administrators",
+          "[project-package][atomic-publisher][permissions]") {
+    struct LocalSid {
+        PSID sid = nullptr;
+        explicit LocalSid(const wchar_t* text) {
+            REQUIRE(ConvertStringSidToSidW(text, &sid) != 0);
+        }
+        ~LocalSid() {
+            LocalFree(sid);
+        }
+        LocalSid(const LocalSid&) = delete;
+        LocalSid& operator=(const LocalSid&) = delete;
+    };
+    const LocalSid caller(L"S-1-5-21-1000-2000-3000-1001");
+    const LocalSid system(L"S-1-5-18");
+    const LocalSid administrators(L"S-1-5-32-544");
+    const LocalSid other_user(L"S-1-5-21-1000-2000-3000-1002");
+    const LocalSid authenticated_users(L"S-1-5-11");
+    const LocalSid everyone(L"S-1-1-0");
+
+    using detail::staging_parent_owner_trusted;
+    REQUIRE(staging_parent_owner_trusted(caller.sid, caller.sid));
+    REQUIRE(staging_parent_owner_trusted(system.sid, caller.sid));
+    REQUIRE(staging_parent_owner_trusted(administrators.sid, caller.sid));
+
+    REQUIRE_FALSE(staging_parent_owner_trusted(other_user.sid, caller.sid));
+    REQUIRE_FALSE(staging_parent_owner_trusted(authenticated_users.sid, caller.sid));
+    REQUIRE_FALSE(staging_parent_owner_trusted(everyone.sid, caller.sid));
+    REQUIRE_FALSE(staging_parent_owner_trusted(nullptr, caller.sid));
+    REQUIRE_FALSE(staging_parent_owner_trusted(caller.sid, nullptr));
+}
+#endif
+
 #if defined(__APPLE__)
 TEST_CASE("Atomic project-package publisher rejects namespace-writing parent ACLs",
           "[project-package][atomic-publisher][permissions]") {

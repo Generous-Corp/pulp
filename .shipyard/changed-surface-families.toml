@@ -196,7 +196,6 @@ paths = [
   "tools/scripts/test_required_gate_liveness.py",
   "tools/scripts/test_required_macos_alias.py",
   "tools/scripts/test_resign_macos_release_tree.py",
-  "tools/scripts/test_resolve_classify_base.py",
   "tools/scripts/test_resolve_linux_route.py",
   "tools/scripts/test_resolve_provider_busy_probe.py",
   "tools/scripts/test_resolve_release_runners.py",
@@ -508,6 +507,37 @@ tests = [
   "reuse-policy-replay-selftest",
   "source-selftest-lane-contract",
   "source-selftest-lane-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-c298b27989cc"
+paths = [
+  "tools/scripts/gpu_audio_p2_campaign.py",
+  "tools/scripts/test_gpu_audio_p2_campaign.py",
+]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-p2-campaign-contract-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2296,34 +2326,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c298b27989cc"
-paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "gpu-audio-p2-campaign-contract-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
 name = "script-readers-db8a5b62e419"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
@@ -3445,6 +3447,34 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b73b58bf0e45"
+paths = ["tools/scripts/test_resolve_classify_base.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "resolve-classify-base-selftest",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-50fbc8030e63"
 paths = ["tools/scripts/test_run_changed_surface_tests.py"]
 tests = [
@@ -4537,6 +4567,34 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-2f8e30b36f08"
+paths = ["tools/scripts/test_windows_posix_shims.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "windows-posix-shims-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-a197cb091ade"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
@@ -5077,6 +5135,7 @@ tests = [
   "vellum-watch-preflight-selftest",
   "version-at-land-selftest",
   "wide-non-native-selftest",
+  "windows-posix-shims-selftest",
 ]
 build_targets = [
   "pulp-cli",
@@ -5135,6 +5194,7 @@ paths = [
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_p2_campaign.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
@@ -5481,6 +5541,7 @@ paths = [
   "tools/scripts/test_windows_cli_compile_scope.py",
   "tools/scripts/test_windows_cli_compile_workflow.py",
   "tools/scripts/test_windows_cli_release_precheck.py",
+  "tools/scripts/test_windows_posix_shims.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
@@ -5646,6 +5707,7 @@ paths = [
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_p2_campaign.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
@@ -5992,6 +6054,7 @@ paths = [
   "tools/scripts/test_windows_cli_compile_scope.py",
   "tools/scripts/test_windows_cli_compile_workflow.py",
   "tools/scripts/test_windows_cli_release_precheck.py",
+  "tools/scripts/test_windows_posix_shims.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",

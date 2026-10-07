@@ -110,6 +110,37 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/VST3"
     )
 
+    # CMake's BUNDLE property is Apple-only.  On Windows a MODULE target
+    # otherwise lands as VST3/<name>.dll, while hosts and the VST3 spec expect
+    # the portable bundle shape VST3/<name>.vst3/Contents/<arch>-win/<name>.vst3.
+    # Keep the linker output in the existing staging directory (the control
+    # shipping scanner and runtime staging use TARGET_FILE_DIR), then mirror
+    # the completed module into the real bundle after all post-build sidecars
+    # have been generated.  The copy is deliberately post-build and
+    # copy_if_different so direct target builds and multi-config generators
+    # remain deterministic.
+    if(WIN32)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+            set(_pulp_vst3_windows_arch "arm64-win")
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
+            set(_pulp_vst3_windows_arch "x86_64-win")
+        else()
+            set(_pulp_vst3_windows_arch "x86-win")
+        endif()
+        set(_pulp_vst3_windows_bundle
+            "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
+        set(_pulp_vst3_windows_contents
+            "${_pulp_vst3_windows_bundle}/Contents/${_pulp_vst3_windows_arch}")
+        add_custom_command(TARGET ${target}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "${_pulp_vst3_windows_contents}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:${target}_VST3>"
+                "${_pulp_vst3_windows_contents}/${name}.vst3"
+            COMMENT "Assembling Windows VST3 bundle ${name}.vst3"
+            VERBATIM)
+    endif()
+
     # Info.plist: use custom if available, otherwise generate from template
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.vst3")
         set_target_properties(${target}_VST3 PROPERTIES

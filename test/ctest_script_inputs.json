@@ -1024,7 +1024,8 @@
    ],
    "inputs": [
     "tools/cli/cmd_upgrade.cpp",
-    "tools/import-design/browser_capture"
+    "tools/import-design/browser_capture",
+    "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
    ],
    "kind": "compiled",
    "sources": [
@@ -1686,6 +1687,18 @@
    "sources": [
     "test/test_timeline_replay_golden.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-group-view-widgets": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_editor_bridge.cpp"
+   ],
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-host": {
@@ -2462,6 +2475,7 @@
   "pulp-test-design-tokens-w3c",
   "pulp-test-dsl-processor",
   "pulp-test-dsp-runtime-no-alloc",
+  "pulp-test-dspx06-graph-timing",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
@@ -6709,6 +6723,7 @@
     "tools/import-design/jsx-runtime/materialized_metadata_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_source_emitter.test.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
     "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
     "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs",
@@ -6795,6 +6810,13 @@
    ],
    "kind": "node"
   },
+  "pulp-gpu-audio-p2-campaign-contract": {
+   "entry": "tools/scripts/gpu_audio_p2_campaign.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_campaign.py"
+   ],
+   "kind": "python"
+  },
   "pulp-gpu-audio-provider-identity": {
    "entry": "tools/scripts/gpu_audio_provider_identity.py",
    "inputs": [
@@ -6854,16 +6876,6 @@
     "tools/import-design/browser_capture/vendor_payload.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
-   ],
-   "kind": "node"
-  },
-  "pulp-materialized-runtime-node-dependencies": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
    ],
    "kind": "node"
   },
@@ -8353,6 +8365,15 @@
    ],
    "kind": "python"
   },
+  "resolve-classify-base-selftest": {
+   "entry": "tools/scripts/test_resolve_classify_base.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/scripts/resolve_classify_base.py",
+    "tools/scripts/test_resolve_classify_base.py"
+   ],
+   "kind": "python"
+  },
   "retry-git-clone": {
    "entry": "test/test_retry_git_clone.sh",
    "inputs": [
@@ -9475,6 +9496,61 @@
     "tools/cmake/PulpTestSuite.cmake",
     "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/test_wide_non_native.py"
+   ],
+   "kind": "python"
+  },
+  "windows-posix-shims-selftest": {
+   "entry": "tools/scripts/test_windows_posix_shims.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "docs/status/gpu-recipes.schema.json",
+    "docs/status/gpu-recipes.yaml",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/scripts/gpu_clean_agent_isolation.py",
+    "tools/scripts/gpu_clean_agent_journey.py",
+    "tools/scripts/gpu_clean_agent_trust.py",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_dpr_evidence.py",
+    "tools/scripts/gpu_dpr_v2_evidence.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/test_windows_posix_shims.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
    ],
    "kind": "python"
   },

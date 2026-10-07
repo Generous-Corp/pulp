@@ -353,7 +353,8 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.stdout_output.find("pulp import-design") != std::string::npos);
         REQUIRE(r.stdout_output.find("--from <source>") != std::string::npos);
         REQUIRE(r.stdout_output.find("--output <path>   Destination file for the primary artifact") != std::string::npos);
-        REQUIRE(r.stdout_output.find("--emit {js|ir-json|cpp|swiftui}") != std::string::npos);
+        REQUIRE(r.stdout_output.find("--emit {js|ir-json|cpp|swiftui|materialized-runtime}") !=
+                std::string::npos);
         REQUIRE(r.stdout_output.find("--mode {live|baked}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--snapshot-semantics {fail|warn|accept}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--fit-authored-frame") != std::string::npos);

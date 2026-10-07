@@ -2,8 +2,14 @@
 #pragma once
 
 #include <array>
+#include <cmath>
+#include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
+
+#include <choc/containers/choc_Value.h>
+#include <pulp/view/editor_bridge.hpp>
 
 namespace pulp::view::editor_bridge_contract {
 
@@ -60,4 +66,74 @@ inline constexpr std::array<std::string_view, 3> kCommandNames{
     {"begin_gesture", "end_gesture", "set_parameter"}};
 inline constexpr std::array<std::string_view, 1> kPublicationNames{{"parameter_changed"}};
 
+// The canonical parameter command has a real typed production seam. The
+// callback owns parameter identity (for example, a StateStore name→ParamID
+// lookup); this generated layer owns envelope validation and response shape.
+using SetParameterHandler = std::function<bool(const SetParameterRequest&)>;
+
+inline bool decode_set_parameter_request(const choc::value::ValueView& payload,
+                                         SetParameterRequest& request, std::string& error) {
+    try {
+        if (!payload.isObject()) {
+            error = "set_parameter payload must be an object";
+            return false;
+        }
+        if (!payload.hasObjectMember("key") || !payload["key"].isString()) {
+            error = "set_parameter payload missing 'key' string";
+            return false;
+        }
+        request.key = std::string(payload["key"].getString());
+        if (request.key.empty()) {
+            error = "set_parameter payload 'key' must not be empty";
+            return false;
+        }
+        if (!payload.hasObjectMember("value")) {
+            error = "set_parameter payload missing 'value' number";
+            return false;
+        }
+        const auto value = payload["value"];
+        if (value.isFloat64())
+            request.value = value.getFloat64();
+        else if (value.isFloat32())
+            request.value = static_cast<double>(value.getFloat32());
+        else if (value.isInt64())
+            request.value = static_cast<double>(value.getInt64());
+        else if (value.isInt32())
+            request.value = static_cast<double>(value.getInt32());
+        else {
+            error = "set_parameter payload 'value' must be a number";
+            return false;
+        }
+        if (!std::isfinite(request.value)) {
+            error = "set_parameter payload 'value' must be finite";
+            return false;
+        }
+        return true;
+    } catch (...) {
+        error = "set_parameter payload is invalid";
+        return false;
+    }
+}
+
+inline std::string set_parameter_response(bool accepted) noexcept {
+    try {
+        auto extras = choc::value::createObject("");
+        extras.addMember("accepted", accepted);
+        return EditorBridge::ok_response(extras);
+    } catch (...) {
+        return accepted ? std::string{R"({"ok":true,"accepted":true})"}
+                        : std::string{R"({"ok":true,"accepted":false})"};
+    }
+}
+
+inline void register_set_parameter(EditorBridge& bridge, SetParameterHandler handler) {
+    bridge.add_handler("set_parameter",
+                       [handler = std::move(handler)](const choc::value::ValueView& payload) {
+                           SetParameterRequest request;
+                           std::string error;
+                           if (!decode_set_parameter_request(payload, request, error))
+                               return EditorBridge::err_response(error);
+                           return set_parameter_response(handler(request));
+                       });
+}
 } // namespace pulp::view::editor_bridge_contract

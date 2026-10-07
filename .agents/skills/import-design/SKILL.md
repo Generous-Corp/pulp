@@ -7,6 +7,20 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+### Materialized browser source emission
+
+For a browser capture that publishes `materialized-document.json`, use
+`pulp import-design --emit materialized-runtime --source-out <dir>`. The CLI
+stages `src/MaterializedDocument.tsx`, token and binding sidecars, the
+normalized runtime document, and `build.toml` in the existing browser
+transaction. Use `--ids positional` for legacy captures. `--ids stable` is
+intentionally fail-closed: every binding must carry the complete
+`(component, local_path, content_hash)` source tuple, and ambiguous historical
+matches in `ids.map.json` are rejected. Verify deterministic output with
+`node --test tools/import-design/jsx-runtime/materialized_source_emitter.test.mjs`
+and keep the browser capture's Chromium validation receipt alongside the
+emitted source tree.
+
 ## TOOLS THIS SKILL ALREADY SHIPS — reach for these before hand-rolling (read this first)
 
 Every one of these is documented further down this file. That was not enough:
@@ -7364,3 +7378,12 @@ clause: the cascade's clauses overlap, so a case with a *single* registered
 handler owner is answered identically by the ancestor walk and by the later
 single-owner shortcut — break the walk and the test still passes. Registering a
 second, unrelated owner is what makes such a case falsifiable.
+
+## Governed build invocation
+
+Import-validation round-trip harnesses must route Pulp target builds through
+`tools/ci/governed-build.sh`. Do not pass `--parallel`, `-j`, or a caller-owned
+`PULP_BUILD_JOBS` value; the governor owns fair-share parallelism and records the
+build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`,
+`stitch`, `rn`, `designmd`, and `jsx`). Leave a separate external-project build
+(such as Spectr) on its own toolchain boundary.

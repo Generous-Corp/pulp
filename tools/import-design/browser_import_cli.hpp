@@ -84,6 +84,10 @@ public:
     [[nodiscard]] const std::string& reference_image() const noexcept {
         return reference_image_;
     }
+    [[nodiscard]] const std::optional<std::filesystem::path>&
+    materialized_document() const noexcept {
+        return materialized_document_;
+    }
     [[nodiscard]] pulp::view::DesignIR take_design_ir() {
         return std::move(design_ir_);
     }
@@ -109,6 +113,7 @@ private:
     int render_height_ = 800;
     bool similarity_failed_ = false;
     std::string reference_image_;
+    std::optional<std::filesystem::path> materialized_document_;
     std::unique_ptr<EvidenceTransaction> evidence_;
 
     friend struct internal::BrowserImportCliResultBuilder;

@@ -475,8 +475,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "974c5b4e2f5e76a32c5cb9e8a328e8241b929d84",
-          "object_id": "a63a36fe4fb0a76343df187924c4d00d6e226092",
+          "revision": "c4c855cf3ca5d61ec8cfe6f6ff19ff911c6a4eba",
+          "object_id": "1a6ebc39389eee89dc1e288ef29a75336cd37daf",
           "object_type": "blob"
         },
         {
@@ -1145,8 +1145,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_v2_evidence.py",
           "state": "pulp-owned-retained",
-          "revision": "6886b385d57735a9c4534091d7886db730cca11a",
-          "object_id": "98152d615b511bcfbbd2581232207f07f81a144d",
+          "revision": "b4bdafe350c0a312dd9c42f0ec5ce770a9613c81",
+          "object_id": "39fe4eacc9f6a22cb02b947ab12b6268b577ae3b",
           "object_type": "blob"
         },
         {

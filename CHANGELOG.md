@@ -9,6 +9,47 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09240"></a>
+## [0.924.0] - 2026-10-07
+
+- codex/neural evidence 20261007 ([#9779](https://github.com/Generous-Corp/pulp/pull/9779))
+- release/version bump ([#9777](https://github.com/Generous-Corp/pulp/pull/9777))
+- codex/refactor governed import validation 20261007 ([#9775](https://github.com/Generous-Corp/pulp/pull/9775))
+- fix/wp0 counter contract followup 20261007 ([#9768](https://github.com/Generous-Corp/pulp/pull/9768))
+- codex/wp2b clean output corpus 20261006 ([#9774](https://github.com/Generous-Corp/pulp/pull/9774))
+- feat/wp2a prod wiring 20261007 ([#9759](https://github.com/Generous-Corp/pulp/pull/9759))
+- fix/upgrade install declare materialized contract ([#9772](https://github.com/Generous-Corp/pulp/pull/9772))
+- fix/unregistered tests repo path pin ([#9771](https://github.com/Generous-Corp/pulp/pull/9771))
+- test/keyed proof b ([#9592](https://github.com/Generous-Corp/pulp/pull/9592))
+
+<a id="v09231"></a>
+## [0.923.1] - 2026-10-07
+
+- release/version bump ([#9769](https://github.com/Generous-Corp/pulp/pull/9769))
+- build/setup cache lock windows registration ([#9766](https://github.com/Generous-Corp/pulp/pull/9766))
+
+<a id="v09230"></a>
+## [0.923.0] - 2026-10-07
+
+- fix/windows posix api batch2 ([#9720](https://github.com/Generous-Corp/pulp/pull/9720))
+- release/version bump ([#9765](https://github.com/Generous-Corp/pulp/pull/9765))
+- fix/windows staging admin owner ([#9762](https://github.com/Generous-Corp/pulp/pull/9762))
+- fix/unregistered tests dir rule ([#9763](https://github.com/Generous-Corp/pulp/pull/9763))
+- fix/reaper post job jit identity ([#9761](https://github.com/Generous-Corp/pulp/pull/9761))
+- wp/0 bridge counter fresh main 20261007 ([#9758](https://github.com/Generous-Corp/pulp/pull/9758))
+- fix/setup lock wait names owner ([#9726](https://github.com/Generous-Corp/pulp/pull/9726))
+- ci/fleet lint linux lease lane ([#9742](https://github.com/Generous-Corp/pulp/pull/9742))
+- fix/tartci lease declare process liveness ([#9743](https://github.com/Generous-Corp/pulp/pull/9743))
+- feat/wp3 bridge safety main 20261007 ([#9757](https://github.com/Generous-Corp/pulp/pull/9757))
+- codex/p2 provenance 20261006 ([#9755](https://github.com/Generous-Corp/pulp/pull/9755))
+
+<a id="v09220"></a>
+## [0.922.0] - 2026-10-06
+
+- release/version bump ([#9756](https://github.com/Generous-Corp/pulp/pull/9756))
+- feature/design import refactor 20261004 ([#9516](https://github.com/Generous-Corp/pulp/pull/9516))
+- p2 trace retention fix 20261006 ([#9754](https://github.com/Generous-Corp/pulp/pull/9754))
+
 <a id="v09211"></a>
 ## [0.921.1] - 2026-10-06
 
@@ -9985,6 +10026,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.924.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.924.0
+[0.923.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.923.1
+[0.923.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.923.0
+[0.922.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.922.0
 [0.921.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.921.1
 [0.921.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.921.0
 [0.920.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.920.2

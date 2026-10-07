@@ -45,6 +45,21 @@ def check(bundle: pathlib.Path) -> list[str]:
     # file they never authored.
     if stray.exists() and not correct.exists():
         problems.append(f"{bundle.name}: moduleinfo.json is missing from Contents/Resources/")
+
+    # CMake's BUNDLE property is ignored for a Windows MODULE target.  The
+    # format still requires a bundle directory, with the loadable module under
+    # Contents/<arch>-win/.  Catch a directory that exists only because a
+    # sidecar was copied into it while the actual VST3 binary was left beside
+    # the bundle as <name>.dll.
+    windows_arch_dirs = [
+        p for p in (bundle / "Contents").glob("*-win") if p.is_dir()
+    ]
+    if windows_arch_dirs:
+        for arch_dir in windows_arch_dirs:
+            if not any(p.is_file() and p.suffix.lower() == ".vst3"
+                       for p in arch_dir.iterdir()):
+                problems.append(
+                    f"{bundle.name}: {arch_dir.name} contains no loadable .vst3 module")
     return problems
 
 
