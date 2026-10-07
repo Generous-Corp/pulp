@@ -86,6 +86,15 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+## Build emitters always use the governor
+
+Any command that Pulp prints for a user to copy, any generated test driver,
+and every sanitizer workflow build step must invoke
+`tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
+directory explicit, including secondary artifact trees and the Linux RTSan
+lane, but do not include `-j`, `--parallel`, or a host-core probe: the
+governor owns parallelism, leases, and build-directory locking.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 ### Build commands emitted by diagnostics and remediations

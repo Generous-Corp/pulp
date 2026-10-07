@@ -237,7 +237,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
-        run: cmake --build build-asan -j$(sysctl -n hw.ncpu)
+        run: tools/ci/governed-build.sh cmake --build build-asan
 
       # The visual-analysis ctests skip without these and the non-skippable
       # visual-python-deps-present check fails, as in every job running ctest.
@@ -267,12 +267,11 @@ jobs:
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=ON \
             -DPULP_ENABLE_GPU=OFF
-          cmake --build build-asan-artifact \
+          tools/ci/governed-build.sh cmake --build build-asan-artifact \
             --target PulpEffect_CLAP PulpEffect_VST3 PulpEffect_AU \
               pulp-clap-bundle-lifecycle-test \
               pulp-vst3-bundle-lifecycle-test \
-              pulp-au-bundle-lifecycle-test \
-            -j$(sysctl -n hw.ncpu)
+              pulp-au-bundle-lifecycle-test
           ctest --test-dir build-asan-artifact --output-on-failure \
             -R '^(clap|vst3|au)-bundle-lifecycle-PulpEffect$'
           # This second Debug+ASan tree has served its purpose. The full ctest
@@ -344,7 +343,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
-        run: cmake --build build-tsan -j$(sysctl -n hw.ncpu)
+        run: tools/ci/governed-build.sh cmake --build build-tsan
 
       # The visual-analysis ctests skip without these and the non-skippable
       # visual-python-deps-present check fails, as in every job running ctest.
@@ -425,7 +424,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
-        run: cmake --build build-ubsan -j$(sysctl -n hw.ncpu)
+        run: tools/ci/governed-build.sh cmake --build build-ubsan
 
       # The visual-analysis ctests skip without these and the non-skippable
       # visual-python-deps-present check fails, as in every job running ctest.
@@ -517,7 +516,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
-        run: cmake --build build-rtsan -j$(nproc)
+        run: tools/ci/governed-build.sh cmake --build build-rtsan
 
       # The visual-analysis ctests skip without these and the non-skippable
       # visual-python-deps-present check fails, as in every job running ctest.
