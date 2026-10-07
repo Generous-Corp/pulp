@@ -791,7 +791,6 @@
     "tools/scripts/test_promote_quirk_tiers.py",
     "tools/scripts/test_pulp_lldb.py",
     "tools/scripts/test_queue_admission_guard.py",
-    "tools/scripts/test_resolve_classify_base.py",
     "tools/scripts/test_resolve_runs_on.py",
     "tools/scripts/test_resolve_runs_on_extra.py",
     "tools/scripts/test_ruleset_drift_config.py",
