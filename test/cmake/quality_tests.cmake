@@ -904,6 +904,14 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_queue_batch_attribute.py")
     set_tests_properties(queue-batch-attribute-selftest PROPERTIES TIMEOUT 120)
 
+    # resolve-classify-base-selftest pins the event-aware classify base and the
+    # build.yml wiring around it: push runs never cancel, the reporting aliases
+    # and Windows gates skip cache-warming pushes, and classify runs one resolved
+    # Python 3.11.
+    add_test(NAME resolve-classify-base-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_resolve_classify_base.py")
+    set_tests_properties(resolve-classify-base-selftest PROPERTIES TIMEOUT 120)
+
     # base-poison-detector-selftest pins what may and may not be called proof
     # that `main` itself is carrying a failure. A wrong `poisoned` pauses the
     # whole merge queue, and the two tempting rules are both unsafe: a failure
