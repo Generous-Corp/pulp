@@ -6096,16 +6096,11 @@ tests = [
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
-  "pulp-gpu-dawn-shared-io-provider-lifecycle",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
   "pulp_bundle_threejs_for_jsc_smoke",
 ]
-build_targets = [
-  "pulp-cli",
-  "pulp-gpu-dawn-shared-io-provider-probe",
-  "pulp-gpu-host-mapped-pointer-probe",
-]
+build_targets = ["pulp-cli"]
 supported_build_types = [
   "debug",
   "release",
