@@ -144,7 +144,7 @@ def check(prefix: Path, source: Path) -> list[str]:
             problems.append(f"runtime file missing from the SDK: {relative}")
         elif not filecmp.cmp(src, installed, shallow=False):
             # The message names the fix, because the instinct on seeing this is
-            # to rebuild the binary — which is already current and is not what
+            # to rebuild the binary, which is already current and is not what
             # drifted.
             problems.append(
                 f"runtime module is STALE in the SDK: {src.name} "
