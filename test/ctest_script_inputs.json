@@ -9520,6 +9520,7 @@
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
