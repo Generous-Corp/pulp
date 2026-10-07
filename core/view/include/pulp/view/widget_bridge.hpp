@@ -329,6 +329,16 @@ public:
         return widgets_.size();
     }
 
+    // Number of JS-to-native bridge dispatches since the last reset. This is
+    // per bridge so deterministic import benchmarks can measure mount and
+    // step work without a process-global counter.
+    std::uint64_t bridge_call_count() const noexcept {
+        return bridge_call_count_.load(std::memory_order_relaxed);
+    }
+    void reset_bridge_call_count() noexcept {
+        bridge_call_count_.store(0, std::memory_order_relaxed);
+    }
+
     // Deliver `paramchange` to JS subscriptions whose param moved since the
     // last frame. Polled, not pushed — see state_binding_api.cpp for why that
     // is what makes delivery origin-blind, coalesced, and off the audio thread.
@@ -613,6 +623,7 @@ private:
     // keeps drawing on every poll.
     bool frames_drained_by_service_ = false;
     bool frame_pump_live_ = false;  // set by the first host frame service
+    std::atomic<std::uint64_t> bridge_call_count_{0};
     // Requested by __pulpRuntimeSettle__ while QuickJS is inside a native
     // callback. Drained only from the outer host-frame boundary; this is a
     // budget, not a synchronous recursion request.

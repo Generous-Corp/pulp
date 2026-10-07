@@ -465,6 +465,14 @@ the runner, and logs each of the four steps as `FENCE <vmid> n/4`:
    the wrong id was read.
 4. Re-probe the guest for no worker and an untouched `_work`, then destroy it.
 
+A finished JIT clone (listener exited, registration gone) is reaped once the
+guest's identity matches the host's recorded generation. JIT runners delete
+`.runner` when their one job ends, so for such a clone the guest probe reads the
+name from the listener logs under `_diag`, and only when every log agrees on
+one name. Before this, every finished JIT clone failed with
+`post-job guest identity does not match the host generation` and stayed until
+someone removed it by hand.
+
 A label fence cannot work here: a JIT runner's labels are read-only, so
 replacing them never removes a routing label. The supervisor's own shutdown
 uses the same deregistration fence, and hands a runner GitHub reports busy to

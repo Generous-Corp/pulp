@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import subprocess
@@ -447,6 +448,63 @@ class JitDeregistrationFenceTests(unittest.TestCase):
         result, operations = self._run(job_runner="some-other-runner")
         self.assertIn("REAP 200", result.stdout)
         self.assertIn("qm destroy 200 --purge", operations)
+
+
+class GuestProbeIdentityTests(unittest.TestCase):
+    """The in-guest probe must name a finished JIT clone's runner, or no
+    post-job clone can ever be matched to its host generation and reaped."""
+
+    def _probe_source(self) -> str:
+        text = REAPER.read_text(encoding="utf-8")
+        marker = "python3 - /home/ci/actions-runner <<'PY'\n"
+        start = text.index(marker) + len(marker)
+        return text[start:text.index("\nPY\n", start)]
+
+    def _run(self, files: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as tmp_name:
+            root = pathlib.Path(tmp_name) / "actions-runner"
+            for rel, body in files.items():
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(body, encoding="utf-8")
+            root.mkdir(exist_ok=True)
+            # A forged root in the environment must be ignored; argv decides.
+            return subprocess.run(
+                ["python3", "-c", self._probe_source(), str(root)],
+                capture_output=True, text=True,
+                env={**os.environ, "TARTCI_PROBE_RUNNER_ROOT": "/nonexistent-forged-root"},
+            )
+
+    @staticmethod
+    def _identity(result: subprocess.CompletedProcess[str]) -> str:
+        return next(line.split("=", 1)[1] for line in result.stdout.splitlines()
+                    if line.startswith("identity="))
+
+    def test_live_runner_identity_comes_from_runner_file(self) -> None:
+        result = self._run({".runner": json.dumps({"AgentName": "pulp-ci-ephemeral-200-a"})})
+        self.assertEqual(self._identity(result), "pulp-ci-ephemeral-200-a")
+
+    def test_finished_jit_clone_is_named_by_its_listener_log(self) -> None:
+        log = '[2026-10-06 10:03:29Z INFO Runner] {\n  "AgentName": "pulp-ci-ephemeral-201-86cc",\n}\n'
+        result = self._run({"_diag/Runner_20261006-020000-utc.log": log})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self._identity(result), "pulp-ci-ephemeral-201-86cc")
+
+    def test_conflicting_listener_logs_are_not_an_identity(self) -> None:
+        result = self._run({
+            "_diag/Runner_a.log": '"AgentName": "pulp-ci-ephemeral-201-a"',
+            "_diag/Runner_b.log": '"AgentName": "pulp-ci-ephemeral-201-b"',
+        })
+        self.assertEqual(result.returncode, 2)
+
+    def test_the_runner_root_is_host_argv_not_guest_environment(self) -> None:
+        text = REAPER.read_text(encoding="utf-8")
+        self.assertIn('"ci@${ip}" python3 - /home/ci/actions-runner <<', text)
+        self.assertNotIn("TARTCI_PROBE_RUNNER_ROOT", text)
+        self.assertNotIn("os.environ", self._probe_source())
+
+    def test_no_runner_file_and_no_log_is_an_empty_identity(self) -> None:
+        self.assertEqual(self._identity(self._run({})), "")
 
 
 if __name__ == "__main__":

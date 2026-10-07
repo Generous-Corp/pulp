@@ -143,6 +143,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trace-frame-cost-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_frame_cost.py")
+    # Windows routes for POSIX-only calls (killpg, a directory fd, the
+    # executable bit), driven on every host by patching the platform check.
+    add_test(NAME windows-posix-shims-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_windows_posix_shims.py")
     # Windows cannot execute a shebang script; tests stand in for native
     # tools with scripts, so every launch of a configurable tool goes through
     # script_argv.argv_for. The selftest covers both platforms and pins two
@@ -1677,7 +1682,10 @@ endif()
 # setup.sh's shared source cache after a killed priming run: a lock whose owner
 # is gone is reclaimed (a live one never is), and a half-populated cache is
 # re-fetched rather than trusted. Windows runs it under Git for Windows' bash,
-# located beside git rather than on PATH, where bash.exe may be WSL's.
+# located from git rather than on PATH, where bash.exe may be WSL's. FindGit
+# can resolve any of Git's cmd/, bin/ or mingw64/bin/ copies (configuring from
+# Git Bash puts mingw64/bin first), so search bin/ under each ancestor of
+# git.exe rather than assuming one layout.
 if(UNIX)
     add_test(NAME setup-cache-lock
         COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
@@ -1685,13 +1693,20 @@ if(UNIX)
 elseif(WIN32)
     find_package(Git QUIET)
     if(GIT_FOUND)
-        get_filename_component(_pulp_git_bin_dir "${GIT_EXECUTABLE}" DIRECTORY)
-        get_filename_component(_pulp_git_root "${_pulp_git_bin_dir}" DIRECTORY)
-        find_program(PULP_GIT_BASH bash HINTS "${_pulp_git_root}/bin" NO_DEFAULT_PATH)
+        get_filename_component(_pulp_git_dir "${GIT_EXECUTABLE}" DIRECTORY)
+        set(_pulp_git_bash_hints)
+        foreach(_pulp_git_level RANGE 2)
+            get_filename_component(_pulp_git_dir "${_pulp_git_dir}" DIRECTORY)
+            list(APPEND _pulp_git_bash_hints "${_pulp_git_dir}/bin")
+        endforeach()
+        find_program(PULP_GIT_BASH bash HINTS ${_pulp_git_bash_hints} NO_DEFAULT_PATH)
         if(PULP_GIT_BASH)
             add_test(NAME setup-cache-lock
                 COMMAND "${PULP_GIT_BASH}" "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
             set_tests_properties(setup-cache-lock PROPERTIES TIMEOUT 240)
+        else()
+            message(WARNING "setup-cache-lock not registered: no Git for Windows "
+                "bash.exe under ${_pulp_git_bash_hints} (git: ${GIT_EXECUTABLE})")
         endif()
     endif()
 endif()

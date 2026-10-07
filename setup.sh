@@ -495,17 +495,38 @@ reclaim_stale_source_cache_lock() {
     return 1
 }
 
+# describe_source_cache_lock_owner <lockdir>: one line naming who holds it.
+# A live same-host owner is never reclaimed, so if its pid was reused by an
+# unrelated long-lived process after the real owner died, the wait has no end.
+# Naming the pid, its age and the command now running under it is what lets an
+# operator see that case.
+describe_source_cache_lock_owner() {
+    local owner pid host started command age="?"
+    owner="$(cat "$1/owner" 2>/dev/null || true)"
+    [ -n "$owner" ] || { printf 'no owner record'; return; }
+    pid="$(source_cache_owner_field "$owner" pid)"
+    host="$(source_cache_owner_field "$owner" host)"
+    started="$(source_cache_owner_field "$owner" started)"
+    [[ "$started" =~ ^[0-9]+$ ]] && age="$(( $(date +%s) - started ))s"
+    printf 'pid %s on %s, held %s' "${pid:-?}" "${host:-?}" "$age"
+    if [ "$host" = "$(source_cache_host)" ] && [[ "$pid" =~ ^[0-9]+$ ]]; then
+        command="$(ps -p "$pid" -o comm= 2>/dev/null | head -1)"
+        [ -z "$command" ] || printf ', running %s' "$command"
+    fi
+}
+
 # acquire_source_cache_lock <lockdir> <label>: blocks until this shell owns it.
 acquire_source_cache_lock() {
-    local lockdir="$1" label="$2" waited=false
+    local lockdir="$1" label="$2" waited=0
     while ! mkdir "$lockdir" 2>/dev/null; do
         if reclaim_stale_source_cache_lock "$lockdir" "$label"; then
             continue
         fi
-        if [ "$waited" = false ]; then
-            info "Waiting for shared $label source cache lock..."
-            waited=true
+        # Say who holds it at once, then again every five minutes of waiting.
+        if [ $((waited % 300)) -eq 0 ]; then
+            info "Waiting for shared $label source cache lock ($(describe_source_cache_lock_owner "$lockdir")): $lockdir"
         fi
+        waited=$((waited + 1))
         sleep 1
     done
     # The owner is this shell. In a ( ... ) subshell $$ still names the parent

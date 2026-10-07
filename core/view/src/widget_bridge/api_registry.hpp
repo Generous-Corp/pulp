@@ -19,7 +19,29 @@ namespace pulp::view {
 
 struct BridgeApiContext {
     ScriptEngine& engine;
+    std::atomic<std::uint64_t>* bridge_call_count;
+
+    explicit BridgeApiContext(ScriptEngine& e)
+        : engine(e), bridge_call_count(e.bridge_call_counter()) {}
 };
+
+// Keep all bridge entry points on the same accounting path.  Promise functions
+// and host-object methods are registered through JsEngine's secondary APIs and
+// therefore do not pass through register_bridge_function().  Wrapping them
+// here makes the counter describe JS-to-native dispatches rather than only the
+// large direct-function registry.
+inline void count_bridge_call(std::atomic<std::uint64_t>* counter) noexcept {
+    if (counter != nullptr)
+        counter->fetch_add(1, std::memory_order_relaxed);
+}
+
+inline NativeFunction counted_bridge_function(std::atomic<std::uint64_t>* counter,
+                                              NativeFunction fn) {
+    return [counter, fn = std::move(fn)](const choc::value::Value* args, size_t num_args) mutable {
+        count_bridge_call(counter);
+        return fn(args, num_args);
+    };
+}
 
 // Every JS->C++ native is registered through this one call, so a span wrapped
 // here attributes the native half of a script handler by function name with no
@@ -29,26 +51,29 @@ struct BridgeApiContext {
 // indirection.
 template <typename Fn>
 void register_bridge_function(BridgeApiContext& context, std::string_view name, Fn&& fn) {
+    auto* counter = context.bridge_call_count;
+    auto count_call = [counter] { count_bridge_call(counter); };
 #if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED
     if constexpr (std::is_convertible_v<Fn&&, choc::javascript::Context::NativeFunction>) {
         choc::javascript::Context::NativeFunction inner(std::forward<Fn>(fn));
         std::string span(name);
         context.engine.register_function(
-            std::string(name),
-            choc::javascript::Context::NativeFunction(
-                [inner = std::move(inner), span = std::move(span)](
-                    choc::javascript::ArgumentList args) {
-                    PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
-                    return inner(args);
-                }));
+            std::string(name), choc::javascript::Context::NativeFunction(
+                                   [inner = std::move(inner), span = std::move(span),
+                                    count_call](choc::javascript::ArgumentList args) {
+                                       count_call();
+                                       PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
+                                       return inner(args);
+                                   }));
         return;
     } else if constexpr (std::is_convertible_v<Fn&&, NativeFunction>) {
         NativeFunction inner(std::forward<Fn>(fn));
         std::string span(name);
         context.engine.register_function(
             std::string(name),
-            NativeFunction([inner = std::move(inner), span = std::move(span)](
-                               const choc::value::Value* args, size_t num_args) {
+            NativeFunction([inner = std::move(inner), span = std::move(span),
+                            count_call](const choc::value::Value* args, size_t num_args) {
+                count_call();
                 PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
                 return inner(args, num_args);
             }));
@@ -57,20 +82,43 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
         context.engine.register_function(std::string(name), std::forward<Fn>(fn));
     }
 #else
-    context.engine.register_function(std::string(name), std::forward<Fn>(fn));
+    if constexpr (std::is_convertible_v<Fn&&, choc::javascript::Context::NativeFunction>) {
+        choc::javascript::Context::NativeFunction inner(std::forward<Fn>(fn));
+        context.engine.register_function(
+            std::string(name),
+            choc::javascript::Context::NativeFunction(
+                [inner = std::move(inner), count_call](choc::javascript::ArgumentList args) {
+                    count_call();
+                    return inner(args);
+                }));
+    } else if constexpr (std::is_convertible_v<Fn&&, NativeFunction>) {
+        NativeFunction inner(std::forward<Fn>(fn));
+        context.engine.register_function(
+            std::string(name), NativeFunction([inner = std::move(inner), count_call](
+                                                  const choc::value::Value* args, size_t num_args) {
+                count_call();
+                return inner(args, num_args);
+            }));
+    } else {
+        context.engine.register_function(std::string(name), std::forward<Fn>(fn));
+    }
 #endif
 }
 
 inline void register_bridge_host_object(BridgeApiContext& context,
                                         std::string_view name,
                                         HostObjectDescriptor descriptor) {
+    auto* counter = context.bridge_call_count;
+    for (auto& method : descriptor.methods)
+        method.fn = counted_bridge_function(counter, std::move(method.fn));
     context.engine.register_host_object(std::string(name), std::move(descriptor));
 }
 
 inline void register_bridge_promise_function(BridgeApiContext& context,
                                              std::string_view name,
                                              NativePromiseFunction fn) {
-    context.engine.register_promise_function(std::string(name), std::move(fn));
+    context.engine.register_promise_function(
+        std::string(name), counted_bridge_function(context.bridge_call_count, std::move(fn)));
 }
 
 } // namespace pulp::view
