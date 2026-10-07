@@ -57,13 +57,13 @@ public:
     void register_function(const std::string& name, choc::javascript::Context::NativeFunction fn);
     void register_promise_function(const std::string& name, NativePromiseFunction fn);
 
-    // Internal WidgetBridge instrumentation seam. The pointer is borrowed
-    // for the lifetime of the owning bridge and is only touched on the JS
-    // thread by registered native functions.
-    void set_bridge_call_counter(std::atomic<std::uint64_t>* counter) noexcept {
+    // Internal WidgetBridge instrumentation seam. Registered functions retain
+    // this state because their engine may outlive the owning bridge.
+    void
+    set_bridge_call_counter(const std::shared_ptr<std::atomic<std::uint64_t>>& counter) noexcept {
         bridge_call_counter_ = counter;
     }
-    std::atomic<std::uint64_t>* bridge_call_counter() const noexcept {
+    std::shared_ptr<std::atomic<std::uint64_t>> bridge_call_counter() const noexcept {
         return bridge_call_counter_;
     }
 
@@ -121,7 +121,7 @@ public:
 private:
     std::unique_ptr<JsEngine> engine_;
     std::shared_ptr<const void> alive_ = std::make_shared<const char>('\0');
-    std::atomic<std::uint64_t>* bridge_call_counter_ = nullptr;
+    std::shared_ptr<std::atomic<std::uint64_t>> bridge_call_counter_;
 
     // For QuickJS backward compatibility: WidgetBridge uses CHOC's Context directly
     // for the stack size hack and pimpl access. We keep a reference to the CHOC
