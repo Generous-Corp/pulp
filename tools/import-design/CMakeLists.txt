@@ -189,10 +189,6 @@ install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
 install(FILES "${_pulp_materialized_binding_contract}"
     DESTINATION bin/jsx-runtime)
-install(FILES "${_pulp_materialized_source_emitter}"
-    DESTINATION bin/jsx-runtime)
-install(FILES "${_pulp_materialized_ids_map}"
-    DESTINATION bin/jsx-runtime)
 
 add_executable(pulp-design-import-bench
     design_import_benchmark.cpp)

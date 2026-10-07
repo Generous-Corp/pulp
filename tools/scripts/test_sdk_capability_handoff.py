@@ -153,6 +153,21 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
                 expected_importer_runtime_paths=expected,
             )
 
+    def test_undeclared_sibling_runtime_is_rejected(self) -> None:
+        sibling = self.prefix / MATERIALIZED_CONTRACT_PATH
+        sibling.parent.mkdir(parents=True, exist_ok=True)
+        sibling.write_bytes(b"export const fixtureContract = true;\n")
+        (sibling.parent / "materialized_source_emitter.mjs").write_text(
+            "export const internalOnly = true;\n", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(handoff.HandoffError, "selected contract"):
+            handoff.build_handoff(
+                self.prefix,
+                sdk_source_sha=SOURCE_SHA,
+                platform=PLATFORM,
+                expected_importer_runtime_paths={MATERIALIZED_CONTRACT_PATH.as_posix()},
+            )
+
     def test_duplicate_importer_runtime_path_is_rejected(self) -> None:
         document = self.stamp()
         duplicate = dict(document["importer"]["runtime"][0])
