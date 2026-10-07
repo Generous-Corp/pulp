@@ -53,6 +53,14 @@ class BuildGovernancePathTests(unittest.TestCase):
         self.assertIn("tools/ci/governed-build.sh cmake --build build-video-nogpu", source)
         self.assertNotRegex(source, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))")
 
+    def test_generated_wasm_fixture_build_uses_governor(self) -> None:
+        source = read_source("test/cmake/gpu_audio_web_tests.cmake")
+        self.assertIn(
+            '"$PULP_ROOT/tools/ci/governed-build.sh" cmake --build "$WORK"',
+            source,
+        )
+        self.assertNotRegex(source, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))")
+
     def test_mcp_build_keeps_governor_and_exit_status(self) -> None:
         source = read_source("tools/mcp/mcp_tools.cpp")
         self.assertIn('"tools" / "ci" / "governed-build.sh"', source)
