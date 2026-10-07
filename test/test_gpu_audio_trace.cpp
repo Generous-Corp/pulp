@@ -834,7 +834,8 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
             event.sequence = 0;
             recorder.publish_callback(event);
             drain_shared_io_trace(recorder, {}, 256);
-            for (std::uint64_t sequence = 1000; sequence < 1300; ++sequence) {
+            for (std::uint64_t sequence = 1000;
+                 sequence < 1000 + SharedIoTraceRecorder::capacity + 44; ++sequence) {
                 terminal = record(sequence);
                 terminal.generation = 1;
                 recorder.publish_completed(terminal);

@@ -534,23 +534,17 @@ SharedIoConvolutionSession::service(std::uint64_t now_ns) noexcept {
         return result;
     if (!drain_completions(now_ns, result)) {
         fail_closed();
-        (void)drain_trace();
         result.fenced = true;
         return result;
     }
     if (!submit_available(result)) {
         fail_closed();
-        (void)drain_trace();
         result.fenced = true;
         return result;
     }
     // Deterministic fakes may retire synchronously; one second drain turns
     // those exact terminals into pipeline records without another callback.
     (void)drain_completions(now_ns, result);
-    // Diagnostic capture must be drained continuously. Waiting until release
-    // allows the fixed SPSC queues to overflow during a long campaign, which
-    // makes an otherwise correct run unauthenticated.
-    (void)drain_trace();
     result.fenced = fenced();
     return result;
 }
