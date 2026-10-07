@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <pulp/host/custom_node_diagnostics.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
@@ -42,6 +44,9 @@ struct IrPolicy {
     int resample_taps_per_phase = Engine::kResampTapsPerPhaseDefault;
     bool true_stereo = false;
 };
+struct Instance {
+    Engine engine;
+};
 float convolution_reverb_worst_case_gain(const ImpulseResponse&, const IrPolicy&,
                                          double sample_rate, int max_block);
 CustomNodeType make_convolution_reverb_node(ImpulseResponse, IrPolicy = {});
@@ -49,6 +54,11 @@ CustomNodeType catalog_probe_node();
 ForgeNodeDescriptor descriptor();
 #if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
 inline constexpr const char* kGpuTypeId = "space.convolution_reverb_gpu";
+struct GpuInstance {
+    std::unique_ptr<gpu_audio::GpuConvolutionReverb> engine;
+    std::uint64_t preparation_generation = 0;
+};
+int gpu_internal_block_size(int max_block) noexcept;
 inline constexpr std::uint64_t kGpuDiagnosticSchema = 0x4750554352560001ULL;
 enum class GpuDiagnosticCounterUnit : std::uint8_t { TransportQuantum = 1 };
 struct GpuConvolutionDiagnostics {
@@ -92,6 +102,25 @@ inline constexpr float kGateHoldPctMax = 95.0f;
 inline constexpr float kAttackPctMin = 5.0f;
 inline constexpr float kAttackPctMax = 98.0f;
 inline constexpr float kOutputGainDbMax = 24.0f;
+struct Instance {
+    Engine engine;
+    /// Last value forwarded for each continuous param. See
+    /// `forward_if_changed`.
+    float last_diffusion = std::numeric_limits<float>::quiet_NaN();
+    float last_tone = std::numeric_limits<float>::quiet_NaN();
+    float last_hf_damp = std::numeric_limits<float>::quiet_NaN();
+    float last_width = std::numeric_limits<float>::quiet_NaN();
+    float last_converter = std::numeric_limits<float>::quiet_NaN();
+    float last_output_gain = std::numeric_limits<float>::quiet_NaN();
+    float last_mix = std::numeric_limits<float>::quiet_NaN();
+};
+template <typename Fn>
+inline void forward_if_changed(float& last, float value, Fn&& apply) {
+    if (value == last)
+        return;
+    last = value;
+    apply(value);
+}
 float nonlin_ambience_worst_case_gain();
 CustomNodeType make_nonlin_ambience_node(std::uint32_t seed = cal::kDefaultSeed,
                                          double max_length_ms = cal::kMaxLengthMs);
@@ -115,6 +144,14 @@ inline constexpr state::ParamID kMicAxisDeg = 12;
 inline constexpr state::ParamID kDiffractionPct = 13;
 inline constexpr state::ParamID kOutputTrimDb = 14;
 using Engine = signal::SpeakerModel;
+struct Instance {
+    Engine engine;
+    std::array<float, 14> last_params = [] {
+        std::array<float, 14> values{};
+        values.fill(std::numeric_limits<float>::quiet_NaN());
+        return values;
+    }();
+};
 float speaker_cabinet_worst_case_gain();
 CustomNodeType make_speaker_cabinet_node();
 CustomNodeType make_speaker_emulation_node();
