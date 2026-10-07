@@ -88,6 +88,14 @@ on a real PR. Do them in order.
 
 ## Focused builds are a dev-loop default, never a landing signal
 
+### Build commands emitted by diagnostics and remediations
+
+Any command that Pulp prints for a user to copy, including desktop video
+doctor/remediation output, is a build emitter and must invoke
+`tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
+directory explicit, but do not include `-j`, `--parallel`, or a host-core
+probe: the governor owns parallelism, leases, and build-directory locking.
+
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
 and run only what the working diff affects (`pulp affected`, the build-target
 projection in `tools/scripts/changed_surface_inventory.py`, which also honours
