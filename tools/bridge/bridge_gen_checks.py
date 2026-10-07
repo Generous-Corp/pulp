@@ -35,6 +35,8 @@ class BridgeGeneratorChecks(unittest.TestCase):
         data = generator.load_contract()
         self.assertEqual([row["name"] for row in data["commands"]], ["begin_gesture", "end_gesture", "set_parameter"])
         self.assertIn("accepted: boolean", generator.render_ts(data))
+        self.assertIn("JSON.stringify(request)", generator.render_ts(data))
+        self.assertIn("export function jsonTransport", generator.render_ts(data))
         self.assertLess(generator.render_cpp(data).find('"begin_gesture"'), generator.render_cpp(data).find('"parameter_changed"'))
 
     def test_schema_rejects_duplicate_fields(self) -> None:

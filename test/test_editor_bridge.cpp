@@ -308,10 +308,16 @@ TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
                   "&& dirname(root) !== root) root = dirname(root);\n"
                   "const bridge = await import(pathToFileURL(join(root, 'tools', 'bridge', "
                   "'generated_editor_bridge.ts')).href);\n"
-                  "bridge.setParameter(request => {\n"
-                  "  writeFileSync(process.argv[2], JSON.stringify(request));\n"
-                  "  return { ok: true, accepted: true };\n"
-                  "}, 'gain', -6.25);\n";
+                  "const transport = bridge.jsonTransport(request => {\n"
+                  "  writeFileSync(process.argv[2], request);\n"
+                  "  return JSON.stringify({ ok: true, accepted: true });\n"
+                  "});\n"
+                  "const response = bridge.setParameter(transport, 'gain', -6.25);\n"
+                  "if (!response.ok || !response.accepted) process.exit(2);\n"
+                  "let malformedResponseRejected = false;\n"
+                  "try { bridge.setParameter(bridge.jsonTransport(() => '{'), 'gain', 0); }\n"
+                  "catch { malformedResponseRejected = true; }\n"
+                  "if (!malformedResponseRejected) process.exit(3);\n";
     }
 
     pulp::platform::ProcessOptions node_options;

@@ -322,6 +322,15 @@ def render_ts(data: dict[str, Any]) -> str:
             "export type EditorBridgeResponse<T extends object> = { ok: boolean } & Partial<T>;\n",
             "export type EditorBridgeResult<T extends object> = EditorBridgeResponse<T> | Promise<EditorBridgeResponse<T>>;\n",
             "export type EditorBridgeTransport = (request: EditorBridgeRequest) => unknown | Promise<unknown>;\n",
+            "export type EditorBridgeJsonTransport = (requestJson: string) => string | Promise<string>;\n",
+            "export function jsonTransport(transport: EditorBridgeJsonTransport): EditorBridgeTransport {\n"
+            "  return request => {\n"
+            "    const response = transport(JSON.stringify(request));\n"
+            "    if (response instanceof Promise)\n"
+            "      return response.then(value => JSON.parse(value) as unknown);\n"
+            "    return JSON.parse(response) as unknown;\n"
+            "  };\n"
+            "}\n",
         ]
     )
     for row in commands:
@@ -347,7 +356,7 @@ def render_docs(data: dict[str, Any]) -> str:
         intro = [
             "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.",
             "",
-            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.",
+            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.",
             "",
         ]
     else:
