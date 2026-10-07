@@ -416,6 +416,9 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
     return results
 
 
+# Checks that block only drift the change reaches; each must carry
+# PULP_DIFF_SCOPED where it is registered, or its base re-run is believed.
+DIFF_SCOPED_TESTS = ("script-test-inputs-drift", "changed-surface-script-families-drift")
 NOT_COMPARABLE = ("base verdict not comparable (diff-scoped check): its base re-run sees an "
                   "empty diff and passes by construction")
 
@@ -442,7 +445,7 @@ def label_base_failures(build: Path, failed: list[str], base_ref: str) -> dict[s
     for test in json.loads(out).get("tests", []):
         if test.get("name") in failed and test.get("command"):
             props = {p["name"]: p["value"] for p in test.get("properties", [])}
-            if str(props.get("PULP_DIFF_SCOPED", "")).strip().upper() in ("TRUE", "ON", "1"):
+            if _diff_scoped(props):
                 diff_scoped.add(test["name"])
             entries[test["name"]] = lane._entry_from_command(
                 test["name"], test["command"], props, REPO_ROOT, build)
@@ -475,6 +478,29 @@ def label_base_failures(build: Path, failed: list[str], base_ref: str) -> dict[s
     return verdicts
 
 
+def _diff_scoped(props: dict) -> bool:
+    return str(props.get("PULP_DIFF_SCOPED", "")).strip().upper() in ("TRUE", "ON", "1")
+
+
+def diff_scoped_registration_problems(tests: list[dict]) -> list[str]:
+    """Each known diff-scoped check registered in this configure must carry
+    PULP_DIFF_SCOPED. A check this configure does not register is not judged,
+    but script-test-inputs-drift registers everywhere, so its absence means
+    the inventory was not read."""
+    by_name = {t.get("name"): t for t in tests}
+    if DIFF_SCOPED_TESTS[0] not in by_name:
+        return [f"{DIFF_SCOPED_TESTS[0]} is not registered here; wrong build directory?"]
+    problems = []
+    for name in DIFF_SCOPED_TESTS:
+        test = by_name.get(name)
+        if test is None:
+            continue
+        props = {p["name"]: p["value"] for p in test.get("properties", [])}
+        if not _diff_scoped(props):
+            problems.append(f"{name} is diff-scoped but does not carry PULP_DIFF_SCOPED TRUE")
+    return problems
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--build-dir", type=Path, required=True)
@@ -488,9 +514,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label-exclude", default="")
     parser.add_argument("--junit-dir", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="print the selection only")
+    parser.add_argument("--check-diff-scoped", action="store_true",
+                        help="only check that the diff-scoped checks carry PULP_DIFF_SCOPED")
     args = parser.parse_args(argv)
 
     build = args.build_dir.resolve()
+    if args.check_diff_scoped:
+        out = subprocess.run(["ctest", "--test-dir", str(build), "-N", "--show-only=json-v1"],
+                             capture_output=True, text=True, encoding="utf-8", check=False)
+        if out.returncode != 0:
+            print(f"pr-head-affected-tests: cannot read the ctest inventory: {out.stderr.strip()}",
+                  file=sys.stderr)
+            return 2
+        problems = diff_scoped_registration_problems(json.loads(out.stdout).get("tests", []))
+        for problem in problems:
+            print(f"pr-head-affected-tests: {problem}", file=sys.stderr)
+        if not problems:
+            print("pr-head-affected-tests: every registered diff-scoped check carries PULP_DIFF_SCOPED")
+        return 1 if problems else 0
     try:
         paths = diff_paths(args.base, args.head)
         changes = changed_lines(args.base, args.head,

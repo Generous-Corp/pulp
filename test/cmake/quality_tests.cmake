@@ -743,6 +743,12 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pr-head-affected-tests-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
         set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
+        # The diff-scoped drift checks must carry PULP_DIFF_SCOPED in this
+        # configure's inventory, or their base re-run is believed again.
+        add_test(NAME pr-head-diff-scoped-registrations COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/pr_head_affected_tests.py"
+            --build-dir "${CMAKE_BINARY_DIR}" --check-diff-scoped)
+        set_tests_properties(pr-head-diff-scoped-registrations PROPERTIES TIMEOUT 60)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
         # Shadow flake-exoneration verdict the merge-group macos job annotates
         # after a failed ctest (OCCURS_ON_OTHER_CLS from other heads' ctest-logs

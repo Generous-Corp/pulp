@@ -415,6 +415,36 @@ class BaseRedTests(unittest.TestCase):
         self.assertEqual(verdicts["script-diff-scoped"], (False, "passes on the base"))
 
 
+class DiffScopedRegistrationTests(unittest.TestCase):
+    @staticmethod
+    def registration(name: str, marked: bool | None) -> dict:
+        props = [] if marked is None else [{"name": "PULP_DIFF_SCOPED",
+                                             "value": "TRUE" if marked else "FALSE"}]
+        return {"name": name, "properties": props}
+
+    def test_both_marked_is_clean(self) -> None:
+        tests = [self.registration(n, True) for n in step.DIFF_SCOPED_TESTS]
+        self.assertEqual(step.diff_scoped_registration_problems(tests), [])
+
+    def test_an_unmarked_registration_is_named(self) -> None:
+        for missing in (None, False):
+            with self.subTest(missing=missing):
+                tests = [self.registration("script-test-inputs-drift", True),
+                         self.registration("changed-surface-script-families-drift", missing)]
+                problems = step.diff_scoped_registration_problems(tests)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("changed-surface-script-families-drift", problems[0])
+
+    def test_a_check_this_configure_does_not_register_is_not_judged(self) -> None:
+        tests = [self.registration("script-test-inputs-drift", True)]
+        self.assertEqual(step.diff_scoped_registration_problems(tests), [])
+
+    def test_control_an_inventory_without_the_anchor_check_fails(self) -> None:
+        problems = step.diff_scoped_registration_problems([self.registration("other", None)])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("wrong build directory", problems[0])
+
+
 class ExitCodeTests(unittest.TestCase):
     """A red main does not fail the pull request; its own failure does."""
 
