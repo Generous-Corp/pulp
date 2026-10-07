@@ -1689,6 +1689,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-group-view-widgets": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_editor_bridge.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-host": {
    "data": "none",
    "inputs": [],
