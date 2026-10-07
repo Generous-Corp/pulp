@@ -208,15 +208,15 @@ BrowserHtmlImportResult import_browser_html(
         return BrowserHtmlFailure{
             3, std::move(sprite_error), shape, std::move(workspaces)};
     }
-    return BrowserHtmlCaptured{
-        shape,
-        std::move(*lowered.design_ir),
-        capture_directory,
-        durable_capture_directory,
-        lowered.reference_png,
-        lowered.semantic_report,
-        std::move(workspaces),
-        std::move(lowered.warnings)};
+    return BrowserHtmlCaptured{shape,
+                               std::move(*lowered.design_ir),
+                               capture_directory,
+                               durable_capture_directory,
+                               lowered.reference_png,
+                               lowered.semantic_report,
+                               captured.capture.artifacts->materialized_document,
+                               std::move(workspaces),
+                               std::move(lowered.warnings)};
 }
 
 }  // namespace pulp::import_design

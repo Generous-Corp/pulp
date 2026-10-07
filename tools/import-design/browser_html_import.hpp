@@ -57,6 +57,7 @@ struct BrowserHtmlCaptured {
     std::filesystem::path durable_capture_directory;
     std::filesystem::path reference_png;
     std::filesystem::path semantic_report;
+    std::optional<std::filesystem::path> materialized_document;
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;
     /// Lowering succeeded but part of the design could not be drawn for a
     /// reason the CALLER can fix — carried out so the CLI prints it rather
