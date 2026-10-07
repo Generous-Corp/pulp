@@ -31,6 +31,72 @@ TEST_CASE("WidgetBridge counter ignores pure JavaScript work",
     REQUIRE(bridge.bridge_call_count() == 0);
 }
 
+TEST_CASE("WidgetBridge counter covers host-object methods and deferred promise calls",
+          "[view][bridge][wp0][secondary-registrars]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // navigatorGPU.getPreferredCanvasFormat is a HostObjectMethod. It must be
+    // counted even though the host-object adapter installs an internal global
+    // function behind the scenes.
+    bridge.reset_bridge_call_count();
+    auto format = engine.evaluate("navigatorGPU.getPreferredCanvasFormat()");
+    REQUIRE(format.getWithDefault<std::string>("") != "");
+    REQUIRE(bridge.bridge_call_count() == 1);
+
+    // __requestAdapterImpl is registered through the promise path. The native
+    // body runs on the microtask pump, so measuring immediately after evaluate
+    // proves the counter is attached to invocation rather than registration.
+    bridge.reset_bridge_call_count();
+    engine.evaluate("__requestAdapterImpl()");
+    REQUIRE(bridge.bridge_call_count() == 0);
+    engine.pump_message_loop();
+    REQUIRE(bridge.bridge_call_count() == 1);
+}
+
+TEST_CASE("WidgetBridge callback delivery does not masquerade as native dispatch",
+          "[view][bridge][wp0][callback-path]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        globalThis.__wp0Clicked = false;
+        createToggleButton('callback-label', '');
+        on('callback-label', 'click', function() { globalThis.__wp0Clicked = true; });
+    )JS");
+    bridge.reset_bridge_call_count();
+
+    // Native input invokes the JS callback (C++ -> JS). That direction is not
+    // a JS-to-native bridge dispatch and must leave the counter unchanged.
+    auto* callback_widget = bridge.widget("callback-label");
+    REQUIRE(callback_widget != nullptr);
+    REQUIRE(static_cast<bool>(callback_widget->on_click));
+    callback_widget->on_click();
+    REQUIRE(engine.evaluate("__wp0Clicked === true").getWithDefault<bool>(false));
+    REQUIRE(bridge.bridge_call_count() == 0);
+}
+
+TEST_CASE("WidgetBridge counter remains exact under repeated native calls",
+          "[view][bridge][wp0][overhead]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.reset_bridge_call_count();
+    constexpr int calls = 128;
+    for (int i = 0; i < calls; ++i)
+        engine.evaluate("getGPUInfo()");
+    REQUIRE(bridge.bridge_call_count() == static_cast<std::uint64_t>(calls));
+}
+
 TEST_CASE("WidgetBridge creates knob from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;
