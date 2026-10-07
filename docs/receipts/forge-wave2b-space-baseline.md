@@ -3,8 +3,10 @@
 Captured from `origin/main` at `c3c37bfc05fd58686dcc0dc369e4aaff9f4ccb06` before the space-family extraction.
 
 The extraction was replayed onto current `origin/main` at
-`6d1a4c332f66b81bc4fc67ec0d0f3b2d2d0fc0a9` before this receipt was revalidated
-on 2026-10-07.
+`26e9354d7414851306fde8bef3daf3a289f9b53d` before this receipt was revalidated
+on 2026-10-07. The previous PR head was preserved at
+`20c915f9a7bbf30767acb49cd5f21112a8500d8c` and the pre-rebase refreshed head
+at `8c29c9224f57756b3d9151971d5e90336ea8d92b`.
 
 - Public header: `core/host/include/pulp/host/forge_space_catalog.hpp`
 - Header size: 52,728 bytes, 925 lines.
@@ -22,6 +24,10 @@ on 2026-10-07.
 - Direct focused binary `build/test/pulp-test-forge-space-catalog --reporter compact`: 20 cases, 3,376 assertions, all passed.
 - Export after extraction: 415,732 bytes, SHA-256 `350567a6c9ca5a6b981f0efe8354207479f3341765871d7af4a821fc094c3e46`; `cmp` against the baseline returned 0.
 - `dsp_capability_registry.py --check` and `consumption_census.py --check` passed.
+- After the current-main rebase, `script_test_inputs.py --check` passed with
+  465 declared tests in sync; the two materialized-runtime entries reported by
+  the stale CI checkout are present from current `origin/main`, so no generated
+  manifest edit was required.
 - No compile-time improvement claim is made yet; a before/after include-time
   measurement remains a follow-up rather than inferred from the line-count
   reduction.
