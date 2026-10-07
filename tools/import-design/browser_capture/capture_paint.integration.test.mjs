@@ -184,6 +184,54 @@ test("real browser capture freezes a canvas animation and names its browser",
     }
   });
 
+// A full-panel canvas often sizes its backing store from a resize observer or
+// window resize handler. Chrome's beyond-viewport screenshot path can deliver
+// that resize even when the settled document exactly fills the active
+// viewport. The handler clears the backing store, and the capture has already
+// disabled rAF, so a second paint cannot repair the accepted frame.
+test("viewport capture preserves a canvas across resize-sensitive panels",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-canvas-resize-sensitive-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 320px; height: 240px; overflow: hidden; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+<canvas id="surface"></canvas>
+<script>
+  const canvas = document.getElementById("surface");
+  const resize = () => {
+    canvas.width = innerWidth * devicePixelRatio;
+    canvas.height = innerHeight * devicePixelRatio;
+  };
+  resize();
+  window.addEventListener("resize", resize);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "rgb(210, 40, 70)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+</script>
+`);
+      await runCapture(script, browser, input, root, output, 320, 240);
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const [red, green, blue, alpha] = rgbaPixel(screenshot, 100, 100);
+      assert.ok(red > 180 && green < 80 && blue < 110 && alpha > 240,
+        `resize-sensitive canvas was lost: rgba(${red}, ${green}, ${blue}, ${alpha})`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 // The capture is what decides what can ever be drawn. Every assertion here is
 // a property whose absence renders as a plausible wrong picture: a tiled grid
 // collapsed to one hairline, a dashed left edge silently gone, a layered panel
