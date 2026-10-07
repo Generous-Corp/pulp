@@ -66,7 +66,7 @@ inline std::string provider_receipt_digest(const SharedIoProviderIdentity& ident
 
 inline bool valid_provider_receipt_digest(const SharedIoProviderIdentity& identity,
                                           std::string_view native_runtime_revision,
-                                          std::string_view immutable_receipt_digest) noexcept {
+                                          std::string_view immutable_receipt_digest) {
     if (immutable_receipt_digest.size() != 64)
         return false;
     for (const auto c : immutable_receipt_digest) {
@@ -105,7 +105,7 @@ struct GpuConvolverTrialContext {
     std::string immutable_receipt_digest;
 };
 
-inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
+inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) {
     return context.trial_id != 0 && context.pair_id != 0 && context.block_frames != 0 &&
            context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
            context.inflight_depth != 0 && context.queue_capacity > context.lead_blocks &&
