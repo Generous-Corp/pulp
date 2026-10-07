@@ -6808,6 +6808,13 @@
    ],
    "kind": "node"
   },
+  "pulp-gpu-audio-p2-campaign-contract": {
+   "entry": "tools/scripts/gpu_audio_p2_campaign.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_campaign.py"
+   ],
+   "kind": "python"
+  },
   "pulp-gpu-audio-provider-identity": {
    "entry": "tools/scripts/gpu_audio_provider_identity.py",
    "inputs": [
@@ -6867,16 +6874,6 @@
     "tools/import-design/browser_capture/vendor_payload.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
-   ],
-   "kind": "node"
-  },
-  "pulp-materialized-runtime-node-dependencies": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
    ],
    "kind": "node"
   },

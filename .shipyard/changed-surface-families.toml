@@ -516,6 +516,37 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-c298b27989cc"
+paths = [
+  "tools/scripts/gpu_audio_p2_campaign.py",
+  "tools/scripts/test_gpu_audio_p2_campaign.py",
+]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-p2-campaign-contract-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-6b152499de52"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
@@ -2277,34 +2308,6 @@ tests = [
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
   "git-stdin-pipe-deadlock-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-c298b27989cc"
-paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "gpu-audio-p2-campaign-contract-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5163,6 +5166,7 @@ paths = [
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_p2_campaign.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
@@ -5674,6 +5678,7 @@ paths = [
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_p2_campaign.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",

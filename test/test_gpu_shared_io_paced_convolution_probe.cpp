@@ -211,6 +211,7 @@ struct RawCensus {
     std::unordered_set<std::string> delivery_identities;
     std::unordered_set<std::string> terminal_identities;
     std::vector<const TraceRecord*> lifecycle_records;
+    std::vector<const TraceRecord*> unaccounted_records;
 };
 
 RawCensus collect_raw_census(const std::vector<TraceRecord>& records,
@@ -225,11 +226,26 @@ RawCensus collect_raw_census(const std::vector<TraceRecord>& records,
     }
     census.lifecycle_records.reserve(records.size());
     for (const auto& record : records) {
-        if (record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
-            record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Delivery)
-            continue;
-        const auto identity = trace_identity(engine_id, record.generation, record.sequence);
+        // Retain every raw row before classifying it. Eligible and Recovery
+        // rows are valid lifecycle evidence, but do not participate in the
+        // Terminal/Delivery identity multisets.
         census.lifecycle_records.push_back(&record);
+        const auto known = record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal ||
+                           record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Eligible ||
+                           record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Delivery ||
+                           record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Recovery;
+        if (!known) {
+            census.unaccounted_records.push_back(&record);
+            census.valid = false;
+            continue;
+        }
+        if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Eligible ||
+            record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Recovery) {
+            if (!record.valid())
+                census.valid = false;
+            continue;
+        }
+        const auto identity = trace_identity(engine_id, record.generation, record.sequence);
         if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal) {
             if (!census.admission_identities.contains(identity) || !record.valid() ||
                 !record.admission_identity_matched ||
@@ -329,6 +345,45 @@ int self_test() {
     records.push_back(terminal);
     if (collect_raw_census(records, admissions, engine_id, authenticated).valid) {
         std::cerr << "self-test: duplicate terminal accepted\n";
+        return 1;
+    }
+    TraceRecord eligible;
+    eligible.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Eligible;
+    eligible.generation = 1;
+    eligible.sequence = 3;
+    records = {terminal, delivery, eligible};
+    eligible.set(pulp::gpu_audio::detail::SharedIoTraceStage::Scheduled, 1);
+    const auto eligible_census = collect_raw_census(records, admissions, engine_id, authenticated);
+    if (!eligible_census.valid || !eligible_census.unaccounted_records.empty() ||
+        eligible_census.lifecycle_records.size() != records.size()) {
+        std::cerr << "self-test: valid Eligible trace row was rejected or dropped\n";
+        return 1;
+    }
+    TraceRecord recovery;
+    recovery.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Recovery;
+    recovery.generation = 1;
+    recovery.next_generation = 2;
+    recovery.set(pulp::gpu_audio::detail::SharedIoTraceStage::Scheduled, 1);
+    records = {terminal, delivery, recovery};
+    const auto recovery_census = collect_raw_census(records, admissions, engine_id, authenticated);
+    if (!recovery_census.valid || !recovery_census.unaccounted_records.empty()) {
+        std::cerr << "self-test: valid Recovery trace row was rejected\n";
+        return 1;
+    }
+    auto unknown_record = recovery;
+    unknown_record.kind = static_cast<pulp::gpu_audio::detail::SharedIoTraceKind>(99);
+    records = {terminal, delivery, unknown_record};
+    const auto unaccounted = collect_raw_census(records, admissions, engine_id, authenticated);
+    if (unaccounted.valid || unaccounted.unaccounted_records.size() != 1 ||
+        unaccounted.lifecycle_records.size() != records.size() ||
+        unaccounted.lifecycle_records.back() != &records.back()) {
+        std::cerr << "self-test: unknown trace row was not retained and rejected\n";
+        return 1;
+    }
+    recovery.next_generation = 0;
+    records = {terminal, delivery, recovery};
+    if (collect_raw_census(records, admissions, engine_id, authenticated).valid) {
+        std::cerr << "self-test: malformed Recovery trace row was accepted\n";
         return 1;
     }
 
@@ -474,6 +529,7 @@ int run(Config config) {
     std::uint64_t late_completions = 0;
     std::uint64_t authenticated_terminal_records = 0;
     std::uint64_t terminal_record_count = 0;
+    std::uint64_t delivery_record_count = 0;
     const auto terminal_identity = [engine_id](const auto& record) {
         return std::to_string(engine_id) + ":" + std::to_string(record.generation) + ":" +
                std::to_string(record.sequence);
@@ -482,6 +538,8 @@ int run(Config config) {
     for (const auto& record : trace_records) {
         if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal)
             ++terminal_record_count;
+        else if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Delivery)
+            ++delivery_record_count;
         const bool authenticated =
             record.valid() && record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
             record.gpu_work_admitted && record.admission_identity_matched &&
@@ -501,10 +559,10 @@ int run(Config config) {
             ++late_completions;
     }
 
-    // Preserve every terminal and delivery row in the raw census, including
-    // callback-only priming and CPU-fallback positions. The admission-linked
-    // subset is checked for one terminal and one delivery per admission, while
-    // the complete delivery stream remains available for fallback accounting.
+    // Preserve every trace row in the raw census, including callback-only
+    // priming, CPU-fallback positions, and any unaccounted kind. The
+    // admission-linked subset is checked for one terminal and one delivery per
+    // admission, while the complete stream remains available for accounting.
     const auto raw_census =
         collect_raw_census(trace_records, trace_admissions, engine_id, terminal_identities);
     const auto& admission_identities = raw_census.admission_identities;
@@ -651,7 +709,12 @@ int run(Config config) {
                << ",\"measured_blocks\":" << measured_blocks
                << ",\"measured_blocks_per_repetition\":" << config.blocks
                << ",\"steady_repetitions\":" << config.steady_repetitions
-               << ",\"total_callbacks\":" << total_blocks
+               << ",\"total_callbacks\":" << total_blocks << ",\"callback_count\":" << total_blocks
+               << ",\"measured_callback_count\":" << measured_blocks
+               << ",\"admission_granularity\":\"one_per_callback\""
+               << ",\"admission_record_count\":" << trace_admissions.size()
+               << ",\"delivery_record_count\":" << delivery_record_count
+               << ",\"unaccounted_trace_record_count\":" << raw_census.unaccounted_records.size()
                << ",\"measured_miss_counter_delta\":" << measured_misses
                << ",\"callback_overruns\":" << callback_overruns
                << ",\"late_callback_starts\":" << late_callback_starts
