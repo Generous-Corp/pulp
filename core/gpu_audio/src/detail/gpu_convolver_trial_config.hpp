@@ -2,6 +2,7 @@
 
 #include "dawn_shared_io_provider.hpp"
 #include "shared_io_execution_contract.hpp"
+#include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
 
 #include <cstdint>
@@ -33,6 +34,17 @@ constexpr bool valid_gpu_convolver_thermal_state(GpuConvolverThermalState state)
            state == GpuConvolverThermalState::Throttled;
 }
 
+inline bool valid_provider_identity_component(const std::string& value) noexcept {
+    // Identity values are serialized into JSON by the private receipt writer.
+    // Reject control characters and quoting rather than risking an ambiguous
+    // or forged provenance projection.
+    for (const unsigned char c : value) {
+        if (c < 0x20 || c == '\"' || c == '\\')
+            return false;
+    }
+    return !value.empty();
+}
+
 struct GpuConvolverTrialContext {
     std::uint64_t trial_id = 0;
     std::uint64_t pair_id = 0;
@@ -53,9 +65,12 @@ struct GpuConvolverTrialContext {
     bool workgroup_requested = false;
     bool workgroup_joined = false;
     GpuConvolverThermalState thermal_state = GpuConvolverThermalState::Unavailable;
+    // Receipts require an authenticated provider identity; missing identity
+    // fails closed and cannot be interpreted as physical GPU evidence.
+    SharedIoProviderIdentity provider_identity;
 };
 
-constexpr bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
+inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
     return context.trial_id != 0 && context.pair_id != 0 && context.block_frames != 0 &&
            context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
            context.inflight_depth != 0 && context.queue_capacity > context.lead_blocks &&
@@ -63,7 +78,15 @@ constexpr bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext&
            context.max_inflight <= context.queue_capacity - context.lead_blocks &&
            context.lead_blocks != 0 && context.deadline_ns != 0 &&
            context.watchdog_ns > context.deadline_ns && context.transfer_counters_direct &&
-           context.timing_provenance_direct &&
+           context.timing_provenance_direct && context.provider_identity.authenticated &&
+           valid_provider_identity_component(context.provider_identity.provider_revision) &&
+           valid_provider_identity_component(context.provider_identity.adapter_name) &&
+           valid_provider_identity_component(context.provider_identity.adapter_backend) &&
+           context.provider_identity.adapter_vendor_id != 0 &&
+           context.provider_identity.adapter_device_id != 0 &&
+           context.provider_identity.native_runtime_authenticated &&
+           valid_provider_identity_component(context.provider_identity.native_runtime_name) &&
+           valid_provider_identity_component(context.provider_identity.native_runtime_backend) &&
            valid_gpu_convolver_thermal_state(context.thermal_state) &&
            (!context.workgroup_requested || context.workgroup_joined);
 }
