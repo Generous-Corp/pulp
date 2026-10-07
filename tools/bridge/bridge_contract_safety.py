@@ -54,7 +54,9 @@ TS_KEYWORDS = frozenset(
 # ``is``) remain legal binding identifiers.  Only strict/future-reserved words
 # plus the two strict-mode restricted bindings are rejected here.
 TS_PARAMETER_KEYWORDS = TS_KEYWORDS | frozenset({"arguments", "eval"})
-TS_WRAPPER_RESERVED = TS_PARAMETER_KEYWORDS
+# These names are emitted by the generated module itself and therefore cannot
+# be claimed by a command wrapper after snake_case→camelCase transformation.
+TS_WRAPPER_RESERVED = TS_PARAMETER_KEYWORDS | frozenset({"jsonTransport"})
 
 TS_GENERATED_ALIASES = {
     "EditorBridgeCommand",
