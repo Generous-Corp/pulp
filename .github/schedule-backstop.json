@@ -7,6 +7,7 @@
     {"file": "main-health-detector.yml", "cadence_minutes": 30},
     {"file": "merge-stall-check.yml", "cadence_minutes": 30},
     {"file": "pending-intent-liveness.yml", "cadence_minutes": 30},
+    {"file": "read-audit-cadence-check.yml", "cadence_minutes": 30},
     {"file": "release-cadence-check.yml", "cadence_minutes": 30},
     {"file": "release-reconcile.yml", "cadence_minutes": 30},
     {"file": "required-gate-liveness.yml", "cadence_minutes": 30},

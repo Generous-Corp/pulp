@@ -798,6 +798,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # The read audit's per-day ledger: clean days, resets, missing days.
+        add_test(NAME read-audit-cadence-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_read_audit_cadence.py")
+        set_tests_properties(read-audit-cadence-selftest PROPERTIES TIMEOUT 120)
         # Pure parts of the test-link determinism check (command extraction,
         # the configure's decision file, the loud skip).
         add_test(NAME link-determinism-selftest COMMAND ${Python3_EXECUTABLE}

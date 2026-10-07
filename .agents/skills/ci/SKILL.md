@@ -931,7 +931,16 @@ was not flagged has no verdict, because strace saw nothing, and it fails for
 that reason. Once the first run came back clean the nightly
 switched to `--fail-on-findings`: its exit follows the `read-audit stage0:`
 verdict (clean 0, findings 1, incomplete 2). A red nightly is a broken
-Stage 0 streak, not a flake. Read the stage0 line before rerunning it.
+Stage 0 streak, not a flake. Read the stage0 line before rerunning it. The streak counts clean cron DAYS, not runs,
+and only the day's scheduled run counts (the day is the date GitHub created
+it, hours after the cron), or a same-sha dispatch that cancelled and replaced
+it. Any other dispatch is a control, never a day, so dispatching the nightly
+cannot repair the streak. The `read-audit-cadence-check` ledger
+judges each counted run by its report's stage0 verdict, not by the run's
+conclusion: before the fail-on-findings flip (2026-10-03 23:42Z) a green run
+could carry findings. GitHub fires daily crons hours late or drops them, so a
+day with no counted run is a gap, resets the streak, and is named by that
+check's tracking issue.
 
 ### Only a ready-to-land PR head issues a receipt
 
