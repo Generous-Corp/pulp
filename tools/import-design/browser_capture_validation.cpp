@@ -110,8 +110,11 @@ std::string extent(int width, int height) {
     return std::to_string(width) + "x" + std::to_string(height);
 }
 
-constexpr std::uint32_t kMinimumCanvasInkRgbSum = 120;
-constexpr std::uint64_t kMinimumCanvasInkPixels = 16;
+// A real dark Spectr canvas can have almost no bright pixels, but its
+// hash-verified sparse plane still contains broad opaque coverage. The known
+// blank-frame false positive had only 127 isolated opaque specks, so use
+// coverage rather than brightness as the portable gate.
+constexpr std::uint64_t kMinimumCanvasInkPixels = 256;
 
 bool compose_materialized_canvas_evidence(
     const pulp::view::DesignIR& ir,
@@ -226,12 +229,7 @@ bool compose_materialized_canvas_evidence(
              pixel < destination.rgba.size(); pixel += 4) {
             const auto alpha = source.rgba[pixel + 3];
             if (alpha == 0) continue;
-            const auto rgb_sum =
-                static_cast<std::uint32_t>(source.rgba[pixel]) +
-                static_cast<std::uint32_t>(source.rgba[pixel + 1]) +
-                static_cast<std::uint32_t>(source.rgba[pixel + 2]);
-            if (rgb_sum >= kMinimumCanvasInkRgbSum)
-                ++sparse_composite_ink_pixels;
+            ++sparse_composite_ink_pixels;
             if (alpha != 255) {
                 error =
                     "materialized canvas composite evidence is not a sparse replacement plane";
@@ -313,9 +311,8 @@ bool compose_materialized_canvas_evidence(
         error =
             "materialized canvas validation requires at least " +
             std::to_string(kMinimumCanvasInkPixels) +
-            " meaningful ink pixels (RGB sum >= " +
-            std::to_string(kMinimumCanvasInkRgbSum) +
-            ") in the hash-verified sparse composite evidence";
+            " opaque canvas pixels in the hash-verified sparse composite "
+            "evidence";
         return false;
     }
     if (composed == 0) {

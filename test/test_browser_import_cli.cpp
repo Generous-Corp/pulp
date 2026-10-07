@@ -1211,8 +1211,8 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
     evidence.width = expected.width;
     evidence.height = expected.height;
     evidence.rgba.resize(expected.rgba.size(), 0);
-    for (int y = 8; y < 16; ++y) {
-        for (int x = 8; x < 16; ++x) {
+    for (int y = 6; y < 22; ++y) {
+        for (int x = 6; x < 22; ++x) {
             const auto pixel = static_cast<std::size_t>(
                 (y * evidence.width + x) * 4);
             evidence.rgba[pixel] = 231;
@@ -1270,7 +1270,7 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
              .height = 32,
              .require_canvas_ink = true});
         CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("meaningful ink pixels") !=
+        CHECK(rejected.error.find("opaque canvas pixels") !=
               std::string::npos);
 
         const auto allowed = id::validate_browser_capture_design_ir(
@@ -1307,7 +1307,7 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
              .height = 32,
              .require_canvas_ink = true});
         CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("meaningful ink pixels") !=
+        CHECK(rejected.error.find("opaque canvas pixels") !=
               std::string::npos);
     }
 
