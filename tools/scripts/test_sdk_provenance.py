@@ -418,6 +418,8 @@ class SdkProvenanceTests(unittest.TestCase):
         (self.prefix / "version.txt").write_text("0.918.0\n", encoding="utf-8")
         at_floor = provenance._importer_runtime_paths(self.prefix, "linux-x64")
         self.assertIn(sibling, at_floor)
+        self.assertIn("bin/jsx-runtime/materialized_source_emitter.mjs", at_floor)
+        self.assertIn("bin/jsx-runtime/materialized_ids_map.mjs", at_floor)
 
     def test_historical_matrix_without_node_floor_remains_supported(self) -> None:
         matrix = self.root / "historical-release-product-matrix.json"

@@ -153,7 +153,7 @@ def _source_provenance() -> tuple[str, str]:
 
     status = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "status", "--porcelain=v1", "--untracked-files=no"],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, encoding="utf-8"
     )
     if status.returncode != 0:
         raise RuntimeError("unable to establish source tree status")
@@ -173,7 +173,7 @@ def _source_provenance() -> tuple[str, str]:
     tracked = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "--error-unmatch", "--stage", "--",
          str(DRIVER_RELATIVE_PATH)],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, encoding="utf-8"
     )
     if tracked.returncode != 0 or not tracked.stdout.strip():
         raise RuntimeError("campaign driver is not tracked by the source repository")
@@ -183,11 +183,11 @@ def _source_provenance() -> tuple[str, str]:
     try:
         head_blob = subprocess.check_output(
             ["git", "-C", str(REPO_ROOT), "rev-parse", f"HEAD:{DRIVER_RELATIVE_PATH}"],
-            text=True,
+            text=True, encoding="utf-8"
         ).strip()
         worktree_blob = subprocess.check_output(
             ["git", "-C", str(REPO_ROOT), "hash-object", "--", str(DRIVER_PATH)],
-            text=True,
+            text=True, encoding="utf-8"
         ).strip()
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("unable to establish tracked campaign driver blob") from exc
@@ -196,7 +196,7 @@ def _source_provenance() -> tuple[str, str]:
 
     try:
         source_revision = subprocess.check_output(
-            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True,
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True, encoding="utf-8"
         ).strip()
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("unable to resolve source revision") from exc
@@ -295,7 +295,7 @@ def observe_jsonl(path: Path) -> LosslessLifecycleObserver:
     """Read a raw JSONL stream without dropping blank or malformed rows."""
 
     observer = LosslessLifecycleObserver()
-    with path.open() as stream:
+    with path.open(encoding="utf-8") as stream:
         for line_number, line in enumerate(stream, 1):
             if not line.strip():
                 raise RuntimeError(f"raw observer encountered blank line {line_number}")
@@ -613,11 +613,11 @@ def run(args: argparse.Namespace) -> int:
                    "--run-kind=cold",
                    f"--output-dir={control_dir}", f"--raw-jsonl={control_dir / 'raw.jsonl'}",
                    "--negative-control", "--expect-failure"]
-        control_proc = subprocess.run(control, capture_output=True, text=True, timeout=900)
+        control_proc = subprocess.run(control, capture_output=True, text=True, timeout=900, encoding="utf-8")
         control_receipt_path = control_dir / "receipt.json"
         if control_proc.returncode != 0 or not control_receipt_path.is_file():
             raise RuntimeError("negative control did not return expected-failure status")
-        control_receipt = json.loads(control_receipt_path.read_text())
+        control_receipt = json.loads(control_receipt_path.read_text(encoding="utf-8"))
         control_raw = control_dir / "raw.jsonl"
         validate_negative_control_receipt(control_receipt)
         if not control_raw.is_file():
@@ -650,11 +650,11 @@ def run(args: argparse.Namespace) -> int:
                             command.append(f"--steady-repetitions={RUNS_PER_KIND}")
                         if args.wake_on_write:
                             command.append("--wake-on-write")
-                        proc = subprocess.run(command, capture_output=True, text=True, timeout=900)
+                        proc = subprocess.run(command, capture_output=True, text=True, timeout=900, encoding="utf-8")
                         receipt_path = trial_dir / "receipt.json"
                         if proc.returncode != 0 or not receipt_path.is_file():
                             raise RuntimeError(f"{slots=} {lead=} {run_kind=} {repetition=} probe failed ({proc.returncode})")
-                        receipt = json.loads(receipt_path.read_text())
+                        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
                         validate_receipt(receipt, slots, lead, run_kind)
                         raw_path = trial_dir / "raw.jsonl"
                         if not raw_path.is_file():
@@ -669,9 +669,9 @@ def run(args: argparse.Namespace) -> int:
                             raise RuntimeError(
                                 f"{slots=} {lead=} {run_kind=} provenance run kind disagrees"
                             )
-                        (trial_dir / "command.json").write_text(json.dumps({"argv": command, "returncode": proc.returncode}, indent=2) + "\n")
-                        (trial_dir / "probe.stdout").write_text(proc.stdout)
-                        (trial_dir / "probe.stderr").write_text(proc.stderr)
+                        (trial_dir / "command.json").write_text(json.dumps({"argv": command, "returncode": proc.returncode}, indent=2) + "\n", encoding="utf-8")
+                        (trial_dir / "probe.stdout").write_text(proc.stdout, encoding="utf-8")
+                        (trial_dir / "probe.stderr").write_text(proc.stderr, encoding="utf-8")
                         for logical_repetition in logical_repetitions:
                             trials.append({"slots": slots, "lead": lead, "run_kind": run_kind,
                                            "repetition": logical_repetition, "receipt_sha256": sha256(receipt_path),
@@ -710,7 +710,7 @@ def run(args: argparse.Namespace) -> int:
                 "run_kinds": ["cold", "steady"], "required_measured_blocks": REQUIRED_MEASURED_BLOCKS,
                 "paced": True, "trials": trials}
     validate_manifest_provenance(manifest, source_revision, driver_sha256)
-    (args.output_dir / "campaign.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    (args.output_dir / "campaign.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"schema": SCHEMA, "status": "completed", "trials": len(trials),
                       "acceptance_status": manifest["acceptance_status"],
                       "performance_verdict": "unassigned"}))

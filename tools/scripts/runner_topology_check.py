@@ -230,7 +230,7 @@ class RunnerInventory:
 
 
 def load_contract(path: Path) -> Contract:
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     lanes = [
         Lane(
             variable=raw["variable"],
@@ -306,7 +306,7 @@ def load_toml_fixture(path: Path) -> dict[str, Any]:
             raise ValueError(
                 "--fleet-profile requires Python 3.11+ or the optional tomli package"
             ) from exc
-    return tomllib.loads(path.read_text())
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 # ── Live state ──────────────────────────────────────────────────────────
@@ -330,7 +330,7 @@ def resolve_cli() -> str:
 def _api(args: list[str]) -> Any:
     out = subprocess.run(
         [resolve_cli(), "api", *args],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8"
     )
     return json.loads(out.stdout)
 
@@ -456,7 +456,7 @@ def find_consuming_workflows(variable: str, workflows_dir: Path) -> list[str]:
         return found
     for path in sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml")):
         try:
-            if needle in path.read_text():
+            if needle in path.read_text(encoding="utf-8"):
                 found.append(path.name)
         except OSError:
             continue
@@ -2063,11 +2063,11 @@ def main(argv: list[str] | None = None) -> int:
             (path, load_toml_fixture(path)) for path in args.fleet_profile
         ]
         receipt_inputs = [
-            (path, json.loads(path.read_text())) for path in args.fleet_receipt
+            (path, json.loads(path.read_text(encoding="utf-8"))) for path in args.fleet_receipt
         ]
         source_manifest = (
             (args.fleet_source_manifest,
-             json.loads(args.fleet_source_manifest.read_text()))
+             json.loads(args.fleet_source_manifest.read_text(encoding="utf-8")))
             if args.fleet_source_manifest else None
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -2085,16 +2085,16 @@ def main(argv: list[str] | None = None) -> int:
     offline_inputs = bool(args.runners_json and args.variables_json)
     unread_scopes: list[str] = []
     if offline_inputs:
-        runners = parse_runners(json.loads(args.runners_json.read_text()))
-        variables = parse_variables(json.loads(args.variables_json.read_text()))
+        runners = parse_runners(json.loads(args.runners_json.read_text(encoding="utf-8")))
+        variables = parse_variables(json.loads(args.variables_json.read_text(encoding="utf-8")))
         evidence = static_evidence(
-            parse_served_label_sets(json.loads(args.jobs_json.read_text()))
+            parse_served_label_sets(json.loads(args.jobs_json.read_text(encoding="utf-8")))
             if args.jobs_json else [])
         queued_ages = static_queued_ages(
-            [int(v) for v in json.loads(args.queued_jobs_json.read_text())]
+            [int(v) for v in json.loads(args.queued_jobs_json.read_text(encoding="utf-8"))]
             if args.queued_jobs_json else [])
         service_records = static_service_records(parse_service_records(
-            json.loads(args.service_records_json.read_text()))
+            json.loads(args.service_records_json.read_text(encoding="utf-8")))
         ) if args.service_records_json else None
     else:
         try:

@@ -29,6 +29,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <chrono>
 #include <climits>
 #include <limits>
 
@@ -123,6 +124,12 @@ Socket::Socket(Socket&& other) noexcept
       bound_local_path_(std::move(other.bound_local_path_)),
       bound_local_device_(other.bound_local_device_),
       bound_local_inode_(other.bound_local_inode_) {
+#ifdef _WIN32
+    shutdown_requested_.store(other.shutdown_requested_.load(std::memory_order_acquire),
+                              std::memory_order_release);
+    read_timeout_ms_.store(other.read_timeout_ms_.load(std::memory_order_relaxed),
+                           std::memory_order_relaxed);
+#endif
     other.fd_ = kInvalidSocketHandle;
     other.bound_local_path_.clear();
     other.bound_local_device_ = 0;
@@ -137,6 +144,12 @@ Socket& Socket::operator=(Socket&& other) noexcept {
         bound_local_path_ = std::move(other.bound_local_path_);
         bound_local_device_ = other.bound_local_device_;
         bound_local_inode_ = other.bound_local_inode_;
+#ifdef _WIN32
+        shutdown_requested_.store(other.shutdown_requested_.load(std::memory_order_acquire),
+                                  std::memory_order_release);
+        read_timeout_ms_.store(other.read_timeout_ms_.load(std::memory_order_relaxed),
+                               std::memory_order_relaxed);
+#endif
         other.fd_ = kInvalidSocketHandle;
         other.bound_local_path_.clear();
         other.bound_local_device_ = 0;
@@ -148,6 +161,10 @@ Socket& Socket::operator=(Socket&& other) noexcept {
 bool Socket::create(SocketType type) {
     close();
     type_ = type;
+#ifdef _WIN32
+    shutdown_requested_.store(false, std::memory_order_release);
+    read_timeout_ms_.store(0, std::memory_order_relaxed);
+#endif
 
 #ifdef _WIN32
     if (!winsock_init()) return false;
@@ -569,6 +586,39 @@ int Socket::send_to(const uint8_t* data, size_t length,
 
 int Socket::receive(uint8_t* buffer, size_t buffer_size) {
     if (fd_ == kInvalidSocketHandle) return -1;
+#ifdef _WIN32
+    if (type_ != SocketType::UDP) {
+        constexpr std::int64_t slice_ms = 50;
+        const auto started = std::chrono::steady_clock::now();
+        for (;;) {
+            if (shutdown_requested_.load(std::memory_order_acquire))
+                return 0;
+            std::int64_t wait_ms = slice_ms;
+            const auto timeout_ms = read_timeout_ms_.load(std::memory_order_relaxed);
+            if (timeout_ms > 0) {
+                const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::steady_clock::now() - started)
+                                            .count();
+                if (elapsed_ms >= timeout_ms) {
+                    ::WSASetLastError(WSAETIMEDOUT);
+                    return -1;
+                }
+                wait_ms = std::min(wait_ms, timeout_ms - elapsed_ms);
+            }
+            WSAPOLLFD descriptor{};
+            descriptor.fd = NATIVE_SOCKET(fd_);
+            descriptor.events = POLLRDNORM;
+            const int ready = ::WSAPoll(&descriptor, 1, static_cast<INT>(wait_ms));
+            if (ready == SOCKET_ERROR) {
+                if (::WSAGetLastError() == WSAEINTR)
+                    continue;
+                return -1;
+            }
+            if (ready > 0)
+                break;
+        }
+    }
+#endif
     return static_cast<int>(::recv(NATIVE_SOCKET(fd_), reinterpret_cast<char*>(buffer),
                                    static_cast<int>(buffer_size), 0));
 }
@@ -683,6 +733,7 @@ bool Socket::set_read_timeout(std::chrono::milliseconds timeout) {
     if (fd_ == kInvalidSocketHandle) return false;
     const auto bounded = std::max(timeout, std::chrono::milliseconds(0));
 #ifdef _WIN32
+    read_timeout_ms_.store(bounded.count(), std::memory_order_relaxed);
     const DWORD value = static_cast<DWORD>(
         std::min<std::int64_t>(
             bounded.count(), std::numeric_limits<DWORD>::max()));
@@ -746,6 +797,9 @@ void Socket::close() {
 
 void Socket::shutdown() {
     if (fd_ != kInvalidSocketHandle && type_ != SocketType::UDP) {
+#ifdef _WIN32
+        shutdown_requested_.store(true, std::memory_order_release);
+#endif
         (void)SOCKET_SHUTDOWN(NATIVE_SOCKET(fd_));
     }
 }

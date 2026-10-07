@@ -56,7 +56,9 @@
     "browser_capture/settle.mjs",
     "browser_capture/tokens.mjs",
     "browser_capture/vendor_payload.mjs",
-    "jsx-runtime/materialized_binding_contract.mjs"
+    "jsx-runtime/materialized_binding_contract.mjs",
+    "jsx-runtime/materialized_source_emitter.mjs",
+    "jsx-runtime/materialized_ids_map.mjs"
   ],
   "pulp_library_stems": [
     "pulp-audio",

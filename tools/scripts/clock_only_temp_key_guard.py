@@ -78,7 +78,7 @@ def scan(root: Path):
 def load_ledger(path: Path) -> dict[str, int]:
     if not path.is_file():
         return {}
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     return {name: int(entry["count"]) for name, entry in data.get("sites", {}).items()}
 
 

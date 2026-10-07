@@ -798,6 +798,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # The read audit's per-day ledger: clean days, resets, missing days.
+        add_test(NAME read-audit-cadence-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_read_audit_cadence.py")
+        set_tests_properties(read-audit-cadence-selftest PROPERTIES TIMEOUT 120)
         # Pure parts of the test-link determinism check (command extraction,
         # the configure's decision file, the loud skip).
         add_test(NAME link-determinism-selftest COMMAND ${Python3_EXECUTABLE}
@@ -903,6 +907,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME queue-batch-attribute-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_queue_batch_attribute.py")
     set_tests_properties(queue-batch-attribute-selftest PROPERTIES TIMEOUT 120)
+
+    # resolve-classify-base-selftest pins the event-aware classify base and the
+    # build.yml wiring around it: push runs never cancel, the reporting aliases
+    # and Windows gates skip cache-warming pushes, and classify runs one resolved
+    # Python 3.11.
+    add_test(NAME resolve-classify-base-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_resolve_classify_base.py")
+    set_tests_properties(resolve-classify-base-selftest PROPERTIES TIMEOUT 120)
 
     # base-poison-detector-selftest pins what may and may not be called proof
     # that `main` itself is carrying a failure. A wrong `poisoned` pauses the
@@ -1076,6 +1088,11 @@ if(Python3_Interpreter_FOUND)
     # updated; registering the file directly covers it either way.
     add_test(NAME gate-common-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_common.py")
+
+    # Every enforcing lint block in gates.sh must set the failure flag: a block
+    # that reports and falls through lets a red lint pass the whole gate.
+    add_test(NAME gates-sh-fail-flag-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gates_lint_blocks.py")
 
     # The bypass trailers that withhold a release tag, classified through the
     # same parse the pre-merge gates use. A tag that is withheld by a trailer

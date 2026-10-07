@@ -393,13 +393,11 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
     fs::create_directories(build_dir.parent_path());
     fs::create_directories(sdk_dir);
 
-    std::string configure_cmd = "cmake -S " + repo_root.string()
-        + " -B " + build_dir.string()
-        + " -DCMAKE_BUILD_TYPE=Release"
-        + " -DCMAKE_INSTALL_PREFIX=" + sdk_dir.string()
-        + " -DPULP_BUILD_TESTS=OFF"
-        + " -DPULP_BUILD_EXAMPLES=OFF"
-        + " -DPULP_ENABLE_AUDIO_PROBES=OFF"
+    std::string configure_cmd =
+        "cmake -S " + shell_quote(repo_root.string()) + " -B " + shell_quote(build_dir.string()) +
+        " -DCMAKE_BUILD_TYPE=Release" + " -DCMAKE_INSTALL_PREFIX=" + shell_quote(sdk_dir.string()) +
+        " -DPULP_BUILD_TESTS=OFF" + " -DPULP_BUILD_EXAMPLES=OFF" +
+        " -DPULP_ENABLE_AUDIO_PROBES=OFF"
         // Disable the standalone visual Cmd+I overlay in this local SDK build.
         // This option does not itself prove endpoint or archive stripping; GPU
         // is disabled separately below.
@@ -408,17 +406,28 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         // runtime design-import) from the shipped SDK. The runtime W3C token API
         // stays. Re-enable with -DPULP_ENABLE_DESIGN_IMPORT=ON for a plugin that
         // needs runtime design import.
-        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF"
-        + " -DPULP_ENABLE_GPU=OFF";
+        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF" + " -DPULP_ENABLE_GPU=OFF";
     append_windows_visual_studio_generator_args(configure_cmd);
     if (run_with_spinner(configure_cmd, "Configuring local SDK") != 0) {
         return {};
     }
 
-    // Bound to the same policy as every other no-lease build path: an explicit
-    // PULP_BUILD_JOBS wins, else the tier-0 host default. Never unbounded.
-    std::string install_cmd = "cmake --build " + build_dir.string()
-        + " --target install --parallel " + std::to_string(resolve_local_build_jobs());
+    // SDK installation is an execution-bearing build just like `pulp build`.
+    // Use the same lease/QoS/watchdog/lock policy so a checkout-triggered SDK
+    // materialization cannot oversubscribe the host or race another build in
+    // the same directory.
+    auto lease = TartciAgentBuildLease::acquire({repo_root, "sdk-checkout", false});
+    if (!lease.ok()) {
+        std::cerr << "Error: could not acquire build capacity: " << lease.error() << "\n";
+        return {};
+    }
+    ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
+    std::string install_cmd = "cmake --build " + shell_quote(build_dir.string()) +
+                              " --target install --parallel " + std::to_string(lease.jobs());
+    install_cmd = apply_build_dir_lock(
+        apply_agent_build_watchdog(apply_agent_build_qos(install_cmd, lease.qos(), lease.floor()),
+                                   lease.jobs(), lease.active()),
+        repo_root, build_dir);
     if (run_with_spinner(install_cmd, "Installing local SDK") != 0) {
         return {};
     }

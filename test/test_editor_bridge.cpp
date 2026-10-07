@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "pulp/view/editor_bridge.hpp"
+#include "pulp/platform/child_process.hpp"
 #include "../tools/bridge/generated_editor_bridge.hpp"
 #include "pulp/view/script_engine.hpp"
 #include "pulp/view/scripted_ui.hpp"
@@ -57,18 +58,6 @@ bool response_has_error(const std::string& r, std::string_view substr) {
     const bool not_ok = r.find(R"("ok": false)") != std::string::npos
                      || r.find(R"("ok":false)")  != std::string::npos;
     return not_ok && r.find(substr) != std::string::npos;
-}
-
-std::string shell_quote(const std::filesystem::path& path) {
-    std::string quoted{"'"};
-    for (const char c : path.string()) {
-        if (c == '\'')
-            quoted += "'\\''";
-        else
-            quoted += c;
-    }
-    quoted += '\'';
-    return quoted;
 }
 
 } // namespace
@@ -286,10 +275,25 @@ TEST_CASE("generated set_parameter dispatch updates a real StateStore",
 TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
           "[editor_bridge][typed-contract][typescript]") {
     // Node's built-in TypeScript stripping keeps this proof on the checked-in
-    // generated client. The dedicated typed-client proof is fail-closed when
-    // the required Node feature is unavailable.
-    REQUIRE(std::system("node --experimental-strip-types -e 'process.exit(0)' >/dev/null 2>&1") ==
-            0);
+    // generated client. Use Pulp's cross-platform process runner rather than
+    // a shell command: Windows CTest has neither POSIX redirection nor the
+    // single-quote escaping used by the old implementation. The import lane
+    // requires Node 22, but native bridge coverage remains mandatory when the
+    // optional Node runtime is unavailable.
+    const auto node = pulp::platform::find_on_path("node");
+    if (!node)
+        SKIP("Node.js is unavailable for the generated TypeScript proof");
+
+    pulp::platform::ProcessOptions node_probe_options;
+    node_probe_options.timeout_ms = 10'000;
+    node_probe_options.max_output_bytes = 4 * 1024;
+    node_probe_options.capture_stdout = false;
+    node_probe_options.capture_stderr = false;
+    const auto node_probe = pulp::platform::ChildProcess::run(
+        node->string(), {"--experimental-strip-types", "-e", "process.exit(0)"},
+        node_probe_options);
+    if (node_probe.timed_out || node_probe.exit_code != 0)
+        SKIP("Node.js lacks --experimental-strip-types for the generated TypeScript proof");
 
     const auto temp_dir = pulp::test::make_unique_temp_dir("pulp-editor-bridge-ts");
     const auto script = temp_dir / "invoke_generated_bridge.mjs";
@@ -304,15 +308,26 @@ TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
                   "&& dirname(root) !== root) root = dirname(root);\n"
                   "const bridge = await import(pathToFileURL(join(root, 'tools', 'bridge', "
                   "'generated_editor_bridge.ts')).href);\n"
-                  "bridge.setParameter(request => {\n"
-                  "  writeFileSync(process.argv[2], JSON.stringify(request));\n"
-                  "  return { ok: true, accepted: true };\n"
-                  "}, 'gain', -6.25);\n";
+                  "const transport = bridge.jsonTransport(request => {\n"
+                  "  writeFileSync(process.argv[2], request);\n"
+                  "  return JSON.stringify({ ok: true, accepted: true });\n"
+                  "});\n"
+                  "const response = bridge.setParameter(transport, 'gain', -6.25);\n"
+                  "if (!response.ok || !response.accepted) process.exit(2);\n"
+                  "let malformedResponseRejected = false;\n"
+                  "try { bridge.setParameter(bridge.jsonTransport(() => '{'), 'gain', 0); }\n"
+                  "catch { malformedResponseRejected = true; }\n"
+                  "if (!malformedResponseRejected) process.exit(3);\n";
     }
 
-    const auto command =
-        "node --experimental-strip-types " + shell_quote(script) + " " + shell_quote(request_path);
-    REQUIRE(std::system(command.c_str()) == 0);
+    pulp::platform::ProcessOptions node_options;
+    node_options.timeout_ms = 10'000;
+    node_options.max_output_bytes = 16 * 1024;
+    const auto node_result = pulp::platform::ChildProcess::run(
+        node->string(), {"--experimental-strip-types", script.string(), request_path.string()},
+        node_options);
+    REQUIRE_FALSE(node_result.timed_out);
+    REQUIRE(node_result.exit_code == 0);
     REQUIRE(std::filesystem::exists(request_path));
 
     pulp::state::StateStore store;

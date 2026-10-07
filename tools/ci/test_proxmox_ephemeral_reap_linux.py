@@ -22,7 +22,7 @@ TIMER = ROOT / "tools" / "ci" / "pulp-ephemeral-reap.timer"
 class ProxmoxEphemeralReapTests(unittest.TestCase):
     def test_shell_is_syntactically_valid(self) -> None:
         result = subprocess.run(
-            ["/bin/bash", "-n", str(REAPER)], capture_output=True, text=True
+            ["/bin/bash", "-n", str(REAPER)], capture_output=True, text=True, encoding="utf-8"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -98,7 +98,7 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
                 else ""
             )
             (vm_configs / "200.conf").write_text(
-                f"name: pulp-ci-ephemeral-200\n{description}"
+                f"name: pulp-ci-ephemeral-200\n{description}", encoding="utf-8"
             )
             os.utime(vm_configs / "200.conf", (1, 1))
             operations = tmp / "operations"
@@ -115,7 +115,7 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
                       guest:cmd) echo '{{"ip-address" : "192.168.86.251"}}' ;;
                     esac
                     """
-                )
+                ), encoding="utf-8"
             )
             ssh = tmp / "ssh"
             ssh.write_text(
@@ -131,7 +131,7 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
                     work_entries={work_entries}
                     EOF
                     """
-                )
+                ), encoding="utf-8"
             )
             ghapp = tmp / "ghapp"
             ghapp.write_text(
@@ -145,7 +145,7 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
                       *) exit 2 ;;
                     esac
                     """
-                )
+                ), encoding="utf-8"
             )
             for executable in (qm, ssh, ghapp):
                 executable.chmod(0o755)
@@ -167,8 +167,8 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
             command = ["/bin/bash", str(REAPER)]
             if execute:
                 command.append("--yes")
-            result = subprocess.run(command, capture_output=True, text=True, env=env)
-            operation_text = operations.read_text() if operations.exists() else ""
+            result = subprocess.run(command, capture_output=True, text=True, env=env, encoding="utf-8")
+            operation_text = operations.read_text(encoding="utf-8") if operations.exists() else ""
             return result, operation_text
 
     def test_report_only_identifies_exact_stale_unused_runner_without_mutation(self) -> None:
@@ -328,7 +328,7 @@ class JitDeregistrationFenceTests(unittest.TestCase):
                 f"description: pulp-runner-generation={self.GENERATION}"
                 ";pulp-runner-scope=orgs/Generous-Corp\n"
             )
-            (vm_configs / "200.conf").write_text(f"name: pulp-ci-ephemeral-200\n{description}")
+            (vm_configs / "200.conf").write_text(f"name: pulp-ci-ephemeral-200\n{description}", encoding="utf-8")
             os.utime(vm_configs / "200.conf", (1, 1))
             operations = tmp / "operations"
             qm = tmp / "qm"
@@ -344,7 +344,7 @@ class JitDeregistrationFenceTests(unittest.TestCase):
                       guest:cmd) echo '{{"ip-address" : "192.168.86.251"}}' ;;
                     esac
                     """
-                )
+                ), encoding="utf-8"
             )
             ssh = tmp / "ssh"
             ssh.write_text(
@@ -360,13 +360,13 @@ class JitDeregistrationFenceTests(unittest.TestCase):
                     work_entries=0
                     EOF
                     """
-                )
+                ), encoding="utf-8"
             )
             ghapp = tmp / "ghapp"
-            ghapp.write_text(FAKE_GH_FENCE)
+            ghapp.write_text(FAKE_GH_FENCE, encoding="utf-8")
             # macOS has no flock(1); the lock's own semantics are not under test.
             flock = tmp / "flock"
-            flock.write_text("#!/bin/sh\nexit 0\n")
+            flock.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             for executable in (qm, ssh, ghapp, flock):
                 executable.chmod(0o755)
             env = os.environ.copy()
@@ -395,9 +395,9 @@ class JitDeregistrationFenceTests(unittest.TestCase):
             )
             result = subprocess.run(
                 ["/bin/bash", str(REAPER), "--yes"],
-                capture_output=True, text=True, env=env, timeout=60,
+                capture_output=True, text=True, env=env, timeout=60, encoding="utf-8"
             )
-            return result, operations.read_text() if operations.exists() else ""
+            return result, operations.read_text(encoding="utf-8") if operations.exists() else ""
 
     def test_idle_jit_orphan_is_reaped_through_all_four_logged_steps(self) -> None:
         result, operations = self._run()
@@ -472,7 +472,7 @@ class GuestProbeIdentityTests(unittest.TestCase):
             return subprocess.run(
                 ["python3", "-c", self._probe_source(), str(root)],
                 capture_output=True, text=True,
-                env={**os.environ, "TARTCI_PROBE_RUNNER_ROOT": "/nonexistent-forged-root"},
+                env={**os.environ, "TARTCI_PROBE_RUNNER_ROOT": "/nonexistent-forged-root"}, encoding="utf-8"
             )
 
     @staticmethod

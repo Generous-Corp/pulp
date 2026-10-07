@@ -273,6 +273,30 @@ never 0. A merge to `main` that changes one of these files makes the host
 report drift until it is reinstalled, which is the intent: the host should run
 what `main` says.
 
+Drift is never installed automatically, because a merge to `tools/ci` should not
+become root code on the host until someone chooses to run it. The guard instead
+makes the reinstall a single verified command:
+
+- `/var/lib/pulp-ci-host/drift.state` records when drift was first seen and
+  the `main` commit it was compared against. A later merge updates the commit
+  but keeps the first-seen time, and the next drift-free check deletes the file.
+- On drift, the check stages the table's files at that exact commit under
+  `/root/pulp-deploy-staged/<sha>`, verifies each file's blob id against the
+  commit, and deletes any other stage. A fetch that does not verify stages
+  nothing.
+- `pulp-proxmox-host-health.sh --install-staged` installs that stage after
+  verifying it again against `main` as it is at that moment. It refuses when
+  `main` has moved past the stage or a staged file changed, so it installs
+  exactly what the guard compared against. The `UNHEALTHY` line prints this
+  command whenever a stage is ready.
+- `pulp-proxmox-host-health.sh --json` runs the same check and prints one JSON
+  object (`schema: 1`). It includes `state` (`healthy`, `unhealthy` or
+  `unverified`), `ref_sha`, `drift.first_seen` and `drift.age_seconds`, each
+  drifted file with its installed and expected blobs, failed slots, disk fill,
+  the stage, and `reinstall_command`. It uses the same exit codes as the text
+  check. Fleet monitoring reads this over SSH to report drift that has lasted
+  more than an hour.
+
 Create separate root-owned role environments; never share one:
 
 ```sh
@@ -1029,7 +1053,21 @@ was unknown. Each run ends with one
 platform registers was audited, and no audited executable has a finding.
 `incomplete` means the run cannot vouch for itself. The nightly passes `--fail-on-findings`, so its
 exit follows that verdict: 0 for clean, 1 for findings, 2 for incomplete. A
-red nightly therefore means the streak of clean runs is broken. A clean run's
+red nightly therefore means the streak of clean runs is broken. The streak
+counts clean cron days on main, and only the schedule speaks for a day: the
+counted run is that day's run with event `schedule`, and the day is the UTC
+date that run was created (GitHub fires the cron hours late, so the cron hour
+says nothing). A dispatch counts in its place only when that day's scheduled
+run was cancelled and the dispatch ran on the same head sha after it that day, which is
+the per-ref cancel-in-progress replacement. Every other dispatch is a canary
+precondition or a control and never counts. A day with no counted run is a gap
+and resets the streak like a finding.
+`.github/workflows/read-audit-cadence-check.yml` (`tools/ci/read_audit_cadence.py`)
+rebuilds that ledger every 30 minutes from each run's own stage0 verdict,
+writes each day's counted run, every run it did not count and why, and the
+streak to its summary and artifact, and opens a tracking issue naming any
+recent gap.
+A clean run's
 stage0 block also publishes `covered`, the executables it observed with no
 finding. The key manifest (`tools/ci/executable_keys.py --audit-report`) marks
 any executable outside that set always_run `audit_uncovered`, and every

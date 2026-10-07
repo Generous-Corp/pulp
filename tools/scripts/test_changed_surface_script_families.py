@@ -198,7 +198,7 @@ print(result[-len(str(len(request))):].decode())
             env["PATH"] = f"{root}{os.pathsep}{env.get('PATH', '')}"
             completed = subprocess.run(
                 [sys.executable, "-c", probe, str(Path(__file__).resolve().parent)],
-                cwd=root, env=env, text=True, capture_output=True, timeout=10,
+                cwd=root, env=env, text=True, capture_output=True, timeout=10, encoding="utf-8"
             )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(completed.stdout.strip(), str(len(b"deadbeef\n" * 20000)))
@@ -615,7 +615,7 @@ class StaticCheckTest(FamilyFixture):
         self.write("tools/scripts/new_check.py", "")
         self.script_test("runner-selftest", "tools/scripts/runner.py", ["tools/scripts/new_check.py"])
         self.regenerate()
-        generated_paths = (self.root / families.FAMILIES_FILE).read_text()
+        generated_paths = (self.root / families.FAMILIES_FILE).read_text(encoding="utf-8")
         self.assertNotIn("tools/scripts/new_check.py", generated_paths)  # reached through runner.py
         self.commit("a script a shell script runs")
         self.assertEqual(self.static()[0], [])

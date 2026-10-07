@@ -34,6 +34,12 @@ SCALARS = {"string": "std::string", "number": "double", "boolean": "bool"}
 TS_SCALARS = {"string": "string", "number": "number", "boolean": "boolean"}
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+CANONICAL_SET_PARAMETER_REQUEST = [
+    {"name": "key", "type": "string"},
+    {"name": "value", "type": "number"},
+]
+CANONICAL_SET_PARAMETER_RESPONSE = [{"name": "accepted", "type": "boolean"}]
+
 
 def _require_identifier(value: Any, label: str) -> str:
     if not isinstance(value, str) or IDENT.fullmatch(value) is None:
@@ -85,6 +91,21 @@ def _rows(value: Any, section: str, *, fields_key: str) -> list[dict[str, Any]]:
     return sorted(result, key=lambda row: row["name"])
 
 
+def _validate_canonical_set_parameter(commands: list[dict[str, Any]]) -> None:
+    for row in commands:
+        if row["name"] != "set_parameter":
+            continue
+        if (
+            row["request"] != CANONICAL_SET_PARAMETER_REQUEST
+            or row["response"] != CANONICAL_SET_PARAMETER_RESPONSE
+        ):
+            raise ValueError(
+                "commands.set_parameter must use the canonical request "
+                "fields key:string, value:number and response field "
+                "accepted:boolean"
+            )
+
+
 def load_contract(path: Path = SOURCE) -> dict[str, Any]:
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -101,6 +122,7 @@ def load_contract(path: Path = SOURCE) -> dict[str, Any]:
         raise ValueError("command and publication names must be unique")
     if not commands:
         raise ValueError("bridge contract must declare at least one command")
+    _validate_canonical_set_parameter(commands)
     return {"version": 1, "name": name, "commands": commands, "publications": publications}
 
 
@@ -123,14 +145,15 @@ def cpp_struct(name: str, row_fields: list[dict[str, str]]) -> str:
 
 
 def canonical_set_parameter(data: dict[str, Any]) -> bool:
-    """Whether the contract has the canonical typed parameter command."""
-    for row in data["commands"]:
-        if row["name"] == "set_parameter":
-            return row["request"] == [
-                {"name": "key", "type": "string"},
-                {"name": "value", "type": "number"},
-            ] and row["response"] == [{"name": "accepted", "type": "boolean"}]
-    return False
+    """Whether the contract has the canonical typed parameter command.
+
+    A ``set_parameter`` row is a reserved production seam.  If a caller hands
+    the renderer an ad-hoc parsed mapping instead of ``load_contract``'s
+    validated result, reject a drifted row here too rather than silently
+    omitting the generated helper.
+    """
+    _validate_canonical_set_parameter(data["commands"])
+    return any(row["name"] == "set_parameter" for row in data["commands"])
 
 
 def render_set_parameter_helpers(data: dict[str, Any]) -> str:
@@ -299,6 +322,15 @@ def render_ts(data: dict[str, Any]) -> str:
             "export type EditorBridgeResponse<T extends object> = { ok: boolean } & Partial<T>;\n",
             "export type EditorBridgeResult<T extends object> = EditorBridgeResponse<T> | Promise<EditorBridgeResponse<T>>;\n",
             "export type EditorBridgeTransport = (request: EditorBridgeRequest) => unknown | Promise<unknown>;\n",
+            "export type EditorBridgeJsonTransport = (requestJson: string) => string | Promise<string>;\n",
+            "export function jsonTransport(transport: EditorBridgeJsonTransport): EditorBridgeTransport {\n"
+            "  return request => {\n"
+            "    const response = transport(JSON.stringify(request));\n"
+            "    if (response instanceof Promise)\n"
+            "      return response.then(value => JSON.parse(value) as unknown);\n"
+            "    return JSON.parse(response) as unknown;\n"
+            "  };\n"
+            "}\n",
         ]
     )
     for row in commands:
@@ -319,15 +351,27 @@ def payload_text(row: dict[str, Any], key: str) -> str:
 
 
 def render_docs(data: dict[str, Any]) -> str:
+    canonical = canonical_set_parameter(data)
+    if canonical:
+        intro = [
+            "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.",
+            "",
+            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.",
+            "",
+        ]
+    else:
+        intro = [
+            "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic.",
+            "",
+            "No canonical `set_parameter` helper is emitted for this contract.",
+            "",
+        ]
     lines = [
         "<!-- Generated by tools/bridge/bridge_gen.py; do not edit. -->",
         "",
         f"# {data['name'].title()} bridge contract",
         "",
-        "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.",
-        "",
-        "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.",
-        "",
+        *intro,
         "## Commands",
         "",
         "| Name | Request | Response |",

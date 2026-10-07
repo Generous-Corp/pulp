@@ -276,8 +276,8 @@ def check_long_horizon_contract() -> tuple[int, int]:
     fixture = pathlib.Path(__file__).with_name("test_fixtures") / \
         "long-horizon" / "dsp-600-v3-4b9f0aa3.json"
     m5 = P.LONG_HORIZON_MARKER + json.dumps(
-        json.loads(fixture.read_text()), separators=(",", ":"))
-    m5_payload = json.loads(fixture.read_text())
+        json.loads(fixture.read_text(encoding="utf-8")), separators=(",", ":"))
+    m5_payload = json.loads(fixture.read_text(encoding="utf-8"))
     old_balances = []
     for checkpoint in m5_payload["checkpoints"]:
         left, right = checkpoint["report"]["cables"][:2]
@@ -303,7 +303,7 @@ def check_long_horizon_contract() -> tuple[int, int]:
     # report shape but make its second path material from the first window,
     # evolving in level and spectrum, and remove the fast event stream. The
     # same evaluator must now pass or its rejection is not trustworthy.
-    corrected = json.loads(fixture.read_text())
+    corrected = json.loads(fixture.read_text(encoding="utf-8"))
     levels = (.2, 1.0, .3, 1.2)
     centroids = (300.0, 950.0, 420.0, 1100.0)
     for checkpoint, level, centroid in zip(
@@ -486,7 +486,7 @@ def check_long_horizon_contract() -> tuple[int, int]:
     else:
         print("  ok     compiled constraints reach the model before generation")
 
-    source = pathlib.Path(P.__file__).read_text()
+    source = pathlib.Path(P.__file__).read_text(encoding="utf-8")
     if "repair_long_horizon" in source or \
             "horizon_errors = long_horizon_evolution_errors" not in source or \
             "behaviour=diagnosis.behaviour + horizon_errors" not in source:

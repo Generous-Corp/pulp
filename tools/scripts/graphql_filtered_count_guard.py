@@ -98,7 +98,7 @@ def find_offences(text: str) -> tuple[int, list[int]]:
 
 def _tracked_files(repo: Path) -> list[str]:
     res = subprocess.run(["git", "-C", str(repo), "ls-files", "--", *SCAN_ROOTS],
-                         capture_output=True, text=True, check=True)
+                         capture_output=True, text=True, check=True, encoding="utf-8")
     return [p for p in res.stdout.splitlines()
             if Path(p).suffix in SCAN_SUFFIXES and p not in SELF]
 

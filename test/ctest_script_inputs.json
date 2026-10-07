@@ -1418,6 +1418,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-gpu-wavenet-session": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_gpu_wavenet_session.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_gpu_wavenet_session.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-group-app-host": {
    "data": "declared",
    "detected_sources": [
@@ -2279,16 +2293,12 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
-  "pulp-gpu-audio-coreaudio-workgroup-benchmark",
-  "pulp-gpu-audio-p4-matched-convolution-benchmark",
-  "pulp-gpu-audio-p4-raw-screening",
   "pulp-gpu-dawn-shared-io-provider-probe",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
   "pulp-gpu-same-device-paired-probe",
   "pulp-gpu-same-device-storage-probe",
   "pulp-gpu-shared-io-convolution-session-probe",
-  "pulp-gpu-shared-io-paced-convolution-probe",
   "pulp-gpu-shared-io-private-convolution-probe",
   "pulp-gpu-shared-spectral-probe",
   "pulp-heritage-adaptive-calibration-render",
@@ -3573,6 +3583,7 @@
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_run_changed_surface_tests.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],
@@ -3651,6 +3662,7 @@
     "tools/scripts/test_ios_compile_gate_legs.py",
     "tools/scripts/test_prepush_gate_supervisor.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],
@@ -4687,6 +4699,13 @@
    "inputs": [
     "tools/scripts/gate_suite_executed.py",
     "tools/scripts/test_gate_suite_executed.py"
+   ],
+   "kind": "python"
+  },
+  "gates-sh-fail-flag-selftest": {
+   "entry": "tools/scripts/test_gates_lint_blocks.py",
+   "inputs": [
+    "tools/scripts/test_gates_lint_blocks.py"
    ],
    "kind": "python"
   },
@@ -6808,13 +6827,6 @@
    ],
    "kind": "node"
   },
-  "pulp-gpu-audio-p2-campaign-contract": {
-   "entry": "tools/scripts/gpu_audio_p2_campaign.py",
-   "inputs": [
-    "tools/scripts/gpu_audio_p2_campaign.py"
-   ],
-   "kind": "python"
-  },
   "pulp-gpu-audio-provider-identity": {
    "entry": "tools/scripts/gpu_audio_provider_identity.py",
    "inputs": [
@@ -6854,28 +6866,12 @@
    ],
    "kind": "python"
   },
-  "pulp-gpu-shared-io-paced-convolution-probe": {
-   "entry": "test/verify_gpu_shared_io_paced_convolution.py",
-   "inputs": [
-    "test/verify_gpu_shared_io_paced_convolution.py"
-   ],
-   "kind": "python"
-  },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
     "test/test_pulp_installer_mcp_contract.sh"
    ],
    "kind": "shell"
-  },
-  "pulp-materialized-runtime-conformance": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
-   ],
-   "kind": "node"
   },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
@@ -8262,6 +8258,16 @@
    ],
    "kind": "python"
   },
+  "read-audit-cadence-selftest": {
+   "entry": "tools/ci/test_read_audit_cadence.py",
+   "inputs": [
+    ".github/schedule-backstop.json",
+    ".github/workflows/read-audit-cadence-check.yml",
+    "tools/ci/read_audit_cadence.py",
+    "tools/ci/test_read_audit_cadence.py"
+   ],
+   "kind": "python"
+  },
   "read-audit-selftest": {
    "entry": "tools/ci/test_read_audit.py",
    "inputs": [
@@ -8363,6 +8369,15 @@
    ],
    "kind": "python"
   },
+  "resolve-classify-base-selftest": {
+   "entry": "tools/scripts/test_resolve_classify_base.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/scripts/resolve_classify_base.py",
+    "tools/scripts/test_resolve_classify_base.py"
+   ],
+   "kind": "python"
+  },
   "retry-git-clone": {
    "entry": "test/test_retry_git_clone.sh",
    "inputs": [
@@ -8444,6 +8459,7 @@
     "tools/scripts/test_prepush_gate_supervisor.py",
     "tools/scripts/test_reuse_policy_replay.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],

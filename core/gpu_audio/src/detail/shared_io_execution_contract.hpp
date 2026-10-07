@@ -54,6 +54,24 @@ enum class SharedIoContractError : std::uint8_t {
     MissingProviderSlots,
 };
 
+// The callback lead consumes completion-table entries before a submitted
+// block can be retired. Keep this arithmetic in one private policy seam so
+// receipts and tests cannot accidentally treat physical slots as pipeline
+// depth. This remains diagnostic-only; it does not enable a GPU path.
+struct SharedIoDepthLeadPolicy {
+    std::uint32_t lead_blocks = 0;
+    std::uint32_t pipeline_depth = 0;
+    std::uint32_t max_inflight = 1;
+
+    constexpr std::uint32_t available_inflight() const noexcept {
+        return pipeline_depth > lead_blocks ? pipeline_depth - lead_blocks : 0;
+    }
+    constexpr bool valid() const noexcept {
+        return lead_blocks != 0 && pipeline_depth > lead_blocks && max_inflight != 0 &&
+               max_inflight <= available_inflight();
+    }
+};
+
 struct SharedIoExecutionContract {
     std::uint32_t channels = 0;
     std::uint32_t block_size = 0;
@@ -118,6 +136,10 @@ validate_shared_io_contract(const SharedIoExecutionContract& contract) noexcept 
 }
 
 struct SharedIoTelemetrySnapshot {
+    std::uint32_t configured_lead_blocks = 0;
+    std::uint32_t configured_pipeline_depth = 0;
+    std::uint32_t configured_max_inflight = 0;
+    std::uint32_t configured_available_inflight = 0;
     std::uint64_t callback_blocks = 0;
     std::uint64_t submitted_blocks = 0;
     std::uint64_t retired_success = 0;
@@ -148,7 +170,19 @@ struct SharedIoTelemetrySnapshot {
 // authentic provider timestamp is supplied.
 class SharedIoTelemetry {
   public:
+    void configure_depth_lead(SharedIoDepthLeadPolicy policy) noexcept {
+        configured_lead_blocks_.store(policy.lead_blocks, std::memory_order_relaxed);
+        configured_pipeline_depth_.store(policy.pipeline_depth, std::memory_order_relaxed);
+        configured_max_inflight_.store(policy.max_inflight, std::memory_order_relaxed);
+        configured_available_inflight_.store(policy.available_inflight(),
+                                             std::memory_order_relaxed);
+    }
+
     void reset() noexcept {
+        configured_lead_blocks_.store(0, std::memory_order_relaxed);
+        configured_pipeline_depth_.store(0, std::memory_order_relaxed);
+        configured_max_inflight_.store(0, std::memory_order_relaxed);
+        configured_available_inflight_.store(0, std::memory_order_relaxed);
         callback_blocks_.store(0, std::memory_order_relaxed);
         submitted_blocks_.store(0, std::memory_order_relaxed);
         retired_success_.store(0, std::memory_order_relaxed);
@@ -238,6 +272,11 @@ class SharedIoTelemetry {
 
     SharedIoTelemetrySnapshot snapshot() const noexcept {
         SharedIoTelemetrySnapshot out;
+        out.configured_lead_blocks = configured_lead_blocks_.load(std::memory_order_relaxed);
+        out.configured_pipeline_depth = configured_pipeline_depth_.load(std::memory_order_relaxed);
+        out.configured_max_inflight = configured_max_inflight_.load(std::memory_order_relaxed);
+        out.configured_available_inflight =
+            configured_available_inflight_.load(std::memory_order_relaxed);
         out.callback_blocks = callback_blocks_.load(std::memory_order_relaxed);
         out.submitted_blocks = submitted_blocks_.load(std::memory_order_relaxed);
         out.retired_success = retired_success_.load(std::memory_order_relaxed);
@@ -270,6 +309,8 @@ class SharedIoTelemetry {
     std::atomic<std::uint64_t> delivered_blocks_{0}, deadline_misses_{0};
     std::atomic<std::uint64_t> late_completions_{0}, fallback_blocks_{0};
     std::atomic<std::uint64_t> resync_drops_{0}, input_drops_{0};
+    std::atomic<std::uint32_t> configured_lead_blocks_{0}, configured_pipeline_depth_{0},
+        configured_max_inflight_{0}, configured_available_inflight_{0};
     std::atomic<std::uint64_t> payload_bytes_copied_{0}, in_flight_high_water_{0};
     std::atomic<std::uint64_t> callback_duration_ns_{0}, worker_pack_copy_duration_ns_{0};
     std::atomic<std::uint64_t> encode_submit_duration_ns_{0}, pre_submit_delay_ns_{0};

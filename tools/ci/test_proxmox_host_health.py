@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -83,7 +85,7 @@ class GovernorTests(unittest.TestCase):
                 ["/bin/bash", str(GOVERNOR), *args],
                 capture_output=True,
                 text=True,
-                env=full_env,
+                env=full_env, encoding="utf-8"
             )
 
     def test_reserve_is_derived_from_the_machine(self) -> None:
@@ -147,8 +149,16 @@ class HealthCheckTests(unittest.TestCase):
         self.root = self.tmp / "root"
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
+        # The default branch as GitHub serves it: a commit sha, the tools/ci
+        # listing at that commit, and raw file contents. Tests move "main" by
+        # editing this copy and changing the sha.
+        self.remote = self.tmp / "remote"
+        shutil.copytree(CI, self.remote)
+        self.sha = "a" * 40
+        self.served = None  # raw content override: {repo_file: bytes}
         self.failed_units = ""
         self.listing_ok = True
+        self.now = 1_800_000_000
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -156,20 +166,36 @@ class HealthCheckTests(unittest.TestCase):
     def _manifest(self) -> list[tuple[str, str]]:
         out = subprocess.run(
             ["/bin/bash", str(HEALTH), "--manifest"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, encoding="utf-8"
         ).stdout
         return [tuple(line.split()[:2]) for line in out.splitlines() if line.strip()]
 
     def _env(self) -> dict[str, str]:
         listing = "".join(
-            f"{repo_file}\t{blob_id((CI / repo_file).read_bytes())}\n"
+            f"{repo_file}\t{blob_id((self.remote / repo_file).read_bytes())}\n"
             for repo_file, _ in self._manifest()
         )
         (self.tmp / "listing.tsv").write_text(listing, encoding="utf-8")
-        write_exec(
-            self.bin / "ghapp",
-            f"{'cat ' + str(self.tmp / 'listing.tsv') if self.listing_ok else 'exit 1'}\n",
-        )
+        served = self.tmp / "served"
+        shutil.rmtree(served, ignore_errors=True)
+        shutil.copytree(self.remote, served)
+        for name, data in (self.served or {}).items():
+            (served / name).write_bytes(data)
+        if self.listing_ok:
+            body = f"""\
+            args="$*"
+            case "$args" in
+              *repos/*/commits/*) echo {self.sha} ;;
+              *"contents/tools/ci?ref={self.sha}"*) cat {self.tmp / 'listing.tsv'} ;;
+              *"contents/tools/ci/"*"?ref={self.sha}"*)
+                f="${{args##*contents/tools/ci/}}"; f="${{f%%\\?ref=*}}"
+                cat "{served}/$f" ;;
+              *) exit 1 ;;
+            esac
+            """
+        else:
+            body = "exit 1\n"
+        write_exec(self.bin / "ghapp", body)
         write_exec(self.bin / "systemctl", f"printf '%s' '{self.failed_units}'\n")
         return {
             **os.environ,
@@ -177,13 +203,31 @@ class HealthCheckTests(unittest.TestCase):
             "PULP_PROXMOX_HEALTH_GH": str(self.bin / "ghapp"),
             "PULP_PROXMOX_HEALTH_SYSTEMCTL": str(self.bin / "systemctl"),
             "PULP_PROXMOX_HEALTH_GOVERNOR": "/nonexistent-governor",
+            "PULP_PROXMOX_HEALTH_NOW": str(self.now),
         }
 
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["/bin/bash", str(HEALTH), *args],
-            capture_output=True, text=True, env=self._env(),
+            capture_output=True, text=True, env=self._env(), encoding="utf-8"
         )
+
+    def _json(self) -> tuple[int, dict]:
+        result = self._run("--json")
+        return result.returncode, json.loads(result.stdout)
+
+    def _move_main(self, sha_char: str = "b") -> None:
+        timer = self.remote / "pulp-ephemeral-reap.timer"
+        timer.write_text(timer.read_text(encoding="utf-8") + "# merged change\n", encoding="utf-8")
+        self.sha = sha_char * 40
+
+    @property
+    def drift_state(self) -> pathlib.Path:
+        return self.root / "var/lib/pulp-ci-host/drift.state"
+
+    @property
+    def stage_root(self) -> pathlib.Path:
+        return self.root / "root/pulp-deploy-staged"
 
     def _install(self) -> None:
         result = self._run("--install", str(ROOT))
@@ -231,6 +275,112 @@ class HealthCheckTests(unittest.TestCase):
         result = self._run()
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("FAILED pulp-ephemeral-pool@1.service", result.stdout)
+
+    def test_merge_to_main_records_drift_and_stages_a_verified_copy(self) -> None:
+        self._install()
+        (self.stage_root / ("c" * 40)).mkdir(parents=True)
+        self._move_main()
+        result = self._run()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("DRIFT /etc/systemd/system/pulp-ephemeral-reap.timer — installed", result.stdout)
+        self.assertIn("reinstall with: ", result.stdout)
+        self.assertIn("--install-staged", result.stdout)
+        self.assertIn(f"first_drift_epoch={self.now}", self.drift_state.read_text(encoding="utf-8"))
+        self.assertIn(f"ref_sha={self.sha}", self.drift_state.read_text(encoding="utf-8"))
+        stage = self.stage_root / self.sha
+        self.assertEqual((stage / ".verified").read_text(encoding="utf-8").strip(), self.sha)
+        self.assertEqual(
+            (stage / "tools/ci/pulp-ephemeral-reap.timer").read_bytes(),
+            (self.remote / "pulp-ephemeral-reap.timer").read_bytes(),
+        )
+        # Only the current ref's stage is kept.
+        self.assertEqual(sorted(p.name for p in self.stage_root.iterdir()), [self.sha])
+        # Staging never installs.
+        self.assertNotIn(b"# merged change", (self.root / "etc/systemd/system/pulp-ephemeral-reap.timer").read_bytes())
+
+    def test_drift_age_counts_from_the_first_sighting_across_ref_moves(self) -> None:
+        self._install()
+        self._move_main("b")
+        self.assertEqual(self._run().returncode, 1)
+        self.now += 3700
+        self._move_main("d")
+        code, report = self._json()
+        self.assertEqual(code, 1)
+        self.assertEqual(report["state"], "unhealthy")
+        self.assertEqual(report["ref_sha"], "d" * 40)
+        self.assertEqual(report["drift"]["age_seconds"], 3700)
+        self.assertEqual(report["drift"]["first_seen"], "2027-01-15T08:00:00Z")
+        self.assertEqual(report["stage"]["path"], str(self.stage_root / ("d" * 40)))
+        self.assertTrue(report["stage"]["ready"])
+        self.assertTrue(report["reinstall_command"].endswith("--install-staged"))
+        [row] = report["drift"]["files"]
+        self.assertEqual(row["repo_path"], "tools/ci/pulp-ephemeral-reap.timer")
+        self.assertEqual(row["reason"], "modified")
+        self.assertEqual(row["expected_blob"], blob_id((self.remote / "pulp-ephemeral-reap.timer").read_bytes()))
+        self.assertEqual(row["installed_blob"], blob_id((CI / "pulp-ephemeral-reap.timer").read_bytes()))
+        self.assertEqual(sorted(p.name for p in self.stage_root.iterdir()), ["d" * 40])
+
+    def test_install_staged_clears_drift(self) -> None:
+        self._install()
+        self._move_main()
+        self.assertEqual(self._run().returncode, 1)
+        installed = self._run("--install-staged")
+        self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+        self.assertIn(f"installing Generous-Corp/pulp@{self.sha[:12]}", installed.stdout)
+        code, report = self._json()
+        self.assertEqual(code, 0, report)
+        self.assertEqual(report["state"], "healthy")
+        self.assertIsNone(report["drift"]["first_seen"])
+        self.assertEqual(report["drift"]["files"], [])
+        self.assertFalse(self.drift_state.exists())
+
+    def test_install_staged_refuses_a_stage_the_ref_has_moved_past(self) -> None:
+        self._install()
+        self._move_main("b")
+        self.assertEqual(self._run().returncode, 1)
+        self._move_main("d")
+        result = self._run("--install-staged")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(f"REFUSED no stage for main at {'d' * 12}", result.stdout)
+        self.assertNotIn(b"# merged change", (self.root / "etc/systemd/system/pulp-ephemeral-reap.timer").read_bytes())
+
+    def test_install_staged_refuses_a_stage_edited_after_verification(self) -> None:
+        self._install()
+        self._move_main()
+        self.assertEqual(self._run().returncode, 1)
+        staged = self.stage_root / self.sha / "tools/ci/proxmox-ephemeral-reap-linux.sh"
+        staged.write_text(staged.read_text(encoding="utf-8") + "rm -rf /\n", encoding="utf-8")
+        result = self._run("--install-staged")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("no longer matches main", result.stdout)
+        self.assertNotIn(b"rm -rf /", (self.root / "usr/local/sbin/pulp-ephemeral-reap.sh").read_bytes())
+
+    def test_fetched_content_that_disagrees_with_the_listing_is_not_staged(self) -> None:
+        self._install()
+        self._move_main()
+        self.served = {"macpro-governor.sh": b"#!/bin/bash\necho tampered\n"}
+        result = self._run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("nothing staged", result.stdout + result.stderr)
+        self.assertIn("--install <pulp checkout at main>", result.stdout)
+        self.assertFalse((self.stage_root / self.sha).exists())
+        code, report = self._json()
+        self.assertFalse(report["stage"]["ready"])
+        self.assertIsNone(report["stage"]["path"])
+
+    def test_json_is_the_only_stdout_and_reports_unverified(self) -> None:
+        self._install()
+        code, report = self._json()
+        self.assertEqual(code, 0)
+        self.assertEqual(report["schema"], 1)
+        self.assertEqual(report["state"], "healthy")
+        self.assertEqual(report["ref_sha"], self.sha)
+        self.assertEqual(report["failed_units"], [])
+        self.listing_ok = False
+        code, report = self._json()
+        self.assertEqual(code, 2)
+        self.assertEqual(report["state"], "unverified")
+        self.assertIsNone(report["ref_sha"])
 
     def test_reaper_runs_the_health_check_after_every_pass(self) -> None:
         service = REAP_SERVICE.read_text(encoding="utf-8")
