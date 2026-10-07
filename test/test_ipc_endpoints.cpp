@@ -3,6 +3,8 @@
 #include <pulp/runtime/socket.hpp>
 
 #include <chrono>
+#include <future>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -182,4 +184,33 @@ TEST_CASE("IPC socket client rejects hostless numeric endpoints",
         REQUIRE(client.state() == IpcState::Disconnected);
         REQUIRE_FALSE(client.is_connected());
     }
+}
+
+TEST_CASE("IPC socket disconnect returns while the peer stays connected and silent",
+          "[events][ipc][socket][regression]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+
+    InterprocessConnection client;
+    REQUIRE(
+        client.connect("127.0.0.1:" + std::to_string(listener.local_port()), IpcTransport::Socket));
+    auto peer = listener.accept(2000ms);
+    REQUIRE(peer.has_value());
+    REQUIRE(client.is_connected());
+
+    // The read thread is blocked waiting for a frame the peer never sends, and
+    // the peer never closes: disconnect() must still wake it.
+    auto disconnecting = std::async(std::launch::async, [&client] { client.disconnect(); });
+    const bool returned = disconnecting.wait_for(2s) == std::future_status::ready;
+    bool joined = returned;
+    if (!returned) {
+        peer->close(); // release the reader so the future can be joined
+        joined = disconnecting.wait_for(10s) == std::future_status::ready;
+    }
+
+    REQUIRE(returned);
+    REQUIRE(joined);
+    REQUIRE_FALSE(client.is_connected());
 }
