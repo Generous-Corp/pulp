@@ -61,7 +61,7 @@ cd "$ROOT"
 if [[ $BUILD_FIRST -eq 1 ]]; then
     echo "[baseline] Configuring + building $PLUGIN" >&2
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null
-    cmake --build build --target "$PLUGIN" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)" >/dev/null
+    "$ROOT/tools/ci/governed-build.sh" cmake --build build --target "$PLUGIN" >/dev/null
 fi
 
 mkdir -p "$OUTPUT_DIR"

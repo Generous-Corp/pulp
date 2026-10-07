@@ -118,6 +118,14 @@ class BuildGovernancePathTests(unittest.TestCase):
                 relative,
             )
 
+    def test_format_baseline_capture_routes_optional_build_through_governor(self) -> None:
+        source = read_source("tools/scripts/format_baseline_capture.sh")
+        build_lines = [line for line in source.splitlines() if "cmake --build" in line]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn('"$ROOT/tools/ci/governed-build.sh"', build_lines[0])
+        self.assertIn('--target "$PLUGIN"', build_lines[0])
+        self.assertNotRegex(build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
+
     def test_governor_probe_is_bounded_and_has_a_receipt(self) -> None:
         source = read_source("tools/ci/governed-build.sh")
         self.assertIn('export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"', source)
