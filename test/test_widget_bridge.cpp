@@ -97,6 +97,30 @@ TEST_CASE("WidgetBridge counter remains exact under repeated native calls",
     REQUIRE(bridge.bridge_call_count() == static_cast<std::uint64_t>(calls));
 }
 
+TEST_CASE("WidgetBridge failed construction rolls back the borrowed counter",
+          "[view][bridge][wp0][lifetime][negative-control]") {
+    ScriptEngine engine;
+    View first_root;
+    first_root.set_bounds({0, 0, 400, 300});
+    StateStore first_store;
+    WidgetBridge first(engine, first_root, first_store);
+
+    // A second bridge on the same engine reaches the native-symbol uniqueness
+    // guard during construction. Its destructor cannot run, so the counter
+    // registration must roll back from the constructor's scope guard.
+    View second_root;
+    second_root.set_bounds({0, 0, 400, 300});
+    StateStore second_store;
+    REQUIRE_THROWS(WidgetBridge(engine, second_root, second_store));
+
+    // The first bridge's already-registered wrappers still own its counter;
+    // the failed second construction must not leave a dangling pointer in the
+    // ScriptEngine or corrupt the first bridge's measurement.
+    first.reset_bridge_call_count();
+    first.load_script("createLabel('rollback-label', 'ok', 10, 10, 100, 20);");
+    REQUIRE(first.bridge_call_count() > 0);
+}
+
 TEST_CASE("WidgetBridge creates knob from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;
