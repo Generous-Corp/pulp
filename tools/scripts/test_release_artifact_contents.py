@@ -1044,12 +1044,12 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             },
         )
 
-    def test_windows_library_matrix_tracks_x64_skia_availability(self) -> None:
+    def test_windows_library_matrix_tracks_skia_availability(self) -> None:
         self.assertIn(
             "pulp-bundled-fonts",
             rac.expected_pulp_libraries("windows-x64", rac.DEFAULT_MATRIX),
         )
-        self.assertNotIn(
+        self.assertIn(
             "pulp-bundled-fonts",
             rac.expected_pulp_libraries("windows-arm64", rac.DEFAULT_MATRIX),
         )
@@ -1063,11 +1063,11 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 root, "windows-x64", VERSION, SOURCE_SHA, native_signatures=False
             )
 
-    def test_complete_windows_arm64_matrix_passes_without_bundled_fonts(self) -> None:
+    def test_complete_windows_arm64_matrix_passes_with_bundled_fonts(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             _cli, sdk = make_platform(root, "windows-arm64")
-            self.assertNotIn("pulp-sdk/lib/pulp-bundled-fonts.lib", sdk)
+            self.assertIn("pulp-sdk/lib/pulp-bundled-fonts.lib", sdk)
             rac.verify_platform(
                 root, "windows-arm64", VERSION, SOURCE_SHA,
                 native_signatures=False,
@@ -1090,20 +1090,18 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     native_signatures=False,
                 )
 
-    def test_negative_control_windows_arm64_rejects_bundled_fonts(self) -> None:
+    def test_negative_control_windows_arm64_requires_bundled_fonts(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             _cli, sdk = make_platform(root, "windows-arm64")
-            sdk.add("pulp-sdk/lib/pulp-bundled-fonts.lib")
+            sdk.remove("pulp-sdk/lib/pulp-bundled-fonts.lib")
             write_archive(
                 root / rac.sdk_asset_name("windows-arm64"),
                 sdk,
                 as_zip=True,
                 platform="windows-arm64",
             )
-            with self.assertRaisesRegex(
-                rac.ContentError, "stale_or_unexpected=.*pulp-bundled-fonts"
-            ):
+            with self.assertRaisesRegex(rac.ContentError, "missing SDK product.*pulp-bundled-fonts"):
                 rac.verify_platform(
                     root, "windows-arm64", VERSION, SOURCE_SHA,
                     native_signatures=False,
