@@ -36,6 +36,40 @@ SCRIPT = Path(__file__).with_name("resolve_classify_base.py")
 BASE_SHA = "a" * 40
 BEFORE_SHA = "b" * 40
 
+# A top-level job header under `jobs:` (two-space indent, then `name:`).
+JOB_HEADER = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.MULTILINE)
+
+
+def job_block(text: str, name: str) -> str:
+    """One job's YAML, from its header to the next top-level job.
+
+    Bounded by the next job rather than by a named neighbour, so a job inserted
+    after it does not leak into the slice.
+    """
+    headers = list(JOB_HEADER.finditer(text))
+    for index, header in enumerate(headers):
+        if header.group(1) == name:
+            end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+            return text[header.start() : end]
+    raise AssertionError(f"job {name!r} not found in {BUILD_WORKFLOW}")
+
+
+def job_condition(text: str, name: str) -> str:
+    """A job's `if:` condition, folded onto one line."""
+    block = job_block(text, name)
+    match = re.search(r"^    if: (?:>-\s*\n)?(.*?)(?=^    [a-z-]+:)", block, re.MULTILINE | re.DOTALL)
+    if not match:
+        raise AssertionError(f"job {name!r} has no if: condition")
+    return " ".join(match.group(1).split())
+
+
+def jobs_on(text: str, runs_on: str) -> list[str]:
+    return [
+        header.group(1)
+        for header in JOB_HEADER.finditer(text)
+        if f"\n    runs-on: {runs_on}\n" in job_block(text, header.group(1))
+    ]
+
 
 class ResolveBaseTests(unittest.TestCase):
     def test_push_uses_event_before_not_origin_main(self) -> None:
@@ -168,9 +202,7 @@ class WorkflowWiringTests(unittest.TestCase):
         )
 
     def test_classify_uses_bounded_exact_tree_checkout(self) -> None:
-        classify_job = self.text.split("\n  classify:\n", 1)[1].split(
-            "\n  build:\n", 1
-        )[0]
+        classify_job = job_block(self.text, "classify")
         self.assertIn("fetch-depth: 1", classify_job)
         self.assertNotIn("fetch-depth: 0", classify_job)
         self.assertIn('git fetch --no-tags --depth=1 origin "$base"', classify_job)
@@ -184,9 +216,7 @@ class WorkflowWiringTests(unittest.TestCase):
         )
 
     def test_classify_resolves_one_python311_runtime_under_launchd_path(self) -> None:
-        classify_job = self.text.split("\n  classify:\n", 1)[1].split(
-            "\n  build:\n", 1
-        )[0]
+        classify_job = job_block(self.text, "classify")
 
         self.assertIn(
             'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"',
@@ -220,9 +250,7 @@ class WorkflowWiringTests(unittest.TestCase):
         )
 
     def test_generated_bump_override_executes_only_protected_base_code(self) -> None:
-        classify_job = self.text.split("\n  classify:\n", 1)[1].split(
-            "\n  build:\n", 1
-        )[0]
+        classify_job = job_block(self.text, "classify")
         self.assertIn(
             'git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py"',
             classify_job,
@@ -310,9 +338,14 @@ class WorkflowWiringTests(unittest.TestCase):
 
     def test_push_runs_are_not_cancelled_by_concurrency(self) -> None:
         # Cancelling a superseded main run throws away the cache it exists to
-        # publish. PR runs must still cancel.
-        self.assertIn(
-            "cancel-in-progress: ${{ github.event_name != 'push' }}", self.text
+        # publish. PR runs must still cancel; a local proof neither cancels nor
+        # is cancelled.
+        match = re.search(r"^  cancel-in-progress: \$\{\{ (.*) \}\}$", self.text, re.MULTILINE)
+        self.assertIsNotNone(match, "concurrency must compute cancel-in-progress")
+        expression = match.group(1)
+        self.assertEqual(
+            [term.strip() for term in expression.split("&&")],
+            ["github.event_name != 'push'", "!inputs.local_proof"],
         )
 
 
@@ -385,23 +418,25 @@ class CacheSaveScopeTests(unittest.TestCase):
         # Linux/Windows aliases skip cache-warming pushes. Native macOS now
         # reports directly from its matrix child; its bootstrap is limited to
         # PR and Shipyard workflow-dispatch validation.
-        self.assertEqual(
-            self.text.count("if: always() && github.event_name != 'push'"), 2
-        )
+        for alias in ("linux", "windows"):
+            with self.subTest(alias=alias):
+                self.assertIn(
+                    "github.event_name != 'push'", job_condition(self.text, alias)
+                )
         self.assertIn(
             "&& (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')",
-            self.text,
+            job_condition(self.text, "macos"),
         )
-        # windows-msvc-release-gate, windows-midi2-gate, windows-ble-gate.
-        advisory_condition = re.compile(
-            r"if:\s*>-\s*\n"
-            r"\s+needs\.classify\.outputs\.native_build_required == 'true'\s*\n"
-            r"\s+&& github\.event_name != 'push'"
-        )
-        self.assertEqual(len(advisory_condition.findall(self.text)), 3)
-        # Every windows-latest job is accounted for above — a new one must not
-        # silently start running on cache-warming pushes.
-        self.assertEqual(self.text.count("runs-on: windows-latest"), 3)
+        # windows-msvc-release-gate, windows-midi2-gate, windows-ble-gate, and
+        # every other windows-latest job: a new one must not silently start
+        # running on cache-warming pushes.
+        windows_jobs = jobs_on(self.text, "windows-latest")
+        self.assertEqual(len(windows_jobs), 3, windows_jobs)
+        for job in windows_jobs:
+            with self.subTest(job=job):
+                condition = job_condition(self.text, job)
+                self.assertIn("needs.classify.outputs.native_build_required == 'true'", condition)
+                self.assertIn("github.event_name != 'push'", condition)
 
 
 class PushDiffIntegrationTests(unittest.TestCase):
