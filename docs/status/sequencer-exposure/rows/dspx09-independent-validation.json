@@ -1,0 +1,77 @@
+{
+  "id": "dspx09-independent-validation",
+  "title": "DSPX-09 independent DSP reference oracles and typed negative controls",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "89873b97-ddd2-4113-ae43-3d209cd6f276",
+  "owned_paths": [
+    "test/test_dspx09_independent_validation.cpp",
+    "test/cmake/sampler_runtime_tests.cmake",
+    "docs/guides/dspx09-independent-validation.md",
+    "docs/status/sequencer-exposure/rows/dspx09-independent-validation.json",
+    "docs/status/dsp-readiness/dspx09-independent-validation-receipt-20261007.md"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_dspx09_independent_validation.cpp",
+      "needles": [
+        "DSPX-09 independent allpass oracle",
+        "DSPX-09 retained-history refusal",
+        "DSPX-09 automation base and offset oracle",
+        "RetainedHistoryMode::Refuse",
+        "BaseOffsetRefusal::NonFiniteBase"
+      ]
+    },
+    {
+      "path": "docs/guides/dspx09-independent-validation.md",
+      "needles": [
+        "DSPX-09",
+        "independent reference oracle",
+        "typed negative control",
+        "packaged distribution or GPU execution"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "deferred",
+      "owner": "dspx09-followup",
+      "rationale": "The independent proof consumes public Pulp headers; an installed SDK artifact receipt is reserved for DSPX-Z4.",
+      "dependencies": [
+        "DSPX-Z4-artifact-receipt"
+      ]
+    },
+    "offline_timeline_cli": {
+      "disposition": "deferred",
+      "owner": "dspx09-followup",
+      "rationale": "This packet proves the shared value contract but adds no offline timeline operation.",
+      "dependencies": [
+        "timeline-automation-command"
+      ]
+    },
+    "offline_timeline_mcp": {
+      "disposition": "deferred",
+      "owner": "dspx09-followup",
+      "rationale": "This packet adds no MCP operation; the canonical control registry remains the authority.",
+      "dependencies": [
+        "timeline-automation-command"
+      ]
+    },
+    "live_product_control": {
+      "disposition": "deferred",
+      "owner": "dspx09-followup",
+      "rationale": "The independent proof does not claim a shipped host or Forge runtime route.",
+      "dependencies": [
+        "DSPX-Z4-vertical-acceptance"
+      ]
+    },
+    "design_time_agent_manifest": {
+      "disposition": "deferred",
+      "owner": "dspx09-followup",
+      "rationale": "No generated design-time manifest is changed by this proof-only packet.",
+      "dependencies": [
+        "DSPX-Z4-vertical-acceptance"
+      ]
+    }
+  }
+}

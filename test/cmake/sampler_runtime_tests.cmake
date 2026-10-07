@@ -512,6 +512,11 @@ pulp_add_test_suite(pulp-test-generated-dsp-graph-parity GROUP pulp-test-group-s
     SOURCES test_generated_dsp_graph_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # DSPX-03 retained-history policy: exact-key adoption, clear, reseed, and refusal.
+# DSPX-09 independent reference examples: allpass oracle, retained-history refusal, and automation validation.
+pulp_add_test_suite(pulp-test-dspx09-independent-validation GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_dspx09_independent_validation.cpp
+    LIBRARIES pulp::host pulp::signal pulp::state)
+
 pulp_add_test_suite(pulp-test-retained-history-dspx03 GROUP pulp-test-group-sampler-host-graph
     SOURCES test_retained_history_dspx03.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::audio-analysis)
