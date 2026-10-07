@@ -174,6 +174,17 @@ export function Other() {
             self.assertNotEqual(noncanonical.returncode, 0)
             self.assertIn("path is not canonical", noncanonical.stdout)
 
+            manifest.write_text("[]", encoding="utf-8")
+            non_object = subprocess.run(
+                [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
+                text=True, capture_output=True, check=False)
+            self.assertNotEqual(non_object.returncode, 0)
+            self.assertIn("manifest must be a JSON object", non_object.stdout)
+
+            nul = run_with_path("Captured\x00.tsx")
+            self.assertNotEqual(nul.returncode, 0)
+            self.assertIn("path is not canonical", nul.stdout)
+
             link = root / "Linked.tsx"
             link.symlink_to(source)
             linked = run_with_path("Linked.tsx")

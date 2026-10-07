@@ -54,6 +54,8 @@ def validate_corpus_manifest(source: Path, manifest_path: Path) -> str | None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return f"generated-output manifest cannot be read: {exc}"
+    if not isinstance(manifest, dict):
+        return "generated-output manifest must be a JSON object"
     if manifest.get("schema") != "pulp.clean-output-corpus.v1":
         return "generated-output manifest has an unsupported schema"
     if manifest.get("producer") != "pulp import-design --emit source":
@@ -75,7 +77,8 @@ def validate_corpus_manifest(source: Path, manifest_path: Path) -> str | None:
             return "generated-output manifest contains a malformed file entry"
         relative = entry["path"]
         relative_path = Path(relative)
-        if (relative_path.is_absolute() or relative_path.as_posix() != relative or
+        if (not relative or "\x00" in relative or relative_path.is_absolute() or
+                relative_path.as_posix() != relative or
                 any(part in ("", ".", "..") for part in relative_path.parts) or
                 "\\" in relative):
             return f"generated-output manifest path is not canonical: {relative}"
