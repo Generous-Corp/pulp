@@ -15,7 +15,7 @@ The extraction was replayed onto current `origin/main` at
 
 ## Post-extraction evidence
 
-- Public header after extraction: 5,167 bytes, 114 lines; implementation: 43,205 bytes, 763 lines; private descriptor: 394 bytes, 15 lines.
+- Public header after extraction: 6,716 bytes, 160 lines; implementation: 42,396 bytes, 799 lines; private descriptor: 438 bytes, 14 lines.
 - Direct include consumers remain 5 across source and tests; the implementation is now compiled as `core/host/src/forge_space_catalog.cpp` through `core/host/CMakeLists.txt`.
 - Governed `pulp-host` compile passed, followed by governed `pulp-test-forge-space-catalog` link.
 - Direct focused binary `build/test/pulp-test-forge-space-catalog --reporter compact`: 19 cases, 3,374 assertions, all passed.
@@ -27,3 +27,7 @@ The extraction was replayed onto current `origin/main` at
 - The new out-of-line implementation translation unit reaches the existing
   `load_measurer.hpp` closure once; this is an intentional implementation-TU
   edge, not a public-header include.
+- The compatibility surface retains the previously nameable `Instance` and
+  `GpuInstance` types, `gpu_internal_block_size`, and
+  `nonlin_ambience::forward_if_changed`; the dedicated compatibility suite
+  covers those declarations and helper semantics.
