@@ -113,12 +113,20 @@ std::string extent(int width, int height) {
 bool compose_materialized_canvas_evidence(
     const pulp::view::DesignIR& ir,
     std::vector<std::uint8_t>& rendered,
-    std::string& error) {
+    std::string& error,
+    bool require_canvas_ink) {
     const auto authority = ir.root.attributes.find(
         "materialized_visual_authority");
     if (authority == ir.root.attributes.end() ||
-        authority->second != "browser:chrome+native-canvases")
+        authority->second != "browser:chrome+native-canvases") {
+        if (require_canvas_ink) {
+            error =
+                "materialized canvas validation requires a materialized "
+                "canvas composition evidence plane";
+            return false;
+        }
         return true;
+    }
 
     const auto native_render = decode_png_rgba(rendered.data(), rendered.size());
     if (!native_render.valid()) {
@@ -171,6 +179,8 @@ bool compose_materialized_canvas_evidence(
     }
 
     std::size_t composed = 0;
+    std::uint64_t sparse_composite_ink_pixels = 0;
+    bool saw_sparse_composite = false;
     const auto composite_ref = ir.root.attributes.find(
         "materialized_canvas_validation_asset");
     if (composite_ref != ir.root.attributes.end()) {
@@ -199,6 +209,12 @@ bool compose_materialized_canvas_evidence(
                 "materialized canvas composite evidence extent does not match render";
             return false;
         }
+        // The browser capture IR verifies this sidecar's SHA-256 before it
+        // becomes an asset. Count the decoded alpha values here rather than
+        // trusting the envelope's changed_pixels metadata: this is the actual
+        // sparse plane that will be composited and catches a transparent or
+        // stale capture even when its metadata claims a change.
+        saw_sparse_composite = true;
         // Chromium has already resolved canvas-vs-DOM stacking in this sparse
         // evidence plane. Opaque pixels replace the canvas-free chrome and
         // transparent pixels preserve it; intermediate alpha would make the
@@ -207,6 +223,7 @@ bool compose_materialized_canvas_evidence(
              pixel < destination.rgba.size(); pixel += 4) {
             const auto alpha = source.rgba[pixel + 3];
             if (alpha == 0) continue;
+            ++sparse_composite_ink_pixels;
             if (alpha != 255) {
                 error =
                     "materialized canvas composite evidence is not a sparse replacement plane";
@@ -281,6 +298,13 @@ bool compose_materialized_canvas_evidence(
                 std::lround(output_alpha * 255.0f));
         }
         ++composed;
+    }
+    if (require_canvas_ink &&
+        (!saw_sparse_composite || sparse_composite_ink_pixels == 0)) {
+        error =
+            "materialized canvas validation requires at least one non-transparent "
+            "pixel in the hash-verified sparse composite evidence";
+        return false;
     }
     if (composed == 0) {
         error = "materialized validation found no canvas evidence planes";
@@ -471,7 +495,8 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
     // the published IR remains executable CanvasWidget targets, and the live
     // native runtime has a separate no-reference-plane gate proving it paints
     // those streams itself.
-    if (!compose_materialized_canvas_evidence(ir, rendered, result.error))
+    if (!compose_materialized_canvas_evidence(
+            ir, rendered, result.error, options.require_canvas_ink))
         return result;
     if (!write_bytes_atomically(options.rendered, rendered, result.error))
         return result;

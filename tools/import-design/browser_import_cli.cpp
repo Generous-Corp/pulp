@@ -623,7 +623,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
              request.supports_faithful_capture,
          .native_panel_lowering = request.native_panel_lowering,
          .materialized_canvas_composition =
-             request.materialized_canvas_composition},
+             request.materialized_canvas_composition,
+         .require_canvas_ink = request.require_canvas_ink},
         content);
 
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;
@@ -792,6 +793,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .width = render_width,
          .height = render_height,
          .fail_below_percent = request.fail_below_percent,
+         .require_canvas_ink = request.require_canvas_ink,
          .backend = request.screenshot_backend});
     if (!comparison.valid) {
         std::cerr << "Validation error: " << comparison.error << "\n";

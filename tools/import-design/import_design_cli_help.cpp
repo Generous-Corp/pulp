@@ -66,6 +66,10 @@ void print_usage() {
     std::cout << "  --materialized-canvas-composition\n";
     std::cout << "                    Keep the accepted Chromium frame as native Skia paint and\n";
     std::cout << "                    emit transparent, hit-testable canvas behavior targets\n";
+    std::cout << "  --require-canvas-ink\n";
+    std::cout << "                    Require the materialized canvas evidence plane to contain\n";
+    std::cout << "                    at least one non-transparent pixel (opt-in; requires\n";
+    std::cout << "                    --materialized-canvas-composition)\n";
     std::cout << "  --offline         Explicitly use the legacy lower-fidelity HTML parser instead\n";
     std::cout << "                    of executing HTML in Chromium\n";
     std::cout << "  --asset-cache <path>\n";

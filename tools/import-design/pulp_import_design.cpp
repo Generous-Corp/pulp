@@ -1705,6 +1705,7 @@ struct CliOptions {
     /// way to be turned on before.
     bool native_panel_lowering = false;
     bool materialized_canvas_composition = false;
+    bool require_canvas_ink = false;
     std::string browser_path;
     std::string browser_interactions_path;
     bool fit_authored_frame = false, offline = false;
@@ -2003,6 +2004,8 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.native_panel_lowering = true;
         } else if (std::strcmp(argv[i], "--materialized-canvas-composition") == 0) {
             opt.materialized_canvas_composition = true;
+        } else if (std::strcmp(argv[i], "--require-canvas-ink") == 0) {
+            opt.require_canvas_ink = true;
         } else if (std::strcmp(argv[i], "--browser") == 0) {
             if (i + 1 >= argc) {
                 std::cerr << "Error: --browser requires an executable path\n";
@@ -2064,7 +2067,7 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.fit_authored_frame, opt.render_size_explicit,
             !opt.browser_interactions_path.empty(), opt.offline,
             opt.export_tokens_mode, opt.detect_only, opt.native_panel_lowering,
-            opt.materialized_canvas_composition))
+            opt.materialized_canvas_composition, opt.require_canvas_ink))
         return *code;
     return std::nullopt;
 }
@@ -2721,6 +2724,7 @@ int main(int argc, char* argv[]) {
              artifact_emit != ArtifactEmit::swiftui,
          .native_panel_lowering = cli.native_panel_lowering,
          .materialized_canvas_composition = cli.materialized_canvas_composition,
+         .require_canvas_ink = cli.require_canvas_ink,
          .validate = validate},
         content);
     if (const auto* failure =

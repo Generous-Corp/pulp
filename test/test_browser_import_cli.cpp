@@ -153,6 +153,11 @@ TEST_CASE("authored-frame CLI policy rejects every incompatible route",
               true, false, false, false, false, true, false, false) == 2);
     CHECK(validate_browser_import_cli_options(
               false, false, false, false, false, false, true, true) == 2);
+    CHECK(validate_browser_import_cli_options(
+              false, false, false, false, false, false, false, false, true) ==
+          2);
+    CHECK_FALSE(validate_browser_import_cli_options(
+        false, false, false, false, false, false, false, true, true));
     CHECK_FALSE(validate_browser_import_cli_options(
         true, false, false, false, false, false, false, false));
 
@@ -170,6 +175,8 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
     std::optional<fs::path> observed;
     std::optional<int> observed_width;
     bool observed_fit_authored_frame = false;
+    bool observed_materialized_canvas_composition = false;
+    bool observed_require_canvas_ink = false;
 
     id::internal::BrowserImportCliOperations operations;
     operations.import_html =
@@ -179,6 +186,9 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
             observed_width = capture_request.pinned_width;
             observed_fit_authored_frame =
                 capture_request.fit_authored_frame;
+            observed_materialized_canvas_composition =
+                capture_request.materialized_canvas_composition;
+            observed_require_canvas_ink = capture_request.require_canvas_ink;
             return id::BrowserHtmlNotApplicable{};
         };
     operations.validate_capture =
@@ -223,6 +233,22 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
         CHECK_FALSE(observed);
         CHECK_FALSE(observed_width);
         CHECK(observed_fit_authored_frame);
+    }
+
+    SECTION("forwards opt-in canvas ink requirement") {
+        request.materialized_canvas_composition = true;
+        request.require_canvas_ink = true;
+        request.browser_interactions = tree.root / "interactions.json";
+
+        const auto result =
+            id::internal::run_browser_import_cli_with_operations(
+                request, "not html", operations);
+        const auto* failure =
+            std::get_if<id::BrowserImportFailure>(&result);
+        REQUIRE(failure);
+        CHECK(failure->exit_code == 2);
+        CHECK(observed_materialized_canvas_composition);
+        CHECK(observed_require_canvas_ink);
     }
 }
 
@@ -1216,13 +1242,44 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
          .rendered = tree.root / "render.png",
          .diff = tree.root / "diff.png",
          .width = 32,
-         .height = 32});
+         .height = 32,
+         .require_canvas_ink = true});
     INFO(result.error);
     INFO(result.registration_reason);
     REQUIRE(result.valid);
     REQUIRE(result.scored);
     CHECK(result.diff_pixels == 0);
     CHECK(result.similarity == 1.0f);
+
+    SECTION("zero-ink sparse evidence is rejected only when requested") {
+        id::ImportPngImage empty;
+        empty.width = evidence.width;
+        empty.height = evidence.height;
+        empty.rgba.resize(evidence.rgba.size(), 0);
+        tree.write(evidence_path, id::encode_png_rgba(empty));
+
+        const auto rejected = id::validate_browser_capture_design_ir(
+            ir,
+            {.reference = reference_path,
+             .rendered = tree.root / "render-zero-ink.png",
+             .diff = tree.root / "diff-zero-ink.png",
+             .width = 32,
+             .height = 32,
+             .require_canvas_ink = true});
+        CHECK_FALSE(rejected.valid);
+        CHECK(rejected.error.find("requires at least one non-transparent") !=
+              std::string::npos);
+
+        const auto allowed = id::validate_browser_capture_design_ir(
+            ir,
+            {.reference = reference_path,
+             .rendered = tree.root / "render-zero-ink-default.png",
+             .diff = tree.root / "diff-zero-ink-default.png",
+             .width = 32,
+             .height = 32});
+        CHECK(allowed.valid);
+        CHECK(allowed.scored);
+    }
 
     SECTION("removing the evidence fails closed") {
         fs::remove(evidence_path);
