@@ -48,6 +48,61 @@ class BridgeGeneratorChecks(unittest.TestCase):
             with self.assertRaises(ValueError):
                 generator.load_contract(path)
 
+    def test_schema_rejects_drifted_canonical_set_parameter(self) -> None:
+        malformed_contracts = (
+            (
+                'request = [{name="key", type="string"}]\n'
+                'response = [{name="accepted", type="boolean"}]\n'
+            ),
+            (
+                'request = [{name="key", type="string"}, {name="value", type="number"}]\n'
+                'response = [{name="accepted", type="string"}]\n'
+            ),
+        )
+        for index, fields in enumerate(malformed_contracts):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "bad.toml"
+                path.write_text(
+                    'version = 1\nname = "editor"\n[[commands]]\nname = "set_parameter"\n'
+                    + fields,
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(ValueError, "canonical request"):
+                    generator.load_contract(path)
+
+    def test_renderer_rejects_drifted_canonical_set_parameter(self) -> None:
+        data = {
+            "version": 1,
+            "name": "editor",
+            "commands": [
+                {
+                    "name": "set_parameter",
+                    "request": [{"name": "key", "type": "string"}],
+                    "response": [{"name": "accepted", "type": "boolean"}],
+                }
+            ],
+            "publications": [],
+        }
+        with self.assertRaisesRegex(ValueError, "canonical request"):
+            generator.render(data)
+
+    def test_docs_state_when_canonical_helper_is_absent(self) -> None:
+        data = {
+            "version": 1,
+            "name": "editor",
+            "commands": [
+                {
+                    "name": "set_value",
+                    "request": [{"name": "key", "type": "string"}],
+                    "response": [],
+                }
+            ],
+            "publications": [],
+        }
+        docs = generator.render_docs(data)
+        self.assertIn("No canonical `set_parameter` helper is emitted", docs)
+        self.assertNotIn("The canonical `set_parameter` command also emits", docs)
+
     def test_planted_drift_negative_control(self) -> None:
         outputs = generator.render(generator.load_contract())
         with tempfile.TemporaryDirectory() as directory:
