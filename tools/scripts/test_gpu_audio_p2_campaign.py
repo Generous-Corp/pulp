@@ -264,6 +264,15 @@ class P2CampaignContractTests(unittest.TestCase):
         ])
         self.assertEqual(plan["trial_count"], 4 * 2 * campaign.RUNS_PER_KIND)
 
+    def test_process_receipts_expand_to_logical_trials_once(self):
+        self.assertEqual(campaign.logical_trial_repetitions("cold", 4), (4,))
+        self.assertEqual(
+            campaign.logical_trial_repetitions("steady", 1),
+            tuple(range(1, campaign.RUNS_PER_KIND + 1)),
+        )
+        with self.assertRaises(ValueError):
+            campaign.logical_trial_repetitions("other", 1)
+
     def test_matrix_axis_rejects_duplicates_and_unknown_values(self):
         with self.assertRaises(SystemExit):
             campaign.parse_args(["--plan-only", "--slots", "2,2"])
