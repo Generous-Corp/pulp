@@ -85,6 +85,18 @@ class BuildGovernancePathTests(unittest.TestCase):
             if "PULP_BUILD_JOBS" in source:
                 self.assertIn("deprecated; governed-build selects parallelism", source, name)
 
+    def test_wasm_fixture_lane_routes_build_through_governor(self) -> None:
+        source = read_source("tools/ci/wasm-fixture-lane.sh")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line
+        ]
+        self.assertGreaterEqual(len(build_lines), 1)
+        for line in build_lines:
+            self.assertIn("governed-build.sh", line)
+            self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
+        self.assertIn('PULP_BUILD_JOBS="$jobs"', source)
+
     def test_governor_probe_is_bounded_and_has_a_receipt(self) -> None:
         source = read_source("tools/ci/governed-build.sh")
         self.assertIn('export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"', source)

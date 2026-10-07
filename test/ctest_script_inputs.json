@@ -8271,6 +8271,16 @@
    ],
    "kind": "python"
   },
+  "read-audit-cadence-selftest": {
+   "entry": "tools/ci/test_read_audit_cadence.py",
+   "inputs": [
+    ".github/schedule-backstop.json",
+    ".github/workflows/read-audit-cadence-check.yml",
+    "tools/ci/read_audit_cadence.py",
+    "tools/ci/test_read_audit_cadence.py"
+   ],
+   "kind": "python"
+  },
   "read-audit-selftest": {
    "entry": "tools/ci/test_read_audit.py",
    "inputs": [

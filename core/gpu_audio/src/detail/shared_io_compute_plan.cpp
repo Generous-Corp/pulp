@@ -35,6 +35,11 @@ bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config&
     completion_read_ = completion_write_ = 0;
     predictor_.reset();
     telemetry_ = {};
+    lifecycle_receipts_.clear();
+    lifecycle_receipts_.reserve(kLifecycleReceiptCapacity);
+    receipt_index_by_slot_.assign(config.slots, kLifecycleReceiptCapacity);
+    lifecycle_receipt_overflow_ = false;
+    completion_receipt_overflow_ = false;
     telemetry_.prediction_enabled = predictor_.config().enabled;
     return true;
 }
@@ -53,6 +58,12 @@ SharedIoComputePlan::acquire_input(std::uint64_t sequence, std::uint64_t deadlin
         return std::nullopt;
     }
     pending_[lease->token.slot] = {SubmitToken{lease->token, deadline_ns}, true};
+    if (lifecycle_receipts_.size() < kLifecycleReceiptCapacity) {
+        lifecycle_receipts_.push_back(
+            {lease->token.preparation_epoch, lease->token.stream_sequence});
+        receipt_index_by_slot_[lease->token.slot] = lifecycle_receipts_.size() - 1;
+    } else
+        lifecycle_receipt_overflow_ = true;
     std::size_t active = 0;
     for (const auto& item : pending_)
         active += item.active;
@@ -70,18 +81,27 @@ bool SharedIoComputePlan::submit(const SubmitToken& token) noexcept {
         // it immediately so a saturated dispatcher cannot strand a slot.
         pending_[token.slot.slot].active = false;
         arena_.discard(token.slot);
+        if (auto* receipt = receipt_for(token.slot))
+            receipt->discarded = true;
         return false;
     }
     const auto started = std::chrono::steady_clock::now();
     pending_[token.slot.slot].token.submitted_ns = monotonic_now_ns();
     if (!arena_.submit(token.slot)) {
         pending_[token.slot.slot].active = false;
+        if (auto* receipt = receipt_for(token.slot))
+            receipt->discarded = true;
         return false;
     }
     telemetry_.encode_submit_ns +=
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                        std::chrono::steady_clock::now() - started)
                                        .count());
+    if (auto* receipt = receipt_for(token.slot))
+        receipt->submit_ns =
+            static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
     return true;
 }
 
@@ -90,7 +110,11 @@ bool SharedIoComputePlan::cancel(const SubmitToken& token) noexcept {
         !(pending_[token.slot.slot].token.slot == token.slot))
         return false;
     pending_[token.slot.slot].active = false;
-    return arena_.discard(token.slot);
+    const bool discarded = arena_.discard(token.slot);
+    if (discarded)
+        if (auto* receipt = receipt_for(token.slot))
+            receipt->discarded = true;
+    return discarded;
 }
 
 bool SharedIoComputePlan::reprime_when_quiescent() noexcept {
@@ -119,6 +143,13 @@ void SharedIoComputePlan::record_terminal(const SharedIoSlotLedger::SlotToken& t
         return;
     const auto pending = pending_[token.slot].token;
     pending_[token.slot].active = false;
+    if (auto* receipt = receipt_for(token)) {
+        receipt->terminal = true;
+        receipt->terminal_ns =
+            static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+    }
     // Calibrate admission only from successful terminal work. Failed/device
     // lost submissions have no stable execution-time meaning; their lifecycle
     // receipts remain authoritative, but they must not bias the predictor.
@@ -132,6 +163,7 @@ void SharedIoComputePlan::record_terminal(const SharedIoSlotLedger::SlotToken& t
     const auto next = (completion_write_ + 1) % completions_.size();
     if (next == completion_read_) {
         ++telemetry_.misses;
+        completion_receipt_overflow_ = true;
         return;
     }
     Completion completion{pending, status, false};
@@ -142,6 +174,13 @@ void SharedIoComputePlan::record_terminal(const SharedIoSlotLedger::SlotToken& t
         telemetry_.gpu_elapsed_ns += completion.gpu_elapsed_ns;
         ++telemetry_.gpu_timestamp_samples;
         telemetry_.gpu_timing_available = true;
+    }
+    if (auto* receipt = receipt_for(token)) {
+        receipt->gpu_timestamp_available = completion.gpu_elapsed_available;
+        if (completion.gpu_elapsed_available)
+            receipt->gpu_elapsed_ns = static_cast<std::int64_t>(completion.gpu_elapsed_ns);
+        receipt->device_lost = status == SharedIoArena::CompletionStatus::RetiredFailed &&
+                               provider_ != nullptr && provider_->device_lost();
     }
     completions_[completion_write_] = completion;
     completion_write_ = next;
@@ -156,6 +195,7 @@ std::size_t SharedIoComputePlan::drain_until(std::uint64_t now_ns,
     const auto started = std::chrono::steady_clock::now();
     const auto before = completion_write_;
     arena_.drain_completions({this, &SharedIoComputePlan::on_terminal}, service_deadline_ns);
+    const auto receipt_service_ns = monotonic_now_ns();
     const auto observed_now_ns =
         service_deadline_ns == 0
             ? now_ns
@@ -166,6 +206,9 @@ std::size_t SharedIoComputePlan::drain_until(std::uint64_t now_ns,
     auto cursor = before;
     while (cursor != completion_write_) {
         auto& completion = completions_[cursor];
+        if (auto* receipt = receipt_for(completion.token.slot))
+            receipt->service_ns =
+                receipt_service_ns == 0 ? -1 : static_cast<std::int64_t>(receipt_service_ns);
         completion.late =
             completion.token.deadline_ns != 0 && observed_now_ns > completion.token.deadline_ns;
         if (completion.late)
@@ -184,8 +227,63 @@ std::optional<SharedIoComputePlan::Completion> SharedIoComputePlan::pop_completi
     if (completion_read_ == completion_write_)
         return std::nullopt;
     auto value = completions_[completion_read_];
+    if (auto* receipt = receipt_for(value.token.slot))
+        receipt->delivery_ns =
+            static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
     completion_read_ = (completion_read_ + 1) % completions_.size();
     return value;
+}
+
+SharedIoComputePlan::LifecycleReceipt*
+SharedIoComputePlan::receipt_for(const SharedIoSlotLedger::SlotToken& token) noexcept {
+    if (token.slot >= receipt_index_by_slot_.size())
+        return nullptr;
+    const auto index = receipt_index_by_slot_[token.slot];
+    if (index >= lifecycle_receipts_.size())
+        return nullptr;
+    auto& receipt = lifecycle_receipts_[index];
+    return receipt.generation == token.preparation_epoch &&
+                   receipt.sequence == token.stream_sequence
+               ? &receipt
+               : nullptr;
+}
+
+std::optional<SharedIoArena::OutputLease>
+SharedIoComputePlan::acquire_output(const Completion& completion) noexcept {
+    if (completion.status != SharedIoArena::CompletionStatus::RetiredSuccess)
+        return std::nullopt;
+    auto lease = arena_.acquire_output(completion.token.slot.preparation_epoch,
+                                       completion.token.slot.stream_sequence);
+    if (lease)
+        if (auto* receipt = receipt_for(completion.token.slot))
+            receipt->output_acquired = true;
+    return lease;
+}
+
+bool SharedIoComputePlan::expire_delivery(const Completion& completion) noexcept {
+    const bool expired = arena_.expire_delivery(completion.token.slot);
+    if (expired)
+        if (auto* receipt = receipt_for(completion.token.slot))
+            receipt->discarded = true;
+    return expired;
+}
+
+bool SharedIoComputePlan::discard_completion(const Completion& completion) noexcept {
+    const bool discarded = arena_.discard(completion.token.slot);
+    if (discarded)
+        if (auto* receipt = receipt_for(completion.token.slot))
+            receipt->discarded = true;
+    return discarded;
+}
+
+bool SharedIoComputePlan::release_output(const SharedIoArena::ReleaseRecord& record) noexcept {
+    const bool released = arena_.release_output(record);
+    if (released)
+        if (auto* receipt = receipt_for(record.token))
+            receipt->output_released = true;
+    return released;
 }
 
 } // namespace pulp::gpu_audio::detail

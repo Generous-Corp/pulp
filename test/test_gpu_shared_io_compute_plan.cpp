@@ -756,6 +756,22 @@ TEST_CASE("shared IO compute plan exposes retired output and cancels refused lea
     CHECK(reinterpret_cast<const float*>(output->bytes.data())[0] == 3.0f);
     REQUIRE(plan.release_output({output->token}));
 
+    const auto receipts = plan.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 1);
+    CHECK(receipts[0].generation == input->token.preparation_epoch);
+    CHECK(receipts[0].sequence == 3);
+    CHECK(receipts[0].submit_ns >= 0);
+    CHECK(receipts[0].terminal);
+    CHECK(receipts[0].terminal_ns >= 0);
+    CHECK(receipts[0].service_ns >= receipts[0].terminal_ns);
+    CHECK(receipts[0].delivery_ns >= 0);
+    CHECK(receipts[0].output_acquired);
+    CHECK(receipts[0].output_released);
+    CHECK_FALSE(receipts[0].gpu_timestamp_available);
+    CHECK(receipts[0].gpu_elapsed_ns == -1);
+    CHECK_FALSE(receipts[0].device_lost);
+    CHECK(plan.lifecycle_receipt_valid());
+
     auto refused = plan.acquire_input(4, 0);
     REQUIRE(refused);
     REQUIRE(plan.cancel({refused->token, 0}));
@@ -819,6 +835,16 @@ TEST_CASE("shared IO compute plan reprimes persistent slots only after quiescenc
     REQUIRE(reprime);
     CHECK(reprime->token.preparation_epoch == first_epoch + 1);
     REQUIRE(plan.cancel({reprime->token, 0}));
+    const auto receipts = plan.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 2);
+    CHECK(receipts[0].generation == first_epoch);
+    CHECK(receipts[0].sequence == 20);
+    CHECK(receipts[0].output_released);
+    CHECK(receipts[0].gpu_elapsed_ns == -1);
+    CHECK(receipts[1].generation == first_epoch + 1);
+    CHECK(receipts[1].sequence == 21);
+    CHECK(receipts[1].discarded);
+    CHECK_FALSE(receipts[1].terminal);
     REQUIRE(plan.release());
 }
 
@@ -870,6 +896,65 @@ TEST_CASE("shared IO compute plan bounds saturation and retires refused or faile
     auto after_failure = plan.acquire_input(35, 0);
     REQUIRE(after_failure);
     REQUIRE(plan.cancel({after_failure->token, 0}));
+    const auto receipts = plan.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 6);
+    CHECK(receipts[0].sequence == 30);
+    CHECK(receipts[1].sequence == 31);
+    CHECK(receipts[2].sequence == 32);
+    CHECK(receipts[2].discarded);
+    CHECK(receipts[3].sequence == 33);
+    CHECK(receipts[3].discarded);
+    CHECK(receipts[4].sequence == 34);
+    CHECK(receipts[4].terminal);
+    CHECK(receipts[4].discarded);
+    CHECK_FALSE(receipts[4].gpu_timestamp_available);
+    CHECK(receipts[4].gpu_elapsed_ns == -1);
+    CHECK(receipts[5].sequence == 35);
+    CHECK(receipts[5].discarded);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO lifecycle receipts fail closed on bounded retention overflow",
+          "[gpu_audio][shared_io][p3]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    for (std::uint64_t sequence = 0; sequence <= SharedIoComputePlan::kLifecycleReceiptCapacity;
+         ++sequence) {
+        auto input = plan.acquire_input(sequence, 0);
+        REQUIRE(input);
+        REQUIRE(plan.cancel({input->token, 0}));
+    }
+    CHECK(plan.lifecycle_receipt_overflow());
+    CHECK_FALSE(plan.lifecycle_receipt_valid());
+    CHECK(plan.take_lifecycle_receipts().size() == SharedIoComputePlan::kLifecycleReceiptCapacity);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO lifecycle receipt separates observed service time from delivery",
+          "[gpu_audio][shared_io][p3]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    auto input = plan.acquire_input(90, 0);
+    REQUIRE(input);
+    REQUIRE(plan.submit({input->token, 0}));
+    CHECK(plan.take_lifecycle_receipts().empty());
+    REQUIRE(plan.drain_until(0, 1) == 1);
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    auto output = plan.acquire_output(*completion);
+    REQUIRE(output);
+    REQUIRE(plan.release_output({output->token}));
+    const auto receipts = plan.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 1);
+    CHECK(receipts[0].submit_ns >= 0);
+    CHECK(receipts[0].terminal_ns >= receipts[0].submit_ns);
+    CHECK(receipts[0].service_ns >= receipts[0].terminal_ns);
+    CHECK(receipts[0].delivery_ns >= receipts[0].service_ns);
+    CHECK(receipts[0].gpu_elapsed_ns == -1);
     REQUIRE(plan.release());
 }
 

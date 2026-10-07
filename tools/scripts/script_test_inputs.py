@@ -165,6 +165,12 @@ def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
     build_type = cache.get("CMAKE_BUILD_TYPE", "")
     if build_type and build_type != "Release":
         reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
+    # Without a format SDK the configure registers none of that format's
+    # tests or plugin targets, so the list it writes silently drops their
+    # inputs. A cache from before a flag existed omits it and is not judged.
+    for flag, sdk in (("PULP_HAS_VST3", "external/vst3sdk"), ("PULP_HAS_AUSDK", "external/AudioUnitSDK")):
+        if flag in cache and off(cache[flag]):
+            reasons.append(f"{flag}={cache[flag]} (the gate configures with {sdk} checked out)")
     return reasons
 
 
@@ -1000,6 +1006,19 @@ def drift(current: dict, checked_in: dict) -> list[tuple[str, str, set[str]]]:
     return problems
 
 
+def unscanned_executables(current: dict, checked_in: dict,
+                          scanned: dict[str, dict]) -> list[tuple[str, str, set[str]]]:
+    """Executables this configuration scans that the list does not name. A
+    clean executable has no `executables` entry, so `executables_scanned` is
+    the only record that it was scanned; a name missing from it reads to a
+    selector as never scanned. `paths` is the executable's own sources."""
+    if "executables_scanned" not in checked_in:
+        return []
+    listed = set(checked_in.get("executables_scanned") or [])
+    return [("unscanned executable", name, set((scanned.get(name) or {}).get("sources") or []))
+            for name in current.get("executables_scanned") or [] if name not in listed]
+
+
 def compiled_entry_paths(rec: dict) -> set[str]:
     """What a change must touch to own a compiled entry's drift: the sources
     whose text decided it, data readers and spawn sites alike (a spawns-only
@@ -1170,6 +1189,8 @@ def main(argv: list[str]) -> int:
         # and the result says so.
         current = {k: v for k, v in current.items() if k != "executables"}
     problems = drift(current, checked_in)
+    if "executables" in current:
+        problems += unscanned_executables(current, checked_in, test_executables(build_dir) or {})
     if not current["tests"]:
         print("script-test-inputs: ERROR: no script-driven test found; wrong build directory?", file=sys.stderr)
         return 2
@@ -1189,6 +1210,8 @@ def main(argv: list[str]) -> int:
         if kind == "missing from list":
             entry = current["tests"][name].get("entry") or ""
             return bool(entry) and entry in changed
+        if kind == "unscanned executable":
+            return bool(paths & changed)
         if kind == "missing compiled entry":
             # Only the entry's own sources, not its declared inputs: a shared
             # fixture directory must not make every new entry this change's.

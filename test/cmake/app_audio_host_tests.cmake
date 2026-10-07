@@ -756,6 +756,7 @@ set_tests_properties(cmake-sample-kernel-sdk-consumer PROPERTIES
 # runtime test binary.
 add_library(pulp-test-host-signal-graph-headers OBJECT
     header_compile/host_custom_node_type.cpp
+    header_compile/host_signal_graph_authoring.cpp
     header_compile/host_signal_graph_node.cpp
     header_compile/host_signal_graph_connection.cpp
     header_compile/host_signal_graph_runtime.cpp

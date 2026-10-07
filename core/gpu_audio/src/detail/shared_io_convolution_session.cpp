@@ -102,6 +102,9 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
 bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     trace_recorder_.reset();
     trace_telemetry_.reset();
+    const auto contract = execution_contract();
+    trace_telemetry_.configure_depth_lead(
+        {contract.algorithmic_lead_blocks, contract.pipeline_depth, contract.max_inflight});
     retained_trace_records_.clear();
     retained_trace_admissions_.clear();
     trace_retention_overflow_ = false;
@@ -109,7 +112,6 @@ bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     if (!trace_template_.enabled)
         return true;
 
-    auto contract = execution_contract();
     trace_template_.contract = contract;
     trace_template_.generation = plan_.preparation_epoch();
     try {
