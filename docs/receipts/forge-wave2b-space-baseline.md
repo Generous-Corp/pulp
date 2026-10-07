@@ -3,7 +3,8 @@
 Captured from `origin/main` at `c3c37bfc05fd58686dcc0dc369e4aaff9f4ccb06` before the space-family extraction.
 
 The extraction was replayed onto current `origin/main` at
-`62a063a2c6b6a300ada92ecc645c40b73d835b8e` before this receipt was revalidated.
+`c4ed69529c9df393d65475ff9790d4eb4067fb38` before this receipt was revalidated
+on 2026-10-07.
 
 - Public header: `core/host/include/pulp/host/forge_space_catalog.hpp`
 - Header size: 52,728 bytes, 925 lines.
@@ -18,7 +19,7 @@ The extraction was replayed onto current `origin/main` at
 - Public header after extraction: 6,716 bytes, 160 lines; implementation: 42,396 bytes, 799 lines; private descriptor: 438 bytes, 14 lines.
 - Direct include consumers remain 5 across source and tests; the implementation is now compiled as `core/host/src/forge_space_catalog.cpp` through `core/host/CMakeLists.txt`.
 - Governed `pulp-host` compile passed, followed by governed `pulp-test-forge-space-catalog` link.
-- Direct focused binary `build/test/pulp-test-forge-space-catalog --reporter compact`: 19 cases, 3,374 assertions, all passed.
+- Direct focused binary `build/test/pulp-test-forge-space-catalog --reporter compact`: 20 cases, 3,376 assertions, all passed.
 - Export after extraction: 415,732 bytes, SHA-256 `350567a6c9ca5a6b981f0efe8354207479f3341765871d7af4a821fc094c3e46`; `cmp` against the baseline returned 0.
 - `dsp_capability_registry.py --check` and `consumption_census.py --check` passed.
 - No compile-time improvement claim is made yet; a before/after include-time
