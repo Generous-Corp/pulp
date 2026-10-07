@@ -4536,6 +4536,34 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-2f8e30b36f08"
+paths = ["tools/scripts/test_windows_posix_shims.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "windows-posix-shims-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-a197cb091ade"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
@@ -5076,6 +5104,7 @@ tests = [
   "vellum-watch-preflight-selftest",
   "version-at-land-selftest",
   "wide-non-native-selftest",
+  "windows-posix-shims-selftest",
 ]
 build_targets = [
   "pulp-cli",
@@ -5479,6 +5508,7 @@ paths = [
   "tools/scripts/test_windows_cli_compile_scope.py",
   "tools/scripts/test_windows_cli_compile_workflow.py",
   "tools/scripts/test_windows_cli_release_precheck.py",
+  "tools/scripts/test_windows_posix_shims.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
@@ -5989,6 +6019,7 @@ paths = [
   "tools/scripts/test_windows_cli_compile_scope.py",
   "tools/scripts/test_windows_cli_compile_workflow.py",
   "tools/scripts/test_windows_cli_release_precheck.py",
+  "tools/scripts/test_windows_posix_shims.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",

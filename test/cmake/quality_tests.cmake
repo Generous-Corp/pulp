@@ -143,6 +143,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trace-frame-cost-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_frame_cost.py")
+    # Windows routes for POSIX-only calls (killpg, a directory fd, the
+    # executable bit), driven on every host by patching the platform check.
+    add_test(NAME windows-posix-shims-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_windows_posix_shims.py")
     # Windows cannot execute a shebang script; tests stand in for native
     # tools with scripts, so every launch of a configurable tool goes through
     # script_argv.argv_for. The selftest covers both platforms and pins two
