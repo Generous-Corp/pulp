@@ -179,6 +179,8 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     void service_until(std::uint64_t deadline_ns) noexcept override;
     AdapterIdentity adapter_identity() const;
     std::string dawn_revision() const;
+    SharedIoProviderIdentity provider_identity() const noexcept override;
+    SharedIoProviderCapabilities provider_capabilities() const noexcept override;
     // Quiescent only: no slots/programs/futures; failed device cannot be reused.
     bool reconfigure_storage_kind(StorageKind kind) noexcept;
     StorageKind storage_kind() const noexcept;

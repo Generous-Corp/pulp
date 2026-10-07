@@ -150,6 +150,7 @@ class SharedIoConvolutionSession {
                 identity.generation,   fenced()};
     }
     SharedIoProviderIdentity provider_identity() const noexcept;
+    SharedIoProviderCapabilities provider_capabilities() const noexcept;
     SharedIoTelemetrySnapshot trace_telemetry() const noexcept {
         return trace_telemetry_.snapshot();
     }
