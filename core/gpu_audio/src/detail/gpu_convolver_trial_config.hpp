@@ -119,12 +119,14 @@ inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& co
            valid_provider_identity_component(context.provider_identity.adapter_backend) &&
            context.provider_identity.adapter_vendor_id != 0 &&
            context.provider_identity.adapter_device_id != 0 &&
+           // This value is projected verbatim into the private JSONL receipt;
+           // reject unsafe bytes before digest validation or serialization.
+           valid_provider_identity_component(context.native_runtime_revision) &&
            valid_provider_receipt_digest(context.provider_identity, context.native_runtime_revision,
                                          context.immutable_receipt_digest) &&
            context.provider_identity.native_runtime_authenticated &&
            valid_provider_identity_component(context.provider_identity.native_runtime_name) &&
            valid_provider_identity_component(context.provider_identity.native_runtime_backend) &&
-           valid_provider_identity_component(context.native_runtime_revision) &&
            valid_gpu_convolver_thermal_state(context.thermal_state) &&
            (!context.workgroup_requested || context.workgroup_joined);
 }

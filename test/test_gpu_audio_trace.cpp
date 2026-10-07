@@ -1349,6 +1349,15 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     context.provider_identity.adapter_name = "adapter\"forged";
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
     set_authenticated_test_provider_identity(context);
+    auto quoted_runtime_revision = context;
+    quoted_runtime_revision.native_runtime_revision = "runtime\"-rev";
+    CHECK_FALSE(valid_gpu_convolver_trial_context(quoted_runtime_revision));
+    auto escaped_runtime_revision = context;
+    escaped_runtime_revision.native_runtime_revision = "runtime\\-rev";
+    CHECK_FALSE(valid_gpu_convolver_trial_context(escaped_runtime_revision));
+    auto control_runtime_revision = context;
+    control_runtime_revision.native_runtime_revision = std::string{"runtime\x01-rev"};
+    CHECK_FALSE(valid_gpu_convolver_trial_context(control_runtime_revision));
     context.native_runtime_revision.clear();
     CHECK_FALSE(valid_gpu_convolver_trial_context(context));
 }
