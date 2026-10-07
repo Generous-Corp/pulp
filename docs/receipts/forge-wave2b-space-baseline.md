@@ -3,7 +3,7 @@
 Captured from `origin/main` at `c3c37bfc05fd58686dcc0dc369e4aaff9f4ccb06` before the space-family extraction.
 
 The extraction was replayed onto current `origin/main` at
-`c4ed69529c9df393d65475ff9790d4eb4067fb38` before this receipt was revalidated
+`6d1a4c332f66b81bc4fc67ec0d0f3b2d2d0fc0a9` before this receipt was revalidated
 on 2026-10-07.
 
 - Public header: `core/host/include/pulp/host/forge_space_catalog.hpp`
