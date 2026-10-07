@@ -38,10 +38,13 @@ void print_usage() {
     std::cout << "  --json            With --outline, emit the inventory as JSON\n";
     std::cout << "  --screen <name>   Screen to import (Stitch)\n";
     std::cout << "  --output <path>   Destination file for the primary artifact (default: ui.js)\n";
-    std::cout << "  --emit {js|ir-json|cpp|swiftui}\n";
+    std::cout << "  --emit {js|ir-json|cpp|swiftui|materialized-runtime}\n";
     std::cout << "                    Primary artifact kind (built-in default: js). cpp and\n";
     std::cout << "                    swiftui are baked-only; swiftui emits native SwiftUI\n";
     std::cout << "                    (a View + PulpTheme.swift + binding manifest)\n";
+    std::cout << "  --source-out <dir> Directory for --emit materialized-runtime source tree\n";
+    std::cout << "  --ids {stable|positional}\n";
+    std::cout << "                    Stable source identities require complete source tuples\n";
     std::cout << "  --mode {live|baked}\n";
     std::cout << "                    Runtime model (built-in default: live; baked emits IR or C++ artifacts)\n";
     std::cout << "  --snapshot-semantics {fail|warn|accept}\n";

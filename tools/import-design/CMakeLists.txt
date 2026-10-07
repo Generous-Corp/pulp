@@ -108,6 +108,10 @@ add_dependencies(pulp-import-design pulp-browser-capture-runtime)
 # place while staging the relative layout expected by the packaged helper.
 set(_pulp_materialized_binding_contract
     "${CMAKE_CURRENT_SOURCE_DIR}/jsx-runtime/materialized_binding_contract.mjs")
+set(_pulp_materialized_source_emitter
+    "${CMAKE_CURRENT_SOURCE_DIR}/jsx-runtime/materialized_source_emitter.mjs")
+set(_pulp_materialized_ids_map
+    "${CMAKE_CURRENT_SOURCE_DIR}/jsx-runtime/materialized_ids_map.mjs")
 add_custom_target(pulp-jsx-runtime-materialized-contract
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime"
@@ -118,6 +122,26 @@ add_custom_target(pulp-jsx-runtime-materialized-contract
     DEPENDS "${_pulp_materialized_binding_contract}"
     COMMENT "Staging shared materialized binding contract beside pulp-import-design")
 add_dependencies(pulp-import-design pulp-jsx-runtime-materialized-contract)
+add_custom_target(pulp-jsx-runtime-materialized-emitter
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_pulp_materialized_source_emitter}"
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime/materialized_source_emitter.mjs"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS "${_pulp_materialized_source_emitter}"
+    COMMENT "Staging materialized runtime source emitter beside pulp-import-design")
+add_dependencies(pulp-import-design pulp-jsx-runtime-materialized-emitter)
+add_custom_target(pulp-jsx-runtime-materialized-ids-map
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_pulp_materialized_ids_map}"
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime/materialized_ids_map.mjs"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS "${_pulp_materialized_ids_map}"
+    COMMENT "Staging materialized ids map helper beside pulp-import-design")
+add_dependencies(pulp-import-design pulp-jsx-runtime-materialized-ids-map)
 
 set(PULP_NODE_RUNTIME_EXECUTABLE "" CACHE FILEPATH
     "Self-contained target-architecture Node executable staged with design import")
@@ -164,6 +188,10 @@ install(TARGETS pulp-import-design
 install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
 install(FILES "${_pulp_materialized_binding_contract}"
+    DESTINATION bin/jsx-runtime)
+install(FILES "${_pulp_materialized_source_emitter}"
+    DESTINATION bin/jsx-runtime)
+install(FILES "${_pulp_materialized_ids_map}"
     DESTINATION bin/jsx-runtime)
 
 add_executable(pulp-design-import-bench

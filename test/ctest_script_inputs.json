@@ -6708,6 +6708,7 @@
     "tools/import-design/jsx-runtime/materialized_metadata_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_source_emitter.test.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
     "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
     "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs",

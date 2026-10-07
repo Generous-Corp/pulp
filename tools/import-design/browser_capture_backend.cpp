@@ -876,9 +876,11 @@ CaptureResult capture_document(
         *output_directory / "semantic-report.json",
         *output_directory / "tokens.json",
         *output_directory / "dom-snapshot.json",
+        nonempty_regular_file(*output_directory / "materialized-document.json")
+            ? std::optional<fs::path>{*output_directory / "materialized-document.json"}
+            : std::nullopt,
         request.interaction_plan
-            ? std::optional<fs::path>{
-                  *output_directory / "interaction-report.json"}
+            ? std::optional<fs::path>{*output_directory / "interaction-report.json"}
             : std::nullopt};
     const std::pair<const char*, fs::path> required[] = {
         {"capture envelope", artifacts.envelope},
