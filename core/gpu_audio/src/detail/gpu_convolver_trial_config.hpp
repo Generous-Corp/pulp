@@ -45,6 +45,16 @@ inline bool valid_provider_identity_component(const std::string& value) noexcept
     return !value.empty();
 }
 
+inline bool valid_provider_receipt_digest(const SharedIoProviderIdentity& identity) noexcept {
+    if (identity.immutable_receipt_digest.size() != 64)
+        return false;
+    for (const auto c : identity.immutable_receipt_digest) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            return false;
+    }
+    return identity.immutable_receipt_digest == shared_io_provider_receipt_digest(identity);
+}
+
 struct GpuConvolverTrialContext {
     std::uint64_t trial_id = 0;
     std::uint64_t pair_id = 0;
@@ -84,7 +94,7 @@ inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& co
            valid_provider_identity_component(context.provider_identity.adapter_backend) &&
            context.provider_identity.adapter_vendor_id != 0 &&
            context.provider_identity.adapter_device_id != 0 &&
-           valid_provider_identity_component(context.provider_identity.immutable_receipt_digest) &&
+           valid_provider_receipt_digest(context.provider_identity) &&
            context.provider_identity.native_runtime_authenticated &&
            valid_provider_identity_component(context.provider_identity.native_runtime_name) &&
            valid_provider_identity_component(context.provider_identity.native_runtime_backend) &&

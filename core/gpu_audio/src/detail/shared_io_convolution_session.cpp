@@ -1,7 +1,5 @@
 #include "shared_io_convolution_session.hpp"
 
-#include <pulp/runtime/crypto.hpp>
-
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "dawn_shared_io_provider.hpp"
 #endif
@@ -83,6 +81,7 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
         identity.adapter_device_id = adapter.device_id;
         identity.native_runtime_name = adapter.native_runtime_name;
         identity.native_runtime_backend = adapter.backend;
+        identity.native_runtime_revision = adapter.native_runtime_revision;
         identity.authenticated =
             !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
             identity.adapter_backend == "metal" && identity.adapter_vendor_id != 0 &&
@@ -99,17 +98,7 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
             // computed only after the provider's revision, adapter identity,
             // vendor/device IDs, and native runtime revision have all
             // authenticated against one another.
-            const auto receipt =
-                std::string{"pulp.gpu-audio.provider.v1\n"} +
-                "provider_revision=" + identity.provider_revision + "\n" +
-                "adapter_name=" + identity.adapter_name + "\n" +
-                "adapter_backend=" + identity.adapter_backend + "\n" +
-                "adapter_vendor_id=" + std::to_string(identity.adapter_vendor_id) +
-                "\nadapter_device_id=" + std::to_string(identity.adapter_device_id) +
-                "\nnative_runtime_name=" + identity.native_runtime_name +
-                "\nnative_runtime_backend=" + identity.native_runtime_backend +
-                "\nnative_runtime_revision=" + adapter.native_runtime_revision + "\n";
-            identity.immutable_receipt_digest = pulp::runtime::sha256_hex(receipt);
+            identity.immutable_receipt_digest = shared_io_provider_receipt_digest(identity);
         }
     } catch (...) {
         return SharedIoProviderIdentity{};

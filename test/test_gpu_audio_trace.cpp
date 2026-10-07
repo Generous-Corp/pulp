@@ -29,6 +29,21 @@
 
 using namespace pulp::gpu_audio::detail;
 
+SharedIoProviderIdentity authenticated_test_provider_identity() {
+    SharedIoProviderIdentity identity{.authenticated = true,
+                                      .provider_revision = "provider-rev",
+                                      .adapter_name = "adapter",
+                                      .adapter_backend = "backend",
+                                      .adapter_vendor_id = 1,
+                                      .adapter_device_id = 2,
+                                      .native_runtime_authenticated = true,
+                                      .native_runtime_name = "runtime",
+                                      .native_runtime_backend = "runtime-backend",
+                                      .native_runtime_revision = "runtime-rev"};
+    identity.immutable_receipt_digest = shared_io_provider_receipt_digest(identity);
+    return identity;
+}
+
 namespace {
 SharedIoTraceConfig config(std::uint32_t stride = 4) {
     SharedIoTraceConfig value;
@@ -1309,17 +1324,15 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     context.deadline_ns = 1000;
     context.watchdog_ns = 2000;
     context.transfer_counters_direct = context.timing_provenance_direct = true;
-    context.provider_identity = {.authenticated = true,
-                                 .provider_revision = "provider-rev",
-                                 .adapter_name = "adapter",
-                                 .adapter_backend = "backend",
-                                 .adapter_vendor_id = 1,
-                                 .adapter_device_id = 2,
-                                 .immutable_receipt_digest = "digest",
-                                 .native_runtime_authenticated = true,
-                                 .native_runtime_name = "runtime",
-                                 .native_runtime_backend = "runtime-backend"};
+    context.provider_identity = authenticated_test_provider_identity();
     REQUIRE(valid_gpu_convolver_trial_context(context));
+    auto tampered_digest = context;
+    tampered_digest.provider_identity.immutable_receipt_digest[0] =
+        tampered_digest.provider_identity.immutable_receipt_digest[0] == '0' ? '1' : '0';
+    CHECK_FALSE(valid_gpu_convolver_trial_context(tampered_digest));
+    auto uppercase_digest = context;
+    uppercase_digest.provider_identity.immutable_receipt_digest[0] = 'A';
+    CHECK_FALSE(valid_gpu_convolver_trial_context(uppercase_digest));
     context.max_inflight = 3;
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
     context.max_inflight = 2;
@@ -1343,16 +1356,7 @@ TEST_CASE("P4 trace projection keeps provider and timing provenance explicit",
     context.deadline_ns = 1000;
     context.watchdog_ns = 2000;
     context.transfer_counters_direct = context.timing_provenance_direct = true;
-    context.provider_identity = {.authenticated = true,
-                                 .provider_revision = "provider-rev",
-                                 .adapter_name = "adapter",
-                                 .adapter_backend = "backend",
-                                 .adapter_vendor_id = 1,
-                                 .adapter_device_id = 2,
-                                 .immutable_receipt_digest = "digest",
-                                 .native_runtime_authenticated = true,
-                                 .native_runtime_name = "runtime",
-                                 .native_runtime_backend = "runtime-backend"};
+    context.provider_identity = authenticated_test_provider_identity();
     SharedIoTraceRecord terminal;
     terminal.generation = 1;
     terminal.sequence = 7;
@@ -1401,16 +1405,7 @@ TEST_CASE("P4 trace JSONL parses as a schema with authenticated per-row provenan
     context.deadline_ns = 1000;
     context.watchdog_ns = 2000;
     context.transfer_counters_direct = context.timing_provenance_direct = true;
-    context.provider_identity = {.authenticated = true,
-                                 .provider_revision = "provider-rev",
-                                 .adapter_name = "adapter",
-                                 .adapter_backend = "backend",
-                                 .adapter_vendor_id = 1,
-                                 .adapter_device_id = 2,
-                                 .immutable_receipt_digest = "digest",
-                                 .native_runtime_authenticated = true,
-                                 .native_runtime_name = "runtime",
-                                 .native_runtime_backend = "runtime-backend"};
+    context.provider_identity = authenticated_test_provider_identity();
 
     std::array<SharedIoTraceRecord, 2> records{};
     for (std::size_t i = 0; i < records.size(); ++i) {
@@ -1486,13 +1481,15 @@ TEST_CASE("P4 trace JSONL parses as a schema with authenticated per-row provenan
     };
 
     const auto text = output.str();
-    REQUIRE(validate(text, "digest"));
+    const auto expected_digest = context.provider_identity.immutable_receipt_digest;
+    REQUIRE(validate(text, expected_digest));
     auto forged = text;
-    const auto digest = forged.find("\"identity_digest\":\"digest\"");
+    const auto digest = forged.find("\"identity_digest\":\"" + expected_digest + "\"");
     REQUIRE(digest != std::string::npos);
-    forged.replace(digest, std::string{"\"identity_digest\":\"digest\""}.size(),
-                   "\"identity_digest\":\"forged\"");
-    CHECK_FALSE(validate(forged, "digest"));
+    const auto encoded_digest = std::string{"\"identity_digest\":\""} + expected_digest + "\"";
+    forged.replace(digest, encoded_digest.size(),
+                   "\"identity_digest\":\"" + std::string(64, 'f') + "\"");
+    CHECK_FALSE(validate(forged, expected_digest));
 }
 
 TEST_CASE("P4 receipt rejects an unsafe queue admission geometry", "[gpu_audio][trace][raw][p4]") {
