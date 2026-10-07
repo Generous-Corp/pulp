@@ -468,6 +468,7 @@
       "pulp/host/scan_cache.hpp",
       "pulp/host/scanner.hpp",
       "pulp/host/signal_graph.hpp",
+      "pulp/host/signal_graph_authoring.hpp",
       "pulp/host/signal_graph_connection.hpp",
       "pulp/host/signal_graph_control.hpp",
       "pulp/host/signal_graph_execution_snapshot.hpp",
