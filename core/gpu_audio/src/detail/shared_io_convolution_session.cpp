@@ -81,7 +81,6 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
         identity.adapter_device_id = adapter.device_id;
         identity.native_runtime_name = adapter.native_runtime_name;
         identity.native_runtime_backend = adapter.backend;
-        identity.native_runtime_revision = adapter.native_runtime_revision;
         identity.authenticated =
             !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
             identity.adapter_backend == "metal" && identity.adapter_vendor_id != 0 &&
@@ -93,13 +92,6 @@ SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const n
         // an observed identifier, not an absent identity; backend, vendor,
         // name, and immutable provider revision remain mandatory above.
         identity.native_runtime_authenticated = identity.authenticated;
-        if (identity.authenticated) {
-            // This is the immutable receipt identity for diagnostics. It is
-            // computed only after the provider's revision, adapter identity,
-            // vendor/device IDs, and native runtime revision have all
-            // authenticated against one another.
-            identity.immutable_receipt_digest = shared_io_provider_receipt_digest(identity);
-        }
     } catch (...) {
         return SharedIoProviderIdentity{};
     }
