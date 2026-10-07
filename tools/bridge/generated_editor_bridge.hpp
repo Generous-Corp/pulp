@@ -4,11 +4,16 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <initializer_list>
+#include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
 
 #include <choc/containers/choc_Value.h>
+#include <pulp/runtime/alive_token.hpp>
+#include <pulp/state/store.hpp>
 #include <pulp/view/editor_bridge.hpp>
 
 namespace pulp::view::editor_bridge_contract {
@@ -135,5 +140,53 @@ inline void register_set_parameter(EditorBridge& bridge, SetParameterHandler han
                                return EditorBridge::err_response(error);
                            return set_parameter_response(handler(request));
                        });
+}
+
+// A stable key map is the explicit identity boundary for imported controls.
+// The generated bridge never guesses a ParamID from a display name. Callers
+// provide the immutable wire key→ParamID table once during plugin setup; the
+// helper validates every target before registering any handler, then routes
+// set through StateStore. Gesture commands stay explicit contract declarations
+// until a host-owned lifecycle adapter is supplied.
+struct StateStoreParameterBinding {
+    std::string key;
+    state::ParamID id = 0;
+};
+
+inline bool register_state_store_set_parameter_handler(
+    EditorBridge& bridge, state::StateStore& store, runtime::AliveToken::Handle owner_alive,
+    std::initializer_list<StateStoreParameterBinding> bindings) {
+    if (!runtime::AliveToken::is_alive(owner_alive))
+        return false;
+    auto key_to_id = std::make_shared<std::map<std::string, state::ParamID>>();
+    for (const auto& binding : bindings) {
+        if (binding.key.empty())
+            return false;
+        if (store.info(binding.id) == nullptr)
+            return false;
+        if (!key_to_id->emplace(binding.key, binding.id).second)
+            return false;
+    }
+    if (key_to_id->empty())
+        return false;
+
+    register_set_parameter(bridge,
+                           [&store, owner_alive, key_to_id](const SetParameterRequest& request) {
+                               if (!runtime::AliveToken::is_alive(owner_alive))
+                                   return false;
+                               const auto found = key_to_id->find(request.key);
+                               if (found == key_to_id->end())
+                                   return false;
+                               const auto value = static_cast<float>(request.value);
+                               // The wire contract carries a double, while StateStore stores
+                               // float. A finite double can still overflow during narrowing;
+                               // reject it instead of letting StateStore sanitize it to the
+                               // parameter default while reporting accepted=true.
+                               if (!std::isfinite(value))
+                                   return false;
+                               store.set_value(found->second, value);
+                               return true;
+                           });
+    return true;
 }
 } // namespace pulp::view::editor_bridge_contract
