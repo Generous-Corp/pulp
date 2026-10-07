@@ -66,14 +66,21 @@ inline std::string provider_receipt_digest(const SharedIoProviderIdentity& ident
 
 inline bool valid_provider_receipt_digest(const SharedIoProviderIdentity& identity,
                                           std::string_view native_runtime_revision,
-                                          std::string_view immutable_receipt_digest) {
+                                          std::string_view immutable_receipt_digest) noexcept {
     if (immutable_receipt_digest.size() != 64)
         return false;
     for (const auto c : immutable_receipt_digest) {
         if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
             return false;
     }
-    return immutable_receipt_digest == provider_receipt_digest(identity, native_runtime_revision);
+    try {
+        return immutable_receipt_digest == provider_receipt_digest(identity, native_runtime_revision);
+    } catch (...) {
+        // Receipt validation is a fail-closed boundary. Canonicalization uses
+        // allocating std::string operations, so allocation or hashing failures
+        // must reject the receipt rather than escape into the trace writer.
+        return false;
+    }
 }
 
 struct GpuConvolverTrialContext {
@@ -105,7 +112,7 @@ struct GpuConvolverTrialContext {
     std::string immutable_receipt_digest;
 };
 
-inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) {
+inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
     return context.trial_id != 0 && context.pair_id != 0 && context.block_frames != 0 &&
            context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
            context.inflight_depth != 0 && context.queue_capacity > context.lead_blocks &&
