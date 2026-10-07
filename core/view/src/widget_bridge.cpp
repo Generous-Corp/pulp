@@ -487,7 +487,7 @@ static void invoke_or_throw(ScriptEngine& engine,
 // recursive_mutex defensively tolerates same-thread reentry.
 namespace {
 class BridgeCallCounterGuard {
-public:
+  public:
     BridgeCallCounterGuard(ScriptEngine& engine, std::atomic<std::uint64_t>* counter)
         : engine_(engine), counter_(counter) {}
 
@@ -499,9 +499,11 @@ public:
             engine_.set_bridge_call_counter(nullptr);
     }
 
-    void release() noexcept { active_ = false; }
+    void release() noexcept {
+        active_ = false;
+    }
 
-private:
+  private:
     ScriptEngine& engine_;
     std::atomic<std::uint64_t>* counter_;
     bool active_ = true;
