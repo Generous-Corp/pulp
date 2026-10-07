@@ -1232,7 +1232,8 @@ leaves them out of its link map. Loaders of system libraries only are not in
 scope, because the runner image names those.
 
 A change to a pin file (`tools/deps/manifest.json`,
-`tools/cmake/PulpDependencies.cmake`, `tools/cmake/PulpFetchContent.cmake`)
+`tools/cmake/PulpDependencies.cmake`, `tools/cmake/PulpFetchContent.cmake`, or
+a FetchContent block of the root `CMakeLists.txt`)
 marks always_run `dependency_pin` only the executables that build against a
 dependency it moved on this platform. `tools/ci/dependency_pins.py` names the
 moved dependencies: manifest entries by name (documentation fields and
@@ -1242,8 +1243,10 @@ the branches this platform does not take are dropped. An executable reaches a
 name through its codemodel dependency closure or an archive its recorded link
 pulled. Anything it cannot name moves every executable: a file that does not
 parse, a change outside any mapped block, any change to
-`PulpFetchContent.cmake`, a name the map lacks, or a mapped name this build
-shows no target or archive for. The key manifest's producer records the
+`PulpFetchContent.cmake` or to a root FetchContent block, a name the map
+lacks (the map's `unmapped` list names those on purpose, each with its
+reason, and a test fails on a linking dependency in neither), or a mapped
+name this build shows no target or archive for. The key manifest's producer records the
 verdict as `dependency_pins`. job.json counts the loaders as
 `/link_members/shared_loaders`. `object-deps-<sha>.json`
 (`tools/ci/object_deps.py`, `--object-deps`) holds, per object file, the

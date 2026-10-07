@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Which dependencies a change to the pin files moved, on one platform.
 
-The pin files are tools/deps/manifest.json, tools/cmake/PulpDependencies.cmake
-and tools/cmake/PulpFetchContent.cmake. A change to one of them can move a
+The pin files are tools/deps/manifest.json, tools/cmake/PulpDependencies.cmake,
+tools/cmake/PulpFetchContent.cmake and the FetchContent blocks of the root
+CMakeLists.txt. A change to one of them can move a
 dependency's content without moving any path the codemodel digests, so the
 key code treats the executables that build against a moved dependency as
 `dependency_pin`. This module says which dependencies moved, or that the
@@ -23,6 +24,10 @@ Attribution is by dependency name (the manifest's `name`):
                      branch this platform takes when every condition up to
                      it is a bare platform variable (PLATFORM_TRUTH).
   PulpFetchContent   shared logic: any platform-effective change moves all.
+  CMakeLists.txt     only its blocks that declare or fetch a FetchContent
+                     dependency count, and any platform-effective change to
+                     one moves all; the rest of the file reaches executables
+                     through their codemodel digests.
 
 Everything that cannot be attributed moves all (`scope` "all"): a file that
 does not parse, a changed block no anchor claims, blocks added, removed or
@@ -44,7 +49,11 @@ MAP_PATH = Path(__file__).resolve().parent / "dependency_pin_map.json"
 MANIFEST = "tools/deps/manifest.json"
 DEPENDENCIES_CMAKE = "tools/cmake/PulpDependencies.cmake"
 FETCHCONTENT_CMAKE = "tools/cmake/PulpFetchContent.cmake"
-PIN_PATHS = (MANIFEST, DEPENDENCIES_CMAKE, FETCHCONTENT_CMAKE)
+ROOT_CMAKE = "CMakeLists.txt"
+PIN_PATHS = (MANIFEST, DEPENDENCIES_CMAKE, FETCHCONTENT_CMAKE, ROOT_CMAKE)
+# Commands that declare or fetch a FetchContent dependency.
+FETCHCONTENT_COMMANDS = frozenset({"fetchcontent_declare", "fetchcontent_makeavailable", "fetchcontent_populate",
+                                   "fetchcontent_getproperties", "pulp_register_fetchcontent_source"})
 # Manifest fields no build reads: inventory, licensing and audit metadata.
 DOC_FIELDS = frozenset({"notes", "license", "category", "repository", "upstream", "documented_in_dependencies_md",
                         "documented_in_notice_md", "source_files", "external_names"})
@@ -84,9 +93,17 @@ NONE = Pins("names")
 
 def load_map(path: Path = MAP_PATH) -> dict:
     doc = json.loads(path.read_text(encoding="utf-8"))
-    if doc.get("schema") != MAP_SCHEMA or not isinstance(doc.get("dependencies"), dict):
+    if doc.get("schema") != MAP_SCHEMA or not isinstance(doc.get("dependencies"), dict) \
+            or not isinstance(doc.get("unmapped"), dict) or set(doc["dependencies"]) & set(doc["unmapped"]):
         raise ValueError(f"{path} is not a {MAP_SCHEMA} document")
+    # `unmapped` names dependencies that are deliberately absent from the map
+    # (each with its reason). They move every executable, like any name the
+    # map lacks; the list only stops a new dependency going unmapped silently.
     return doc["dependencies"]
+
+
+def load_unmapped(path: Path = MAP_PATH) -> dict[str, str]:
+    return json.loads(path.read_text(encoding="utf-8"))["unmapped"]
 
 
 # -- manifest -----------------------------------------------------------------
@@ -350,6 +367,14 @@ def cmake_names(base: str | None, head: str | None, platform: str, dep_map: dict
     return moved
 
 
+def fetchcontent_blocks(text: str | None, platform: str) -> list[list[str]] | None:
+    """The platform-effective text of the root file's FetchContent blocks."""
+    if text is None:
+        return None
+    return [effective(b, platform) for b in blocks(text, ROOT_CMAKE)
+            if any(c.name in FETCHCONTENT_COMMANDS for c in b)]
+
+
 def attribute(base: dict[str, str | None], head: dict[str, str | None], platform: str,
               dep_map: dict) -> Pins:
     """Pins moved between two copies of the pin files, keyed by path; a path
@@ -366,6 +391,9 @@ def attribute(base: dict[str, str | None], head: dict[str, str | None], platform
                 moved |= manifest_names(b, h, platform)
             elif path == DEPENDENCIES_CMAKE:
                 moved |= cmake_names(b, h, platform, dep_map)
+            elif path == ROOT_CMAKE:
+                if fetchcontent_blocks(b, platform) != fetchcontent_blocks(h, platform):
+                    raise Unattributable(f"a FetchContent block in {ROOT_CMAKE} changed")
             else:
                 eb = effective(commands(b, path)[0], platform) if b is not None else None
                 eh = effective(commands(h, path)[0], platform) if h is not None else None

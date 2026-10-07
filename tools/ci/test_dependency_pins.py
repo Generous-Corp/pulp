@@ -81,6 +81,12 @@ class ManifestTests(unittest.TestCase):
         pair = sides((real("manifest.head.json"), edit_manifest(real("manifest.head.json"), doc)))
         self.assertEqual(dp.attribute(*pair, "darwin", MAP), dp.Pins("names"))
 
+    def test_a_field_outside_the_documentation_allowlist_moves_its_name(self):
+        def invent(entries):
+            entries["Yoga"]["invented_build_field"] = "x"
+        pair = sides((real("manifest.head.json"), edit_manifest(real("manifest.head.json"), invent)))
+        self.assertEqual(dp.attribute(*pair, "darwin", MAP), dp.Pins("names", frozenset({"Yoga"})))
+
     def test_a_version_moves_its_name(self):
         def bump(entries):
             entries["Yoga"]["version"] = "v9"
@@ -176,6 +182,29 @@ class CMakeTests(unittest.TestCase):
         decided = CMAKE.replace('set(_plat "windows")', 'set(_plat "windows-arm64")')
         self.assertEqual(self.moved(decided, "darwin"), dp.Pins("names"))
 
+    def test_a_chain_on_a_non_platform_variable_is_kept_whole(self):
+        # The negative control for the collapse: PULP_HAS_VST3 decides
+        # nothing, so a change in any of its branches counts here.
+        base = CMAKE.replace('option(PULP_SKIA_AUTOFETCH "x" ON)',
+                             'option(PULP_SKIA_AUTOFETCH "x" ON)\nif(PULP_HAS_VST3)\n    set(V 1)\n'
+                             'elseif(WIN32)\n    set(V 2)\nelse()\n    set(V 3)\nendif()')
+        for old in ("set(V 1)", "set(V 2)", "set(V 3)"):
+            with self.subTest(old=old):
+                head = base.replace(old, old.replace(")", "0)"))
+                self.assertEqual(dp.attribute(*sides(cmake=(base, head)), "darwin", MAP),
+                                 dp.Pins("names", frozenset({"Skia"})))
+
+    def test_a_not_arm_collapses_to_the_taken_arm_only(self):
+        base = CMAKE.replace('option(PULP_SKIA_AUTOFETCH "x" ON)',
+                             'option(PULP_SKIA_AUTOFETCH "x" ON)\nif(NOT WIN32)\n    set(N 1)\nelse()\n'
+                             '    set(N 2)\nendif()')
+        taken = base.replace("set(N 1)", "set(N 10)")
+        untaken = base.replace("set(N 2)", "set(N 20)")
+        self.assertEqual(dp.attribute(*sides(cmake=(base, taken)), "darwin", MAP), dp.Pins("names", frozenset({"Skia"})))
+        self.assertEqual(dp.attribute(*sides(cmake=(base, untaken)), "darwin", MAP), dp.Pins("names"))
+        self.assertEqual(dp.attribute(*sides(cmake=(base, untaken)), "windows", MAP),
+                         dp.Pins("names", frozenset({"Skia"})))
+
     def test_a_change_no_anchor_claims_moves_all(self):
         for head in (CMAKE.replace("include(Shared.cmake)", "include(Shared.cmake)\ninclude(More.cmake)"),
                      CMAKE.replace('message(WARNING "no skia")', 'message(FATAL_ERROR "no skia")'),
@@ -245,7 +274,53 @@ class ClosureTests(unittest.TestCase):
         self.assertEqual(idx.targets_of("WOFF2"), {"pulp-canvas"})
 
 
+ROOT = """project(x)
+
+# Tests
+if(PULP_BUILD_TESTS)
+    FetchContent_Declare(Catch2 GIT_TAG v3.7.1)
+    FetchContent_MakeAvailable(Catch2)
+endif()
+
+# Library
+add_library(pulp-x STATIC x.cpp)
+"""
+
+
+class RootCMakeTests(unittest.TestCase):
+    def test_a_root_fetchcontent_block_change_moves_all(self):
+        pins = dp.attribute({dp.ROOT_CMAKE: ROOT}, {dp.ROOT_CMAKE: ROOT.replace("v3.7.1", "v3.8.0")}, "darwin", MAP)
+        self.assertEqual((pins.scope, pins.why), ("all", "a FetchContent block in CMakeLists.txt changed"))
+
+    def test_other_root_changes_move_nothing_through_the_pins(self):
+        for head in (ROOT.replace("x.cpp", "y.cpp"), ROOT.replace("# Tests", "# Tests, Catch2")):
+            self.assertEqual(dp.attribute({dp.ROOT_CMAKE: ROOT}, {dp.ROOT_CMAKE: head}, "darwin", MAP), dp.Pins("names"))
+
+    def test_the_live_root_file_parses_and_has_a_fetchcontent_block(self):
+        text = (HERE.parents[1] / dp.ROOT_CMAKE).read_text(encoding="utf-8")
+        self.assertTrue(dp.fetchcontent_blocks(text, "darwin"))
+
+
+# Source kinds that never link into a C++ executable; every other kind must
+# be mapped or listed as unmapped with a reason.
+NON_LINKING_KINDS = frozenset({"npm", "python-pip", "transitive-python", "cargo", "release-asset"})
+
+
 class MapTests(unittest.TestCase):
+    def test_every_linking_dependency_is_mapped_or_listed_unmapped(self):
+        manifest = json.loads((HERE.parents[1] / dp.MANIFEST).read_text(encoding="utf-8"))
+        unmapped = dp.load_unmapped()
+        silent = sorted(e["name"] for e in manifest["dependencies"]
+                        if e["source_kind"] not in NON_LINKING_KINDS and e["name"] not in MAP
+                        and e["name"] not in unmapped)
+        self.assertEqual(silent, [])
+        self.assertTrue(all(isinstance(r, str) and r for r in unmapped.values()))
+        self.assertEqual(sorted(set(unmapped) - {e["name"] for e in manifest["dependencies"]}), [])
+        # Unmapped means every executable at run time.
+        pins = dp.attribute(*sides((json.dumps({"dependencies": [{"name": "CHOC", "version": "1"}]}),
+                                    json.dumps({"dependencies": [{"name": "CHOC", "version": "2"}]}))), "darwin", MAP)
+        self.assertEqual(pins.scope, "all")
+
     def test_every_mapped_name_is_a_manifest_entry_and_can_be_found(self):
         manifest = json.loads((HERE.parents[1] / dp.MANIFEST).read_text(encoding="utf-8"))
         names = {e["name"] for e in manifest["dependencies"]}
