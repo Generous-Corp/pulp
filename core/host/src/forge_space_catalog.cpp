@@ -57,9 +57,7 @@ bool valid_impulse_response(const ImpulseResponse& ir) {
 /// each of these is documented by the DSP as taking effect on the next load, so
 /// none of them can be a param.
 
-struct Instance {
-    Engine engine;
-};
+
 
 /// Worst-case linear gain for the Forge registry (series law 8).
 ///
@@ -202,10 +200,7 @@ int gpu_internal_block_size(int max_block) noexcept {
     return static_cast<int>(quantum);
 }
 
-struct GpuInstance {
-    std::unique_ptr<gpu_audio::GpuConvolutionReverb> engine;
-    std::uint64_t preparation_generation = 0;
-};
+
 
 // Fixed POD schema. Lane counters count transport quanta, not arbitrary host
 // callbacks. Both mono lanes stay separate; worker output is not GPU delivery.
@@ -452,25 +447,9 @@ using ::pulp::host::space::nonlin_ambience::kWidthPct;
 ///
 /// `last` starts as NaN so the first sample always forwards (`x == NaN` is
 /// false for every x, including NaN).
-template <typename Fn> void forward_if_changed(float& last, float value, Fn&& apply) {
-    if (value == last)
-        return;
-    last = value;
-    apply(value);
-}
 
-struct Instance {
-    Engine engine;
-    /// Last value forwarded for each continuous param. See
-    /// `forward_if_changed`.
-    float last_diffusion = std::numeric_limits<float>::quiet_NaN();
-    float last_tone = std::numeric_limits<float>::quiet_NaN();
-    float last_hf_damp = std::numeric_limits<float>::quiet_NaN();
-    float last_width = std::numeric_limits<float>::quiet_NaN();
-    float last_converter = std::numeric_limits<float>::quiet_NaN();
-    float last_output_gain = std::numeric_limits<float>::quiet_NaN();
-    float last_mix = std::numeric_limits<float>::quiet_NaN();
-};
+
+
 
 /// Worst-case linear gain for the Forge registry (series law 8).
 ///
@@ -667,14 +646,7 @@ using ::pulp::host::space::cabinet::kTrebleHz;
 using ::pulp::host::space::cabinet::kTypeId;
 using ::pulp::host::space::cabinet::kVolumeL;
 
-struct Instance {
-    Engine engine;
-    std::array<float, 14> last_params = [] {
-        std::array<float, 14> values{};
-        values.fill(std::numeric_limits<float>::quiet_NaN());
-        return values;
-    }();
-};
+
 
 float speaker_cabinet_worst_case_gain() {
     return static_cast<float>(Engine{}.worst_case_gain() *
