@@ -928,8 +928,22 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(
             run_block,
             r"--import-design-contract\s+build/tools/import-design/jsx-runtime/materialized_binding_contract\.mjs")
+        self.assertRegex(
+            run_block,
+            r"--import-design-source-emitter\s+build/tools/import-design/jsx-runtime/materialized_source_emitter\.mjs")
+        self.assertRegex(
+            run_block,
+            r"--import-design-ids-map\s+build/tools/import-design/jsx-runtime/materialized_ids_map\.mjs")
         self.assertIn(
             "test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs",
+            run_block,
+        )
+        self.assertIn(
+            "test -f build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs",
+            run_block,
+        )
+        self.assertIn(
+            "test -f build/tools/import-design/jsx-runtime/materialized_ids_map.mjs",
             run_block,
         )
         self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
@@ -979,8 +993,16 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             run_block,
             r"'--import-design-contract',\s*"
             r"'build/tools/import-design/Release/jsx-runtime/materialized_binding_contract\.mjs'")
+        self.assertRegex(
+            run_block,
+            r"'--import-design-source-emitter',\s*"
+            r"'build/tools/import-design/Release/jsx-runtime/materialized_source_emitter\.mjs'")
+        self.assertRegex(
+            run_block,
+            r"'--import-design-ids-map',\s*"
+            r"'build/tools/import-design/Release/jsx-runtime/materialized_ids_map\.mjs'")
         self.assertIn(
-            "materialized binding contract missing from import-design build staging",
+            "materialized_binding_contract.mjs",
             run_block,
         )
         self.assertIn(
