@@ -9,7 +9,7 @@ using namespace pulp;
 
 // ── PulpPluck Tests ─────────────────────────────────────────────────────
 
-TEST_CASE("PulpPluck descriptor", "[examples][pluck]") {
+TEST_CASE("web demo build: PulpPluck descriptor", "[examples][pluck]") {
     auto proc = examples::create_pulp_pluck();
     auto desc = proc->descriptor();
     REQUIRE(desc.name == "PulpPluck");
@@ -19,7 +19,7 @@ TEST_CASE("PulpPluck descriptor", "[examples][pluck]") {
     REQUIRE(desc.output_buses.size() == 1);
 }
 
-TEST_CASE("PulpPluck parameters", "[examples][pluck]") {
+TEST_CASE("web demo build: PulpPluck parameters", "[examples][pluck]") {
     auto proc = examples::create_pulp_pluck();
     state::StateStore store;
     proc->set_state_store(&store);
@@ -27,7 +27,7 @@ TEST_CASE("PulpPluck parameters", "[examples][pluck]") {
     REQUIRE(store.param_count() == 3);
 }
 
-TEST_CASE("PulpPluck produces audio from MIDI", "[examples][pluck]") {
+TEST_CASE("web demo build: PulpPluck produces audio from MIDI", "[examples][pluck]") {
     auto proc = examples::create_pulp_pluck();
     state::StateStore store;
     proc->set_state_store(&store);
@@ -65,7 +65,7 @@ TEST_CASE("PulpPluck produces audio from MIDI", "[examples][pluck]") {
     REQUIRE(has_audio);
 }
 
-TEST_CASE("PulpPluck silence without MIDI", "[examples][pluck]") {
+TEST_CASE("web demo build: PulpPluck silence without MIDI", "[examples][pluck]") {
     auto proc = examples::create_pulp_pluck();
     state::StateStore store;
     proc->set_state_store(&store);

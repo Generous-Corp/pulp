@@ -235,11 +235,25 @@ LiveResizeCoverState simulate_live_resize_cover(
         state.resize_applied = resize_content_view(host, width, height);
         state.cover_after_present =
             [layer.contentsGravity isEqualToString:kCAGravityResize];
+        // The host releases the cover from a main-queue timer after the
+        // compositor interval. Poll for the release instead of sleeping a fixed
+        // span: a loaded host delays that timer well past any fixed margin, and
+        // the time it took is what the caller asserts on.
+        const auto ended = std::chrono::steady_clock::now();
+        const auto deadline = ended + std::chrono::seconds(2);
         [view viewDidEndLiveResize];
-        [[NSRunLoop currentRunLoop]
-            runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.10]];
+        while ([layer.contentsGravity isEqualToString:kCAGravityResize]
+               && std::chrono::steady_clock::now() < deadline) {
+            [[NSRunLoop currentRunLoop]
+                runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        }
         state.cover_after_compositor_interval =
             [layer.contentsGravity isEqualToString:kCAGravityResize];
+        if (!state.cover_after_compositor_interval) {
+            state.cover_release_ms = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - ended).count());
+        }
     }
     return state;
 }
