@@ -92,8 +92,13 @@ class UnregisteredTestsCheckTest(unittest.TestCase):
             "      - run: python3 -m pytest tools/x/test_cmake.py; prefix=tools/scripts",
             "      - run: python3 -c 'import sys; sys.path.insert(0, \"tools/scripts\")'",
             "      - run: python3 tools/scripts/shell_portability_check.py tools/ci tools/scripts",
+            "      - run: python3 -m pytest build/mytools/scripts",
+            "      - run: python3 -m unittest discover -s $ROOT/mytools/ci",
         ]) + "\n")
-        self.assertIn("tools/scripts/test_quiet.py", guard.uncovered(repo.root)[0])
+        repo.write("tools/ci/test_quiet.py", "")
+        missing = guard.uncovered(repo.root)[0]
+        self.assertIn("tools/scripts/test_quiet.py", missing)
+        self.assertIn("tools/ci/test_quiet.py", missing)
 
     def test_a_new_unregistered_test_fails(self) -> None:
         repo = self.repo()
