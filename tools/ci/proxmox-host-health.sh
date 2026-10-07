@@ -3,6 +3,7 @@
 #
 #   proxmox-host-health.sh                     # check; exit 1 on any finding
 #   proxmox-host-health.sh --json              # the same check as one JSON object
+#   proxmox-host-health.sh --json-out FILE     # text check; also write the JSON to FILE
 #   proxmox-host-health.sh --install DIR       # install DIR/tools/ci/* per the table
 #   proxmox-host-health.sh --install-staged    # install the verified stage of the ref
 #   proxmox-host-health.sh --manifest          # print the install table
@@ -30,7 +31,9 @@
 # the ref as it is now and refuses a stage the ref has moved past, so the one
 # command a person runs installs exactly what the check compared against.
 # --json reports the same state for fleet monitoring, including how long drift
-# has persisted.
+# has persisted. The reaper unit runs the check with --json-out, so fleet
+# monitoring reads the latest result from a world-readable file instead of
+# running the check, which needs root's GitHub credential, itself.
 set -uo pipefail
 
 REPO="${PULP_PROXMOX_HEALTH_REPO:-Generous-Corp/pulp}"
@@ -46,6 +49,7 @@ STAGE_ROOT="${ROOT_PREFIX}/root/pulp-deploy-staged"
 # Warn this many points before the governor starts refusing clones.
 DISK_WARN_MARGIN=10
 JSON=0
+JSON_OUT=""
 
 # repository file (under tools/ci/)          host path                                       mode
 MANIFEST="$(cat <<'EOF'
@@ -179,7 +183,7 @@ do_check() {
     local drift_rows="" failed_rows=""
     if ! ref_data="$(read_ref)"; then
         log "UNVERIFIED cannot read ${REPO} tools/ci at ${REF}; drift is unknown"
-        [ "$JSON" = 1 ] && emit_json unverified "" "" "" "" "" "" "" ""
+        report unverified "" "" "" "" "" "" "" ""
         exit 2
     fi
     sha="$(head -n 1 <<< "$ref_data")"
@@ -243,13 +247,30 @@ do_check() {
             log "STAGE ${REF} at ${sha:0:12}: ${stage:-nothing staged}${stage:+ is staged and verified}; drift began $(( $(now_epoch) - ${first:-$(now_epoch)} ))s ago"
         fi
         log "UNHEALTHY ${findings} finding(s); reinstall with: ${reinstall}"
-        [ "$JSON" = 1 ] && emit_json unhealthy "$sha" "$first" "$drift_rows" "$failed_rows" \
+        report unhealthy "$sha" "$first" "$drift_rows" "$failed_rows" \
             "$data_pct" "$disk_finding" "$stage" "$reinstall"
         exit 1
     fi
     log "HEALTHY every installed file matches ${REPO}@${REF}; no failed pool slot"
-    [ "$JSON" = 1 ] && emit_json healthy "$sha" "" "" "" "$data_pct" 0 "" ""
+    report healthy "$sha" "" "" "" "$data_pct" 0 "" ""
     exit 0
+}
+
+# Print the JSON (--json) and/or replace JSON_OUT with it (--json-out). The
+# file is renamed into place so a reader never sees a partial object, and every
+# outcome, including unverified, rewrites it so checked_at shows the check ran.
+report() {
+    local dir
+    [ "$JSON" = 1 ] && emit_json "$@"
+    if [ -n "$JSON_OUT" ]; then
+        dir="$(dirname "$JSON_OUT")"
+        mkdir -p "$dir" && chmod 0755 "$dir" \
+            && emit_json "$@" > "${JSON_OUT}.new.$$" \
+            && chmod 0644 "${JSON_OUT}.new.$$" \
+            && mv -f "${JSON_OUT}.new.$$" "$JSON_OUT" \
+            || { rm -f "${JSON_OUT}.new.$$"; log "STATUS cannot write $JSON_OUT"; }
+    fi
+    return 0
 }
 
 # One JSON object for fleet monitoring. Schema 1 fields are append-only.
@@ -323,8 +344,9 @@ do_install_staged() {
 case "${1:-}" in
     "") do_check ;;
     --json) JSON=1; do_check ;;
+    --json-out) [ -n "${2:-}" ] || { log "usage: $0 --json-out <file>"; exit 2; }; JSON_OUT="$2"; do_check ;;
     --install) [ -n "${2:-}" ] || { log "usage: $0 --install <pulp checkout>"; exit 2; }; do_install "$2" ;;
     --install-staged) do_install_staged ;;
     --manifest) printf '%s\n' "$MANIFEST" ;;
-    *) log "usage: $0 [--json | --install <pulp checkout> | --install-staged | --manifest]"; exit 2 ;;
+    *) log "usage: $0 [--json | --json-out <file> | --install <pulp checkout> | --install-staged | --manifest]"; exit 2 ;;
 esac

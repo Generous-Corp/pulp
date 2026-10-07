@@ -382,6 +382,43 @@ class HealthCheckTests(unittest.TestCase):
         self.assertEqual(report["state"], "unverified")
         self.assertIsNone(report["ref_sha"])
 
+    def test_json_out_writes_every_outcome_to_a_world_readable_file(self) -> None:
+        self._install()
+        status = self.tmp / "run/pulp-ci-host/health.json"
+        result = self._run("--json-out", str(status))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("HEALTHY", result.stdout)
+        self.assertEqual(status.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(status.parent.stat().st_mode & 0o777, 0o755)
+        written = json.loads(status.read_text())
+        self.assertEqual(written, json.loads(self._run("--json").stdout))
+        self.assertEqual(written["state"], "healthy")
+
+        self._move_main()
+        self.now += 60
+        self.assertEqual(self._run("--json-out", str(status)).returncode, 1)
+        written = json.loads(status.read_text())
+        self.assertEqual(written["state"], "unhealthy")
+        self.assertTrue(written["stage"]["ready"])
+
+        # A check that cannot reach GitHub still rewrites the file, so a reader
+        # sees a fresh "unverified" rather than a stale healthy.
+        self.listing_ok = False
+        self.now += 60
+        self.assertEqual(self._run("--json-out", str(status)).returncode, 2)
+        written = json.loads(status.read_text())
+        self.assertEqual(written["state"], "unverified")
+        self.assertEqual(written["checked_at"], "2027-01-15T08:02:00Z")
+        self.assertEqual(sorted(p.name for p in status.parent.iterdir()), ["health.json"])
+
+    def test_reaper_publishes_the_status_file_fleet_monitoring_reads(self) -> None:
+        service = REAP_SERVICE.read_text(encoding="utf-8")
+        self.assertIn(
+            "ExecStartPost=/usr/local/sbin/pulp-proxmox-host-health.sh"
+            " --json-out /run/pulp-ci-host/health.json",
+            service,
+        )
+
     def test_reaper_runs_the_health_check_after_every_pass(self) -> None:
         service = REAP_SERVICE.read_text(encoding="utf-8")
         self.assertIn("ExecStartPost=/usr/local/sbin/pulp-proxmox-host-health.sh", service)

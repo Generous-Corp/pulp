@@ -294,8 +294,14 @@ makes the reinstall a single verified command:
   `unverified`), `ref_sha`, `drift.first_seen` and `drift.age_seconds`, each
   drifted file with its installed and expected blobs, failed slots, disk fill,
   the stage, and `reinstall_command`. It uses the same exit codes as the text
-  check. Fleet monitoring reads this over SSH to report drift that has lasted
-  more than an hour.
+  check.
+- The reaper unit runs the check as
+  `--json-out /run/pulp-ci-host/health.json`. That prints the text check to the
+  journal as before, and also writes the JSON to that file (mode 0644, replaced
+  by rename) on every outcome, including `unverified`. Fleet monitoring reads
+  the file over the existing root SSH alias and never runs the check itself.
+  It reports drift older than an hour, any non-healthy state, and a
+  `checked_at` older than 30 minutes, since the reaper runs every 15 minutes.
 
 Create separate root-owned role environments; never share one:
 
