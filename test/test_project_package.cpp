@@ -16,6 +16,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -91,7 +92,10 @@ void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) 
         return;
     std::error_code ignored;
     fs::remove(g_swap_after_blob_verification, ignored);
+    std::fprintf(stderr, "[proof-pkg] swap remove: %d %s\n", ignored.value(), ignored.message().c_str());
+    ignored.clear();
     fs::rename(g_blob_swap_source, g_swap_after_blob_verification, ignored);
+    std::fprintf(stderr, "[proof-pkg] swap rename: %d %s\n", ignored.value(), ignored.message().c_str());
 }
 
 void count_blob_verification(pulp::project_package::detail::PackageFaultPoint point) noexcept {
@@ -148,11 +152,19 @@ void rebind_publication_source(pulp::project_package::detail::PackageFaultPoint 
         return;
     std::error_code ignored;
     fs::rename(g_rebind_source, g_rebind_displaced, ignored);
+    std::fprintf(stderr, "[proof-pkg] rebind rename %s: %d %s\n", g_rebind_source.string().c_str(),
+                 ignored.value(), ignored.message().c_str());
     if (g_rebind_replacement_file.empty()) {
+        ignored.clear();
         fs::create_directory(g_rebind_source, ignored);
-        std::ofstream(g_rebind_source / "replacement.txt") << "replacement";
+        std::fprintf(stderr, "[proof-pkg] rebind mkdir: %d %s\n", ignored.value(), ignored.message().c_str());
+        std::ofstream out(g_rebind_source / "replacement.txt");
+        out << "replacement";
+        std::fprintf(stderr, "[proof-pkg] rebind replacement write ok=%d\n", out ? 1 : 0);
     } else {
-        std::ofstream(g_rebind_replacement_file) << "replacement";
+        std::ofstream out(g_rebind_replacement_file);
+        out << "replacement";
+        std::fprintf(stderr, "[proof-pkg] rebind replacement-file write ok=%d\n", out ? 1 : 0);
     }
 }
 
@@ -728,7 +740,12 @@ TEST_CASE("Package writer rejects a root pathname rebound away from its lock",
     REQUIRE(writer);
     const auto displaced =
         temporary.path.parent_path() / (temporary.path.filename().string() + "-displaced");
-    fs::rename(temporary.path, displaced);
+    {
+        std::error_code rename_error;
+        fs::rename(temporary.path, displaced, rename_error);
+        std::fprintf(stderr, "[proof-pkg] root rebind rename: %d %s\n", rename_error.value(),
+                     rename_error.message().c_str());
+    }
     fs::create_directories(temporary.path / "media");
     const std::vector<std::uint8_t> bytes{'p', 'i', 'n'};
 
@@ -902,7 +919,7 @@ TEST_CASE("Project package readers observe one complete generation during public
     reader.join();
 
     if (reader_package_error) {
-        INFO("concurrent open PackageErrorCode=" << static_cast<int>(reader_package_error->code)
+        UNSCOPED_INFO("concurrent open PackageErrorCode=" << static_cast<int>(reader_package_error->code)
                                                  << " path="
                                                  << reader_package_error->path.string());
     }
@@ -1256,7 +1273,12 @@ TEST_CASE("Atomic publication matches Windows DACL inheritance for trees and fil
     auto file_publisher = AtomicPublisher::create_file(published_file);
     REQUIRE(file_publisher);
     REQUIRE(dacl_matches_sddl(file_publisher->staging_file(), kPrivatePublicationFileDacl));
-    std::ofstream(file_publisher->staging_file()) << "published";
+    {
+        std::ofstream out(file_publisher->staging_file());
+        out << "published";
+        out.flush();
+        std::fprintf(stderr, "[proof-pkg] dacl staging write ok=%d\n", out ? 1 : 0);
+    }
     g_published_permission_observation_path = published_file;
     g_published_permission_observation_is_directory = false;
     g_published_permission_observed = false;
@@ -1265,6 +1287,10 @@ TEST_CASE("Atomic publication matches Windows DACL inheritance for trees and fil
         observe_private_published_permissions);
     const auto file_committed = file_publisher->commit_file(file_publisher->staging_file());
     pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    if (!file_committed)
+        UNSCOPED_INFO("proof-pkg dacl commit_file error code="
+                      << static_cast<int>(file_committed.error().code)
+                      << " path=" << file_committed.error().path.string());
     REQUIRE(file_committed);
     REQUIRE(file_committed.value() == AtomicPublishOutcome::PublishedDurably);
     REQUIRE(g_published_permission_observed);
@@ -1728,6 +1754,9 @@ TEST_CASE("Atomic project-package publisher rejects staged symlinks",
         SKIP("symlink creation is unavailable: " << error.message());
 
     const auto committed = publisher->commit_directory();
+    if (!committed)
+        UNSCOPED_INFO("proof-pkg commit_file error code=" << static_cast<int>(committed.error().code)
+                      << " path=" << committed.error().path.string());
     REQUIRE_FALSE(committed);
     REQUIRE(committed.error().code == PackageErrorCode::InvalidLayout);
     REQUIRE_FALSE(fs::exists(destination));
@@ -2017,6 +2046,10 @@ TEST_CASE("Package writer fences the same pre-existing blob handle that it verif
     g_swap_after_blob_verification.clear();
     g_blob_swap_source.clear();
 
+    if (!restaged)
+        UNSCOPED_INFO("proof-pkg restage error code=" << static_cast<int>(restaged.error().code));
+    else
+        UNSCOPED_INFO("proof-pkg restage succeeded");
     REQUIRE_FALSE(restaged);
     REQUIRE(restaged.error().code == PackageErrorCode::DurabilityUncertain);
 }
