@@ -41,6 +41,11 @@ std::optional<int> validate_browser_import_cli_options(
                      "--materialized-canvas-composition\n";
         return 2;
     }
+    if (require_canvas_ink && offline) {
+        std::cerr << "Error: --require-canvas-ink cannot be combined with "
+                     "--offline\n";
+        return 2;
+    }
     return std::nullopt;
 }
 

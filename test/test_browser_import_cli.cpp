@@ -158,6 +158,9 @@ TEST_CASE("authored-frame CLI policy rejects every incompatible route",
           2);
     CHECK_FALSE(validate_browser_import_cli_options(
         false, false, false, false, false, false, false, true, true));
+    CHECK(validate_browser_import_cli_options(
+              false, false, false, true, false, false, false, true, true) ==
+          2);
     CHECK_FALSE(validate_browser_import_cli_options(
         true, false, false, false, false, false, false, false));
 

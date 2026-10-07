@@ -46,6 +46,21 @@ BrowserHtmlImportResult import_browser_html(
         request.source != pulp::view::DesignSource::stitch) {
         return BrowserHtmlNotApplicable{};
     }
+    if (request.require_canvas_ink &&
+        !request.materialized_canvas_composition) {
+        return BrowserHtmlFailure{
+            2,
+            "--require-canvas-ink requires --materialized-canvas-composition",
+            "",
+            {}};
+    }
+    if (request.require_canvas_ink && request.offline) {
+        return BrowserHtmlFailure{
+            2,
+            "--require-canvas-ink cannot be combined with --offline",
+            "",
+            {}};
+    }
     const auto intake = classify_html_intake(request.input_file, content);
     const auto shape = html_export_shape_name(intake.shape);
     if (!intake.use_browser) return BrowserHtmlNotApplicable{};
