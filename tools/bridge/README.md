@@ -25,7 +25,9 @@ still a follow-up seam. `begin_gesture` and `end_gesture` remain contract
 declarations until their host gesture lifetime is integrated.
 
 The generated C++ header and TypeScript wrapper remain source-tree artifacts in
-this slice. SDK packaging/export, an installed generation workflow, and
+this slice. The TypeScript wrapper includes `jsonTransport`, which serializes
+the generated request envelope and parses the JSON response at the bridge
+boundary. SDK packaging/export, an installed generation workflow, and
 `@pulp/react` integration remain explicit follow-up boundaries.
 
 The generated-client integration test uses Node's `--experimental-strip-types`

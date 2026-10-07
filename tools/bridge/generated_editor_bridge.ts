@@ -42,6 +42,17 @@ export type EditorBridgeResult<T extends object> = EditorBridgeResponse<T> | Pro
 
 export type EditorBridgeTransport = (request: EditorBridgeRequest) => unknown | Promise<unknown>;
 
+export type EditorBridgeJsonTransport = (requestJson: string) => string | Promise<string>;
+
+export function jsonTransport(transport: EditorBridgeJsonTransport): EditorBridgeTransport {
+  return request => {
+    const response = transport(JSON.stringify(request));
+    if (response instanceof Promise)
+      return response.then(value => JSON.parse(value) as unknown);
+    return JSON.parse(response) as unknown;
+  };
+}
+
 export function beginGesture(transport: EditorBridgeTransport, key: string): EditorBridgeResult<BeginGestureResponse> {
   return transport({ type: "begin_gesture", payload: { key: key } }) as EditorBridgeResult<BeginGestureResponse>;
 }

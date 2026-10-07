@@ -4,7 +4,7 @@
 
 The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.
 
-The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.
+The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. SDK packaging/export, an installed generation workflow, `@pulp/react` integration, and the production stable wire-key→`ParamID` map remain follow-up boundaries.
 
 ## Commands
 
