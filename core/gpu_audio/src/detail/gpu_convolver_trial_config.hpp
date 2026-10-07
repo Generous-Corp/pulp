@@ -84,6 +84,7 @@ inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& co
            valid_provider_identity_component(context.provider_identity.adapter_backend) &&
            context.provider_identity.adapter_vendor_id != 0 &&
            context.provider_identity.adapter_device_id != 0 &&
+           valid_provider_identity_component(context.provider_identity.immutable_receipt_digest) &&
            context.provider_identity.native_runtime_authenticated &&
            valid_provider_identity_component(context.provider_identity.native_runtime_name) &&
            valid_provider_identity_component(context.provider_identity.native_runtime_backend) &&

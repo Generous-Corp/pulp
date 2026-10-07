@@ -65,13 +65,20 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
            << (context.workgroup_requested ? "true" : "false") << R"(,"workgroup_joined":)"
            << (context.workgroup_joined ? "true" : "false") << R"(,"thermal_state":")" << thermal
            << R"(","deadline_ns":)" << context.deadline_ns << R"(,"watchdog_ns":)"
-           << context.watchdog_ns << R"(,"provenance":{"authenticated":true,"provider_revision":")"
-           << context.provider_identity.provider_revision << R"(","adapter_name":")"
-           << context.provider_identity.adapter_name << R"(","adapter_backend":")"
-           << context.provider_identity.adapter_backend
-           << R"(","native_runtime_authenticated":true,"native_runtime_name":")"
-           << context.provider_identity.native_runtime_name << R"(","native_runtime_backend":")"
-           << context.provider_identity.native_runtime_backend << R"("})" << "}\n";
+           << context.watchdog_ns << R"(,"provenance":{"authenticated":)"
+           << (context.provider_identity.authenticated ? "true" : "false")
+           << R"(,"provider_revision":")" << context.provider_identity.provider_revision
+           << R"(","adapter_name":")" << context.provider_identity.adapter_name
+           << R"(","adapter_backend":")" << context.provider_identity.adapter_backend
+           << R"(","adapter_vendor_id":)" << context.provider_identity.adapter_vendor_id
+           << R"(,"adapter_device_id":)" << context.provider_identity.adapter_device_id
+           << R"(,"immutable_receipt_digest":")"
+           << context.provider_identity.immutable_receipt_digest
+           << R"(","native_runtime_authenticated":)"
+           << (context.provider_identity.native_runtime_authenticated ? "true" : "false")
+           << R"(,"native_runtime_name":")" << context.provider_identity.native_runtime_name
+           << R"(","native_runtime_backend":")" << context.provider_identity.native_runtime_backend
+           << R"("})" << "}\n";
 
     for (std::size_t ordinal = 0; ordinal < records.size(); ++ordinal) {
         const auto& record = records[ordinal];
@@ -85,6 +92,7 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
                << context.trial_id << R"(,"pair_id":)" << context.pair_id << R"(,"path":")" << path
                << R"(","block_ordinal":)" << ordinal << R"(,"sequence":)" << record.sequence
                << R"(,"gpu_terminal":")" << shared_io_gpu_terminal_name(record.gpu_terminal)
+               << R"(","identity_digest":")" << context.provider_identity.immutable_receipt_digest
                << R"(","delivery":")" << shared_io_delivery_name(record.delivery)
                << R"(","gpu_reason":")" << shared_io_fallback_reason_name(record.gpu_reason)
                << R"(","delivery_reason":")"

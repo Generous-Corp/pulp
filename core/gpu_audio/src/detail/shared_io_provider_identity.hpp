@@ -15,6 +15,7 @@ struct SharedIoProviderIdentity {
     std::string adapter_backend;
     std::uint64_t adapter_vendor_id = 0;
     std::uint64_t adapter_device_id = 0;
+    std::string immutable_receipt_digest;
     bool native_runtime_authenticated = false;
     std::string native_runtime_name;
     std::string native_runtime_backend;
