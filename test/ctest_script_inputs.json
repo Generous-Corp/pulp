@@ -1418,6 +1418,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-gpu-wavenet-session": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_gpu_wavenet_session.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_gpu_wavenet_session.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-group-app-host": {
    "data": "declared",
    "detected_sources": [
@@ -2279,16 +2293,12 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
-  "pulp-gpu-audio-coreaudio-workgroup-benchmark",
-  "pulp-gpu-audio-p4-matched-convolution-benchmark",
-  "pulp-gpu-audio-p4-raw-screening",
   "pulp-gpu-dawn-shared-io-provider-probe",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
   "pulp-gpu-same-device-paired-probe",
   "pulp-gpu-same-device-storage-probe",
   "pulp-gpu-shared-io-convolution-session-probe",
-  "pulp-gpu-shared-io-paced-convolution-probe",
   "pulp-gpu-shared-io-private-convolution-probe",
   "pulp-gpu-shared-spectral-probe",
   "pulp-heritage-adaptive-calibration-render",
@@ -6808,13 +6818,6 @@
    ],
    "kind": "node"
   },
-  "pulp-gpu-audio-p2-campaign-contract": {
-   "entry": "tools/scripts/gpu_audio_p2_campaign.py",
-   "inputs": [
-    "tools/scripts/gpu_audio_p2_campaign.py"
-   ],
-   "kind": "python"
-  },
   "pulp-gpu-audio-provider-identity": {
    "entry": "tools/scripts/gpu_audio_provider_identity.py",
    "inputs": [
@@ -6851,13 +6854,6 @@
     "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "test/cmake/render_gpu_surface_tests.cmake",
     "test/test_gpu_dawn_vellum_d15_source.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-shared-io-paced-convolution-probe": {
-   "entry": "test/verify_gpu_shared_io_paced_convolution.py",
-   "inputs": [
-    "test/verify_gpu_shared_io_paced_convolution.py"
    ],
    "kind": "python"
   },
