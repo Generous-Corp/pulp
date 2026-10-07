@@ -12,6 +12,9 @@ namespace pulp::gpu_audio::detail {
 
 class SharedIoComputePlan {
   public:
+    // Fixed storage keeps the RT-facing admission path allocation-free. A
+    // diagnostic campaign that exceeds this bound is invalidated explicitly.
+    static constexpr std::size_t kLifecycleReceiptCapacity = 4096;
     struct Config {
         std::uint32_t slots = 0;
         std::size_t input_bytes_per_slot = 0;
@@ -30,6 +33,23 @@ class SharedIoComputePlan {
         bool late = false;
         std::uint64_t gpu_elapsed_ns = 0;
         bool gpu_elapsed_available = false;
+    };
+    // Private diagnostic lifecycle evidence. GPU timestamps remain unavailable
+    // until the provider supplies an authenticated timestamp query.
+    struct LifecycleReceipt {
+        std::uint64_t generation = 0;
+        std::uint64_t sequence = 0;
+        std::int64_t submit_ns = -1;
+        std::int64_t terminal_ns = -1;
+        std::int64_t service_ns = -1;
+        std::int64_t delivery_ns = -1;
+        std::int64_t gpu_elapsed_ns = -1;
+        bool terminal = false;
+        bool output_acquired = false;
+        bool output_released = false;
+        bool discarded = false;
+        bool device_lost = false;
+        bool gpu_timestamp_available = false;
     };
     struct Telemetry {
         std::uint64_t payload_bytes_copied = 0;
@@ -82,27 +102,31 @@ class SharedIoComputePlan {
     std::size_t drain(std::uint64_t now_ns) noexcept;
     std::size_t drain_until(std::uint64_t now_ns, std::uint64_t service_deadline_ns) noexcept;
     std::optional<Completion> pop_completion() noexcept;
-    std::optional<SharedIoArena::OutputLease>
-    acquire_output(const Completion& completion) noexcept {
-        if (completion.status != SharedIoArena::CompletionStatus::RetiredSuccess)
-            return std::nullopt;
-        return arena_.acquire_output(completion.token.slot.preparation_epoch,
-                                     completion.token.slot.stream_sequence);
+    std::vector<LifecycleReceipt> take_lifecycle_receipts() {
+        // Receipt extraction is a quiescent diagnostic operation. Keeping the
+        // live vector intact while work is pending prevents partial evidence.
+        if (!arena_.quiescent())
+            return {};
+        std::vector<LifecycleReceipt> result(lifecycle_receipts_.begin(),
+                                             lifecycle_receipts_.end());
+        lifecycle_receipts_.clear();
+        return result;
     }
-    bool expire_delivery(const Completion& completion) noexcept {
-        return arena_.expire_delivery(completion.token.slot);
+    bool lifecycle_receipt_overflow() const noexcept {
+        return lifecycle_receipt_overflow_;
     }
+    bool lifecycle_receipt_valid() const noexcept {
+        return !lifecycle_receipt_overflow_ && !completion_receipt_overflow_;
+    }
+    std::optional<SharedIoArena::OutputLease> acquire_output(const Completion&) noexcept;
+    bool expire_delivery(const Completion&) noexcept;
     // Terminal failure and expired success retain storage until this explicit
     // non-RT disposition relinquishes the exact token.
-    bool discard_completion(const Completion& completion) noexcept {
-        return arena_.discard(completion.token.slot);
-    }
+    bool discard_completion(const Completion&) noexcept;
     // Host/quiescent only. Reuses the persistent slot allocations while
     // advancing epoch identity, so prior completion/token records are stale.
     bool reprime_when_quiescent() noexcept;
-    bool release_output(const SharedIoArena::ReleaseRecord& record) noexcept {
-        return arena_.release_output(record);
-    }
+    bool release_output(const SharedIoArena::ReleaseRecord&) noexcept;
     bool release() noexcept {
         const bool released = arena_.release();
         if (released)
@@ -125,12 +149,17 @@ class SharedIoComputePlan {
                             SharedIoArena::CompletionStatus status) noexcept;
     void record_terminal(const SharedIoSlotLedger::SlotToken& token,
                          SharedIoArena::CompletionStatus status) noexcept;
+    LifecycleReceipt* receipt_for(const SharedIoSlotLedger::SlotToken&) noexcept;
 
     SharedIoArena arena_;
     SharedIoArenaProvider* provider_ = nullptr;
     SharedIoExecutionPredictor predictor_;
     std::vector<Pending> pending_;
     std::vector<Completion> completions_;
+    std::vector<LifecycleReceipt> lifecycle_receipts_;
+    std::vector<std::size_t> receipt_index_by_slot_;
+    bool lifecycle_receipt_overflow_ = false;
+    bool completion_receipt_overflow_ = false;
     std::size_t completion_read_ = 0;
     std::size_t completion_write_ = 0;
     Telemetry telemetry_;
