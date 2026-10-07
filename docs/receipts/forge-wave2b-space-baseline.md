@@ -24,3 +24,6 @@ The extraction was replayed onto current `origin/main` at
 - No compile-time improvement claim is made yet; a before/after include-time
   measurement remains a follow-up rather than inferred from the line-count
   reduction.
+- The new out-of-line implementation translation unit reaches the existing
+  `load_measurer.hpp` closure once; this is an intentional implementation-TU
+  edge, not a public-header include.
