@@ -41,11 +41,21 @@ class Finding:
 
 
 def validate_corpus_manifest(source: Path, manifest_path: Path) -> str | None:
-    """Verify that a captured output corpus is the exact recorded artifact."""
+    """Verify that a captured output corpus is the exact recorded artifact.
+
+    A digest check alone is insufficient for a corpus: an unlisted source file
+    can still be linted while remaining outside the recorded artifact set, and
+    a duplicate or non-canonical path makes the manifest order dependent.  We
+    therefore bind the manifest to the complete source suffix set and require
+    canonical, sorted relative paths.  This keeps two agents running the gate
+    against the same corpus from silently describing different trees.
+    """
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return f"generated-output manifest cannot be read: {exc}"
+    if not isinstance(manifest, dict):
+        return "generated-output manifest must be a JSON object"
     if manifest.get("schema") != "pulp.clean-output-corpus.v1":
         return "generated-output manifest has an unsupported schema"
     if manifest.get("producer") != "pulp import-design --emit source":
@@ -53,21 +63,66 @@ def validate_corpus_manifest(source: Path, manifest_path: Path) -> str | None:
     files = manifest.get("files")
     if not isinstance(files, list) or not files:
         return "generated-output manifest must list at least one file"
-    root = source.resolve()
+    if source.is_symlink():
+        return "generated-output corpus source root must not be a symlink"
+    if not source.exists():
+        return f"generated-output corpus source root is missing: {source}"
+    source_root = source if source.is_dir() else source.parent
+    root = source_root.resolve()
+    manifest_paths: list[str] = []
+    seen_paths: set[str] = set()
     for entry in files:
         if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or \
                 not isinstance(entry.get("sha256"), str):
             return "generated-output manifest contains a malformed file entry"
-        path = (source / entry["path"]).resolve()
+        relative = entry["path"]
+        relative_path = Path(relative)
+        if (not relative or "\x00" in relative or relative_path.is_absolute() or
+                relative_path.as_posix() != relative or
+                any(part in ("", ".", "..") for part in relative_path.parts) or
+                "\\" in relative):
+            return f"generated-output manifest path is not canonical: {relative}"
+        if relative in seen_paths:
+            return f"generated-output manifest contains duplicate file path: {relative}"
+        seen_paths.add(relative)
+        manifest_paths.append(relative)
+        digest = entry["sha256"]
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            return f"generated-output manifest has an invalid sha256 for {relative}"
+        unresolved_path = source_root / relative
+        if unresolved_path.is_symlink():
+            return f"generated-output manifest file must not be a symlink: {relative}"
+        path = unresolved_path.resolve()
         try:
             path.relative_to(root)
         except ValueError:
-            return f"generated-output manifest path escapes the source root: {entry['path']}"
+            return f"generated-output manifest path escapes the source root: {relative}"
         if not path.is_file():
-            return f"generated-output manifest file is missing: {entry['path']}"
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if digest != entry["sha256"]:
-            return f"generated-output manifest hash mismatch: {entry['path']}"
+            return f"generated-output manifest file is missing: {relative}"
+        actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual_digest != digest:
+            return f"generated-output manifest hash mismatch: {relative}"
+
+    if manifest_paths != sorted(manifest_paths):
+        return "generated-output manifest file paths are not sorted"
+
+    actual_files = _source_files(source)
+    actual_paths = [
+        path.relative_to(source if source.is_dir() else source.parent).as_posix()
+        for path in actual_files
+    ]
+    if any(path.is_symlink() for path in actual_files):
+        relative = next(path.relative_to(source_root).as_posix()
+                        for path in actual_files if path.is_symlink())
+        return f"generated-output corpus file must not be a symlink: {relative}"
+    expected = set(actual_paths)
+    recorded = set(manifest_paths)
+    missing = sorted(expected - recorded)
+    extra = sorted(recorded - expected)
+    if missing:
+        return "generated-output manifest omits source file(s): " + ", ".join(missing)
+    if extra:
+        return "generated-output manifest lists non-source file(s): " + ", ".join(extra)
     return None
 
 
