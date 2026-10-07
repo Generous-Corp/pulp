@@ -1,8 +1,7 @@
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-#include "detail/dawn_shared_io_provider.hpp"
-#include "detail/dawn_shared_io_wavenet_program.hpp"
+#include "detail/dawn_wavenet_factory.hpp"
 #include "detail/shared_io_program_session.hpp"
 #endif
 
@@ -49,9 +48,6 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
     result.error = GpuWaveNetSessionError::ProviderUnavailable;
     return result;
 #else
-#ifndef PULP_GPU_AUDIO_EXPECTED_DAWN_SHA
-#define PULP_GPU_AUDIO_EXPECTED_DAWN_SHA ""
-#endif
     try {
         std::vector<std::vector<std::uint32_t>> dilations;
         std::vector<detail::DawnSharedIoWavenetLayerSpec> arrays;
@@ -84,21 +80,14 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
             return result;
         }
 
-        auto policy = detail::DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
-        if (config.completion_policy == GpuWaveNetCompletionPolicy::WaitAny)
-            policy = detail::DawnSharedIoProvider::CompletionPolicy::WaitAny;
-        if (config.completion_policy == GpuWaveNetCompletionPolicy::TimedWaitAny)
-            policy = detail::DawnSharedIoProvider::CompletionPolicy::TimedWaitAny;
-        auto created = detail::DawnSharedIoProvider::create(
-            {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
-             .completion_policy = policy,
-             .completion_wait_ns = config.completion_wait_ns});
+        auto created =
+            detail::create_dawn_wavenet(spec, {.completion_policy = config.completion_policy,
+                                               .completion_wait_ns = config.completion_wait_ns});
         if (!created.provider) {
             result.error = GpuWaveNetSessionError::ProviderUnavailable;
             return result;
         }
-        auto program = created.provider->make_wavenet_program(spec);
-        if (!program) {
+        if (!created.program) {
             result.error = GpuWaveNetSessionError::ProgramUnavailable;
             return result;
         }
@@ -109,10 +98,10 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
         // what they requested, while support reports the provider's actual
         // policy after any backend fallback.
         impl->completion_policy = config.completion_policy;
-        impl->completion_policy_supported = created.provider->completion_policy() == policy;
+        impl->completion_policy_supported = created.effective_policy == created.requested_policy;
         impl->session = std::make_unique<detail::SharedIoProgramSession>();
         const auto bytes = static_cast<std::size_t>(config.descriptor.block_size) * sizeof(float);
-        if (!impl->session->prepare({std::move(created.provider), std::move(program)},
+        if (!impl->session->prepare({std::move(created.provider), std::move(created.program)},
                                     {.slots = config.slots,
                                      .input_bytes_per_slot = bytes,
                                      .output_bytes_per_slot = bytes})) {
