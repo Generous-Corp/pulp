@@ -32,7 +32,7 @@ def run(provider: str, classify: str, *, native: str = "false", receipt: str = "
             "CLASSIFY_FALLBACK_CMD": f"touch {marker}; echo progress; echo {fallback}; exit {fallback_rc}",
         })
         proc = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True,
-                              timeout=30)
+                              timeout=30, encoding="utf-8")
         return proc.returncode, proc.stdout + proc.stderr, marker.exists()
 
 

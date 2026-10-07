@@ -103,8 +103,8 @@ class RepoPlanApply(unittest.TestCase):
     def _checkout(self) -> pathlib.Path:
         d = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
-        (d / "pulp.toml").write_text('sdk_version = "0.638.1"\n')
-        (d / "CMakeLists.txt").write_text("find_package(Pulp 0.638.1 CONFIG)\n")
+        (d / "pulp.toml").write_text('sdk_version = "0.638.1"\n', encoding="utf-8")
+        (d / "CMakeLists.txt").write_text("find_package(Pulp 0.638.1 CONFIG)\n", encoding="utf-8")
         return d
 
     def test_plan_reports_changes_without_writing(self):
@@ -114,14 +114,14 @@ class RepoPlanApply(unittest.TestCase):
         self.assertIn("CMakeLists.txt", plan)
         self.assertTrue(plan["pulp.toml"]["changes"])
         # Nothing was written.
-        self.assertIn("0.638.1", (d / "pulp.toml").read_text())
+        self.assertIn("0.638.1", (d / "pulp.toml").read_text(encoding="utf-8"))
 
     def test_apply_writes_both_files(self):
         d = self._checkout()
         changed = MOD.apply_repo_update(d, "0.640.0")
         self.assertEqual(set(changed), {"pulp.toml", "CMakeLists.txt"})
-        self.assertIn("0.640.0", (d / "pulp.toml").read_text())
-        self.assertIn("find_package(Pulp 0.640.0", (d / "CMakeLists.txt").read_text())
+        self.assertIn("0.640.0", (d / "pulp.toml").read_text(encoding="utf-8"))
+        self.assertIn("find_package(Pulp 0.640.0", (d / "CMakeLists.txt").read_text(encoding="utf-8"))
 
     def test_apply_noop_when_already_current(self):
         d = self._checkout()
@@ -132,7 +132,7 @@ class RepoPlanApply(unittest.TestCase):
     def test_plan_empty_for_no_pin(self):
         d = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
-        (d / "pulp.toml").write_text('sdk_version = "latest"\n')  # floating, no concrete pin
+        (d / "pulp.toml").write_text('sdk_version = "latest"\n', encoding="utf-8")  # floating, no concrete pin
         plan = MOD.plan_repo_update(d, "0.640.0")
         # 'latest' is detected as present-but-not-a-semver: no changes.
         self.assertFalse(any(v["changes"] for v in plan.values()))
@@ -245,7 +245,7 @@ class UpdateCli(unittest.TestCase):
         d = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         (d / "pulp-gpu-nam").mkdir()
-        (d / "pulp-gpu-nam" / "pulp.toml").write_text('sdk_version = "0.638.1"\n')
+        (d / "pulp-gpu-nam" / "pulp.toml").write_text('sdk_version = "0.638.1"\n', encoding="utf-8")
         consumers = {"repos": [{"repo": "o/pulp-gpu-nam",
                                 "status": {"state": "build-pass"}}]}
 
@@ -259,7 +259,7 @@ class UpdateCli(unittest.TestCase):
         self.assertEqual(rc, 0)
         opened.assert_not_called()          # dry-run must not open a PR
         # And the dry-run left the pin untouched on disk.
-        self.assertIn("0.638.1", (d / "pulp-gpu-nam" / "pulp.toml").read_text())
+        self.assertIn("0.638.1", (d / "pulp-gpu-nam" / "pulp.toml").read_text(encoding="utf-8"))
 
     def test_dryrun_temp_workdir_is_cleaned_up(self):
         # With no --workdir the tool mints a temp dir; a dry run must not leave it
@@ -271,7 +271,7 @@ class UpdateCli(unittest.TestCase):
 
         def fake_clone(repo, dest):
             dest.mkdir(parents=True, exist_ok=True)
-            (dest / "pulp.toml").write_text('sdk_version = "0.638.1"\n')
+            (dest / "pulp.toml").write_text('sdk_version = "0.638.1"\n', encoding="utf-8")
             return True, "cloned"
 
         args = mock.Mock(to="0.640.0", only=None, open_prs=False, workdir=None)
@@ -283,4 +283,7 @@ class UpdateCli(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # The tool under test prints non-ASCII marks; a Windows pipe defaults to
+    # the ANSI code page, which cannot encode them.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     unittest.main()

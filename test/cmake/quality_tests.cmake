@@ -1089,6 +1089,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gate-common-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_common.py")
 
+    # Every enforcing lint block in gates.sh must set the failure flag: a block
+    # that reports and falls through lets a red lint pass the whole gate.
+    add_test(NAME gates-sh-fail-flag-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gates_lint_blocks.py")
+
     # The bypass trailers that withhold a release tag, classified through the
     # same parse the pre-merge gates use. A tag that is withheld by a trailer
     # nobody declared reports nothing at all, so this failure mode has no other

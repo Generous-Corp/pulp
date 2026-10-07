@@ -48,7 +48,7 @@ def method_bodies(lines: list[str]):
 
 
 def check(path: pathlib.Path) -> list[str]:
-    lines = path.read_text().split("\n")
+    lines = path.read_text(encoding="utf-8").split("\n")
     emitters, missing = [], []
     for name, body in method_bodies(lines):
         if not any(EMIT.search(b) for b in body):

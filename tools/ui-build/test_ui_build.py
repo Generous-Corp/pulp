@@ -33,7 +33,7 @@ class UiBuildContractTests(unittest.TestCase):
     def run_cli_in(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SCRIPT), *args], cwd=root,
-            text=True, capture_output=True, check=False)
+            text=True, capture_output=True, check=False, encoding="utf-8")
 
     def test_build_then_check_is_deterministic(self):
         built = self.run_cli("build", "--source", "native-ui/src", "--out", "build/native-ui", "--json")

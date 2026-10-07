@@ -164,16 +164,16 @@ class CliTests(unittest.TestCase):
     def test_the_cli_writes_the_ledger_and_names_missing_days(self):
         with tempfile.TemporaryDirectory() as tmp:
             runs = Path(tmp) / "runs.json"
-            runs.write_text(json.dumps({"workflow_runs": [run(1, "2026-10-03T14:00:00Z"), run(2, "2026-10-05T10:00:00Z")]}))
+            runs.write_text(json.dumps({"workflow_runs": [run(1, "2026-10-03T14:00:00Z"), run(2, "2026-10-05T10:00:00Z")]}), encoding="utf-8")
             verdicts = Path(tmp) / "verdicts.json"
-            verdicts.write_text(json.dumps({"1": "clean", "2": "clean"}))
+            verdicts.write_text(json.dumps({"1": "clean", "2": "clean"}), encoding="utf-8")
             proc = subprocess.run([sys.executable, str(HERE / "read_audit_cadence.py"), "--runs", str(runs),
                                    "--verdicts", str(verdicts),
                                    "--start", "2026-10-03", "--now", "2026-10-05T12:00:00+00:00",
                                    "--out", f"{tmp}/l.json", "--summary", f"{tmp}/l.md"],
-                                  capture_output=True, text=True, timeout=60)
-            doc = json.loads((Path(tmp) / "l.json").read_text())
-            md = (Path(tmp) / "l.md").read_text()
+                                  capture_output=True, text=True, timeout=60, encoding="utf-8")
+            doc = json.loads((Path(tmp) / "l.json").read_text(encoding="utf-8"))
+            md = (Path(tmp) / "l.md").read_text(encoding="utf-8")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual((doc["streak"]["count"], doc["missing"]), (1, ["2026-10-04"]))
         self.assertIn("**2026-10-04**", md)
@@ -183,11 +183,11 @@ class CliTests(unittest.TestCase):
 class WorkflowTests(unittest.TestCase):
     def test_the_check_is_scheduled_hosted_and_backstopped(self):
         root = HERE.parents[1]
-        text = (root / ".github/workflows/read-audit-cadence-check.yml").read_text()
+        text = (root / ".github/workflows/read-audit-cadence-check.yml").read_text(encoding="utf-8")
         self.assertIn("tools/ci/read_audit_cadence.py", text)
         self.assertIn("read-audit-nightly.yml/runs", text)
         self.assertIn("schedule:", text)
-        manifest = json.loads((root / ".github/schedule-backstop.json").read_text())
+        manifest = json.loads((root / ".github/schedule-backstop.json").read_text(encoding="utf-8"))
         self.assertIn("read-audit-cadence-check.yml", {r["file"] for r in manifest["workflows"]})
 
 
