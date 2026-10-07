@@ -1,4 +1,5 @@
 #include "detail/gpu_convolver_raw_trace_jsonl.hpp"
+#include "detail/gpu_convolver_trace_jsonl.hpp"
 #include "detail/shared_io_convolution_session.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
@@ -1306,12 +1307,81 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     context.deadline_ns = 1000;
     context.watchdog_ns = 2000;
     context.transfer_counters_direct = context.timing_provenance_direct = true;
+    context.provider_identity = {.authenticated = true,
+                                 .provider_revision = "provider-rev",
+                                 .adapter_name = "adapter",
+                                 .adapter_backend = "backend",
+                                 .adapter_vendor_id = 1,
+                                 .adapter_device_id = 2,
+                                 .native_runtime_authenticated = true,
+                                 .native_runtime_name = "runtime",
+                                 .native_runtime_backend = "runtime-backend"};
     REQUIRE(valid_gpu_convolver_trial_context(context));
     context.max_inflight = 3;
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
     context.max_inflight = 2;
     context.thermal_state = static_cast<GpuConvolverThermalState>(255);
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
+    context.thermal_state = GpuConvolverThermalState::Unavailable;
+    context.provider_identity.adapter_name = "adapter\"forged";
+    REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
+}
+
+TEST_CASE("P4 trace projection keeps provider and timing provenance explicit",
+          "[gpu_audio][trace][p4]") {
+    GpuConvolverTrialContext context;
+    context.trial_id = context.pair_id = 1;
+    context.block_frames = context.channels = context.ir_frames = 1;
+    context.sample_rate_hz = 48000;
+    context.inflight_depth = 3;
+    context.queue_capacity = 4;
+    context.max_inflight = 2;
+    context.lead_blocks = 2;
+    context.deadline_ns = 1000;
+    context.watchdog_ns = 2000;
+    context.transfer_counters_direct = context.timing_provenance_direct = true;
+    context.provider_identity = {.authenticated = true,
+                                 .provider_revision = "provider-rev",
+                                 .adapter_name = "adapter",
+                                 .adapter_backend = "backend",
+                                 .adapter_vendor_id = 1,
+                                 .adapter_device_id = 2,
+                                 .native_runtime_authenticated = true,
+                                 .native_runtime_name = "runtime",
+                                 .native_runtime_backend = "runtime-backend"};
+    SharedIoTraceRecord terminal;
+    terminal.generation = 1;
+    terminal.sequence = 7;
+    terminal.gpu_work_admitted = true;
+    terminal.gpu_terminal = SharedIoGpuTerminalDisposition::CompletedAccepted;
+    terminal.outcome = SharedIoTraceOutcome::Success;
+    terminal.reason = terminal.gpu_reason = SharedIoFallbackReason::None;
+    terminal.set(SharedIoTraceStage::SubmitBegin, 100);
+    terminal.set(SharedIoTraceStage::CompletionObserved, 200);
+    std::ostringstream output;
+    REQUIRE(write_gpu_convolver_trace_jsonl(output, context, std::span{&terminal, 1}));
+    const auto text = output.str();
+    CHECK(text.find("\"authenticated\":true") != std::string::npos);
+    CHECK(text.find("\"gpu_terminal\":\"completed_accepted\"") != std::string::npos);
+    CHECK(text.find("\"delivery\":") != std::string::npos);
+    CHECK(text.find("\"delivery_reason\":\"none\"") != std::string::npos);
+    CHECK(text.find("\"gpu_elapsed\":{\"availability\":\"unavailable\"}") != std::string::npos);
+    terminal.callback_timing_available = true;
+    terminal.callback_start_ns = 300;
+    terminal.callback_end_ns = 350;
+    terminal.result_visible_ns = 400;
+    terminal.gpu_elapsed_available = true;
+    terminal.gpu_elapsed_ns = 42;
+    output.str("");
+    output.clear();
+    REQUIRE(write_gpu_convolver_trace_jsonl(output, context, std::span{&terminal, 1}));
+    CHECK(output.str().find("\"availability\":\"available\",\"value_ns\":42") != std::string::npos);
+    CHECK(output.str().find("callback_direct") != std::string::npos);
+    terminal.callback_end_ns = 299;
+    output.str("");
+    output.clear();
+    CHECK_FALSE(write_gpu_convolver_trace_jsonl(output, context, std::span{&terminal, 1}));
+    CHECK(output.str().empty());
 }
 
 TEST_CASE("P4 receipt rejects an unsafe queue admission geometry", "[gpu_audio][trace][raw][p4]") {
