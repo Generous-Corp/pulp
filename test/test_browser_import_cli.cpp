@@ -1267,7 +1267,8 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
                  .height = 32,
                  .require_canvas_ink = true});
         CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("at least one non-transparent") != std::string::npos);
+        CHECK(rejected.error.find("at least 256 opaque canvas pixels") !=
+              std::string::npos);
 
         const auto allowed = id::validate_browser_capture_design_ir(
             ir, {.reference = reference_path,
@@ -1279,29 +1280,32 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
         CHECK(allowed.scored);
     }
 
-    SECTION("low-contrast opaque pixels still satisfy the alpha ink contract") {
+    SECTION("127 isolated opaque specks do not satisfy the coverage floor") {
         id::ImportPngImage specks;
         specks.width = evidence.width;
         specks.height = evidence.height;
         specks.rgba.resize(evidence.rgba.size(), 0);
-        for (std::size_t pixel = 0; pixel < 16; ++pixel) {
+        for (std::size_t pixel = 0; pixel < 127; ++pixel) {
             const auto offset = pixel * 4;
-            specks.rgba[offset] = 39;
-            specks.rgba[offset + 1] = 39;
-            specks.rgba[offset + 2] = 39;
+            // Deliberately dark and opaque: brightness must not be part of the
+            // contract, while isolated coverage must still fail closed.
+            specks.rgba[offset] = 5;
+            specks.rgba[offset + 1] = 6;
+            specks.rgba[offset + 2] = 9;
             specks.rgba[offset + 3] = 255;
         }
         tree.write(evidence_path, id::encode_png_rgba(specks));
 
-        const auto accepted = id::validate_browser_capture_design_ir(
+        const auto rejected = id::validate_browser_capture_design_ir(
             ir, {.reference = reference_path,
                  .rendered = tree.root / "render-low-contrast.png",
                  .diff = tree.root / "diff-low-contrast.png",
                  .width = 32,
                  .height = 32,
                  .require_canvas_ink = true});
-        CHECK(accepted.valid);
-        CHECK(accepted.scored);
+        CHECK_FALSE(rejected.valid);
+        CHECK(rejected.error.find("at least 256 opaque canvas pixels") !=
+              std::string::npos);
     }
 
     SECTION("removing the evidence fails closed") {

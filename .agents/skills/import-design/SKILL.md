@@ -3925,11 +3925,13 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `--materialized-canvas-composition --require-canvas-ink` when a blank frame
   would invalidate the result. The opt-in gate inspects the decoded,
   hash-verified sparse canvas plane rather than trusting `changed_pixels`
-  metadata and requires at least one non-transparent pixel. Opaque pixels are
-  counted regardless of RGB brightness, so a legitimately dark or sparse
-  canvas still satisfies the alpha contract. Keep the flag off for intentionally
-  blank static panels. A passing pixel score without this gate does not prove
-  that an animated canvas actually painted its graph.
+  metadata. It requires at least 256 opaque canvas pixels and a viewport
+  relative floor of 0.1%, so transparent captures or isolated specks cannot
+  produce a false 100% A/B score. Opaque pixels are counted regardless of RGB
+  brightness, so a legitimately dark canvas still satisfies the coverage
+  contract. Keep the flag off for intentionally blank static panels. A passing
+  pixel score without this gate does not prove that an animated canvas actually
+  painted its graph.
 - External browser requests are denied by default. If the export depends on a
   CDN runtime and the health gate reports `capture-source-unresolved`, review
   the listed URLs and retry with `--allow-browser-network`. The opt-in permits
