@@ -1215,9 +1215,12 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
         for (int x = 6; x < 22; ++x) {
             const auto pixel = static_cast<std::size_t>(
                 (y * evidence.width + x) * 4);
-            evidence.rgba[pixel] = 231;
-            evidence.rgba[pixel + 1] = 17;
-            evidence.rgba[pixel + 2] = 93;
+            // Deliberately dark paint: the gate measures opaque coverage so a
+            // valid dark canvas cannot be rejected by an absolute brightness
+            // threshold.
+            evidence.rgba[pixel] = 5;
+            evidence.rgba[pixel + 1] = 6;
+            evidence.rgba[pixel + 2] = 9;
             evidence.rgba[pixel + 3] = 255;
             expected.rgba[pixel] = evidence.rgba[pixel];
             expected.rgba[pixel + 1] = evidence.rgba[pixel + 1];
