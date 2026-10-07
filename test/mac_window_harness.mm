@@ -242,17 +242,17 @@ LiveResizeCoverState simulate_live_resize_cover(
         const auto ended = std::chrono::steady_clock::now();
         const auto deadline = ended + std::chrono::seconds(2);
         [view viewDidEndLiveResize];
-        while ([layer.contentsGravity isEqualToString:kCAGravityResize]
-               && std::chrono::steady_clock::now() < deadline) {
-            [[NSRunLoop currentRunLoop]
-                runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        while ([layer.contentsGravity isEqualToString:kCAGravityResize] &&
+               std::chrono::steady_clock::now() < deadline) {
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
         }
         state.cover_after_compositor_interval =
             [layer.contentsGravity isEqualToString:kCAGravityResize];
         if (!state.cover_after_compositor_interval) {
-            state.cover_release_ms = static_cast<uint64_t>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - ended).count());
+            state.cover_release_ms =
+                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - ended)
+                                          .count());
         }
     }
     return state;
