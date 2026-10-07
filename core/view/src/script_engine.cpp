@@ -19,7 +19,8 @@ ScriptEngine::ScriptEngine(JsEngineType engine_type)
 ScriptEngine::~ScriptEngine() = default;
 
 ScriptEngine::ScriptEngine(ScriptEngine&& other) noexcept
-    : engine_(std::move(other.engine_)), bridge_call_counter_(std::move(other.bridge_call_counter_)),
+    : engine_(std::move(other.engine_)),
+      bridge_call_counter_(std::move(other.bridge_call_counter_)),
       choc_context_(other.choc_context_) {}
 
 ScriptEngine& ScriptEngine::operator=(ScriptEngine&& other) noexcept {

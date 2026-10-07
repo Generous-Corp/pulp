@@ -59,7 +59,8 @@ public:
 
     // Internal WidgetBridge instrumentation seam. Registered functions retain
     // this state because their engine may outlive the owning bridge.
-    void set_bridge_call_counter(const std::shared_ptr<std::atomic<std::uint64_t>>& counter) noexcept {
+    void
+    set_bridge_call_counter(const std::shared_ptr<std::atomic<std::uint64_t>>& counter) noexcept {
         bridge_call_counter_ = counter;
     }
     std::shared_ptr<std::atomic<std::uint64_t>> bridge_call_counter() const noexcept {

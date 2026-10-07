@@ -37,7 +37,8 @@ inline void count_bridge_call(const std::shared_ptr<std::atomic<std::uint64_t>>&
 
 inline NativeFunction counted_bridge_function(std::shared_ptr<std::atomic<std::uint64_t>> counter,
                                               NativeFunction fn) {
-    return [counter = std::move(counter), fn = std::move(fn)](const choc::value::Value* args, size_t num_args) mutable {
+    return [counter = std::move(counter), fn = std::move(fn)](const choc::value::Value* args,
+                                                              size_t num_args) mutable {
         count_bridge_call(counter);
         return fn(args, num_args);
     };
