@@ -24,7 +24,7 @@ struct DawnWaveNetFactoryResult {
         DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
 };
 
-DawnWaveNetFactoryResult create_dawn_wavenet(const DawnSharedIoWavenetProgramSpec& spec,
+DawnWaveNetFactoryResult create_dawn_wavenet(const WavenetProgramSpec& spec,
                                              const DawnWaveNetFactoryConfig& config) noexcept;
 
 } // namespace pulp::gpu_audio::detail
