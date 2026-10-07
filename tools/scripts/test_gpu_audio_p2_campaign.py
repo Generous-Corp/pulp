@@ -147,12 +147,55 @@ class P2CampaignContractTests(unittest.TestCase):
         }
         with self.assertRaises(RuntimeError):
             campaign.validate_identity_rows(rows[:1] + [callback_only], expected_sha)
-        receipt = {"admissions_enqueued": 1, "terminal_record_count": 1,
-                   "authenticated_terminal_records": 1}
+        receipt = {
+            "warmup_blocks": 0, "measured_blocks": 1, "declared_lead_blocks": 0,
+            "total_callbacks": 1, "callback_count": 1, "measured_callback_count": 1,
+            "admission_granularity": "one_per_callback", "admission_record_count": 1,
+            "delivery_record_count": 1, "admissions_enqueued": 1,
+            "terminal_record_count": 1, "authenticated_terminal_records": 1,
+        }
         campaign.validate_identity_rows(rows, expected_sha, receipt=receipt)
         with self.assertRaises(RuntimeError):
             campaign.validate_identity_rows(rows, expected_sha,
                                             receipt={**receipt, "admissions_enqueued": 2})
+
+    def test_raw_census_rejects_truncated_callback_stream(self):
+        rows = self._rows()
+        expected_sha = rows[0]["executable_observed_sha256"]
+        receipt = {
+            "warmup_blocks": 0, "measured_blocks": 1, "declared_lead_blocks": 0,
+            "total_callbacks": 1, "callback_count": 1, "measured_callback_count": 1,
+            "admission_granularity": "one_per_callback", "admission_record_count": 1,
+            "delivery_record_count": 1, "admissions_enqueued": 1,
+            "terminal_record_count": 1, "authenticated_terminal_records": 1,
+        }
+        campaign.validate_identity_rows(rows, expected_sha, receipt=receipt)
+        with self.assertRaisesRegex(RuntimeError, "delivery census|identity multisets"):
+            campaign.validate_identity_rows(rows[:-1], expected_sha, receipt=receipt)
+        with self.assertRaisesRegex(RuntimeError, "callback geometry|callback count"):
+            campaign.validate_identity_rows(
+                rows, expected_sha, receipt={**receipt, "callback_count": 2,
+                                             "total_callbacks": 2,
+                                             "delivery_record_count": 2,
+                                             "admission_record_count": 2,
+                                             "admissions_enqueued": 2,
+                                             "terminal_record_count": 2,
+                                             "authenticated_terminal_records": 2})
+
+    def test_negative_control_requires_observed_oracle_failure(self):
+        valid = {"status": "failed", "negative_control": True,
+                 "oracle_failed_blocks": campaign.NEGATIVE_CONTROL_FAILED_BLOCKS}
+        campaign.validate_negative_control_receipt(valid)
+        for invalid in (
+                {"status": "failed", "negative_control": True, "oracle_failed_blocks": 0},
+                {"status": "failed", "negative_control": True},
+                {"status": "completed", "negative_control": True,
+                 "oracle_failed_blocks": campaign.NEGATIVE_CONTROL_FAILED_BLOCKS},
+                {"status": "failed", "negative_control": False,
+                 "oracle_failed_blocks": campaign.NEGATIVE_CONTROL_FAILED_BLOCKS},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "negative control"):
+                campaign.validate_negative_control_receipt(invalid)
 
     def test_delivery_disposition_must_match_terminal_census(self):
         rows = self._rows()
@@ -204,17 +247,26 @@ class P2CampaignContractTests(unittest.TestCase):
             "schema": "pulp.gpu-audio-paced-convolution.v1", "status": "completed",
             "gpu_receipt_authenticated": True, "declared_slots": 2,
             "declared_lead_blocks": 1, "run_kind": "steady",
-            "authenticated_terminal_records": 1, "terminal_record_count": 1,
-            "retired_success": 1, "retired_failure": 0, "admissions_attempted": 1,
+            "authenticated_terminal_records": 500001, "terminal_record_count": 500001,
+            "retired_success": 500001, "retired_failure": 0, "admissions_attempted": 500001,
             "admissions_enqueued": 1, "admissions_dropped": 0, "trace_attempted": 1,
             "trace_enqueued": 1, "trace_dropped": 0, "trace_sampled_out": 0,
-            "trace_invalid": 0, "high_water_in_flight": 1, "retired_success": 1,
+            "trace_invalid": 0, "high_water_in_flight": 1,
             "measured_blocks": campaign.REQUIRED_MEASURED_BLOCKS * campaign.RUNS_PER_KIND,
             "measured_blocks_per_repetition": campaign.REQUIRED_MEASURED_BLOCKS,
             "steady_repetitions": campaign.RUNS_PER_KIND,
+            "warmup_blocks": 0, "total_callbacks": campaign.REQUIRED_MEASURED_BLOCKS * campaign.RUNS_PER_KIND + 1,
+            "callback_count": campaign.REQUIRED_MEASURED_BLOCKS * campaign.RUNS_PER_KIND + 1,
+            "measured_callback_count": campaign.REQUIRED_MEASURED_BLOCKS * campaign.RUNS_PER_KIND,
+            "admission_granularity": "one_per_callback",
+            "admission_record_count": campaign.REQUIRED_MEASURED_BLOCKS * campaign.RUNS_PER_KIND + 1,
+            "delivery_record_count": campaign.REQUIRED_MEASURED_BLOCKS * campaign.RUNS_PER_KIND + 1,
             "provider_identity_status": "passed", "native_runtime_identity_status": "passed",
             "adapter_vendor_id": 1, "adapter_device_id": 1,
         }
+        base["admissions_enqueued"] = base["admission_record_count"]
+        base["admissions_attempted"] = base["admission_record_count"]
+        base["trace_attempted"] = base["trace_enqueued"] = base["admission_record_count"]
         invalid = dict(base)
         with self.assertRaises(RuntimeError):
             campaign.validate_receipt(invalid, 2, 1, "steady")
@@ -245,6 +297,23 @@ class P2CampaignContractTests(unittest.TestCase):
             campaign.validate_manifest_provenance({**manifest, "driver_sha256": "d" * 64}, source, driver)
         with self.assertRaisesRegex(RuntimeError, "clean tracked"):
             campaign.validate_manifest_provenance({**manifest, "source_tree_clean": False}, source, driver)
+
+    def test_post_trial_provenance_recheck_rejects_mid_run_mutation(self):
+        with patch.object(campaign, "_source_provenance",
+                          side_effect=[("a" * 40, "b" * 64), ("c" * 40, "b" * 64)]):
+            initial = campaign._source_provenance()
+            with self.assertRaisesRegex(RuntimeError, "provenance changed"):
+                campaign._require_unchanged_source(initial)
+
+    def test_source_provenance_rejects_untracked_driver_copy(self):
+        with tempfile.TemporaryDirectory() as root:
+            copied = Path(root) / "gpu_audio_p2_campaign.py"
+            copied.write_text("# copied driver\n")
+            with patch.object(campaign, "DRIVER_PATH", copied):
+                clean = type("Result", (), {"returncode": 0, "stdout": ""})()
+                with patch.object(campaign.subprocess, "run", return_value=clean):
+                    with self.assertRaisesRegex(RuntimeError, "canonical tracked file"):
+                        campaign._source_provenance()
 
     def test_plan_only_declares_complete_matrix(self):
         args = campaign.parse_args(["--plan-only"])

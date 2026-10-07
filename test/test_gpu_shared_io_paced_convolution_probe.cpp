@@ -474,6 +474,7 @@ int run(Config config) {
     std::uint64_t late_completions = 0;
     std::uint64_t authenticated_terminal_records = 0;
     std::uint64_t terminal_record_count = 0;
+    std::uint64_t delivery_record_count = 0;
     const auto terminal_identity = [engine_id](const auto& record) {
         return std::to_string(engine_id) + ":" + std::to_string(record.generation) + ":" +
                std::to_string(record.sequence);
@@ -482,6 +483,8 @@ int run(Config config) {
     for (const auto& record : trace_records) {
         if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal)
             ++terminal_record_count;
+        else if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Delivery)
+            ++delivery_record_count;
         const bool authenticated =
             record.valid() && record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
             record.gpu_work_admitted && record.admission_identity_matched &&
@@ -651,7 +654,11 @@ int run(Config config) {
                << ",\"measured_blocks\":" << measured_blocks
                << ",\"measured_blocks_per_repetition\":" << config.blocks
                << ",\"steady_repetitions\":" << config.steady_repetitions
-               << ",\"total_callbacks\":" << total_blocks
+               << ",\"total_callbacks\":" << total_blocks << ",\"callback_count\":" << total_blocks
+               << ",\"measured_callback_count\":" << measured_blocks
+               << ",\"admission_granularity\":\"one_per_callback\""
+               << ",\"admission_record_count\":" << trace_admissions.size()
+               << ",\"delivery_record_count\":" << delivery_record_count
                << ",\"measured_miss_counter_delta\":" << measured_misses
                << ",\"callback_overruns\":" << callback_overruns
                << ",\"late_callback_starts\":" << late_callback_starts

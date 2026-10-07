@@ -26,6 +26,8 @@ REQUIRED_MEASURED_BLOCKS = 100_000
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DRIVER_PATH = Path(__file__).resolve()
+DRIVER_RELATIVE_PATH = Path("tools/scripts/gpu_audio_p2_campaign.py")
+NEGATIVE_CONTROL_FAILED_BLOCKS = 1
 
 # Keep this in lockstep with detail::SharedIoTraceKind.  The raw P2
 # lifecycle census deliberately retains only Terminal and Delivery rows;
@@ -159,6 +161,41 @@ def _source_provenance() -> tuple[str, str]:
         raise RuntimeError("unable to establish source tree status")
     if status.stdout:
         raise RuntimeError("source tree has tracked modifications; measurement requires a clean tree")
+
+    # The campaign driver is part of the authenticated source, not an input
+    # supplied by the host.  Requiring the canonical tracked path and the
+    # exact HEAD blob prevents a copied/untracked driver from laundering a
+    # receipt with the same source revision and a caller-supplied digest.
+    try:
+        expected_driver_path = (REPO_ROOT / DRIVER_RELATIVE_PATH).resolve()
+    except OSError as exc:
+        raise RuntimeError("campaign driver path cannot be resolved") from exc
+    if DRIVER_PATH != expected_driver_path or not DRIVER_PATH.is_file():
+        raise RuntimeError("campaign driver must be the canonical tracked file")
+    tracked = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "--error-unmatch", "--stage", "--",
+         str(DRIVER_RELATIVE_PATH)],
+        capture_output=True, text=True, check=False,
+    )
+    if tracked.returncode != 0 or not tracked.stdout.strip():
+        raise RuntimeError("campaign driver is not tracked by the source repository")
+    stage_fields = tracked.stdout.strip().split()
+    if len(stage_fields) < 3 or stage_fields[0] != "100644":
+        raise RuntimeError("campaign driver is not an owned regular source blob")
+    try:
+        head_blob = subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", f"HEAD:{DRIVER_RELATIVE_PATH}"],
+            text=True,
+        ).strip()
+        worktree_blob = subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "hash-object", "--", str(DRIVER_PATH)],
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("unable to establish tracked campaign driver blob") from exc
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", head_blob) or worktree_blob != head_blob:
+        raise RuntimeError("campaign driver blob is not owned by the measured HEAD")
+
     try:
         source_revision = subprocess.check_output(
             ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True,
@@ -168,6 +205,14 @@ def _source_provenance() -> tuple[str, str]:
     if not re.fullmatch(r"[0-9a-fA-F]{40}", source_revision):
         raise RuntimeError("source revision is not an immutable commit SHA")
     return source_revision, sha256(DRIVER_PATH)
+
+
+def _require_unchanged_source(initial: tuple[str, str]) -> None:
+    """Re-authenticate source and driver ownership after a complete campaign."""
+
+    final = _source_provenance()
+    if final != initial:
+        raise RuntimeError("source or campaign driver provenance changed during campaign")
 
 
 def validate_manifest_provenance(manifest: dict[str, Any], expected_source_revision: str,
@@ -325,6 +370,30 @@ def validate_receipt(receipt: dict, slots: int, lead: int, expected_run_kind: st
         "positive_success": receipt.get("retired_success", 0) > 0,
         "measured_blocks": receipt.get("measured_blocks") == REQUIRED_MEASURED_BLOCKS * (
             RUNS_PER_KIND if expected_run_kind == "steady" else 1),
+        # The probe's accounting unit is a callback, not a measured block:
+        # warmup and lead callbacks are real deliveries and must be present in
+        # the raw census.  Keep this relationship explicit so a future batched
+        # producer must publish a new admission granularity contract rather
+        # than silently weakening the current one.
+        "callback_geometry": (
+            _nonnegative_integer(receipt.get("warmup_blocks"))
+            and _positive_integer(receipt.get("measured_blocks"))
+            and _positive_integer(receipt.get("total_callbacks"))
+            and receipt.get("total_callbacks") == receipt.get("warmup_blocks")
+            + receipt.get("measured_blocks") + lead
+            and receipt.get("measured_callback_count") == receipt.get("measured_blocks")
+            and receipt.get("callback_count") == receipt.get("total_callbacks")
+            and receipt.get("admission_granularity") == "one_per_callback"
+        ),
+        "census_counter_fields": (
+            _nonnegative_integer(receipt.get("admission_record_count"))
+            and _nonnegative_integer(receipt.get("terminal_record_count"))
+            and _nonnegative_integer(receipt.get("delivery_record_count"))
+            and receipt.get("admission_record_count") == receipt.get("admissions_enqueued")
+            and receipt.get("admission_record_count") == receipt.get("callback_count")
+            and receipt.get("terminal_record_count") == receipt.get("admission_record_count")
+            and receipt.get("delivery_record_count") == receipt.get("callback_count")
+        ),
         "steady_repetitions": expected_run_kind != "steady" or (
             receipt.get("steady_repetitions") == RUNS_PER_KIND
             and receipt.get("measured_blocks_per_repetition") == REQUIRED_MEASURED_BLOCKS
@@ -339,6 +408,16 @@ def validate_receipt(receipt: dict, slots: int, lead: int, expected_run_kind: st
     failed = [name for name, ok in required.items() if not ok]
     if failed:
         raise RuntimeError(f"{slots=} {lead=} receipt failed: {', '.join(failed)}")
+
+
+def validate_negative_control_receipt(receipt: dict[str, Any]) -> None:
+    """Require a planted control to fail for the observed oracle reason."""
+
+    if receipt.get("status") == "completed" or receipt.get("negative_control") is not True:
+        raise RuntimeError("negative control unexpectedly passed or was not marked")
+    if receipt.get("oracle_failed_blocks") != NEGATIVE_CONTROL_FAILED_BLOCKS:
+        raise RuntimeError("negative control did not prove the expected oracle failure")
+
 
 def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None = None,
                           expected_manifest_sha256: str | None = None,
@@ -413,18 +492,42 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
     if sorted(admissions) != sorted(terminals):
         raise RuntimeError("admission/terminal identity multisets differ")
     if receipt is not None:
+        expected_warmup = receipt.get("warmup_blocks")
+        expected_measured = receipt.get("measured_blocks")
+        expected_lead = receipt.get("declared_lead_blocks")
+        expected_callbacks = receipt.get("callback_count", receipt.get("total_callbacks"))
+        expected_measured_callbacks = receipt.get("measured_callback_count")
+        expected_admission_rows = receipt.get("admission_record_count")
         expected_admissions = receipt.get("admissions_enqueued")
         expected_terminals = receipt.get("terminal_record_count")
         expected_authenticated = receipt.get("authenticated_terminal_records")
+        expected_deliveries = receipt.get("delivery_record_count")
         if not all(_nonnegative_integer(value) for value in
-                   (expected_admissions, expected_terminals, expected_authenticated)):
+                   (expected_warmup, expected_measured, expected_lead, expected_callbacks,
+                    expected_measured_callbacks, expected_admission_rows,
+                    expected_admissions, expected_terminals, expected_authenticated,
+                    expected_deliveries)):
             raise RuntimeError("receipt lacks non-negative raw census counters")
+        if receipt.get("admission_granularity") != "one_per_callback":
+            raise RuntimeError("receipt admission granularity is not authenticated")
+        if expected_callbacks != expected_warmup + expected_measured + expected_lead:
+            raise RuntimeError("receipt callback geometry is inconsistent")
+        if expected_measured_callbacks != expected_measured:
+            raise RuntimeError("receipt measured callback count disagrees with measured blocks")
+        if receipt.get("total_callbacks") != expected_callbacks:
+            raise RuntimeError("receipt callback count disagrees with total callbacks")
+        if expected_admission_rows != expected_admissions:
+            raise RuntimeError("receipt admission row count disagrees with admission counter")
+        if expected_admission_rows != expected_callbacks:
+            raise RuntimeError("receipt admission row count disagrees with callback count")
         if len(admissions) != expected_admissions:
             raise RuntimeError("raw admission census disagrees with receipt")
         if len(terminals) != expected_terminals or len(terminals) != expected_authenticated:
             raise RuntimeError("raw terminal census disagrees with receipt")
         if len(admitted_deliveries) != expected_admissions:
             raise RuntimeError("raw admitted-delivery census disagrees with receipt")
+        if len(deliveries) != expected_deliveries or len(deliveries) != expected_callbacks:
+            raise RuntimeError("raw delivery census disagrees with callback count")
     terminal_by_identity = {
         (r.get("engine_id"), r.get("generation"), r.get("sequence")): r
         for r in record_rows if r.get("trace_kind") == 0
@@ -482,6 +585,7 @@ def run(args: argparse.Namespace) -> int:
     if args.blocks != REQUIRED_MEASURED_BLOCKS:
         raise RuntimeError(f"acceptance campaign requires exactly {REQUIRED_MEASURED_BLOCKS} measured blocks")
     source_revision, driver_sha256 = _source_provenance()
+    initial_source_provenance = (source_revision, driver_sha256)
     if args.expected_source_revision is not None and args.expected_source_revision != source_revision:
         raise RuntimeError("expected source revision does not match the measured source")
     if args.expected_driver_sha256 is not None and args.expected_driver_sha256 != driver_sha256:
@@ -505,8 +609,9 @@ def run(args: argparse.Namespace) -> int:
             raise RuntimeError("negative control did not return expected-failure status")
         control_receipt = json.loads(control_receipt_path.read_text())
         control_raw = control_dir / "raw.jsonl"
-        if control_receipt.get("status") == "completed" or not control_receipt.get("negative_control") or not control_raw.is_file():
-            raise RuntimeError("negative control unexpectedly passed or was not marked")
+        validate_negative_control_receipt(control_receipt)
+        if not control_raw.is_file():
+            raise RuntimeError("negative control did not produce a raw census")
         control_observer = observe_jsonl(control_raw)
         control_observer.validate(probe_sha256, receipt=control_receipt)
         control_rows = control_observer.rows
@@ -574,6 +679,7 @@ def run(args: argparse.Namespace) -> int:
                 child.rmdir()
         args.output_dir.rmdir()
         raise
+    _require_unchanged_source(initial_source_provenance)
     if len(trials) != len(selected_slots) * len(selected_leads) * 2 * RUNS_PER_KIND:
         raise RuntimeError("campaign completed with an incomplete cold/steady matrix")
     if not campaign_manifest_digest:
