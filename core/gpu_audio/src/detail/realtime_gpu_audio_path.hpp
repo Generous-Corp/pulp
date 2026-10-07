@@ -4,6 +4,8 @@
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
+#include "shared_io_provider_identity.hpp"
+
 #include <cstdint>
 #include <limits>
 
@@ -48,5 +50,6 @@ bool requires_realtime_gpu_path(GpuAudioNode* node) noexcept;
 // Returns a provider only when the concrete private path can establish its
 // identity. Generic/test hooks deliberately return Unknown.
 GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept;
+SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode* node) noexcept;
 
 } // namespace pulp::gpu_audio::detail

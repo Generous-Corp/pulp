@@ -68,6 +68,30 @@ std::optional<std::vector<HostParamInfo>> processor_node_parameters(const Signal
 class TimelineGraphPlaybackBinding;
 class SampleRegionParameterBinding;
 
+// A control-side receipt for the graph's authoring state.  `graph_identity`
+// identifies one SignalGraph lifetime and is deliberately process-local;
+// `generation` advances whenever authoring state changes, including a clear()
+// that may recycle compact NodeIds.  Consumers can retain a receipt while
+// preparing an imported change and reject it if another control-side writer
+// changed the graph before the change is committed.  The receipt never enters
+// the audio callback or the serialized .pulpgraph format.
+struct GraphAuthoringReceipt {
+    std::uint64_t graph_identity = 0;
+    std::uint64_t generation = 0;
+
+    bool valid() const noexcept {
+        return graph_identity != 0;
+    }
+
+    friend bool operator==(const GraphAuthoringReceipt&, const GraphAuthoringReceipt&) = default;
+};
+
+enum class GraphAuthoringReceiptStatus : std::uint8_t {
+    Current,
+    WrongGraph,
+    Stale,
+};
+
 // ── Signal Graph ────────────────────────────────────────────────────────
 
 class SignalGraph : public format::AudioWorkgroupClient {
@@ -344,6 +368,14 @@ public:
     const GraphNode* node(NodeId id) const;
     const std::vector<GraphNode>& nodes() const { return nodes_; }
     const std::vector<Connection>& connections() const { return connections_; }
+
+    // Capture and validate control-side authoring lineage.  These operations
+    // take the same mutation lock as graph edits, so a receipt is never a
+    // mixed read of graph identity and generation.  A receipt is observational
+    // only; PreparedTopologyEdit remains the publication boundary and performs
+    // its own stale-base check at commit().
+    GraphAuthoringReceipt authoring_receipt() const;
+    GraphAuthoringReceiptStatus validate_authoring_receipt(GraphAuthoringReceipt receipt) const;
 
     // Check if connecting would create a cycle
     bool would_create_cycle(NodeId source, NodeId dest) const;

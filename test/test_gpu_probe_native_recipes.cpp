@@ -95,8 +95,22 @@ TEST_CASE("Renderer3D recipe produces bounded typed evidence", "[gpu][gpu-probe]
     const auto run = probe::run_renderer3d_recipe({false, kEvidenceId});
     require_valid(run);
     require_work_or_skip(run);
-    REQUIRE(run.result.verdict == probe::Verdict::pass);
     REQUIRE_FALSE(run.payloads.empty());
+    REQUIRE(run.result.passes.size() == 4);
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE(run.result.passes[i].verdict == probe::Verdict::pass);
+    // The exact golden is the macOS default Metal adapter's fingerprint. Any
+    // other adapter (llvmpipe on the Linux leg) is held to the portable
+    // structure only, which the recipe reports as unverified rather than pass.
+    if (run.result.adapter.backend == std::optional<std::string>("Metal")) {
+        REQUIRE(run.result.verdict == probe::Verdict::pass);
+        REQUIRE(run.result.passes[3].code == "metal_fingerprint_match");
+    } else {
+        INFO("adapter backend: " << run.result.adapter.backend.value_or("unknown"));
+        REQUIRE(run.result.verdict == probe::Verdict::unverified);
+        REQUIRE(run.result.passes[3].code ==
+                "portable_structure_verified_exact_golden_unavailable");
+    }
 }
 
 TEST_CASE("Renderer3D planted framebuffer regression reaches GPU readback",

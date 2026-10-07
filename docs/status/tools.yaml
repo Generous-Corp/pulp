@@ -280,6 +280,16 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: materialized-runtime-conformance
+  path: tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs
+  category: design-import
+  use_when: Run the deterministic materialized-runtime contract and its planted vendor-tag negative control.
+  invocation: node tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs --json
+  inputs: A representative materialized browser document fixture and the canonicalizer.
+  outputs: Canonical output SHA, byte-size/timing metrics, and a negative-control verdict.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: reembed-mtk
   path: tools/import-design/reembed_mtk.py
   category: design-import
@@ -476,6 +486,16 @@ tools:
   inputs: The in-tree Spectr fixtures.
   outputs: Parser + live in-process standalone PNG + render validation for the lane; capture does not
     require macOS Screen Recording permission.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: verify-browser-fidelity-receipt
+  path: tools/import-validation/verify_browser_fidelity_receipt.py
+  category: import-validation
+  use_when: Validate a Chromium DevTools Protocol browser-render receipt before comparing an imported native render.
+  invocation: python3 tools/import-validation/verify_browser_fidelity_receipt.py <receipt.json> [--source <editor.html>]
+  inputs: A CDP browser-fidelity receipt, its source editor.html, and optional expected title or screenshot SHA-256.
+  outputs: A fail-closed summary proving the readiness marker, DOM shape, clean console/network state, deterministic screenshot, and rejected negative control.
   availability: always
   skill: import-design
   docs: guides/importing-designs.md

@@ -87,7 +87,9 @@ export function materializedStructuralPath(nodes, strings, elementChildren, owne
     current = parent[current] ?? -1;
   }
   if (reversed.length === 0) return null;
-  return { anchor, anchorNode, path: reversed.reverse() };
+  const pulpId = materializedAttributeValue(nodes, strings, owner, 'data-pulp-id');
+  return { anchor, anchorNode, path: reversed.reverse(),
+    ...(pulpId ? { pulp_id: pulpId } : {}) };
 }
 
 export function buildMaterializedLayoutBindings(snapshot, coordinateSpace = null) {
@@ -162,6 +164,7 @@ export function buildMaterializedLayoutBindings(snapshot, coordinateSpace = null
       index: bindings.length,
       anchor: identity.anchor,
       path: identity.path,
+      ...(identity.pulp_id ? { pulp_id: identity.pulp_id } : {}),
       box: {
         left: rect[0] - origin[0],
         top: rect[1] - origin[1],

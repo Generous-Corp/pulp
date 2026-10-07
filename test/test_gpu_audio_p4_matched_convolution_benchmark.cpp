@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <span>
 #include <string_view>
@@ -391,19 +393,39 @@ bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync, const Tri
     const auto provider = env("PULP_GPU_AUDIO_P4_PROVIDER");
     const auto provider_revision = env("PULP_GPU_AUDIO_P4_PROVIDER_REVISION");
     const auto provider_asset = env("PULP_GPU_AUDIO_P4_PROVIDER_ASSET_SHA256");
+    const auto worker_scheduling = env("PULP_GPU_AUDIO_P4_WORKER_SCHEDULING");
+    const auto host_contention = env("PULP_GPU_AUDIO_P4_HOST_CONTENTION");
+    const auto thermal_state = env("PULP_GPU_AUDIO_P4_THERMAL_STATE");
+    const auto power_state = env("PULP_GPU_AUDIO_P4_POWER_STATE");
+    const auto workgroup_joined = env("PULP_GPU_AUDIO_P4_WORKGROUP_JOINED");
+    const auto workgroup_failures = env("PULP_GPU_AUDIO_P4_WORKGROUP_JOIN_FAILURES");
     const auto campaign_id = env("PULP_GPU_AUDIO_P4_CAMPAIGN_ID");
     const auto ui_p99 = env("PULP_GPU_AUDIO_P4_UI_P99_NS");
     const auto raw_output = env("PULP_GPU_AUDIO_P4_RAW_OUTPUT");
     if (!source || !binary || !machine || !model || !os || !adapter || !provider ||
-        !provider_revision || !provider_asset || !campaign_id || !ui_p99 || !raw_output)
+        !provider_revision || !provider_asset || !worker_scheduling || !host_contention ||
+        !thermal_state || !power_state || !workgroup_joined || !workgroup_failures ||
+        !campaign_id || !ui_p99 || !raw_output)
         return false;
-    const auto parse_u64 = [](const char* value) -> std::uint64_t {
+    if (std::string_view(workgroup_joined) != "true" &&
+        std::string_view(workgroup_joined) != "false")
+        return false;
+    const auto parse_u64 = [](const char* value, std::uint64_t& parsed_value) -> bool {
+        if (value == nullptr || *value < '0' || *value > '9')
+            return false;
         char* end = nullptr;
+        errno = 0;
         const auto parsed = std::strtoull(value, &end, 10);
-        return end != value && end != nullptr && *end == '\0' ? parsed : 0;
+        if (errno == ERANGE || end == value || end == nullptr || *end != '\0' ||
+            parsed > std::numeric_limits<std::uint64_t>::max())
+            return false;
+        parsed_value = static_cast<std::uint64_t>(parsed);
+        return true;
     };
-    const auto ui_frame_p99_ns = parse_u64(ui_p99);
-    if (ui_frame_p99_ns == 0)
+    std::uint64_t ui_frame_p99_ns = 0;
+    std::uint64_t workgroup_join_failure_count = 0;
+    if (!parse_u64(ui_p99, ui_frame_p99_ns) || ui_frame_p99_ns == 0 ||
+        !parse_u64(workgroup_failures, workgroup_join_failure_count))
         return false;
 
     pulp::gpu_audio::detail::GpuConvolverRawManifest manifest;
@@ -419,6 +441,12 @@ bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync, const Tri
     manifest.provider = provider;
     manifest.provider_revision = provider_revision;
     manifest.provider_asset_sha256 = provider_asset;
+    manifest.worker_scheduling = worker_scheduling;
+    manifest.host_contention = host_contention;
+    manifest.host_thermal_state = thermal_state;
+    manifest.power_state = power_state;
+    manifest.worker_workgroup_joined = std::string_view(workgroup_joined) == "true";
+    manifest.worker_workgroup_join_failures = workgroup_join_failure_count;
     manifest.generated_utc = "provided-by-campaign-wrapper";
     manifest.build_flags = {"-O3", "-DNDEBUG"};
     manifest.warmup_blocks = 2;

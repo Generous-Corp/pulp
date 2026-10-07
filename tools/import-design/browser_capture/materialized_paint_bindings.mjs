@@ -12,6 +12,7 @@
 
 import {
   buildMaterializedElementChildren,
+  materializedAttributeValue,
   isMaterializedElement,
   materializedFiniteRect,
   materializedStringAt,
@@ -121,6 +122,7 @@ export function buildMaterializedPaintBindings(snapshot, coordinateSpace = null)
       index: bindings.length,
       anchor: identity.anchor,
       path: identity.path,
+      ...(identity.pulp_id ? { pulp_id: identity.pulp_id } : {}),
       tag,
       paint,
     };

@@ -31,6 +31,7 @@ Commands:
   scan           List VST3 / AU / AUv3 / CLAP / LV2 plug-ins
   host           Load a plug-in and run a synthetic audio block through it
   import         Detect a framework project and emit a Pulp migration scaffold
+  ui             Build or verify an imported UI source snapshot
   kit            Inspect and apply local Pulp package manifests
   content        Validate and install data-only content packs
   pr             One-shot push-a-PR: gates + bump + ship

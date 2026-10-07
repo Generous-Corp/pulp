@@ -14,6 +14,9 @@
 #   PULP_HARNESS_THRESHOLD  similarity threshold for PASS (default 0.85)
 #   PULP_DIR               override pulp checkout path (default /Users/danielraffel/Code/pulp)
 #   SPECTR_DIR             override spectr checkout path (default /Users/danielraffel/Code/spectr)
+#   SPECTR_BROWSER_RECEIPT  optional CDP receipt JSON; validate it before the
+#                           native roundtrip (set this in acceptance lanes)
+#   SPECTR_BROWSER_EXPECTED_SHA256  optional screenshot digest pin
 #
 # Exit codes:
 #   0  PASS  — Spectr native render matches reference within tolerance
@@ -29,6 +32,8 @@ REFERENCE="$PULP/planning/screenshots/REFERENCE-spectr-editor-html.png"
 OUT_DIR="$PULP/planning/screenshots"
 OUT="$OUT_DIR/spectr-native-latest.png"
 THRESHOLD="${PULP_HARNESS_THRESHOLD:-0.85}"
+BROWSER_RECEIPT="${SPECTR_BROWSER_RECEIPT:-}"
+BROWSER_EXPECTED_SHA256="${SPECTR_BROWSER_EXPECTED_SHA256:-}"
 
 SKIP_IMPORT=0
 SKIP_BUILD=0
@@ -51,6 +56,27 @@ yel()   { printf '\033[33m%s\033[0m\n' "$*"; }
 [[ -f "$EDITOR_HTML" ]] || { red "ERROR: missing $EDITOR_HTML"; exit 2; }
 which pulp >/dev/null || { red "ERROR: pulp CLI not in PATH"; exit 2; }
 which python3 >/dev/null || { red "ERROR: python3 required for diff"; exit 2; }
+
+# A native roundtrip is meaningful only when its browser source oracle was
+# complete.  Keep the browser dependency opt-in: ordinary native-only runs
+# remain available, while acceptance lanes can make the CDP receipt a hard
+# precondition and can pin the expected screenshot identity.
+if [[ -n "$BROWSER_RECEIPT" ]]; then
+  [[ -f "$BROWSER_RECEIPT" ]] || {
+    red "ERROR: browser fidelity receipt not found: $BROWSER_RECEIPT"
+    exit 2
+  }
+  browser_args=("$BROWSER_RECEIPT" "--source" "$EDITOR_HTML" \
+    "--expected-title" "Spectr — zoomable filter bank")
+  if [[ -n "$BROWSER_EXPECTED_SHA256" ]]; then
+    browser_args+=("--expected-screenshot-sha256" "$BROWSER_EXPECTED_SHA256")
+  fi
+  if ! python3 "$PULP/tools/import-validation/verify_browser_fidelity_receipt.py" \
+      "${browser_args[@]}"; then
+    red "ERROR: browser fidelity receipt did not satisfy the CDP import contract"
+    exit 2
+  fi
+fi
 
 # Freshness — refuse to validate from a checkout behind origin/main.
 # Lesson from 2026-05-15: a roundtrip ran from a feature branch 175 commits

@@ -1405,6 +1405,38 @@ commands:
             description: Emit the drift report as JSON instead of human-readable text
     docs: reference/cli.md#tweaks
 
+  - name: ui
+    status: experimental
+    summary: Build or verify a deterministic owned UI source snapshot and manifest.
+    subcommands:
+      - name: build
+        summary: Emit a deterministic UI source snapshot and ui-build-manifest.json.
+        args:
+          - name: --source
+            kind: option
+            required: false
+            description: Owned UI source root (default native-ui/src)
+          - name: --out
+            kind: option
+            required: false
+            description: Build output root (default build/native-ui)
+          - name: --json
+            kind: flag
+            required: false
+      - name: check
+        summary: Verify source and output bytes against the UI build manifest without mutating output.
+        args:
+          - name: --source
+            kind: option
+            required: false
+          - name: --out
+            kind: option
+            required: false
+          - name: --json
+            kind: flag
+            required: false
+    docs: reference/cli.md#ui
+
   - name: import-design
     status: partial
     summary: >

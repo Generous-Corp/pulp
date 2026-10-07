@@ -120,7 +120,9 @@ function structuralPath(nodes, strings, elementChildren, owner) {
     current = parent[current] ?? -1;
   }
   if (reversed.length === 0) return null;
-  return { anchor, path: reversed.reverse() };
+  const pulpId = attributeValue(nodes, strings, owner, 'data-pulp-id');
+  return { anchor, path: reversed.reverse(),
+    ...(pulpId ? { pulp_id: pulpId } : {}) };
 }
 
 function lineBoxesFor(layoutIndex, textBoxes, ownerBounds, coordinateSpace) {
@@ -313,6 +315,7 @@ export function buildMaterializedTextBindings(snapshot, platformFontReport,
       index: bindings.length,
       anchor: identity.anchor,
       path: identity.path,
+      ...(identity.pulp_id ? { pulp_id: identity.pulp_id } : {}),
       ...(anonymousTextIndex === null ? {} : {
         anonymous_text_index: anonymousTextIndex,
       }),

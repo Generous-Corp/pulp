@@ -70,6 +70,7 @@ test('loads captured state geometry independently from captured paint', () => {
     atlasPath, { visualAuthority: 'native' })[0];
   assert.equal(state.image, '');
   assert.deepEqual(state.metadata.layout_bindings, [{
+    id: 'pulp-layout-01bebc6698495063',
     anchor: '#root', path: [{ tag: 'div', index: 0 }],
     box: { left: 10, top: 20, width: 300, height: 200 },
   }]);

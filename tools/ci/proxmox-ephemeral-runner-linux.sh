@@ -31,8 +31,16 @@ ISOLATED_BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"
 LEGACY_GUEST_IPV4_PREFIX=192.168.86
 LEGACY_GUEST_IPV4_FIRST_OCTET=251
 LEGACY_GUEST_IPV4_GATEWAY=192.168.86.1
-CORES=4
-MEM_MB=8192
+# Per-clone size. A build slot needs 4c/8G; a slot that only runs seconds-long
+# preamble jobs (checkout plus a Python classifier) fits in 1c/2G, which lets
+# it share the host with a build slot and the Windows VM.
+CORES="${TARTCI_PROXMOX_CORES:-4}"
+MEM_MB="${TARTCI_PROXMOX_MEMORY_MB:-8192}"
+# The legacy LAN identity is indexed from this VMID (default: the slot's own
+# CLONE_BASE). A second pool on the bridged network sets it to the first pool's
+# base so the two never derive the same address or MAC: with base 200, VMIDs
+# 200..203 map to 192.168.86.251..254.
+GUEST_INDEX_BASE="${TARTCI_PROXMOX_GUEST_INDEX_BASE:-$CLONE_BASE}"
 REPO="${TARTCI_RUNNER_REPO:-${PULP_RUNNER_REPO:-Generous-Corp/pulp}}"
 ORG="${REPO%%/*}"
 BASE_LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
@@ -91,19 +99,63 @@ sanitize_runner_output() {
         -e 's/(A[A-Za-z0-9_-]{20,})/<redacted>/g'
 }
 
-routing_label_survives() {
-    local observed_labels="$1" configured_label
-    local configured_labels=()
-    IFS=',' read -r -a configured_labels <<< "$LABELS"
-    for configured_label in "${configured_labels[@]}"; do
-        case "$configured_label" in
-            self-hosted|Linux|X64) continue ;;
+# Dispatch fence for an idle JIT runner: deregistration itself.
+#
+# JIT runner labels come from the JIT configuration and are read-only, so
+# replacing labels can never remove a routing label; a label fence on a JIT
+# runner always fails and leaves the clone behind. GitHub refuses to delete a
+# runner while it runs a job, so a DELETE that succeeds proves the runner was
+# idle at that instant, and no job can be assigned to a runner that no longer
+# exists. A 404 alone could also mean the wrong id, so the fence also requires
+# that no in-progress job in the repository names the runner.
+#
+# jit_deregister_fence <registration_api> <rid> <runner_name>
+# Returns 0 when fenced, 3 when GitHub refused because the runner is busy, and
+# 1 when any step cannot be proved.
+jit_deregister_fence() {
+    local registration_api="$1" rid="$2" runner_name="$3"
+    local record name busy output run_ids run_id job_runners
+    record="$(github_api "${registration_api}/actions/runners/${rid}" \
+        --jq '[.id,.name,.busy] | @tsv' 2>/dev/null)" \
+        || { log "JIT fence 1/4: cannot read runner id $rid"; return 1; }
+    IFS=$'\t' read -r _ name busy <<< "$record"
+    [ "$name" = "$runner_name" ] \
+        || { log "JIT fence 1/4: runner id $rid is $name, not $runner_name"; return 1; }
+    [ "$busy" = false ] || { log "JIT fence 1/4: runner id $rid is busy"; return 3; }
+    log "JIT fence 1/4: read runner id $rid $runner_name busy=false"
+    if ! output="$(github_api --method DELETE \
+        "${registration_api}/actions/runners/${rid}" 2>&1)"; then
+        case "$output" in
+            *[Bb]usy*|*"running a job"*|*"HTTP 422"*)
+                log "JIT fence 2/4: GitHub refused to deregister busy runner id $rid"
+                return 3 ;;
         esac
-        case ",$observed_labels," in
-            *",${configured_label},"*) return 0 ;;
-        esac
+        log "JIT fence 2/4: cannot deregister runner id $rid"
+        return 1
+    fi
+    log "JIT fence 2/4: deregistered runner id $rid"
+    if output="$(github_api "${registration_api}/actions/runners/${rid}" 2>&1)"; then
+        log "JIT fence 3/4: runner id $rid still exists after deregistration"
+        return 1
+    fi
+    case "$output" in
+        *"HTTP 404"*|*"Not Found"*) ;;
+        *) log "JIT fence 3/4: runner id $rid lookup failed for a reason other than 404"; return 1 ;;
+    esac
+    run_ids="$(github_api --paginate "repos/${REPO}/actions/runs?status=in_progress&per_page=100" \
+        --jq '.workflow_runs[].id' 2>/dev/null)" \
+        || { log "JIT fence 3/4: cannot list in-progress runs"; return 1; }
+    for run_id in $run_ids; do
+        [[ "$run_id" =~ ^[0-9]+$ ]] || { log "JIT fence 3/4: invalid run id"; return 1; }
+        job_runners="$(github_api --paginate "repos/${REPO}/actions/runs/${run_id}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.status == "in_progress") | .runner_name // empty' 2>/dev/null)" \
+            || { log "JIT fence 3/4: cannot list jobs of run $run_id"; return 1; }
+        if printf '%s\n' "$job_runners" | grep -Fxq -- "$runner_name"; then
+            log "JIT fence 3/4: an in-progress job in run $run_id names $runner_name"
+            return 1
+        fi
     done
-    return 1
+    log "JIT fence 3/4: runner id $rid returns 404 and no in-progress job names $runner_name"
 }
 
 monitor_runner_heartbeat() {
@@ -266,32 +318,12 @@ deferred_cleanup() {
         esac
         { [ "$status" = online ] || [ "$status" = offline ]; } \
             || die "invalid deferred-cleanup runner status"
-        if [ "$status" = online ] || [ "$status" = offline ]; then
-            github_api --method PUT \
-                "${registration_api}/actions/runners/${rid}/labels" \
-                -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
-                || die "cannot fence deferred-cleanup runner"
-            for fence_probe in 1 2; do
-                fenced_runner="$(github_api \
-                    "${registration_api}/actions/runners/${rid}" \
-                    --jq '[.name,.busy,.status,([.labels[].name] | join(","))] | @tsv')" \
-                    || die "cannot verify deferred-cleanup fence"
-                IFS=$'\t' read -r fenced_name busy status labels <<< "$fenced_runner"
-                [ "$fenced_name" = "$runner_name" ] \
-                    || die "deferred-cleanup fence resolved the wrong runner"
-                [ "$busy" = false ] \
-                    || die "deferred-cleanup runner became busy before dispatch fence"
-                { [ "$status" = online ] || [ "$status" = offline ]; } \
-                    || die "invalid deferred-cleanup fenced runner status"
-                routing_label_survives "$labels" \
-                    && die "routing label survived deferred-cleanup fence"
-                case ",$labels," in
-                    *,pulp-shutdown-fenced,*) ;;
-                    *) die "shutdown label is missing after deferred-cleanup fence" ;;
-                esac
-                [ "$fence_probe" = 2 ] || sleep 2
-            done
-        fi
+        jit_deregister_fence "$registration_api" "$rid" "$runner_name"
+        case $? in
+            0) ;;
+            3) sleep 15; continue ;;
+            *) die "cannot prove the deferred-cleanup dispatch fence" ;;
+        esac
         break
     done
     [ "$SECONDS" -lt "$deadline" ] \
@@ -376,6 +408,10 @@ esac
 [ "$CLONE_BASE" -ge 1 ] && [ "$CLONE_MAX" -le 254 ] \
     && [ "$CLONE_BASE" -le "$CLONE_MAX" ] \
     || die "clone VMID range must be ordered within 1..254"
+[[ "$CORES" =~ ^[1-9][0-9]*$ && "$MEM_MB" =~ ^[1-9][0-9]*$ ]] \
+    || die "clone cores and memory must be positive integers"
+[[ "$GUEST_INDEX_BASE" =~ ^[0-9]+$ ]] && [ "$GUEST_INDEX_BASE" -le "$CLONE_BASE" ] \
+    || die "guest index base must be a VMID at or below the clone range"
 [[ "$RUNNER_NAME_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] \
     || die "runner name prefix must be shell-safe"
 [[ "$VM_NAME_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] \
@@ -522,8 +558,8 @@ done
 
 # A fresh random MAC per clone consumed a new DHCP lease per job until the LAN
 # pool was exhausted on 2026-08-02. Keep both network identities deterministic:
-# VMIDs 200..202 map to 192.168.86.251..253 and locally administered MACs.
-SLOT_INDEX=$((VMID - CLONE_BASE))
+# VMIDs 200..203 map to 192.168.86.251..254 and locally administered MACs.
+SLOT_INDEX=$((VMID - GUEST_INDEX_BASE))
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     NETWORK_BRIDGE="${ISOLATED_BRIDGE_PREFIX}${VMID}"
     GUEST_IP="${GUEST_IPV4_PREFIX}.${VMID}.2"
@@ -532,6 +568,8 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     GUEST_DNS_SERVER="$AUTOMATIC_GUEST_DNS_SERVER"
 else
     NETWORK_BRIDGE=vmbr0
+    [ $((LEGACY_GUEST_IPV4_FIRST_OCTET + SLOT_INDEX)) -le 254 ] \
+        || { flock -u 9; die "VMID $VMID would derive a LAN address past ${LEGACY_GUEST_IPV4_PREFIX}.254"; }
     GUEST_IP="${LEGACY_GUEST_IPV4_PREFIX}.$((LEGACY_GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
     GUEST_IPV4_GATEWAY="$LEGACY_GUEST_IPV4_GATEWAY"
     GUEST_IPV4_PREFIX_LENGTH=24
@@ -636,11 +674,9 @@ cleanup() {
         return
     fi
     # A completed --ephemeral job deregisters itself. During an operator stop,
-    # an idle runner can still be online when the local ssh session exits. Fence
-    # dispatch by replacing every custom routing label with a shutdown fence,
-    # then re-read the
-    # runner and delete its registration before powering off the clone. If work
-    # won the race before the label removal, the second busy read preserves it.
+    # an idle runner can still be registered when the local ssh session exits.
+    # Deregistering it is the dispatch fence (see jit_deregister_fence); a runner
+    # that is or becomes busy is handed to the deferred cleanup instead.
     if [ "$GITHUB_API_READY" = 1 ]; then
         runners_tsv="$(github_api --paginate \
             "${REGISTRATION_API}/actions/runners?per_page=100" \
@@ -660,81 +696,13 @@ cleanup() {
                 || { log "ERROR: exact runner has invalid busy state; leaving clone $VMID for safe recovery"; return; }
             { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                 || { log "ERROR: exact runner has invalid status; leaving clone $VMID for safe recovery"; return; }
-            if [ "$runner_status" = online ] || [ "$runner_status" = offline ]; then
-                github_api --method PUT \
-                    "${REGISTRATION_API}/actions/runners/${rid}/labels" \
-                    -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
-                    || { log "ERROR: cannot fence runner dispatch; leaving clone $VMID for safe recovery"; return; }
-                for fence_probe in 1 2; do
-                    fenced_runner="$(github_api \
-                        "${REGISTRATION_API}/actions/runners/${rid}" \
-                        --jq '[.name,.busy,.status,([.labels[].name] | join(","))] | @tsv')" \
-                        || { log "ERROR: cannot verify dispatch fence; leaving clone $VMID for safe recovery"; return; }
-                    IFS=$'\t' read -r fenced_name runner_busy runner_status runner_labels <<< "$fenced_runner"
-                    [ "$fenced_name" = "$RUNNER_NAME" ] \
-                        || { log "ERROR: dispatch fence resolved the wrong runner; leaving clone $VMID for safe recovery"; return; }
-                    if [ "$runner_busy" = true ]; then
-                        delegate_deferred_cleanup || true
-                        return
-                    fi
-                    [ "$runner_busy" = false ] \
-                        || { log "ERROR: exact runner has invalid fenced busy state; leaving clone $VMID for safe recovery"; return; }
-                    { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
-                        || { log "ERROR: exact runner has invalid fenced status; leaving clone $VMID for safe recovery"; return; }
-                    if routing_label_survives "$runner_labels"; then
-                        log "ERROR: a routing label survived dispatch fence; leaving clone $VMID for safe recovery"
-                        return
-                    fi
-                    case ",$runner_labels," in
-                        *,pulp-shutdown-fenced,*) ;;
-                        *)
-                            log "ERROR: shutdown label is missing after dispatch fence; leaving clone $VMID for safe recovery"
-                            return
-                            ;;
-                    esac
-                    [ "$fence_probe" = 2 ] || sleep 2
-                done
-                log "fenced dispatch for idle runner id $rid"
-                shutdown_deadline=$((SECONDS + 120))
-                log "stopping fenced clone $VMID before deregistration"
-                timeout 20s qm stop "$VMID" >/dev/null 2>&1 || true
-                while [ "$SECONDS" -lt "$shutdown_deadline" ]; do
-                    [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] && break
-                    sleep 2
-                done
-                [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] \
-                    || { log "ERROR: fenced clone $VMID did not stop; leaving it for safe recovery"; return; }
-                while [ "$SECONDS" -lt "$shutdown_deadline" ]; do
-                    runners_tsv="$(github_api --paginate \
-                        "${REGISTRATION_API}/actions/runners?per_page=100" \
-                        --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
-                        || { log "ERROR: cannot confirm fenced runner shutdown; leaving clone $VMID for safe recovery"; return; }
-                    runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
-                        -v name="$RUNNER_NAME" '$2 == name')"
-                    [ -n "$runner_lookup" ] || break
-                    [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
-                        || { log "ERROR: duplicate exact runner registrations; leaving clone $VMID for safe recovery"; return; }
-                    IFS=$'\t' read -r rid _ runner_busy runner_status <<< "$runner_lookup"
-                    [ "$runner_busy" = false ] \
-                        || { log "ERROR: fenced runner is busy during shutdown; leaving clone $VMID for safe recovery"; return; }
-                    [ "$runner_status" = offline ] && break
-                    [ "$runner_status" = online ] \
-                        || { log "ERROR: fenced runner has invalid shutdown status; leaving clone $VMID for safe recovery"; return; }
-                    sleep 2
-                done
-                [ -z "$runner_lookup" ] || [ "$runner_status" = offline ] \
-                    || { log "ERROR: fenced runner stayed online before cleanup deadline; leaving clone $VMID for safe recovery"; return; }
-            fi
-            [ -n "$runner_lookup" ] || rid=""
-            if [ -z "$rid" ]; then
-                log "runner deregistered itself during fenced shutdown"
-            elif ! github_api --method DELETE \
-                "${REGISTRATION_API}/actions/runners/${rid}"; then
-                log "ERROR: cannot deregister runner id $rid; leaving clone $VMID for safe recovery"
-                return
-            else
-                log "deregistered runner id $rid"
-            fi
+            jit_deregister_fence "$REGISTRATION_API" "$rid" "$RUNNER_NAME"
+            case $? in
+                0) ;;
+                3) delegate_deferred_cleanup || true; return ;;
+                *) log "ERROR: cannot prove the dispatch fence; leaving clone $VMID for safe recovery"; return ;;
+            esac
+            log "JIT fence 4/4: destroying clone $VMID"
         fi
     fi
     log "destroying clone $VMID"
@@ -865,8 +833,10 @@ EOF
     rm -f "$VM_FIREWALL_TMP"
     NET0="${NET0},firewall=1"
 fi
+# --ciupgrade 0: Proxmox's cloud-init default runs a full apt upgrade on first
+# boot, which holds the dpkg lock while the job's own apt-get runs.
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
-    --cpuunits 50 --balloon 0 --onboot 0 \
+    --cpuunits 50 --balloon 0 --onboot 0 --ciupgrade 0 \
     --net0 "$NET0" \
     --ipconfig0 "ip=${GUEST_IP}/${GUEST_IPV4_PREFIX_LENGTH},gw=${GUEST_IPV4_GATEWAY}" \
     --nameserver "$GUEST_DNS_SERVER" >/dev/null \
@@ -993,6 +963,28 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
         gh auth status --show-token 2>&1 \
         | grep -Eq "^[[:space:]-]*Token:"
 ' || die "golden $GOLDEN lacks an uncredentialed gh CLI"
+
+# Two things run apt in a fresh clone. Cloud-init's first-boot module upgrades
+# packages unless --ciupgrade 0 is set above, and the golden's apt timers last
+# ran when it was baked, so Persistent=true starts apt-daily-upgrade about a
+# minute after every clone boots. It holds the dpkg
+# lock while the job's own apt-get runs, and the job fails on "Could not get
+# lock /var/lib/dpkg/lock-frontend". Stop the timers in this throwaway clone and
+# let any apt run that already started finish (killing it mid-dpkg would break
+# the clone) before a job can be assigned.
+ssh -o BatchMode=yes "ci@$GUEST_IP" '
+    sudo -n systemctl stop apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+    # First-boot cloud-init may still be running apt for the golden.
+    timeout 600 cloud-init status --wait >/dev/null 2>&1 || true
+    for _ in $(seq 1 120); do
+        # unattended-upgrades.service is only a shutdown hook and stays active;
+        # the upgrade itself runs inside apt-daily-upgrade.service.
+        systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service \
+            2>/dev/null || exit 0
+        sleep 5
+    done
+    exit 1
+' || die "apt maintenance in clone $VMID was still running after 10 minutes; discarding it rather than hand a job a held dpkg lock"
 
 # GitHub's JIT endpoint creates one exact ephemeral registration. The
 # generation UUID in RUNNER_NAME prevents a stale registration from causing a

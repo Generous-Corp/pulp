@@ -30,6 +30,7 @@
 #include <pulp/format/reload/revocation.hpp>
 #include <pulp/format/reload/swap_pack.hpp>
 #include <pulp/runtime/http.hpp>
+#include <pulp/runtime/safe_relative_path.hpp>
 #include <pulp/view/reload_capabilities.hpp>
 
 #include <cstdint>
@@ -99,18 +100,13 @@ inline std::string build_update_check_url(const std::string& base_url,
            "&installed=" + std::to_string(installed_version);
 }
 
-/// True only if @p p is safe to join onto a download directory: a non-empty,
-/// relative path with no root name and no `..` component. The manifest is the
+/// True only if @p p is safe to join onto a download directory, per
+/// runtime::is_safe_relative_path (no rooted form, no `..`). The manifest is the
 /// untrusted server's word (its signature is verified only later), so a fetcher
 /// MUST screen every declared file path with this before writing it, or a hostile
 /// `../../x` escapes the download directory.
 inline bool is_safe_pack_member_path(const std::string& p) {
-    if (p.empty()) return false;
-    const std::filesystem::path rel(p);
-    if (!rel.is_relative() || rel.has_root_name()) return false;
-    for (const auto& part : rel)
-        if (part == "..") return false;
-    return true;
+    return runtime::is_safe_relative_path(std::filesystem::path(p));
 }
 
 struct RemoteUpdateConfig {
@@ -228,6 +224,10 @@ inline std::function<FetchedPack(const std::string&)> make_http_pack_fetcher(
                 return out;  // fail closed — treat as unavailable, write nothing
             }
             const std::filesystem::path dest = download_dir / f.path;
+            if (!runtime::is_within_directory(download_dir, dest)) {
+                out.detail = "unsafe manifest path rejected: " + f.path;
+                return out;
+            }
             std::filesystem::create_directories(dest.parent_path(), ec);
             if (!runtime::http_download(files_base_url + "/" + f.path, dest.string(),
                                         timeout_seconds)) {

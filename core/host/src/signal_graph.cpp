@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <pulp/format/processor.hpp>
@@ -1867,17 +1868,30 @@ namespace {
 std::vector<NodeId> processing_order_for(const std::vector<GraphNode>& nodes,
                                          const std::vector<Connection>& connections) {
     std::unordered_map<NodeId, int> in_degree;
-    for (const auto& n : nodes)
+    std::unordered_map<NodeId, std::size_t> authoring_index;
+    authoring_index.reserve(nodes.size());
+    for (std::size_t index = 0; index < nodes.size(); ++index) {
+        const auto& n = nodes[index];
         in_degree[n.id] = 0;
+        authoring_index[n.id] = index;
+    }
     for (const auto& c : connections) {
         if (c.feedback) continue;
         in_degree[c.dest_node]++;
     }
-    std::queue<NodeId> queue;
-    for (auto& [id, deg] : in_degree) if (deg == 0) queue.push(id);
+    // A graph can have multiple ready nodes at every fan-out/fan-in boundary.
+    // Do not let unordered_map iteration or connection insertion order choose
+    // the runtime plan. Authoring position is the semantic tie-break for
+    // independent nodes; NodeId is an identity token and may outlive a node's
+    // position after removals or future ID allocation changes.
+    using ReadyNode = std::pair<std::size_t, NodeId>;
+    std::priority_queue<ReadyNode, std::vector<ReadyNode>, std::greater<ReadyNode>> queue;
+    for (const auto& [id, deg] : in_degree)
+        if (deg == 0)
+            queue.push({authoring_index.at(id), id});
     std::vector<NodeId> order;
     while (!queue.empty()) {
-        auto current = queue.front();
+        const auto current = queue.top().second;
         queue.pop();
         order.push_back(current);
         for (const auto& c : connections) {
@@ -1886,7 +1900,8 @@ std::vector<NodeId> processing_order_for(const std::vector<GraphNode>& nodes,
             // source must be processed before the dest so its output
             // buffer is valid when we sample it for param events.
             if (c.source_node == current) {
-                if (--in_degree[c.dest_node] == 0) queue.push(c.dest_node);
+                if (--in_degree[c.dest_node] == 0)
+                    queue.push({authoring_index.at(c.dest_node), c.dest_node});
             }
         }
     }

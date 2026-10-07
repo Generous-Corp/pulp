@@ -86,7 +86,7 @@
             "properties": {
               "path": {
                 "type": "string",
-                "pattern": "^bin/browser_capture-v1/[^/]+$"
+                "pattern": "^bin/(?:browser_capture-v1/[^/]+|jsx-runtime/materialized_binding_contract\\.mjs)$"
               },
               "sha256": {
                 "type": "string",
