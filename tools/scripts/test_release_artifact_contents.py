@@ -512,6 +512,10 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
     def test_materialized_binding_contract_is_version_floored(self) -> None:
         member = rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER
         sdk_member = "pulp-sdk/bin/" + member
+        sibling_members = {
+            "pulp-sdk/bin/" + sibling
+            for sibling in rac.MATERIALIZED_RUNTIME_SIBLING_CLI_MEMBERS
+        }
         for platform in ("darwin-arm64", "linux-x64", "windows-x64"):
             with self.subTest(platform=platform):
                 before = rac.cli_members(platform, rac.DEFAULT_MATRIX, "0.917.0")
@@ -526,6 +530,19 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 self.assertIn(member, at_floor)
                 self.assertNotIn(sdk_member, sdk_before)
                 self.assertIn(sdk_member, sdk_at_floor)
+                self.assertTrue(sibling_members.isdisjoint(sdk_before))
+                self.assertTrue(sibling_members <= sdk_at_floor)
+
+    def test_materialized_runtime_siblings_are_installed_into_sdk(self) -> None:
+        cmake = (
+            ROOT / "tools" / "import-design" / "CMakeLists.txt"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '"${_pulp_materialized_source_emitter}"', cmake
+        )
+        self.assertIn(
+            '"${_pulp_materialized_ids_map}"', cmake
+        )
 
     def test_large_private_node_runtime_is_verified(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -814,6 +831,10 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 for member in runtime_members
             }
             | {"pulp-sdk/bin/" + member for member in materialized_members}
+            | {
+                "pulp-sdk/bin/" + sibling
+                for sibling in rac.MATERIALIZED_RUNTIME_SIBLING_CLI_MEMBERS
+            }
             | {
                 "pulp-sdk/bin/browser_capture-v1/node",
                 "pulp-sdk/bin/browser_capture-v1/node.LICENSE",

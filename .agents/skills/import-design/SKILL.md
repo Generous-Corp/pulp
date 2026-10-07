@@ -21,6 +21,16 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
 
+### Packaged SDK runtime contract
+
+The installed `pulp-import-design` SDK runtime includes the browser-capture
+manifest plus the materialized JSX siblings
+`materialized_binding_contract.mjs`, `materialized_source_emitter.mjs`, and
+`materialized_ids_map.mjs`. Keep all three installed under `bin/jsx-runtime`;
+the release provenance handoff hashes the complete tree and rejects a missing
+sibling or an undeclared extra. Validate the archive with
+`python3 tools/scripts/test_release_artifact_contents.py` before publishing.
+
 ## TOOLS THIS SKILL ALREADY SHIPS — reach for these before hand-rolling (read this first)
 
 Every one of these is documented further down this file. That was not enough:
