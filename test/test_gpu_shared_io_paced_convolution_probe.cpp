@@ -227,15 +227,22 @@ RawCensus collect_raw_census(const std::vector<TraceRecord>& records,
     census.lifecycle_records.reserve(records.size());
     for (const auto& record : records) {
         // Retain every raw row before classifying it. Eligible and Recovery
-        // rows are valid trace kinds, but the P2 lifecycle census deliberately
-        // accounts only for Terminal and Delivery. Dropping an unaccounted row
-        // would let the serialized census look complete while raw_census_valid
-        // remained true.
+        // rows are valid lifecycle evidence, but do not participate in the
+        // Terminal/Delivery identity multisets.
         census.lifecycle_records.push_back(&record);
-        if (record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
-            record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Delivery) {
+        const auto known = record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal ||
+                           record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Eligible ||
+                           record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Delivery ||
+                           record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Recovery;
+        if (!known) {
             census.unaccounted_records.push_back(&record);
             census.valid = false;
+            continue;
+        }
+        if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Eligible ||
+            record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Recovery) {
+            if (!record.valid())
+                census.valid = false;
             continue;
         }
         const auto identity = trace_identity(engine_id, record.generation, record.sequence);
@@ -345,11 +352,38 @@ int self_test() {
     eligible.generation = 1;
     eligible.sequence = 3;
     records = {terminal, delivery, eligible};
+    eligible.set(pulp::gpu_audio::detail::SharedIoTraceStage::Scheduled, 1);
+    const auto eligible_census = collect_raw_census(records, admissions, engine_id, authenticated);
+    if (!eligible_census.valid || !eligible_census.unaccounted_records.empty() ||
+        eligible_census.lifecycle_records.size() != records.size()) {
+        std::cerr << "self-test: valid Eligible trace row was rejected or dropped\n";
+        return 1;
+    }
+    TraceRecord recovery;
+    recovery.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Recovery;
+    recovery.generation = 1;
+    recovery.next_generation = 2;
+    recovery.set(pulp::gpu_audio::detail::SharedIoTraceStage::Scheduled, 1);
+    records = {terminal, delivery, recovery};
+    const auto recovery_census = collect_raw_census(records, admissions, engine_id, authenticated);
+    if (!recovery_census.valid || !recovery_census.unaccounted_records.empty()) {
+        std::cerr << "self-test: valid Recovery trace row was rejected\n";
+        return 1;
+    }
+    auto unknown_record = recovery;
+    unknown_record.kind = static_cast<pulp::gpu_audio::detail::SharedIoTraceKind>(99);
+    records = {terminal, delivery, unknown_record};
     const auto unaccounted = collect_raw_census(records, admissions, engine_id, authenticated);
     if (unaccounted.valid || unaccounted.unaccounted_records.size() != 1 ||
         unaccounted.lifecycle_records.size() != records.size() ||
         unaccounted.lifecycle_records.back() != &records.back()) {
-        std::cerr << "self-test: unaccounted trace row was not retained and rejected\n";
+        std::cerr << "self-test: unknown trace row was not retained and rejected\n";
+        return 1;
+    }
+    recovery.next_generation = 0;
+    records = {terminal, delivery, recovery};
+    if (collect_raw_census(records, admissions, engine_id, authenticated).valid) {
+        std::cerr << "self-test: malformed Recovery trace row was accepted\n";
         return 1;
     }
 

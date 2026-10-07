@@ -229,18 +229,26 @@ class P2CampaignContractTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             campaign.validate_identity_rows(wrong_classification, expected_sha)
 
-    def test_identity_rows_reject_unknown_and_unaccounted_trace_kinds(self):
+    def test_identity_rows_retain_known_lifecycle_kinds_and_reject_unknown_or_malformed(self):
         rows = self._rows()
         expected_sha = rows[0]["executable_observed_sha256"]
         unknown = [dict(row) for row in rows]
         unknown.append(dict(rows[-1], trace_kind=99))
         with self.assertRaisesRegex(RuntimeError, "unknown trace kind"):
             campaign.validate_identity_rows(unknown, expected_sha)
-        for trace_kind in (1, 3):
-            unaccounted = [dict(row) for row in rows]
-            unaccounted.append(dict(rows[-1], trace_kind=trace_kind))
-            with self.assertRaisesRegex(RuntimeError, "unaccounted trace kind"):
-                campaign.validate_identity_rows(unaccounted, expected_sha)
+        eligible = dict(rows[-1], trace_kind=1, generation=1, sequence=3,
+                        valid_stages=1, gpu_work_admitted=False,
+                        output_eligible=False, gpu_terminal=0, delivery=0)
+        recovery = dict(eligible, trace_kind=3, next_generation=2)
+        campaign.validate_identity_rows(rows + [eligible, recovery], expected_sha)
+        zero_stage_eligible = dict(eligible, sequence=4, valid_stages=0)
+        campaign.validate_identity_rows(rows + [zero_stage_eligible], expected_sha)
+        malformed = dict(eligible, valid_stages=-1)
+        with self.assertRaisesRegex(RuntimeError, "malformed known trace kind"):
+            campaign.validate_identity_rows(rows + [malformed], expected_sha)
+        malformed_recovery = dict(recovery, next_generation=1)
+        with self.assertRaisesRegex(RuntimeError, "malformed Recovery"):
+            campaign.validate_identity_rows(rows + [malformed_recovery], expected_sha)
 
     def test_steady_receipt_requires_same_process_residency(self):
         base = {

@@ -30,10 +30,8 @@ DRIVER_RELATIVE_PATH = Path("tools/scripts/gpu_audio_p2_campaign.py")
 NEGATIVE_CONTROL_FAILED_BLOCKS = 1
 
 # Keep this in lockstep with detail::SharedIoTraceKind.  The raw P2
-# lifecycle census deliberately retains only Terminal and Delivery rows;
-# Eligible and Recovery rows are valid trace kinds elsewhere, but are not
-# accounted for by this admission/terminal/delivery verifier and therefore
-# must fail closed rather than being silently ignored.
+# lifecycle census retains every row, while only Terminal and Delivery rows
+# participate in the admission/terminal/delivery identity multisets.
 TRACE_KINDS = frozenset((0, 1, 2, 3))
 LIFECYCLE_TRACE_KINDS = frozenset((0, 2))
 
@@ -462,8 +460,20 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
         if (isinstance(trace_kind, bool) or not isinstance(trace_kind, int) or
                 trace_kind not in TRACE_KINDS):
             raise RuntimeError("raw census contains unknown trace kind")
-        if trace_kind not in LIFECYCLE_TRACE_KINDS:
-            raise RuntimeError("raw census contains an unaccounted trace kind")
+        if trace_kind in (1, 3):
+            # Eligible and Recovery rows are valid lifecycle evidence but are
+            # excluded from the Terminal/Delivery identity multisets. Mirror
+            # SharedIoTraceRecord::valid() for the fields serialized by the
+            # host-only probe so malformed known rows fail closed.
+            if (not _positive_integer(record.get("generation")) or
+                    record.get("gpu_work_admitted") is True or
+                    record.get("output_eligible") is True or
+                    record.get("gpu_terminal", 0) != 0 or
+                    record.get("delivery", 0) != 0 or
+                    not _nonnegative_integer(record.get("valid_stages"))):
+                raise RuntimeError("raw census contains malformed known trace kind")
+            if trace_kind == 3 and record.get("next_generation", 0) <= record["generation"]:
+                raise RuntimeError("raw census contains malformed Recovery trace row")
     admissions = [(r.get("engine_id"), r.get("generation"), r.get("sequence"))
                   for r in rows if r.get("kind") == "admission"]
     terminals = [(r.get("engine_id"), r.get("generation"), r.get("sequence")) for r in record_rows
