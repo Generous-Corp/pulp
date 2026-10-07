@@ -110,19 +110,16 @@ std::string extent(int width, int height) {
     return std::to_string(width) + "x" + std::to_string(height);
 }
 
-bool compose_materialized_canvas_evidence(
-    const pulp::view::DesignIR& ir,
-    std::vector<std::uint8_t>& rendered,
-    std::string& error,
-    bool require_canvas_ink) {
+bool compose_materialized_canvas_evidence(const pulp::view::DesignIR& ir,
+                                          std::vector<std::uint8_t>& rendered, std::string& error,
+                                          bool require_canvas_ink) {
     const auto authority = ir.root.attributes.find(
         "materialized_visual_authority");
     if (authority == ir.root.attributes.end() ||
         authority->second != "browser:chrome+native-canvases") {
         if (require_canvas_ink) {
-            error =
-                "materialized canvas validation requires a materialized "
-                "canvas composition evidence plane";
+            error = "materialized canvas validation requires a materialized "
+                    "canvas composition evidence plane";
             return false;
         }
         return true;
@@ -299,12 +296,10 @@ bool compose_materialized_canvas_evidence(
         }
         ++composed;
     }
-    if (require_canvas_ink &&
-        (!saw_sparse_composite || sparse_composite_ink_pixels == 0)) {
-        error =
-            "materialized canvas validation requires at least one "
-            "non-transparent pixel in the hash-verified sparse composite "
-            "evidence";
+    if (require_canvas_ink && (!saw_sparse_composite || sparse_composite_ink_pixels == 0)) {
+        error = "materialized canvas validation requires at least one "
+                "non-transparent pixel in the hash-verified sparse composite "
+                "evidence";
         return false;
     }
     if (composed == 0) {
@@ -496,8 +491,8 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
     // the published IR remains executable CanvasWidget targets, and the live
     // native runtime has a separate no-reference-plane gate proving it paints
     // those streams itself.
-    if (!compose_materialized_canvas_evidence(
-            ir, rendered, result.error, options.require_canvas_ink))
+    if (!compose_materialized_canvas_evidence(ir, rendered, result.error,
+                                              options.require_canvas_ink))
         return result;
     if (!write_bytes_atomically(options.rendered, rendered, result.error))
         return result;

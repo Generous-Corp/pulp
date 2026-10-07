@@ -56,11 +56,9 @@ struct BrowserImportCliRequest {
 /// Reject browser-specific CLI options before a non-browser command path can
 /// silently ignore them. Returns the CLI exit code after printing a diagnostic.
 std::optional<int> validate_browser_import_cli_options(
-    bool fit_authored_frame, bool render_size_explicit,
-    bool has_browser_interactions, bool offline, bool export_tokens,
-    bool detect_only, bool native_panel_lowering,
-    bool materialized_canvas_composition,
-    bool require_canvas_ink = false);
+    bool fit_authored_frame, bool render_size_explicit, bool has_browser_interactions, bool offline,
+    bool export_tokens, bool detect_only, bool native_panel_lowering,
+    bool materialized_canvas_composition, bool require_canvas_ink = false);
 
 /// Reject an explicit source that cannot enter browser-backed HTML import.
 std::optional<int> validate_fit_authored_frame_source_cli(

@@ -4,16 +4,11 @@
 
 namespace pulp::import_design {
 
-std::optional<int> validate_browser_import_cli_options(
-    bool fit_authored_frame,
-    bool render_size_explicit,
-    bool has_browser_interactions,
-    bool offline,
-    bool export_tokens,
-    bool detect_only,
-    bool native_panel_lowering,
-    bool materialized_canvas_composition,
-    bool require_canvas_ink) {
+std::optional<int>
+validate_browser_import_cli_options(bool fit_authored_frame, bool render_size_explicit,
+                                    bool has_browser_interactions, bool offline, bool export_tokens,
+                                    bool detect_only, bool native_panel_lowering,
+                                    bool materialized_canvas_composition, bool require_canvas_ink) {
     if (fit_authored_frame) {
         const char* conflict = render_size_explicit       ? "--render-size"
                                : has_browser_interactions ? "--browser-interactions"

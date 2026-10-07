@@ -153,14 +153,12 @@ TEST_CASE("authored-frame CLI policy rejects every incompatible route",
               true, false, false, false, false, true, false, false) == 2);
     CHECK(validate_browser_import_cli_options(
               false, false, false, false, false, false, true, true) == 2);
-    CHECK(validate_browser_import_cli_options(
-              false, false, false, false, false, false, false, false, true) ==
-          2);
-    CHECK_FALSE(validate_browser_import_cli_options(
-        false, false, false, false, false, false, false, true, true));
-    CHECK(validate_browser_import_cli_options(
-              false, false, false, true, false, false, false, true, true) ==
-          2);
+    CHECK(validate_browser_import_cli_options(false, false, false, false, false, false, false,
+                                              false, true) == 2);
+    CHECK_FALSE(validate_browser_import_cli_options(false, false, false, false, false, false, false,
+                                                    true, true));
+    CHECK(validate_browser_import_cli_options(false, false, false, true, false, false, false, true,
+                                              true) == 2);
     CHECK_FALSE(validate_browser_import_cli_options(
         true, false, false, false, false, false, false, false));
 
@@ -244,10 +242,8 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
         request.browser_interactions = tree.root / "interactions.json";
 
         const auto result =
-            id::internal::run_browser_import_cli_with_operations(
-                request, "not html", operations);
-        const auto* failure =
-            std::get_if<id::BrowserImportFailure>(&result);
+            id::internal::run_browser_import_cli_with_operations(request, "not html", operations);
+        const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
         REQUIRE(failure);
         CHECK(failure->exit_code == 2);
         CHECK(observed_materialized_canvas_composition);
@@ -1242,14 +1238,13 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
         .height = evidence.height,
     });
 
-    const auto result = id::validate_browser_capture_design_ir(
-        ir,
-        {.reference = reference_path,
-         .rendered = tree.root / "render.png",
-         .diff = tree.root / "diff.png",
-         .width = 32,
-         .height = 32,
-         .require_canvas_ink = true});
+    const auto result =
+        id::validate_browser_capture_design_ir(ir, {.reference = reference_path,
+                                                    .rendered = tree.root / "render.png",
+                                                    .diff = tree.root / "diff.png",
+                                                    .width = 32,
+                                                    .height = 32,
+                                                    .require_canvas_ink = true});
     INFO(result.error);
     INFO(result.registration_reason);
     REQUIRE(result.valid);
@@ -1265,24 +1260,21 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
         tree.write(evidence_path, id::encode_png_rgba(empty));
 
         const auto rejected = id::validate_browser_capture_design_ir(
-            ir,
-            {.reference = reference_path,
-             .rendered = tree.root / "render-zero-ink.png",
-             .diff = tree.root / "diff-zero-ink.png",
-             .width = 32,
-             .height = 32,
-             .require_canvas_ink = true});
+            ir, {.reference = reference_path,
+                 .rendered = tree.root / "render-zero-ink.png",
+                 .diff = tree.root / "diff-zero-ink.png",
+                 .width = 32,
+                 .height = 32,
+                 .require_canvas_ink = true});
         CHECK_FALSE(rejected.valid);
-        CHECK(rejected.error.find("at least one non-transparent") !=
-              std::string::npos);
+        CHECK(rejected.error.find("at least one non-transparent") != std::string::npos);
 
         const auto allowed = id::validate_browser_capture_design_ir(
-            ir,
-            {.reference = reference_path,
-             .rendered = tree.root / "render-zero-ink-default.png",
-             .diff = tree.root / "diff-zero-ink-default.png",
-             .width = 32,
-             .height = 32});
+            ir, {.reference = reference_path,
+                 .rendered = tree.root / "render-zero-ink-default.png",
+                 .diff = tree.root / "diff-zero-ink-default.png",
+                 .width = 32,
+                 .height = 32});
         CHECK(allowed.valid);
         CHECK(allowed.scored);
     }
@@ -1302,13 +1294,12 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
         tree.write(evidence_path, id::encode_png_rgba(specks));
 
         const auto accepted = id::validate_browser_capture_design_ir(
-            ir,
-            {.reference = reference_path,
-             .rendered = tree.root / "render-low-contrast.png",
-             .diff = tree.root / "diff-low-contrast.png",
-             .width = 32,
-             .height = 32,
-             .require_canvas_ink = true});
+            ir, {.reference = reference_path,
+                 .rendered = tree.root / "render-low-contrast.png",
+                 .diff = tree.root / "diff-low-contrast.png",
+                 .width = 32,
+                 .height = 32,
+                 .require_canvas_ink = true});
         CHECK(accepted.valid);
         CHECK(accepted.scored);
     }

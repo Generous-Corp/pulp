@@ -614,16 +614,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .initial_width = request.initial_width,
          .initial_height = request.initial_height,
          .offline = request.offline,
-         .skia_validation =
-             request.screenshot_backend ==
-             pulp::view::ScreenshotBackend::skia,
+         .skia_validation = request.screenshot_backend == pulp::view::ScreenshotBackend::skia,
          .allow_browser_network = request.allow_browser_network,
          .dry_run = request.dry_run,
-         .supports_faithful_capture =
-             request.supports_faithful_capture,
+         .supports_faithful_capture = request.supports_faithful_capture,
          .native_panel_lowering = request.native_panel_lowering,
-         .materialized_canvas_composition =
-             request.materialized_canvas_composition,
+         .materialized_canvas_composition = request.materialized_canvas_composition,
          .require_canvas_ink = request.require_canvas_ink},
         content);
 
@@ -785,16 +781,15 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
     // recovered from a faithful_capture child's negative offset, and native
     // panel lowering emits no such child, so the crop silently became zero and
     // every native panel was scored against a misregistered oracle.
-    const auto comparison = operations.validate_capture(
-        design_ir,
-        {.reference = reference_image,
-         .rendered = rendered_path,
-         .diff = diff_path,
-         .width = render_width,
-         .height = render_height,
-         .fail_below_percent = request.fail_below_percent,
-         .require_canvas_ink = request.require_canvas_ink,
-         .backend = request.screenshot_backend});
+    const auto comparison =
+        operations.validate_capture(design_ir, {.reference = reference_image,
+                                                .rendered = rendered_path,
+                                                .diff = diff_path,
+                                                .width = render_width,
+                                                .height = render_height,
+                                                .fail_below_percent = request.fail_below_percent,
+                                                .require_canvas_ink = request.require_canvas_ink,
+                                                .backend = request.screenshot_backend});
     if (!comparison.valid) {
         std::cerr << "Validation error: " << comparison.error << "\n";
         return BrowserImportFailure{1};

@@ -2065,9 +2065,9 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
 
     if (auto code = pulp::import_design::validate_browser_import_cli_options(
             opt.fit_authored_frame, opt.render_size_explicit,
-            !opt.browser_interactions_path.empty(), opt.offline,
-            opt.export_tokens_mode, opt.detect_only, opt.native_panel_lowering,
-            opt.materialized_canvas_composition, opt.require_canvas_ink))
+            !opt.browser_interactions_path.empty(), opt.offline, opt.export_tokens_mode,
+            opt.detect_only, opt.native_panel_lowering, opt.materialized_canvas_composition,
+            opt.require_canvas_ink))
         return *code;
     return std::nullopt;
 }
@@ -2687,29 +2687,24 @@ int main(int argc, char* argv[]) {
             browser_reserved_outputs.emplace_back(*path);
     }
 
-    auto browser_import =
-        pulp::import_design::run_browser_import_session(
+    auto browser_import = pulp::import_design::run_browser_import_session(
         {.input_file = input_file,
          // Use the actual emitted artifact as the portability anchor. For
          // directory/extensionless C++ output, this is
          // <requested>/imported_ui.cpp rather than the raw CLI token.
          .output_file = std::move(browser_primary_output),
          .importer_executable = argv[0],
-         .browser_executable =
-             browser_path.empty()
-                 ? std::optional<fs::path>{}
-                 : std::optional<fs::path>{browser_path},
-         .browser_interactions =
-             browser_interactions_path.empty()
-                 ? std::optional<fs::path>{}
-                 : std::optional<fs::path>{browser_interactions_path},
+         .browser_executable = browser_path.empty() ? std::optional<fs::path>{}
+                                                    : std::optional<fs::path>{browser_path},
+         .browser_interactions = browser_interactions_path.empty()
+                                     ? std::optional<fs::path>{}
+                                     : std::optional<fs::path>{browser_interactions_path},
          .fit_authored_frame = cli.fit_authored_frame,
          .source = *source,
          // An explicit --render-size is the user's authored viewport, not a
          // seed the capture may silently replace during width correction.
-         .pinned_width = render_size_explicit
-             ? std::optional<int>{render_width}
-             : std::optional<int>{},
+         .pinned_width =
+             render_size_explicit ? std::optional<int>{render_width} : std::optional<int>{},
          .initial_width = render_size_explicit ? render_width : 1280,
          .initial_height = render_size_explicit ? render_height : 800,
          .reference_image = reference_image,
@@ -2720,8 +2715,7 @@ int main(int argc, char* argv[]) {
          .offline = offline,
          .allow_browser_network = allow_browser_network,
          .dry_run = dry_run,
-         .supports_faithful_capture =
-             artifact_emit != ArtifactEmit::swiftui,
+         .supports_faithful_capture = artifact_emit != ArtifactEmit::swiftui,
          .native_panel_lowering = cli.native_panel_lowering,
          .materialized_canvas_composition = cli.materialized_canvas_composition,
          .require_canvas_ink = cli.require_canvas_ink,
