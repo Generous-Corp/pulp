@@ -320,6 +320,12 @@ TEST_CASE("generated StateStore registration routes stable keys safely",
     CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
         rejected, store, owner_alive.capture(), {{"gain", 1}, {"missing", 999}}));
     CHECK(rejected.handler_count() == 0);
+
+    EditorBridge duplicate;
+    pulp::runtime::AliveToken duplicate_alive;
+    CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        duplicate, store, duplicate_alive.capture(), {{"gain", 1}, {"gain_alias", 1}}));
+    CHECK(duplicate.handler_count() == 0);
 }
 
 TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
