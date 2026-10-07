@@ -87,10 +87,10 @@ class P2CampaignContractTests(unittest.TestCase):
     def test_observe_jsonl_rejects_blank_or_malformed_rows(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "raw.jsonl"
-            path.write_text('{"kind":"provenance"}\n\n')
+            path.write_text('{"kind":"provenance"}\n\n', encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "blank line"):
                 campaign.observe_jsonl(path)
-            path.write_text('{not-json}\n')
+            path.write_text('{not-json}\n', encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "invalid JSON"):
                 campaign.observe_jsonl(path)
 
@@ -273,7 +273,7 @@ class P2CampaignContractTests(unittest.TestCase):
     def test_lower_block_count_rejected_before_probe(self):
         with tempfile.TemporaryDirectory() as root:
             probe = Path(root) / "probe"
-            probe.write_text("#!/bin/sh\nexit 0\n")
+            probe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             probe.chmod(probe.stat().st_mode | stat.S_IXUSR)
             args = campaign.parse_args([
                 "--probe", str(probe), "--output-dir", str(Path(root) / "out"), "--blocks", "1024"

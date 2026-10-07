@@ -21,7 +21,7 @@ def run(root: Path, *manifests: Path) -> subprocess.CompletedProcess[str]:
     command = [sys.executable, str(LINT), "--root", str(root)]
     for manifest in manifests:
         command.extend(("--manifest", str(manifest)))
-    return subprocess.run(command, text=True, capture_output=True, check=False)
+    return subprocess.run(command, text=True, capture_output=True, check=False, encoding="utf-8")
 
 
 def main() -> int:

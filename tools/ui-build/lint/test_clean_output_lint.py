@@ -67,7 +67,7 @@ export function Other() {
             root = Path(directory)
             missing = subprocess.run(
                 [sys.executable, str(lint), str(root / "missing")],
-                text=True, capture_output=True, check=False)
+                text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertNotEqual(missing.returncode, 0)
             self.assertIn("missing-source-root", missing.stdout)
 
@@ -75,7 +75,7 @@ export function Other() {
             empty.mkdir()
             result = subprocess.run(
                 [sys.executable, str(lint), str(empty), "--json"],
-                text=True, capture_output=True, check=False)
+                text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(json.loads(result.stdout)["findings"][0]["code"],
                              "empty-source-root")
@@ -97,12 +97,12 @@ export function Other() {
             }), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
-                text=True, capture_output=True, check=False)
+                text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             source.write_text(source.read_text(encoding="utf-8") + "// drift\n", encoding="utf-8")
             stale = subprocess.run(
                 [sys.executable, str(lint), str(root), "--manifest", str(manifest)],
-                text=True, capture_output=True, check=False)
+                text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertNotEqual(stale.returncode, 0)
             self.assertIn("invalid-corpus-manifest", stale.stdout)
 
