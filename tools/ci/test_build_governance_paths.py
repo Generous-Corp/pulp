@@ -97,6 +97,27 @@ class BuildGovernancePathTests(unittest.TestCase):
             self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
         self.assertIn('PULP_BUILD_JOBS="$jobs"', source)
 
+    def test_sanitizer_and_coverage_helpers_route_builds_through_governor(self) -> None:
+        """Local diagnostic lanes must keep their --jobs cap at the governor boundary."""
+        for relative in (
+            "scripts/run_asan.sh",
+            "scripts/run_tsan.sh",
+            "scripts/run_ubsan.sh",
+            "scripts/run_coverage.sh",
+        ):
+            source = read_source(relative)
+            build_lines = [
+                line for line in source.splitlines() if "cmake --build" in line
+            ]
+            self.assertEqual(len(build_lines), 1, relative)
+            self.assertIn("governed-build.sh", source, relative)
+            self.assertIn('PULP_BUILD_JOBS="${JOBS}"', source, relative)
+            self.assertNotRegex(
+                source,
+                r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))",
+                relative,
+            )
+
     def test_governor_probe_is_bounded_and_has_a_receipt(self) -> None:
         source = read_source("tools/ci/governed-build.sh")
         self.assertIn('export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"', source)
