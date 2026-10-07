@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""Per-night ledger of the nightly read audit on main: which nights ran clean,
+"""Per-day ledger of the nightly read audit on main: which cron days ran clean,
 which did not, and which had no counted run at all.
 
-The read audit's Stage 0 streak counts clean nights, and only the nightly
-window speaks for a night. A run counts for night N only if it completed
-(`updated_at`) inside N's window, 07:00-10:00Z, and at most one run counts per
-night:
+The read audit's Stage 0 streak counts clean cron days, and only the schedule
+speaks for a day. GitHub fires the nightly's cron hours late, so the day is
+the UTC date the scheduled run was created, not the cron hour. At most one run
+counts per day:
 
-    the scheduled run      normally the one that counts; if two completed in
-                           the window, the first to complete
-    a replacing dispatch   a run of another event counts only when it
-                           completed in the window and has the same head sha
-                           as a scheduled run of that night that was
-                           cancelled (the dispatch cancelled it), and only when
-                           no scheduled run counts
-    anything else          ignored and listed with its reason: a dispatch
-                           outside the window is a canary precondition or a
-                           control, never a night
+    the scheduled run      the run with event `schedule` created that day; if
+                           there were two, the first created
+    a replacing dispatch   counts in its place only when that day's scheduled
+                           run was cancelled and the dispatch ran on the same
+                           head sha after it (the per-ref cancel-in-progress
+                           replacement); the first such dispatch
+    anything else          ignored and listed with its reason: any other
+                           dispatch is a canary precondition or a control,
+                           never a day
 
 A counted run is clean when its report's stage0 verdict says so (--verdicts,
 read from each run's read-audit.json). Without a report, its conclusion
@@ -24,17 +23,19 @@ decides, but only for a run created after the nightly began failing on any
 verdict but clean (FAIL_ON_FINDINGS_SINCE); before that a `success` could carry
 findings, so such a run is not clean. A cancelled or skipped run says nothing.
 
-    streak       walking the nights in order, a clean night adds one; a
-                 not-clean night and a gap both reset it to zero
-    missing      every judged night since --start with no counted run (a gap):
-                 GitHub dropped or deferred the schedule past the window; the
-                 night is named so it is never hidden
+    streak       walking the days in order, a clean day adds one; a
+                 not-clean day and a gap both reset it to zero
+    missing      every completed UTC day since --start with no counted run (a
+                 gap): GitHub dropped the schedule, or its run was cancelled
+                 with no same-sha replacement; the day is named so it is never
+                 hidden
     missing_recent
-                 the missing nights of the last --flag-days days, which is what
+                 the missing days of the last --flag-days days, which is what
                  the tracking issue raises (an old gap stays in the ledger but
                  does not hold the issue open forever)
 
-A night is judged once its window has closed; before that it is `pending`.
+Today, and a day whose run is still in progress, is `pending` until a counted
+run exists.
 
     read_audit_cadence.py --runs runs.json --start 2026-10-03 [--now ISO] \\
         --out ledger.json [--summary ledger.md]
@@ -55,10 +56,6 @@ COUNTED = {"success": "clean", "failure": "not_clean"}
 # When read-audit-nightly.yml started passing --fail-on-findings: from here a
 # `success` conclusion means a clean verdict.
 FAIL_ON_FINDINGS_SINCE = "2026-10-04T00:00:00Z"
-# The nightly window, as offsets from UTC midnight. Only a run that completes
-# inside it speaks for its night.
-WINDOW_OPEN = dt.timedelta(hours=7)
-WINDOW_CLOSE = dt.timedelta(hours=10)
 
 
 def _stamp(text: str) -> dt.datetime:
@@ -67,12 +64,6 @@ def _stamp(text: str) -> dt.datetime:
 
 def _date(stamp: str) -> dt.date:
     return _stamp(stamp).date()
-
-
-def window(night: dt.date) -> tuple[dt.datetime, dt.datetime]:
-    """The nightly window of `night`: [07:00Z, 10:00Z]."""
-    base = dt.datetime(night.year, night.month, night.day, tzinfo=dt.timezone.utc)
-    return base + WINDOW_OPEN, base + WINDOW_CLOSE
 
 
 def run_verdict(run: dict, verdicts: dict[str, str]) -> str | None:
@@ -88,13 +79,9 @@ def run_verdict(run: dict, verdicts: dict[str, str]) -> str | None:
     return by_conclusion
 
 
-def _completed(run: dict) -> dt.datetime:
-    return _stamp(run.get("updated_at") or run["created_at"])
-
-
 def _entry(run: dict, verdict: str | None = None, reason: str | None = None) -> dict:
     entry = {"id": run["id"], "event": run.get("event"), "created_at": run["created_at"],
-             "completed_at": run.get("updated_at") or run["created_at"]}
+             "head_sha": run.get("head_sha"), "conclusion": run.get("conclusion")}
     if verdict is not None:
         entry["verdict"] = verdict
     if reason is not None:
@@ -102,70 +89,74 @@ def _entry(run: dict, verdict: str | None = None, reason: str | None = None) -> 
     return entry
 
 
-def night_run(runs: list[dict], night: dt.date, verdicts: dict[str, str]) -> tuple[dict | None, list[dict]]:
-    """(the run that speaks for `night` with its verdict, every other run of the night with a reason).
+def assign(runs: list[dict], verdicts: dict[str, str]) -> tuple[dict[dt.date, dict], dict[dt.date, list[dict]]]:
+    """({day: the counted run with its verdict}, {day: the runs not counted, with reasons}).
 
-    `runs` are the completed runs on the ref whose creation or completion
-    falls on `night`.
+    `runs` are the completed runs on the ref.
     """
-    opens, closes = window(night)
-    cancelled_schedule_shas = {r.get("head_sha") for r in runs
-                               if r.get("event") == "schedule" and r.get("conclusion") == "cancelled"
-                               and _date(r["created_at"]) == night}
-    scheduled, replacing, ignored = [], [], []
-    for r in sorted(runs, key=_completed):
-        verdict = run_verdict(r, verdicts)
-        if verdict is None:
+    counted: dict[dt.date, dict] = {}
+    ignored: dict[dt.date, list[dict]] = {}
+    used: set = set()
+    ordered = sorted(runs, key=lambda r: r["created_at"])
+    schedules = [r for r in ordered if r.get("event") == "schedule"]
+    for sched in schedules:
+        day = _date(sched["created_at"])
+        if day in counted:
+            ignored.setdefault(day, []).append(
+                _entry(sched, run_verdict(sched, verdicts), "a run already counts for this day"))
             continue
-        if not opens <= _completed(r) <= closes:
-            ignored.append(_entry(r, verdict, "completed outside the nightly window"))
-        elif r.get("event") == "schedule":
-            scheduled.append((r, verdict))
-        elif r.get("head_sha") and r.get("head_sha") in cancelled_schedule_shas:
-            replacing.append((r, verdict))
-        else:
-            ignored.append(_entry(r, verdict, "in the window but not replacing a cancelled scheduled run"))
-    chosen = (scheduled or replacing or [None])[0]
-    for r, verdict in scheduled + replacing:
-        if chosen is None or r is not chosen[0]:
-            ignored.append(_entry(r, verdict, "a run already counts for this night"))
-    if chosen is None:
-        return None, ignored
-    return _entry(chosen[0], chosen[1]), ignored
+        verdict = run_verdict(sched, verdicts)
+        if verdict is not None:
+            counted[day] = _entry(sched, verdict)
+            used.add(sched["id"])
+            continue
+        if sched.get("conclusion") != "cancelled":
+            continue  # skipped or otherwise silent: the day may still have another scheduled run
+        for r in ordered:
+            if (r.get("event") != "schedule" and r["id"] not in used and r.get("head_sha")
+                    and r.get("head_sha") == sched.get("head_sha") and r["created_at"] >= sched["created_at"]):
+                verdict = run_verdict(r, verdicts)
+                if verdict is not None:
+                    counted[day] = _entry(r, verdict, f"replaces cancelled scheduled run {sched['id']}")
+                    used.add(r["id"])
+                    break
+    for r in ordered:
+        if r["id"] in used or r.get("event") == "schedule" or run_verdict(r, verdicts) is None:
+            continue
+        ignored.setdefault(_date(r["created_at"]), []).append(
+            _entry(r, run_verdict(r, verdicts), "not a scheduled run and not replacing a cancelled one"))
+    return counted, ignored
 
 
 def ledger(runs: list[dict], start: dt.date, now: dt.datetime, ref: str = "main", flag_days: int = 7,
            verdicts: dict[str, str] | None = None) -> dict:
-    by_night: dict[dt.date, list[dict]] = {}
-    for run in runs:
-        if run.get("head_branch") != ref or run.get("status") != "completed":
-            continue
-        nights = {_date(run["created_at"]), _completed(run).date()}
-        for night in nights:
-            if night >= start:
-                by_night.setdefault(night, []).append(run)
-    now = now.astimezone(dt.timezone.utc)
+    mine = [r for r in runs if r.get("head_branch") == ref and r.get("status") == "completed"]
+    counted, ignored = assign(mine, verdicts or {})
+    # A day whose run is still going is not judged yet.
+    running = {_date(r["created_at"]) for r in runs
+               if r.get("head_branch") == ref and r.get("status") != "completed"}
+    today = now.astimezone(dt.timezone.utc).date()
     rows, missing = [], []
     streak: list[dict] = []
-    night = start
-    while night <= now.date():
-        counted, ignored = night_run(by_night.get(night, []), night, verdicts or {})
-        if counted is not None:
-            verdict = counted["verdict"]
-        elif now <= window(night)[1]:
-            verdict = "pending"  # the window is still open
+    day = start
+    while day <= today:
+        run = counted.get(day)
+        if run is not None:
+            verdict = run["verdict"]
+        elif day == today or day in running:
+            verdict = "pending"  # the schedule may still fire today, or its run is still going
         else:
             verdict = "gap"
-            missing.append(night.isoformat())
+            missing.append(day.isoformat())
         if verdict == "clean":
-            streak.append({"date": night.isoformat(), "run_id": counted["id"]})
+            streak.append({"date": day.isoformat(), "run_id": run["id"]})
         elif verdict in ("not_clean", "gap"):
             streak = []
-        rows.append({"date": night.isoformat(), "verdict": verdict, "run": counted, "ignored": ignored})
-        night += dt.timedelta(days=1)
-    recent = (now.date() - dt.timedelta(days=flag_days)).isoformat()
+        rows.append({"date": day.isoformat(), "verdict": verdict, "run": run,
+                     "ignored": ignored.get(day, [])})
+        day += dt.timedelta(days=1)
+    recent = (today - dt.timedelta(days=flag_days)).isoformat()
     return {"schema": SCHEMA, "ref": ref, "start": start.isoformat(), "now": now.isoformat(),
-            "window": {"open": str(WINDOW_OPEN), "close": str(WINDOW_CLOSE)},
             "days": rows, "missing": missing, "missing_recent": [d for d in missing if d >= recent],
             "streak": {"count": len(streak), "days": streak}}
 
@@ -173,11 +164,11 @@ def ledger(runs: list[dict], start: dt.date, now: dt.datetime, ref: str = "main"
 def summarize(doc: dict, needed: int = 7) -> str:
     s = doc["streak"]
     lines = [f"## Read audit cadence on {doc['ref']} since {doc['start']}", "",
-             f"Clean-night streak: **{s['count']} of {needed}**. A night counts only through a run that "
-             f"completed in its 07:00-10:00Z window; a gap resets the streak like a finding.", ""]
+             f"Clean-day streak: **{s['count']} of {needed}**. A day counts only through its scheduled run "
+             f"(or a same-sha dispatch that replaced a cancelled one); a gap resets the streak like a finding.", ""]
     if doc["missing"]:
-        lines += [f"Nights with no counted run (gap, streak reset): **{', '.join(doc['missing'])}**", ""]
-    lines += ["| night | verdict | counted run | not counted |", "|---|---|---|---|"]
+        lines += [f"Days with no counted run (gap, streak reset): **{', '.join(doc['missing'])}**", ""]
+    lines += ["| day | verdict | counted run | not counted |", "|---|---|---|---|"]
     for row in doc["days"]:
         run = row["run"]
         counted = f"{run['id']} ({run['event']})" if run else "none"
