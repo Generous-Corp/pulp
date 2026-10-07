@@ -2667,3 +2667,320 @@ TEST_CASE("IPC destruction waits for an in-flight disconnect callback",
     server.disconnect_accepted();
     server.stop();
 }
+
+// proof-only mutants: each must FAIL on Windows.
+TEST_CASE("proof-mutant ceiling: IPC socket write timeout bounds the complete frame",
+          "[events][ipc][socket][regression]") {
+    constexpr std::size_t payload_size = 32u * 1024u * 1024u;
+    constexpr std::size_t stream_size = 4 + payload_size + 4 + 2;
+    // Keep enough scheduler headroom for heavily loaded CI while still
+    // distinguishing the 60 ms whole-frame deadline from the multi-second
+    // transfer a per-write timeout would permit.
+    constexpr auto send_ceiling = std::chrono::microseconds(1);
+
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> release_peer{false};
+    std::atomic<std::size_t> drained_bytes{0};
+    std::atomic<bool> stream_exact{true};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        std::vector<std::uint8_t> buffer(64u * 1024u);
+        std::size_t position = 0;
+        while (socket && !release_peer.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            const auto received = socket->receive(buffer.data(), buffer.size());
+            if (received <= 0)
+                break;
+            for (int i = 0; i < received; ++i, ++position) {
+                if (position >= stream_size || buffer[static_cast<std::size_t>(i)] !=
+                                                   expected_stream_byte(position, payload_size))
+                    stream_exact.store(false, std::memory_order_relaxed);
+            }
+            drained_bytes.store(position, std::memory_order_release);
+        }
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(payload_size);
+    client.set_write_timeout(std::chrono::milliseconds(60));
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    bool sent = true;
+    std::chrono::steady_clock::duration send_duration{};
+    if (connected && peer_accepted.load(std::memory_order_acquire)) {
+        const std::vector<std::uint8_t> payload(payload_size, 0x5a);
+        const auto started = std::chrono::steady_clock::now();
+        sent = client.send_message(payload.data(), payload.size());
+        send_duration = std::chrono::steady_clock::now() - started;
+    }
+
+#if defined(_WIN32)
+    // Winsock accepts the whole frame without blocking: with SO_SNDBUF at
+    // 131072, a single 32 MiB send to a peer that has drained 64 KiB is
+    // accepted in about 20 ms. The deadline is met at acceptance, so the frame
+    // is delivered and the connection stays usable.
+    bool still_connected = false;
+    bool follow_up_sent = false;
+    if (sent) {
+        still_connected = client.is_connected();
+        follow_up_sent = client.send_message("ok");
+    }
+    const auto drain_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (drained_bytes.load(std::memory_order_acquire) < stream_size &&
+           std::chrono::steady_clock::now() < drain_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+#endif
+
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable()) peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE(drained_bytes.load(std::memory_order_relaxed) > 0);
+    REQUIRE(send_duration < send_ceiling);
+#if defined(_WIN32)
+    REQUIRE(sent);
+    REQUIRE(still_connected);
+    REQUIRE(follow_up_sent);
+    REQUIRE(drained_bytes.load(std::memory_order_relaxed) == stream_size);
+    REQUIRE(stream_exact.load(std::memory_order_relaxed));
+#else
+    REQUIRE_FALSE(sent);
+    REQUIRE_FALSE(client.is_connected());
+#endif
+}
+
+TEST_CASE("proof-mutant bytes: IPC socket write timeout bounds the complete frame",
+          "[events][ipc][socket][regression]") {
+    constexpr std::size_t payload_size = 32u * 1024u * 1024u;
+    constexpr std::size_t stream_size = 4 + payload_size + 4 + 2;
+    // Keep enough scheduler headroom for heavily loaded CI while still
+    // distinguishing the 60 ms whole-frame deadline from the multi-second
+    // transfer a per-write timeout would permit.
+    constexpr auto send_ceiling = std::chrono::seconds(2);
+
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> release_peer{false};
+    std::atomic<std::size_t> drained_bytes{0};
+    std::atomic<bool> stream_exact{true};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        std::vector<std::uint8_t> buffer(64u * 1024u);
+        std::size_t position = 0;
+        while (socket && !release_peer.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            const auto received = socket->receive(buffer.data(), buffer.size());
+            if (received <= 0)
+                break;
+            for (int i = 0; i < received; ++i, ++position) {
+                if (position >= stream_size || buffer[static_cast<std::size_t>(i)] !=
+                                                   static_cast<std::uint8_t>(expected_stream_byte(position, payload_size) ^ 1))
+                    stream_exact.store(false, std::memory_order_relaxed);
+            }
+            drained_bytes.store(position, std::memory_order_release);
+        }
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(payload_size);
+    client.set_write_timeout(std::chrono::milliseconds(60));
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    bool sent = true;
+    std::chrono::steady_clock::duration send_duration{};
+    if (connected && peer_accepted.load(std::memory_order_acquire)) {
+        const std::vector<std::uint8_t> payload(payload_size, 0x5a);
+        const auto started = std::chrono::steady_clock::now();
+        sent = client.send_message(payload.data(), payload.size());
+        send_duration = std::chrono::steady_clock::now() - started;
+    }
+
+#if defined(_WIN32)
+    // Winsock accepts the whole frame without blocking: with SO_SNDBUF at
+    // 131072, a single 32 MiB send to a peer that has drained 64 KiB is
+    // accepted in about 20 ms. The deadline is met at acceptance, so the frame
+    // is delivered and the connection stays usable.
+    bool still_connected = false;
+    bool follow_up_sent = false;
+    if (sent) {
+        still_connected = client.is_connected();
+        follow_up_sent = client.send_message("ok");
+    }
+    const auto drain_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (drained_bytes.load(std::memory_order_acquire) < stream_size &&
+           std::chrono::steady_clock::now() < drain_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+#endif
+
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable()) peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE(drained_bytes.load(std::memory_order_relaxed) > 0);
+    REQUIRE(send_duration < send_ceiling);
+#if defined(_WIN32)
+    REQUIRE(sent);
+    REQUIRE(still_connected);
+    REQUIRE(follow_up_sent);
+    REQUIRE(drained_bytes.load(std::memory_order_relaxed) == stream_size);
+    REQUIRE(stream_exact.load(std::memory_order_relaxed));
+#else
+    REQUIRE_FALSE(sent);
+    REQUIRE_FALSE(client.is_connected());
+#endif
+}
+
+TEST_CASE("proof-mutant bytes: IPC socket write timeout includes writer admission",
+          "[events][ipc][socket][regression][concurrency]") {
+    constexpr auto timeout = std::chrono::milliseconds(500);
+    constexpr auto writer_hold = std::chrono::milliseconds(200);
+    constexpr auto scheduler_headroom = std::chrono::milliseconds(150);
+    constexpr std::size_t payload_size = 32u * 1024u * 1024u;
+
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+#if defined(_WIN32)
+    // Winsock accepts each whole frame without blocking (see "IPC socket write
+    // timeout bounds the complete frame"), so both writers are admitted in time
+    // and both frames arrive, followed by a usable connection's "ok".
+    constexpr std::size_t frames_delivered = 2;
+    constexpr std::size_t stream_size = frames_delivered * (4 + payload_size) + 4 + 2;
+#else
+    constexpr std::size_t frames_delivered = 1;
+    constexpr std::size_t stream_size = 4 + payload_size;
+#endif
+    std::atomic<std::size_t> drained_bytes{0};
+    std::atomic<bool> stream_exact{true};
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> second_started{false};
+    std::atomic<bool> release_peer{false};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        while (socket &&
+               !second_started.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        std::this_thread::sleep_for(writer_hold);
+        std::vector<std::uint8_t> buffer(64u * 1024u);
+        std::size_t position = 0;
+        while (socket && position < stream_size) {
+            const auto received =
+                socket->receive(buffer.data(), std::min(buffer.size(), stream_size - position));
+            if (received <= 0)
+                break;
+            for (int i = 0; i < received; ++i, ++position) {
+                if (buffer[static_cast<std::size_t>(i)] !=
+                    static_cast<std::uint8_t>(expected_stream_byte(position, payload_size, frames_delivered) ^ 1))
+                    stream_exact.store(false, std::memory_order_relaxed);
+            }
+            drained_bytes.store(position, std::memory_order_release);
+        }
+        while (socket &&
+               !release_peer.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(payload_size);
+    client.set_write_timeout(timeout);
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::yield();
+    }
+
+    const std::vector<std::uint8_t> payload(payload_size, 0x5a);
+    bool first_sent = false;
+    std::thread first([&] {
+        first_sent = client.send_message(payload.data(), payload.size());
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    second_started.store(true, std::memory_order_release);
+    const auto started = std::chrono::steady_clock::now();
+    const bool second_sent =
+        client.send_message(payload.data(), payload.size());
+    const auto duration = std::chrono::steady_clock::now() - started;
+
+    first.join();
+#if defined(_WIN32)
+    bool still_connected = false;
+    bool follow_up_sent = false;
+    if (first_sent && second_sent) {
+        still_connected = client.is_connected();
+        follow_up_sent = client.send_message("ok");
+    }
+    const auto drain_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (drained_bytes.load(std::memory_order_acquire) < stream_size &&
+           std::chrono::steady_clock::now() < drain_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+#endif
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable())
+        peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE(first_sent);
+#if defined(_WIN32)
+    REQUIRE(second_sent);
+    REQUIRE(still_connected);
+    REQUIRE(follow_up_sent);
+    REQUIRE(drained_bytes.load(std::memory_order_relaxed) == stream_size);
+    REQUIRE(stream_exact.load(std::memory_order_relaxed));
+#else
+    REQUIRE_FALSE(second_sent);
+#endif
+    // A fresh timeout after writer admission would take at least the hold plus
+    // the configured timeout. Keep the ceiling below that regression while
+    // allowing loaded CI hosts enough scheduling headroom around the deadline.
+    REQUIRE(duration < timeout + scheduler_headroom);
+}
