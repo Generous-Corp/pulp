@@ -400,7 +400,7 @@ function pngDimensions(bytes) {
 const MAX_CAPTURED_CANVASES = 32;
 const MAX_CAPTURED_CANVAS_PIXELS = 64 * 1024 * 1024;
 
-async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
+function capturedCanvasNodes(snapshot) {
   const document = snapshot.documents?.[0];
   const nodes = document?.nodes;
   const strings = snapshot.strings ?? [];
@@ -433,6 +433,113 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
       `browser capture found ${canvases.length} canvases; maximum is ` +
       `${MAX_CAPTURED_CANVASES}`);
   }
+  return canvases;
+}
+
+// Read a canvas's raster only when the backing-store dimensions are within the
+// remaining capture budget. This is used around captureBeyondViewport: Chrome
+// may dispatch a resize while producing that screenshot, and a page resize
+// handler can clear a canvas after the accepted frame has already been chosen.
+// Keeping the check outside the screenshot path makes that mutation fail closed
+// instead of publishing a plausible but incomplete browser.png.
+async function readCanvasRasterSignature(cdp, backendNodeId, pixelBudget) {
+  const resolved = await cdp.call("DOM.resolveNode", { backendNodeId });
+  const objectId = resolved.object?.objectId;
+  if (!objectId) {
+    throw new Error(`could not resolve canvas backend node ${backendNodeId}`);
+  }
+  try {
+    const measured = await cdp.call("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function() {
+        if (!(this instanceof HTMLCanvasElement))
+          throw new Error('resolved node is not a canvas');
+        return { width: this.width, height: this.height };
+      }`,
+      returnByValue: true,
+    });
+    const width = Number(measured.result?.value?.width);
+    const height = Number(measured.result?.value?.height);
+    const pixels = width * height;
+    if (!Number.isInteger(width) || !Number.isInteger(height) ||
+        width <= 0 || height <= 0 || !Number.isSafeInteger(pixels)) {
+      throw new Error(`canvas backend node ${backendNodeId} has invalid size`);
+    }
+    if (pixels > pixelBudget) {
+      throw new Error(
+        `captured canvas pixels exceed ${MAX_CAPTURED_CANVAS_PIXELS}`);
+    }
+    const encoded = await cdp.call("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function() {
+        if (!(this instanceof HTMLCanvasElement))
+          throw new Error('resolved node is not a canvas');
+        return this.toDataURL('image/png');
+      }`,
+      returnByValue: true,
+    });
+    const dataUrl = String(encoded.result?.value ?? "");
+    const prefix = "data:image/png;base64,";
+    if (!dataUrl.startsWith(prefix)) {
+      throw new Error(`canvas backend node ${backendNodeId} did not produce PNG`);
+    }
+    return {
+      backendNodeId,
+      width,
+      height,
+      pixels,
+      sha256: sha256(Buffer.from(dataUrl.slice(prefix.length), "base64")),
+    };
+  } finally {
+    await cdp.call("Runtime.releaseObject", { objectId }).catch(() => {});
+  }
+}
+
+async function captureCanvasRasterSignatures(cdp, snapshot) {
+  const canvases = capturedCanvasNodes(snapshot);
+  const signatures = [];
+  let totalPixels = 0;
+  for (const { backendNodeId } of canvases) {
+    const signature = await readCanvasRasterSignature(
+      cdp, backendNodeId, MAX_CAPTURED_CANVAS_PIXELS - totalPixels);
+    totalPixels += signature.pixels;
+    signatures.push(signature);
+  }
+  return signatures;
+}
+
+async function verifyCanvasRasterSignatures(cdp, signatures) {
+  let totalPixels = 0;
+  for (const expected of signatures) {
+    let actual;
+    try {
+      actual = await readCanvasRasterSignature(
+        cdp, expected.backendNodeId,
+        MAX_CAPTURED_CANVAS_PIXELS - totalPixels);
+    } catch (cause) {
+      const error = new Error(
+        `captureBeyondViewport could not verify canvas backend node ` +
+        `${expected.backendNodeId} after capturing overflow content: ` +
+        `${cause.message}; refusing to publish incomplete canvas evidence`);
+      error.code = "capture-canvas-overflow-resize";
+      throw error;
+    }
+    totalPixels += actual.pixels;
+    if (actual.width === expected.width && actual.height === expected.height &&
+        actual.sha256 === expected.sha256) continue;
+    const error = new Error(
+      `captureBeyondViewport changed canvas backend node ` +
+      `${expected.backendNodeId} while capturing overflow content ` +
+      `(before ${expected.width}x${expected.height}/${expected.sha256}, ` +
+      `after ${actual.width}x${actual.height}/${actual.sha256}); ` +
+      "refusing to publish incomplete canvas evidence");
+    error.code = "capture-canvas-overflow-resize";
+    throw error;
+  }
+}
+
+async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
+  const canvases = capturedCanvasNodes(snapshot);
 
   const assets = [];
   let totalPixels = 0;
@@ -1718,6 +1825,13 @@ async function runCapture(options) {
     // Pixels are different: the compositor cannot present a new frame with
     // virtual time paused, so the screenshot loop below runs with virtual time
     // released again.
+    // An overflow screenshot can resize the capture surface. Snapshot every
+    // canvas before that boundary and verify it immediately after the accepted
+    // stable frame; a resize handler that clears or changes a backing store is
+    // rejected before any incomplete browser evidence is published.
+    const overflowCanvasSignatures = screenshotOptions.captureBeyondViewport
+      ? await captureCanvasRasterSignatures(cdp, snapshot)
+      : [];
     await resumeDynamicTime(cdp);
     // Compositor-backed pages can need several post-freeze presentation
     // boundaries even after DOM/timer motion is frozen. Always observe the
@@ -1738,6 +1852,8 @@ async function runCapture(options) {
       error.code = "capture-frame-not-deterministic";
       throw error;
     }
+    if (overflowCanvasSignatures.length > 0)
+      await verifyCanvasRasterSignatures(cdp, overflowCanvasSignatures);
     // This is the authoritative pixel boundary: dynamic time has resumed and
     // the compositor has produced the byte-stable frame stored as browser.png.
     // Semantics, token, font, and health collection all follow the earlier
