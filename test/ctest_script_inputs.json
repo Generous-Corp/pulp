@@ -1024,7 +1024,8 @@
    ],
    "inputs": [
     "tools/cli/cmd_upgrade.cpp",
-    "tools/import-design/browser_capture"
+    "tools/import-design/browser_capture",
+    "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
    ],
    "kind": "compiled",
    "sources": [
