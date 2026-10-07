@@ -7378,3 +7378,12 @@ clause: the cascade's clauses overlap, so a case with a *single* registered
 handler owner is answered identically by the ancestor walk and by the later
 single-owner shortcut — break the walk and the test still passes. Registering a
 second, unrelated owner is what makes such a case falsifiable.
+
+## Governed build invocation
+
+Import-validation round-trip harnesses must route Pulp target builds through
+`tools/ci/governed-build.sh`. Do not pass `--parallel`, `-j`, or a caller-owned
+`PULP_BUILD_JOBS` value; the governor owns fair-share parallelism and records the
+build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`,
+`stitch`, `rn`, `designmd`, and `jsx`). Leave a separate external-project build
+(such as Spectr) on its own toolchain boundary.

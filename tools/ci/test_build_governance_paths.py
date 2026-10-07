@@ -61,6 +61,30 @@ class BuildGovernancePathTests(unittest.TestCase):
         self.assertIn("run_with_spinner(build_command", source)
         self.assertNotIn('run_with_spinner("cmake --build', source)
 
+    def test_import_validation_pulp_builds_route_through_governor(self) -> None:
+        scripts = (
+            "v0-roundtrip.sh",
+            "figma-roundtrip.sh",
+            "pencil-roundtrip.sh",
+            "stitch-roundtrip.sh",
+            "rn-roundtrip.sh",
+            "designmd-roundtrip.sh",
+            "jsx-roundtrip.sh",
+        )
+        for name in scripts:
+            source = read_source(f"tools/import-validation/{name}")
+            build_lines = [
+                line
+                for line in source.splitlines()
+                if "cmake --build" in line and "Skip the cmake" not in line
+            ]
+            self.assertGreaterEqual(len(build_lines), 1, name)
+            for line in build_lines:
+                self.assertIn("governed-build.sh", line, name)
+                self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))", name)
+            if "PULP_BUILD_JOBS" in source:
+                self.assertIn("deprecated; governed-build selects parallelism", source, name)
+
     def test_governor_probe_is_bounded_and_has_a_receipt(self) -> None:
         source = read_source("tools/ci/governed-build.sh")
         self.assertIn('export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"', source)

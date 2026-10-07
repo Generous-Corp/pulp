@@ -27,7 +27,6 @@ else
 fi
 BUILD_DIR="${PULP_BUILD_DIR:-$PULP_DIR/build-rn-import}"
 BUILD_TYPE="${PULP_BUILD_TYPE:-Debug}"
-BUILD_JOBS="${PULP_BUILD_JOBS:-1}"
 REFERENCE="${PULP_RN_REFERENCE:-$PULP_DIR/planning/screenshots/REFERENCE-rn-gain-stage.png}"
 OUT="${PULP_RN_OUT:-$PULP_DIR/planning/screenshots/rn-gain-stage-latest.png}"
 THRESHOLD="${PULP_HARNESS_THRESHOLD:-0.85}"
@@ -46,7 +45,7 @@ Env:
   PULP_DIR              Pulp checkout path
   PULP_BUILD_DIR        CMake build dir
   PULP_BUILD_TYPE       CMake build type (default: Debug)
-  PULP_BUILD_JOBS       CMake build parallelism (default: 1)
+  PULP_BUILD_JOBS       deprecated; governed-build selects parallelism
   PULP_RN_FIXTURE       RN TSX fixture path (defaults to planning fixture,
                         falls back to test fixture when planning is unavailable)
   PULP_RN_REFERENCE     reference screenshot path
@@ -102,7 +101,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
   if [[ $PARSER_ONLY -eq 0 ]]; then
     build_targets+=(pulp-screenshot)
   fi
-  cmake --build "$BUILD_DIR" --parallel "$BUILD_JOBS" \
+  bash "$PULP_DIR/tools/ci/governed-build.sh" cmake --build "$BUILD_DIR" \
     --target "${build_targets[@]}"
 fi
 

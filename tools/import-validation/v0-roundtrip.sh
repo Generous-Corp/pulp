@@ -24,7 +24,6 @@ else
 fi
 BUILD_DIR="${PULP_BUILD_DIR:-$PULP_DIR/build-v0-import}"
 BUILD_TYPE="${PULP_BUILD_TYPE:-Debug}"
-BUILD_JOBS="${PULP_BUILD_JOBS:-1}"
 REFERENCE="${PULP_V0_REFERENCE:-$PULP_DIR/planning/screenshots/REFERENCE-v0-dev-audio-control-panel.png}"
 OUT="${PULP_V0_OUT:-$PULP_DIR/planning/screenshots/v0-dev-audio-control-panel-latest.png}"
 THRESHOLD="${PULP_HARNESS_THRESHOLD:-0.85}"
@@ -43,7 +42,7 @@ Env:
   PULP_DIR              Pulp checkout path
   PULP_BUILD_DIR        CMake build dir
   PULP_BUILD_TYPE       CMake build type (default: Debug)
-  PULP_BUILD_JOBS       CMake build parallelism (default: 1)
+  PULP_BUILD_JOBS       deprecated; governed-build selects parallelism
   PULP_V0_FIXTURE       v0 TSX fixture path (defaults to planning fixture,
                         falls back to test fixture when planning is unavailable)
   PULP_V0_REFERENCE     reference screenshot path
@@ -95,7 +94,7 @@ find_test_exe() {
 
 if [[ $SKIP_BUILD -eq 0 ]]; then
   cmake -S "$PULP_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
-  cmake --build "$BUILD_DIR" --parallel "$BUILD_JOBS" \
+  bash "$PULP_DIR/tools/ci/governed-build.sh" cmake --build "$BUILD_DIR" \
     --target pulp-test-design-import pulp-test-design-import-react-runtime pulp-test-widget-bridge-runtime-import
 fi
 
