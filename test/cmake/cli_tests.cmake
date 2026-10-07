@@ -484,7 +484,8 @@ catch_discover_tests(pulp-test-cli-upgrade-url)
 # pulp-cpp before replacing the user-facing pulp binary.
 add_executable(pulp-test-cli-upgrade-install test_cli_upgrade_install.cpp)
 pulp_test_data(pulp-test-cli-upgrade-install NO_DEFINE
-    PATHS tools/import-design/browser_capture tools/cli/cmd_upgrade.cpp)
+    PATHS tools/import-design/browser_capture tools/cli/cmd_upgrade.cpp
+          tools/import-design/jsx-runtime/materialized_binding_contract.mjs)
 target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(pulp-test-cli-upgrade-install PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
