@@ -78,7 +78,8 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
            << (context.provider_identity.native_runtime_authenticated ? "true" : "false")
            << R"(,"native_runtime_name":")" << context.provider_identity.native_runtime_name
            << R"(","native_runtime_backend":")" << context.provider_identity.native_runtime_backend
-           << R"("})" << "}\n";
+           << R"(","native_runtime_revision":")"
+           << context.provider_identity.native_runtime_revision << R"("})" << "}\n";
 
     for (std::size_t ordinal = 0; ordinal < records.size(); ++ordinal) {
         const auto& record = records[ordinal];

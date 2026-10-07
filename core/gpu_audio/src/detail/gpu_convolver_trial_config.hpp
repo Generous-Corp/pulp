@@ -98,6 +98,7 @@ inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& co
            context.provider_identity.native_runtime_authenticated &&
            valid_provider_identity_component(context.provider_identity.native_runtime_name) &&
            valid_provider_identity_component(context.provider_identity.native_runtime_backend) &&
+           valid_provider_identity_component(context.provider_identity.native_runtime_revision) &&
            valid_gpu_convolver_thermal_state(context.thermal_state) &&
            (!context.workgroup_requested || context.workgroup_joined);
 }

@@ -1341,6 +1341,9 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     context.thermal_state = GpuConvolverThermalState::Unavailable;
     context.provider_identity.adapter_name = "adapter\"forged";
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
+    context.provider_identity = authenticated_test_provider_identity();
+    context.provider_identity.native_runtime_revision.clear();
+    CHECK_FALSE(valid_gpu_convolver_trial_context(context));
 }
 
 TEST_CASE("P4 trace projection keeps provider and timing provenance explicit",
@@ -1456,7 +1459,8 @@ TEST_CASE("P4 trace JSONL parses as a schema with authenticated per-row provenan
                         provenance["immutable_receipt_digest"].getString() != expected_digest ||
                         !provenance["native_runtime_authenticated"].getBool() ||
                         provenance["native_runtime_name"].getString() != "runtime" ||
-                        provenance["native_runtime_backend"].getString() != "runtime-backend")
+                        provenance["native_runtime_backend"].getString() != "runtime-backend" ||
+                        provenance["native_runtime_revision"].getString() != "runtime-rev")
                         return false;
                 } else {
                     if (object["record_kind"].getString() != "block" ||
