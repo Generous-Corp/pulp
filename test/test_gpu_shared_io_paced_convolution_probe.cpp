@@ -211,6 +211,7 @@ struct RawCensus {
     std::unordered_set<std::string> delivery_identities;
     std::unordered_set<std::string> terminal_identities;
     std::vector<const TraceRecord*> lifecycle_records;
+    std::vector<const TraceRecord*> unaccounted_records;
 };
 
 RawCensus collect_raw_census(const std::vector<TraceRecord>& records,
@@ -225,11 +226,19 @@ RawCensus collect_raw_census(const std::vector<TraceRecord>& records,
     }
     census.lifecycle_records.reserve(records.size());
     for (const auto& record : records) {
-        if (record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
-            record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Delivery)
-            continue;
-        const auto identity = trace_identity(engine_id, record.generation, record.sequence);
+        // Retain every raw row before classifying it. Eligible and Recovery
+        // rows are valid trace kinds, but the P2 lifecycle census deliberately
+        // accounts only for Terminal and Delivery. Dropping an unaccounted row
+        // would let the serialized census look complete while raw_census_valid
+        // remained true.
         census.lifecycle_records.push_back(&record);
+        if (record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
+            record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Delivery) {
+            census.unaccounted_records.push_back(&record);
+            census.valid = false;
+            continue;
+        }
+        const auto identity = trace_identity(engine_id, record.generation, record.sequence);
         if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal) {
             if (!census.admission_identities.contains(identity) || !record.valid() ||
                 !record.admission_identity_matched ||
@@ -329,6 +338,18 @@ int self_test() {
     records.push_back(terminal);
     if (collect_raw_census(records, admissions, engine_id, authenticated).valid) {
         std::cerr << "self-test: duplicate terminal accepted\n";
+        return 1;
+    }
+    TraceRecord eligible;
+    eligible.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Eligible;
+    eligible.generation = 1;
+    eligible.sequence = 3;
+    records = {terminal, delivery, eligible};
+    const auto unaccounted = collect_raw_census(records, admissions, engine_id, authenticated);
+    if (unaccounted.valid || unaccounted.unaccounted_records.size() != 1 ||
+        unaccounted.lifecycle_records.size() != records.size() ||
+        unaccounted.lifecycle_records.back() != &records.back()) {
+        std::cerr << "self-test: unaccounted trace row was not retained and rejected\n";
         return 1;
     }
 
@@ -504,10 +525,10 @@ int run(Config config) {
             ++late_completions;
     }
 
-    // Preserve every terminal and delivery row in the raw census, including
-    // callback-only priming and CPU-fallback positions. The admission-linked
-    // subset is checked for one terminal and one delivery per admission, while
-    // the complete delivery stream remains available for fallback accounting.
+    // Preserve every trace row in the raw census, including callback-only
+    // priming, CPU-fallback positions, and any unaccounted kind. The
+    // admission-linked subset is checked for one terminal and one delivery per
+    // admission, while the complete stream remains available for accounting.
     const auto raw_census =
         collect_raw_census(trace_records, trace_admissions, engine_id, terminal_identities);
     const auto& admission_identities = raw_census.admission_identities;
@@ -659,6 +680,7 @@ int run(Config config) {
                << ",\"admission_granularity\":\"one_per_callback\""
                << ",\"admission_record_count\":" << trace_admissions.size()
                << ",\"delivery_record_count\":" << delivery_record_count
+               << ",\"unaccounted_trace_record_count\":" << raw_census.unaccounted_records.size()
                << ",\"measured_miss_counter_delta\":" << measured_misses
                << ",\"callback_overruns\":" << callback_overruns
                << ",\"late_callback_starts\":" << late_callback_starts
