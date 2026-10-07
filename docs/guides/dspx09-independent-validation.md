@@ -7,7 +7,9 @@ canonical registries.
 
 ## What the proof covers
 
-`pulp-test-dspx09-independent-validation` runs three focused cases:
+The original `pulp-test-dspx09-independent-validation` target runs three focused
+cases. The follow-up target `pulp-test-dspx09-followup` adds four executable
+cases in the same grouped sampler/host binary:
 
 - a sinusoidal allpass magnitude oracle, which checks the public TPT allpass
   path against the analytic unity-magnitude property;
@@ -15,6 +17,15 @@ canonical registries.
   policy remains bounded and cannot silently become `Adopt`;
 - a base-vs-offset automation oracle, which checks effective value composition
   and typed refusals for non-finite and out-of-range values.
+
+The follow-up cases add:
+
+- a bounded delay impulse oracle with negative and non-finite delay refusals;
+- retained-history adopt and incompatible-identity refusal through the live swap
+  fixture, with graph topology unchanged on refusal;
+- ordered dense automation delivery and explicit queue-overflow refusal;
+- a projection comparator that accepts the Pulp lane while keeping Forge
+  development-only and Spectr/GPU-NAM `DeferredExternalOwner`.
 
 The suite is deliberately independent of sample-region kernels. It does not
 register a second graph, control broker, scheduler, or Forge authority.
@@ -35,9 +46,11 @@ registered by this packet.
 Run the focused proof after configuring a Release build:
 
 ```bash
-pulp build --target pulp-test-dspx09-independent-validation
-./build/test/pulp-test-group-sampler-host-graph '[dspx-09]'
+pulp build --target pulp-test-dspx09-followup
+./build/test/pulp-test-group-sampler-host-graph '[dspx-09][follow-up]'
 ```
 
 The test binary is grouped with the sampler host graph target; the tag filter
-selects only the three DSPX-09 cases.
+selects only the four follow-up cases. The fixture translation unit also carries
+the existing DSPX-03 lifecycle cases, so the focused receipt includes their
+assertions while the filter selects only the new follow-up names.

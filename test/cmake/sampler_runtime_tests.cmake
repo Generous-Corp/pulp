@@ -517,6 +517,11 @@ pulp_add_test_suite(pulp-test-dspx09-independent-validation GROUP pulp-test-grou
     SOURCES test_dspx09_independent_validation.cpp
     LIBRARIES pulp::host pulp::signal pulp::state)
 
+# DSPX-09 follow-up: executable lifecycle/refusal and typed cross-host projection controls.
+pulp_add_test_suite(pulp-test-dspx09-followup GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_dspx09_followup.cpp
+    LIBRARIES pulp::host pulp::signal pulp::state)
+
 pulp_add_test_suite(pulp-test-retained-history-dspx03 GROUP pulp-test-group-sampler-host-graph
     SOURCES test_retained_history_dspx03.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::audio-analysis)

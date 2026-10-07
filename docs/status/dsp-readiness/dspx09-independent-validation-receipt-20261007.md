@@ -7,6 +7,19 @@
 
 ## Focused executable proof
 
+Follow-up exact-head proof (PR 9834 is already merged):
+
+```text
+tools/ci/governed-build.sh cmake --build build --target pulp-test-group-sampler-host-graph
+./build/test/pulp-test-group-sampler-host-graph '[dspx-09][follow-up]'
+```
+
+Receipt: 4 follow-up cases, 1062 assertions, exit code 0. The executable
+retained-history cases use the existing DSPX-03 staging fixture and prove adopt
+plus incompatible identity refusal with unchanged graph topology. Delay impulse,
+dense automation ordering/overflow, and the typed cross-host projection
+comparator are covered by the new follow-up source.
+
 Command:
 
 ```text
