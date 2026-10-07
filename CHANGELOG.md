@@ -9,6 +9,28 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09300"></a>
+## [0.930.0] - 2026-10-07
+
+- fix/overflow canvas capture 20261007 ([#9811](https://github.com/Generous-Corp/pulp/pull/9811))
+- release/version bump ([#9817](https://github.com/Generous-Corp/pulp/pull/9817))
+- codex/cpu fallback packet 20261007 ([#9816](https://github.com/Generous-Corp/pulp/pull/9816))
+- codex/wp3b next production seam 20261008 ([#9810](https://github.com/Generous-Corp/pulp/pull/9810))
+
+<a id="v09290"></a>
+## [0.929.0] - 2026-10-07
+
+- release/version bump ([#9814](https://github.com/Generous-Corp/pulp/pull/9814))
+- codex/p4 slot lead 20261007 ([#9813](https://github.com/Generous-Corp/pulp/pull/9813))
+- codex/skia arm64 pulp audit 20261007 ([#9812](https://github.com/Generous-Corp/pulp/pull/9812))
+- docs/tart ci vm no ip triage ([#9807](https://github.com/Generous-Corp/pulp/pull/9807))
+- codex/signalgraph authoring header 20261007 ([#9783](https://github.com/Generous-Corp/pulp/pull/9783))
+- codex/forge product neutral boundary 20261007 ([#9792](https://github.com/Generous-Corp/pulp/pull/9792))
+- fix/sdk jsx runtime install 20261007 ([#9806](https://github.com/Generous-Corp/pulp/pull/9806))
+- codex/spectr dynamic canvas fix 20261008 ([#9805](https://github.com/Generous-Corp/pulp/pull/9805))
+- fix/script inputs refuse without sdks ([#9802](https://github.com/Generous-Corp/pulp/pull/9802))
+- ci/read audit cadence check ([#9654](https://github.com/Generous-Corp/pulp/pull/9654))
+
 <a id="v09280"></a>
 ## [0.928.0] - 2026-10-07
 
@@ -10062,6 +10084,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.930.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.930.0
+[0.929.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.929.0
 [0.928.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.928.0
 [0.927.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.927.0
 [0.926.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.926.0
