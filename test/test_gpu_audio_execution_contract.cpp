@@ -37,6 +37,32 @@ TEST_CASE("shared IO contract separates logical capacity from physical provider 
             SharedIoContractError::MissingAlgorithmicLead);
 }
 
+TEST_CASE("shared IO depth lead policy bounds multi-flight admission",
+          "[gpu_audio][shared_io][p4]") {
+    constexpr SharedIoDepthLeadPolicy policy{4, 8, 4};
+    STATIC_REQUIRE(policy.valid());
+    STATIC_REQUIRE(policy.available_inflight() == 4);
+    constexpr SharedIoDepthLeadPolicy overcommitted{4, 8, 5};
+    STATIC_REQUIRE_FALSE(overcommitted.valid());
+
+    SharedIoExecutionContract contract{
+        .channels = 2,
+        .block_size = 32,
+        .sample_rate = 48000,
+        .algorithmic_lead_blocks = 4,
+        .pipeline_depth = 8,
+        .provider_slots = 4,
+        .max_inflight = 5,
+        .active_path = SharedIoPath::StagedAsync,
+    };
+    REQUIRE_FALSE(SharedIoDepthLeadPolicy{contract.algorithmic_lead_blocks, contract.pipeline_depth,
+                                          contract.max_inflight}
+                      .valid());
+    REQUIRE(validate_shared_io_contract(contract).accepted());
+    contract.max_inflight = 4;
+    REQUIRE(validate_shared_io_contract(contract).accepted());
+}
+
 TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
           "[gpu_audio][shared_io]") {
     SharedIoExecutionContract contract{
@@ -70,6 +96,7 @@ TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
 TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing explicitly",
           "[gpu_audio][shared_io]") {
     SharedIoTelemetry telemetry;
+    telemetry.configure_depth_lead({2, 4, 2});
     telemetry.record_callback_block(true);
     telemetry.record_submit();
     telemetry.record_retired(true);
@@ -81,6 +108,10 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
 
     const auto before_gpu_timing = telemetry.snapshot();
     REQUIRE(before_gpu_timing.callback_blocks == 1);
+    REQUIRE(before_gpu_timing.configured_lead_blocks == 2);
+    REQUIRE(before_gpu_timing.configured_pipeline_depth == 4);
+    REQUIRE(before_gpu_timing.configured_max_inflight == 2);
+    REQUIRE(before_gpu_timing.configured_available_inflight == 2);
     REQUIRE(before_gpu_timing.deadline_misses == 1);
     REQUIRE(before_gpu_timing.submitted_blocks == 1);
     REQUIRE(before_gpu_timing.retired_success == 1);
@@ -103,5 +134,7 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
 
     telemetry.reset();
     REQUIRE(telemetry.snapshot().callback_blocks == 0);
+    REQUIRE(telemetry.snapshot().configured_pipeline_depth == 0);
+    REQUIRE(telemetry.snapshot().configured_available_inflight == 0);
     REQUIRE_FALSE(telemetry.snapshot().gpu_elapsed_available);
 }
