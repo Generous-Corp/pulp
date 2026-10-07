@@ -607,8 +607,13 @@ def official_codex_identity(agent_bin: pathlib.Path) -> dict[str, Any]:
     if "Mach-O 64-bit executable" not in file_output:
         raise TrustError("agent executable is not a native Mach-O Codex binary")
     _run_bytes(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(resolved)])
+    # Verbosity 6 dumps every CodeDirectory page hash.  Large signed Codex
+    # binaries exceed the bounded 4 MiB stderr cap with that diagnostic dump;
+    # verbosity 4 retains the identity, authority, CDHash, and runtime fields
+    # this gate validates while keeping output bounded on current and future
+    # binaries.
     details_result = _run_bytes(
-        ["/usr/bin/codesign", "-d", "--verbose=6", str(resolved)], check=False
+        ["/usr/bin/codesign", "-d", "--verbose=4", str(resolved)], check=False
     )
     if details_result.returncode != 0:
         raise TrustError("Codex code-signing details are unavailable")

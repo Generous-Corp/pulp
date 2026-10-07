@@ -482,6 +482,10 @@ def _run(
         raise JourneyError("invalid bounded subprocess request")
     child_env = dict(os.environ if env is None else env)
     child_env["NO_COLOR"] = "1"
+    # The installed CLI normally refreshes its release cache in a detached
+    # curl/gh process.  A bounded journey must own every descendant, so keep
+    # this diagnostic subprocess lane network-free and process-tree closed.
+    child_env["PULP_UPDATE_CHECK_DISABLED"] = "1"
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
     try:
         process = subprocess.Popen(
