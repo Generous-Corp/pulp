@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09260"></a>
+## [0.926.0] - 2026-10-07
+
+- release/version bump ([#9785](https://github.com/Generous-Corp/pulp/pull/9785))
+
+<a id="v09250"></a>
+## [0.925.0] - 2026-10-07
+
+- release/version bump ([#9781](https://github.com/Generous-Corp/pulp/pull/9781))
+- fix/windows vst3 bundle 20261006 ([#9778](https://github.com/Generous-Corp/pulp/pull/9778))
+- codex/dspx06 timing 20261006 ([#9780](https://github.com/Generous-Corp/pulp/pull/9780))
+
 <a id="v09240"></a>
 ## [0.924.0] - 2026-10-07
 
@@ -10026,6 +10038,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.926.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.926.0
+[0.925.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.925.0
 [0.924.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.924.0
 [0.923.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.923.1
 [0.923.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.923.0
