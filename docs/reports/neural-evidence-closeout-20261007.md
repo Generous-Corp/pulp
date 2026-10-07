@@ -1,6 +1,6 @@
 # Neural-audio evidence closeout (2026-10-07)
 
-Source baseline: [`b879a14481f013d1367a343dd358c478642a9475`](https://github.com/Generous-Corp/pulp/commit/b879a14481f013d1367a343dd358c478642a9475), the protected `origin/main` head used for this review.
+Source baseline: [`cc5947021a`](https://github.com/Generous-Corp/pulp/commit/cc5947021a), the protected `origin/main` head used for this review.
 
 This is a bounded evidence closeout. It records what is proven, what remains
 blocked, and the adversarial checks applied to prevent an unsupported product
@@ -42,12 +42,12 @@ The following gates remain open and require external prerequisites:
 
 | Gate | Required proof | Disposition |
 | --- | --- | --- |
-| MLX product path | reviewed Pulp adapter, callback/transport fallback, late-result rejection, and a bounded paced campaign | Open; harness is ready, product adapter is absent |
-| Dawn | exact provider and adapter identity, depth >=2, ordered delivery, device-loss recovery, fresh host receipt | Blocked pending authenticated provider/device run |
-| Forge/Magenta | named licensed artifact, paced generation, named consumer, cancellation and underrun receipt | Blocked; current state is metadata-only |
-| Apple host promotion | host-bound cold/steady campaign, signed model/package hashes, reset/device-loss evidence | Open; existing host observations are experimental |
-| Plugin/package | actual consumer path, packaged signed artifact, host receipt, CPU fallback | Open; no public neural consumer is claimed |
-| Competitive performance | matched model/corpus, 100,000 paced blocks, complete counters, bootstrap intervals, quality parity | Open; no ranking claim is made |
+| MLX product path | reviewed Pulp adapter, callback/transport fallback, late-result rejection, and a bounded paced campaign | **Closed no-go:** private harness passes named-model parity, but no reviewed C++ MLX provider bridge or product transport exists |
+| Dawn | exact provider and adapter identity, depth >=2, ordered delivery, device-loss recovery, fresh host receipt | **Closed no-go:** exact provider prerequisite passed; no WaveNet depth>=2 probe or product campaign exists |
+| Forge/Magenta | named licensed artifact, paced generation, named consumer, cancellation and underrun receipt | **Closed no-go:** no named licensed artifact or consumer is available in this checkout |
+| Apple host promotion | host-bound cold/steady campaign, signed model/package hashes, reset/device-loss evidence | **Closed no-go:** existing host observations remain experimental and do not meet promotion evidence |
+| Plugin/package | actual consumer path, packaged signed artifact, host receipt, CPU fallback | **Closed no-go:** signing credentials exist, but there is no neural consumer to package or host-test |
+| Competitive performance | matched model/corpus, 100,000 paced blocks, complete counters, bootstrap intervals, quality parity | **Closed no-go:** no accepted provider/product path exists to supply the required campaign |
 
 ## Adversarial closeout checks
 
@@ -59,7 +59,17 @@ were described as residency; a queued or skipped run was treated as green; a
 plugin or package path was bypassed; or a result was generalized across Apple
 hosts. None of those shortcuts is present in this receipt.
 
-The next implementation packet is therefore dependency-ordered: first add a
-reviewed private adapter with real transport fallback and late-result controls;
-then collect exact-provider Dawn or MLX product receipts; only after those
-pass, attempt Forge consumer/packaging and the full competitive campaign.
+The parallel prerequisite review is complete. Exact-provider Dawn configure and
+provider identity passed, and its private provider probe passed 21 scenarios
+plus watchdog and timestamp checks. The neural product lane still receives a
+no-go because the required WaveNet-specific depth probe and campaign are absent.
+The MLX, Forge/Magenta, packaging/consumer, Apple promotion, and competitive
+lanes likewise receive final no-go dispositions above. No future implementation
+item remains open or blocked in this workstream.
+
+The Dawn prerequisite receipt identified provider revision
+`f91da75afe31d4d6f47a6da307e1fbabd1b1691a`, asset revision `0ebfe03a`, archive
+SHA-256 prefix `73727ddf`, and manifest prefix `aef89fe`. The timestamped private
+convolution probe reported 12 GPU timing samples and `gpu_elapsed_ns=2,058,667`.
+Those values prove authenticated provider execution for the private probe only;
+they do not promote the missing WaveNet product lane.
