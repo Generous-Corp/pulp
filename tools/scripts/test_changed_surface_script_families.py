@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import re
@@ -542,9 +544,31 @@ class DriftCheckTest(FamilyFixture):
     def test_a_build_outside_the_gate_profile_refuses_to_write(self) -> None:
         build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
                                       PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
-        self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build, mode="--write"), 2)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.check(["tools/scripts/test_a.py"], build=build, mode="--write")
+        self.assertEqual(rc, 2)
+        self.assertIn("refusing to write", err.getvalue())
+        self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", err.getvalue())
         self.assertEqual((self.root / families.FAMILIES_FILE).read_text(encoding="utf-8"),
                          "# stale\n")
+
+    def test_a_gate_profile_build_writes(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="OFF")
+        self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build, mode="--write"), 0)
+        written = (self.root / families.FAMILIES_FILE).read_text(encoding="utf-8")
+        self.assertIn('"a-selftest"', written)
+
+    def test_the_skip_names_why(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build),
+                             families.SKIP_EXIT)
+        self.assertIn("SKIP", out.getvalue())
+        self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", out.getvalue())
 
     def test_missing_codemodel_is_a_reported_skip(self) -> None:
         saved = inventory.codemodel_reply_available
