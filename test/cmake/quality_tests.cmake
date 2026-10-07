@@ -863,6 +863,12 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/ci/test_executable_keys.py")
     set_tests_properties(executable-keys-selftest PROPERTIES TIMEOUT 120)
 
+    # Which dependencies a pin-file change moved on one platform, for the
+    # key's dependency_pin reason.
+    add_test(NAME dependency-pins-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_dependency_pins.py")
+    set_tests_properties(dependency-pins-selftest PROPERTIES TIMEOUT 60)
+
     # The selection over a key manifest: would-skip set, seeded sample, and
     # the tests and build targets left to run, as canonical bytes.
     add_test(NAME executable-selection-selftest COMMAND ${Python3_EXECUTABLE}

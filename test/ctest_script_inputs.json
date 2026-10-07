@@ -3623,6 +3623,8 @@
     "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/dependency_pin_map.json",
+    "tools/ci/dependency_pins.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/ios_gate_digest.py",
@@ -4260,6 +4262,17 @@
    ],
    "kind": "python"
   },
+  "dependency-pins-selftest": {
+   "entry": "tools/ci/test_dependency_pins.py",
+   "inputs": [
+    "tools/ci/dependency_pins.py",
+    "tools/ci/test_dependency_pins.py",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpFetchContent.cmake",
+    "tools/deps/manifest.json"
+   ],
+   "kind": "python"
+  },
   "deps-audit-extra-selftest": {
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
@@ -4451,6 +4464,8 @@
     "test/support",
     "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
+    "tools/ci/dependency_pin_map.json",
+    "tools/ci/dependency_pins.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/key_blind_executables.json",
@@ -8421,6 +8436,8 @@
     "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/dependency_pin_map.json",
+    "tools/ci/dependency_pins.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/ios_gate_digest.py",

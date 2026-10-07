@@ -283,9 +283,62 @@ class KeyTests(unittest.TestCase):
         self.fx.links["schema"] = "pulp-link-members/v99"
         self.assertEqual({e["always_run"] for e in self.fx.keys(head).values()}, {"base_unrecorded"})
 
-    def test_a_dependency_pin_reruns_everything(self):
-        keys = self.fx.keys(self.head(**{"tools/deps/manifest.json": "{\"x\": 1}\n"}))
+    def test_a_pin_change_no_dependency_can_be_named_for_reruns_everything(self):
+        for manifest in ("{\"x\": 1}\n", "{\"dependencies\": [\n"):
+            with self.subTest(manifest=manifest):
+                keys = self.fx.keys(self.head(**{"tools/deps/manifest.json": manifest}))
+                self.assertEqual({e["always_run"] for e in keys.values()}, {"dependency_pin"})
+
+    def pins_base(self, **files):
+        """Re-commit the base with these pin files, then name the head."""
+        self.fx.files.update(files)
+        self.fx.base = self.fx.commit()
+
+    def test_another_platforms_skia_change_reruns_nothing_here(self):
+        fixtures = HERE / "fixtures" / "dependency_pins"
+        read = lambda name: (fixtures / name).read_text(encoding="utf-8")  # noqa: E731
+        self.pins_base(**{"tools/deps/manifest.json": read("manifest.base.json"),
+                          "tools/cmake/PulpDependencies.cmake": read("PulpDependencies.base.cmake.txt")})
+        head = self.head(**{"tools/deps/manifest.json": read("manifest.head.json"),
+                            "tools/cmake/PulpDependencies.cmake": read("PulpDependencies.head.cmake.txt")})
+        keys = self.fx.keys(head)
+        self.assertNotIn("dependency_pin", {e["always_run"] for e in keys.values()})
+        self.assertTrue(self.equal(keys, EXE))
+
+    def test_a_moved_dependency_reruns_only_what_builds_against_it(self):
+        skia = "/Users/x/.cache/pulp/skia/darwin-arm64-1/build/lib/Release/libskia.a"
+        self.fx.links["executables"][f"<build>/{EXE}"]["archives"][skia] = {"members": [], "whole": False}
+        self.fx.links["members"][skia] = []
+        assets = {"mac-arm64": {"url": "u", "sha256": "1" * 64}, "win-x64": {"url": "u", "sha256": "2" * 64}}
+        manifest = lambda a: json.dumps({"dependencies": [  # noqa: E731
+            {"name": "Skia", "version": "m1", "determinism": {"release_assets": a}}]})
+        self.pins_base(**{"tools/deps/manifest.json": manifest(assets)})
+        windows = self.head(**{"tools/deps/manifest.json": manifest({**assets, "win-x64": {"url": "u", "sha256": "3" * 64}})})
+        self.assertNotIn("dependency_pin", {e["always_run"] for e in self.fx.keys(windows).values()})
+        mac = self.head(**{"tools/deps/manifest.json": manifest({**assets, "mac-arm64": {"url": "u", "sha256": "4" * 64}})})
+        keys = self.fx.keys(mac)
+        self.assertEqual(keys[EXE]["always_run"], "dependency_pin")
+        self.assertIsNone(keys[OTHER]["always_run"])
+        self.assertTrue(self.equal(keys, OTHER))
+
+    def test_a_moved_dependency_the_build_cannot_show_reruns_everything(self):
+        # Highway is mapped, but nothing in this build is a Highway target:
+        # a mapping that finds nothing cannot vouch for anything.
+        manifest = lambda v: json.dumps({"dependencies": [{"name": "Highway", "version": v}]})  # noqa: E731
+        self.pins_base(**{"tools/deps/manifest.json": manifest("1")})
+        keys = self.fx.keys(self.head(**{"tools/deps/manifest.json": manifest("2")}))
         self.assertEqual({e["always_run"] for e in keys.values()}, {"dependency_pin"})
+
+    def test_a_fetchcontent_dependency_reaches_through_its_target(self):
+        yoga = {"type": "STATIC_LIBRARY", "digest": "d-yoga", "artifacts": ["<build>/_deps/yoga-build/libyogacore.a"],
+                "dependencies": []}
+        for side in (self.fx.head_targets, self.fx.base_targets):
+            side["yogacore"] = dict(yoga)
+            side["liba"]["dependencies"] = ["yogacore"]
+        manifest = lambda v: json.dumps({"dependencies": [{"name": "Yoga", "version": v}]})  # noqa: E731
+        self.pins_base(**{"tools/deps/manifest.json": manifest("v1")})
+        keys = self.fx.keys(self.head(**{"tools/deps/manifest.json": manifest("v2")}))
+        self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"]), ("dependency_pin", None))
 
     def test_a_digest_that_is_not_content_keyed_is_unknown(self):
         head = self.head(**{"docs/readme.md": "new\n"})
@@ -451,6 +504,8 @@ class ManifestTests(unittest.TestCase):
             doc = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual((doc["producer"]["audit_commit"], len(doc["producer"]["audit_report_sha256"]),
                               doc["producer"]["audit_status"]), ("c0ffee", 64, "clean"))
+            self.assertEqual(doc["producer"]["dependency_pins"], {"scope": "names", "names": [], "why": None})
+            self.assertNotIn("dependency_pins", doc)
             self.assertEqual(doc["schema"], ek.SCHEMA)
             producer = doc["producer"]
             self.assertEqual((producer["base_sha"], producer["head_sha"], producer["base_record_run_id"]),

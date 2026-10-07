@@ -29,7 +29,9 @@ What a key cannot see is made an always_run reason, never a guess:
     base_other_toolchain
                        the record was built by another toolchain
     toolchain_unknown  either side's toolchain identity is incomplete
-    dependency_pin     a dependency pin moved (every build input may move)
+    dependency_pin     a dependency it builds against moved its pin, or a pin
+                       file changed in a way no dependency can be named for
+                       (dependency_pins.py)
     codemodel_unknown  no content-keyed codemodel digest for the target on
                        one side
     commit_bound       the executable embeds the commit
@@ -97,6 +99,7 @@ from typing import Iterable
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import dependency_pins  # noqa: E402
 import link_members  # noqa: E402
 import object_deps  # noqa: E402
 from spawn_closure import SpawnIndex  # noqa: E402
@@ -108,7 +111,8 @@ KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
 # touching any of them makes a plan select everything.
 KEY_CODE_PATHS = ("tools/ci/executable_keys.py", "tools/ci/link_members.py", "tools/ci/object_deps.py",
                   "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/always_run_names.py",
-                  "tools/ci/executable_selection.py", "tools/ci/key_blind_executables.json")
+                  "tools/ci/executable_selection.py", "tools/ci/key_blind_executables.json",
+                  "tools/ci/dependency_pins.py", "tools/ci/dependency_pin_map.json")
 # Executables whose recorded bytes changed while their content-keyed source
 # key did not, as the reuse replay measured them (reuse_policy_replay.py
 # key-blind). The list only grows: an entry always runs until the mechanism
@@ -118,10 +122,9 @@ SCRIPT_INPUTS_PATH = "test/ctest_script_inputs.json"
 CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
 # Files that pin third-party dependencies. A bump can change a dependency's
 # content without changing any path the codemodel digests or any archive a
-# recorded link names (FetchContent archives are treated as pinned), so a
-# change to one of them re-keys every executable.
-DEPENDENCY_PIN_PATHS = frozenset({"tools/deps/manifest.json", "tools/cmake/PulpDependencies.cmake",
-                                  "tools/cmake/PulpFetchContent.cmake"})
+# recorded link names (FetchContent archives are treated as pinned), so an
+# executable that builds against a moved dependency is not keyed.
+DEPENDENCY_PIN_PATHS = frozenset(dependency_pins.PIN_PATHS)
 # Registration labels that mean the test drives a shared host resource.
 ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
 COMPILE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".mm", ".m")
@@ -481,6 +484,26 @@ def audit_covered(report: dict | None) -> frozenset[str] | None:
     return frozenset(str(n) for n in s0["covered"])
 
 
+PIN_MAP = dependency_pins.load_map()
+
+
+def toolchain_platform(toolchain: dict | None) -> str:
+    """The platform the pin rules evaluate CMake for: the toolchain's OS."""
+    return str((toolchain or {}).get("os") or "").lower()
+
+
+def moved_pins(source_root: Path, base_sha: str, head_sha: str, changed: Iterable[str],
+               toolchain: dict | None) -> dependency_pins.Pins:
+    """The dependencies the changed pin files moved, on this toolchain's
+    platform."""
+    changed = sorted(changed)
+    if not changed:
+        return dependency_pins.NONE
+    base = {p: show(source_root, base_sha, p) for p in changed}
+    head = {p: show(source_root, head_sha, p) for p in changed}
+    return dependency_pins.attribute(base, head, toolchain_platform(toolchain), PIN_MAP)
+
+
 def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None, head_codemodel: dict | None,
             ctest: dict | None, build_dir: Path | None, toolchain: dict | None,
             key_blind_path: Path | None = None, *, audited: frozenset[str] | None) -> dict:
@@ -491,7 +514,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
     base_tree, head_tree = tree_blobs(source_root, base_sha), tree_blobs(source_root, head_sha)
     changed_paths = {p for p in set(base_tree) | set(head_tree) if base_tree.get(p) != head_tree.get(p)}
     shadowing = {os.path.basename(p) for p in set(base_tree) ^ set(head_tree) if p.endswith(HEADER_SUFFIXES)}
-    pins = bool(DEPENDENCY_PIN_PATHS & changed_paths)
+    pins = moved_pins(source_root, base_sha, head_sha, DEPENDENCY_PIN_PATHS & changed_paths, toolchain)
     head_targets = (head_codemodel or {}).get("targets") or {}
     base_cm = (record or {}).get("codemodel")
     base_targets = (base_cm or {}).get("targets") or {}
@@ -512,6 +535,10 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
     # runs anything: keying then would skip nothing and say nothing.
     unmatched = bool((ctest or {}).get("tests")) and not regs
     key_blind = load_key_blind(KEY_BLIND_LIST if key_blind_path is None else key_blind_path)
+    pin_index = dependency_pins.DependencyIndex(
+        PIN_MAP, toolchain_platform(toolchain), head_targets, base_targets,
+        ((record or {}).get("links") or {}).get("executables"))
+    pins = dependency_pins.resolve(pins, pin_index)
     by_artifact = {a.removeprefix(BUILD): n for n, t in head_targets.items()
                    if t.get("type") in ("EXECUTABLE", "MODULE_LIBRARY") for a in t.get("artifacts") or []}
     out: dict[str, dict] = {}
@@ -532,7 +559,8 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             "base_unrecorded" if record is None or sets is None or not ancestor else
             "toolchain_unknown" if not record.get("toolchain") or not toolchain else
             "base_other_toolchain" if record["toolchain"] != toolchain else
-            "dependency_pin" if pins else
+            "dependency_pin" if pins.scope == "all" or (pins.names and pin_index.reaches(artifact, name, pins.names))
+            else
             "codemodel_unknown" if not keyed or not base_target.get("digest") or not target.get("digest")
             or any(not (base_targets.get(n) or {}).get("digest") for n in linked or ()) else
             "commit_bound" if target.get("commit_bound") or base_target.get("commit_bound") else
@@ -566,7 +594,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
     counts: dict[str, int] = {}
     for e in out.values():
         counts[e["always_run"] or "keyed"] = counts.get(e["always_run"] or "keyed", 0) + 1
-    return {"executables": out, "reasons": dict(sorted(counts.items()))}
+    return {"executables": out, "reasons": dict(sorted(counts.items())), "dependency_pins": pins.as_json()}
 
 
 def code_digest(source_root: Path, base_sha: str) -> str:
@@ -626,6 +654,7 @@ def main(argv: list[str]) -> int:
                              "audit_commit": (audit or {}).get("commit"),
                              # Says in words why nothing was keyed on data
                              # when a report was missing or not clean.
+                             "dependency_pins": body.pop("dependency_pins"),
                              "audit_status": ("absent" if audit is None else
                                               "clean" if audit_covered(audit) is not None else "not_clean")},
                 **body}

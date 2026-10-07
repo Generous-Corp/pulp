@@ -1,0 +1,20 @@
+{
+ "schema": "pulp-dependency-pin-map/v1",
+ "dependencies": {
+  "Brotli": {"fetchcontent": ["brotli"], "targets": ["pulp-canvas"]},
+  "Catch2": {"fetchcontent": ["catch2"]},
+  "DRACO": {"fetchcontent": ["draco"]},
+  "fastgltf": {"fetchcontent": ["fastgltf"]},
+  "Highway": {"fetchcontent": ["highway"]},
+  "Mbed TLS": {"fetchcontent": ["mbedtls"]},
+  "Oboe": {"fetchcontent": ["oboe"], "platforms": ["android"]},
+  "SDL3": {"fetchcontent": ["sdl3"]},
+  "SheenBidi": {"fetchcontent": ["sheenbidi"]},
+  "simdjson": {"fetchcontent": ["simdjson"]},
+  "Skia": {"archives": ["*/pulp/skia/*", "<src>/external/skia-build/*"], "anchors": ["\\bPULP_SKIA_AUTOFETCH\\b", "\\bset\\(PULP_HAS_SKIA FALSE\\b"]},
+  "WebGPU-distribution": {"fetchcontent": ["webgpu"]},
+  "WOFF2": {"fetchcontent": ["woff2"], "targets": ["pulp-canvas"]},
+  "yaml-cpp": {"fetchcontent": ["yaml-cpp"]},
+  "Yoga": {"fetchcontent": ["yoga"], "anchors": ["\\byogacore\\b"]}
+ }
+}
