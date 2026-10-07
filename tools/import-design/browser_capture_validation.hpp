@@ -16,8 +16,8 @@ struct BrowserCaptureValidationOptions {
     int width = 0;
     int height = 0;
     float fail_below_percent = -1.0f;
-    /// Require the hash-verified materialized canvas composite to contain at
-    /// least one non-transparent pixel. Opt-in: ordinary static/blank designs
+    /// Require the hash-verified materialized canvas composite to contain the
+    /// minimum opaque coverage floor. Opt-in: ordinary static/blank designs
     /// remain valid when this is false.
     bool require_canvas_ink = false;
     /// Region of the REFERENCE to compare, in reference pixels. An explicit

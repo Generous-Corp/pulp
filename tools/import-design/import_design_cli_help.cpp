@@ -68,7 +68,8 @@ void print_usage() {
     std::cout << "                    emit transparent, hit-testable canvas behavior targets\n";
     std::cout << "  --require-canvas-ink\n";
     std::cout << "                    Require the materialized canvas evidence plane to contain\n";
-    std::cout << "                    at least one non-transparent pixel (opt-in; requires\n";
+    std::cout << "                    at least 256 opaque pixels and a 0.1% viewport floor\n";
+    std::cout << "                    (opt-in; requires\n";
     std::cout << "                    --materialized-canvas-composition)\n";
     std::cout << "  --offline         Explicitly use the legacy lower-fidelity HTML parser instead\n";
     std::cout << "                    of executing HTML in Chromium\n";
