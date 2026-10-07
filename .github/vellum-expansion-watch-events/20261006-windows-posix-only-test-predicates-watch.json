@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261006-windows-posix-only-test-predicates-watch",
+  "created_at": "2026-10-06T04:20:23Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "test_findskia_arch_assert.py and test_check_bundle_architectures.py decide whether to run with sys.platform == 'darwin' instead of os.uname(), which does not exist on Windows and killed the modules before their own skip. On macOS the same tests run with the same assertions; no Skia pin, render backend, bundle layout or captured output moves. Watch-only; no authority moves.",
+  "tests": [
+    "python3 tools/rack/test_generate_safety.py",
+    "python3 tools/scripts/test_check_bundle_architectures.py",
+    "python3 tools/scripts/test_findskia_arch_assert.py",
+    "python3 tools/scripts/test_git_stdin_pipe_deadlock.py",
+    "python3 tools/scripts/test_hydrate_real_git.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

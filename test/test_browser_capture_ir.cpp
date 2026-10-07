@@ -9,6 +9,7 @@
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +18,12 @@
 #include <set>
 #include <vector>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -24,13 +31,29 @@ namespace fs = std::filesystem;
 struct TempCapture {
     fs::path root;
 
+    // ctest runs every case as its own process, many at once, and each one
+    // writes the same file names. A clock reading alone is not unique (two
+    // processes can read the same tick), and two cases sharing a directory
+    // read each other's sidecars, so a drift case can see a sibling's
+    // matching report and accept it. The process id separates processes, the
+    // serial separates fixtures in one process, and the directory is claimed
+    // only if this fixture created it.
     TempCapture() {
-        root = fs::temp_directory_path() /
-               ("pulp-browser-capture-ir-test-" +
-                std::to_string(std::chrono::steady_clock::now()
-                                   .time_since_epoch()
-                                   .count()));
-        fs::create_directories(root);
+        static std::atomic<unsigned long long> serial{0};
+#if defined(_WIN32)
+        const auto pid = static_cast<unsigned long long>(_getpid());
+#else
+        const auto pid = static_cast<unsigned long long>(::getpid());
+#endif
+        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+        for (;;) {
+            root = fs::temp_directory_path() /
+                   ("pulp-browser-capture-ir-test-" + std::to_string(pid) + "-" +
+                    std::to_string(tick) + "-" +
+                    std::to_string(serial.fetch_add(1, std::memory_order_relaxed)));
+            if (fs::create_directory(root))
+                break;
+        }
     }
     ~TempCapture() {
         std::error_code ec;

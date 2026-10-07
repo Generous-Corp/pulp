@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 71,
+  "manifest_revision": 72,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -675,16 +675,20 @@
     {
       "key": "midi.channel-routing",
       "domain": "midi",
+      "contract_version": {
+        "major": 2,
+        "minor": 0
+      },
       "summary": "Lifecycle-safe MIDI channel routing with overlapping-note ownership.",
       "rt_class": "audio",
       "lifecycle": {
-        "construction": "any",
+        "construction": "control",
         "prepare": "reserve MIDI and UMP output on control",
         "process": "audio",
         "reset": "audio with prepared output",
-        "release": "none"
+        "release": "control"
       },
-      "state_model": "Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+      "state_model": "Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt, held in one heap ledger allocated by the constructor; a moved-from object refuses every entry point.",
       "seed_model": "none",
       "determinism": {
         "repeatability": "bit_exact",
@@ -718,10 +722,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -730,7 +730,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:860d679e1e74767b8645f6e7175e7b13f999ea6f4bd03fdb32649b6b5fd665a8"
+      "contract_digest": "sha256:1acd9b9b617c228cd84437a2ce9f82c430c2f0cec5afa3cb3548dfb7e9283863"
     },
     {
       "key": "midi.chord-memory",
@@ -930,16 +930,20 @@
     {
       "key": "midi.keyboard-split",
       "domain": "midi",
+      "contract_version": {
+        "major": 2,
+        "minor": 0
+      },
       "summary": "Lifecycle-safe two-way keyboard split for MIDI 1 and UMP event streams.",
       "rt_class": "audio",
       "lifecycle": {
-        "construction": "any",
+        "construction": "control",
         "prepare": "reserve both MIDI and UMP outputs on control",
         "process": "audio",
         "reset": "audio with prepared outputs",
-        "release": "none"
+        "release": "control"
       },
-      "state_model": "Two fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+      "state_model": "Two fixed forwarded and suppressed MIDI and UMP ledgers plus release debt, held in one heap ledger allocated by the constructor; a moved-from object refuses every entry point.",
       "seed_model": "none",
       "determinism": {
         "repeatability": "bit_exact",
@@ -973,10 +977,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -985,7 +985,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:69f5a1211ca7e43496604f4c269c3fe9d157a2b5e71856f840ae22074a6a5349"
+      "contract_digest": "sha256:d28a41e1cdc6c97952e381ba29d2fffdd35d08c2c70d85db2e3813e9f1031fc4"
     },
     {
       "key": "midi.latch",
@@ -1357,16 +1357,20 @@
     {
       "key": "midi.note-range-filtering",
       "domain": "midi",
+      "contract_version": {
+        "major": 2,
+        "minor": 0
+      },
       "summary": "Lifecycle-safe note-range filtering for MIDI 1 and UMP event streams.",
       "rt_class": "audio",
       "lifecycle": {
-        "construction": "any",
+        "construction": "control",
         "prepare": "reserve MIDI and UMP output on control",
         "process": "audio",
         "reset": "audio with prepared output",
-        "release": "none"
+        "release": "control"
       },
-      "state_model": "Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+      "state_model": "Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt, held in one heap ledger allocated by the constructor; a moved-from object refuses every entry point.",
       "seed_model": "none",
       "determinism": {
         "repeatability": "bit_exact",
@@ -1399,10 +1403,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -1411,7 +1411,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:d51b9ce1cb92b4db8fd7f48d002b43ff999c0130b0a38c4fb7a9a2c89acb2d53"
+      "contract_digest": "sha256:0aff35463e81f7373c99ce199f8a2839bb293551c6c07ae984ffed962a731d11"
     },
     {
       "key": "midi.note-repeat",

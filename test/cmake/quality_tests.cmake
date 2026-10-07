@@ -28,6 +28,30 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    # The typed editor bridge is generated from one TOML contract. Keep the
+    # safety audit and its production-path gate in the configured test graph so
+    # a contract that is valid TOML but unsafe after C++/TypeScript name
+    # transformation cannot reach checked-in outputs or a plugin build.
+    add_test(NAME pulp-editor-bridge-generator-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/bridge/bridge_gen_checks.py")
+    add_test(NAME pulp-editor-bridge-contract-safety-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/bridge/bridge_contract_safety_checks.py")
+    add_test(NAME pulp-editor-bridge-contract-gate-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/bridge/bridge_contract_gate_checks.py")
+    add_test(NAME pulp-editor-bridge-contract-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/bridge/bridge_contract_check.py"
+            --docs "${CMAKE_SOURCE_DIR}/docs/reference/generated-editor-bridge-contract.md")
+    set_tests_properties(
+        pulp-editor-bridge-generator-selftest
+        pulp-editor-bridge-contract-safety-selftest
+        pulp-editor-bridge-contract-gate-selftest
+        pulp-editor-bridge-contract-check
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
     # Private MLX validation stays tools-only/default-off. Register the test so
     # the repository-wide test-registration guard and generated script-input
     # manifest observe the harness on every configured platform. The test
@@ -35,6 +59,43 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME mlx-named-model-harness-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
+
+    # The importer, UI compiler and SDK are extractable packages.  Keep their
+    # dependency seam executable in every configured tree, including trees
+    # without a JavaScript toolchain; the self-test plants a private include
+    # and proves the same instrument fails closed.
+    add_test(NAME vellum-boundary-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_boundary_lint.py")
+    add_test(NAME vellum-boundary-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_boundary_lint.py")
+    set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
+    # Keep one checked-in, license-free source fixture on the same instrument
+    # as the importer output gate. The companion unittest plants every lint
+    # class and must turn red, so a vacuous clean fixture cannot make this gate
+    # appear healthy.
+    add_test(NAME pulp-ui-clean-output-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/clean_output_lint.py"
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/fixtures/clean")
+    add_test(NAME pulp-ui-clean-output-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/lint/test_clean_output_lint.py")
+    set_tests_properties(pulp-ui-clean-output-lint
+        pulp-ui-clean-output-lint-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+    # The source emitter is the smallest executable WP-2a seam.  It owns
+    # deterministic snapshot output and a fail-closed drift check while the
+    # future TSX/runtime compiler is developed behind the same command.
+    add_test(NAME pulp-ui-build-contracts
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ui-build/test_ui_build.py")
+    set_tests_properties(pulp-ui-build-contracts PROPERTIES
+        LABELS "pr;design-import" TIMEOUT 60)
+
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")
@@ -82,6 +143,18 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trace-frame-cost-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_frame_cost.py")
+    # Windows routes for POSIX-only calls (killpg, a directory fd, the
+    # executable bit), driven on every host by patching the platform check.
+    add_test(NAME windows-posix-shims-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_windows_posix_shims.py")
+    # Windows cannot execute a shebang script; tests stand in for native
+    # tools with scripts, so every launch of a configurable tool goes through
+    # script_argv.argv_for. The selftest covers both platforms and pins two
+    # consumers to the helper.
+    add_test(NAME script-argv-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_argv.py")
     # The web-compat harness classifies a CSS property as out-of-scope when it
     # is absent from a hand-transcribed table of one Yoga release. A stale table
     # therefore hides real gaps as "out of scope" and the compat numbers improve
@@ -341,6 +414,12 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+
+    # Temp-leak guard: wraps a test command in a private temp directory and
+    # fails when the command leaves anything there (see its use on the Node
+    # unit aggregate in design_import_tool_cli_tests.cmake).
+    add_test(NAME tmp-leak-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_tmp_leak_guard.py")
 
     # Shared Catch2 test PCH: the configure-time ledger says which suites reuse
     # a carrier; this reads the generator's compile lines back and proves it
@@ -1052,6 +1131,8 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_reap_linux.py")
         add_test(NAME proxmox-ci-host-network-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_configure_proxmox_ci_network.py")
+        add_test(NAME proxmox-ci-host-health-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_host_health.py")
     endif()
 
     # Silent-revert guard: reject a push whose diff byte-exactly restores the
@@ -1071,6 +1152,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
     add_test(NAME gpu-audio-provider-identity-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_provider_identity.py")
+    add_test(NAME gpu-audio-p2-campaign-contract-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p2_campaign.py")
     add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 
@@ -1251,18 +1334,29 @@ if(Python3_Interpreter_FOUND)
     # Shipyard's declared target so a different optional feature set cannot be
     # mistaken for inventory drift.
     if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
-        set(_changed_surface_policy_args)
-        if(PULP_CHANGED_SURFACE_INVENTORY_TARGET)
-            list(APPEND _changed_surface_policy_args --build-dir "${CMAKE_BINARY_DIR}")
-        endif()
+        # The policy tables alone, from source: this is also a source-lane
+        # test, so it never takes a build-tree argument.
         add_test(NAME changed-surface-policy-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py")
+        # The live-tree inventory check, which reads the build tree, only where
+        # Shipyard's target enables it. It is registered in every
+        # configuration (bare elsewhere) so the generated script-input and
+        # changed-surface family lists, keyed by test name, are the same for
+        # the required gate and the Shipyard lane.
+        set(_changed_surface_inventory_args)
+        if(PULP_CHANGED_SURFACE_INVENTORY_TARGET)
+            list(APPEND _changed_surface_inventory_args --build-dir "${CMAKE_BINARY_DIR}")
+        endif()
+        add_test(NAME changed-surface-policy-inventory COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
-            ${_changed_surface_policy_args})
+            ${_changed_surface_inventory_args})
         add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
         # Two cases walk the whole tracked tree for configured reachability,
-        # once, shared; about 50 s on m3.
-        set_tests_properties(changed-surface-script-families-selftest PROPERTIES TIMEOUT 120)
+        # once, shared. The matcher is cached, but hosted runners can still be
+        # several times slower than the owner's machine as the script corpus
+        # grows; keep the contract bounded without making normal runs brittle.
+        set_tests_properties(changed-surface-script-families-selftest PROPERTIES TIMEOUT 300)
         add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
         # The lane runner's own contract: base provisioning and configure-shape
@@ -1341,6 +1435,13 @@ if(Python3_Interpreter_FOUND)
     # otherwise inherit. 3x the worst run observed on 2026-09-13, rounded up.
     set_tests_properties(version-at-land-selftest PROPERTIES
         TIMEOUT 180)
+
+    # GitHub's itemTypes-filtered timelineItems connection reports totalCount
+    # over EVERY timeline item, so a filtered totalCount reads a never-queued
+    # PR as ejected. Fails if any tracked query selects it, and proves the scan
+    # reached the known filtered queries.
+    add_test(NAME graphql-filtered-count-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_graphql_filtered_count_guard.py")
 
     # min-OS measurement: --measure/--elf floor derivation over a built binary
     # (magic-byte format detection + Mach-O/ELF/PE/ar readers). The primitive the
@@ -1572,6 +1673,38 @@ endif()
 if(UNIX)
     add_test(NAME setup-source-cache
         COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_source_cache.sh")
+endif()
+
+# setup.sh's shared source cache after a killed priming run: a lock whose owner
+# is gone is reclaimed (a live one never is), and a half-populated cache is
+# re-fetched rather than trusted. Windows runs it under Git for Windows' bash,
+# located from git rather than on PATH, where bash.exe may be WSL's. FindGit
+# can resolve any of Git's cmd/, bin/ or mingw64/bin/ copies (configuring from
+# Git Bash puts mingw64/bin first), so search bin/ under each ancestor of
+# git.exe rather than assuming one layout.
+if(UNIX)
+    add_test(NAME setup-cache-lock
+        COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
+    set_tests_properties(setup-cache-lock PROPERTIES TIMEOUT 240)
+elseif(WIN32)
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        get_filename_component(_pulp_git_dir "${GIT_EXECUTABLE}" DIRECTORY)
+        set(_pulp_git_bash_hints)
+        foreach(_pulp_git_level RANGE 2)
+            get_filename_component(_pulp_git_dir "${_pulp_git_dir}" DIRECTORY)
+            list(APPEND _pulp_git_bash_hints "${_pulp_git_dir}/bin")
+        endforeach()
+        find_program(PULP_GIT_BASH bash HINTS ${_pulp_git_bash_hints} NO_DEFAULT_PATH)
+        if(PULP_GIT_BASH)
+            add_test(NAME setup-cache-lock
+                COMMAND "${PULP_GIT_BASH}" "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_cache_lock.sh")
+            set_tests_properties(setup-cache-lock PROPERTIES TIMEOUT 240)
+        else()
+            message(WARNING "setup-cache-lock not registered: no Git for Windows "
+                "bash.exe under ${_pulp_git_bash_hints} (git: ${GIT_EXECUTABLE})")
+        endif()
+    endif()
 endif()
 # Catch2 discovery must preserve multi-label lists as one CTest property value.
 if(Python3_Interpreter_FOUND)

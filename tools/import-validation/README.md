@@ -74,3 +74,24 @@ extracted from a video). The roundtrip script's contract — write
   to the runtime log via `__spectrLog`. While that instrumentation is
   still landing, the probe is advisory by default; pass `--require-trace`
   to enforce.
+
+## Browser-source fidelity receipts
+
+The browser capture harness is the source oracle for browser-runnable design
+imports.  Validate its CDP receipt before comparing a native render:
+
+```sh
+python3 tools/import-validation/verify_browser_fidelity_receipt.py \
+  /path/to/receipt.json \
+  --source /path/to/resources/editor.html \
+  --expected-title 'Spectr — zoomable filter bank'
+```
+
+The checker fails closed unless the source bytes match the receipt's
+`sourceSha256`, both launches have the same readiness marker and DOM summary, a
+non-empty `#root`, no console or network failures, identical screenshot
+SHA-256 values, and a rejected planted broken-mount control.  A copied receipt
+may use `--source` to identify the current checkout; that file must contain the
+recorded source digest.  The Spectr roundtrip accepts the same check through
+`SPECTR_BROWSER_RECEIPT` and optionally pins
+`SPECTR_BROWSER_EXPECTED_SHA256`.

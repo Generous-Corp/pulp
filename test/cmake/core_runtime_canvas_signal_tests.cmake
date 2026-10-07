@@ -212,6 +212,11 @@ pulp_add_test_suite(pulp-test-url GROUP pulp-test-group-core-runtime
 pulp_add_test_suite(pulp-test-runtime-result GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)
 
+# Untrusted relative-path screening shared by every archive, manifest and
+# asset guard.
+pulp_add_test_suite(pulp-test-safe-relative-path GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
+
 # XML and ZIP/GZIP compression tests
 pulp_add_test_suite(pulp-test-xml-zip GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)

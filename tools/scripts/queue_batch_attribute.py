@@ -64,6 +64,8 @@ import posixpath
 import re
 import shutil
 import subprocess
+
+from script_argv import argv_for
 import sys
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -158,7 +160,7 @@ def run_gh(args: list[str], **kwargs) -> subprocess.CompletedProcess:
     """
     cli = gh_cli()
     try:
-        return subprocess.run([cli, *args], **kwargs)
+        return subprocess.run([*argv_for(cli), *args], **kwargs)
     except FileNotFoundError:
         print(
             f"queue_batch_attribute: GitHub CLI {cli!r} is not on PATH "

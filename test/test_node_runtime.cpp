@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/import-design/node_runtime.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -21,12 +21,8 @@ namespace {
 class TempTree {
 public:
     explicit TempTree(std::string_view label) {
-        const auto nonce =
-            std::chrono::steady_clock::now().time_since_epoch().count();
-        root_ = fs::temp_directory_path()
-            / (std::string("pulp-node-runtime-test-") + std::string(label) + "-"
-               + std::to_string(nonce));
-        fs::create_directories(root_);
+        root_ = pulp::test::make_unique_temp_dir(std::string("pulp-node-runtime-test-") +
+                                                 std::string(label));
     }
 
     ~TempTree() {

@@ -114,7 +114,10 @@ TEST_CASE("reverse buffer matches a hand sequence and rejects timing mutations",
 TEST_CASE("raised-cosine reverse boundaries remove the full-scale splice",
           "[signal][reverse-buffer][boundary][click-safe]") {
     constexpr std::size_t kWindow = 8;
-    std::array<double, 24> input{};
+    // A named length: MSVC rejects `input.size()` as a template argument inside
+    // a lambda that captures `input` by reference (C2975).
+    constexpr std::size_t kSamples = 3 * kWindow;
+    std::array<double, kSamples> input{};
     std::fill_n(input.begin(), kWindow, 1.0);
     std::fill_n(input.begin() + kWindow, kWindow, -1.0);
 
@@ -122,7 +125,7 @@ TEST_CASE("raised-cosine reverse boundaries remove the full-scale splice",
         ReverseBuffer64 reverse;
         REQUIRE(reverse.configure({.window_samples = kWindow, .boundary_fade_samples = fade}));
         REQUIRE(reverse.prepare(kWindow));
-        std::array<double, input.size()> output{};
+        std::array<double, kSamples> output{};
         reverse.process_block(input.data(), output.data(), output.size());
         return output;
     };

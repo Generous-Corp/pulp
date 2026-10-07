@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -40,14 +41,7 @@ struct ScratchDir {
     fs::path path;
 
     explicit ScratchDir(const char* stem) {
-        const auto counter =
-            std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path()
-             / (std::string("pulp-isolated-scanner-test-") + stem + "-"
-                + std::to_string(counter));
-        std::error_code ec;
-        fs::remove_all(path, ec);
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(std::string("pulp-isolated-scanner-test-") + stem);
     }
 
     ~ScratchDir() {

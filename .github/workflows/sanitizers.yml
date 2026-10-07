@@ -213,6 +213,20 @@ jobs:
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
 
+      # The materialized-runtime conformance probe imports esbuild through the
+      # checked-in canonicalizer. Provision the exact Node LTS and lockfile
+      # cache before configuring so every CTest path sees the same dependency
+      # set, including clean hosted sanitizer runners.
+      - name: Set up Node.js for materialized runtime tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.15.0'
+          cache: npm
+          cache-dependency-path: tools/import-design/jsx-runtime/package-lock.json
+
+      - name: Install materialized runtime Node test dependencies
+        run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
+
       - name: Configure with ASan
         run: |
           cmake -S . -B build-asan \
@@ -383,6 +397,19 @@ jobs:
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
+
+      # Keep the sanitizer lane's Node toolchain deterministic: the broad CTest
+      # pass includes pulp-materialized-runtime-conformance, which imports the
+      # locked esbuild dependency from this directory.
+      - name: Set up Node.js for materialized runtime tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.15.0'
+          cache: npm
+          cache-dependency-path: tools/import-design/jsx-runtime/package-lock.json
+
+      - name: Install materialized runtime Node test dependencies
+        run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
 
       - name: Configure with UBSan
         run: |

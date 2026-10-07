@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from scene3d_launch import argv_for
 
 
 EXPECTED_TRUE_FIELDS = [
@@ -208,7 +209,7 @@ def main():
 
         result = subprocess.run(
             [
-                str(args.probe_tool),
+                *argv_for(args.probe_tool),
                 "--scene",
                 "boxtextured",
                 "--fixture",

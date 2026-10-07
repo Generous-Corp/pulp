@@ -588,6 +588,13 @@ std::unique_ptr<pulp::format::Processor> create_processor() {
           &installed_parity_control_hooks);
   if (!hooks_registered)
     return {};
+  static const bool graph_authority_registered =
+      pulp::inspect::detail::install_standalone_signal_graph_authority_factory(
+          [](pulp::format::Processor&) -> pulp::host::SignalGraphControlAuthority* {
+            return nullptr;
+          });
+  if (!graph_authority_registered)
+    return {};
   return std::make_unique<InstalledStandaloneProcessor>();
 }
 ]=])

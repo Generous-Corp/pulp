@@ -89,8 +89,9 @@ target_sources(pulp-format-core PRIVATE
 
 target_sources(pulp-format-view PRIVATE
     src/view_bridge.cpp
-    # Processor::SettingsSection's special members need view::View complete;
-    # Processor::create_view() does not, and stays in format.cpp.
+    # The two Processor::SettingsSection members that need view::View complete
+    # (adopting a view, take_view); create_view() does not, and stays in
+    # format.cpp.
     src/settings_section.cpp
     # In-app update surfaces over the core AppUpdateService: the EditorBridge
     # messages a JS editor calls and the native Settings group.

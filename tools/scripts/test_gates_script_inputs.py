@@ -48,6 +48,7 @@ COPIED = [
     "tools/scripts/gate_common.py",
     "tools/ci/source_selftests.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ui-build/lint/clean_output_lint.py",
 ]
 
 # Stands in for changed_surface_script_families.py: its own suite covers what it
@@ -58,7 +59,13 @@ default = "changed-surface script families" + (" (static)" if mode == "STATIC" e
 print(os.environ.get(f"FAKE_{mode}_SAYS", default))
 sys.exit(int(os.environ.get(f"FAKE_{mode}_RC", "0")))
 """
-STUBS = ["tools/scripts/version_bump_check.py", "tools/scripts/skill_sync_check.py"]
+STUBS = [
+    "tools/scripts/version_bump_check.py",
+    "tools/scripts/skill_sync_check.py",
+    # gates.sh now fails closed when this instrument is absent; keep the
+    # synthetic repository's ordinary-path stub explicit.
+    "tools/scripts/vellum_boundary_lint.py",
+]
 
 FAKE_CMAKE = r"""#!/bin/sh
 echo "$*" >> "$FAKE_CMAKE_LOG"
@@ -111,6 +118,21 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.write(".github/workflows/version-skill-check.yml",
                    "jobs:\n  lane:\n    steps:\n      - run: python3 tools/ci/source_selftests.py run\n")
         self.write("tools/ci/test_beta.py", "print('beta')\n")
+        self.write(
+            "tools/ui-build/lint/fixtures/clean/FilterPanel.tsx",
+            "export function FilterPanel({value}: {value: number}) {\n"
+            "  return <button data-pulp-action=\"filter\" aria-label=\"Filter\" "
+            "style={{color: tokens.text}}>{value}</button>;\n"
+            "}\n",
+        )
+        self.write(
+            "tools/ui-build/lint/fixtures/generated/CapturedFilterPanel.tsx",
+            "export function CapturedFilterPanel({value, tokens}: "
+            "{value: number; tokens: {text: string}}) {\n"
+            "  return <button data-pulp-action=\"filter\" aria-label=\"Filter\" "
+            "style={{color: tokens.text}}>{value}</button>;\n"
+            "}\n",
+        )
         self.write("tools/ci/source_selftests.json", json.dumps({"schema_version": 1, "tests": [
             {"name": "beta", "argv": ["{repo}/tools/ci/test_beta.py"], "timeout": 120.0}]}) + "\n")
         inventory = {"tests": [

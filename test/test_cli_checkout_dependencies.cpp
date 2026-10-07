@@ -1,5 +1,6 @@
 #include "../tools/cli/cli_common.hpp"
 #include "../tools/cli/cli_sdk.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,9 +11,7 @@
 namespace {
 
 struct TempCheckout {
-    fs::path root = fs::temp_directory_path()
-        / ("pulp-checkout-deps-" + std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::path root = pulp::test::make_unique_temp_dir("pulp-checkout-deps");
 
     TempCheckout() {
         fs::create_directories(root / "tools/deps");

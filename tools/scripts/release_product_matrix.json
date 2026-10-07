@@ -6,6 +6,7 @@
   "control_broker_floor": "0.795.0",
   "control_standalone_host_floor": "0.803.1",
   "node_runtime_floor": "0.813.1",
+  "materialized_binding_contract_floor": "0.918.0",
   "gpu_health_contract_floor": "0.817.0",
   "gpu_health_v2_contract_floor": "0.828.0",
   "gpu_health_run_attestation_contract_floor": "0.828.0",
@@ -53,7 +54,9 @@
     "browser_capture/security.mjs",
     "browser_capture/semantics.mjs",
     "browser_capture/settle.mjs",
-    "browser_capture/tokens.mjs"
+    "browser_capture/tokens.mjs",
+    "browser_capture/vendor_payload.mjs",
+    "jsx-runtime/materialized_binding_contract.mjs"
   ],
   "pulp_library_stems": [
     "pulp-audio",
@@ -74,6 +77,7 @@
     "pulp-inspect-client",
     "pulp-inspect-control",
     "pulp-inspect-offline-runtime",
+    "pulp-inspect-graph-runtime",
     "pulp-inspect-protocol",
     "pulp-inspect-runtime",
     "pulp-inspect-runtime-eval",

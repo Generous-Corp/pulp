@@ -17,9 +17,9 @@
 // routing-path safety-net, not a claim of full graph-runtime parity.
 //
 // Equivalence is asserted BIT-EXACTLY. Both engines materialize the same edge
-// list, preserve connection order into their inbound-edge lists, and sum
-// linearly in that order, so there is no associativity freedom for the two to
-// diverge on — any difference is a real routing/gain bug, not float noise. A
+// list and canonicalize ordinary audio fan-in by endpoint identity before
+// summing, so equivalent authored connection permutations have one reduction
+// order. Any difference is a real routing/gain bug, not float noise. A
 // relative-tolerance class is only warranted once an edge kind whose summation
 // order genuinely differs (e.g. a parallel schedule) is added.
 //
@@ -206,10 +206,19 @@ RuntimeSpecs build_runtime_specs(const RandomGraph& rg, std::vector<GainState>& 
         s.nodes.push_back({rg.gain_id(i), GraphRuntimeNodeKind::Processor, 1, 1});
     s.nodes.push_back({rg.output_id, GraphRuntimeNodeKind::AudioOutput, 1, 0});
 
-    for (const auto& e : rg.edges) s.conns.push_back({e.src, 0, e.dst, 0});
+    for (const auto& e : rg.edges) {
+        GraphRuntimeConnectionSpec connection{};
+        connection.source_node = e.src;
+        connection.dest_node = e.dst;
+        s.conns.push_back(connection);
+    }
     if (feedback_on_gain) {
         const std::uint32_t id = rg.gain_id(feedback_idx);
-        s.conns.push_back({id, 0, id, 0, /*feedback=*/true});
+        GraphRuntimeConnectionSpec connection{};
+        connection.source_node = id;
+        connection.dest_node = id;
+        connection.feedback = true;
+        s.conns.push_back(connection);
     }
 
     states.assign(rg.gain_count, GainState{});
@@ -226,6 +235,85 @@ bool exact_equal(const std::vector<float>& a, const std::vector<float>& b) {
     for (std::size_t i = 0; i < a.size(); ++i)
         if (a[i] != b[i]) return false;  // bit-exact: identical edge/sum order
     return true;
+}
+
+struct ThreeWayFanIn {
+    static constexpr std::array<float, 3> kGains{
+        100000000.0f,
+        -100000000.0f,
+        1.0f,
+    };
+    static constexpr std::array<std::uint32_t, 3> kBranchIds{2, 3, 4};
+    static constexpr std::uint32_t kInputId = 1;
+    static constexpr std::uint32_t kOutputId = 5;
+};
+
+std::vector<float> signal_graph_three_way_fan_in(const std::array<int, 3>& order, int frames) {
+    pulp::host::SignalGraph g;
+    const auto input = g.add_input_node(1, "In");
+    const std::array branches{
+        g.add_gain_node("A"),
+        g.add_gain_node("B"),
+        g.add_gain_node("C"),
+    };
+    const auto output = g.add_output_node(1, "Out");
+    for (const auto branch : branches)
+        REQUIRE(g.connect(input, 0, branch, 0));
+    for (const int index : order)
+        REQUIRE(g.connect(branches[index], 0, output, 0));
+    for (std::size_t i = 0; i < branches.size(); ++i)
+        REQUIRE(g.set_node_gain(branches[i], ThreeWayFanIn::kGains[i]));
+    REQUIRE(g.prepare(kSr, frames));
+
+    const std::vector<float> x(static_cast<std::size_t>(frames), 1.0f);
+    std::vector<float> y(static_cast<std::size_t>(frames), 0.0f);
+    std::array<const float*, 1> in_ch{x.data()};
+    std::array<float*, 1> out_ch{y.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 1,
+                                                 static_cast<std::uint32_t>(frames));
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 1, static_cast<std::uint32_t>(frames));
+    g.set_canonical_executor_routing_enabled(false);
+    g.set_parallel_routing_enabled(false);
+    g.set_anticipation_enabled(false);
+    g.process(out_view, in_view, frames);
+    return y;
+}
+
+struct ThreeWayRuntime {
+    std::vector<GraphRuntimeNodeSpec> nodes{
+        {ThreeWayFanIn::kInputId, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        {ThreeWayFanIn::kBranchIds[0], GraphRuntimeNodeKind::Processor, 1, 1},
+        {ThreeWayFanIn::kBranchIds[1], GraphRuntimeNodeKind::Processor, 1, 1},
+        {ThreeWayFanIn::kBranchIds[2], GraphRuntimeNodeKind::Processor, 1, 1},
+        {ThreeWayFanIn::kOutputId, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    std::vector<GraphRuntimeConnectionSpec> conns;
+    std::vector<GraphRuntimeNodeBinding> bindings;
+};
+
+ThreeWayRuntime make_three_way_runtime(const std::array<int, 3>& order,
+                                       std::vector<GainState>& states) {
+    ThreeWayRuntime result;
+    const auto append_audio = [&result](std::uint32_t source, std::uint32_t dest) {
+        GraphRuntimeConnectionSpec connection{};
+        connection.source_node = source;
+        connection.dest_node = dest;
+        result.conns.push_back(connection);
+    };
+    for (const auto branch : ThreeWayFanIn::kBranchIds)
+        append_audio(ThreeWayFanIn::kInputId, branch);
+    for (const int index : order)
+        append_audio(ThreeWayFanIn::kBranchIds[index], ThreeWayFanIn::kOutputId);
+
+    states.resize(ThreeWayFanIn::kGains.size());
+    for (std::size_t i = 0; i < states.size(); ++i)
+        states[i].gain = ThreeWayFanIn::kGains[i];
+    result.bindings.push_back({ThreeWayFanIn::kInputId, nullptr, nullptr, false});
+    for (std::size_t i = 0; i < states.size(); ++i) {
+        result.bindings.push_back({ThreeWayFanIn::kBranchIds[i], routing_gain, &states[i], true});
+    }
+    result.bindings.push_back({ThreeWayFanIn::kOutputId, nullptr, nullptr, false});
+    return result;
 }
 
 // Per-graph structural facts used to assert the fuzzer keeps real pressure.
@@ -344,4 +432,43 @@ TEST_CASE("Routed executor matches SignalGraph for random graphs with one feedba
     }
     INFO("feedback graphs exercised: " << tested);
     CHECK(tested > 60);  // most seeds must have a live feedback site
+}
+
+TEST_CASE("Three-way ordinary audio fan-in is permutation-invariant across walk and routed paths",
+          "[host][graph][executor][routing][parity][differential][fan-in]") {
+    constexpr int kFrames = 32;
+    constexpr std::array<std::array<int, 3>, 6> permutations{{
+        {0, 1, 2},
+        {0, 2, 1},
+        {1, 0, 2},
+        {1, 2, 0},
+        {2, 0, 1},
+        {2, 1, 0},
+    }};
+
+    std::vector<float> canonical;
+    for (const auto& order : permutations) {
+        CAPTURE(order[0], order[1], order[2]);
+        const auto ref = signal_graph_three_way_fan_in(order, kFrames);
+        REQUIRE_FALSE(ref.empty());
+        for (const float value : ref)
+            REQUIRE(value == 1.0f);
+
+        std::vector<GainState> states;
+        const auto specs = make_three_way_runtime(order, states);
+        GraphRuntimeSnapshot snapshot;
+        REQUIRE(make_snapshot(snapshot, specs.nodes, specs.conns, specs.bindings));
+        auto pool = make_pool(snapshot, kFrames);
+        GraphRuntimeExecutor exec;
+        RoutedHarness h(kSr, kFrames, {std::vector<float>(kFrames, 1.0f)}, 1);
+        REQUIRE(h.run(exec, snapshot, pool).ok());
+        REQUIRE(exact_equal(ref, h.outs[0]));
+
+        if (canonical.empty()) {
+            canonical = ref;
+        } else {
+            REQUIRE(exact_equal(canonical, ref));
+        }
+        REQUIRE(exact_equal(canonical, h.outs[0]));
+    }
 }

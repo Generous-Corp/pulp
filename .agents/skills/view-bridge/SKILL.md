@@ -3375,3 +3375,25 @@ Shape, if you are extending it:
   a capture is still reading pixels out of the surface.
 - The key run only closes the window when no `--screenshot` one-shot is armed;
   otherwise the screenshot owns the exit and closing here would race it.
+
+### `SettingsSection::view` owns its view through a type-erased deleter
+
+`Processor::SettingsSection::view` is `std::unique_ptr<view::View, void (*)(view::View*)>`,
+not a plain `std::unique_ptr<view::View>`, so a SettingsSection can be built, moved
+and destroyed where `view::View` is incomplete. That is what keeps a
+`pulp::format-core`-only consumer linkable: the inline `settings_sections()` destroys a
+vector of them. To hand a section's view to something that takes a plain owning
+pointer (a settings panel's `add_section`), call `section.take_view()`; moving
+`section.view` into a `std::unique_ptr<view::View>` does not compile. Construct a
+section with a view through `SettingsSection(title, std::unique_ptr<view::View>)`,
+which installs the deleter where View is complete.
+
+
+## Typed imported-editor bridge contracts
+
+The design-import bridge contract is generated from `tools/bridge/bridge.toml`
+into sorted C++/TypeScript/docs artifacts. Keep `EditorBridge::handlers()`
+ordered and deterministic, validate generated output with the bridge drift and
+missing-handler controls, and keep inbound commands distinct from outbound
+publications. This seed contract does not replace payload parsing or handler
+registration for existing plugins.

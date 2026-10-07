@@ -4,12 +4,32 @@
 
 #include <filesystem>
 #include <string>
+#include <system_error>
+#include <utility>
 
 namespace pulp_mcp {
 
 struct ProbeJsonTemp {
     std::filesystem::path directory;
     std::filesystem::path json_path;
+};
+
+// Removes a probe's private temp directory on every exit from the tool that
+// made it, including an argument refusal found after the directory exists.
+class ProbeJsonTempGuard {
+  public:
+    explicit ProbeJsonTempGuard(std::filesystem::path directory)
+        : directory_(std::move(directory)) {}
+    ~ProbeJsonTempGuard() {
+        std::error_code ec;
+        if (!directory_.empty())
+            std::filesystem::remove_all(directory_, ec);
+    }
+    ProbeJsonTempGuard(const ProbeJsonTempGuard&) = delete;
+    ProbeJsonTempGuard& operator=(const ProbeJsonTempGuard&) = delete;
+
+  private:
+    std::filesystem::path directory_;
 };
 
 std::filesystem::path source_build_cli_path(const std::filesystem::path& root);

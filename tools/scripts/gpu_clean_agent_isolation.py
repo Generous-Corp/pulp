@@ -24,11 +24,20 @@ class IsolationError(RuntimeError):
     """A bounded process or proxy invariant failed."""
 
 
+def _signal_group(process: subprocess.Popen[bytes], hard: bool) -> None:
+    """SIGTERM/SIGKILL the session on POSIX. Windows has no process groups to
+    signal (no os.killpg), so it terminates the process itself."""
+    if os.name == "nt":
+        process.kill() if hard else process.terminate()
+        return
+    os.killpg(process.pid, signal.SIGKILL if hard else signal.SIGTERM)
+
+
 def _terminate_group(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        _signal_group(process, hard=False)
     except ProcessLookupError:
         return
     try:
@@ -37,7 +46,7 @@ def _terminate_group(process: subprocess.Popen[bytes]) -> None:
     except subprocess.TimeoutExpired:
         pass
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        _signal_group(process, hard=True)
     except ProcessLookupError:
         pass
     try:

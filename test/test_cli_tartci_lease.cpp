@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/cli/cli_common.hpp"
 #include "tools/cli/shell_quote.hpp"
 #include "tools/cli/tartci_lease.hpp"
@@ -296,10 +297,7 @@ fs::path source_root() {
 }
 
 fs::path fresh_temp_dir(const std::string& stem) {
-    auto dir = fs::temp_directory_path()
-        / (stem + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(dir);
-    return dir;
+    return pulp::test::make_unique_temp_dir(stem);
 }
 
 }  // namespace
@@ -370,10 +368,7 @@ TEST_CASE("build-dir lock refuses a build while the Python lock holds the tree")
 
 #ifndef _WIN32
 TEST_CASE("concurrent watch loops are rejected by one fixed host lease") {
-    auto root = fs::temp_directory_path()
-        / ("pulp-tartci-lease-test-"
-           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(root);
+    auto root = pulp::test::make_unique_temp_dir("pulp-tartci-lease-test");
     const auto script = root / "tartci";
     const auto store = root / "leases.txt";
     const auto log = root / "calls.log";
@@ -470,10 +465,7 @@ TEST_CASE("build acquisition degrades to a bounded cap when host-profile fails")
     // without the subcommand) must NOT fail the build — it degrades to the
     // bounded tier-0 default. This is the on-pool reality that would otherwise
     // make `pulp build` exit non-zero.
-    auto root = fs::temp_directory_path()
-        / ("pulp-tartci-lease-hp-"
-           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(root);
+    auto root = pulp::test::make_unique_temp_dir("pulp-tartci-lease-hp");
     const auto script = root / "tartci";
     {
         std::ofstream out(script);
@@ -537,10 +529,7 @@ TEST_CASE("governance tier is Tier 2 when an orchard fleet is configured") {
 
 #ifndef _WIN32
 TEST_CASE("governance tier is Tier 1 when a tartci host-profile succeeds") {
-    auto root = fs::temp_directory_path()
-        / ("pulp-tartci-gov-"
-           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(root);
+    auto root = pulp::test::make_unique_temp_dir("pulp-tartci-gov");
     const auto script = root / "tartci";
     {
         std::ofstream out(script);
@@ -624,10 +613,7 @@ TEST_CASE("utility qos and required floor qos wrap the build command") {
 
 #ifndef _WIN32
 TEST_CASE("a denied background build takes the agent-floor lease instead of failing") {
-    auto root = fs::temp_directory_path()
-        / ("pulp-tartci-floor-test-"
-           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(root);
+    auto root = pulp::test::make_unique_temp_dir("pulp-tartci-floor-test");
     const auto script = root / "tartci";
     const auto log = root / "calls.log";
     {
@@ -733,11 +719,7 @@ exit 0
 }
 
 fs::path fresh_lease_test_root(const char* tag) {
-    auto root = fs::temp_directory_path() /
-                (std::string("pulp-tartci-class-") + tag + "-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(root);
-    return root;
+    return pulp::test::make_unique_temp_dir(std::string("pulp-tartci-class-") + tag);
 }
 
 } // namespace

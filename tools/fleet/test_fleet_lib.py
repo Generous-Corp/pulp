@@ -24,6 +24,10 @@ def executable(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+# Fleet hosts are macOS: the runner layout under test is built from symlinks,
+# executable-bit fakes and POSIX tar members, none of which a Windows checkout
+# reproduces, and fleet_lib never runs on Windows.
+@unittest.skipIf(sys.platform == "win32", "fleet runner layouts are macOS-only")
 class RunnerPolicyFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="fleet-runner-policy-")

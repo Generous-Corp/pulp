@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { normalizeMaterializedMetadata } from './materialized_metadata_contract.mjs';
+import { isMaterializedBrowserDocumentSchema } from
+  './materialized_binding_contract.mjs';
 
 const validId = /^[A-Za-z0-9._-]+$/;
 const validEvent = /^[A-Za-z][A-Za-z0-9:_-]*$/;
@@ -135,8 +137,7 @@ export function loadMaterializedStateAtlas(
         throw new Error('state atlas metadata total is too large');
       }
       const metadataDocument = JSON.parse(metadataBytes.toString('utf8'));
-      if (metadataDocument.schema !== 'pulp-materialized-browser-document-v1' ||
-          metadataDocument.version !== 1) {
+      if (!isMaterializedBrowserDocumentSchema(metadataDocument)) {
         throw new Error(`state atlas entry ${id} metadata document is invalid`);
       }
       metadata = normalizeMaterializedMetadata(

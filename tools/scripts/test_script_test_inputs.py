@@ -72,6 +72,7 @@ class Repo:
         write(self.root, "tools/import/run.mjs", "import { f } from './lib/util.mjs';\nconst c = require('./config.json');\n")
         write(self.root, "tools/import/lib/util.mjs", "export const f = 1;\n")
         write(self.root, "tools/import/config.json", "{}\n")
+        write(self.root, "tools/scripts/tmp_leak_guard.py", "import alpha_lib\n")
         write(self.root, "tools/scripts/test_beta.sh", "#!/bin/bash\nsource \"$(dirname \"$0\")/lib.sh\"\n. tools/scripts/other.sh\n")
         write(self.root, "tools/scripts/lib.sh", "x=1\n")
         write(self.root, "tools/scripts/other.sh", "y=1\n")
@@ -86,6 +87,10 @@ class Repo:
             {"name": "alpha", "command": ["/usr/bin/python3", f"{r}/tools/scripts/test_alpha.py", f"{r}/test/fixtures/data.txt"],
              "properties": [{"name": "WORKING_DIRECTORY", "value": f"{r}/tools/scripts"}]},
             {"name": "node-run", "command": ["/opt/homebrew/bin/node", "--test", f"{r}/tools/import/run.mjs"], "properties": []},
+            {"name": "guarded-node-run",
+             "command": ["/usr/bin/python3", f"{r}/tools/scripts/tmp_leak_guard.py", "--ignore", "x-*", "--",
+                         "/opt/homebrew/bin/node", "--test", f"{r}/tools/import/run.mjs"],
+             "properties": []},
             {"name": "beta", "command": ["/bin/bash", f"{r}/tools/scripts/test_beta.sh"], "properties": []},
             {"name": "mod", "command": ["/usr/bin/python3", "-m", "test_mod"],
              "properties": [{"name": "WORKING_DIRECTORY", "value": f"{r}/tools/scripts"}]},
@@ -192,6 +197,16 @@ class BuildListTests(unittest.TestCase):
     def test_node_entry_follows_relative_imports_and_requires(self) -> None:
         n = self.lst["tests"]["node-run"]
         self.assertEqual(n["inputs"], ["tools/import/config.json", "tools/import/lib/util.mjs", "tools/import/run.mjs"])
+
+    def test_a_temp_leak_guarded_command_is_declared_as_what_it_wraps(self) -> None:
+        # Classified as the guard, the node test would lose its import walk and
+        # a change to its imports would no longer select it.
+        n = self.lst["tests"]["guarded-node-run"]
+        self.assertEqual(n["kind"], "node")
+        self.assertEqual(n["entry"], "tools/import/run.mjs")
+        self.assertEqual(n["inputs"], [
+            "docs/status/alpha.yaml", "tools/import/config.json", "tools/import/lib/util.mjs", "tools/import/run.mjs",
+            "tools/scripts/alpha_lib.py", "tools/scripts/tmp_leak_guard.py"])
 
     def test_shell_entry_follows_source_lines(self) -> None:
         b = self.lst["tests"]["beta"]
@@ -886,6 +901,41 @@ class GateProfileTests(unittest.TestCase):
                 proc = self.run_tool(repo, "--write")
                 self.assertEqual(proc.returncode, 2)
                 self.assertIn("refusing to write", proc.stderr)
+
+
+class GatePlatformTests(unittest.TestCase):
+    def cache(self, repo: Repo, CMAKE_SYSTEM_NAME: str) -> None:
+        # Where CMake records it: not CMakeCache.txt, but CMakeSystem.cmake.
+        write(repo.root / "build", "CMakeFiles/4.3.3/CMakeSystem.cmake",
+              f'set(CMAKE_SYSTEM_NAME "{CMAKE_SYSTEM_NAME}")\n')
+
+    def run_tool(self, repo: Repo, *args: str) -> subprocess.CompletedProcess:
+        inv = repo.root / "build" / "inv.json"
+        inv.parent.mkdir(parents=True, exist_ok=True)
+        inv.write_text(json.dumps(repo.inventory()), encoding="utf-8")
+        return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
+                               "--build-dir", str(repo.root / "build"), "--inventory-json", str(inv), *args],
+                              capture_output=True, text=True, timeout=60, env=tool_env(event=None, strict=False))
+
+    def test_another_platform_skips_by_name_and_never_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.cache(repo, CMAKE_SYSTEM_NAME="Darwin")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            # A Linux configure registers tests the macOS-written list cannot have.
+            self.cache(repo, CMAKE_SYSTEM_NAME="Linux")
+            write(repo.root, "tools/scripts/newmod.py", "")
+            write(repo.root, "tools/scripts/test_alpha.py", "import alpha_lib\nimport newmod\n")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, sti.SKIP_EXIT, proc.stdout + proc.stderr)
+            self.assertIn("SKIPPED: CMAKE_SYSTEM_NAME=Linux", proc.stdout)
+            self.assertIn("this is a skip, not a pass", proc.stdout)
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("refusing to write: CMAKE_SYSTEM_NAME=Linux", proc.stderr)
+            # Control: the same drift on the gate's platform still fails.
+            self.cache(repo, CMAKE_SYSTEM_NAME="Darwin")
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 1)
 
 
 class ScanScopeTests(unittest.TestCase):

@@ -71,8 +71,15 @@ import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs"
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
 import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mjs";
 import {
+  normalizeMaterializedBindingDocument,
+} from "../jsx-runtime/materialized_binding_contract.mjs";
+import {
   materializedCoordinateSpaceFromQuad,
 } from "./materialized_coordinate_space.mjs";
+import {
+  annotateCapturedVendorReferences,
+  classifyTrustedCapturedVendorPayload,
+} from "./vendor_payload.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -411,7 +418,15 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
         `browser capture found duplicate canvas backend node ${backendNodeId}`);
     }
     seenBackendNodeIds.add(backendNodeId);
-    canvases.push(backendNodeId);
+    let pulpId = '';
+    const attributes = nodes.attributes?.[index] ?? [];
+    for (let attr = 0; attr + 1 < attributes.length; attr += 2) {
+      const name = String(strings[attributes[attr]] ?? '').toLowerCase();
+      if (name !== 'data-pulp-id') continue;
+      pulpId = String(strings[attributes[attr + 1]] ?? '');
+      break;
+    }
+    canvases.push({ backendNodeId, pulpId });
   }
   if (canvases.length > MAX_CAPTURED_CANVASES) {
     throw new Error(
@@ -421,7 +436,7 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
 
   const assets = [];
   let totalPixels = 0;
-  for (const backendNodeId of canvases) {
+  for (const { backendNodeId, pulpId } of canvases) {
     const resolved = await cdp.call("DOM.resolveNode", { backendNodeId });
     const objectId = resolved.object?.objectId;
     if (!objectId) {
@@ -527,6 +542,7 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
         width_px: dimensions.width,
         height_px: dimensions.height,
         backend_node_id: backendNodeId,
+        ...(pulpId ? { pulp_id: pulpId } : {}),
         bounds: {
           left: Number(measured.result?.value?.bounds?.left ?? 0),
           top: Number(measured.result?.value?.bounds?.top ?? 0),
@@ -740,6 +756,31 @@ async function configurePage(cdp, width, height, dpr) {
   }
 }
 
+function capturedAttribute(openTag, wanted) {
+  let i = openTag.toLowerCase().indexOf('script') + 6;
+  while (i < openTag.length) {
+    while (/\s/.test(openTag[i])) ++i;
+    if (i >= openTag.length || openTag[i] === '>' || openTag[i] === '/') break;
+    const start = i;
+    while (i < openTag.length && !/[\s=/>]/.test(openTag[i])) ++i;
+    const name = openTag.slice(start, i).toLowerCase();
+    while (/\s/.test(openTag[i])) ++i;
+    let value = '';
+    if (openTag[i] === '=') {
+      ++i;
+      while (/\s/.test(openTag[i])) ++i;
+      const quote = openTag[i] === '"' || openTag[i] === "'" ? openTag[i++] : '';
+      const valueStart = i;
+      if (quote) while (i < openTag.length && openTag[i] !== quote) ++i;
+      else while (i < openTag.length && !/[\s>]/.test(openTag[i])) ++i;
+      value = openTag.slice(valueStart, i);
+      if (quote && openTag[i] === quote) ++i;
+    }
+    if (name === wanted) return value;
+  }
+  return undefined;
+}
+
 async function captureMaterializedDocument(cdp) {
   const metadata = await cdp.call("Runtime.evaluate", {
     expression: `(async () => {
@@ -770,8 +811,8 @@ async function captureMaterializedDocument(cdp) {
         });
       }
       return {
-        schema: 'pulp-materialized-browser-document-v1',
-        version: 1,
+        schema: 'pulp-materialized-browser-document-v2',
+        version: 2,
         html: document.html,
         mime_type: document.mime_type,
         assets
@@ -841,6 +882,59 @@ async function captureMaterializedDocument(cdp) {
       throw new Error(`materialized blob ${index} length changed during capture`);
     }
     materialized.assets[index].sha256 = sha256(bytes);
+    // Record vendor classification as capture metadata. The canonicalizer
+    // consumes this explicit role; it never guesses from arbitrary authored
+    // asset text. A vendor must be an empty script reference in the captured
+    // executable document and match the complete, known signature.
+    const asset = materialized.assets[index];
+    const scriptRefs = [];
+    const lowerHtml = materialized.html.toLowerCase();
+    let cursor = 0;
+    while (cursor < materialized.html.length) {
+      const start = lowerHtml.indexOf("<script", cursor);
+      if (start < 0) break;
+      const boundary = lowerHtml[start + 7];
+      if (boundary && !/[\s/>]/.test(boundary)) {
+        cursor = start + 7;
+        continue;
+      }
+      let openEnd = start + 7;
+      let quote = "";
+      for (; openEnd < materialized.html.length; ++openEnd) {
+        const ch = materialized.html[openEnd];
+        if (quote) { if (ch === quote) quote = ""; }
+        else if (ch === "\"" || ch === "'") quote = ch;
+        else if (ch === ">") break;
+      }
+      if (openEnd >= materialized.html.length) break;
+      const openTag = materialized.html.slice(start, openEnd + 1);
+      const close = lowerHtml.indexOf("</script", openEnd + 1);
+      const src = capturedAttribute(openTag, 'src');
+      if (src !== undefined && close >= 0) {
+        if (src === asset.url) {
+          scriptRefs.push({
+            empty: materialized.html.slice(openEnd + 1, close).trim() === "",
+            vendor: capturedAttribute(openTag, 'data-pulp-vendor') || '',
+          });
+        }
+      }
+      cursor = close >= 0 ? close + 8 : openEnd + 1;
+    }
+    const emptyScript = scriptRefs.length > 0 && scriptRefs.every((ref) => ref.empty);
+    const javascriptMime = /^(?:text|application)\/javascript(?:\s*;|$)/i.test(asset.mime_type);
+    const trustedVendor = javascriptMime
+      ? classifyTrustedCapturedVendorPayload(
+        Buffer.from(dataBase64, "base64").toString("utf8"))
+      : "";
+    if (emptyScript && trustedVendor &&
+        scriptRefs.every((ref) => !ref.vendor || ref.vendor === trustedVendor)) {
+      // Normal browser loaders omit capture metadata.  Once the exact
+      // allowlisted bytes are known, emit the marker ourselves so the
+      // canonicalizer can remove only this capture-owned vendor asset.
+      materialized.html = annotateCapturedVendorReferences(
+        materialized.html, asset.url, trustedVendor);
+      asset.vendor_kind = trustedVendor;
+    }
   }
 
   // Blob URLs are realm-scoped and typically contain a fresh UUID on every
@@ -848,6 +942,7 @@ async function captureMaterializedDocument(cdp) {
   // the executable document to content-addressed asset IDs so identical source
   // material produces byte-identical sidecars across captures.
   const stableAssets = new Map();
+  const ambiguousAssetIds = new Set();
   for (const asset of materialized.assets) {
     const id = `pulp-materialized-asset-${asset.sha256}`;
     materialized.html = materialized.html.split(asset.url).join(id);
@@ -861,7 +956,19 @@ async function captureMaterializedDocument(cdp) {
         byte_length: asset.byte_length,
         data_base64: asset.data_base64,
         sha256: asset.sha256,
+        ...(asset.vendor_kind ? { vendor_kind: asset.vendor_kind } : {}),
       });
+    } else {
+      const existing = stableAssets.get(id);
+      if (existing.vendor_kind && asset.vendor_kind &&
+          existing.vendor_kind !== asset.vendor_kind) {
+        // Conflicting provenance for identical bytes is ambiguous. Preserve
+        // the asset and require a later explicit capture to classify it.
+        delete existing.vendor_kind;
+        ambiguousAssetIds.add(id);
+      } else if (!ambiguousAssetIds.has(id) && !existing.vendor_kind && asset.vendor_kind) {
+        existing.vendor_kind = asset.vendor_kind;
+      }
     }
   }
   materialized.assets = [...stableAssets.values()];
@@ -1565,6 +1672,7 @@ async function runCapture(options) {
           kind: String(candidate.kind ?? "unknown"),
           tag: String(candidate.tag ?? ""),
           name: String(candidate.name ?? ""),
+          ...(candidate.pulp_id ? { pulp_id: String(candidate.pulp_id) } : {}),
           bounds: {
             left: Number(candidate.bounds?.left ?? 0),
             top: Number(candidate.bounds?.top ?? 0),
@@ -1655,6 +1763,7 @@ async function runCapture(options) {
         (asset, index) => ({
           index,
           anchor: `chromium:backend-node:${asset.backend_node_id}`,
+          ...(asset.pulp_id ? { pulp_id: asset.pulp_id } : {}),
           bounds: {
             left: asset.bounds.left - finalExtent.left,
             top: asset.bounds.top - finalExtent.top,
@@ -1662,6 +1771,13 @@ async function runCapture(options) {
             height: asset.bounds.height,
           },
         }));
+      // Emit both the replay-friendly arrays and the v2 id-addressed view.
+      // Capture is the identity authority: once a source-owned data-pulp-id is
+      // present it survives sibling insertion; otherwise the deterministic
+      // fallback is retained for v1-shaped inputs and reported by the sidecar.
+      Object.assign(materializedDocument,
+        normalizeMaterializedBindingDocument(materializedDocument,
+          { upgradeSchema: true }));
     }
     // Capture the exact authored body beneath declared moving indicators.
     // Visibility removes only the marked paint without changing its layout,

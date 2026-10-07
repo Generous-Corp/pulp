@@ -30,11 +30,19 @@ Control-broker support: Darwin archives may include the health-only
 `pulp-control-broker` service binary. Other platforms reject this member so a
 platform matrix mistake cannot silently publish an unusable service.
 
+The design-import helper also ships the shared materialized binding contract
+under `jsx-runtime/`. `browser_capture/capture.mjs` imports this sibling at
+runtime, so an importer payload is incomplete unless the contract is staged
+next to the browser-capture directory.
+
 Usage (called from .github/workflows/release-cli.yml):
     python3 tools/scripts/package_cli.py \\
         --binary build/pulp \\
         --cpp-binary build/tools/cli/pulp-cpp \\
         --mcp-binary build/tools/mcp/pulp-mcp \\
+        --import-design-binary build/tools/import-design/pulp-import-design \\
+        --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \\
+        --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs \\
         --build-dir build \\
         --platform darwin-arm64 \\
         --out pulp-darwin-arm64.tar.gz
@@ -44,6 +52,7 @@ Layout produced inside the tarball:
     pulp-cpp                    (optional, post-swap; rpath rewritten)
     pulp-mcp                    (optional, plugin-MCP server; rpath rewritten)
     pulp-control-broker         (optional, Darwin health-only service)
+    jsx-runtime/materialized_binding_contract.mjs (optional, import-design sibling contract)
     libwgpu_native.dylib        (or libwgpu_native.so / wgpu_native.dll)
 
 The smoke gate from PR #395 verifies the output runs on a runner
@@ -292,6 +301,13 @@ def main() -> int:
                    help="Optional pulp-import-design delegate binary.")
     p.add_argument("--import-design-runtime-dir", required=False, type=Path, default=None,
                    help="Browser-capture .mjs runtime directory bundled with import-design.")
+    p.add_argument("--import-design-contract", required=False, type=Path, default=None,
+                   help="Shared materialized binding contract bundled beside the browser-capture runtime.")
+    p.add_argument(
+        "--allow-missing-import-design-contract",
+        action="store_true",
+        help="Allow pre-contract historical import-design payloads to omit the sibling contract.",
+    )
     p.add_argument("--node-runtime", required=False, type=Path, default=None,
                    help="Self-contained Node runtime bundled with import-design.")
     p.add_argument("--node-license", required=False, type=Path, default=None,
@@ -341,6 +357,26 @@ def main() -> int:
     if ((args.import_design_binary is None) !=
             (args.import_design_runtime_dir is None)):
         print("FAIL: import-design binary and runtime directory must be supplied together",
+              file=sys.stderr)
+        return 2
+    if args.import_design_contract is not None and args.import_design_binary is None:
+        print("FAIL: --import-design-contract requires --import-design-binary",
+              file=sys.stderr)
+        return 2
+    if args.allow_missing_import_design_contract and args.import_design_binary is None:
+        print("FAIL: --allow-missing-import-design-contract requires --import-design-binary",
+              file=sys.stderr)
+        return 2
+    if (
+        args.import_design_binary is not None
+        and args.import_design_contract is None
+        and not args.allow_missing_import_design_contract
+    ):
+        print("FAIL: import-design binary and materialized binding contract must be supplied together",
+              file=sys.stderr)
+        return 2
+    if args.import_design_contract is not None and not args.import_design_contract.is_file():
+        print(f"FAIL: --import-design-contract not at {args.import_design_contract}",
               file=sys.stderr)
         return 2
     if (args.node_runtime is None) != (args.node_license is None):
@@ -437,6 +473,18 @@ def main() -> int:
                 args.import_design_binary, stage, import_name, is_windows)
             files.append(staged_import)
             names.append(import_name)
+            if args.import_design_contract is not None:
+                staged_import_contract = stage / "jsx-runtime" / "materialized_binding_contract.mjs"
+                staged_import_contract.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(args.import_design_contract, staged_import_contract)
+                files.append(staged_import_contract)
+                names.append("jsx-runtime/materialized_binding_contract.mjs")
+                print("bundled: "
+                      f"{args.import_design_contract} -> "
+                      "jsx-runtime/materialized_binding_contract.mjs", flush=True)
+            else:
+                print("note: packaging a pre-contract import-design payload without "
+                      "jsx-runtime/materialized_binding_contract.mjs", flush=True)
             if args.node_runtime is not None:
                 node_name = "node.exe" if is_windows else "node"
                 node_dir = stage / "browser_capture"

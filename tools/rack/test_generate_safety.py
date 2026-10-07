@@ -2202,5 +2202,28 @@ class PulpDspUseGate(SdkIsolatedTestCase):
         self.assertIn("vca", message)
 
 
+
+class GenerationLockSafety(unittest.TestCase):
+    """Two generations against one pack must not both proceed. The lock is
+    taken through file_lock, so it holds on Windows too (no fcntl there)."""
+
+    def test_a_second_claim_on_the_same_lock_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "pack.lock")
+            with open(path, "w", encoding="utf-8") as first, \
+                    open(path, "w", encoding="utf-8") as second:
+                generate.claim_generation_lock(first)
+                with self.assertRaisesRegex(SystemExit, "already running"):
+                    generate.claim_generation_lock(second)
+
+    def test_the_lock_frees_when_its_holder_closes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "pack.lock")
+            with open(path, "w", encoding="utf-8") as first:
+                generate.claim_generation_lock(first)
+            with open(path, "w", encoding="utf-8") as again:
+                generate.claim_generation_lock(again)
+
+
 if __name__ == "__main__":
     unittest.main()

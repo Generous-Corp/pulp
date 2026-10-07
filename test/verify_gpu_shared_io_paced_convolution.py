@@ -40,6 +40,7 @@ def main():
             assert receipt["terminal_record_count"] == receipt["admissions_enqueued"]
             assert receipt["admissions_attempted"] == receipt["admissions_enqueued"] + receipt["admissions_dropped"]
             assert receipt["admissions_dropped"] == 0
+            assert receipt["trace_retention_capacity"] >= receipt["trace_attempted"] > 0
             assert receipt["trace_dropped"] == 0
             assert receipt["trace_attempted"] == (receipt["trace_enqueued"] + receipt["trace_dropped"] +
                                                     receipt["trace_sampled_out"] + receipt["trace_invalid"])
@@ -69,6 +70,7 @@ def main():
         assert long_receipt["terminal_records"] > 256
         assert long_receipt["terminal_records"] == long_receipt["admissions_enqueued"]
         assert long_receipt["admissions_dropped"] == 0
+        assert long_receipt["trace_retention_capacity"] >= long_receipt["trace_attempted"] > 0
         assert long_receipt["trace_dropped"] == 0
         assert long_receipt["gpu_receipt_authenticated"] is True
     print("paced convolution probe and numerical negative control passed")

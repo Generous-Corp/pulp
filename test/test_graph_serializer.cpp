@@ -16,10 +16,14 @@
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <numeric>
+#include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -226,6 +230,114 @@ CustomNodeType make_custom_node_type(std::string type_id,
     return type;
 }
 
+struct ReplayFixture {
+    NodeId input = 0;
+    NodeId gain_a = 0;
+    NodeId gain_b = 0;
+    NodeId output = 0;
+};
+
+struct ReplayEdge {
+    unsigned source_role = 0;
+    PortIndex source_port = 0;
+    unsigned dest_role = 0;
+    PortIndex dest_port = 0;
+};
+
+constexpr std::array<ReplayEdge, 8> kReplayEdges{{
+    {0, 0, 1, 0},
+    {0, 1, 1, 1}, // input -> branch A
+    {0, 0, 2, 0},
+    {0, 1, 2, 1}, // input -> branch B
+    {1, 0, 3, 0},
+    {1, 1, 3, 1}, // branch A -> output
+    {2, 0, 3, 0},
+    {2, 1, 3, 1}, // branch B -> output
+}};
+
+void populate_replay_graph(SignalGraph& graph, ReplayFixture& fixture,
+                           const std::array<std::size_t, kReplayEdges.size()>& edge_order) {
+    // Keep authoring insertion fixed so every graph uses the same compact
+    // NodeIds. Only edge discovery order varies across replay attempts.
+    fixture.input = graph.add_input_node(2, "Input");
+    fixture.gain_a = graph.add_gain_node("Branch A");
+    fixture.gain_b = graph.add_gain_node("Branch B");
+    fixture.output = graph.add_output_node(2, "Output");
+    REQUIRE(fixture.input != 0);
+    REQUIRE(fixture.gain_a != 0);
+    REQUIRE(fixture.gain_b != 0);
+    REQUIRE(fixture.output != 0);
+
+    const std::array<NodeId, 4> ids{
+        {fixture.input, fixture.gain_a, fixture.gain_b, fixture.output}};
+    REQUIRE(graph.set_node_gain(fixture.gain_a, 0.25f));
+    REQUIRE(graph.set_node_gain(fixture.gain_b, 0.75f));
+    for (const auto edge_index : edge_order) {
+        const auto& edge = kReplayEdges[edge_index];
+        REQUIRE(graph.connect(ids[edge.source_role], edge.source_port, ids[edge.dest_role],
+                              edge.dest_port));
+    }
+}
+
+std::array<float, 16> render_replay_graph(SignalGraph& graph) {
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> input_left{{0.125f, -0.5f, 1.25f, 2.0f, -3.5f, 4.25f, 0.0f, 0.75f}};
+    std::array<float, kFrames> input_right{{-0.25f, 0.75f, 0.5f, -1.5f, 2.25f, -4.0f, 1.0f, 0.0f}};
+    std::array<float, kFrames> output_left{};
+    std::array<float, kFrames> output_right{};
+    const float* inputs[2] = {input_left.data(), input_right.data()};
+    float* outputs[2] = {output_left.data(), output_right.data()};
+    pulp::audio::BufferView<const float> input_view(inputs, 2, kFrames);
+    pulp::audio::BufferView<float> output_view(outputs, 2, kFrames);
+    graph.process(output_view, input_view, kFrames);
+
+    std::array<float, 16> rendered{};
+    std::copy(output_left.begin(), output_left.end(), rendered.begin());
+    std::copy(output_right.begin(), output_right.end(), rendered.begin() + kFrames);
+    return rendered;
+}
+
+std::uint64_t replay_plan_fingerprint(const SignalGraph& graph) {
+    // This is a test-only portable fingerprint of the inputs that define the
+    // compiled plan. It intentionally does not expose CompiledGraph internals.
+    std::uint64_t hash = 1469598103934665603ULL;
+    const auto mix = [&hash](std::uint64_t value) {
+        hash ^= value;
+        hash *= 1099511628211ULL;
+    };
+    for (const auto id : graph.processing_order())
+        mix(id);
+    auto edges = graph.connections();
+    std::sort(edges.begin(), edges.end(), [](const Connection& left, const Connection& right) {
+        return std::tie(left.source_node, left.source_port, left.dest_node, left.dest_port,
+                        left.feedback, left.midi, left.automation, left.audio_rate_modulation,
+                        left.sidechain, left.automation_param_id) <
+               std::tie(right.source_node, right.source_port, right.dest_node, right.dest_port,
+                        right.feedback, right.midi, right.automation, right.audio_rate_modulation,
+                        right.sidechain, right.automation_param_id);
+    });
+    for (const auto& edge : edges) {
+        mix(edge.source_node);
+        mix(edge.source_port);
+        mix(edge.dest_node);
+        mix(edge.dest_port);
+        mix(edge.feedback);
+        mix(edge.midi);
+        mix(edge.automation);
+        mix(edge.audio_rate_modulation);
+        mix(edge.sidechain);
+        mix(edge.automation_param_id);
+    }
+    const auto stats = graph.prepared_stats();
+    mix(stats.node_count);
+    mix(stats.ordered_node_count);
+    mix(stats.connection_count);
+    mix(stats.total_ports);
+    mix(static_cast<std::uint64_t>(stats.max_block_size));
+    mix(stats.total_prepared_buffer_bytes);
+    return hash;
+}
+
 } // namespace
 
 TEST_CASE("GraphSerializer round-trips an empty graph", "[host][serializer]") {
@@ -245,6 +357,77 @@ TEST_CASE("GraphSerializer round-trips an empty graph", "[host][serializer]") {
     REQUIRE(json.find("\"format_version\": 2") != std::string::npos);
     REQUIRE(json.find("sample_regions") == std::string::npos);
     REQUIRE(GraphSerializer::to_json(dst) == json);
+}
+
+TEST_CASE("SignalGraph D1 replay probe separates plan determinism from persistence order",
+          "[host][graph][serializer][determinism]") {
+    std::array<std::size_t, kReplayEdges.size()> edge_order{};
+    std::iota(edge_order.begin(), edge_order.end(), 0);
+    const auto canonical_edge_order = edge_order;
+
+    std::string baseline_json;
+    std::set<std::string> persisted_forms;
+    std::vector<NodeId> baseline_order;
+    std::uint64_t baseline_plan_hash = 0;
+    std::array<float, 16> baseline_render{};
+    for (int permutation = 0; permutation < 20; ++permutation) {
+        if (permutation != 0)
+            REQUIRE(std::next_permutation(edge_order.begin(), edge_order.end()));
+
+        SignalGraph graph;
+        ReplayFixture fixture;
+        populate_replay_graph(graph, fixture, edge_order);
+        const auto json = GraphSerializer::to_json(graph);
+        REQUIRE_FALSE(json.empty());
+        persisted_forms.insert(json);
+        REQUIRE(graph.prepare(48000.0, 8));
+        const auto order = graph.processing_order();
+        const auto rendered = render_replay_graph(graph);
+        const auto plan_hash = replay_plan_fingerprint(graph);
+
+        if (permutation == 0) {
+            baseline_json = json;
+            baseline_order = order;
+            baseline_plan_hash = plan_hash;
+            baseline_render = rendered;
+        } else {
+            REQUIRE(order == baseline_order);
+            REQUIRE(plan_hash == baseline_plan_hash);
+            REQUIRE(rendered == baseline_render);
+        }
+
+        // Replay the persisted bytes as a second graph instance. This catches
+        // a serializer order that looks stable in memory but remaps differently
+        // during load.
+        SignalGraph replay;
+        const auto load = GraphSerializer::from_json(replay, json);
+        INFO(load.error);
+        REQUIRE(load.ok);
+        REQUIRE(replay.prepare(48000.0, 8));
+        REQUIRE(replay.processing_order() == baseline_order);
+        REQUIRE(render_replay_graph(replay) == baseline_render);
+    }
+
+    // Ordinary graph serialization is a canonical content contract: authored
+    // insertion order remains available to editing, while equivalent edge
+    // permutations emit identical persisted bytes. Keep this assertion beside
+    // the plan and audio checks so a future serializer regression cannot hide
+    // behind a runtime-only determinism result.
+    REQUIRE(persisted_forms.size() == 1);
+
+    // Negative control: a real topology change must still change the persisted
+    // graph, plan fingerprint, and rendered bytes. A test that only checked
+    // replay equality would otherwise be able to pass while ignoring an edge.
+    SignalGraph altered;
+    ReplayFixture altered_fixture;
+    populate_replay_graph(altered, altered_fixture, canonical_edge_order);
+    REQUIRE(altered.disconnect(altered_fixture.gain_b, 1, altered_fixture.output, 1));
+    REQUIRE(altered.connect(altered_fixture.gain_b, 1, altered_fixture.output, 0));
+    const auto altered_json = GraphSerializer::to_json(altered);
+    REQUIRE(altered.prepare(48000.0, 8));
+    REQUIRE(altered_json != baseline_json);
+    REQUIRE(replay_plan_fingerprint(altered) != baseline_plan_hash);
+    REQUIRE(render_replay_graph(altered) != baseline_render);
 }
 
 TEST_CASE("GraphSerializer persists an executable sample region",

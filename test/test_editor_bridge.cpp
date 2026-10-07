@@ -15,16 +15,17 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "pulp/view/editor_bridge.hpp"
+#include "../tools/bridge/generated_editor_bridge.hpp"
 #include "pulp/view/script_engine.hpp"
 #include "pulp/view/scripted_ui.hpp"
 #include "pulp/view/web_view.hpp"
 #include "pulp/view/widgets.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <filesystem>
@@ -203,6 +204,47 @@ TEST_CASE("EditorBridge: remove_handler reverts to unknown_type",
     CHECK(bridge.handler_count() == 0);
     const auto resp = bridge.dispatch_json(R"({"type":"hello"})");
     CHECK(response_has_error(resp, "unknown message type"));
+}
+
+TEST_CASE("EditorBridge: handlers exposes a sorted ownership-safe snapshot",
+          "[editor_bridge][typed-contract]") {
+    EditorBridge bridge;
+    bridge.add_handler("set_parameter", [](const auto&) { return EditorBridge::ok_response(); });
+    bridge.add_handler("begin_gesture", [](const auto&) { return EditorBridge::ok_response(); });
+    bridge.add_handler("end_gesture", [](const auto&) { return EditorBridge::ok_response(); });
+
+    const auto names = bridge.handlers();
+    REQUIRE(names == std::vector<std::string>{"begin_gesture", "end_gesture", "set_parameter"});
+
+    // A caller-owned snapshot stays valid after the bridge mutates.
+    bridge.remove_handler("begin_gesture");
+    CHECK(names == std::vector<std::string>{"begin_gesture", "end_gesture", "set_parameter"});
+    CHECK(bridge.handlers() == std::vector<std::string>{"end_gesture", "set_parameter"});
+}
+
+TEST_CASE("EditorBridge: handlers parity control catches a missing contract handler",
+          "[editor_bridge][typed-contract][control]") {
+    std::vector<std::string> contract;
+    for (const auto name : pulp::view::editor_bridge_contract::kCommandNames)
+        contract.emplace_back(name);
+    EditorBridge bridge;
+    bridge.add_handler("begin_gesture", [](const auto&) { return EditorBridge::ok_response(); });
+    bridge.add_handler("set_parameter", [](const auto&) { return EditorBridge::ok_response(); });
+
+    // This is the planted-negative control for parity checks: a generated
+    // contract must fail closed when one declared handler is not registered.
+    CHECK(bridge.handlers() != contract);
+}
+
+TEST_CASE("EditorBridge: generated contract and registration table stay in parity",
+          "[editor_bridge][typed-contract]") {
+    std::vector<std::string> contract;
+    EditorBridge bridge;
+    for (const auto name : pulp::view::editor_bridge_contract::kCommandNames) {
+        contract.emplace_back(name);
+        bridge.add_handler(name, [](const auto&) { return EditorBridge::ok_response(); });
+    }
+    CHECK(bridge.handlers() == contract);
 }
 
 // ── Value coercion helpers ───────────────────────────────────────────────
@@ -531,12 +573,8 @@ TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement"
           "[editor_bridge][native_runtime][scripted_ui][reload]")
 {
     namespace fs = std::filesystem;
-    const auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto temp_dir = fs::temp_directory_path()
-                        / ("pulp-editor-bridge-session-" + unique);
+    const auto temp_dir = pulp::test::make_unique_temp_dir("pulp-editor-bridge-session");
     const auto script_path = temp_dir / "ui.js";
-    fs::create_directories(temp_dir);
     const auto write_script = [&](float value) {
         std::ofstream out(script_path);
         out << "var response = JSON.parse(__testEditorDispatch(JSON.stringify("

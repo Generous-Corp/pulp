@@ -75,8 +75,15 @@ if(_PULP_NODE_FOR_TESTS)
     list(REMOVE_ITEM _PULP_MATERIALIZED_RUNTIME_NODE_TESTS
          ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS})
 
+    # The aggregate runs in a private temp directory and fails if any suite
+    # leaves scratch there, which would otherwise pile up on the boot volume.
+    set(_PULP_NODE_UNIT_TMP_GUARD)
+    if(Python3_Interpreter_FOUND)
+        set(_PULP_NODE_UNIT_TMP_GUARD ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/tmp_leak_guard.py --)
+    endif()
     add_test(NAME pulp-browser-capture-node-unit
-             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+             COMMAND ${_PULP_NODE_UNIT_TMP_GUARD} ${_PULP_NODE_FOR_TESTS} --test
                      ${_PULP_BROWSER_CAPTURE_NODE_TESTS}
                      ${_PULP_MATERIALIZED_RUNTIME_NODE_TESTS})
     set_tests_properties(pulp-browser-capture-node-unit PROPERTIES
@@ -122,6 +129,17 @@ if(_PULP_NODE_FOR_TESTS)
         TIMEOUT 600
         LABELS "parser-import;browser-capture;node")
 
+    # This probe only uses Node built-ins and Pulp's checked-in canonicalizer,
+    # so keep it required even when optional parser dependencies are absent.
+    # Otherwise a malformed conformance fixture can reach CI unnoticed.
+    add_test(NAME pulp-materialized-runtime-conformance
+             COMMAND ${_PULP_NODE_FOR_TESTS}
+                     ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs
+                     --json)
+    set_tests_properties(pulp-materialized-runtime-conformance PROPERTIES
+        TIMEOUT 30
+        LABELS "parser-import;browser-capture;node;conformance")
+
     if(EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/esbuild/package.json"
        AND EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/@babel/parser/package.json")
         add_test(NAME pulp-materialized-runtime-node-dependencies
@@ -129,6 +147,7 @@ if(_PULP_NODE_FOR_TESTS)
                          ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS})
         set_tests_properties(pulp-materialized-runtime-node-dependencies PROPERTIES
             TIMEOUT 60
+            PULP_OPTIONAL TRUE
             LABELS "parser-import;browser-capture;node")
     endif()
 endif()

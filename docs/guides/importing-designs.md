@@ -131,6 +131,13 @@ pulp config set import_design.browser system   # never use the managed copy
 pulp config set import_design.browser managed  # require the managed copy
 ```
 
+Before capturing, Pulp probes the selected browser for the headless/CDP
+capabilities it needs. The probe has its own deadline, 15 s by default; set
+`PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS=<ms>` to raise it on a slow or heavily
+loaded host. When the probe fails, the error's first line says why: "timed out
+after <N> ms" means the browser was slow to answer, while any other reason
+means it lacks a capability.
+
 An import never downloads Chrome. The installer verifies a committed SHA-256
 pin, extracts the complete official archive transactionally under
 `$PULP_HOME/tools/chrome-for-testing/<version>/<platform>/`, and publishes the

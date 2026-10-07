@@ -34,6 +34,7 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     timeline.document.session
     graph.sample-region.read
     graph.sample-region.edit
+    graph.modulation-route.edit
     unavailable)
 
 set(_PULP_CONTROL_CAPABILITIES
@@ -63,6 +64,7 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.timeline/document-session@1
     dev.pulp.graph/sample-region.read@1
     dev.pulp.graph/sample-region.edit@1
+    dev.pulp.graph/modulation-route.edit@1
     dev.pulp.unavailable/operation@1)
 
 # Registry presence pre-stages schema/client compatibility but is not permission
@@ -74,7 +76,7 @@ set(_PULP_CONTROL_UNWIRED_CAPABILITIES)
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
 set(_PULP_CONTROL_REGISTRY_DIGEST_V1
-    "f402b3a0e12ecd0417669029d27353c46a7d114e47f32443cba616fe8960c99e")
+    "d98850681408945533dff4b647ddf0309f500cdbafc13f4af983ba4674410e8e")
 
 function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     # A target's declarations are configure-time truth, not sticky user
