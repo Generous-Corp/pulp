@@ -36,20 +36,28 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
                                     [&](const ValueChannelInfo& i) { return i.name == name; });
     if (clash != infos_.end()) return fail(DeclareError::duplicate_name);
 
-    // Allocate the existing control sidecar before mutating the ordered
-    // declaration vectors. This keeps a failed setup allocation transactional.
-    if (!telemetry_control_)
-        telemetry_control_ = detail::make_value_channel_telemetry_control();
-    infos_.push_back(ValueChannelInfo{std::move(name), std::move(unit), shape, neutral});
+    // Keep the sidecar and ordered declaration vectors in one transaction. The
+    // first declaration creates the sidecar before its metadata can be indexed;
+    // any allocation failure after that point must leave an empty set with no
+    // generation identity or claimable attachment.
+    const bool had_telemetry_control = telemetry_control_ != nullptr;
+    bool info_added = false;
+    bool entry_added = false;
     try {
+        if (!telemetry_control_)
+            telemetry_control_ = detail::make_value_channel_telemetry_control();
+        infos_.push_back(ValueChannelInfo{std::move(name), std::move(unit), shape, neutral});
+        info_added = true;
         entries_.push_back(std::make_unique<Entry>());
+        entry_added = true;
         detail::value_channel_telemetry_index_add(telemetry_control_.get(), infos_.back().name,
                                                   shape, infos_.size() - 1);
     } catch (...) {
-        if (entries_.size() >= infos_.size())
+        if (entry_added)
             entries_.pop_back();
-        infos_.pop_back();
-        if (infos_.empty())
+        if (info_added)
+            infos_.pop_back();
+        if (!had_telemetry_control)
             telemetry_control_.reset();
         throw;
     }
