@@ -1030,13 +1030,18 @@ platform registers was audited, and no audited executable has a finding.
 `incomplete` means the run cannot vouch for itself. The nightly passes `--fail-on-findings`, so its
 exit follows that verdict: 0 for clean, 1 for findings, 2 for incomplete. A
 red nightly therefore means the streak of clean runs is broken. The streak
-counts clean days on main, whatever triggered the run: a dispatch counts the
-same as the schedule, two runs on one day count once, a day with no run
-neither adds nor resets, and a non-clean run resets it.
+counts clean nights on main, and only the nightly window speaks for a night:
+a run counts only if it completed between 07:00 and 10:00Z, and at most one
+counts per night, normally the scheduled run. A dispatch counts in its place
+only when it completed in the window and has the head sha of a scheduled run it
+cancelled that night; a dispatch outside the window never counts (it is a
+canary precondition or a control). A night with no counted run is a gap and
+resets the streak like a finding.
 `.github/workflows/read-audit-cadence-check.yml` (`tools/ci/read_audit_cadence.py`)
 rebuilds that ledger every 30 minutes from each run's own stage0 verdict,
-writes each day's run ids and the streak to its summary and artifact, and
-opens a tracking issue naming any recent day with no run on main.
+writes each night's counted run, every run it did not count and why, and the
+streak to its summary and artifact, and opens a tracking issue naming any
+recent gap.
 A clean run's
 stage0 block also publishes `covered`, the executables it observed with no
 finding. The key manifest (`tools/ci/executable_keys.py --audit-report`) marks
