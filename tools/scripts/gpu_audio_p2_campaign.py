@@ -330,6 +330,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def logical_trial_repetitions(run_kind: str, process_repetition: int) -> tuple[int, ...]:
+    """Map one process receipt to its logical matrix repetitions."""
+
+    if run_kind == "cold":
+        return (process_repetition,)
+    if run_kind == "steady":
+        return tuple(range(1, RUNS_PER_KIND + 1))
+    raise ValueError(f"unknown run kind: {run_kind}")
+
+
 def validate_receipt(receipt: dict, slots: int, lead: int, expected_run_kind: str) -> None:
     if receipt.get("schema") != "pulp.gpu-audio-paced-convolution.v1":
         raise RuntimeError(f"{slots=} {lead=}: unexpected probe schema")
@@ -672,7 +682,13 @@ def run(args: argparse.Namespace) -> int:
                         (trial_dir / "command.json").write_text(json.dumps({"argv": command, "returncode": proc.returncode}, indent=2) + "\n", encoding="utf-8")
                         (trial_dir / "probe.stdout").write_text(proc.stdout, encoding="utf-8")
                         (trial_dir / "probe.stderr").write_text(proc.stderr, encoding="utf-8")
-                        for logical_repetition in logical_repetitions:
+                        # Each cold process is one logical repetition. A
+                        # steady process contains all five logical repetitions
+                        # in one resident session. Expanding cold receipts
+                        # five times makes a complete 96-process matrix look
+                        # like 480 logical trials and fails at finalization.
+                        trial_repetitions = logical_trial_repetitions(run_kind, repetition)
+                        for logical_repetition in trial_repetitions:
                             trials.append({"slots": slots, "lead": lead, "run_kind": run_kind,
                                            "repetition": logical_repetition, "receipt_sha256": sha256(receipt_path),
                                            "raw_jsonl_sha256": sha256(raw_path),
