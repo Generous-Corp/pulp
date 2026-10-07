@@ -1145,8 +1145,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_v2_evidence.py",
           "state": "pulp-owned-retained",
-          "revision": "6886b385d57735a9c4534091d7886db730cca11a",
-          "object_id": "98152d615b511bcfbbd2581232207f07f81a144d",
+          "revision": "b4bdafe350c0a312dd9c42f0ec5ce770a9613c81",
+          "object_id": "39fe4eacc9f6a22cb02b947ab12b6268b577ae3b",
           "object_type": "blob"
         },
         {
