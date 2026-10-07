@@ -1445,7 +1445,6 @@ TEST_CASE("P4 trace JSONL parses as a schema with authenticated per-row provenan
             while (std::getline(lines, line)) {
                 if (line.empty())
                     return false;
-                INFO("receipt line: " << line);
                 const auto object = choc::json::parse(line);
                 if (!object.isObject() ||
                     object["schema"].getString() != "pulp.gpu-audio.p4.trace.v1" ||
@@ -1473,11 +1472,6 @@ TEST_CASE("P4 trace JSONL parses as a schema with authenticated per-row provenan
                     if (!timings.isObject() || !timings["gpu_elapsed"].isObject())
                         return false;
                     const auto expected = row == 1 ? "unavailable" : "available";
-                    INFO("row=" << row << " kind=" << object["record_kind"].getString()
-                                << " ordinal=" << object["block_ordinal"].getInt64()
-                                << " digest=" << object["identity_digest"].getString()
-                                << " gpu=" << timings["gpu_elapsed"]["availability"].getString()
-                                << " expected=" << expected);
                     if (timings["gpu_elapsed"]["availability"].getString() != expected)
                         return false;
                     if (row == 2 && timings["gpu_elapsed"]["value_ns"].getInt64() != 42)
