@@ -20,12 +20,14 @@
 #include "pulp/view/scripted_ui.hpp"
 #include "pulp/view/web_view.hpp"
 #include "pulp/view/widgets.hpp"
+#include "pulp/state/store.hpp"
 #include "support/unique_temp_dir.hpp"
 
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
 
 #include <atomic>
+#include <cstdlib>
 #include <cstdint>
 #include <functional>
 #include <filesystem>
@@ -55,6 +57,18 @@ bool response_has_error(const std::string& r, std::string_view substr) {
     const bool not_ok = r.find(R"("ok": false)") != std::string::npos
                      || r.find(R"("ok":false)")  != std::string::npos;
     return not_ok && r.find(substr) != std::string::npos;
+}
+
+std::string shell_quote(const std::filesystem::path& path) {
+    std::string quoted{"'"};
+    for (const char c : path.string()) {
+        if (c == '\'')
+            quoted += "'\\''";
+        else
+            quoted += c;
+    }
+    quoted += '\'';
+    return quoted;
 }
 
 } // namespace
@@ -245,6 +259,136 @@ TEST_CASE("EditorBridge: generated contract and registration table stay in parit
         bridge.add_handler(name, [](const auto&) { return EditorBridge::ok_response(); });
     }
     CHECK(bridge.handlers() == contract);
+}
+
+TEST_CASE("generated set_parameter dispatch updates a real StateStore",
+          "[editor_bridge][typed-contract][state]") {
+    pulp::state::StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
+
+    EditorBridge bridge;
+    pulp::view::editor_bridge_contract::register_set_parameter(
+        bridge, [&store](const pulp::view::editor_bridge_contract::SetParameterRequest& request) {
+            if (request.key != "gain")
+                return false;
+            store.set_value(1, static_cast<float>(request.value));
+            return true;
+        });
+
+    const auto response =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":-6.25}})");
+    CHECK(response_ok(response));
+    const auto response_value = choc::json::parse(response);
+    REQUIRE(response_value["accepted"].getBool());
+    CHECK(store.get_value(1) == Approx(-6.25f));
+}
+
+TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
+          "[editor_bridge][typed-contract][typescript]") {
+    // Node's built-in TypeScript stripping keeps this proof on the checked-in
+    // generated client. The dedicated typed-client proof is fail-closed when
+    // the required Node feature is unavailable.
+    REQUIRE(std::system("node --experimental-strip-types -e 'process.exit(0)' >/dev/null 2>&1") ==
+            0);
+
+    const auto temp_dir = pulp::test::make_unique_temp_dir("pulp-editor-bridge-ts");
+    const auto script = temp_dir / "invoke_generated_bridge.mjs";
+    const auto request_path = temp_dir / "request.json";
+    {
+        std::ofstream output(script, std::ios::binary);
+        output << "import { pathToFileURL } from 'node:url';\n"
+                  "import { existsSync, writeFileSync } from 'node:fs';\n"
+                  "import { dirname, join } from 'node:path';\n"
+                  "let root = process.cwd();\n"
+                  "while (!existsSync(join(root, 'tools', 'bridge', 'generated_editor_bridge.ts')) "
+                  "&& dirname(root) !== root) root = dirname(root);\n"
+                  "const bridge = await import(pathToFileURL(join(root, 'tools', 'bridge', "
+                  "'generated_editor_bridge.ts')).href);\n"
+                  "bridge.setParameter(request => {\n"
+                  "  writeFileSync(process.argv[2], JSON.stringify(request));\n"
+                  "  return { ok: true, accepted: true };\n"
+                  "}, 'gain', -6.25);\n";
+    }
+
+    const auto command =
+        "node --experimental-strip-types " + shell_quote(script) + " " + shell_quote(request_path);
+    REQUIRE(std::system(command.c_str()) == 0);
+    REQUIRE(std::filesystem::exists(request_path));
+
+    pulp::state::StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
+    EditorBridge bridge;
+    pulp::view::editor_bridge_contract::register_set_parameter(
+        bridge, [&store](const pulp::view::editor_bridge_contract::SetParameterRequest& request) {
+            if (request.key != "gain")
+                return false;
+            store.set_value(1, static_cast<float>(request.value));
+            return true;
+        });
+
+    // Read the exact envelope emitted by the generated TS transport before
+    // crossing the C++ bridge.
+    const auto envelope = [&request_path] {
+        std::ifstream input(request_path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(input), {});
+    }();
+    const auto dispatched = bridge.dispatch_json(envelope);
+    CHECK(response_ok(dispatched));
+    CHECK(store.get_value(1) == Approx(-6.25f));
+}
+
+TEST_CASE("generated set_parameter rejects invalid payloads without mutating state",
+          "[editor_bridge][typed-contract][negative]") {
+    pulp::state::StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
+    store.set_value(1, -3.0f);
+
+    EditorBridge bridge;
+    pulp::view::editor_bridge_contract::register_set_parameter(
+        bridge, [&store](const pulp::view::editor_bridge_contract::SetParameterRequest& request) {
+            if (request.key != "gain")
+                return false;
+            store.set_value(1, static_cast<float>(request.value));
+            return true;
+        });
+
+    const auto missing_key =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"value":4.0}})");
+    CHECK(response_has_error(missing_key, "missing 'key'"));
+    CHECK(store.get_value(1) == Approx(-3.0f));
+
+    const auto unknown_key =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"unknown","value":4.0}})");
+    CHECK(response_ok(unknown_key));
+    CHECK_FALSE(choc::json::parse(unknown_key)["accepted"].getBool());
+    CHECK(store.get_value(1) == Approx(-3.0f));
+
+    const auto empty_key =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"","value":4.0}})");
+    CHECK(response_has_error(empty_key, "must not be empty"));
+    CHECK(store.get_value(1) == Approx(-3.0f));
+
+    auto non_number_payload = choc::value::createObject("");
+    non_number_payload.addMember("key", "gain");
+    non_number_payload.addMember("value", "not-a-number");
+    const auto non_number = bridge.dispatch("set_parameter", non_number_payload);
+    CHECK(response_has_error(non_number, "must be a number"));
+    CHECK(store.get_value(1) == Approx(-3.0f));
+
+    auto non_finite_payload = choc::value::createObject("");
+    non_finite_payload.addMember("key", "gain");
+    non_finite_payload.addMember("value", std::numeric_limits<double>::infinity());
+    const auto non_finite = bridge.dispatch("set_parameter", non_finite_payload);
+    CHECK(response_has_error(non_finite, "must be finite"));
+    CHECK(store.get_value(1) == Approx(-3.0f));
+}
+
+TEST_CASE("generated set_parameter remains fail-closed when registration is missing",
+          "[editor_bridge][typed-contract][negative]") {
+    EditorBridge bridge;
+    const auto response =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":2.0}})");
+    CHECK(response_has_error(response, "unknown message type"));
 }
 
 // ── Value coercion helpers ───────────────────────────────────────────────
