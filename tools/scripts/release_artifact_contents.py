@@ -63,6 +63,8 @@ PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS = frozenset(
 MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER = (
     "jsx-runtime/materialized_binding_contract.mjs"
 )
+MATERIALIZED_SOURCE_EMITTER_CLI_MEMBER = "jsx-runtime/materialized_source_emitter.mjs"
+MATERIALIZED_IDS_MAP_CLI_MEMBER = "jsx-runtime/materialized_ids_map.mjs"
 CONTROL_BROKER_CLI_MEMBER = "pulp-control-broker"
 CONTROL_BROKER_SDK_MEMBER = "pulp-sdk/libexec/pulp/pulp-control-broker"
 CONTROL_STANDALONE_HOST_CLI_MEMBER = "pulp-control-standalone-host"
@@ -571,6 +573,14 @@ def cli_runtime_source_path(member: str, source_root: Path) -> Path | None:
             source_root / "tools" / "import-design" / "jsx-runtime"
             / "materialized_binding_contract.mjs"
         )
+    if member in {
+        MATERIALIZED_SOURCE_EMITTER_CLI_MEMBER,
+        MATERIALIZED_IDS_MAP_CLI_MEMBER,
+    }:
+        return (
+            source_root / "tools" / "import-design" / "jsx-runtime"
+            / member.removeprefix("jsx-runtime/")
+        )
     return None
 
 
@@ -643,8 +653,10 @@ def sdk_import_design_runtime_members(
             "pulp-sdk/bin/browser_capture-v1/node.LICENSE",
         })
     if materialized_binding_contract_required(matrix, version):
-        members.add(
-            "pulp-sdk/bin/" + MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER
+        members.update(
+            "pulp-sdk/bin/" + member
+            for member in resources
+            if member.startswith("jsx-runtime/")
         )
     return frozenset(members)
 
