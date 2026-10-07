@@ -794,9 +794,14 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             rac.DEFAULT_MATRIX.cli_binary_stems,
             {"pulp", "pulp-cpp", "pulp-import-design", "pulp-mcp"},
         )
+        materialized_members = {
+            rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER,
+            rac.MATERIALIZED_SOURCE_EMITTER_CLI_MEMBER,
+            rac.MATERIALIZED_IDS_MAP_CLI_MEMBER,
+        }
         self.assertEqual(
             rac.DEFAULT_MATRIX.common_cli_members,
-            runtime_members | {rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER},
+            runtime_members | materialized_members,
             "browser-capture runtime manifest and materialized contract matrix drifted",
         )
         self.assertEqual(
@@ -808,9 +813,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 + member.removeprefix("browser_capture/")
                 for member in runtime_members
             }
-            | {
-                "pulp-sdk/bin/" + rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER
-            }
+            | {"pulp-sdk/bin/" + member for member in materialized_members}
             | {
                 "pulp-sdk/bin/browser_capture-v1/node",
                 "pulp-sdk/bin/browser_capture-v1/node.LICENSE",
