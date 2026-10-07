@@ -59,6 +59,7 @@ target_sources(pulp-host PRIVATE
     src/sample_region_proof.cpp
     src/sample_region_parameters.cpp
     src/sample_region_runtime.cpp
+    src/bounded_delay_descriptor.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)

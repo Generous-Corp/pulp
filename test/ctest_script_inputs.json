@@ -84,6 +84,7 @@
     "tools/cli/cmd_seq.cpp",
     "tools/cli/cmd_ship.cpp",
     "tools/cli/cmd_tweaks.cpp",
+    "tools/cli/cmd_ui.cpp",
     "tools/cli/cmd_upgrade.cpp",
     "tools/cli/cmd_validate.cpp",
     "tools/cli/cmd_version.cpp",
@@ -932,7 +933,8 @@
     "test/test_cli_tartci_lease.cpp"
    ],
    "inputs": [
-    "tools/ci/build_dir_lock.py"
+    "tools/ci/build_dir_lock.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "compiled",
    "sources": [
@@ -2264,8 +2266,18 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
+  "pulp-gpu-audio-coreaudio-workgroup-benchmark",
+  "pulp-gpu-audio-p4-matched-convolution-benchmark",
+  "pulp-gpu-audio-p4-raw-screening",
+  "pulp-gpu-dawn-shared-io-provider-probe",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
+  "pulp-gpu-same-device-paired-probe",
+  "pulp-gpu-same-device-storage-probe",
+  "pulp-gpu-shared-io-convolution-session-probe",
+  "pulp-gpu-shared-io-paced-convolution-probe",
+  "pulp-gpu-shared-io-private-convolution-probe",
+  "pulp-gpu-shared-spectral-probe",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -2639,6 +2651,7 @@
   "pulp-test-midi-arpeggiator",
   "pulp-test-midi-parameter-map-scaling",
   "pulp-test-midi-performance-kernels",
+  "pulp-test-midi-routing-ledger",
   "pulp-test-midi-step-player",
   "pulp-test-midi-utility-note-length",
   "pulp-test-midi-voice-modulation-adapter",
@@ -2697,6 +2710,7 @@
   "pulp-test-popover-row-template-1147",
   "pulp-test-processor-node-adapter",
   "pulp-test-project-package",
+  "pulp-test-public-type-sizes",
   "pulp-test-pulp-node-v1",
   "pulp-test-real-plugin-runner-cache",
   "pulp-test-recurrent-cpu-adapter",
@@ -3318,6 +3332,63 @@
    "entry": "tools/scripts/test_ccache_pch_isolation.py",
    "inputs": [
     "tools/scripts/test_ccache_pch_isolation.py"
+   ],
+   "kind": "python"
+  },
+  "changed-surface-policy-inventory": {
+   "entry": "tools/scripts/test_changed_surface_policy.py",
+   "inputs": [
+    "core/host",
+    "core/host/include",
+    "core/platform/include/pulp/platform/child_process.hpp",
+    "core/signal/include/pulp/signal/signal.hpp",
+    "docs/status",
+    "docs/status/dsp-capabilities.json",
+    "docs/status/forge-catalog.json",
+    "docs/status/sequencer-exposure.json",
+    "test/CMakeLists.txt",
+    "test/cmake/native_component_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/ctest_script_inputs.json",
+    "test/fixtures",
+    "test/fixtures/child_process_input_fixture.cpp",
+    "test/support",
+    "test/test_child_process.cpp",
+    "test/test_child_process_standard_input.cpp",
+    "test/test_runtime_utils.cpp",
+    "tools/ci",
+    "tools/ci/build_dir_lock.py",
+    "tools/ci/changed_surface_lane_reds.json",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/executable_keys.py",
+    "tools/ci/executable_selection.py",
+    "tools/ci/key_blind_executables.json",
+    "tools/ci/lane_reuse_record.py",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
+    "tools/cli/cmd_forge.cpp",
+    "tools/cli/cmd_misc.cpp",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/cmake/toolchains/macos-arm64-osxcross.cmake",
+    "tools/import-design/browser_capture/security.mjs",
+    "tools/rack/generate.py",
+    "tools/rack/patch.py",
+    "tools/rack/provenance_check.py",
+    "tools/rack/test_acid_preflight.py",
+    "tools/rack/test_generate_safety.py",
+    "tools/scripts",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/generate_widget_bridge_api.py",
+    "tools/scripts/process_liveness.py",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/test_changed_surface_policy.py",
+    "tools/scripts/test_runner_topology_check.py",
+    "tools/scripts/version_bump_check.py"
    ],
    "kind": "python"
   },
@@ -4644,6 +4715,14 @@
    ],
    "kind": "shell"
   },
+  "gpu-audio-p2-campaign-contract-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_campaign.py",
+    "tools/scripts/test_gpu_audio_p2_campaign.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-p4-evidence-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p4_evidence.py",
    "inputs": [
@@ -4742,6 +4821,7 @@
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/test_gpu_dpr_calibration_failure_proof.py",
     "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
@@ -4792,6 +4872,7 @@
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/test_gpu_dpr_experiment.py",
     "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
@@ -4964,6 +5045,7 @@
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
     "tools/scripts/json_schema_lite.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/test_gpu_dpr_v2_evidence.py",
     "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
@@ -5011,6 +5093,7 @@
     "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/script_argv.py",
     "tools/scripts/test_gpu_dpr_web_adapter.py",
     "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
@@ -5741,6 +5824,15 @@
    ],
    "kind": "python"
   },
+  "graphql-filtered-count-guard": {
+   "entry": "tools/scripts/test_graphql_filtered_count_guard.py",
+   "inputs": [
+    "tools/scripts/graphql_filtered_count_guard.py",
+    "tools/scripts/test_graphql_filtered_count_guard.py",
+    "tools/scripts/version_at_land.py"
+   ],
+   "kind": "python"
+  },
   "harness-adapters-base-selftest": {
    "entry": "tools/harness/tests/test_adapters_base.py",
    "inputs": [
@@ -5913,6 +6005,14 @@
    "inputs": [
     "tools/import-design/realtime_contract.py",
     "tools/import-design/test_realtime_contract.py"
+   ],
+   "kind": "python"
+  },
+  "import-validation-browser-fidelity-receipt-selftest": {
+   "entry": "tools/import-validation/test_verify_browser_fidelity_receipt.py",
+   "inputs": [
+    "tools/import-validation/test_verify_browser_fidelity_receipt.py",
+    "tools/import-validation/verify_browser_fidelity_receipt.py"
    ],
    "kind": "python"
   },
@@ -6234,6 +6334,14 @@
     "tools/cmake/PulpUtils.cmake",
     "tools/scripts/mac_objc_source_list_guard.py",
     "tools/scripts/test_mac_objc_source_list_guard.py"
+   ],
+   "kind": "python"
+  },
+  "macos-merge-group-bootstrap-selftest": {
+   "entry": "tools/ci/test_macos_merge_group_bootstrap.py",
+   "inputs": [
+    "tools/ci/macos_merge_group_bootstrap.sh",
+    "tools/ci/test_macos_merge_group_bootstrap.py"
    ],
    "kind": "python"
   },
@@ -6591,10 +6699,12 @@
     "tools/import-design/browser_capture/settle.test.mjs",
     "tools/import-design/browser_capture/text_diagnostics.test.mjs",
     "tools/import-design/browser_capture/tokens.test.mjs",
+    "tools/import-design/browser_capture/vendor_payload.test.mjs",
     "tools/import-design/jsx-runtime/materialized_css_variables.test.mjs",
     "tools/import-design/jsx-runtime/materialized_dynamic_layout.test.mjs",
     "tools/import-design/jsx-runtime/materialized_font_bindings.test.mjs",
     "tools/import-design/jsx-runtime/materialized_frame_contract.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_ids_map.test.mjs",
     "tools/import-design/jsx-runtime/materialized_layer_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_metadata_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
@@ -6622,6 +6732,54 @@
    ],
    "kind": "shell"
   },
+  "pulp-editor-bridge-contract-check": {
+   "entry": "tools/bridge/bridge_contract_check.py",
+   "inputs": [
+    "docs/reference/generated-editor-bridge-contract.md",
+    "tools/bridge/bridge.toml",
+    "tools/bridge/bridge_contract_check.py",
+    "tools/bridge/bridge_contract_safety.py",
+    "tools/bridge/bridge_gen.py",
+    "tools/bridge/generated_editor_bridge.hpp",
+    "tools/bridge/generated_editor_bridge.ts"
+   ],
+   "kind": "python"
+  },
+  "pulp-editor-bridge-contract-gate-selftest": {
+   "entry": "tools/bridge/bridge_contract_gate_checks.py",
+   "inputs": [
+    "tools/bridge/bridge.toml",
+    "tools/bridge/bridge_contract_check.py",
+    "tools/bridge/bridge_contract_gate_checks.py",
+    "tools/bridge/bridge_contract_safety.py",
+    "tools/bridge/bridge_gen.py",
+    "tools/bridge/generated_editor_bridge.hpp",
+    "tools/bridge/generated_editor_bridge.ts",
+    "tools/scripts/script_test_inputs.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-editor-bridge-contract-safety-selftest": {
+   "entry": "tools/bridge/bridge_contract_safety_checks.py",
+   "inputs": [
+    "tools/bridge/bridge.toml",
+    "tools/bridge/bridge_contract_safety.py",
+    "tools/bridge/bridge_contract_safety_checks.py",
+    "tools/bridge/bridge_gen.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-editor-bridge-generator-selftest": {
+   "entry": "tools/bridge/bridge_gen_checks.py",
+   "inputs": [
+    "tools/bridge/bridge.toml",
+    "tools/bridge/bridge_gen.py",
+    "tools/bridge/bridge_gen_checks.py",
+    "tools/bridge/generated_editor_bridge.hpp",
+    "tools/bridge/generated_editor_bridge.ts"
+   ],
+   "kind": "python"
+  },
   "pulp-fig-decode-unit": {
    "entry": "tools/import-design/fig/fig.test.mjs",
    "inputs": [
@@ -6637,12 +6795,77 @@
    ],
    "kind": "node"
   },
+  "pulp-gpu-audio-provider-identity": {
+   "entry": "tools/scripts/gpu_audio_provider_identity.py",
+   "inputs": [
+    "external/skia-build",
+    "tools/deps/manifest.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/gpu_audio_provider_identity.py",
+    "tools/scripts/process_liveness.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-gpu-dawn-shared-io-provider-identity": {
+   "entry": "tools/scripts/gpu_audio_provider_identity.py",
+   "inputs": [
+    "external/skia-build",
+    "tools/deps/manifest.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/gpu_audio_provider_identity.py",
+    "tools/scripts/process_liveness.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-gpu-dawn-shared-io-provider-lifecycle": {
+   "entry": "test/verify_gpu_dawn_shared_io_provider.py",
+   "inputs": [
+    "test/verify_gpu_dawn_shared_io_provider.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-gpu-dawn-vellum-d15-source": {
+   "entry": "test/test_gpu_dawn_vellum_d15_source.py",
+   "inputs": [
+    "core/gpu_audio/CMakeLists.txt",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
+    "test/cmake/render_gpu_surface_tests.cmake",
+    "test/test_gpu_dawn_vellum_d15_source.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-gpu-shared-io-paced-convolution-probe": {
+   "entry": "test/verify_gpu_shared_io_paced_convolution.py",
+   "inputs": [
+    "test/verify_gpu_shared_io_paced_convolution.py"
+   ],
+   "kind": "python"
+  },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
     "test/test_pulp_installer_mcp_contract.sh"
    ],
    "kind": "shell"
+  },
+  "pulp-materialized-runtime-conformance": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-materialized-runtime-node-dependencies": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
+   ],
+   "kind": "node"
   },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
@@ -6701,6 +6924,30 @@
     "test/test_ctest_timeout_kills_wedged.sh"
    ],
    "kind": "shell"
+  },
+  "pulp-ui-build-contracts": {
+   "entry": "tools/ui-build/test_ui_build.py",
+   "inputs": [
+    "tools/ui-build/test_ui_build.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-ui-clean-output-lint": {
+   "entry": "tools/ui-build/lint/clean_output_lint.py",
+   "inputs": [
+    "tools/ui-build/lint/clean_output_lint.py",
+    "tools/ui-build/lint/fixtures/clean"
+   ],
+   "kind": "python"
+  },
+  "pulp-ui-clean-output-lint-negative-contract": {
+   "entry": "tools/ui-build/lint/test_clean_output_lint.py",
+   "inputs": [
+    "tools/scripts/gates.sh",
+    "tools/ui-build/lint/clean_output_lint.py",
+    "tools/ui-build/lint/test_clean_output_lint.py"
+   ],
+   "kind": "python"
   },
   "pulp-uninstaller-contract": {
    "entry": "tools/scripts/test_pulp_uninstall.py",
@@ -7187,6 +7434,7 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
     "tools/rack/idiom_check.py",
@@ -7286,6 +7534,7 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
     "tools/rack/idiom_check.py",
@@ -7718,6 +7967,7 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
     "tools/rack/idiom_check.py",
@@ -7815,6 +8065,7 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
     "tools/rack/idiom_check.py",
@@ -9049,6 +9300,28 @@
     "tools/scripts/test_unregistered_tests_check.py",
     "tools/scripts/unregistered_tests_baseline.json",
     "tools/scripts/unregistered_tests_check.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-boundary-lint": {
+   "entry": "tools/scripts/vellum_boundary_lint.py",
+   "inputs": [
+    "core/view",
+    "core/view/src",
+    "tools/import-design/pulp-package.json",
+    "tools/scripts/vellum_boundary_lint.py",
+    "tools/ui-build/pulp-package.json"
+   ],
+   "kind": "python"
+  },
+  "vellum-boundary-lint-negative-contract": {
+   "entry": "tools/scripts/test_vellum_boundary_lint.py",
+   "inputs": [
+    "tools/import-design",
+    "tools/import-design/pulp-package.json",
+    "tools/scripts/test_vellum_boundary_lint.py",
+    "tools/ui-build",
+    "tools/ui-build/pulp-package.json"
    ],
    "kind": "python"
   },

@@ -25,9 +25,14 @@ def _interpreter(shebang: bytes) -> str:
     words = shebang[2:].strip().split()
     if not words:
         return ""
-    name = words[0].rsplit(b"/", 1)[-1]
+    def basename(word: bytes) -> bytes:
+        # A Windows interpreter path uses backslashes and ends in .exe.
+        name = word.replace(b"\\", b"/").rsplit(b"/", 1)[-1].lower()
+        return name[:-4] if name.endswith(b".exe") else name
+
+    name = basename(words[0])
     if name == b"env" and len(words) > 1:
-        name = words[1].rsplit(b"/", 1)[-1]
+        name = basename(words[1])
     return name.decode("ascii", "replace")
 
 
@@ -47,10 +52,28 @@ def argv_for(executable: str | os.PathLike[str], *, platform: str | None = None)
     if interpreter.startswith("python"):
         return [sys.executable, path]
     if interpreter in ("sh", "bash", "dash", "zsh"):
-        bash = shutil.which("bash")
+        bash = _windows_bash()
         if bash:
             return [bash, path]
     return [path]
+
+
+def _windows_bash() -> str | None:
+    """Git for Windows' bash. PATH often carries only ``Git\\cmd`` (where
+    ``git.exe`` lives), so look beside it for ``Git\\bin\\bash.exe`` when
+    ``bash`` itself is not on PATH."""
+    bash = shutil.which("bash")
+    if bash:
+        return bash
+    git = shutil.which("git")
+    if not git:
+        return None
+    root = os.path.dirname(os.path.dirname(git))
+    for candidate in (os.path.join(root, "bin", "bash.exe"),
+                      os.path.join(root, "usr", "bin", "bash.exe")):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 __all__ = ["argv_for"]

@@ -121,6 +121,13 @@ echo "== a lock held by a live run is never reclaimed"
 
     check "$(run_bounded 4 prime)" "timeout" "priming waits while the owner is alive"
     check "$(grep -c 'Waiting for shared Dep source cache lock' "$OUT")" "1" "it says it is waiting"
+    check "$(grep -c "Waiting for shared Dep source cache lock (pid $holder on $(source_cache_host), held [0-9]*s" "$OUT")" "1" \
+        "the wait names the owner pid, host and age"
+    # Git for Windows' ps has no -o, so the command is named only where ps can say it.
+    if [ -n "$(ps -p "$holder" -o comm= 2>/dev/null)" ]; then
+        check "$(grep -c "held [0-9]*s, running .*sleep)" "$OUT")" "1" \
+            "the wait names the command now running under that pid"
+    fi
     check "$(grep -c 'Reclaiming' "$OUT")" "0" "it does not reclaim a live lock"
     check "$(cat "$lock/owner")" "$owner" "the live owner's lock is untouched"
     check "$([ -e "$FETCHCONTENT_CACHE_ROOT/dep-v1" ] && echo touched || echo untouched)" "untouched" \

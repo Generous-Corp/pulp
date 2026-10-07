@@ -132,6 +132,9 @@ SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
 VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
+VELLUM_BOUNDARY="$ROOT/tools/scripts/vellum_boundary_lint.py"
+CLEAN_OUTPUT_LINT="$ROOT/tools/ui-build/lint/clean_output_lint.py"
+CLEAN_OUTPUT_CORPUS="$ROOT/tools/ui-build/lint/fixtures/generated"
 CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -233,6 +236,48 @@ if [ -f "$VELLUM_HINT" ]; then
     if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
         fail=1
     fi
+fi
+
+# ── 0d. extractable UI package boundary ────────────────────────────────────
+# Keep the importer/compiler/SDK portable for the eventual Vellum extraction:
+# package source may include only public Pulp view headers, and core/view may
+# not reach back into an extractable package.  This is source-only and needs no
+# configured build, so run it in the same cheap gate as the watch preflight.
+if [ ! -f "$VELLUM_BOUNDARY" ]; then
+    echo "gates: Vellum boundary linter is missing: $VELLUM_BOUNDARY" >&2
+    fail=1
+else
+    echo "" >&2
+    echo "▸ Vellum extractable-package boundary" >&2
+    if ! "$PYTHON" "$VELLUM_BOUNDARY"; then
+        fail=1
+    fi
+fi
+
+# ── 0e. clean-output source fixture ────────────────────────────────────────
+# Exercise the reusable importer-output lint in the cheap gate against both the
+# small semantic fixture and the captured generated-output corpus. The linter
+# is fail-closed for both a missing and an empty source root, so invoke it even
+# when either checked-in root has disappeared. A conditional directory check
+# would turn that omission into a silent green gate. The companion unittest
+# plants every lint class and the missing/empty negative controls.
+if [ ! -f "$CLEAN_OUTPUT_LINT" ]; then
+    echo "gates: clean-output linter is missing: $CLEAN_OUTPUT_LINT" >&2
+    fail=1
+else
+    for clean_output_root in \
+        "$ROOT/tools/ui-build/lint/fixtures/clean" \
+        "$CLEAN_OUTPUT_CORPUS"; do
+        echo "" >&2
+        echo "▸ clean-output source root: $clean_output_root" >&2
+        clean_output_args=("$clean_output_root")
+        if [ "$clean_output_root" = "$CLEAN_OUTPUT_CORPUS" ]; then
+            clean_output_args+=(--manifest "$CLEAN_OUTPUT_CORPUS/manifest.json")
+        fi
+        if ! "$PYTHON" "$CLEAN_OUTPUT_LINT" "${clean_output_args[@]}"; then
+            fail=1
+        fi
+    done
 fi
 
 # ── 1. skill-sync ──────────────────────────────────────────────────────────

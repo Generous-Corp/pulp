@@ -4093,3 +4093,14 @@ A program ctest runs directly is declared the same way, under its own target:
 `pulp_test_data(pulp-fixture-runner NO_DEFINE PATHS test/fixtures/timeline)`.
 Its source names no checkout path (the path arrives as an argument), so no
 scan flags it; the nightly read audit is what caught the 41 corpus reads.
+
+## A step-sequencer processor is too big for more than one per test stack
+
+`TimelineStepSequencerProcessor` is about 400 KB. Two or three of them as
+locals in one Catch2 case overflow the 1 MB main-thread stack MSVC links by
+default, while the 8 MB macOS default hides it; the Windows nightly reported
+eight phase1 cases as "Stack overflow". Own each one through
+`std::make_unique` and bind a reference of the old name. Linking
+`pulp-test-timeline-phase1-examples` with `-Wl,-stack_size,0x100000` on Apple
+makes the required macOS lane fail the same way, so keep that option when
+adding cases to the target.

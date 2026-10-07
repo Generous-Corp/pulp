@@ -358,8 +358,11 @@ target_include_directories(pulp-test-cli-tartci-lease PRIVATE
 target_link_libraries(pulp-test-cli-tartci-lease PRIVATE
     pulp::runtime
     Catch2::Catch2WithMain)
-# The build-dir lock cases drive the checkout's own tools/ci/build_dir_lock.py.
-pulp_test_data(pulp-test-cli-tartci-lease PATHS tools/ci/build_dir_lock.py)
+# The build-dir lock cases drive the checkout's own tools/ci/build_dir_lock.py,
+# which imports tools/scripts/process_liveness.py (and lists tools/scripts to find it).
+pulp_test_data(pulp-test-cli-tartci-lease PATHS
+    tools/ci/build_dir_lock.py
+    tools/scripts/process_liveness.py)
 catch_discover_tests(pulp-test-cli-tartci-lease)
 
 # Stale git lock detection behind the `pulp doctor` "git locks" check.

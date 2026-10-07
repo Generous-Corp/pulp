@@ -87,6 +87,114 @@ TEST_CASE("GraphRuntimePlan builds dense node and connection arrays",
     REQUIRE(result.plan.processing_order_indices[2] == 2);
 }
 
+TEST_CASE("GraphRuntimePlan selects ready nodes by stable NodeId",
+          "[graph][graph-runtime][plan][determinism]") {
+    // Dense specification order is intentionally different from the stable
+    // identity order.  The two roots 50 and 10 fan into 20, while root 40 is
+    // also required by the output.  A FIFO ready queue would expose authored
+    // vector order; the runtime plan should use NodeId instead.
+    const std::array nodes = {
+        node(50, 0, 1, pulp::graph::GraphRuntimeNodeKind::AudioInput),
+        node(10, 0, 1, pulp::graph::GraphRuntimeNodeKind::AudioInput),
+        node(20, 2, 1),
+        node(40, 0, 1, pulp::graph::GraphRuntimeNodeKind::AudioInput),
+        node(30, 2, 0, pulp::graph::GraphRuntimeNodeKind::AudioOutput),
+    };
+    const std::array connections = {
+        connect(50, 0, 20, 0),
+        connect(10, 0, 20, 1),
+        connect(20, 0, 30, 0),
+        connect(40, 0, 30, 1),
+    };
+
+    const auto result = pulp::graph::build_graph_runtime_plan(nodes, connections);
+    REQUIRE(result.ok());
+
+    std::vector<pulp::graph::NodeId> processing_ids;
+    processing_ids.reserve(result.plan.processing_order_indices.size());
+    for (const auto index : result.plan.processing_order_indices)
+        processing_ids.push_back(result.plan.nodes[index].id);
+
+    REQUIRE(processing_ids == std::vector<pulp::graph::NodeId>{10, 40, 50, 20, 30});
+
+    // Negative control: changing a stable identity changes the canonical ready
+    // choice.  This guards the test from passing while the comparator silently
+    // ignores NodeId and falls back to dense indices.
+    auto changed_nodes = nodes;
+    changed_nodes[1].id = 60;
+    auto changed_connections = connections;
+    changed_connections[1].source_node = changed_nodes[1].id;
+    const auto changed = pulp::graph::build_graph_runtime_plan(changed_nodes, changed_connections);
+    REQUIRE(changed.ok());
+    std::vector<pulp::graph::NodeId> changed_ids;
+    for (const auto index : changed.plan.processing_order_indices)
+        changed_ids.push_back(changed.plan.nodes[index].id);
+    REQUIRE(changed_ids == std::vector<pulp::graph::NodeId>{40, 50, 60, 20, 30});
+}
+
+TEST_CASE("GraphRuntimePlan canonicalizes ordinary audio fan-in only",
+          "[graph][graph-runtime][plan][determinism]") {
+    using namespace pulp::graph;
+    // Three distinct sources feed one destination port. A non-associative
+    // reduction must see the same source order when the connection records are
+    // replayed in a different authored order.
+    const std::array nodes = {
+        node(40, 0, 1, GraphRuntimeNodeKind::AudioInput),
+        node(10, 0, 1, GraphRuntimeNodeKind::AudioInput),
+        node(30, 0, 1, GraphRuntimeNodeKind::AudioInput),
+        node(20, 1, 0, GraphRuntimeNodeKind::AudioOutput),
+    };
+    const std::array first_order = {
+        connect(30, 0, 20, 0),
+        connect(10, 0, 20, 0),
+        connect(40, 0, 20, 0),
+    };
+    const std::array replay_order = {
+        first_order[2],
+        first_order[0],
+        first_order[1],
+    };
+
+    const auto source_ids = [](const auto& result) {
+        std::vector<NodeId> ids;
+        const auto& destination = result.plan.nodes[3];
+        for (std::uint32_t offset = 0; offset < destination.inbound_connection_count; ++offset) {
+            const auto connection_index =
+                result.plan
+                    .inbound_connection_indices[destination.first_inbound_connection + offset];
+            ids.push_back(
+                result.plan.nodes[result.plan.connections[connection_index].source_index].id);
+        }
+        return ids;
+    };
+
+    const auto first = build_graph_runtime_plan(nodes, first_order);
+    const auto replay = build_graph_runtime_plan(nodes, replay_order);
+    REQUIRE(first.ok());
+    REQUIRE(replay.ok());
+    REQUIRE(source_ids(first) == std::vector<NodeId>{10, 30, 40});
+    REQUIRE(source_ids(replay) == source_ids(first));
+
+    // Sidechain is a plain-audio lane, but its authored order is part of the
+    // bus contract. It must remain insertion-ordered even when replayed with a
+    // different connection permutation.
+    auto sidechain_a = connect(30, 0, 20, 0);
+    auto sidechain_b = connect(10, 0, 20, 0);
+    auto sidechain_c = connect(40, 0, 20, 0);
+    sidechain_a.sidechain = true;
+    sidechain_b.sidechain = true;
+    sidechain_c.sidechain = true;
+    const std::array sidechain_order = {sidechain_a, sidechain_b, sidechain_c};
+    const std::array sidechain_replay_order = {sidechain_c, sidechain_a, sidechain_b};
+    const auto sidechain = build_graph_runtime_plan(nodes, sidechain_order);
+    const auto sidechain_replay = build_graph_runtime_plan(nodes, sidechain_replay_order);
+    REQUIRE(sidechain.ok());
+    REQUIRE(sidechain_replay.ok());
+    REQUIRE(source_ids(sidechain) == std::vector<NodeId>{30, 10, 40});
+    REQUIRE(source_ids(sidechain_replay) == std::vector<NodeId>{40, 30, 10});
+    CHECK(source_ids(sidechain_replay) != source_ids(sidechain));
+}
+
 TEST_CASE("GraphRuntimePlan rejects duplicate and reserved node ids",
           "[graph][graph-runtime][plan]") {
     const std::array duplicate_nodes = {

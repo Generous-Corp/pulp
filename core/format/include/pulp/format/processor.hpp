@@ -583,17 +583,33 @@ public:
     /// A custom settings tab this plugin contributes to the host's Settings UI.
     /// (The matching virtual `settings_sections()` is appended at the end of this class
     /// to preserve additive-only vtable ordering.)
+    ///
+    /// The view is owned through a type-erased deleter, so a SettingsSection can
+    /// be constructed, moved and destroyed where view::View is incomplete: a
+    /// consumer of pulp::format-core alone (the inline `settings_sections()`
+    /// below destroys a vector of them) never needs the view layer. Only the
+    /// constructor that adopts a view, and take_view(), live on the view side.
     struct SettingsSection {
-        SettingsSection();
+        using ViewDeleter = void (*)(view::View*);
+
+        SettingsSection() noexcept : view(nullptr, &no_view) {}
         SettingsSection(std::string title, std::unique_ptr<view::View> view);
-        ~SettingsSection();
-        SettingsSection(SettingsSection&&) noexcept;
-        SettingsSection& operator=(SettingsSection&&) noexcept;
+        ~SettingsSection() = default;
+        SettingsSection(SettingsSection&&) noexcept = default;
+        SettingsSection& operator=(SettingsSection&&) noexcept = default;
         SettingsSection(const SettingsSection&) = delete;
         SettingsSection& operator=(const SettingsSection&) = delete;
 
-        std::string title;                 ///< Tab label, e.g. "Models".
-        std::unique_ptr<view::View> view;  ///< Tab content (built by the plugin).
+        /// Hand the view over as an ordinary owning pointer (empty if none).
+        std::unique_ptr<view::View> take_view();
+
+        std::string title;  ///< Tab label, e.g. "Models".
+        /// Tab content (built by the plugin). Deleted by the deleter installed
+        /// where it was adopted, so destroying it needs no view::View here.
+        std::unique_ptr<view::View, ViewDeleter> view;
+
+    private:
+        static void no_view(view::View*) noexcept {}
     };
 
     /// Called after a view has been constructed and attached. Runs on the

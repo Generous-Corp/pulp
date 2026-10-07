@@ -925,6 +925,13 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(
             run_block,
             r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
+        self.assertRegex(
+            run_block,
+            r"--import-design-contract\s+build/tools/import-design/jsx-runtime/materialized_binding_contract\.mjs")
+        self.assertIn(
+            "test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs",
+            run_block,
+        )
         self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
         self.assertIn('"${import_design_args[@]}"', run_block)
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
@@ -968,6 +975,14 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             run_block,
             r"'--import-design-runtime-dir',\s*"
             r"'build/tools/import-design/Release/browser_capture-v1'")
+        self.assertRegex(
+            run_block,
+            r"'--import-design-contract',\s*"
+            r"'build/tools/import-design/Release/jsx-runtime/materialized_binding_contract\.mjs'")
+        self.assertIn(
+            "materialized binding contract missing from import-design build staging",
+            run_block,
+        )
         self.assertIn(
             "Test-Path build/tools/import-design/Release/pulp-import-design.exe",
             run_block,
@@ -980,6 +995,9 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(
             dry_run,
             r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
+        self.assertRegex(
+            dry_run,
+            r"--import-design-contract\s+build/tools/import-design/jsx-runtime/materialized_binding_contract\.mjs")
 
     def test_dry_run_packages_and_verifies_control_broker(self) -> None:
         dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")

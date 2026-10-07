@@ -1,7 +1,8 @@
 #include "timeline_phase1_example_test_support.hpp"
 
 TEST_CASE("timeline step pattern switching adopts audible state and persists") {
-    TimelineStepSequencerProcessor author;
+    auto author_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& author = *author_owner;
     author.prepare(prepare_context());
     auto pattern_zero = author.pattern_snapshot();
     pattern_zero.active_pattern_count = 2;
@@ -11,9 +12,12 @@ TEST_CASE("timeline step pattern switching adopts audible state and persists") {
     auto pattern_one = pattern_zero;
     pattern_one.active_pattern = 1;
 
-    TimelineStepSequencerProcessor live;
-    TimelineStepSequencerProcessor expected;
-    TimelineStepSequencerProcessor stale;
+    auto live_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& live = *live_owner;
+    auto expected_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& expected = *expected_owner;
+    auto stale_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& stale = *stale_owner;
     for (auto* processor : {&live, &expected, &stale})
         processor->prepare(prepare_context());
     const auto load = [](TimelineStepSequencerProcessor& processor,
@@ -73,7 +77,8 @@ TEST_CASE("timeline step pattern switching adopts audible state and persists") {
     auto serialized =
         timeline::serialize_project(*live.persistent_project(), live.pattern_registry());
     REQUIRE(serialized);
-    TimelineStepSequencerProcessor restored;
+    auto restored_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& restored = *restored_owner;
     restored.prepare(prepare_context());
     auto deserialized = timeline::deserialize_project(serialized.value().json,
                                                       restored.pattern_registry());
@@ -107,7 +112,8 @@ TEST_CASE("timeline step pattern switching adopts audible state and persists") {
 }
 
 TEST_CASE("timeline step mixed batch rolls back document program and render") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
     const auto* project_before = processor.persistent_project();
@@ -120,7 +126,8 @@ TEST_CASE("timeline step mixed batch rolls back document program and render") {
     const auto payload_before = content_before->canonical_payload_json();
     const auto document_before = processor.pattern_snapshot();
     const auto* tempo_map_before = processor.last_transport().tempo_map;
-    TimelineStepSequencerProcessor render_reference;
+    auto render_reference_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& render_reference = *render_reference_owner;
     render_reference.prepare(prepare_context());
     REQUIRE(render_reference.engine_prepared());
     REQUIRE(render_reference.seek_samples(0) == playback::TransportError::None);
@@ -199,7 +206,8 @@ TEST_CASE("timeline step mixed batch rolls back document program and render") {
     REQUIRE(render_after.right == render_before.right);
 }
 TEST_CASE("timeline step lane randomize preserves save load expand equivalence") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
 
@@ -263,7 +271,8 @@ TEST_CASE("timeline step lane randomize preserves save load expand equivalence")
     auto loaded_pattern = loaded_registered->value_as<StepPatternDocument>()->snapshot;
     REQUIRE(cells_equal(loaded_pattern.patterns[0].lanes[0][31], hidden_before));
 
-    TimelineStepSequencerProcessor restored;
+    auto restored_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& restored = *restored_owner;
     restored.prepare(prepare_context());
     REQUIRE(restored.load_persistent_project(loaded.value()));
     REQUIRE(restored.pattern_snapshot().epoch == 2);
@@ -321,7 +330,8 @@ TEST_CASE("timeline step lane randomize preserves save load expand equivalence")
 }
 
 TEST_CASE("timeline step cell and lane clears publish exact active extent echoes") {
-    TimelineStepSequencerProcessor cell_processor;
+    auto cell_processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& cell_processor = *cell_processor_owner;
     cell_processor.prepare(prepare_context());
     auto cell_clear = clear_command(21, state::ClearScope::Cell, 0, 0, 0);
     REQUIRE(cell_processor.channel().ui_try_submit(cell_clear));
@@ -340,7 +350,8 @@ TEST_CASE("timeline step cell and lane clears publish exact active extent echoes
     process_direct(cell_processor, cleared_start);
     REQUIRE(cleared_start.energy() == 0.0);
 
-    TimelineStepSequencerProcessor lane_processor;
+    auto lane_processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& lane_processor = *lane_processor_owner;
     lane_processor.prepare(prepare_context());
     REQUIRE(lane_processor.channel().ui_try_submit(
         length_command(22, state::kStepCount)));
@@ -382,7 +393,8 @@ TEST_CASE("timeline step cell and lane clears publish exact active extent echoes
 
 TEST_CASE("timeline step pattern and all clears publish authoritative bulk resyncs") {
     for (const auto scope : {state::ClearScope::Pattern, state::ClearScope::All}) {
-        TimelineStepSequencerProcessor processor;
+        auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+        auto& processor = *processor_owner;
         processor.prepare(prepare_context());
         REQUIRE(processor.channel().ui_try_submit(
             length_command(31, state::kStepCount)));
@@ -427,7 +439,8 @@ TEST_CASE("timeline step pattern and all clears publish authoritative bulk resyn
         auto loaded = timeline::deserialize_project(saved.value().json,
                                                     processor.pattern_registry());
         REQUIRE(loaded);
-        TimelineStepSequencerProcessor restored;
+        auto restored_owner = std::make_unique<TimelineStepSequencerProcessor>();
+        auto& restored = *restored_owner;
         restored.prepare(prepare_context());
         REQUIRE(restored.load_persistent_project(loaded.value()));
         REQUIRE(cells_equal(restored.pattern_snapshot().patterns[0].lanes[1][31],
@@ -440,7 +453,8 @@ TEST_CASE("timeline step pattern and all clears publish authoritative bulk resyn
 }
 
 TEST_CASE("timeline step clear rejects only fields relevant to each scope") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     const std::array rejected{
         clear_command(41, state::ClearScope::Cell, 0, 0, 31),
@@ -468,7 +482,8 @@ TEST_CASE("timeline step clear rejects only fields relevant to each scope") {
 }
 
 TEST_CASE("timeline step channel snapshots only when applied echoes overflow") {
-    TimelineStepSequencerProcessor processor;
+    auto processor_owner = std::make_unique<TimelineStepSequencerProcessor>();
+    auto& processor = *processor_owner;
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
 

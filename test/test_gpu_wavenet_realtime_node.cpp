@@ -12,6 +12,16 @@
 
 using namespace pulp::gpu_audio;
 namespace {
+
+TEST_CASE("realtime provider identity fails closed for an untyped node",
+          "[gpu_audio][realtime][provider]") {
+    const auto identity = detail::realtime_gpu_provider_identity(nullptr);
+    CHECK_FALSE(identity.authenticated);
+    CHECK_FALSE(identity.native_runtime_authenticated);
+    CHECK(identity.provider_revision.empty());
+    CHECK(identity.adapter_name.empty());
+}
+
 struct Control {
     bool complete = true, fail = false, reject = false, release = true;
     bool wrong_sequence = false, late = false;
@@ -251,6 +261,15 @@ TEST_CASE("WaveNet stamped node never calls providers from callback and honors l
         }
         CHECK(detail::realtime_gpu_provider(&h.node) == GpuAudioProvider::Unknown);
     }
+}
+
+TEST_CASE("realtime provider identity is empty without an authenticated shared provider",
+          "[gpu_audio][wavenet][realtime][identity]") {
+    const auto identity = detail::realtime_gpu_provider_identity(nullptr);
+    CHECK_FALSE(identity.authenticated);
+    CHECK(identity.provider_revision.empty());
+    CHECK(identity.adapter_name.empty());
+    CHECK(identity.adapter_backend.empty());
 }
 
 TEST_CASE("WaveNet timed service publishes new work with one shared pump deadline",

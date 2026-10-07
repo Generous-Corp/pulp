@@ -11,7 +11,7 @@
         set_tests_properties(scene3d-renderer-probe-verifier-contract
             PROPERTIES
             PASS_REGULAR_EXPRESSION
-                "renderer_probe_contract_case=valid-fake-probe.*renderer_probe_contract_case=missing-resource-field.*renderer_probe_contract_case=scene-data-consumption-drift.*renderer_probe_contract_case=pixel-output-drift.*renderer_probe_contract_case=coverage-floor-drift.*renderer_probe_contract_case=manifest-missing-entry-field.*renderer_probe_contract_case=manifest-extra-entry-field.*renderer_probe_contract_case=manifest-software-adapter-drift.*renderer_probe_contract_verified=true")
+                "renderer_probe_contract_case=valid-fake-probe.*renderer_probe_contract_case=missing-resource-field.*renderer_probe_contract_case=scene-data-consumption-drift.*renderer_probe_contract_case=pixel-output-drift.*renderer_probe_contract_case=coverage-floor-drift.*renderer_probe_contract_case=other-adapter-backend.*renderer_probe_contract_case=manifest-missing-entry-field.*renderer_probe_contract_case=manifest-extra-entry-field.*renderer_probe_contract_case=manifest-software-adapter-drift.*renderer_probe_contract_case=golden-scope-rule.*renderer_probe_contract_verified=true")
 
         add_test(NAME scene3d-renderer-probe-public-surface-contract
             COMMAND ${Python3_EXECUTABLE}
@@ -153,7 +153,11 @@
         set_tests_properties(scene3d-native-slice-handoff-contract
             PROPERTIES
             PASS_REGULAR_EXPRESSION
-                "native_slice_handoff_verified=20 artifacts 21 tests 15 doc tokens 1 ctest tokens 7 plan tokens 8 forbidden plan tokens 1 file tokens")
+                "native_slice_handoff_verified=20 artifacts 21 tests 15 doc tokens 1 ctest tokens 7 plan tokens 8 forbidden plan tokens 1 file tokens"
+            # The plan is in the private planning submodule; a checkout
+            # without it states that and is skipped.
+            SKIP_REGULAR_EXPRESSION
+                "native_slice_handoff_skipped=")
 
         add_test(NAME scene3d-native-slice-handoff-negative-contract
             COMMAND ${Python3_EXECUTABLE}
@@ -179,7 +183,9 @@
         set_tests_properties(scene3d-native-slice-handoff-negative-contract
             PROPERTIES
             PASS_REGULAR_EXPRESSION
-                "native_slice_handoff_contract_case=valid-current-handoff.*native_slice_handoff_contract_case=missing-renderer-probe-artifact.*native_slice_handoff_contract_case=missing-boxtextured-ctest.*native_slice_handoff_contract_case=missing-runtime-issue-link.*native_slice_handoff_contract_case=missing-runtime-evidence-comment-link.*native_slice_handoff_contract_case=missing-runtime-evidence-ctest-link.*native_slice_handoff_contract_case=missing-clean-sidecar-runtime-evidence-link.*native_slice_handoff_contract_case=missing-plan-runtime-boundary.*native_slice_handoff_contract_case=stale-plan-live-gltf-spike.*native_slice_handoff_contract_case=stale-plan-live-exporter-implementation.*native_slice_handoff_contract_case=missing-url-gate-doc.*native_slice_handoff_contract_case=missing-final-gate-doc.*native_slice_handoff_contract_verified=true")
+                "native_slice_handoff_contract_case=valid-current-handoff.*native_slice_handoff_contract_case=missing-renderer-probe-artifact.*native_slice_handoff_contract_case=missing-boxtextured-ctest.*native_slice_handoff_contract_case=missing-runtime-issue-link.*native_slice_handoff_contract_case=missing-runtime-evidence-comment-link.*native_slice_handoff_contract_case=missing-runtime-evidence-ctest-link.*native_slice_handoff_contract_case=missing-clean-sidecar-runtime-evidence-link.*native_slice_handoff_contract_case=missing-plan-runtime-boundary.*native_slice_handoff_contract_case=stale-plan-live-gltf-spike.*native_slice_handoff_contract_case=stale-plan-live-exporter-implementation.*native_slice_handoff_contract_case=missing-url-gate-doc.*native_slice_handoff_contract_case=missing-final-gate-doc.*native_slice_handoff_contract_case=planning-not-checked-out.*native_slice_handoff_contract_case=planning-checked-out-without-plan.*native_slice_handoff_contract_verified=true"
+            SKIP_REGULAR_EXPRESSION
+                "native_slice_handoff_contract_skipped=")
 
         add_test(NAME scene3d-renderer-probe-final-eligibility-contract
             COMMAND ${Python3_EXECUTABLE}
@@ -277,4 +283,4 @@
                 set_tests_properties(scene3d-native-renderer-link-boundary-negative-contract
                     PROPERTIES
                     PASS_REGULAR_EXPRESSION
-                        "native_renderer_boundary_contract_case=valid-current-link-boundary.*native_renderer_boundary_contract_case=forbidden-view-link-token.*native_renderer_boundary_contract_case=forbidden-widget-link-token.*native_renderer_boundary_contract_case=missing-scene-parser-token.*native_renderer_boundary_contract_case=missing-render-webgpu-token.*native_renderer_boundary_contract_case=missing-required-link-file.*native_renderer_boundary_contract_verified=true")
+                        "native_renderer_boundary_contract_case=valid-current-link-boundary.*native_renderer_boundary_contract_case=valid-no-soname-webgpu-link.*native_renderer_boundary_contract_case=forbidden-view-link-token.*native_renderer_boundary_contract_case=forbidden-widget-link-token.*native_renderer_boundary_contract_case=missing-scene-parser-token.*native_renderer_boundary_contract_case=missing-render-webgpu-token.*native_renderer_boundary_contract_case=missing-no-soname-webgpu-token.*native_renderer_boundary_contract_case=missing-required-link-file.*native_renderer_boundary_contract_verified=true")

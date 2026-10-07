@@ -1202,7 +1202,7 @@ def prove_forge(
             )
         screenshot = staging / "forge-modular-screenshot.png"
         capture = run_bounded(
-            [str(binary), "--screenshot", str(screenshot)],
+            [*argv_for(binary), "--screenshot", str(screenshot)],
             cwd=repository, environment=runtime_environment, timeout=300,
             directory_claim=proof_claim,
         )

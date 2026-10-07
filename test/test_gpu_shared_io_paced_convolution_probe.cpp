@@ -5,6 +5,7 @@
 
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_convolver.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/trace.hpp>
 
 #include <algorithm>
@@ -16,12 +17,32 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <optional>
+#include <sstream>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <vector>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace {
+#ifndef PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256
+#define PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 ""
+#endif
+#ifndef PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256
+#define PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 ""
+#endif
+#ifndef PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256
+#define PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 ""
+#endif
+
 using Clock = std::chrono::steady_clock;
 using pulp::gpu_audio::GpuAudioTransport;
 using pulp::gpu_audio::GpuConvolver;
@@ -31,17 +52,57 @@ struct Config {
     std::uint32_t lead = 2;
     std::uint32_t blocks = 128;
     std::uint32_t warmup = 64;
+    std::uint32_t slots = GpuConvolver::kSharedIoSlots;
     bool wake = false;
     bool corrupt_output = false;
+    bool expect_failure = false;
+    bool self_test = false;
+    std::string run_kind = "cold";
+    std::uint32_t steady_repetitions = 1;
     std::filesystem::path directory;
+    std::filesystem::path raw_jsonl;
+    std::filesystem::path executable;
 };
 
 constexpr auto kPostCallbackDrainTimeout = std::chrono::seconds{2};
-// Keep long-tail campaigns bounded while allowing a 100,000-block run at the
-// smallest supported block size. The probe retains input, output, and per-block
-// records in memory, so this is deliberately below the point where a routine
-// campaign becomes a multi-hundred-megabyte allocation.
-constexpr std::uint32_t kMaximumMeasuredBlocks = 100'000;
+// Keep long-tail campaigns bounded while allowing five steady repetitions of
+// the required 100,000 measured blocks. The probe retains input, output, and
+// per-block records in memory, so this caps a single process at 500,000 blocks
+// instead of allowing an unbounded steady run.
+constexpr std::uint32_t kMaximumMeasuredBlocks = 500'000;
+
+// Trace records and admissions are retained in separate vectors, so size the
+// bound for the larger stream. A callback can emit one eligible row and one
+// delivery row, while an admitted block emits one terminal row: three
+// lifecycle rows per callback is the current full-lifecycle contract. Keep one
+// extra row for a teardown/recovery boundary. Checked arithmetic is deliberate:
+// an unrepresentable bound must fail closed instead of truncating into a smaller
+// retention budget that would produce an incomplete receipt.
+std::optional<std::uint32_t> trace_retention_capacity(std::uint32_t total_blocks) {
+    constexpr std::uint64_t kLifecycleRowsPerCallback = 3;
+    constexpr std::uint64_t kAdmissionRowsPerCallback = 1;
+    constexpr std::uint64_t kRetentionMarginRows = 1;
+    constexpr auto kMaximum = std::numeric_limits<std::uint32_t>::max();
+    const auto blocks = static_cast<std::uint64_t>(total_blocks);
+    if (blocks > kMaximum / kLifecycleRowsPerCallback)
+        return std::nullopt;
+    const auto lifecycle_rows = blocks * kLifecycleRowsPerCallback;
+    if (blocks > kMaximum / kAdmissionRowsPerCallback)
+        return std::nullopt;
+    const auto admission_rows = blocks * kAdmissionRowsPerCallback;
+    const auto independent_rows = std::max(lifecycle_rows, admission_rows);
+    if (independent_rows > kMaximum - kRetentionMarginRows)
+        return std::nullopt;
+    return static_cast<std::uint32_t>(independent_rows + kRetentionMarginRows);
+}
+
+std::optional<std::uint32_t> total_callback_blocks(std::uint32_t warmup, std::uint64_t measured,
+                                                   std::uint32_t lead) {
+    const auto total = static_cast<std::uint64_t>(warmup) + measured + lead;
+    if (total > std::numeric_limits<std::uint32_t>::max())
+        return std::nullopt;
+    return static_cast<std::uint32_t>(total);
+}
 
 bool parse(int argc, char** argv, Config& config) {
     for (int i = 1; i < argc; ++i) {
@@ -54,25 +115,50 @@ bool parse(int argc, char** argv, Config& config) {
             return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size();
         };
         if (number("--frames=", config.frames) || number("--lead=", config.lead) ||
-            number("--blocks=", config.blocks) || number("--warmup=", config.warmup))
+            number("--blocks=", config.blocks) || number("--warmup=", config.warmup) ||
+            number("--slots=", config.slots))
             continue;
         if (argument == "--wake-on-write")
             config.wake = true;
         else if (argument == "--negative-control")
             config.corrupt_output = true;
+        else if (argument == "--expect-failure")
+            config.expect_failure = true;
+        else if (argument == "--self-test")
+            config.self_test = true;
+        else if (argument.starts_with("--run-kind="))
+            config.run_kind = argument.substr(11);
+        else if (number("--steady-repetitions=", config.steady_repetitions))
+            continue;
         else if (argument.starts_with("--output-dir="))
             config.directory = argument.substr(13);
+        else if (argument.starts_with("--raw-jsonl="))
+            config.raw_jsonl = argument.substr(12);
         else
             return false;
     }
     return (config.frames == 32 || config.frames == 64 || config.frames == 128) &&
            (config.lead == 1 || config.lead == 2 || config.lead == 4 || config.lead == 8) &&
-           config.blocks > 0 && config.blocks <= kMaximumMeasuredBlocks && config.warmup <= 4096;
+           (config.slots == 2 || config.slots == 4 || config.slots == 8 || config.slots == 16) &&
+           (config.run_kind == "cold" || config.run_kind == "steady") &&
+           (!config.expect_failure || config.corrupt_output) && config.blocks > 0 &&
+           config.blocks <= kMaximumMeasuredBlocks && config.warmup <= 4096 &&
+           config.steady_repetitions > 0 && config.steady_repetitions <= 5 &&
+           (config.run_kind == "cold" || config.steady_repetitions == 1 ||
+            config.blocks <= kMaximumMeasuredBlocks / config.steady_repetitions);
 }
 
 std::uint64_t nanoseconds(Clock::duration value) {
     return static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(value).count());
+}
+
+std::uint64_t process_id() noexcept {
+#if defined(_WIN32)
+    return static_cast<std::uint64_t>(::_getpid());
+#else
+    return static_cast<std::uint64_t>(::getpid());
+#endif
 }
 
 struct Record {
@@ -84,12 +170,201 @@ struct Record {
     bool finite = true;
 };
 
+void json_string(std::ostream& stream, std::string_view value) {
+    stream << '"';
+    for (const char character : value) {
+        switch (character) {
+        case '"':
+            stream << "\\\"";
+            break;
+        case '\\':
+            stream << "\\\\";
+            break;
+        case '\n':
+            stream << "\\n";
+            break;
+        case '\r':
+            stream << "\\r";
+            break;
+        case '\t':
+            stream << "\\t";
+            break;
+        default:
+            stream << character;
+            break;
+        }
+    }
+    stream << '"';
+}
+
+using TraceRecord = pulp::gpu_audio::detail::SharedIoTraceRecord;
+using TraceAdmission = pulp::gpu_audio::detail::SharedIoTraceAdmission;
+
+std::string trace_identity(std::uint64_t engine, std::uint64_t generation, std::uint64_t sequence) {
+    return std::to_string(engine) + ":" + std::to_string(generation) + ":" +
+           std::to_string(sequence);
+}
+
+struct RawCensus {
+    bool valid = true;
+    std::unordered_set<std::string> admission_identities;
+    std::unordered_set<std::string> delivery_identities;
+    std::unordered_set<std::string> terminal_identities;
+    std::vector<const TraceRecord*> lifecycle_records;
+};
+
+RawCensus collect_raw_census(const std::vector<TraceRecord>& records,
+                             const std::vector<TraceAdmission>& admissions, std::uint64_t engine_id,
+                             const std::unordered_set<std::string>& authenticated_terminals) {
+    RawCensus census;
+    for (const auto& admission : admissions) {
+        if (!census.admission_identities
+                 .insert(trace_identity(engine_id, admission.generation, admission.sequence))
+                 .second)
+            census.valid = false;
+    }
+    census.lifecycle_records.reserve(records.size());
+    for (const auto& record : records) {
+        if (record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
+            record.kind != pulp::gpu_audio::detail::SharedIoTraceKind::Delivery)
+            continue;
+        const auto identity = trace_identity(engine_id, record.generation, record.sequence);
+        census.lifecycle_records.push_back(&record);
+        if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal) {
+            if (!census.admission_identities.contains(identity) || !record.valid() ||
+                !record.admission_identity_matched ||
+                record.gpu_terminal ==
+                    pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None ||
+                !census.terminal_identities.insert(identity).second)
+                census.valid = false;
+        } else if (record.delivery == pulp::gpu_audio::detail::SharedIoDeliveryDisposition::None ||
+                   !record.callback_timing_available ||
+                   !census.delivery_identities.insert(identity).second) {
+            census.valid = false;
+        }
+    }
+    std::size_t admitted_delivery_count = 0;
+    for (const auto& identity : census.delivery_identities)
+        if (census.admission_identities.contains(identity))
+            ++admitted_delivery_count;
+    census.valid = census.valid &&
+                   authenticated_terminals.size() == census.admission_identities.size() &&
+                   admitted_delivery_count == census.admission_identities.size();
+    return census;
+}
+
+void emit_raw_provenance(std::ostream& raw, std::string_view run_kind, std::uint64_t run_identity,
+                         std::uint64_t engine_id,
+                         const pulp::gpu_audio::detail::SharedIoProviderIdentity& provider_identity,
+                         std::string_view executable_sha, std::string_view manifest_digest) {
+    raw << "{\"kind\":\"provenance\",\"schema\":\"pulp.gpu-audio.p2.raw.v1\","
+           "\"run_kind\":";
+    json_string(raw, run_kind);
+    raw << ",\"same_process_resident\":true,"
+           "\"steady_semantics\":\"same_process_resident\",\"process_id\":"
+        << process_id() << ",\"residency_session_id\":\"" << run_identity
+        << "\",\"prepared_sessions\":1,\"reprepare_count\":0,\"engine_id\":" << engine_id
+        << ",\"provider_identity_status\":\""
+        << (provider_identity.authenticated ? "passed" : "failed")
+        << "\",\"provider_observed_identity\":\""
+        << (provider_identity.authenticated ? "passed" : "failed") << "\",\"provider_revision\":";
+    json_string(raw, provider_identity.provider_revision);
+    raw << ",\"adapter_name\":";
+    json_string(raw, provider_identity.adapter_name);
+    raw << ",\"adapter_backend\":";
+    json_string(raw, provider_identity.adapter_backend);
+    raw << ",\"adapter_vendor_id\":" << provider_identity.adapter_vendor_id
+        << ",\"adapter_device_id\":" << provider_identity.adapter_device_id
+        << ",\"native_runtime_identity_status\":\""
+        << (provider_identity.native_runtime_authenticated ? "passed" : "failed")
+        << "\",\"native_runtime_name\":";
+    json_string(raw, provider_identity.native_runtime_name);
+    raw << ",\"native_runtime_backend\":";
+    json_string(raw, provider_identity.native_runtime_backend);
+    raw << ",\"executable_observed_sha256\":";
+    json_string(raw, executable_sha);
+    raw << ",\"provider_asset_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256);
+    raw << ",\"dawn_archive_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256);
+    raw << ",\"manifest_bindings\":{\"dawn_archive_manifest_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256);
+    raw << ",\"dawn_archive_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256);
+    raw << ",\"provider_asset_manifest_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256);
+    raw << ",\"provider_asset_sha256\":";
+    json_string(raw, PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256);
+    raw << "},\"provenance_manifest_sha256\":";
+    json_string(raw, manifest_digest);
+    raw << "}\n";
+}
+
+int self_test() {
+    constexpr std::uint64_t engine_id = 7;
+    std::vector<TraceAdmission> admissions{{1, 2}};
+    TraceRecord terminal;
+    terminal.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Terminal;
+    terminal.generation = 1;
+    terminal.sequence = 2;
+    terminal.gpu_work_admitted = true;
+    terminal.admission_identity_matched = true;
+    terminal.gpu_terminal =
+        pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::CompletedAccepted;
+    terminal.outcome = pulp::gpu_audio::detail::SharedIoTraceOutcome::Success;
+    terminal.set(pulp::gpu_audio::detail::SharedIoTraceStage::Scheduled, 1);
+    TraceRecord delivery;
+    delivery.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Delivery;
+    delivery.generation = 1;
+    delivery.sequence = 2;
+    delivery.output_eligible = true;
+    delivery.delivery = pulp::gpu_audio::detail::SharedIoDeliveryDisposition::GpuDelivered;
+    delivery.callback_timing_available = true;
+    std::vector<TraceRecord> records{terminal, delivery};
+    std::unordered_set<std::string> authenticated{trace_identity(engine_id, 1, 2)};
+    if (!collect_raw_census(records, admissions, engine_id, authenticated).valid) {
+        std::cerr << "self-test: valid raw census rejected\n";
+        return 1;
+    }
+    records.push_back(terminal);
+    if (collect_raw_census(records, admissions, engine_id, authenticated).valid) {
+        std::cerr << "self-test: duplicate terminal accepted\n";
+        return 1;
+    }
+
+    pulp::gpu_audio::detail::SharedIoProviderIdentity provider;
+    provider.authenticated = true;
+    provider.provider_revision = "revision\"\\\n";
+    provider.adapter_name = "adapter\"\\\n";
+    provider.adapter_backend = "backend\"\\\n";
+    provider.native_runtime_authenticated = true;
+    provider.native_runtime_name = "runtime\"\\\n";
+    provider.native_runtime_backend = "runtime-backend\"\\\n";
+    std::ostringstream serialized;
+    emit_raw_provenance(serialized, "cold\"\\\n", 42, engine_id, provider, "exe\"\\\n",
+                        "manifest\"\\\n");
+    const auto json = serialized.str();
+    if (json.find("\\\"") == std::string::npos || json.find("\\\\") == std::string::npos ||
+        json.find("\\n") == std::string::npos) {
+        std::cerr << "self-test: provenance strings were not escaped\n";
+        return 1;
+    }
+    std::cout << json;
+    return 0;
+}
+
 int run(Config config) {
     const auto run_identity = nanoseconds(Clock::now().time_since_epoch());
     constexpr std::uint32_t sample_rate = 48000;
     constexpr std::uint32_t channels = 2;
     constexpr std::size_t ir_frames = 257;
-    const auto total_blocks = config.warmup + config.blocks + config.lead;
+    const auto measured_blocks =
+        static_cast<std::uint64_t>(config.blocks) * config.steady_repetitions;
+    const auto total_blocks_value =
+        total_callback_blocks(config.warmup, measured_blocks, config.lead);
+    if (!total_blocks_value)
+        return 2;
+    const auto total_blocks = *total_blocks_value;
     const auto total_frames = static_cast<std::size_t>(total_blocks) * config.frames;
     auto input = pulp::test::audio::make_sine(channels, static_cast<int>(total_frames), 731.0f,
                                               sample_rate, 0.2f);
@@ -104,10 +379,28 @@ int run(Config config) {
     std::vector<Record> records(total_blocks);
 
     GpuConvolver node(channels, config.frames, sample_rate, ir, config.lead);
+    pulp::gpu_audio::detail::GpuConvolverTrialConfig trial_config;
+    trial_config.requested_path =
+        pulp::gpu_audio::detail::SharedIoRequest::RequireSharedHostPointer;
+    trial_config.enable_trace = true;
+    trial_config.capture_admissions = true;
+    trial_config.capture_callback_timing = true;
+    trial_config.success_stride = 1;
+    trial_config.slots = config.slots;
+    // Trial mode drains the fixed producer queues into pre-reserved
+    // non-RT retention so a full campaign census remains lossless. The record
+    // and admission streams are bounded independently; retain enough for the
+    // three lifecycle rows per callback plus one teardown/recovery margin.
+    const auto retention_capacity = trace_retention_capacity(total_blocks);
+    if (!retention_capacity)
+        return 2;
+    trial_config.retention_capacity = *retention_capacity;
+    if (!pulp::gpu_audio::detail::configure_gpu_convolver_trial(node, trial_config))
+        return 2;
     if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
         !node.configure_trace({.enabled = true,
                                .capture_admissions = true,
-                               .capture_callback_timing = false,
+                               .capture_callback_timing = true,
                                .success_stride = 1}) ||
         !node.prepare() || !pulp::gpu_audio::detail::realtime_gpu_node_path(&node).active()) {
         std::cout << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\","
@@ -153,10 +446,26 @@ int run(Config config) {
     }
     const auto transport_stats = transport.stats();
     const auto delivery_stats = transport.delivery_snapshot();
+    const auto provider_identity = pulp::gpu_audio::detail::realtime_gpu_provider_identity(&node);
+    const auto engine_id = pulp::gpu_audio::detail::gpu_convolver_trial_engine_id(node);
+    // Stop new GPU admissions, then advance the callback timeline through the
+    // configured lead window so the final admitted sequence receives its typed
+    // delivery disposition before the session is released. These CPU-only
+    // flush positions are deliberately excluded from measured blocks.
+    std::vector<float> flush_input(static_cast<std::size_t>(channels) * config.frames, 0.0f);
+    std::vector<float> flush_output(flush_input.size(), 0.0f);
+    const float* flush_inputs[channels] = {flush_input.data(), flush_input.data() + config.frames};
+    float* flush_outputs[channels] = {flush_output.data(), flush_output.data() + config.frames};
+    pulp::audio::BufferView<const float> flush_in(flush_inputs, channels, config.frames);
+    pulp::audio::BufferView<float> flush_out(flush_outputs, channels, config.frames);
+    for (std::uint32_t block = 0; block < config.lead; ++block)
+        transport.process_offline(flush_in, flush_out, config.frames);
     transport.release();
 
     std::vector<pulp::gpu_audio::detail::SharedIoTraceRecord> trace_records;
     (void)pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, trace_records);
+    std::vector<pulp::gpu_audio::detail::SharedIoTraceAdmission> trace_admissions;
+    (void)pulp::gpu_audio::detail::drain_gpu_convolver_trial_admissions(node, trace_admissions);
     const auto trace_stats = trace_records.empty() ? pulp::gpu_audio::detail::SharedIoTraceRecord{}
                                                    : trace_records.front();
     std::uint64_t high_water_in_flight = 0;
@@ -165,7 +474,11 @@ int run(Config config) {
     std::uint64_t late_completions = 0;
     std::uint64_t authenticated_terminal_records = 0;
     std::uint64_t terminal_record_count = 0;
-    std::unordered_set<std::uint64_t> terminal_sequences;
+    const auto terminal_identity = [engine_id](const auto& record) {
+        return std::to_string(engine_id) + ":" + std::to_string(record.generation) + ":" +
+               std::to_string(record.sequence);
+    };
+    std::unordered_set<std::string> terminal_identities;
     for (const auto& record : trace_records) {
         if (record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal)
             ++terminal_record_count;
@@ -173,7 +486,7 @@ int run(Config config) {
             record.valid() && record.kind == pulp::gpu_audio::detail::SharedIoTraceKind::Terminal &&
             record.gpu_work_admitted && record.admission_identity_matched &&
             record.gpu_terminal != pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::None &&
-            terminal_sequences.insert(record.sequence).second;
+            terminal_identities.insert(terminal_identity(record)).second;
         if (authenticated)
             ++authenticated_terminal_records;
         high_water_in_flight = std::max(high_water_in_flight, record.high_water_in_flight);
@@ -187,6 +500,16 @@ int run(Config config) {
             pulp::gpu_audio::detail::SharedIoGpuTerminalDisposition::LateRejected)
             ++late_completions;
     }
+
+    // Preserve every terminal and delivery row in the raw census, including
+    // callback-only priming and CPU-fallback positions. The admission-linked
+    // subset is checked for one terminal and one delivery per admission, while
+    // the complete delivery stream remains available for fallback accounting.
+    const auto raw_census =
+        collect_raw_census(trace_records, trace_admissions, engine_id, terminal_identities);
+    const auto& admission_identities = raw_census.admission_identities;
+    const auto& raw_lifecycle_records = raw_census.lifecycle_records;
+    const bool raw_census_valid = raw_census.valid;
 
     if (config.corrupt_output)
         output[0][static_cast<std::size_t>(config.warmup + config.lead) * config.frames] += 1.0f;
@@ -261,9 +584,16 @@ int run(Config config) {
         trace_stats.trace_attempted == trace_stats.trace_enqueued + trace_stats.trace_dropped +
                                            trace_stats.trace_sampled_out +
                                            trace_stats.trace_invalid;
+    const bool provider_authenticated = provider_identity.authenticated &&
+                                        provider_identity.native_runtime_authenticated &&
+                                        engine_id != 0;
+    const bool receipt_authenticated = gpu_progress && provider_authenticated && raw_census_valid;
     const auto emit = [&](std::ostream& stream) {
+        const auto executable_sha =
+            pulp::runtime::sha256_file_hex(config.executable, 512ull * 1024ull * 1024ull)
+                .value_or("");
         stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\""
-               << (correct && gpu_progress ? "completed" : "failed")
+               << (correct && receipt_authenticated ? "completed" : "failed")
                << "\",\"performance_verdict\":\"unassigned\",\"path\":\"shared_async\","
                   "\"completion_service\":\"process_events\",\"callback_driver\":\"sleep_until_non_"
                   "rt\","
@@ -274,9 +604,9 @@ int run(Config config) {
                << config.lead
                // This is configured physical capacity, not an observed
                // delivery count. Keep the legacy key and expose the meaning.
-               << ",\"provider_slots\":" << GpuConvolver::kSharedIoSlots
-               << ",\"configured_provider_slots\":" << GpuConvolver::kSharedIoSlots
-               << ",\"declared_slots\":" << GpuConvolver::kSharedIoSlots
+               << ",\"provider_slots\":" << config.slots
+               << ",\"configured_provider_slots\":" << config.slots
+               << ",\"declared_slots\":" << config.slots
                << ",\"declared_lead_blocks\":" << config.lead
                << ",\"high_water_in_flight\":" << high_water_in_flight
                << ",\"retired_success\":" << retired_success
@@ -292,13 +622,35 @@ int run(Config config) {
                << ",\"trace_dropped\":" << trace_stats.trace_dropped
                << ",\"trace_sampled_out\":" << trace_stats.trace_sampled_out
                << ",\"trace_invalid\":" << trace_stats.trace_invalid
-               << ",\"gpu_receipt_authenticated\":" << (gpu_progress ? "true" : "false")
-               << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
+               << ",\"trace_retention_capacity\":" << trial_config.retention_capacity
+               << ",\"gpu_receipt_authenticated\":" << (receipt_authenticated ? "true" : "false")
+               << ",\"provider_identity_status\":";
+        json_string(stream, provider_identity.authenticated ? "passed" : "failed");
+        stream << ",\"provider_observed_identity\":";
+        json_string(stream, provider_identity.authenticated ? "passed" : "failed");
+        stream << ",\"provider_revision\":";
+        json_string(stream, provider_identity.provider_revision);
+        stream << ",\"adapter_name\":";
+        json_string(stream, provider_identity.adapter_name);
+        stream << ",\"adapter_backend\":";
+        json_string(stream, provider_identity.adapter_backend);
+        stream << ",\"adapter_vendor_id\":" << provider_identity.adapter_vendor_id
+               << ",\"adapter_device_id\":" << provider_identity.adapter_device_id
+               << ",\"native_runtime_identity_status\":";
+        json_string(stream, provider_identity.native_runtime_authenticated ? "passed" : "failed");
+        stream << ",\"native_runtime_name\":";
+        json_string(stream, provider_identity.native_runtime_name);
+        stream << ",\"native_runtime_backend\":";
+        json_string(stream, provider_identity.native_runtime_backend);
+        stream << ",\"fallback_blocks\":" << delivery_stats.cpu_fallback_blocks
                << ",\"miss_blocks\":" << transport_stats.miss_blocks
                << ",\"late_completions\":" << late_completions << ",\"run_identity\":\""
                << run_identity << "\""
                << ",\"logical_pipeline_capacity\":" << std::max(8u, config.lead + 2u)
-               << ",\"warmup_blocks\":" << config.warmup << ",\"measured_blocks\":" << config.blocks
+               << ",\"warmup_blocks\":" << config.warmup
+               << ",\"measured_blocks\":" << measured_blocks
+               << ",\"measured_blocks_per_repetition\":" << config.blocks
+               << ",\"steady_repetitions\":" << config.steady_repetitions
                << ",\"total_callbacks\":" << total_blocks
                << ",\"measured_miss_counter_delta\":" << measured_misses
                << ",\"callback_overruns\":" << callback_overruns
@@ -308,6 +660,13 @@ int run(Config config) {
                << ",\"wake_on_write\":" << (config.wake ? "true" : "false")
                << ",\"tracing_compiled\":" << (pulp::runtime::kTracingEnabled ? "true" : "false")
                << ",\"negative_control\":" << (config.corrupt_output ? "true" : "false")
+               << ",\"run_kind\":\"" << config.run_kind << "\""
+               << ",\"process_id\":" << process_id() << ",\"same_process_resident\":true"
+               << ",\"steady_semantics\":\"same_process_resident\""
+               << ",\"residency_session_id\":\"" << run_identity << "\""
+               << ",\"prepared_sessions\":1,\"reprepare_count\":0"
+               << ",\"engine_id\":" << engine_id << ",\"executable_observed_sha256\":\""
+               << executable_sha << "\""
                << ",\"records_file\":\"blocks.csv\"}\n";
     };
     std::ofstream receipt(config.directory / "receipt.json");
@@ -315,17 +674,66 @@ int run(Config config) {
     receipt.flush();
     if (!receipt)
         return 2;
+    if (!config.raw_jsonl.empty()) {
+        std::ofstream raw(config.raw_jsonl);
+        if (!raw)
+            return 2;
+        const auto executable_sha =
+            pulp::runtime::sha256_file_hex(config.executable, 512ull * 1024ull * 1024ull)
+                .value_or("");
+        const auto manifest_digest = pulp::runtime::sha256_hex(
+            std::string("{\"dawn_archive_manifest_sha256\":\"") +
+            PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 + "\",\"dawn_archive_sha256\":\"" +
+            PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 + "\",\"provider_asset_manifest_sha256\":\"" +
+            PULP_GPU_AUDIO_PROVIDER_MANIFEST_SHA256 + "\",\"provider_asset_sha256\":\"" +
+            PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 + "\"}");
+        emit_raw_provenance(raw, config.run_kind, run_identity, engine_id, provider_identity,
+                            executable_sha, manifest_digest);
+        for (const auto& admission : trace_admissions) {
+            raw << "{\"kind\":\"admission\",\"engine_id\":" << engine_id
+                << ",\"generation\":" << admission.generation
+                << ",\"sequence\":" << admission.sequence << "}\n";
+        }
+        for (const auto* record : raw_lifecycle_records) {
+            const auto identity = trace_identity(engine_id, record->generation, record->sequence);
+            raw << "{\"kind\":\"record\",\"trace_kind\":" << static_cast<unsigned>(record->kind)
+                << ",\"engine_id\":" << engine_id << ",\"generation\":" << record->generation
+                << ",\"sequence\":" << record->sequence
+                << ",\"valid_stages\":" << record->valid_stages
+                << ",\"gpu_terminal\":" << static_cast<unsigned>(record->gpu_terminal)
+                << ",\"admission_identity_matched\":"
+                << (record->admission_identity_matched ? "true" : "false")
+                << ",\"admitted\":" << (admission_identities.contains(identity) ? "true" : "false")
+                << ",\"callback_only\":"
+                << (admission_identities.contains(identity) ? "false" : "true")
+                << ",\"delivery\":" << static_cast<unsigned>(record->delivery)
+                << ",\"callback_timing_available\":"
+                << (record->callback_timing_available ? "true" : "false")
+                << ",\"callback_end_ns\":" << record->callback_end_ns
+                << ",\"result_visible_ns\":" << record->result_visible_ns << "}\n";
+        }
+        raw.flush();
+        if (!raw)
+            return 2;
+    }
     emit(std::cout);
     std::cerr << "artifacts: " << config.directory << '\n';
-    return correct && gpu_progress ? 0 : 1;
+    const bool passed = correct && receipt_authenticated;
+    if (config.expect_failure)
+        return !passed && config.corrupt_output ? 0 : 1;
+    return passed ? 0 : 1;
 }
 } // namespace
 
 int main(int argc, char** argv) {
     Config config;
+    if (argc > 0)
+        config.executable = argv[0];
     if (!parse(argc, argv, config))
         return 2;
     try {
+        if (config.self_test)
+            return self_test();
         return run(config);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

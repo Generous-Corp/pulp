@@ -247,6 +247,16 @@ Session::Callback callback(Session& session, std::span<const float> input,
 }
 } // namespace
 
+TEST_CASE("shared convolution session provider identity fails closed before preparation",
+          "[gpu_audio][shared_io][provider]") {
+    Session session;
+    const auto identity = session.provider_identity();
+    CHECK_FALSE(identity.authenticated);
+    CHECK_FALSE(identity.native_runtime_authenticated);
+    CHECK(identity.provider_revision.empty());
+    CHECK(identity.adapter_name.empty());
+}
+
 TEST_CASE("shared convolution session packs provider slots and delivers exact prepared output",
           "[gpu_audio][shared_io][session]") {
     Fixture fixture;
@@ -263,6 +273,18 @@ TEST_CASE("shared convolution session packs provider slots and delivers exact pr
     CHECK(callback(fixture.session, b, output).stamp.sequence == 2);
     CHECK(output == a);
     CHECK(fixture.state->submits == 2);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared convolution session reports no provider identity for a non-Dawn provider",
+          "[gpu_audio][shared_io][session][identity]") {
+    Fixture fixture;
+    fixture.prepare();
+    const auto identity = fixture.session.provider_identity();
+    CHECK_FALSE(identity.authenticated);
+    CHECK(identity.provider_revision.empty());
+    CHECK(identity.adapter_name.empty());
+    CHECK(identity.adapter_backend.empty());
     REQUIRE(fixture.session.release());
 }
 

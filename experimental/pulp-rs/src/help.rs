@@ -172,6 +172,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Detect a framework project and emit a Pulp migration scaffold",
     },
     Entry {
+        name: "ui",
+        summary: "Build or verify an imported UI source snapshot",
+    },
+    Entry {
         name: "identity",
         summary: "Manage the .pulp/identity.lock contract",
     },

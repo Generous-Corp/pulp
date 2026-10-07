@@ -7,6 +7,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -39,6 +40,15 @@ bool EditorBridge::has_handler(std::string_view type) const noexcept {
 
 std::size_t EditorBridge::handler_count() const noexcept {
     return impl_->handlers.size();
+}
+
+std::vector<std::string> EditorBridge::handlers() const {
+    std::vector<std::string> names;
+    names.reserve(impl_->handlers.size());
+    for (const auto& [name, _] : impl_->handlers)
+        names.push_back(name);
+    std::sort(names.begin(), names.end());
+    return names;
 }
 
 std::string EditorBridge::dispatch(std::string_view type,

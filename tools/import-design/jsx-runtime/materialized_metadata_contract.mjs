@@ -8,6 +8,9 @@ import { normalizeRequestedTypography } from './materialized_text_contract.mjs';
 import {
   normalizeMaterializedCoordinateSpace,
 } from '../browser_capture/materialized_coordinate_space.mjs';
+import {
+  normalizeMaterializedBindingDocument,
+} from './materialized_binding_contract.mjs';
 
 const finiteNumber = (value) =>
   typeof value === 'number' && Number.isFinite(value);
@@ -141,12 +144,17 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
   if (!document || typeof document !== 'object') {
     throw new Error(`${label} metadata document is invalid`);
   }
+  let bindingDocument;
+  try {
+    bindingDocument = normalizeMaterializedBindingDocument(document);
+  } catch (error) {
+    throw new Error(`${label} ${error.message}`);
+  }
   const fontBindings = normalizeMaterializedFontBindings(document.font_bindings);
   const coordinateSpace = document.coordinate_space === undefined
     ? null : normalizeMaterializedCoordinateSpace(
       document.coordinate_space, `${label} coordinate space`);
-  const layoutBindings = Array.isArray(document.layout_bindings)
-    ? document.layout_bindings.map((binding, bindingIndex) => {
+  const layoutBindings = bindingDocument.layout_bindings.map((binding, bindingIndex) => {
         const bindingLabel = `${label} layout binding ${bindingIndex}`;
         if (!binding || typeof binding !== 'object' ||
             (binding.anchor !== '#root' && binding.anchor !== 'body') ||
@@ -157,6 +165,7 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
           throw new Error(`${bindingLabel} is invalid`);
         }
         return {
+          id: binding.id,
           anchor: binding.anchor,
           path: normalizePath(binding.path, bindingLabel),
           box: {
@@ -173,13 +182,12 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
         // those as native Yoga boxes; the owning <svg> viewport provides the
         // primitive's layout and viewBox transform.
         .filter(binding => !SVG_PRESENTATION_PRIMITIVES.has(
-          binding.path[binding.path.length - 1].tag)) : [];
+          binding.path[binding.path.length - 1].tag));
   if (layoutBindings.length > 16384) {
     throw new Error(`${label} contains too many layout bindings`);
   }
 
-  const textBindings = Array.isArray(document.text_bindings)
-    ? document.text_bindings.map((binding, bindingIndex) => {
+  const textBindings = bindingDocument.text_bindings.map((binding, bindingIndex) => {
         const bindingLabel = `${label} text binding ${bindingIndex}`;
         const requestedTypography = normalizeRequestedTypography(
           binding?.basis?.requested);
@@ -219,6 +227,7 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
           };
         });
         const normalized = {
+          id: binding.id,
           anchor: binding.anchor,
           path: normalizePath(binding.path, bindingLabel),
           text: binding.text,
@@ -255,12 +264,11 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
         normalized.runtime_font_family = runtimeFamilyForText(
           fontBindings, normalized);
         return normalized;
-      }) : [];
+      });
   if (textBindings.length > 4096) {
     throw new Error(`${label} contains too many text bindings`);
   }
-  const paintBindings = Array.isArray(document.paint_bindings)
-      ? document.paint_bindings.map((binding, bindingIndex) => {
+  const paintBindings = bindingDocument.paint_bindings.map((binding, bindingIndex) => {
         const bindingLabel = `${label} paint binding ${bindingIndex}`;
         const paint = binding?.paint;
         const box = binding?.box;
@@ -287,6 +295,7 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
           throw new Error(`${bindingLabel} box is invalid`);
         }
         return {
+          id: binding.id,
           anchor: binding.anchor,
           path: normalizePath(binding.path, bindingLabel),
           tag: binding.tag,
@@ -305,11 +314,83 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
             width: box.width, height: box.height,
           } }),
         };
-      }) : [];
+      });
   if (paintBindings.length > 16384) {
     throw new Error(`${label} contains too many paint bindings`);
   }
+  const semanticBindings = bindingDocument.semantic_bindings.map(
+    (binding, bindingIndex) => {
+      const bindingLabel = `${label} semantic binding ${bindingIndex}`;
+      const bounds = binding?.bounds;
+      const backendNodeId = Number(binding?.backend_node_id);
+      if (!binding || typeof binding !== 'object' ||
+          !Number.isSafeInteger(backendNodeId) || backendNodeId <= 0 ||
+          binding.anchor !== `chromium:backend-node:${backendNodeId}` ||
+          typeof binding.kind !== 'string' || binding.kind.length === 0 ||
+          binding.kind.length > 128 || typeof binding.tag !== 'string' ||
+          binding.tag.length > 128 || typeof binding.name !== 'string' ||
+          binding.name.length > 4096 || !bounds ||
+          !finiteNumber(bounds.left) || !finiteNumber(bounds.top) ||
+          !finiteNumber(bounds.width) || bounds.width < 0 ||
+          !finiteNumber(bounds.height) || bounds.height < 0) {
+        throw new Error(`${bindingLabel} is invalid`);
+      }
+      return {
+        ...binding,
+        backend_node_id: backendNodeId,
+        bounds: {
+          left: bounds.left, top: bounds.top,
+          width: bounds.width, height: bounds.height,
+        },
+      };
+    });
+  if (semanticBindings.length > 16384)
+    throw new Error(`${label} contains too many semantic bindings`);
+
+  const canvasBindings = bindingDocument.canvas_bindings.map(
+    (binding, bindingIndex) => {
+      const bindingLabel = `${label} canvas binding ${bindingIndex}`;
+      const match = typeof binding?.anchor === 'string'
+        ? binding.anchor.match(/^chromium:backend-node:(\d+)$/) : null;
+      const bounds = binding?.bounds;
+      if (!binding || typeof binding !== 'object' || !match ||
+          !bounds || !finiteNumber(bounds.left) ||
+          !finiteNumber(bounds.top) || !finiteNumber(bounds.width) ||
+          bounds.width < 0 || !finiteNumber(bounds.height) ||
+          bounds.height < 0) {
+        throw new Error(`${bindingLabel} is invalid`);
+      }
+      return {
+        ...binding,
+        backend_node_id: Number(match[1]),
+        bounds: {
+          left: bounds.left, top: bounds.top,
+          width: bounds.width, height: bounds.height,
+        },
+      };
+    });
+  if (canvasBindings.length > 16384)
+    throw new Error(`${label} contains too many canvas bindings`);
+
+  // Rebuild the id maps from the normalized lists. Some legacy captures put
+  // SVG presentation bindings in layout_bindings; after filtering those rows,
+  // returning the input map would leave list/map parity broken and allow a
+  // stale binding to be replayed through an id lookup.
+  const normalizedLists = {
+    semantic: semanticBindings,
+    layout: layoutBindings,
+    text: textBindings,
+    paint: paintBindings,
+    canvas: canvasBindings,
+  };
+  const bindingsById = Object.fromEntries(Object.entries(normalizedLists).map(
+    ([kind, bindings]) => [kind, Object.fromEntries(
+      bindings.map(binding => [binding.id, binding]),
+    )],
+  ));
   return { coordinate_space: coordinateSpace, font_bindings: fontBindings,
-    layout_bindings: layoutBindings, text_bindings: textBindings,
-    paint_bindings: paintBindings };
+    bindings_by_id: bindingsById,
+    semantic_bindings: semanticBindings, layout_bindings: layoutBindings,
+    text_bindings: textBindings, paint_bindings: paintBindings,
+    canvas_bindings: canvasBindings };
 }

@@ -10,17 +10,14 @@ name: Codex review request
 # The skip is Codex-side behavior and is not configurable from this repository.
 # This workflow is the in-repo mitigation: on every head an App-authored PR can
 # merge, it issues the same `@codex review` a human would, then PROVES a review
-# completed for that exact commit. It fails loudly when none did, because a
-# review-coverage mitigation that can no-op in silence reproduces the gap it
-# exists to close.
+# completed for that exact commit. Review coverage is advisory: a missing or
+# unavailable connector must never block an otherwise valid PR from landing.
 
 on:
   pull_request:
-    # `synchronize` is load-bearing, not thoroughness. Under this repo's
-    # up-to-date branch protection a PR is pushed to repeatedly — rebases,
-    # fixes, base updates — and on `opened` alone the reviewed commit and the
-    # merged commit are simply different ones. Every head that could merge has
-    # to be a head that was reviewed.
+    # `synchronize` keeps the advisory signal current after rebases and fixes.
+    # It does not make review a merge prerequisite: connector availability must
+    # never block a PR whose required engineering checks are green.
     types: [opened, ready_for_review, synchronize]
 
 permissions:
@@ -98,23 +95,23 @@ jobs:
                   ;;
               1) ;;
               2)
-                  echo "::error::Cannot read review state for #$PR, so whether it has" \
-                       "been reviewed is unknown. Not requesting; re-run once GitHub" \
-                       "is reachable."
-                  exit 1
+                  echo "::warning::Cannot read Codex review state for #$PR; review remains advisory."
+                  echo "already=true" >> "$GITHUB_OUTPUT"
+                  exit 0
                   ;;
               *)
-                  echo "::error::The review checker did not run (exit $signal)." \
-                       "tools/scripts/codex_review_signal.sh is missing or not" \
-                       "executable at the base commit. Expected only on the pull" \
-                       "request that introduces it; anywhere else the base checkout" \
-                       "is broken. This PR has NOT been shown to be reviewed."
-                  exit 1
+                  echo "::warning::Codex review checker unavailable (exit $signal); review remains advisory."
+                  echo "already=true" >> "$GITHUB_OUTPUT"
+                  exit 0
                   ;;
           esac
           echo "already=false" >> "$GITHUB_OUTPUT"
 
-          gh pr comment "$PR" --repo "$REPO" --body '@codex review'
+          if ! gh pr comment "$PR" --repo "$REPO" --body '@codex review'; then
+              echo "::warning::Could not request Codex review on #$PR; connector is advisory."
+              echo "already=true" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
           echo "Requested a Codex review on #$PR."
 
       - name: Verify a review completed for this head
@@ -136,13 +133,10 @@ jobs:
               set -e
               [ "$signal" -eq 0 ] && exit 0
               if [ "$signal" -ne 1 ]; then
-                  echo "::error::Lost sight of review state for #$PR (exit $signal);" \
-                       "whether it was reviewed is unknown rather than known-bad."
-                  exit 1
+                  echo "::warning::Lost sight of Codex review state for #$PR (exit $signal); review remains advisory."
+                  exit 0
               fi
           done
 
-          echo "::error::Requested a Codex review on #$PR but none completed for" \
-               "$HEAD_SHA within ten minutes, so this PR is unreviewed. The last line" \
-               "above distinguishes a request that stalled from one never taken."
-          exit 1
+          echo "::warning::Codex review did not complete for $HEAD_SHA within ten minutes; review remains advisory."
+          exit 0

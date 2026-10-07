@@ -106,6 +106,7 @@ jobs:
             --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json \
             --import-design-binary build/tools/import-design/pulp-import-design \
             --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
+            --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs \
             --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE" \
             --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE" \
             --build-dir build \
@@ -140,6 +141,10 @@ jobs:
           test -x "$HELPER" || { echo "::error::packaged pulp-import-design helper missing"; exit 1; }
           test -s "$(dirname "$BIN")/browser_capture/capture.mjs" || {
             echo "::error::packaged browser-capture runtime missing"
+            exit 1
+          }
+          test -s "$(dirname "$BIN")/jsx-runtime/materialized_binding_contract.mjs" || {
+            echo "::error::packaged materialized binding contract missing"
             exit 1
           }
           ARCHS="$(lipo -archs "$BIN" 2>/dev/null || true)"

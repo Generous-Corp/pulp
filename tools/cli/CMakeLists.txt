@@ -110,6 +110,7 @@ add_executable(pulp-cli
     cmd_host.cpp
     au_info_plist.cpp
     cmd_import.cpp
+    cmd_ui.cpp
     import_run.cpp
     import_detect.cpp
     import_spi.cpp
