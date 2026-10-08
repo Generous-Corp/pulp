@@ -17,6 +17,7 @@ import {
   captureCaseTimeout,
   execute,
   installedBrowser,
+  rgbaPixel,
 } from "./capture_integration_support.mjs";
 
 // Fitting captures the page, reloads it at the authored frame and captures
@@ -137,6 +138,15 @@ test("oversized authored canvas settles before default and fit capture",
           { x: 0, y: 0, width: 1320, height: 860 });
         assert.equal(envelope.reference.logical_width, 1320);
         assert.equal(envelope.reference.logical_height, 860);
+        const canvasAsset = envelope.assets.find(
+          (asset) => asset.kind === "canvas-snapshot");
+        assert.ok(
+          canvasAsset, `${fit ? "fit" : "default"} capture emitted a canvas asset`);
+        const canvasPng = await readFile(path.join(output, canvasAsset.path));
+        const [red, green, blue, alpha] = rgbaPixel(canvasPng, 100, 100);
+        assert.ok(red > 180 && green < 80 && blue < 110 && alpha > 240,
+          `${fit ? "fit" : "default"} canvas asset lost its painted pixels: ` +
+          `rgba(${red}, ${green}, ${blue}, ${alpha})`);
       }
     } finally {
       await rm(root, { recursive: true, force: true });
