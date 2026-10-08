@@ -563,6 +563,40 @@ TEST_CASE("AliveToken rejects concurrent admission after Handle invalidation",
     CHECK_FALSE(pulp::runtime::AliveToken::is_alive(handle));
 }
 
+TEST_CASE("AliveToken compatibility handles and lease moves are exercised",
+          "[editor_bridge][typed-contract][state][lifetime]") {
+    pulp::runtime::AliveToken owner_alive;
+    const auto handle = owner_alive.capture();
+    CHECK(handle->load(std::memory_order_acquire));
+    handle->store(true, std::memory_order_release);
+    CHECK(pulp::runtime::AliveToken::is_alive(handle));
+
+    auto first = pulp::runtime::AliveToken::try_acquire(handle);
+    REQUIRE(first);
+    auto moved = std::move(first);
+    CHECK_FALSE(static_cast<bool>(first));
+    pulp::runtime::AliveToken::Lease assigned;
+    assigned = std::move(moved);
+    CHECK_FALSE(static_cast<bool>(moved));
+    assigned.reset();
+    CHECK_FALSE(static_cast<bool>(assigned));
+
+    const pulp::runtime::AliveToken::Handle empty;
+    CHECK_FALSE(static_cast<bool>(pulp::runtime::AliveToken::try_acquire(empty)));
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(empty));
+
+    auto legacy = std::make_shared<std::atomic<bool>>(true);
+    CHECK(pulp::runtime::AliveToken::is_alive(legacy));
+    legacy->store(false, std::memory_order_release);
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(legacy));
+
+    owner_alive.retire();
+    handle->store(true, std::memory_order_release);
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(handle));
+    owner_alive.reset();
+    CHECK(pulp::runtime::AliveToken::is_alive(owner_alive.capture()));
+}
+
 TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
           "[editor_bridge][typed-contract][typescript]") {
     // Node's built-in TypeScript stripping keeps this proof on the checked-in
