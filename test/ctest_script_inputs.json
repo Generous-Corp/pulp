@@ -2414,6 +2414,7 @@
   "pulp-test-cli-timeline",
   "pulp-test-cli-tool-registry",
   "pulp-test-cli-tweaks-shellout",
+  "pulp-test-cli-ui-command",
   "pulp-test-cli-update-check",
   "pulp-test-cli-update-mode",
   "pulp-test-cli-upgrade-install",
@@ -6841,6 +6842,25 @@
     "test/test_pulp_installer_mcp_contract.sh"
    ],
    "kind": "shell"
+  },
+  "pulp-materialized-runtime-conformance": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-materialized-runtime-node-dependencies": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
+   ],
+   "kind": "node"
   },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
