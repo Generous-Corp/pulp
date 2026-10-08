@@ -390,6 +390,20 @@ remain developer-supplied macOS assets and should be restored from the private
 backup with their recorded hashes. Windows setup and signing can adopt the same
 boundary later, but is intentionally not specified here.
 
+The current private handoff capsule is:
+
+```text
+~/SDKs/private/pulp-aax-macos/
+```
+
+Its `README.md` is the restore runbook, `RESTORE-MANIFEST.txt` records the
+required archive hashes and deliberately excluded machine-local state, and
+`mise.toml` contains only the optional `aax-ready` and `aax-verify-bundle`
+checks. Copy that capsule through the private backup channel when onboarding
+another Mac; never add it to Pulp or publish it. A new Mac still needs its own
+iLok activation/sign-in, PACE authentication, Apple Developer ID private key,
+and Pro Tools installation.
+
 ## Core Commands
 
 Check current AAX availability:
