@@ -9,6 +9,35 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09350"></a>
+## [0.935.0] - 2026-10-08
+
+- release/version bump ([#9912](https://github.com/Generous-Corp/pulp/pull/9912))
+- codex/governed gcc 20261008 ([#9906](https://github.com/Generous-Corp/pulp/pull/9906))
+
+<a id="v09340"></a>
+## [0.934.0] - 2026-10-08
+
+- release/version bump ([#9910](https://github.com/Generous-Corp/pulp/pull/9910))
+- codex/clean output ui lint coverage 20261008 ([#9908](https://github.com/Generous-Corp/pulp/pull/9908))
+- codex/pr9894 coverage repair 20261008 ([#9904](https://github.com/Generous-Corp/pulp/pull/9904))
+- codex/provenance schema validator 20261008 ([#9900](https://github.com/Generous-Corp/pulp/pull/9900))
+- codex/signalgraph lifecycle ownership 20261008 ([#9902](https://github.com/Generous-Corp/pulp/pull/9902))
+- release/version bump ([#9909](https://github.com/Generous-Corp/pulp/pull/9909))
+- codex/governed workflow slice 20261008 ([#9907](https://github.com/Generous-Corp/pulp/pull/9907))
+- release/version bump ([#9905](https://github.com/Generous-Corp/pulp/pull/9905))
+- codex/governed timeline 20261008 ([#9903](https://github.com/Generous-Corp/pulp/pull/9903))
+- codex/gpu p2 foundation thermal 20261008 ([#9901](https://github.com/Generous-Corp/pulp/pull/9901))
+- codex/governed emitter followup 20261008 ([#9899](https://github.com/Generous-Corp/pulp/pull/9899))
+- codex/gpu p2 host preflight producer 20261008 v2 ([#9895](https://github.com/Generous-Corp/pulp/pull/9895))
+- codex/governed intel portability 20261008 ([#9898](https://github.com/Generous-Corp/pulp/pull/9898))
+- release/version bump ([#9897](https://github.com/Generous-Corp/pulp/pull/9897))
+- codex/governed web plugins 20261008 ([#9896](https://github.com/Generous-Corp/pulp/pull/9896))
+- codex/dspx09 validation 20261007 ([#9891](https://github.com/Generous-Corp/pulp/pull/9891))
+- release/version bump ([#9892](https://github.com/Generous-Corp/pulp/pull/9892))
+- codex/governed wclap 20261008 ([#9888](https://github.com/Generous-Corp/pulp/pull/9888))
+- codex/gpu p2 campaign driver 20261008 ([#9885](https://github.com/Generous-Corp/pulp/pull/9885))
+
 <a id="v09332"></a>
 ## [0.933.2] - 2026-10-08
 
@@ -10180,6 +10209,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.935.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.935.0
+[0.934.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.934.0
 [0.933.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.933.2
 [0.933.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.933.1
 [0.933.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.933.0
