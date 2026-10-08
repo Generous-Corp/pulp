@@ -27,6 +27,16 @@ conformance inputs may use the `conformance-fixture` role; they are also
 hash-checked without being treated as TSX source. Supported source files must
 still appear in the manifest as a complete set.
 
+When a corpus claims a source fixture with `source_kind`, its manifest must
+also name `source_fixture_sha256` and `source_fixture_output`. The linter
+checks the repository fixture bytes and requires the copied output entry to
+carry the same digest, so a checked-in conformance copy cannot drift from the
+input it claims to represent.
+
+Duplicate markup is reported for repeated complete, balanced JSX subtrees even
+when the copies span lines. The scanner stays conservative for malformed TSX;
+the TypeScript compiler remains responsible for syntax validation.
+
 Component/function size is reported only when `--enforce-size` is supplied;
 the program plan keeps those thresholds advisory until DP-2 has measured the
 Spectr corpus. Each finding has a planted-control test in

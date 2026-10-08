@@ -10,6 +10,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# CTest input tracking: this suite executes the implementation through a
+# subprocess, and the implementation loads the linter dynamically.
+# "tools/ui-build/ui_build.py"
+# "tools/ui-build/lint/clean_output_lint.py"
+
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "ui_build.py"
 
