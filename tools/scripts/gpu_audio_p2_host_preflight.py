@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any, Callable
@@ -22,7 +23,12 @@ from typing import Any, Callable
 SCHEMA = "pulp.gpu-audio.p2.host-preflight.v1"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOST_VITALS = REPO_ROOT / "tools/scripts/host_vitals.sh"
+THERMAL_HELPER_RELATIVE = "tools/scripts/p2_thermal_state.swift"
+THERMAL_HELPER = REPO_ROOT / THERMAL_HELPER_RELATIVE
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+THERMAL_SCHEMA = "pulp.gpu-audio.p2.thermal-observation.v1"
+THERMAL_STATES = frozenset({"nominal", "fair", "serious", "critical", "unknown"})
+THERMAL_MAX_AGE_SECONDS = 30.0
 
 
 def _canonical(value: Any) -> bytes:
@@ -32,6 +38,26 @@ def _canonical(value: Any) -> bytes:
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _file_sha256(path: Path) -> str | None:
+    try:
+        return _sha256(path.read_bytes())
+    except OSError:
+        return None
+
+
+def _tool_provenance(name: str) -> dict[str, Any]:
+    path = shutil.which(name)
+    resolved = None
+    digest = None
+    if path:
+        try:
+            resolved = str(Path(path).resolve(strict=True))
+            digest = _file_sha256(Path(resolved))
+        except OSError:
+            resolved = None
+    return {"name": name, "path": resolved, "sha256": digest}
 
 
 def _git_head() -> str:
@@ -99,17 +125,51 @@ def _parse_gpu(raw: str) -> tuple[str, int | None]:
     return "unknown", sum(int(value) for value in busy)
 
 
+def _parse_thermal(raw: str, *, now: datetime | None = None) -> tuple[str, dict[str, Any]]:
+    """Parse and freshness-check the Foundation thermal observation.
+
+    The helper is deliberately a separate source from pmset.  Missing,
+    malformed, future-dated, stale, or unsupported values remain unknown and
+    therefore block admission.
+    """
+    now = now or datetime.now(timezone.utc)
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return "unknown", {"status": "invalid", "reason": "json_invalid"}
+    if not isinstance(value, dict) or value.get("schema") != THERMAL_SCHEMA:
+        return "unknown", {"status": "invalid", "reason": "schema_invalid", "value": value}
+    state = value.get("thermal_state")
+    if state not in THERMAL_STATES:
+        return "unknown", {"status": "invalid", "reason": "state_invalid", "value": value}
+    if value.get("source") != "Foundation.ProcessInfo.thermalState":
+        return "unknown", {"status": "invalid", "reason": "source_invalid", "value": value}
+    sampled_at = value.get("sampled_at")
+    try:
+        sampled = datetime.fromisoformat(str(sampled_at).replace("Z", "+00:00"))
+        age = (now - sampled).total_seconds()
+    except (TypeError, ValueError):
+        return "unknown", {"status": "invalid", "reason": "sampled_at_invalid", "value": value}
+    if age < -1.0 or age > THERMAL_MAX_AGE_SECONDS:
+        return "unknown", {"status": "invalid", "reason": "sample_stale", "age_seconds": age, "value": value}
+    value = dict(value)
+    value["age_seconds"] = age
+    return state, {"status": "valid", "observation": value}
+
+
 def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
             source_revision: str | None = None) -> dict[str, Any]:
     """Collect observations and return a receipt, including blocked status."""
     source = source_revision or _git_head()
     if not re.fullmatch(r"[0-9a-f]{40}", source):
         raise RuntimeError("source_revision is not an immutable commit SHA")
+    swift_provenance = _tool_provenance("swift")
     observations = [
         _run([str(HOST_VITALS), "--json"], runner),
         _run(["ps", "-axo", "pid=,pcpu=,comm="], runner),
         _run(["pmset", "-g", "therm"], runner),
         _run(["ioreg", "-r", "-c", "IOAccelerator", "-l"], runner),
+        _run(["swift", str(THERMAL_HELPER)], runner),
     ]
     reasons: list[str] = []
     try:
@@ -149,12 +209,12 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
         reasons.append("ui_observation_unavailable")
     elif any(p["cpu_pct"] >= 20.0 for p in windows):
         reasons.append("ui_contention_present")
-    thermal_text = observations[2]["stdout"] + observations[2]["stderr"]
-    thermal_state = "nominal" if (observations[2]["returncode"] == 0 and
-                                   "No thermal warning level" in thermal_text and
-                                   "No performance warning level" in thermal_text) else "unknown"
-    if thermal_state == "unknown":
+    thermal_state, thermal_observation = _parse_thermal(
+        observations[4]["stdout"] if observations[4]["returncode"] == 0 else "")
+    if observations[4]["returncode"] != 0 or thermal_state == "unknown":
         reasons.append("thermal_observation_unknown")
+    elif thermal_state != "nominal":
+        reasons.append("thermal_state_not_nominal")
     gpu_status, gpu_busy = _parse_gpu(observations[3]["stdout"])
     if observations[3]["returncode"] != 0 or gpu_status != "passed":
         reasons.append("gpu_observation_unavailable")
@@ -173,7 +233,14 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
         "gpu_contention": "gpu_work_queues_busy" in reasons,
         "gpu_observation_status": gpu_status, "gpu_busy_work_queues": gpu_busy,
         "ui_contention": "ui_contention_present" in reasons,
-        "thermal_state": thermal_state, "reasons": reasons,
+        "thermal_state": thermal_state, "thermal_observation": thermal_observation,
+        "thermal_source": {
+            "schema": THERMAL_SCHEMA,
+            "helper": str(THERMAL_HELPER),
+            "helper_sha256": _file_sha256(THERMAL_HELPER),
+            "tool": swift_provenance,
+        },
+        "reasons": reasons,
         "raw_observations_sha256": raw_hash, "observations": observations,
     }
 

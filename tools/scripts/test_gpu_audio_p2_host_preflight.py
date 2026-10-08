@@ -1,6 +1,7 @@
 import json
 import subprocess
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,12 +10,25 @@ import gpu_audio_p2_host_preflight as preflight
 
 class HostPreflightTests(unittest.TestCase):
     @staticmethod
+    def thermal(state="nominal", sampled_at=None):
+        return json.dumps({
+            "schema": preflight.THERMAL_SCHEMA,
+            "source": "Foundation.ProcessInfo.thermalState",
+            "thermal_state": state,
+            "thermal_state_code": {"nominal": 0, "fair": 1, "serious": 2,
+                                    "critical": 3}.get(state, 99),
+            "sampled_at": sampled_at or datetime.now(timezone.utc).isoformat(),
+        })
+
+    @staticmethod
     def runner(command, **kwargs):
         name = command[0]
         if name.endswith("host_vitals.sh"):
             output = json.dumps({"level": "green", "ncpu": 8, "load1": "1.0"})
         elif name == "ps":
             output = " 10 2.0 /sbin/launchd\n 11 3.0 /System/Library/CoreServices/WindowServer\n"
+        elif name == "swift":
+            output = HostPreflightTests.thermal()
         elif name == "pmset":
             output = "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n"
         else:
@@ -31,6 +45,9 @@ class HostPreflightTests(unittest.TestCase):
         self.assertEqual(receipt["gpu_busy_work_queues"], 0)
         self.assertEqual(receipt["gpu_observation_status"], "unknown")
         self.assertIn("gpu_observation_unavailable", receipt["reasons"])
+        self.assertEqual(receipt["thermal_source"]["schema"], preflight.THERMAL_SCHEMA)
+        self.assertRegex(receipt["thermal_source"]["helper_sha256"], preflight.SHA256_RE)
+        self.assertEqual(receipt["thermal_source"]["tool"]["name"], "swift")
 
     def test_load_and_contention_are_negative_controls(self):
         def busy_runner(command, **kwargs):
@@ -51,6 +68,8 @@ class HostPreflightTests(unittest.TestCase):
             result = self.runner(command, **kwargs)
             if command[0] == "pmset":
                 result.stdout = ""
+            if command[0] == "swift":
+                result.stdout = "not-json"
             if command[0] == "ioreg":
                 result.stdout = "AGXAccelerator registered\n"
             return result
@@ -59,6 +78,61 @@ class HostPreflightTests(unittest.TestCase):
         self.assertIn("thermal_observation_unknown", receipt["reasons"])
         self.assertIn("gpu_observation_unavailable", receipt["reasons"])
 
+    def test_non_nominal_thermal_state_blocks(self):
+        def warm_runner(command, **kwargs):
+            result = self.runner(command, **kwargs)
+            if command[0] == "swift":
+                result.stdout = self.thermal("serious")
+            return result
+
+        receipt = preflight.collect(runner=warm_runner, source_revision="7" * 40)
+        self.assertEqual(receipt["thermal_state"], "serious")
+        self.assertIn("thermal_state_not_nominal", receipt["reasons"])
+        self.assertNotIn("thermal_observation_unknown", receipt["reasons"])
+
+    def test_stale_or_malformed_foundation_observation_blocks(self):
+        stale = datetime.now(timezone.utc).replace(year=2020).isoformat()
+
+        def stale_runner(command, **kwargs):
+            result = self.runner(command, **kwargs)
+            if command[0] == "swift":
+                result.stdout = self.thermal(sampled_at=stale)
+            return result
+
+        receipt = preflight.collect(runner=stale_runner, source_revision="8" * 40)
+        self.assertEqual(receipt["thermal_state"], "unknown")
+        self.assertIn("thermal_observation_unknown", receipt["reasons"])
+
+        def malformed_runner(command, **kwargs):
+            result = self.runner(command, **kwargs)
+            if command[0] == "swift":
+                result.stdout = json.dumps({"schema": preflight.THERMAL_SCHEMA,
+                                            "source": "pmset", "thermal_state": "nominal"})
+            return result
+
+        receipt = preflight.collect(runner=malformed_runner, source_revision="9" * 40)
+        self.assertEqual(receipt["thermal_state"], "unknown")
+        self.assertIn("thermal_observation_unknown", receipt["reasons"])
+
+    def test_missing_or_timed_out_foundation_tool_blocks(self):
+        def missing_runner(command, **kwargs):
+            if command[0] == "swift":
+                raise FileNotFoundError("swift")
+            return self.runner(command, **kwargs)
+
+        receipt = preflight.collect(runner=missing_runner, source_revision="a" * 40)
+        self.assertIn("thermal_observation_unknown", receipt["reasons"])
+        self.assertEqual(receipt["observations"][-1]["returncode"], 127)
+
+        def timeout_runner(command, **kwargs):
+            if command[0] == "swift":
+                raise subprocess.TimeoutExpired(command, kwargs.get("timeout", 10))
+            return self.runner(command, **kwargs)
+
+        receipt = preflight.collect(runner=timeout_runner, source_revision="b" * 40)
+        self.assertIn("thermal_observation_unknown", receipt["reasons"])
+        self.assertEqual(receipt["observations"][-1]["returncode"], 124)
+
     def test_source_revision_is_immutable(self):
         with patch.object(preflight, "_git_head", return_value="not-a-sha"):
             with self.assertRaisesRegex(RuntimeError, "immutable"):
@@ -66,11 +140,11 @@ class HostPreflightTests(unittest.TestCase):
 
     def test_malformed_vitals_and_missing_tool_fail_closed(self):
         def malformed_runner(command, **kwargs):
-            if command[0] == "pmset":
-                raise FileNotFoundError("pmset")
             result = self.runner(command, **kwargs)
             if command[0].endswith("host_vitals.sh"):
                 result.stdout = "not-json"
+            if command[0] == "swift":
+                raise FileNotFoundError("swift")
             return result
 
         receipt = preflight.collect(runner=malformed_runner, source_revision="d" * 40)
