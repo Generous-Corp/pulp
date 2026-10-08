@@ -1,0 +1,51 @@
+{
+  "id": "ui-build-cli-test-input-manifest",
+  "title": "UI build CLI and generated test-input manifest remain sequencer-visible",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "f8eea7c6-5e4b-4e9a-8b0e-2f02e4c6f7a1",
+  "owned_paths": [
+    "test/ctest_script_inputs.json",
+    "test/cmake/cli_tests.cmake",
+    "test/test_cli_ui.cpp",
+    "docs/status/sequencer-exposure/rows/ui-build-cli-test-input-manifest.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_cli_ui.cpp",
+      "needles": [
+        "pulp ui without a subcommand prints the complete usage contract",
+        "pulp ui forwards lint arguments and preserves delegate failures"
+      ]
+    },
+    {
+      "path": "test/ctest_script_inputs.json",
+      "needles": [
+        "pulp-materialized-runtime-conformance",
+        "pulp-test-cli-ui-command"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This row covers internal CLI tests and generated test-input accounting; it changes no installed SDK surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The UI build CLI is unrelated to sequenced timeline editing."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or timeline authority changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No live product control or capability is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The test manifest records coverage inputs and does not advertise an agent capability."
+    }
+  }
+}
