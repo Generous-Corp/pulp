@@ -245,7 +245,11 @@ struct StateStoreParameterBinding {
 inline bool register_state_store_set_parameter_handler(
     EditorBridge& bridge, state::StateStore& store, runtime::AliveToken::Handle owner_alive,
     std::initializer_list<StateStoreParameterBinding> bindings) {
-    if (!runtime::AliveToken::is_alive(owner_alive))
+    // Registration inspects the host-owned store, so it needs the same
+    // quiescence proof as dispatch. This also closes the retire/registration
+    // race before any handler is installed.
+    const auto registration_lease = runtime::AliveToken::try_acquire(owner_alive);
+    if (!registration_lease)
         return false;
     auto key_to_id = std::make_shared<std::map<std::string, state::ParamID>>();
     std::set<state::ParamID> ids;
@@ -264,7 +268,14 @@ inline bool register_state_store_set_parameter_handler(
 
     register_set_parameter(bridge,
                            [&store, owner_alive, key_to_id](const SetParameterRequest& request) {
-                               if (!runtime::AliveToken::is_alive(owner_alive))
+                               // This editor/control callback may take the host-side
+                               // quiescence lease; it is intentionally not an audio RT path.
+                               // is_alive() followed by a raw StateStore reference is
+                               // racy: teardown may retire and destroy the store between
+                               // the check and the write. The lease admits this callback
+                               // atomically and makes owner teardown wait for its release.
+                               const auto lease = runtime::AliveToken::try_acquire(owner_alive);
+                               if (!lease)
                                    return false;
                                const auto found = key_to_id->find(request.key);
                                if (found == key_to_id->end())
@@ -414,7 +425,7 @@ def render_docs(data: dict[str, Any]) -> str:
         intro = [
             "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.",
             "",
-            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. The production helper accepts an immutable one-to-one wire key→`ParamID` table and rejects duplicate keys or IDs before registration. SDK packaging/export, an installed generation workflow, and `@pulp/react` integration remain follow-up boundaries.",
+            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. The production helper accepts an immutable one-to-one wire key→`ParamID` table, rejects duplicate keys or IDs before registration, and holds an AliveToken lease across store access so owner teardown waits for in-flight dispatch. The owner must retire outside a leased callback; reentrant retirement waits for callback release by design. SDK packaging/export, an installed generation workflow, and `@pulp/react` integration remain follow-up boundaries.",
             "",
         ]
     else:
