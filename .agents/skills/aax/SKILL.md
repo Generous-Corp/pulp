@@ -399,7 +399,8 @@ The current private handoff capsule is:
 Its `README.md` is the restore runbook, `RESTORE-MANIFEST.txt` records the
 required archive hashes and deliberately excluded machine-local state, and
 `mise.toml` contains only the optional `aax-ready` and `aax-verify-bundle`
-checks. Copy that capsule through the private backup channel when onboarding
+checks. `restore_toolchains.sh` verifies the archive hash and expected paths
+before extraction. Copy that capsule through the private backup channel when onboarding
 another Mac; never add it to Pulp or publish it. A new Mac still needs its own
 iLok activation/sign-in, PACE authentication, Apple Developer ID private key,
 and Pro Tools installation.
