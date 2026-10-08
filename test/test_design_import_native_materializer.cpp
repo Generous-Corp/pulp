@@ -599,17 +599,14 @@ Rect intersect_text_clip_rect(Rect a, Rect b) {
     return a;
 }
 
-void collect_text_clip_failures(const View& view,
-                                Rect parent_abs,
-                                Rect inherited_clip,
+void collect_text_clip_failures(const View& view, Rect parent_abs, Rect inherited_clip,
                                 std::vector<TextClipFailure>& failures) {
     const auto bounds = view.bounds();
-    const Rect abs{parent_abs.x + bounds.x, parent_abs.y + bounds.y,
-                   bounds.width, bounds.height};
-    const Rect clip = view.overflow() == View::Overflow::hidden ||
-                      view.overflow() == View::Overflow::scroll
-        ? intersect_text_clip_rect(inherited_clip, abs)
-        : inherited_clip;
+    const Rect abs{parent_abs.x + bounds.x, parent_abs.y + bounds.y, bounds.width, bounds.height};
+    const Rect clip =
+        view.overflow() == View::Overflow::hidden || view.overflow() == View::Overflow::scroll
+            ? intersect_text_clip_rect(inherited_clip, abs)
+            : inherited_clip;
     if (const auto* label = dynamic_cast<const Label*>(&view)) {
         // `intrinsic_width()` is intentionally zero for a soft-wrapping
         // label. Use the max-content/painted extent instead so this invariant
@@ -617,14 +614,14 @@ void collect_text_clip_failures(const View& view,
         // imported copy.
         float measured = label->max_content_width();
         const auto painted = label->painted_text_extents(std::max(abs.width, 1.0f));
-        if (painted.measured) measured = std::max(measured, painted.width);
+        if (painted.measured)
+            measured = std::max(measured, painted.width);
         Rect own_clip = clip;
         if (const auto& ancestor = label->ancestor_clip_rect()) {
             // The importer stores this rectangle in the label's local space;
             // translate it before intersecting with the inherited clip.
-            own_clip = intersect_text_clip_rect(
-                own_clip, {abs.x + ancestor->x, abs.y + ancestor->y,
-                           ancestor->width, ancestor->height});
+            own_clip = intersect_text_clip_rect(own_clip, {abs.x + ancestor->x, abs.y + ancestor->y,
+                                                           ancestor->width, ancestor->height});
         }
         // A zero (or narrower-than-ink) solved box under a tiny inherited clip
         // is the exact failure seen in the Spectr header: the text shaper has
@@ -634,8 +631,7 @@ void collect_text_clip_failures(const View& view,
         if (!label->text().empty() && measured > 0.0f &&
             (abs.width + 0.01f < measured || own_clip.width + 0.01f < measured) &&
             own_clip.width <= 2.01f) {
-            failures.push_back({label->id(), label->text(), measured,
-                                abs.width, own_clip.width});
+            failures.push_back({label->id(), label->text(), measured, abs.width, own_clip.width});
         }
     }
     for (auto* child : view.sorted_children_by_z_index())
@@ -644,8 +640,7 @@ void collect_text_clip_failures(const View& view,
 
 std::vector<TextClipFailure> text_clip_failures(const View& root) {
     const auto root_bounds = root.bounds();
-    const Rect root_abs{root_bounds.x, root_bounds.y,
-                        root_bounds.width, root_bounds.height};
+    const Rect root_abs{root_bounds.x, root_bounds.y, root_bounds.width, root_bounds.height};
     return [&] {
         std::vector<TextClipFailure> failures;
         collect_text_clip_failures(root, {0, 0, 0, 0}, root_abs, failures);
@@ -928,21 +923,19 @@ TEST_CASE("baked native materializer carries a resolved clip rectangle to the vi
 TEST_CASE("native text clipping invariant catches separator-sized label ancestors",
           "[view][import][native-materializer][text-clip-invariant]") {
     const std::vector<std::pair<std::string, float>> labels{
-        {"LIVE", 48.0f}, {"PRECISION", 84.0f}, {"IIR", 41.0f},
-        {"FFT", 42.0f}, {"HYBRID", 63.0f}};
+        {"LIVE", 48.0f}, {"PRECISION", 84.0f}, {"IIR", 41.0f}, {"FFT", 42.0f}, {"HYBRID", 63.0f}};
 
     auto make_fixture = [&](bool planted_clip, bool planted_ancestor_clip) {
         DesignIR ir;
         ir.root = frame("text-clip-root", 320.0f, 40.0f, LayoutDirection::row);
 
-        auto rail = frame("segmented-rail", planted_clip ? 2.0f : 278.0f,
-                          22.0f, LayoutDirection::row);
-        if (planted_clip) rail.style.overflow = "hidden";
+        auto rail =
+            frame("segmented-rail", planted_clip ? 2.0f : 278.0f, 22.0f, LayoutDirection::row);
+        if (planted_clip)
+            rail.style.overflow = "hidden";
 
-        float x = 0.0f;
         for (const auto& [text, width] : labels) {
-            auto caption = label("label-" + text, text,
-                                 planted_clip ? 0.0f : width, 15.0f);
+            auto caption = label("label-" + text, text, planted_clip ? 0.0f : width, 15.0f);
             if (text == "HYBRID") {
                 // Exercise the soft-wrapping path: intrinsic_width() is zero
                 // for this label, so the invariant must use max-content or
@@ -951,7 +944,6 @@ TEST_CASE("native text clipping invariant catches separator-sized label ancestor
                 caption.style.height = 30.0f;
             }
             rail.children.push_back(std::move(caption));
-            x += width;
         }
         ir.root.children.push_back(std::move(rail));
 

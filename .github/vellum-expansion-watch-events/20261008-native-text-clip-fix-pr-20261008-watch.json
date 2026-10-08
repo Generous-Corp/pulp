@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261008-native-text-clip-fix-pr-20261008-watch",
+  "created_at": "2026-10-08T16:36:58Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Native materializer acceptance tests add a test-only text clipping invariant and planted 2 px controls for imported View trees; this changes no design-import, Chromium, rendering, or packaging authority and records no runtime fix.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-native-materializer",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
