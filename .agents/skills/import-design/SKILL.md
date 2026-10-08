@@ -21,6 +21,22 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
 
+### Browser capture provenance is an import boundary
+
+The native importer validates `capture.json` before lowering the browser tree
+or emitting a materialized runtime. Treat the capture envelope as a binding to
+one exact input and capture environment: it must carry the staged `editor.html`
+SHA-256, Chromium CDP identity, initial/resolved/document viewport dimensions,
+matching device scale factor and reference viewport, plus a contained
+materialized-document sidecar whose SHA-256, schema/version, HTML field, and
+asset count agree with the envelope. A stale, hand-edited, mismatched, or
+path-escaping envelope fails closed with the
+`browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
+from the same capture directory; do not copy one from an older browser run or
+rewrite its source hash to bypass validation. The focused native coverage is
+`pulp-test-browser-capture-backend [*provenance*]`, and a real import must pass
+the browser capture receipt before any native or materialized parity claim.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
@@ -3921,6 +3937,17 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   gate even without `--validate`; the flag additionally publishes convenient
   render/diff copies beside the primary output. Authored controls and knob art
   remain pixels; never replace them with Pulp's silver/vector fallback.
+- For dynamic or materialized canvas fixtures, add
+  `--materialized-canvas-composition --require-canvas-ink` when a blank frame
+  would invalidate the result. The opt-in gate inspects the decoded,
+  hash-verified sparse canvas plane rather than trusting `changed_pixels`
+  metadata. It requires at least 256 opaque canvas pixels and a viewport
+  relative floor of 0.1%, so transparent captures or isolated specks cannot
+  produce a false 100% A/B score. Opaque pixels are counted regardless of RGB
+  brightness, so a legitimately dark canvas still satisfies the coverage
+  contract. Keep the flag off for intentionally blank static panels. A passing
+  pixel score without this gate does not prove that an animated canvas actually
+  painted its graph.
 - External browser requests are denied by default. If the export depends on a
   CDN runtime and the health gate reports `capture-source-unresolved`, review
   the listed URLs and retry with `--allow-browser-network`. The opt-in permits

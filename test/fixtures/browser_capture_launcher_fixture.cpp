@@ -33,7 +33,11 @@ int main(int argc, char** argv) {
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) args.emplace_back(argv[i]);
     if (args.size() == 1 && args[0] == "--version") {
-        std::cout << "v22.0.0\n";
+        // This binary is used as the browser executable in the production
+        // importer test. Advertise a supported Chromium-shaped version so
+        // discovery reaches capture and the test can exercise the intended
+        // provenance rejection rather than failing at the version floor.
+        std::cout << "Google Chrome 151.0.7922.72\n";
         return 0;
     }
     if (args.size() < 2) return 64;
@@ -51,6 +55,32 @@ int main(int argc, char** argv) {
             std::cerr << "Page.captureScreenshot is not supported\n";
             return 1;
         }
+        // Mirror Browser.getVersion so the C++ discovery path can bind the
+        // selected executable to its CDP protocol/build identity. Test
+        // wrappers advertise their version in the script body; reflect that
+        // value so the probe exercises the same-version contract.
+        std::string version = "151.0.7922.72";
+        const auto browser = value_after(args, "--browser");
+        std::ifstream browser_source(browser);
+        const std::string source{std::istreambuf_iterator<char>(browser_source),
+                                 std::istreambuf_iterator<char>()};
+        const auto is_wrapper =
+            browser.find("pulp-browser-capture-launcher-fixture") == std::string::npos &&
+            source.find("#!/") != std::string::npos;
+        if (is_wrapper) {
+            for (const auto candidate : {"999.0.0.0", "123.0.0.0"}) {
+                if (source.find(candidate) != std::string::npos) {
+                    version = candidate;
+                    break;
+                }
+            }
+        }
+        const auto product =
+            is_wrapper && source.find("pulp-capability-firefox") != std::string::npos ? "Firefox"
+                                                                                      : "Chrome";
+        std::cout << "{\"ok\":true,\"product\":\"" << product << "/" << version
+                  << "\",\"protocolVersion\":\"1.3\","
+                     "\"revision\":\"@fixture\"}\n";
         return 0;
     }
     if (command != "capture") return 65;

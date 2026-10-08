@@ -144,6 +144,14 @@ class AliveToken {
         return handle && handle->alive.load(std::memory_order_acquire);
     }
 
+    // Preserve the read-only compatibility surface for older callback owners
+    // that still use an independent shared atomic sentinel. These sentinels do
+    // not participate in AliveToken lease admission or retirement; callers
+    // that dereference owner-backed state must use Handle plus try_acquire().
+    static bool is_alive(const std::shared_ptr<std::atomic<bool>>& handle) noexcept {
+        return handle && handle->load(std::memory_order_acquire);
+    }
+
     /// Atomically admit one callback before teardown can retire the owner.
     ///
     /// Checking is_alive() and then using a captured owner reference is not a

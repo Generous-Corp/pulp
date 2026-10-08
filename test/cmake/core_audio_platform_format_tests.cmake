@@ -291,6 +291,14 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-clap-entry PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-entry)
 
+    add_executable(pulp-test-dspx07-clap-baked-projection
+        test_dspx07_clap_baked_projection.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp)
+    target_link_libraries(pulp-test-dspx07-clap-baked-projection
+        PRIVATE pulp::format pulp::host clap Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-dspx07-clap-baked-projection)
+
     # Multi-plugin-bundle entry: two plugins from one clap_entry via
     # PULP_CLAP_BUNDLE_PLUGIN + PULP_CLAP_BUNDLE_ENTRY. Compiles the adapter TU
     # so it owns its own clap_entry symbol generator, mirroring pulp-test-clap-entry.

@@ -6,7 +6,7 @@
 
 namespace pulp::gpu_audio::detail {
 
-DawnWaveNetFactoryResult create_dawn_wavenet(const DawnSharedIoWavenetProgramSpec& spec,
+DawnWaveNetFactoryResult create_dawn_wavenet(const WavenetProgramSpec& spec,
                                              const DawnWaveNetFactoryConfig& config) noexcept {
     DawnWaveNetFactoryResult result;
     try {

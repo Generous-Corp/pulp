@@ -80,13 +80,12 @@ jobs:
 
       - name: Build tracing test targets
         run: |
-          cmake --build build \
+          tools/ci/governed-build.sh cmake --build build \
             --target pulp-test-tracing \
-                     pulp-test-tracing-session \
                      pulp-test-offline-tracing \
                      pulp-test-ship-tracing-guard \
-                     pulp-test-tracing-canvas-layers \
-            -j"$(nproc)"
+                     pulp-test-group-core-runtime \
+                     pulp-test-group-core-view
 
       - name: Run tracing test suites
         # "tracing is off by default" asserts kTracingEnabled == false and is
@@ -153,7 +152,7 @@ jobs:
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DCMAKE_INSTALL_PREFIX="$PWD/stage"
-          cmake --build build-sdk -j"$(nproc)"
+          tools/ci/governed-build.sh cmake --build build-sdk
           cmake --install build-sdk
 
       - name: Installed artifacts really carry Perfetto

@@ -35,6 +35,9 @@ struct BrowserHtmlImportRequest {
     /// because the capture is the A-side of the A/B, not a legacy path.
     bool native_panel_lowering = false;
     bool materialized_canvas_composition = false;
+    /// Fail validation when materialized canvas evidence is completely
+    /// transparent. Only meaningful with materialized canvas composition.
+    bool require_canvas_ink = false;
 };
 
 struct BrowserHtmlNotApplicable {};

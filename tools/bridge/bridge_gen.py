@@ -237,17 +237,51 @@ inline void register_set_parameter(EditorBridge& bridge, SetParameterHandler han
 // setup; the helper validates every target before registering any handler, then routes
 // set through StateStore. Gesture commands stay explicit contract declarations
 // until a host-owned lifecycle adapter is supplied.
+//
+// The weak reference must share actual ownership of the store (or its enclosing
+// owner), never a no-op deleter around a borrowed store. A dispatch leases that
+// ownership through set_value and its synchronous listeners. AliveToken only
+// rejects new commands after retirement; an admitted command may finish. This
+// helper is for non-realtime editor dispatch; it may release the final owner.
 struct StateStoreParameterBinding {
     std::string key;
     state::ParamID id = 0;
 };
 
+inline bool apply_state_store_set_parameter(
+    std::weak_ptr<state::StateStore> store, runtime::AliveToken::Handle owner_alive,
+    const std::shared_ptr<const std::map<std::string, state::ParamID>>& key_to_id,
+    const SetParameterRequest& request) {
+    const auto store_lease = store.lock();
+    if (!store_lease)
+        return false;
+    const auto alive_lease = runtime::AliveToken::try_acquire(owner_alive);
+    if (!alive_lease)
+        return false;
+    const auto found = key_to_id->find(request.key);
+    if (found == key_to_id->end())
+        return false;
+    // The wire contract carries a double, while StateStore stores
+    // float. Check representability before narrowing: converting an
+    // out-of-range double to float is implementation-defined and can
+    // otherwise turn an accepted write into a default/clamped value.
+    constexpr auto max_float = static_cast<double>(std::numeric_limits<float>::max());
+    if (request.value > max_float || request.value < -max_float)
+        return false;
+    const auto value = static_cast<float>(request.value);
+    if (!std::isfinite(value))
+        return false;
+    store_lease->set_value(found->second, value);
+    return true;
+}
+
 inline bool register_state_store_set_parameter_handler(
-    EditorBridge& bridge, state::StateStore& store, runtime::AliveToken::Handle owner_alive,
+    EditorBridge& bridge, std::weak_ptr<state::StateStore> store,
+    runtime::AliveToken::Handle owner_alive,
     std::initializer_list<StateStoreParameterBinding> bindings) {
-    // Registration inspects the host-owned store, so it needs the same
-    // quiescence proof as dispatch. This also closes the retire/registration
-    // race before any handler is installed.
+    const auto store_lease = store.lock();
+    if (!store_lease)
+        return false;
     const auto registration_lease = runtime::AliveToken::try_acquire(owner_alive);
     if (!registration_lease)
         return false;
@@ -256,7 +290,7 @@ inline bool register_state_store_set_parameter_handler(
     for (const auto& binding : bindings) {
         if (binding.key.empty())
             return false;
-        if (store.info(binding.id) == nullptr)
+        if (store_lease->info(binding.id) == nullptr)
             return false;
         if (!ids.emplace(binding.id).second)
             return false;
@@ -266,30 +300,10 @@ inline bool register_state_store_set_parameter_handler(
     if (key_to_id->empty())
         return false;
 
-    register_set_parameter(bridge,
-                           [&store, owner_alive, key_to_id](const SetParameterRequest& request) {
-                               // This editor/control callback may take the host-side
-                               // quiescence lease; it is intentionally not an audio RT path.
-                               // is_alive() followed by a raw StateStore reference is
-                               // racy: teardown may retire and destroy the store between
-                               // the check and the write. The lease admits this callback
-                               // atomically and makes owner teardown wait for its release.
-                               const auto lease = runtime::AliveToken::try_acquire(owner_alive);
-                               if (!lease)
-                                   return false;
-                               const auto found = key_to_id->find(request.key);
-                               if (found == key_to_id->end())
-                                   return false;
-                               const auto value = static_cast<float>(request.value);
-                               // The wire contract carries a double, while StateStore stores
-                               // float. A finite double can still overflow during narrowing;
-                               // reject it instead of letting StateStore sanitize it to the
-                               // parameter default while reporting accepted=true.
-                               if (!std::isfinite(value))
-                                   return false;
-                               store.set_value(found->second, value);
-                               return true;
-                           });
+    register_set_parameter(
+        bridge, [store, owner_alive, key_to_id](const SetParameterRequest& request) {
+            return apply_state_store_set_parameter(store, owner_alive, key_to_id, request);
+        });
     return true;
 }
 """
@@ -328,6 +342,7 @@ def render_cpp(data: dict[str, Any]) -> str:
         "#include <cmath>\n"
         "#include <functional>\n"
         "#include <initializer_list>\n"
+        "#include <limits>\n"
         "#include <map>\n"
         "#include <memory>\n"
         "#include <set>\n"
@@ -425,7 +440,15 @@ def render_docs(data: dict[str, Any]) -> str:
         intro = [
             "The TOML contract is the source of truth. The generated table makes names and scalar payload shapes reviewable and deterministic. The canonical `set_parameter` command also emits typed payload validation, a response builder, and a registration helper; its callback remains responsible for resolving the key into plugin state.",
             "",
-            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. The production helper accepts an immutable one-to-one wire key→`ParamID` table, rejects duplicate keys or IDs before registration, and holds an AliveToken lease across store access so owner teardown waits for in-flight dispatch. The owner must retire outside a leased callback; reentrant retirement waits for callback release by design. SDK packaging/export, an installed generation workflow, and `@pulp/react` integration remain follow-up boundaries.",
+            "The generated C++ header and standalone TypeScript wrapper remain source-tree artifacts in this slice. The TypeScript wrapper includes `jsonTransport`, which serializes the generated request envelope and parses the JSON response at the bridge boundary. The production helper accepts an immutable one-to-one wire key→`ParamID` table and rejects duplicate keys or IDs before registration. SDK packaging/export, an installed generation workflow, and `@pulp/react` integration remain follow-up boundaries.",
+            "",
+            "## StateStore binding lifetime",
+            "",
+            "`register_state_store_set_parameter_handler` takes a `std::weak_ptr<StateStore>` plus the owner's `AliveToken::Handle`. The weak pointer must share actual ownership of the store, or use an aliasing shared pointer to the owner containing it; wrapping a borrowed store in a no-op deleter does not satisfy this contract. Registration and each dispatch lock a strong store lease before reading the store. The installed handler retains only the weak pointer between calls, so an editor cannot keep a retired plugin alive indefinitely.",
+            "",
+            "Retire the token before releasing the owner's strong reference. Dispatches that observe retirement or an expired store return `accepted:false`. A dispatch admitted before retirement may complete its write and synchronous listeners while holding the strong lease; retirement is cancellation of future admission, not a wait or rollback. If teardown must wait for all effects, join/serialize dispatch first. Listeners that borrow other owner state must share the same ownership lease (for example through an aliasing store pointer) or be drained separately. An old registration never retargets a replacement store.",
+            "",
+            "Registration, handler-table changes, and bridge destruction must be serialized with dispatch, as required by `EditorBridge`'s unsynchronized handler table. The owning strong pointer can be released concurrently from a different shared-pointer instance. Parameter metadata must remain frozen after registration. This is a non-realtime editor command path: parsing and shared ownership may allocate, and the last lease can destroy the store on the dispatch thread. Keep listeners and the final deleter valid for that thread; the audio `set_value_rt` path is unchanged.",
             "",
         ]
     else:

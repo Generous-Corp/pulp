@@ -14,14 +14,14 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include "../tools/bridge/generated_editor_bridge.hpp"
-#include "pulp/platform/child_process.hpp"
-#include "pulp/state/store.hpp"
 #include "pulp/view/editor_bridge.hpp"
+#include "pulp/platform/child_process.hpp"
+#include "../tools/bridge/generated_editor_bridge.hpp"
 #include "pulp/view/script_engine.hpp"
 #include "pulp/view/scripted_ui.hpp"
 #include "pulp/view/web_view.hpp"
 #include "pulp/view/widgets.hpp"
+#include "pulp/state/store.hpp"
 #include "support/unique_temp_dir.hpp"
 
 #include <choc/containers/choc_Value.h>
@@ -29,16 +29,18 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstdint>
+#include <future>
+#include <memory>
+#include <thread>
 #include <cstdlib>
+#include <cstdint>
+#include <functional>
 #include <filesystem>
 #include <fstream>
-#include <functional>
-#include <future>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -46,9 +48,7 @@
 // Concrete JsRuntime definition so attach_native_runtime can link in
 // tests. The framework forward-declares JsRuntime; the stub body
 // never touches members, so an empty class satisfies the reference.
-namespace pulp::view {
-class JsRuntime {};
-} // namespace pulp::view
+namespace pulp::view { class JsRuntime {}; }
 
 using Catch::Approx;
 using pulp::view::EditorBridge;
@@ -56,13 +56,13 @@ using pulp::view::EditorBridge;
 namespace {
 
 bool response_ok(const std::string& r) {
-    return r.find(R"("ok": true)") != std::string::npos ||
-           r.find(R"("ok":true)") != std::string::npos;
+    return r.find(R"("ok": true)") != std::string::npos
+        || r.find(R"("ok":true)")  != std::string::npos;
 }
 
 bool response_has_error(const std::string& r, std::string_view substr) {
-    const bool not_ok = r.find(R"("ok": false)") != std::string::npos ||
-                        r.find(R"("ok":false)") != std::string::npos;
+    const bool not_ok = r.find(R"("ok": false)") != std::string::npos
+                     || r.find(R"("ok":false)")  != std::string::npos;
     return not_ok && r.find(substr) != std::string::npos;
 }
 
@@ -71,50 +71,60 @@ bool response_has_error(const std::string& r, std::string_view substr) {
 // ── Envelope-level error vocabulary (matches #709 standard codes) ────────
 
 TEST_CASE("EditorBridge: malformed JSON returns malformed_json error",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     const auto resp = bridge.dispatch_json("not json");
     CHECK(response_has_error(resp, "malformed JSON"));
 }
 
-TEST_CASE("EditorBridge: non-object envelope is rejected", "[editor_bridge][issue-709]") {
+TEST_CASE("EditorBridge: non-object envelope is rejected",
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     const auto resp = bridge.dispatch_json("[1,2,3]");
     CHECK(response_has_error(resp, "envelope must be an object"));
 }
 
 TEST_CASE("EditorBridge: envelope missing 'type' returns missing_field error",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     const auto resp = bridge.dispatch_json(R"({"payload":{}})");
     CHECK(response_has_error(resp, "'type'"));
 }
 
 TEST_CASE("EditorBridge: envelope with non-string 'type' is rejected",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     const auto resp = bridge.dispatch_json(R"({"type":42})");
     CHECK(response_has_error(resp, "'type'"));
 }
 
 TEST_CASE("EditorBridge: envelope with empty-string 'type' is rejected",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     const auto resp = bridge.dispatch_json(R"({"type":""})");
     CHECK(response_has_error(resp, "'type'"));
 }
 
-TEST_CASE("EditorBridge: unknown type returns unknown_type error", "[editor_bridge][issue-709]") {
+TEST_CASE("EditorBridge: unknown type returns unknown_type error",
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     const auto resp = bridge.dispatch_json(R"({"type":"not_registered"})");
     CHECK(response_has_error(resp, "unknown message type"));
 }
 
 TEST_CASE("EditorBridge: handler exception is caught as internal_error",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
-    bridge.add_handler("boom",
-                       [](const auto&) -> std::string { throw std::runtime_error("kaboom"); });
+    bridge.add_handler("boom", [](const auto&) -> std::string {
+        throw std::runtime_error("kaboom");
+    });
     const auto resp = bridge.dispatch_json(R"({"type":"boom"})");
     CHECK(response_has_error(resp, "internal error"));
 }
@@ -122,7 +132,8 @@ TEST_CASE("EditorBridge: handler exception is caught as internal_error",
 // ── Handler dispatch happy paths ─────────────────────────────────────────
 
 TEST_CASE("EditorBridge: registered handler receives empty payload when omitted",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     bool called = false;
     bool was_object = false;
@@ -138,7 +149,8 @@ TEST_CASE("EditorBridge: registered handler receives empty payload when omitted"
 }
 
 TEST_CASE("EditorBridge: registered handler receives parsed payload",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     float observed = 0.0f;
     bridge.add_handler("morph", [&](const choc::value::ValueView& payload) {
@@ -150,7 +162,9 @@ TEST_CASE("EditorBridge: registered handler receives parsed payload",
     CHECK(observed == Approx(0.75f));
 }
 
-TEST_CASE("EditorBridge: handler can return success with extras", "[editor_bridge][issue-709]") {
+TEST_CASE("EditorBridge: handler can return success with extras",
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     bridge.add_handler("save_preset", [](const auto&) {
         auto extras = choc::value::createObject("");
@@ -164,7 +178,8 @@ TEST_CASE("EditorBridge: handler can return success with extras", "[editor_bridg
 }
 
 TEST_CASE("EditorBridge: handler-level err_response surfaces the message verbatim",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     bridge.add_handler("paint", [](const auto&) {
         return EditorBridge::err_response("paint without paint_start");
@@ -176,24 +191,21 @@ TEST_CASE("EditorBridge: handler-level err_response surfaces the message verbati
 // ── Handler registration semantics ───────────────────────────────────────
 
 TEST_CASE("EditorBridge: add_handler replaces an existing handler silently",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     int chosen = 0;
-    bridge.add_handler("hello", [&](const auto&) {
-        chosen = 1;
-        return EditorBridge::ok_response();
-    });
-    bridge.add_handler("hello", [&](const auto&) {
-        chosen = 2;
-        return EditorBridge::ok_response();
-    });
+    bridge.add_handler("hello", [&](const auto&) { chosen = 1; return EditorBridge::ok_response(); });
+    bridge.add_handler("hello", [&](const auto&) { chosen = 2; return EditorBridge::ok_response(); });
     CHECK(bridge.handler_count() == 1);
     CHECK(bridge.has_handler("hello"));
     bridge.dispatch_json(R"({"type":"hello"})");
     CHECK(chosen == 2);
 }
 
-TEST_CASE("EditorBridge: remove_handler reverts to unknown_type", "[editor_bridge][issue-709]") {
+TEST_CASE("EditorBridge: remove_handler reverts to unknown_type",
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     bridge.add_handler("hello", [](const auto&) { return EditorBridge::ok_response(); });
     bridge.remove_handler("hello");
@@ -268,9 +280,9 @@ TEST_CASE("generated set_parameter dispatch updates a real StateStore",
 
 TEST_CASE("generated StateStore registration routes stable keys safely",
           "[editor_bridge][typed-contract][state]") {
-    pulp::state::StateStore store;
-    store.add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
-    store.add_parameter({.id = 2, .name = "Mix", .unit = "%", .range = {0.0f, 1.0f, 0.5f}});
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
+    store->add_parameter({.id = 2, .name = "Mix", .unit = "%", .range = {0.0f, 1.0f, 0.5f}});
     pulp::runtime::AliveToken owner_alive;
 
     EditorBridge bridge;
@@ -279,15 +291,15 @@ TEST_CASE("generated StateStore registration routes stable keys safely",
 
     CHECK(response_ok(bridge.dispatch_json(
         R"({"type":"set_parameter","payload":{"key":"gain","value":-6.25}})")));
-    CHECK(store.get_value(1) == Approx(-6.25f));
+    CHECK(store->get_value(1) == Approx(-6.25f));
 
     // Unknown keys fail closed and cannot mutate an unrelated parameter.
-    const auto before = store.get_value(1);
+    const auto before = store->get_value(1);
     const auto unknown_set =
         bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"missing","value":4.0}})");
     CHECK(response_ok(unknown_set));
     CHECK_FALSE(choc::json::parse(unknown_set)["accepted"].getBool());
-    CHECK(store.get_value(1) == Approx(before));
+    CHECK(store->get_value(1) == Approx(before));
 
     // A finite JSON double can overflow the StateStore float representation;
     // reject it before narrowing so accepted=true never hides a reset to the
@@ -296,7 +308,7 @@ TEST_CASE("generated StateStore registration routes stable keys safely",
         bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":1e300}})");
     CHECK(response_ok(overflow));
     CHECK_FALSE(choc::json::parse(overflow)["accepted"].getBool());
-    CHECK(store.get_value(1) == Approx(before));
+    CHECK(store->get_value(1) == Approx(before));
 
     // The liveness handle makes the callback fail closed before it touches
     // StateStore when a plugin retires its owner during editor teardown.
@@ -305,7 +317,7 @@ TEST_CASE("generated StateStore registration routes stable keys safely",
         bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":2.0}})");
     CHECK(response_ok(retired));
     CHECK_FALSE(choc::json::parse(retired)["accepted"].getBool());
-    CHECK(store.get_value(1) == Approx(before));
+    CHECK(store->get_value(1) == Approx(before));
 
     // Registration validates the complete identity table before mutating the
     // bridge, so a missing target cannot leave a half-installed command set.
@@ -319,53 +331,166 @@ TEST_CASE("generated StateStore registration routes stable keys safely",
     CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
         duplicate, store, duplicate_alive.capture(), {{"gain", 1}, {"gain_alias", 1}}));
     CHECK(duplicate.handler_count() == 0);
+
+    // Wire keys are also identities. Distinct ParamIDs must not be allowed to
+    // collapse onto one key, or a later binding would silently win in the map.
+    EditorBridge duplicate_key;
+    pulp::runtime::AliveToken duplicate_key_alive;
+    CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        duplicate_key, store, duplicate_key_alive.capture(), {{"gain", 1}, {"gain", 2}}));
+    CHECK(duplicate_key.handler_count() == 0);
 }
 
-TEST_CASE("generated StateStore dispatch quiesces before owner teardown",
-          "[editor_bridge][typed-contract][state][concurrency]") {
-    pulp::state::StateStore store;
-    store.add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
+TEST_CASE("generated StateStore helper rejects a post-narrowing nonfinite value",
+          "[editor_bridge][typed-contract][state][negative]") {
+    namespace contract = pulp::view::editor_bridge_contract;
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .range = {-60.0f, 12.0f, 0.0f}});
     pulp::runtime::AliveToken owner_alive;
+    const auto key_to_id = std::make_shared<const std::map<std::string, pulp::state::ParamID>>(
+        std::map<std::string, pulp::state::ParamID>{{"gain", 1}});
+    const auto before = store->get_value(1);
 
-    std::promise<void> listener_entered_promise;
-    auto listener_entered = listener_entered_promise.get_future();
-    std::promise<void> release_listener_promise;
-    auto release_listener = release_listener_promise.get_future();
-    auto listener = store.add_audio_listener([&](pulp::state::ParamID, float) {
-        listener_entered_promise.set_value();
-        release_listener.wait();
-    });
+    // The JSON decoder rejects nonfinite wire values before this callback. The
+    // callback is still a public generated production seam, so exercise it
+    // directly to prove the defensive post-narrowing guard remains effective
+    // for an admitted in-process request as well.
+    const contract::SetParameterRequest request{"gain", std::numeric_limits<double>::quiet_NaN()};
+    CHECK_FALSE(contract::apply_state_store_set_parameter(store, owner_alive.capture(), key_to_id,
+                                                          request));
+    CHECK(store->get_value(1) == Approx(before));
+}
 
+TEST_CASE("generated StateStore handler leases an admitted write across concurrent retirement",
+          "[editor_bridge][typed-contract][state][lifetime][concurrency]") {
+    using namespace std::chrono_literals;
+    namespace contract = pulp::view::editor_bridge_contract;
+    std::atomic<int> destructions{0};
+    auto store =
+        std::shared_ptr<pulp::state::StateStore>(new pulp::state::StateStore, [&](auto* value) {
+            delete value;
+            destructions.fetch_add(1);
+        });
+    store->add_parameter({.id = 1, .name = "Gain", .range = {-60.0f, 12.0f, 0.0f}});
+    std::weak_ptr<pulp::state::StateStore> weak_store = store;
+    pulp::runtime::AliveToken owner_alive;
     EditorBridge bridge;
-    REQUIRE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
-        bridge, store, owner_alive.capture(), {{"gain", 1}}));
+    REQUIRE(contract::register_state_store_set_parameter_handler(
+        bridge, weak_store, owner_alive.capture(), {{"gain", 1}}));
+    // Registration and the idle handler must not retain ownership.
+    REQUIRE(store.use_count() == 1);
 
-    auto dispatch = std::async(std::launch::async, [&bridge] {
+    std::promise<long> entered;
+    std::promise<void> resume;
+    auto entered_future = entered.get_future();
+    auto resume_future = resume.get_future().share();
+    std::atomic<int> writes{0};
+    std::string nested_response;
+    auto listener = store->add_listener(
+        [&](pulp::state::ParamID, float) {
+            if (writes.fetch_add(1) != 0)
+                return;
+            // An inline listener is still inside the production set_value call.
+            // Observe the lease before the test is allowed to drop the owner. This
+            // makes a planted raw-reference regression fail without touching freed
+            // memory: if the lease is absent, the test keeps its owner alive.
+            entered.set_value(weak_store.use_count());
+            if (resume_future.wait_for(5s) != std::future_status::ready)
+                return;
+            nested_response = bridge.dispatch_json(
+                R"({"type":"set_parameter","payload":{"key":"gain","value":2.0}})");
+        },
+        pulp::state::ListenerThread::Audio);
+
+    auto dispatched = std::async(std::launch::async, [&] {
         return bridge.dispatch_json(
             R"({"type":"set_parameter","payload":{"key":"gain","value":-6.25}})");
     });
-    if (listener_entered.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
-        // Do not leave the dispatch future blocked on the listener if this
-        // setup gate fails; the test must fail cleanly rather than hang.
-        release_listener_promise.set_value();
-        CHECK(dispatch.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
-        return;
-    }
+    const bool reached_listener = entered_future.wait_for(5s) == std::future_status::ready;
+    const long active_owners = reached_listener ? entered_future.get() : 0;
+    // Retirement must publish the invalidation immediately but wait for the
+    // admitted dispatch lease. Keep it asynchronous while the listener is
+    // deliberately blocked so the test can prove both halves of the contract.
+    auto retirement = std::async(std::launch::async, [&owner_alive] { owner_alive.retire(); });
+    REQUIRE(retirement.wait_for(50ms) == std::future_status::timeout);
 
-    // The callback is inside StateStore::set_value while the listener is
-    // blocked. A teardown that returns here would be able to destroy the
-    // store before dispatch has released its owner lease.
-    auto teardown = std::async(std::launch::async, [&owner_alive] { owner_alive.retire(); });
-    CHECK(teardown.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout);
+    // Drop the only external owner while the dispatch thread is inside
+    // StateStore::set_value. The handler's strong lease must be the reason
+    // this raw weak reference remains valid until the synchronous listener
+    // and the outer dispatch return.
+    store.reset();
+    const bool alive_during_callback = !weak_store.expired();
+    const int destroyed_during_callback = destructions.load();
+    resume.set_value();
+    const auto response = dispatched.get(); // join before any test assertion can throw
+    REQUIRE(retirement.wait_for(1s) == std::future_status::ready);
+    retirement.get();
 
-    release_listener_promise.set_value();
-    REQUIRE(dispatch.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
-    CHECK(response_ok(dispatch.get()));
-    REQUIRE(teardown.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
-    teardown.get();
-    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(owner_alive.capture()));
-    CHECK_FALSE(static_cast<bool>(pulp::runtime::AliveToken::try_acquire(owner_alive.capture())));
-    CHECK(store.get_value(1) == Approx(-6.25f));
+    REQUIRE(reached_listener);
+    CHECK(active_owners == 2);
+    CHECK(alive_during_callback);
+    CHECK(destroyed_during_callback == 0);
+    REQUIRE(response_ok(response));
+    CHECK(choc::json::parse(response)["accepted"].getBool());
+    REQUIRE(response_ok(nested_response));
+    CHECK_FALSE(choc::json::parse(nested_response)["accepted"].getBool());
+    CHECK(writes.load() == 1);
+    CHECK(weak_store.expired());
+    CHECK(destructions.load() == 1);
+    const auto late =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":3.0}})");
+    CHECK_FALSE(choc::json::parse(late)["accepted"].getBool());
+}
+
+TEST_CASE("generated StateStore registration rejects missing ownership and incomplete identity",
+          "[editor_bridge][typed-contract][state][negative]") {
+    namespace contract = pulp::view::editor_bridge_contract;
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 1.0f, 0.0f}});
+    pulp::runtime::AliveToken alive;
+    EditorBridge bridge;
+    bridge.add_handler("set_parameter",
+                       [](const auto&) { return EditorBridge::err_response("existing handler"); });
+    auto unchanged = [&] {
+        CHECK(bridge.handler_count() == 1);
+        CHECK(response_has_error(
+            bridge.dispatch_json(
+                R"({"type":"set_parameter","payload":{"key":"gain","value":0.5}})"),
+            "existing handler"));
+    };
+    CHECK_FALSE(contract::register_state_store_set_parameter_handler(bridge, {}, alive.capture(),
+                                                                     {{"gain", 1}}));
+    unchanged();
+    CHECK_FALSE(contract::register_state_store_set_parameter_handler(
+        bridge, store, alive.capture(), {{"gain", 1}, {"missing", 999}}));
+    unchanged();
+    CHECK_FALSE(contract::register_state_store_set_parameter_handler(bridge, store, alive.capture(),
+                                                                     {{"", 1}}));
+    unchanged();
+    CHECK_FALSE(
+        contract::register_state_store_set_parameter_handler(bridge, store, alive.capture(), {}));
+    unchanged();
+    const std::weak_ptr<pulp::state::StateStore> expired = store;
+    store.reset();
+    CHECK_FALSE(contract::register_state_store_set_parameter_handler(
+        bridge, expired, alive.capture(), {{"gain", 1}}));
+    unchanged();
+}
+
+TEST_CASE("generated StateStore handler rejects expired store without owner retirement",
+          "[editor_bridge][typed-contract][state][lifetime]") {
+    namespace contract = pulp::view::editor_bridge_contract;
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 1.0f, 0.0f}});
+    pulp::runtime::AliveToken alive;
+    EditorBridge bridge;
+    REQUIRE(contract::register_state_store_set_parameter_handler(bridge, store, alive.capture(),
+                                                                 {{"gain", 1}}));
+    store.reset();
+    CHECK(pulp::runtime::AliveToken::is_alive(alive.capture()));
+    const auto response =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":0.5}})");
+    CHECK_FALSE(choc::json::parse(response)["accepted"].getBool());
 }
 
 TEST_CASE("legacy AliveToken Handle invalidation stays nonblocking",
@@ -439,6 +564,7 @@ TEST_CASE("AliveToken rejects concurrent admission after Handle invalidation",
     CHECK(admitted_after_invalidation.load(std::memory_order_relaxed) == 0);
     CHECK_FALSE(pulp::runtime::AliveToken::is_alive(handle));
 }
+
 
 TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
           "[editor_bridge][typed-contract][typescript]") {
@@ -577,18 +703,19 @@ TEST_CASE("generated set_parameter remains fail-closed when registration is miss
 // ── Value coercion helpers ───────────────────────────────────────────────
 
 TEST_CASE("EditorBridge::get_float: handles missing key, type coercion, defaults",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     auto obj = choc::value::createObject("");
-    obj.addMember("as_int", 42);
+    obj.addMember("as_int",   42);
     obj.addMember("as_int64", static_cast<int64_t>(7));
     obj.addMember("as_float", 1.5);
-    obj.addMember("as_str", std::string("nope"));
+    obj.addMember("as_str",   std::string("nope"));
 
-    CHECK(EditorBridge::get_float(obj, "as_int", -1.0f) == Approx(42.0f));
+    CHECK(EditorBridge::get_float(obj, "as_int",   -1.0f) == Approx(42.0f));
     CHECK(EditorBridge::get_float(obj, "as_int64", -1.0f) == Approx(7.0f));
     CHECK(EditorBridge::get_float(obj, "as_float", -1.0f) == Approx(1.5f));
-    CHECK(EditorBridge::get_float(obj, "as_str", -1.0f) == Approx(-1.0f)); // wrong type → default
-    CHECK(EditorBridge::get_float(obj, "absent", 42.5f) == Approx(42.5f)); // missing → default
+    CHECK(EditorBridge::get_float(obj, "as_str",   -1.0f) == Approx(-1.0f));   // wrong type → default
+    CHECK(EditorBridge::get_float(obj, "absent",   42.5f) == Approx(42.5f));   // missing → default
 
     // Non-object value must fall back to default without throwing.
     auto arr = choc::value::createEmptyArray();
@@ -596,48 +723,51 @@ TEST_CASE("EditorBridge::get_float: handles missing key, type coercion, defaults
 }
 
 TEST_CASE("EditorBridge::get_uint: clamps negatives to zero, handles type coercion",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     auto obj = choc::value::createObject("");
-    obj.addMember("pos", 42);
-    obj.addMember("neg", -3);
-    obj.addMember("flt", 2.7);
-    obj.addMember("str", std::string("nope"));
+    obj.addMember("pos",   42);
+    obj.addMember("neg",   -3);
+    obj.addMember("flt",   2.7);
+    obj.addMember("str",   std::string("nope"));
 
-    CHECK(EditorBridge::get_uint(obj, "pos", 0) == 42u);
-    CHECK(EditorBridge::get_uint(obj, "neg", 99) == 0u);  // negative clamped
-    CHECK(EditorBridge::get_uint(obj, "flt", 0) == 2u);   // float truncated
-    CHECK(EditorBridge::get_uint(obj, "str", 77) == 77u); // wrong type → default
+    CHECK(EditorBridge::get_uint(obj, "pos",   0) == 42u);
+    CHECK(EditorBridge::get_uint(obj, "neg",   99) == 0u);    // negative clamped
+    CHECK(EditorBridge::get_uint(obj, "flt",   0) == 2u);     // float truncated
+    CHECK(EditorBridge::get_uint(obj, "str",   77) == 77u);   // wrong type → default
     CHECK(EditorBridge::get_uint(obj, "absent", 5) == 5u);
 }
 
 // Regression coverage: floats above SIZE_MAX must clamp, not invoke undefined
 // behavior via direct float→size_t cast.
 TEST_CASE("EditorBridge::get_uint: clamps floats above SIZE_MAX to size_t max",
-          "[editor_bridge][issue-709]") {
-    const double huge = 1e30;   // way above 2^64 ≈ 1.8e19
-    const double huger = 1e300; // exponent overflow territory
+          "[editor_bridge][issue-709]")
+{
+    const double huge = 1e30;        // way above 2^64 ≈ 1.8e19
+    const double huger = 1e300;      // exponent overflow territory
     auto obj = choc::value::createObject("");
-    obj.addMember("huge_f64", huge);
+    obj.addMember("huge_f64",  huge);
     obj.addMember("huger_f64", huger);
-    obj.addMember("huge_f32", static_cast<float>(1e30f));
-    obj.addMember("neg_huge", -1e20);
+    obj.addMember("huge_f32",  static_cast<float>(1e30f));
+    obj.addMember("neg_huge",  -1e20);
 
     constexpr auto kMax = std::numeric_limits<std::size_t>::max();
-    CHECK(EditorBridge::get_uint(obj, "huge_f64", 0) == kMax);
+    CHECK(EditorBridge::get_uint(obj, "huge_f64",  0) == kMax);
     CHECK(EditorBridge::get_uint(obj, "huger_f64", 0) == kMax);
-    CHECK(EditorBridge::get_uint(obj, "huge_f32", 0) == kMax);
-    CHECK(EditorBridge::get_uint(obj, "neg_huge", 99) == 0u); // negative still clamps to 0
+    CHECK(EditorBridge::get_uint(obj, "huge_f32",  0) == kMax);
+    CHECK(EditorBridge::get_uint(obj, "neg_huge",  99) == 0u);  // negative still clamps to 0
 }
 
 TEST_CASE("EditorBridge::get_string: returns empty on missing or wrong-type",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     auto obj = choc::value::createObject("");
-    obj.addMember("name", std::string("Spectr"));
-    obj.addMember("count", 3);
+    obj.addMember("name",   std::string("Spectr"));
+    obj.addMember("count",  3);
 
-    CHECK(EditorBridge::get_string(obj, "name") == "Spectr");
-    CHECK(EditorBridge::get_string(obj, "count") == "");  // wrong type
-    CHECK(EditorBridge::get_string(obj, "absent") == ""); // missing
+    CHECK(EditorBridge::get_string(obj, "name")   == "Spectr");
+    CHECK(EditorBridge::get_string(obj, "count")  == "");        // wrong type
+    CHECK(EditorBridge::get_string(obj, "absent") == "");        // missing
 
     // Non-object input must return empty without throwing.
     auto arr = choc::value::createEmptyArray();
@@ -647,7 +777,8 @@ TEST_CASE("EditorBridge::get_string: returns empty on missing or wrong-type",
 // ── Response builder shapes ──────────────────────────────────────────────
 
 TEST_CASE("EditorBridge::ok_response: emits canonical {ok:true} envelope",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     const auto r = EditorBridge::ok_response();
     CHECK(response_ok(r));
     // Should not contain an "error" field when successful.
@@ -655,7 +786,8 @@ TEST_CASE("EditorBridge::ok_response: emits canonical {ok:true} envelope",
 }
 
 TEST_CASE("EditorBridge::ok_response(extras): merges extra members into envelope",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     auto extras = choc::value::createObject("");
     extras.addMember("name", std::string("Bridge Save"));
     extras.addMember("count", 7);
@@ -667,14 +799,17 @@ TEST_CASE("EditorBridge::ok_response(extras): merges extra members into envelope
 }
 
 TEST_CASE("EditorBridge::ok_response(non-object extras): falls back to bare ok envelope",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     auto arr = choc::value::createEmptyArray();
     const auto r = EditorBridge::ok_response(arr);
     CHECK(response_ok(r));
     CHECK(r.find("\"error\"") == std::string::npos);
 }
 
-TEST_CASE("EditorBridge::err_response: emits {ok:false,error:...}", "[editor_bridge][issue-709]") {
+TEST_CASE("EditorBridge::err_response: emits {ok:false,error:...}",
+          "[editor_bridge][issue-709]")
+{
     const auto r = EditorBridge::err_response("custom failure");
     CHECK(response_has_error(r, "custom failure"));
 }
@@ -682,7 +817,8 @@ TEST_CASE("EditorBridge::err_response: emits {ok:false,error:...}", "[editor_bri
 // ── dispatch_webview_message — pre-split envelope path ───────────────────
 
 TEST_CASE("EditorBridge::dispatch_webview_message: handles 'null' payload as empty object",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     bool called = false;
     bool was_object = false;
@@ -698,7 +834,8 @@ TEST_CASE("EditorBridge::dispatch_webview_message: handles 'null' payload as emp
 }
 
 TEST_CASE("EditorBridge::dispatch_webview_message: parses payload_json",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     std::string seen;
     bridge.add_handler("name", [&](const choc::value::ValueView& payload) {
@@ -711,7 +848,8 @@ TEST_CASE("EditorBridge::dispatch_webview_message: parses payload_json",
 }
 
 TEST_CASE("EditorBridge::dispatch_webview_message: malformed payload_json errors",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     bridge.add_handler("anything", [](const auto&) { return EditorBridge::ok_response(); });
     const auto r = bridge.dispatch_webview_message("anything", "not json");
@@ -726,11 +864,14 @@ TEST_CASE("EditorBridge::dispatch_webview_message: malformed payload_json errors
 // the type level so the mistake surfaces at compile time, and these
 // static_asserts lock that contract in.
 
-static_assert(!std::is_copy_constructible_v<EditorBridge>, "EditorBridge must not be copyable");
-static_assert(!std::is_copy_assignable_v<EditorBridge>, "EditorBridge must not be copy-assignable");
+static_assert(!std::is_copy_constructible_v<EditorBridge>,
+              "EditorBridge must not be copyable");
+static_assert(!std::is_copy_assignable_v<EditorBridge>,
+              "EditorBridge must not be copy-assignable");
 static_assert(!std::is_move_constructible_v<EditorBridge>,
               "EditorBridge must not be move-constructible");
-static_assert(!std::is_move_assignable_v<EditorBridge>, "EditorBridge must not be move-assignable");
+static_assert(!std::is_move_assignable_v<EditorBridge>,
+              "EditorBridge must not be move-assignable");
 
 // ── Renderer attach helpers ──────────────────────────────────────────────
 //
@@ -742,7 +883,7 @@ static_assert(!std::is_move_assignable_v<EditorBridge>, "EditorBridge must not b
 namespace {
 
 class StubWebViewPanel : public pulp::view::WebViewPanel {
-  public:
+public:
     // Exposed so tests can drive the bridge-registered handler
     // (simulating JS `window.postMessage`).
     std::string deliver(const pulp::view::WebViewMessage& message) {
@@ -755,13 +896,9 @@ class StubWebViewPanel : public pulp::view::WebViewPanel {
     }
 
     // ── Pure virtuals from WebViewPanel ─────────────────────────────
-    bool is_ready() const override {
-        return true;
-    }
+    bool is_ready() const override { return true; }
     void set_ready_handler(ReadyHandler) override {}
-    pulp::view::NativeViewHandle native_handle() override {
-        return {};
-    }
+    pulp::view::NativeViewHandle native_handle() override { return {}; }
     void navigate(const std::string&) override {}
     void set_html(const std::string&) override {}
     void evaluate_js(const std::string&) override {}
@@ -773,18 +910,20 @@ class StubWebViewPanel : public pulp::view::WebViewPanel {
     void post_message(const pulp::view::WebViewMessage&) override {}
     void set_size(uint32_t, uint32_t) override {}
 
-  private:
+private:
     MessageHandler handler_;
 };
 
 } // namespace
 
 TEST_CASE("EditorBridge::attach_webview routes WebViewPanel messages through dispatch",
-          "[editor_bridge][issue-709]") {
+          "[editor_bridge][issue-709]")
+{
     EditorBridge bridge;
     int called_with = 0;
     bridge.add_handler("set_value", [&](const auto& payload) {
-        called_with = static_cast<int>(EditorBridge::get_float(payload, "value", 0.0f));
+        called_with = static_cast<int>(
+            EditorBridge::get_float(payload, "value", 0.0f));
         return EditorBridge::ok_response();
     });
 
@@ -807,7 +946,8 @@ TEST_CASE("EditorBridge::attach_webview routes WebViewPanel messages through dis
 }
 
 TEST_CASE("EditorBridge::detach_webview clears the WebViewPanel message handler",
-          "[editor_bridge][issue-726]") {
+          "[editor_bridge][issue-726]")
+{
     EditorBridge bridge;
     int calls = 0;
     bridge.add_handler("set_value", [&](const auto&) {
@@ -837,7 +977,8 @@ TEST_CASE("EditorBridge::detach_webview clears the WebViewPanel message handler"
 #endif
 
 TEST_CASE("EditorBridge::attach_native_runtime is a no-op stub for #468",
-          "[editor_bridge][issue-709][issue-468]") {
+          "[editor_bridge][issue-709][issue-468]")
+{
     // The native-JS-runtime attach path is a declared seam for pulp
     // #468; the body is intentionally empty until JsRuntime exposes a
     // concrete postMessage primitive. This test locks in the stub's
@@ -856,7 +997,8 @@ TEST_CASE("EditorBridge::attach_native_runtime is a no-op stub for #468",
 }
 
 TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes",
-          "[editor_bridge][native_runtime]") {
+          "[editor_bridge][native_runtime]")
+{
     EditorBridge bridge;
     float received = 0.0f;
     bridge.add_handler("set_value", [&](const auto& payload) {
@@ -865,7 +1007,8 @@ TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes
     });
 
     pulp::view::ScriptEngine engine;
-    CHECK_THROWS_AS(bridge.attach_native_runtime(engine, ""), std::invalid_argument);
+    CHECK_THROWS_AS(bridge.attach_native_runtime(engine, ""),
+                    std::invalid_argument);
     bridge.attach_native_runtime(engine, "__testEditorDispatch");
 
     const auto result = engine.evaluate(
@@ -880,7 +1023,8 @@ TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes
 }
 
 TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement",
-          "[editor_bridge][native_runtime][scripted_ui][reload]") {
+          "[editor_bridge][native_runtime][scripted_ui][reload]")
+{
     namespace fs = std::filesystem;
     const auto temp_dir = pulp::test::make_unique_temp_dir("pulp-editor-bridge-session");
     const auto script_path = temp_dir / "ui.js";
@@ -888,7 +1032,8 @@ TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement"
         std::ofstream out(script_path);
         out << "var response = JSON.parse(__testEditorDispatch(JSON.stringify("
                "{type:'set_value',payload:{value:"
-            << value << "}}))); createLabel('status', response.ok ? 'ok' : 'error', '');";
+            << value
+            << "}}))); createLabel('status', response.ok ? 'ok' : 'error', '');";
     };
     write_script(0.25f);
 
@@ -903,16 +1048,19 @@ TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement"
         return EditorBridge::ok_response();
     });
     pulp::view::ScriptedUiSession session(
-        root, store,
-        {.script_path = script_path, .enable_hot_reload = false, .enable_theme_reload = false});
+        root, store, {.script_path = script_path,
+                      .enable_hot_reload = false,
+                      .enable_theme_reload = false});
 
-    CHECK_THROWS_AS(bridge.attach_native_runtime(session, ""), std::invalid_argument);
+    CHECK_THROWS_AS(bridge.attach_native_runtime(session, ""),
+                    std::invalid_argument);
     bridge.attach_native_runtime(session, "__testEditorDispatch");
     std::string error;
     REQUIRE(session.load(&error));
     CHECK(calls == 1);
     CHECK(received == Approx(0.25f));
-    REQUIRE(dynamic_cast<pulp::view::Label*>(session.bridge()->widget("status")) != nullptr);
+    REQUIRE(dynamic_cast<pulp::view::Label*>(
+                session.bridge()->widget("status")) != nullptr);
 
     write_script(0.75f);
     REQUIRE(session.reload(&error));

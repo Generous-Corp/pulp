@@ -5,6 +5,7 @@
 #include <cmath>
 #include <functional>
 #include <initializer_list>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -149,17 +150,51 @@ inline void register_set_parameter(EditorBridge& bridge, SetParameterHandler han
 // setup; the helper validates every target before registering any handler, then routes
 // set through StateStore. Gesture commands stay explicit contract declarations
 // until a host-owned lifecycle adapter is supplied.
+//
+// The weak reference must share actual ownership of the store (or its enclosing
+// owner), never a no-op deleter around a borrowed store. A dispatch leases that
+// ownership through set_value and its synchronous listeners. AliveToken only
+// rejects new commands after retirement; an admitted command may finish. This
+// helper is for non-realtime editor dispatch; it may release the final owner.
 struct StateStoreParameterBinding {
     std::string key;
     state::ParamID id = 0;
 };
 
+inline bool apply_state_store_set_parameter(
+    std::weak_ptr<state::StateStore> store, runtime::AliveToken::Handle owner_alive,
+    const std::shared_ptr<const std::map<std::string, state::ParamID>>& key_to_id,
+    const SetParameterRequest& request) {
+    const auto store_lease = store.lock();
+    if (!store_lease)
+        return false;
+    const auto alive_lease = runtime::AliveToken::try_acquire(owner_alive);
+    if (!alive_lease)
+        return false;
+    const auto found = key_to_id->find(request.key);
+    if (found == key_to_id->end())
+        return false;
+    // The wire contract carries a double, while StateStore stores
+    // float. Check representability before narrowing: converting an
+    // out-of-range double to float is implementation-defined and can
+    // otherwise turn an accepted write into a default/clamped value.
+    constexpr auto max_float = static_cast<double>(std::numeric_limits<float>::max());
+    if (request.value > max_float || request.value < -max_float)
+        return false;
+    const auto value = static_cast<float>(request.value);
+    if (!std::isfinite(value))
+        return false;
+    store_lease->set_value(found->second, value);
+    return true;
+}
+
 inline bool register_state_store_set_parameter_handler(
-    EditorBridge& bridge, state::StateStore& store, runtime::AliveToken::Handle owner_alive,
+    EditorBridge& bridge, std::weak_ptr<state::StateStore> store,
+    runtime::AliveToken::Handle owner_alive,
     std::initializer_list<StateStoreParameterBinding> bindings) {
-    // Registration inspects the host-owned store, so it needs the same
-    // quiescence proof as dispatch. This also closes the retire/registration
-    // race before any handler is installed.
+    const auto store_lease = store.lock();
+    if (!store_lease)
+        return false;
     const auto registration_lease = runtime::AliveToken::try_acquire(owner_alive);
     if (!registration_lease)
         return false;
@@ -168,7 +203,7 @@ inline bool register_state_store_set_parameter_handler(
     for (const auto& binding : bindings) {
         if (binding.key.empty())
             return false;
-        if (store.info(binding.id) == nullptr)
+        if (store_lease->info(binding.id) == nullptr)
             return false;
         if (!ids.emplace(binding.id).second)
             return false;
@@ -178,30 +213,10 @@ inline bool register_state_store_set_parameter_handler(
     if (key_to_id->empty())
         return false;
 
-    register_set_parameter(bridge,
-                           [&store, owner_alive, key_to_id](const SetParameterRequest& request) {
-                               // This editor/control callback may take the host-side
-                               // quiescence lease; it is intentionally not an audio RT path.
-                               // is_alive() followed by a raw StateStore reference is
-                               // racy: teardown may retire and destroy the store between
-                               // the check and the write. The lease admits this callback
-                               // atomically and makes owner teardown wait for its release.
-                               const auto lease = runtime::AliveToken::try_acquire(owner_alive);
-                               if (!lease)
-                                   return false;
-                               const auto found = key_to_id->find(request.key);
-                               if (found == key_to_id->end())
-                                   return false;
-                               const auto value = static_cast<float>(request.value);
-                               // The wire contract carries a double, while StateStore stores
-                               // float. A finite double can still overflow during narrowing;
-                               // reject it instead of letting StateStore sanitize it to the
-                               // parameter default while reporting accepted=true.
-                               if (!std::isfinite(value))
-                                   return false;
-                               store.set_value(found->second, value);
-                               return true;
-                           });
+    register_set_parameter(
+        bridge, [store, owner_alive, key_to_id](const SetParameterRequest& request) {
+            return apply_state_store_set_parameter(store, owner_alive, key_to_id, request);
+        });
     return true;
 }
 } // namespace pulp::view::editor_bridge_contract

@@ -72,9 +72,8 @@ jobs:
 
       - name: Build timeline scale gates
         run: |
-          cmake --build build-timeline-hardening \
-            --target pulp-test-timeline-scale pulp-test-timeline-agent-view \
-            -j 2
+          tools/ci/governed-build.sh cmake --build build-timeline-hardening \
+            --target pulp-test-timeline-scale pulp-test-timeline-agent-view
 
       - name: Enforce scale, replay, and paging budgets
         env:

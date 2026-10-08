@@ -48,6 +48,18 @@ class BuildGovernancePathTests(unittest.TestCase):
                 self.assertNotRegex(command, r"cmake --build[^'\n]*(?:-j\S*|--parallel(?:=|\s))")
         self.assertGreaterEqual(checked, 1)
 
+    def test_gcc_compile_workflow_builds_use_governor(self) -> None:
+        source = read_source(".github/workflows/gcc-compile-gate.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn("tools/ci/governed-build.sh cmake --build", build_lines[0])
+        self.assertNotRegex(
+            build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))"
+        )
+
     def test_sanitizer_workflow_builds_use_governor(self) -> None:
         source = read_source(".github/workflows/sanitizers.yml")
         build_lines = [line for line in source.splitlines() if "cmake --build" in line]
@@ -113,6 +125,31 @@ class BuildGovernancePathTests(unittest.TestCase):
             self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
         self.assertIn('PULP_BUILD_JOBS="$jobs"', source)
 
+    def test_tart_guest_build_routes_through_governor(self) -> None:
+        source = read_source("tools/ci/tart-run-job.sh")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn("governed-build.sh\" cmake --build", build_lines[0])
+        self.assertNotRegex(
+            build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
+
+    def test_wclap_cloudflare_builds_route_through_governor(self) -> None:
+        source = read_source(".github/workflows/wclap-cloudflare.yml")
+        build_lines = [
+            line for line in source.splitlines() if "cmake --build" in line
+        ]
+        self.assertEqual(len(build_lines), 4)
+        for line in build_lines:
+            self.assertIn('bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build', line)
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+
     def test_sanitizer_and_coverage_helpers_route_builds_through_governor(self) -> None:
         """Local diagnostic lanes must keep their --jobs cap at the governor boundary."""
         for relative in (
@@ -175,6 +212,54 @@ class BuildGovernancePathTests(unittest.TestCase):
             dry_run.stdout.strip(),
             r"^governed-build dry-run receipt: jobs=[1-9][0-9]* grant=tier0 command=.*cmake --build build --target pulp-test-state$",
         )
+
+    def test_intel_portability_build_routes_through_governor(self) -> None:
+        source = read_source(".github/workflows/intel-portability.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn("tools/ci/governed-build.sh cmake --build", build_lines[0])
+        self.assertNotRegex(
+            build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
+
+    def test_web_plugins_builds_route_through_governor(self) -> None:
+        source = read_source(".github/workflows/web-plugins.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertGreaterEqual(len(build_lines), 10)
+        for line in build_lines:
+            self.assertIn("governed-build.sh", line)
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+        # These two jobs set a nested working-directory; the wrapper must be
+        # reached through the workspace root rather than that directory.
+        self.assertIn(
+            'bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build',
+            build_lines[0],
+        )
+        self.assertIn(
+            'bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build',
+            build_lines[1],
+        )
+
+    def test_timeline_fuzz_builds_route_through_governor(self) -> None:
+        source = read_source(".github/workflows/timeline-fuzz.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 2)
+        for line in build_lines:
+            self.assertIn("tools/ci/governed-build.sh", line)
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
 
 
 if __name__ == "__main__":
