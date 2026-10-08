@@ -28,16 +28,22 @@
 #include <choc/text/choc_JSON.h>
 
 #include <atomic>
+#include <chrono>
+#include <future>
+#include <memory>
+#include <thread>
 #include <cstdlib>
 #include <cstdint>
 #include <functional>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 // Concrete JsRuntime definition so attach_native_runtime can link in
 // tests. The framework forward-declares JsRuntime; the stub body
@@ -270,6 +276,215 @@ TEST_CASE("generated set_parameter dispatch updates a real StateStore",
     const auto response_value = choc::json::parse(response);
     REQUIRE(response_value["accepted"].getBool());
     CHECK(store.get_value(1) == Approx(-6.25f));
+}
+
+TEST_CASE("generated StateStore registration routes stable keys safely",
+          "[editor_bridge][typed-contract][state]") {
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
+    store->add_parameter({.id = 2, .name = "Mix", .unit = "%", .range = {0.0f, 1.0f, 0.5f}});
+    pulp::runtime::AliveToken owner_alive;
+
+    EditorBridge bridge;
+    REQUIRE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        bridge, store, owner_alive.capture(), {{"gain", 1}, {"mix", 2}}));
+
+    CHECK(response_ok(bridge.dispatch_json(
+        R"({"type":"set_parameter","payload":{"key":"gain","value":-6.25}})")));
+    CHECK(store->get_value(1) == Approx(-6.25f));
+
+    // Unknown keys fail closed and cannot mutate an unrelated parameter.
+    const auto before = store->get_value(1);
+    const auto unknown_set =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"missing","value":4.0}})");
+    CHECK(response_ok(unknown_set));
+    CHECK_FALSE(choc::json::parse(unknown_set)["accepted"].getBool());
+    CHECK(store->get_value(1) == Approx(before));
+
+    // A finite JSON double can overflow the StateStore float representation;
+    // reject it before narrowing so accepted=true never hides a reset to the
+    // parameter default.
+    const auto overflow =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":1e300}})");
+    CHECK(response_ok(overflow));
+    CHECK_FALSE(choc::json::parse(overflow)["accepted"].getBool());
+    CHECK(store->get_value(1) == Approx(before));
+
+    // The liveness handle makes the callback fail closed before it touches
+    // StateStore when a plugin retires its owner during editor teardown.
+    owner_alive.retire();
+    const auto retired =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":2.0}})");
+    CHECK(response_ok(retired));
+    CHECK_FALSE(choc::json::parse(retired)["accepted"].getBool());
+    CHECK(store->get_value(1) == Approx(before));
+
+    // Registration validates the complete identity table before mutating the
+    // bridge, so a missing target cannot leave a half-installed command set.
+    EditorBridge rejected;
+    CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        rejected, store, owner_alive.capture(), {{"gain", 1}, {"missing", 999}}));
+    CHECK(rejected.handler_count() == 0);
+
+    EditorBridge duplicate;
+    pulp::runtime::AliveToken duplicate_alive;
+    CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        duplicate, store, duplicate_alive.capture(), {{"gain", 1}, {"gain_alias", 1}}));
+    CHECK(duplicate.handler_count() == 0);
+
+    // Wire keys are also identities. Distinct ParamIDs must not be allowed to
+    // collapse onto one key, or a later binding would silently win in the map.
+    EditorBridge duplicate_key;
+    pulp::runtime::AliveToken duplicate_key_alive;
+    CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        duplicate_key, store, duplicate_key_alive.capture(), {{"gain", 1}, {"gain", 2}}));
+    CHECK(duplicate_key.handler_count() == 0);
+}
+
+TEST_CASE("generated StateStore helper rejects a post-narrowing nonfinite value",
+          "[editor_bridge][typed-contract][state][negative]") {
+    namespace contract = pulp::view::editor_bridge_contract;
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .range = {-60.0f, 12.0f, 0.0f}});
+    pulp::runtime::AliveToken owner_alive;
+    const auto key_to_id = std::make_shared<const std::map<std::string, pulp::state::ParamID>>(
+        std::map<std::string, pulp::state::ParamID>{{"gain", 1}});
+    const auto before = store->get_value(1);
+
+    // The JSON decoder rejects nonfinite wire values before this callback. The
+    // callback is still a public generated production seam, so exercise it
+    // directly to prove the defensive post-narrowing guard remains effective
+    // for an admitted in-process request as well.
+    const contract::SetParameterRequest request{"gain", std::numeric_limits<double>::quiet_NaN()};
+    CHECK_FALSE(contract::apply_state_store_set_parameter(store, owner_alive.capture(), key_to_id,
+                                                          request));
+    CHECK(store->get_value(1) == Approx(before));
+}
+
+TEST_CASE("generated StateStore handler leases an admitted write across concurrent retirement",
+          "[editor_bridge][typed-contract][state][lifetime][concurrency]") {
+    using namespace std::chrono_literals;
+    namespace contract = pulp::view::editor_bridge_contract;
+    std::atomic<int> destructions{0};
+    auto store =
+        std::shared_ptr<pulp::state::StateStore>(new pulp::state::StateStore, [&](auto* value) {
+            delete value;
+            destructions.fetch_add(1);
+        });
+    store->add_parameter({.id = 1, .name = "Gain", .range = {-60.0f, 12.0f, 0.0f}});
+    std::weak_ptr<pulp::state::StateStore> weak_store = store;
+    pulp::runtime::AliveToken owner_alive;
+    EditorBridge bridge;
+    REQUIRE(contract::register_state_store_set_parameter_handler(
+        bridge, weak_store, owner_alive.capture(), {{"gain", 1}}));
+    // Registration and the idle handler must not retain ownership.
+    REQUIRE(store.use_count() == 1);
+
+    std::promise<long> entered;
+    std::promise<void> resume;
+    auto entered_future = entered.get_future();
+    auto resume_future = resume.get_future().share();
+    std::atomic<int> writes{0};
+    std::string nested_response;
+    auto listener = store->add_listener(
+        [&](pulp::state::ParamID, float) {
+            if (writes.fetch_add(1) != 0)
+                return;
+            // An inline listener is still inside the production set_value call.
+            // Observe the lease before the test is allowed to drop the owner. This
+            // makes a planted raw-reference regression fail without touching freed
+            // memory: if the lease is absent, the test keeps its owner alive.
+            entered.set_value(weak_store.use_count());
+            if (resume_future.wait_for(5s) != std::future_status::ready)
+                return;
+            nested_response = bridge.dispatch_json(
+                R"({"type":"set_parameter","payload":{"key":"gain","value":2.0}})");
+        },
+        pulp::state::ListenerThread::Audio);
+
+    auto dispatched = std::async(std::launch::async, [&] {
+        return bridge.dispatch_json(
+            R"({"type":"set_parameter","payload":{"key":"gain","value":-6.25}})");
+    });
+    const bool reached_listener = entered_future.wait_for(5s) == std::future_status::ready;
+    const long active_owners = reached_listener ? entered_future.get() : 0;
+    owner_alive.retire();
+    // Drop the only external owner while the dispatch thread is inside
+    // StateStore::set_value. The handler's strong lease must be the reason
+    // this raw weak reference remains valid until the synchronous listener
+    // and the outer dispatch return.
+    store.reset();
+    const bool alive_during_callback = !weak_store.expired();
+    const int destroyed_during_callback = destructions.load();
+    resume.set_value();
+    const auto response = dispatched.get(); // join before any test assertion can throw
+    store.reset();
+
+    REQUIRE(reached_listener);
+    CHECK(active_owners == 2);
+    CHECK(alive_during_callback);
+    CHECK(destroyed_during_callback == 0);
+    REQUIRE(response_ok(response));
+    CHECK(choc::json::parse(response)["accepted"].getBool());
+    REQUIRE(response_ok(nested_response));
+    CHECK_FALSE(choc::json::parse(nested_response)["accepted"].getBool());
+    CHECK(writes.load() == 1);
+    CHECK(weak_store.expired());
+    CHECK(destructions.load() == 1);
+    const auto late =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":3.0}})");
+    CHECK_FALSE(choc::json::parse(late)["accepted"].getBool());
+}
+
+TEST_CASE("generated StateStore registration rejects missing ownership and incomplete identity",
+          "[editor_bridge][typed-contract][state][negative]") {
+    namespace contract = pulp::view::editor_bridge_contract;
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 1.0f, 0.0f}});
+    pulp::runtime::AliveToken alive;
+    EditorBridge bridge;
+    bridge.add_handler("set_parameter",
+                       [](const auto&) { return EditorBridge::err_response("existing handler"); });
+    auto unchanged = [&] {
+        CHECK(bridge.handler_count() == 1);
+        CHECK(response_has_error(
+            bridge.dispatch_json(
+                R"({"type":"set_parameter","payload":{"key":"gain","value":0.5}})"),
+            "existing handler"));
+    };
+    CHECK_FALSE(contract::register_state_store_set_parameter_handler(bridge, {}, alive.capture(),
+                                                                     {{"gain", 1}}));
+    unchanged();
+    CHECK_FALSE(contract::register_state_store_set_parameter_handler(
+        bridge, store, alive.capture(), {{"gain", 1}, {"missing", 999}}));
+    unchanged();
+    CHECK_FALSE(contract::register_state_store_set_parameter_handler(bridge, store, alive.capture(),
+                                                                     {{"", 1}}));
+    unchanged();
+    CHECK_FALSE(
+        contract::register_state_store_set_parameter_handler(bridge, store, alive.capture(), {}));
+    unchanged();
+    const std::weak_ptr<pulp::state::StateStore> expired = store;
+    store.reset();
+    CHECK_FALSE(contract::register_state_store_set_parameter_handler(
+        bridge, expired, alive.capture(), {{"gain", 1}}));
+    unchanged();
+}
+
+TEST_CASE("generated StateStore handler rejects expired store without owner retirement",
+          "[editor_bridge][typed-contract][state][lifetime]") {
+    namespace contract = pulp::view::editor_bridge_contract;
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 1.0f, 0.0f}});
+    pulp::runtime::AliveToken alive;
+    EditorBridge bridge;
+    REQUIRE(contract::register_state_store_set_parameter_handler(bridge, store, alive.capture(),
+                                                                 {{"gain", 1}}));
+    store.reset();
+    CHECK(pulp::runtime::AliveToken::is_alive(alive.capture()));
+    const auto response =
+        bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":0.5}})");
+    CHECK_FALSE(choc::json::parse(response)["accepted"].getBool());
 }
 
 TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",

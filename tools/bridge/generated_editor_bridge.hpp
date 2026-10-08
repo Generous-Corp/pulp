@@ -4,11 +4,18 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <initializer_list>
+#include <limits>
+#include <map>
+#include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
 
 #include <choc/containers/choc_Value.h>
+#include <pulp/runtime/alive_token.hpp>
+#include <pulp/state/store.hpp>
 #include <pulp/view/editor_bridge.hpp>
 
 namespace pulp::view::editor_bridge_contract {
@@ -135,5 +142,77 @@ inline void register_set_parameter(EditorBridge& bridge, SetParameterHandler han
                                return EditorBridge::err_response(error);
                            return set_parameter_response(handler(request));
                        });
+}
+
+// A stable key map is the explicit identity boundary for imported controls.
+// The generated bridge never guesses a ParamID from a display name. Callers
+// provide the immutable one-to-one wire key→ParamID table once during plugin
+// setup; the helper validates every target before registering any handler, then routes
+// set through StateStore. Gesture commands stay explicit contract declarations
+// until a host-owned lifecycle adapter is supplied.
+//
+// The weak reference must share actual ownership of the store (or its enclosing
+// owner), never a no-op deleter around a borrowed store. A dispatch leases that
+// ownership through set_value and its synchronous listeners. AliveToken only
+// rejects new commands after retirement; an admitted command may finish. This
+// helper is for non-realtime editor dispatch; it may release the final owner.
+struct StateStoreParameterBinding {
+    std::string key;
+    state::ParamID id = 0;
+};
+
+inline bool apply_state_store_set_parameter(
+    std::weak_ptr<state::StateStore> store, runtime::AliveToken::Handle owner_alive,
+    const std::shared_ptr<const std::map<std::string, state::ParamID>>& key_to_id,
+    const SetParameterRequest& request) {
+    const auto store_lease = store.lock();
+    if (!store_lease || !runtime::AliveToken::is_alive(owner_alive))
+        return false;
+    const auto found = key_to_id->find(request.key);
+    if (found == key_to_id->end())
+        return false;
+    // The wire contract carries a double, while StateStore stores
+    // float. Check representability before narrowing: converting an
+    // out-of-range double to float is implementation-defined and can
+    // otherwise turn an accepted write into a default/clamped value.
+    constexpr auto max_float = static_cast<double>(std::numeric_limits<float>::max());
+    if (request.value > max_float || request.value < -max_float)
+        return false;
+    const auto value = static_cast<float>(request.value);
+    if (!std::isfinite(value))
+        return false;
+    store_lease->set_value(found->second, value);
+    return true;
+}
+
+inline bool register_state_store_set_parameter_handler(
+    EditorBridge& bridge, std::weak_ptr<state::StateStore> store,
+    runtime::AliveToken::Handle owner_alive,
+    std::initializer_list<StateStoreParameterBinding> bindings) {
+    const auto store_lease = store.lock();
+    if (!store_lease)
+        return false;
+    if (!runtime::AliveToken::is_alive(owner_alive))
+        return false;
+    auto key_to_id = std::make_shared<std::map<std::string, state::ParamID>>();
+    std::set<state::ParamID> ids;
+    for (const auto& binding : bindings) {
+        if (binding.key.empty())
+            return false;
+        if (store_lease->info(binding.id) == nullptr)
+            return false;
+        if (!ids.emplace(binding.id).second)
+            return false;
+        if (!key_to_id->emplace(binding.key, binding.id).second)
+            return false;
+    }
+    if (key_to_id->empty())
+        return false;
+
+    register_set_parameter(
+        bridge, [store, owner_alive, key_to_id](const SetParameterRequest& request) {
+            return apply_state_store_set_parameter(store, owner_alive, key_to_id, request);
+        });
+    return true;
 }
 } // namespace pulp::view::editor_bridge_contract
