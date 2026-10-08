@@ -23,6 +23,7 @@
 #include "pulp/view/widgets.hpp"
 #include "pulp/state/store.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "support/thread_progress.hpp"
 
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
@@ -540,19 +541,16 @@ TEST_CASE("AliveToken rejects concurrent admission after Handle invalidation",
     std::atomic<unsigned> admitted_after_invalidation{0};
 
     std::thread invalidator([&] {
-        while (!start.load(std::memory_order_acquire))
-            std::this_thread::yield();
+        if (!pulp::test::wait_for_condition([&] { return start.load(std::memory_order_acquire); }))
+            return;
         handle->store(false, std::memory_order_release);
         invalidated.store(true, std::memory_order_release);
     });
     std::thread acquirer([&] {
         start.store(true, std::memory_order_release);
-        while (!invalidated.load(std::memory_order_acquire)) {
-            auto lease = pulp::runtime::AliveToken::try_acquire(handle);
-            // Leases admitted before invalidation are valid and release at
-            // the end of this iteration. The post-invalidation probe below
-            // is the rejection control.
-        }
+        if (!pulp::test::wait_for_condition(
+                [&] { return invalidated.load(std::memory_order_acquire); }))
+            return;
         for (unsigned i = 0; i < 1000; ++i) {
             if (pulp::runtime::AliveToken::try_acquire(handle))
                 admitted_after_invalidation.fetch_add(1, std::memory_order_relaxed);
@@ -564,7 +562,6 @@ TEST_CASE("AliveToken rejects concurrent admission after Handle invalidation",
     CHECK(admitted_after_invalidation.load(std::memory_order_relaxed) == 0);
     CHECK_FALSE(pulp::runtime::AliveToken::is_alive(handle));
 }
-
 
 TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
           "[editor_bridge][typed-contract][typescript]") {
