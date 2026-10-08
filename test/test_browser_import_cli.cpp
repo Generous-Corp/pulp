@@ -159,8 +159,19 @@ TEST_CASE("authored-frame CLI policy rejects every incompatible route",
                                                     true, true));
     CHECK(validate_browser_import_cli_options(false, false, false, true, false, false, false, true,
                                               true) == 2);
+    CHECK(validate_browser_import_cli_options(false, false, false, false, true, false, false, true,
+                                              true) == 2);
+    CHECK(validate_browser_import_cli_options(false, false, false, false, false, true, false, true,
+                                              true) == 2);
     CHECK_FALSE(validate_browser_import_cli_options(
         true, false, false, false, false, false, false, false));
+
+    using id::validate_require_canvas_ink_source_cli;
+    CHECK_FALSE(validate_require_canvas_ink_source_cli(true, "html"));
+    CHECK_FALSE(validate_require_canvas_ink_source_cli(true, "claude"));
+    CHECK_FALSE(validate_require_canvas_ink_source_cli(true, "stitch"));
+    CHECK_FALSE(validate_require_canvas_ink_source_cli(false, "figma"));
+    CHECK(validate_require_canvas_ink_source_cli(true, "figma") == 2);
 
     CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "html"));
     CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "claude"));

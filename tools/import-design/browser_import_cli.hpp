@@ -60,6 +60,11 @@ std::optional<int> validate_browser_import_cli_options(
     bool export_tokens, bool detect_only, bool native_panel_lowering,
     bool materialized_canvas_composition, bool require_canvas_ink = false);
 
+/// Reject a canvas-ink requirement for a source that cannot enter the
+/// browser-backed HTML capture lane.
+std::optional<int> validate_require_canvas_ink_source_cli(
+    bool require_canvas_ink, std::string_view source);
+
 /// Reject an explicit source that cannot enter browser-backed HTML import.
 std::optional<int> validate_fit_authored_frame_source_cli(
     bool fit_authored_frame, std::string_view source);

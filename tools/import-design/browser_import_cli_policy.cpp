@@ -41,7 +41,28 @@ validate_browser_import_cli_options(bool fit_authored_frame, bool render_size_ex
                      "--offline\n";
         return 2;
     }
+    if (require_canvas_ink && export_tokens) {
+        std::cerr << "Error: --require-canvas-ink cannot be combined with "
+                     "--export-tokens\n";
+        return 2;
+    }
+    if (require_canvas_ink && detect_only) {
+        std::cerr << "Error: --require-canvas-ink cannot be combined with "
+                     "--detect-only or --report-new-format\n";
+        return 2;
+    }
     return std::nullopt;
+}
+
+std::optional<int> validate_require_canvas_ink_source_cli(
+    bool require_canvas_ink, std::string_view source) {
+    if (!require_canvas_ink || source == "html" || source == "claude" ||
+        source == "stitch") {
+        return std::nullopt;
+    }
+    std::cerr << "Error: --require-canvas-ink applies only to browser-backed "
+                 "HTML import\n";
+    return 2;
 }
 
 std::optional<int> validate_fit_authored_frame_source_cli(
