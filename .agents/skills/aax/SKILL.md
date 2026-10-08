@@ -280,6 +280,12 @@ while still failing `wraptool verify` or Pro Tools's production signature
 requirements. Never claim the signing or Pro Tools gates from a successful
 compile alone. Windows setup and signing remain a separate, deferred path.
 
+On macOS, `wraptool sign` also needs either a PACE-issued customer number or a
+local wrap-configuration file in addition to the Apple Developer ID signing
+identity. If neither is available, stop at the compile/validator gates and
+report that missing PACE configuration; do not guess identifiers or put a
+password in a command line.
+
 ## Core Commands
 
 Check current AAX availability:
