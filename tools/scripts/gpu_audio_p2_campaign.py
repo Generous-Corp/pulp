@@ -16,6 +16,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 from typing import Any
 
 SCHEMA = "pulp.gpu-audio.p2.authenticated-slots-lead.v1"
@@ -146,6 +147,59 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def validate_host_preflight(path: Path, expected_source_revision: str,
+                            max_age_seconds: int = 900) -> dict[str, Any]:
+    """Require a fresh, quiet, source-bound host admission receipt.
+
+    The host probe is deliberately an input owned by the campaign/operations
+    lane.  This driver only verifies the stable contract; it does not infer
+    quietness from a local process list or turn a missing field into a pass.
+    """
+
+    if not path.is_file():
+        raise RuntimeError(f"host preflight is missing: {path}")
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("host preflight is not valid JSON") from exc
+    if not isinstance(receipt, dict):
+        raise RuntimeError("host preflight must be a JSON object")
+    required = {
+        "schema": receipt.get("schema") == "pulp.gpu-audio.p2.host-preflight.v1",
+        "status": receipt.get("status") == "passed",
+        "source_revision": receipt.get("source_revision") == expected_source_revision,
+        "host_id": isinstance(receipt.get("host_id"), str) and bool(receipt["host_id"].strip()),
+        "quiet_host": receipt.get("quiet_host") is True,
+        "host_vitals": receipt.get("host_vitals_level") == "green",
+        "contention": receipt.get("gpu_contention") is False
+        and receipt.get("ui_contention") is False,
+        "thermal": isinstance(receipt.get("thermal_state"), str)
+        and bool(receipt["thermal_state"].strip()),
+    }
+    sampled_at = receipt.get("sampled_at")
+    try:
+        sampled_epoch = datetime.fromisoformat(sampled_at.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError("host preflight sampled_at must be an ISO-8601 timestamp") from exc
+    now = time.time()
+    required["fresh"] = 0 <= now - sampled_epoch <= max_age_seconds
+    failed = [name for name, ok in required.items() if not ok]
+    if failed:
+        raise RuntimeError(f"host preflight failed: {', '.join(failed)}")
+    return receipt
+
+
+def require_unchanged_host_preflight(path: Path, expected_sha256: str) -> None:
+    """Keep the admission artifact immutable for the whole campaign."""
+
+    try:
+        observed = sha256(path)
+    except OSError as exc:
+        raise RuntimeError("host preflight disappeared during campaign") from exc
+    if observed != expected_sha256:
+        raise RuntimeError("host preflight changed during campaign")
 
 
 def _source_provenance() -> tuple[str, str]:
@@ -310,6 +364,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--probe", type=Path)
     p.add_argument("--output-dir", type=Path)
+    p.add_argument("--host-preflight", type=Path,
+                   help="fresh source-bound quiet-host receipt (required for hardware runs)")
     p.add_argument("--frames", type=int, default=32, choices=(32, 64, 128))
     p.add_argument("--blocks", type=int, default=REQUIRED_MEASURED_BLOCKS)
     p.add_argument("--warmup", type=int, default=16)
@@ -606,6 +662,10 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError(f"acceptance campaign requires exactly {REQUIRED_MEASURED_BLOCKS} measured blocks")
     source_revision, driver_sha256 = _source_provenance()
     initial_source_provenance = (source_revision, driver_sha256)
+    if args.host_preflight is None:
+        raise RuntimeError("--host-preflight is required for a hardware campaign")
+    host_preflight = validate_host_preflight(args.host_preflight, source_revision)
+    host_preflight_sha256 = sha256(args.host_preflight)
     if args.expected_source_revision is not None and args.expected_source_revision != source_revision:
         raise RuntimeError("expected source revision does not match the measured source")
     if args.expected_driver_sha256 is not None and args.expected_driver_sha256 != driver_sha256:
@@ -706,6 +766,7 @@ def run(args: argparse.Namespace) -> int:
         args.output_dir.rmdir()
         raise
     _require_unchanged_source(initial_source_provenance)
+    require_unchanged_host_preflight(args.host_preflight, host_preflight_sha256)
     if len(trials) != len(selected_slots) * len(selected_leads) * 2 * RUNS_PER_KIND:
         raise RuntimeError("campaign completed with an incomplete cold/steady matrix")
     if not campaign_manifest_digest:
@@ -718,6 +779,9 @@ def run(args: argparse.Namespace) -> int:
                 "driver_sha256": driver_sha256,
                 "source_tree_clean": True,
                 "probe_sha256": probe_sha256, "probe_path": str(args.probe.resolve()),
+                "host_preflight_sha256": host_preflight_sha256,
+                "host_preflight_path": str(args.host_preflight.resolve()),
+                "host_id": host_preflight["host_id"],
                 "machine_id": platform.node() or "unavailable", "host_platform": platform.platform(),
                 "negative_control": negative_control,
                 "provenance_manifest_sha256": campaign_manifest_digest,
