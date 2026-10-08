@@ -95,6 +95,10 @@ directory explicit, including secondary artifact trees and the Linux RTSan
 lane, but do not include `-j`, `--parallel`, or a host-core probe: the
 governor owns parallelism, leases, and build-directory locking.
 
+The timeline hardening workflow's focused Ninja build follows the same rule:
+`timeline-hardening.yml` must invoke the governor directly and leave worker
+selection to it, even though the lane only builds two timeline test targets.
+
 The `web-plugins.yml` WAMv2 and WebCLAP build steps run under nested
 `working-directory` values. Use the absolute workspace-root wrapper path in
 those steps (`bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`); relative
