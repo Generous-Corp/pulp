@@ -201,6 +201,29 @@ class BuildGovernancePathTests(unittest.TestCase):
             r"^governed-build dry-run receipt: jobs=[1-9][0-9]* grant=tier0 command=.*cmake --build build --target pulp-test-state$",
         )
 
+    def test_web_plugins_builds_route_through_governor(self) -> None:
+        source = read_source(".github/workflows/web-plugins.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertGreaterEqual(len(build_lines), 10)
+        for line in build_lines:
+            self.assertIn("governed-build.sh", line)
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+        # These two jobs set a nested working-directory; the wrapper must be
+        # reached through the workspace root rather than that directory.
+        self.assertIn(
+            'bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build',
+            build_lines[0],
+        )
+        self.assertIn(
+            'bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build',
+            build_lines[1],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
