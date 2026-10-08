@@ -149,14 +149,24 @@ inline void register_set_parameter(EditorBridge& bridge, SetParameterHandler han
 // setup; the helper validates every target before registering any handler, then routes
 // set through StateStore. Gesture commands stay explicit contract declarations
 // until a host-owned lifecycle adapter is supplied.
+//
+// The weak reference must share actual ownership of the store (or its enclosing
+// owner), never a no-op deleter around a borrowed store. A dispatch leases that
+// ownership through set_value and its synchronous listeners. AliveToken only
+// rejects new commands after retirement; an admitted command may finish. This
+// helper is for non-realtime editor dispatch; it may release the final owner.
 struct StateStoreParameterBinding {
     std::string key;
     state::ParamID id = 0;
 };
 
 inline bool register_state_store_set_parameter_handler(
-    EditorBridge& bridge, state::StateStore& store, runtime::AliveToken::Handle owner_alive,
+    EditorBridge& bridge, std::weak_ptr<state::StateStore> store,
+    runtime::AliveToken::Handle owner_alive,
     std::initializer_list<StateStoreParameterBinding> bindings) {
+    const auto store_lease = store.lock();
+    if (!store_lease)
+        return false;
     if (!runtime::AliveToken::is_alive(owner_alive))
         return false;
     auto key_to_id = std::make_shared<std::map<std::string, state::ParamID>>();
@@ -164,7 +174,7 @@ inline bool register_state_store_set_parameter_handler(
     for (const auto& binding : bindings) {
         if (binding.key.empty())
             return false;
-        if (store.info(binding.id) == nullptr)
+        if (store_lease->info(binding.id) == nullptr)
             return false;
         if (!ids.emplace(binding.id).second)
             return false;
@@ -175,8 +185,9 @@ inline bool register_state_store_set_parameter_handler(
         return false;
 
     register_set_parameter(bridge,
-                           [&store, owner_alive, key_to_id](const SetParameterRequest& request) {
-                               if (!runtime::AliveToken::is_alive(owner_alive))
+                           [store, owner_alive, key_to_id](const SetParameterRequest& request) {
+                               const auto store_lease = store.lock();
+                               if (!store_lease || !runtime::AliveToken::is_alive(owner_alive))
                                    return false;
                                const auto found = key_to_id->find(request.key);
                                if (found == key_to_id->end())
@@ -188,7 +199,7 @@ inline bool register_state_store_set_parameter_handler(
                                // parameter default while reporting accepted=true.
                                if (!std::isfinite(value))
                                    return false;
-                               store.set_value(found->second, value);
+                               store_lease->set_value(found->second, value);
                                return true;
                            });
     return true;
