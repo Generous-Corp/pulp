@@ -2,6 +2,7 @@
 
 #include "browser_capture_backend.hpp"
 #include "browser_capture_ir.hpp"
+#include "browser_capture_provenance.hpp"
 #include "browser_capture_workspace.hpp"
 #include "browser_knob_sprites.hpp"
 #include "claude_html_dependencies.hpp"
@@ -177,6 +178,27 @@ BrowserHtmlImportResult import_browser_html(
             captured.capture.diagnostic.message;
         return BrowserHtmlFailure{
             2, std::move(error), shape, std::move(workspaces)};
+    }
+
+    // Bind the durable capture to the exact staged source and selected
+    // browser before native lowering or materialized-runtime source emission
+    // can consume it. This rejects stale envelopes and sidecars that look
+    // structurally valid but came from another source, browser, viewport, or
+    // materialized schema generation.
+    const auto provenance = browser_capture::validate_capture_provenance({
+        .envelope = captured.capture.artifacts->envelope,
+        .source = staged.entry,
+        .materialized_document = captured.capture.artifacts->materialized_document,
+        .browser = *captured.discovery.selected,
+        .initial_width = capture.pinned_width.value_or(capture.initial_width),
+        .initial_height = capture.initial_height,
+        .device_scale_factor = capture.device_scale_factor,
+    });
+    if (!provenance) {
+        return BrowserHtmlFailure{3,
+                                  "browser capture provenance validation failed [" +
+                                      provenance.code + "]: " + provenance.message,
+                                  shape, std::move(workspaces)};
     }
 
     auto lowered = lower_browser_capture_to_ir(

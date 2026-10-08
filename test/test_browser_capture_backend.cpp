@@ -3,6 +3,9 @@
 
 #include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_backend.hpp"
+#include "tools/import-design/browser_capture_provenance.hpp"
+
+#include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -137,7 +140,128 @@ capture::CaptureRequest fixture_request(
     return request;
 }
 
+std::string replace_once(std::string value, std::string_view from, std::string_view to) {
+    const auto position = value.find(from);
+    REQUIRE(position != std::string::npos);
+    value.replace(position, from.size(), to);
+    return value;
+}
+
+struct ProvenanceFixture {
+    fs::path source;
+    fs::path envelope;
+    fs::path materialized;
+    capture::BrowserInstallation browser{"fixture-chrome", capture::BrowserOrigin::system,
+                                         "Fixture Chromium", "123.4.5.6", 123};
+};
+
+ProvenanceFixture write_provenance_fixture(const TempTree& tree) {
+    ProvenanceFixture fixture;
+    fixture.source = tree.write("editor.html", "<main>fixture</main>");
+    const auto materialized_json =
+        R"({"schema":"pulp-materialized-browser-document-v2","version":2,"html":"<html></html>","assets":[]})";
+    fixture.materialized = tree.write("materialized-document.json", materialized_json);
+    const auto source_hash = pulp::runtime::sha256_hex(read_file(fixture.source));
+    const auto materialized_hash = pulp::runtime::sha256_hex(read_file(fixture.materialized));
+    const auto envelope_json =
+        std::string(
+            R"({"schema":"pulp-browser-capture-v1","version":1,"provenance":{"capture_method":"chromium-cdp","browser":{"product":"Fixture Chromium","version":"123.4.5.6","protocol_version":"1.3","build_hash":"fixture","origin":"system"},"source":{"entry":"editor.html","sha256":")") +
+        source_hash +
+        std::string(
+            R"(","materialized_document":"materialized-document.json","materialized_document_sha256":")") +
+        materialized_hash +
+        R"(","materialized_asset_count":0},"viewport":{"initial":{"width":1280,"height":800},"resolved":{"width":1280,"height":800},"document":{"width":1280,"height":800},"device_scale_factor":2}},"reference":{"logical_width":1280,"logical_height":800,"device_scale_factor":2}})";
+    fixture.envelope = tree.write("capture.json", envelope_json);
+    return fixture;
+}
+
 }  // namespace
+
+TEST_CASE("browser capture provenance binds source browser viewport and materialized schema",
+          "[import-design][browser-capture][provenance]") {
+    TempTree tree("provenance-valid");
+    const auto fixture = write_provenance_fixture(tree);
+    const auto result = capture::validate_capture_provenance({
+        .envelope = fixture.envelope,
+        .source = fixture.source,
+        .materialized_document = fixture.materialized,
+        .browser = fixture.browser,
+        .initial_width = 1280,
+        .initial_height = 800,
+        .device_scale_factor = 2,
+    });
+    INFO(result.message);
+    REQUIRE(result);
+}
+
+TEST_CASE("browser capture provenance rejects source hash omission and mismatch",
+          "[import-design][browser-capture][provenance][negative]") {
+    TempTree tree("provenance-source-negative");
+    const auto fixture = write_provenance_fixture(tree);
+    auto envelope = read_file(fixture.envelope);
+    SECTION("omission") {
+        envelope = replace_once(
+            envelope, "\"sha256\":\"" + pulp::runtime::sha256_hex(read_file(fixture.source)) + "\"",
+            "\"sha256\":\"\"");
+    }
+    SECTION("mismatch") {
+        envelope = replace_once(envelope, pulp::runtime::sha256_hex(read_file(fixture.source)),
+                                std::string(64, '0'));
+    }
+    tree.write("capture.json", envelope);
+    const auto result = capture::validate_capture_provenance({
+        .envelope = tree.root() / "capture.json",
+        .source = fixture.source,
+        .materialized_document = fixture.materialized,
+        .browser = fixture.browser,
+        .initial_width = 1280,
+        .initial_height = 800,
+        .device_scale_factor = 2,
+    });
+    CHECK_FALSE(result);
+    CHECK(result.code == "browser-capture-provenance-invalid");
+}
+
+TEST_CASE("browser capture provenance rejects materialized schema hash browser and DPR drift",
+          "[import-design][browser-capture][provenance][negative]") {
+    TempTree tree("provenance-envelope-negative");
+    const auto fixture = write_provenance_fixture(tree);
+    const auto run = [&](std::string envelope, int dpr = 2) {
+        tree.write("capture.json", envelope);
+        return capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = dpr,
+        });
+    };
+    const auto base = read_file(fixture.envelope);
+    SECTION("materialized schema version") {
+        auto sidecar = read_file(fixture.materialized);
+        const auto old_hash = pulp::runtime::sha256_hex(sidecar);
+        sidecar = replace_once(sidecar, "-v2", "-v1");
+        tree.write("materialized-document.json", sidecar);
+        const auto updated = replace_once(base, old_hash, pulp::runtime::sha256_hex(sidecar));
+        const auto result = run(updated);
+        CHECK_FALSE(result);
+        CHECK(result.message.find("schema/version") != std::string::npos);
+    }
+    SECTION("materialized hash") {
+        CHECK_FALSE(
+            run(replace_once(base, pulp::runtime::sha256_hex(read_file(fixture.materialized)),
+                             std::string(64, '1'))));
+    }
+    SECTION("browser identity") {
+        CHECK_FALSE(run(replace_once(base, "123.4.5.6", "124.0.0.0")));
+    }
+    SECTION("DPR") {
+        CHECK_FALSE(
+            run(replace_once(base, "\"device_scale_factor\":2", "\"device_scale_factor\":1")));
+    }
+}
 
 TEST_CASE("browser discovery honors explicit, environment, managed, then system",
           "[import-design][browser-capture]") {
