@@ -145,6 +145,53 @@ test("authored-frame fitting resolves a responsive scaled design surface",
     }
   });
 
+test("authored-frame fitting refuses a control clipped by the authored root",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-authored-fit-clipped-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><style>
+  html,body{margin:0;background:#111}
+  #panel{width:920px;height:200px;overflow:hidden;background:#246}
+  #clipped{position:absolute;left:20px;top:180px;width:160px;height:40px}
+</style><div id="panel"><button id="clipped" data-pulp-param="cutoff">CUT</button></div>
+`);
+
+      await assert.rejects(execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "1280",
+        "--initial-height", "300",
+        "--dpr", "2",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
+        "--fit-authored-frame",
+      ], { maxBuffer: 1024 * 1024 }), (error) => {
+        assert.ok(error.stderr.includes("capture-control-clipped"));
+        assert.ok(error.stderr.includes("cutoff"));
+        return true;
+      });
+      const diagnostic = JSON.parse(
+        await readFile(path.join(output, "capture-error.json"), "utf8"));
+      assert.equal(diagnostic.code, "capture-control-clipped");
+      await assert.rejects(access(path.join(output, "capture.json")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("authored-frame fitting rejects a viewport-relative non-fixed point",
   { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
