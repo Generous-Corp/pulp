@@ -110,6 +110,11 @@ every WASI/Emscripten tree. The gallery step runs from
 keep configure toolchains and build directories unchanged when routing an
 existing build through the governor.
 
+The timeline fuzz workflow's deterministic and libFuzzer build steps follow the
+same rule. Keep their target lists and build directories unchanged, but route
+both `cmake --build` invocations through `tools/ci/governed-build.sh`; the
+governor owns the worker share on every runner.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 ### Build commands emitted by diagnostics and remediations

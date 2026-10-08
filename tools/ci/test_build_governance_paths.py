@@ -236,6 +236,19 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[1],
         )
 
+    def test_timeline_fuzz_builds_route_through_governor(self) -> None:
+        source = read_source(".github/workflows/timeline-fuzz.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 2)
+        for line in build_lines:
+            self.assertIn("tools/ci/governed-build.sh", line)
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
