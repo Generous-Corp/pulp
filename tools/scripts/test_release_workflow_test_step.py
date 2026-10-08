@@ -2647,6 +2647,16 @@ class ReleaseBuildParallelismExplicit(unittest.TestCase):
                     "tools/ci/governed-build.sh.",
                 )
 
+    def test_release_dry_run_uses_governed_build_contract(self) -> None:
+        source = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        build_lines = self._build_invocations(source)
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build --config Release",
+            build_lines[0],
+        )
+        self.assertNotIn("getconf _NPROCESSORS_ONLN", source)
+
 
 class StdlibGuardStepExtractionMatchesYaml(unittest.TestCase):
     """`test_release_trailer_guard.py` reads the guard step out of the workflow
