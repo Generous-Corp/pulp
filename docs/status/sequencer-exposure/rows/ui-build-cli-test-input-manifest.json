@@ -1,7 +1,7 @@
 {
   "id": "ui-build-cli-test-input-manifest",
   "title": "UI build CLI and generated test-input manifest remain sequencer-visible",
-  "classification": "internal_tooling",
+  "classification": "ci_test_only",
   "delivery_state": "pending",
   "claim_id": "f8eea7c6-5e4b-4e9a-8b0e-2f02e4c6f7a1",
   "owned_paths": [
