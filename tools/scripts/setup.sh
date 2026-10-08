@@ -28,7 +28,7 @@ cmake -B "$REPO_ROOT/build" "$REPO_ROOT"
 
 echo ""
 echo "Building..."
-cmake --build "$REPO_ROOT/build" -- -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+bash "$REPO_ROOT/tools/ci/governed-build.sh" cmake --build "$REPO_ROOT/build"
 
 echo ""
 echo "Running tests..."
