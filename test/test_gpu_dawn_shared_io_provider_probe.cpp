@@ -40,6 +40,7 @@ struct Scenario {
     bool watchdog_hang = false;
     TransferControl transfer_control = TransferControl::None;
     bool batched_slots = false;
+    bool timestamp_staged = false;
 };
 
 std::string json_escape(std::string_view value) {
@@ -134,6 +135,11 @@ std::optional<Scenario> parse_scenario(std::string_view value) {
         return Scenario{value, DawnSharedIoProvider::Fault::HoldTerminalBusy};
     if (value == "real-device-repetition")
         return Scenario{value};
+    if (value == "timestamp-staged") {
+        Scenario result{value};
+        result.timestamp_staged = true;
+        return result;
+    }
     if (value == "native-input-oom")
         return Scenario{value, DawnSharedIoProvider::Fault::NativeInputOom, true};
     if (value == "native-output-oom")
@@ -213,6 +219,9 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
               << ",\"service_wall_ns\":" << stats.service_wall_ns
               << ",\"wait_any_wall_ns\":" << stats.wait_any_wall_ns
               << ",\"wait_any_max_wall_ns\":" << stats.wait_any_max_wall_ns
+              << ",\"timestamp_submissions\":" << stats.timestamp_submissions
+              << ",\"timestamp_samples\":" << stats.timestamp_samples
+              << ",\"timestamp_failures\":" << stats.timestamp_failures
               << ",\"fault_injections\":" << stats.fault_injections << ",\"hardware_model\":\""
               << json_escape(hardware_model()) << "\""
               << ",\"os\":\"" << json_escape(have_system_info ? system_info.sysname : "unknown")
@@ -305,6 +314,8 @@ int main(int argc, char** argv) {
             } catch (...) {
                 return 1;
             }
+        } else if (argument == "--timestamp-staged") {
+            scenario_name = "timestamp-staged";
         } else
             return 1;
     }
@@ -337,7 +348,11 @@ int main(int argc, char** argv) {
          .proc_table_override_for_testing = transfer_counter->deferred_proc_table(),
          .fault = scenario->fault,
          .completion_policy = completion_policy,
-         .completion_wait_ns = completion_wait_ns});
+         .completion_wait_ns = completion_wait_ns,
+         .storage_kind = scenario->timestamp_staged
+                             ? DawnSharedIoProvider::StorageKind::Staged
+                             : DawnSharedIoProvider::StorageKind::ImportedHostPointer,
+         .enable_timestamps = scenario->timestamp_staged});
     if (!created.provider) {
         std::cout << "{\"schema\":\"pulp.gpu-dawn-shared-io-provider.v2\","
                   << "\"scenario\":\"" << scenario->name
@@ -422,7 +437,10 @@ int main(int argc, char** argv) {
         const bool prepared =
             arena.prepare(*created.provider, {.slots = 2,
                                               .input_bytes_per_slot = buffer_size.input,
-                                              .output_bytes_per_slot = buffer_size.output});
+                                              .output_bytes_per_slot = buffer_size.output,
+                                              .storage_kind = scenario->timestamp_staged
+                                                                  ? DawnSharedIoProvider::StorageKind::Staged
+                                                                  : DawnSharedIoProvider::StorageKind::ImportedHostPointer});
         if (scenario->expect_prepare_failure) {
             passed = !prepared && !arena.prepared();
             if (passed) {
@@ -603,7 +621,13 @@ int main(int argc, char** argv) {
 
     const auto transfers = transfer_counter->snapshot();
     const bool transfers_pass =
-        scenario->transfer_control == TransferControl::None
+        scenario->timestamp_staged
+            ? (transfers.queue_submit_calls == submissions &&
+               transfers.submitted_command_buffers == submissions &&
+               transfers.queue_write_buffer_calls == submissions &&
+               transfers.copy_buffer_to_buffer_calls >= submissions * 2 &&
+               transfers.buffer_map_async_calls >= submissions * 2)
+            : scenario->transfer_control == TransferControl::None
             ? transfer_oracle(transfers, submissions)
             : transfer_control_oracle(transfers, submissions, scenario->transfer_control);
     passed = passed && transfers_pass && installs == 1;
@@ -663,6 +687,12 @@ int main(int argc, char** argv) {
     if (scenario->batched_slots && stats.wait_any_max_futures != 64) {
         passed = false;
         reason = "wait_any_batch_limit_not_exercised";
+    }
+    if (scenario->timestamp_staged &&
+        (stats.timestamp_submissions != submissions || stats.timestamp_samples != submissions ||
+         stats.timestamp_failures != 0)) {
+        passed = false;
+        reason = "gpu_timestamp_sample_contract_failed";
     }
     if (completion_policy == DawnSharedIoProvider::CompletionPolicy::TimedWaitAny &&
         stats.wait_any_max_timeout_ns > 1'000'000) {
