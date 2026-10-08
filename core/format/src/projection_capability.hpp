@@ -17,7 +17,10 @@ struct ProjectionResult {
 };
 
 /// Maps the smallest DSPX-07 projection slice. Graph-owned features must use
-/// a baked Processor descriptor before an adapter can advertise support.
+/// a baked Processor descriptor before an adapter can advertise support. AUv2
+/// and AUv3 consume the same Processor lifecycle as the other native adapters;
+/// their host-specific bus and render contracts are validated by their own
+/// adapter tests rather than a second projection backend.
 constexpr ProjectionResult projection_capability(ProjectionSurface surface, bool baked_processor,
                                                  bool bounded_descriptor) noexcept {
     if (!baked_processor)
@@ -32,10 +35,8 @@ constexpr ProjectionResult projection_capability(ProjectionSurface surface, bool
     case ProjectionSurface::lv2:
     case ProjectionSurface::wam:
     case ProjectionSurface::wclap:
-        return {ProjectionStatus::supported, {}};
     case ProjectionSurface::au:
-        return {ProjectionStatus::unsupported,
-                "AU projection is deferred to a separate adapter owner"};
+        return {ProjectionStatus::supported, {}};
     }
     return {ProjectionStatus::unsupported, "unknown projection surface"};
 }
