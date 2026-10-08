@@ -134,14 +134,17 @@ TEST_CASE("DSPX-07 baked processor reaches the real AU v3 render path",
         std::array<float, 64> input{};
         for (std::size_t i = 0; i < input.size(); ++i)
             input[i] = static_cast<float>(i + 1) / static_cast<float>(input.size());
+        __block bool pull_contract_ok = true;
 
         AUInternalRenderBlock render = [unit internalRenderBlock];
         REQUIRE(render != nil);
         AURenderPullInputBlock pull = ^AUAudioUnitStatus(
             AudioUnitRenderActionFlags*, const AudioTimeStamp*, AUAudioFrameCount frame_count,
             NSInteger, AudioBufferList* input_data) {
-          REQUIRE(frame_count == input.size());
-          REQUIRE(input_data != nullptr);
+          if (frame_count != input.size() || input_data == nullptr) {
+              pull_contract_ok = false;
+              return kAudio_ParamError;
+          }
           input_data->mNumberBuffers = 1;
           input_data->mBuffers[0].mNumberChannels = 1;
           input_data->mBuffers[0].mDataByteSize = sizeof(input);
@@ -152,6 +155,7 @@ TEST_CASE("DSPX-07 baked processor reaches the real AU v3 render path",
         AudioTimeStamp timestamp{};
         timestamp.mFlags = kAudioTimeStampSampleTimeValid;
         REQUIRE(render(&flags, &timestamp, input.size(), 0, &output_list, nil, pull) == noErr);
+        REQUIRE(pull_contract_ok);
         for (std::size_t i = 0; i < output.size(); ++i)
             REQUIRE(output[i] == Catch::Approx(input[i] * 0.5f));
 
