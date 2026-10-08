@@ -6,6 +6,7 @@
   "claim_id": "89873b97-ddd2-4113-ae43-3d209cd6f276",
   "owned_paths": [
     "test/test_dspx09_independent_validation.cpp",
+    "test/test_dspx09_followup.cpp",
     "test/test_retained_history_dspx03.cpp",
     "test/cmake/sampler_runtime_tests.cmake",
     "docs/guides/dspx09-independent-validation.md",
@@ -22,19 +23,29 @@
       ]
     },
     {
-      "path": "test/test_retained_history_dspx03.cpp",
-      "needles": [
-        "DSPX-09 retained-history refusal reaches the live swap path",
-        "RetainedHistoryMode::Refuse"
-      ]
-    },
-    {
       "path": "docs/guides/dspx09-independent-validation.md",
       "needles": [
         "DSPX-09",
         "independent reference oracle",
         "typed negative control",
         "packaged distribution or GPU execution"
+      ]
+    },
+    {
+      "path": "test/test_dspx09_followup.cpp",
+      "needles": [
+        "DSPX-09 follow-up delay impulse oracle",
+        "DSPX-09 follow-up retained-history lifecycle",
+        "DSPX-09 follow-up automation route",
+        "DSPX-09 follow-up projection comparator",
+        "DeferredExternalOwner"
+      ]
+    },
+    {
+      "path": "test/test_retained_history_dspx03.cpp",
+      "needles": [
+        "DSPX-09 retained-history refusal reaches the live swap path",
+        "RetainedHistoryMode::Refuse"
       ]
     }
   ],
