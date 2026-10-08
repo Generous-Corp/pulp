@@ -79,6 +79,70 @@ test("authored-frame fitting reloads once at a contained fixed point",
     }
   });
 
+test("oversized authored canvas settles before default and fit capture",
+  { timeout: captureCaseTimeout(2, FIT_RELOAD_DEADLINE_MS) }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-authored-fit-canvas-"));
+    const input = path.join(root, "panel.html");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><style>
+  html,body{margin:0;width:1320px;height:860px;overflow:hidden;background:#111}
+  #panel{position:absolute;left:0;top:0;width:1320px;height:860px;background:#246}
+  canvas{position:absolute;inset:0;width:1320px;height:860px}
+</style><div id="panel"><canvas id="surface"></canvas></div><script>
+  const canvas = document.getElementById('surface');
+  const paint = () => {
+    const context = canvas.getContext('2d');
+    context.fillStyle = 'rgb(210,40,70)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  };
+  const resize = () => {
+    canvas.width = innerWidth * devicePixelRatio;
+    canvas.height = innerHeight * devicePixelRatio;
+    requestAnimationFrame(paint);
+  };
+  resize();
+  addEventListener('resize', resize);
+</script>
+`);
+
+      for (const fit of [false, true]) {
+        const output = path.join(root, fit ? "fit" : "default");
+        const args = [
+          script,
+          "capture",
+          "--browser", browser,
+          "--input", input,
+          "--root", root,
+          "--output", output,
+          "--initial-width", "1280",
+          "--initial-height", "800",
+          "--dpr", "2",
+          "--timeout-ms", String(FIT_RELOAD_DEADLINE_MS),
+        ];
+        if (fit) args.push("--fit-authored-frame");
+        await execute(process.execPath, args, { maxBuffer: 1024 * 1024 });
+        const envelope = JSON.parse(
+          await readFile(path.join(output, "capture.json"), "utf8"));
+        assert.deepEqual(envelope.provenance.viewport.resolved,
+          { width: 1320, height: 860 });
+        assert.deepEqual(envelope.reference.authored_frame,
+          { x: 0, y: 0, width: 1320, height: 860 });
+        assert.equal(envelope.reference.logical_width, 1320);
+        assert.equal(envelope.reference.logical_height, 860);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("authored-frame fitting rejects a viewport-relative non-fixed point",
   { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
