@@ -294,6 +294,67 @@ while still failing `wraptool verify` or Pro Tools's production signature
 requirements. Never claim the signing or Pro Tools gates from a successful
 compile alone. Windows setup and signing remain a separate, deferred path.
 
+## Poka-yoke signing and release gates
+
+Make the safe path the easy path and make an unsafe path fail before it can
+produce a misleading artifact. These checks are deliberately redundant:
+
+1. **Keep trust domains separate.** A connected, certified iLok and a successful
+   `wraptool list` prove that the local PACE license can be used. They do not
+   prove that a bundle was signed. Require a fresh `wraptool verify` on the
+   exact final bundle before calling it signed.
+2. **Keep secrets out of process arguments.** Never put an iLok password,
+   customer number, wrap password, certificate private key, or receipt JSON in
+   chat, shell history, an environment capture, a repository, or an argv
+   string. Prefer the interactive PACE prompt or a permissions-restricted
+   file-backed configuration owned by the developer. If a secret is ever
+   pasted into a transcript, rotate it before continuing.
+3. **Refuse unsigned-looking inputs.** Sign only a freshly built bundle from a
+   known build directory. Record its SHA-256 before signing and record the
+   post-signing SHA-256 separately; never overwrite the only unsigned copy.
+4. **Seal the bundle shape before Apple signing.** Arbitrary JSON evidence files
+   under `Contents/MacOS` are treated as nested code by `codesign`. Relocate
+   Pulp's `*.inspector-capabilities.json`, `*.control-shipping.json`, and
+   `*.control-shipping-report.json` sidecars to `Contents/Resources` before
+   signing, then fail if any of those files remain under `Contents/MacOS`.
+5. **Use ordered gates.** The only valid order is: build, inspect bundle shape,
+   Apple/PACE sign, `wraptool verify`, `codesign --verify --deep --strict`,
+   AAX Validator, install the exact verified bundle, then prove discovery and
+   load in Pro Tools. A passing validator or a certified iLok cannot substitute
+   for a later gate.
+6. **Use negative controls when changing the workflow.** A deliberate unsigned
+   copy must fail `wraptool verify`; a deliberate bundle with a sidecar left in
+   `Contents/MacOS` must fail the Apple verification step. Keep these checks
+   disposable and outside public repositories.
+7. **Make installation identity-based.** Install only from the verified
+   artifact, copy to the system and user AAX plug-in locations only when needed
+   for the host test, and compare the installed bundle hash to the verified
+   source hash. Remove stale copies before retrying discovery so a host cannot
+   load an older build by accident.
+8. **Report evidence, not intent.** A release handoff must include the exact
+   source commit, artifact path, artifact SHA-256, signing and validator
+   receipts, install locations, and host result. If Pro Tools was not launched,
+   say that the host gate is pending.
+
+For a local macOS run, the minimum preflight should be equivalent to:
+
+```bash
+set -euo pipefail
+test -x /Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool
+test -d "$AAX_BUNDLE"
+! find "$AAX_BUNDLE/Contents/MacOS" -maxdepth 1 -type f \
+    \( -name '*.json' -o -name '*.inspector-capabilities.json' \
+       -o -name '*.control-shipping.json' \
+       -o -name '*.control-shipping-report.json' \) -print -quit | grep -q .
+shasum -a 256 "$AAX_BUNDLE/Contents/MacOS/$(basename "$AAX_BINARY")"
+```
+
+The command is a shape check, not a signing recipe: the actual wrap
+configuration and credentials stay in the developer's private PACE setup.
+When the PACE account reports **license verified**, record that as the local
+authorization precondition and continue through the independent signing and
+host gates rather than treating it as completion.
+
 On macOS, `wraptool sign` also needs either a PACE-issued customer number or a
 local wrap-configuration file in addition to the Apple Developer ID signing
 identity. If neither is available, stop at the compile/validator gates and
