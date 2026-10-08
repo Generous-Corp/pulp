@@ -3255,8 +3255,10 @@
    "inputs": [
     ".github/workflows/build.yml",
     ".github/workflows/format-baseline-diff.yml",
+    ".github/workflows/tracing-build.yml",
     ".github/workflows/web-plugins.yml",
     "test/cmake/test_gpu_health_cpu_only_configure.sh",
+    "tools/ci/governed-build.sh",
     "tools/scripts/local_diff_cover.sh",
     "tools/scripts/test_build_parallelism_guard.py"
    ],
