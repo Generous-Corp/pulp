@@ -95,6 +95,12 @@ directory explicit, including secondary artifact trees and the Linux RTSan
 lane, but do not include `-j`, `--parallel`, or a host-core probe: the
 governor owns parallelism, leases, and build-directory locking.
 
+WebCLAP Cloudflare builds use `bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`
+for every WASI/Emscripten tree. Keep this absolute workspace-root path: the
+gallery step runs from `examples/web-demos/wclap-build`, where a relative
+`tools/ci/` path cannot resolve. Keep configure toolchains and build directories
+unchanged when routing an existing build through the governor.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 ### Build commands emitted by diagnostics and remediations

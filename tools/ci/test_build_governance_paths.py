@@ -126,6 +126,18 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_wclap_cloudflare_builds_route_through_governor(self) -> None:
+        source = read_source(".github/workflows/wclap-cloudflare.yml")
+        build_lines = [
+            line for line in source.splitlines() if "cmake --build" in line
+        ]
+        self.assertEqual(len(build_lines), 4)
+        for line in build_lines:
+            self.assertIn('bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build', line)
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+
     def test_sanitizer_and_coverage_helpers_route_builds_through_governor(self) -> None:
         """Local diagnostic lanes must keep their --jobs cap at the governor boundary."""
         for relative in (
