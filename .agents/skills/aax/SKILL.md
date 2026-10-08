@@ -335,6 +335,22 @@ produce a misleading artifact. These checks are deliberately redundant:
    source commit, artifact path, artifact SHA-256, signing and validator
    receipts, install locations, and host result. If Pro Tools was not launched,
    say that the host gate is pending.
+9. **Drive DigiShell through DTT.** `CommandLineTools/dsh` is an interactive
+   shell, not a conventional `--help` command. Do not invoke it with empty
+   stdin or a pipe that can close early; that can leave a high-CPU process
+   emitting unbounded `Got empty command` failures. Use the supplied
+   `DTT/run_test.command --script ...` entry point, put logs in a disposable
+   private directory, and bound the run with an external timeout. A failed or
+   timed-out harness is an inconclusive validator result and must be reported
+   as such.
+10. **Interpret validator coverage honestly.** `test.describe_validation`,
+    `test.data_model`, `test.load_unload`, `test.parameter_traversal.random.fast`,
+    and `test.parameters` are useful core gates. `test.page_table.automation_list`
+    may pass with a message that no page tables are registered; that is valid
+    when the plug-in declares none. `test.page_table.load` is only applicable
+    when a page-table library is shipped, so a failure saying that the library
+    is absent is an expected non-applicability result, not evidence that the
+    plug-in's data model failed. Keep it separate from the required pass set.
 
 For a local macOS run, the minimum preflight should be equivalent to:
 
