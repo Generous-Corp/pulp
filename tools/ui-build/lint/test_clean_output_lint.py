@@ -191,6 +191,29 @@ export function Other() {
             self.assertNotEqual(linked.returncode, 0)
             self.assertIn("must not be a symlink", linked.stdout)
 
+    def test_manifest_requires_known_roles(self):
+        lint = Path(__file__).with_name("clean_output_lint.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "Captured.tsx"
+            source.write_text(
+                'export function Captured() { return <button data-pulp-action="x">x</button>; }\n',
+                encoding="utf-8")
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "schema": "pulp.clean-output-corpus.v1",
+                "producer": "pulp import-design --emit source",
+                "files": [{"path": source.name, "role": "mystery",
+                           "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}],
+            }), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(lint), str(root), "--manifest", str(manifest), "--json"],
+                text=True, capture_output=True, check=False, encoding="utf-8")
+            self.assertNotEqual(result.returncode, 0)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["findings"][0]["code"], "invalid-corpus-manifest")
+            self.assertIn("invalid file role", report["findings"][0]["message"])
+
     def test_gates_runs_lint_when_fixture_directory_is_missing(self):
         gates = Path(__file__).parents[3] / "tools/scripts/gates.sh"
         text = gates.read_text(encoding="utf-8")
