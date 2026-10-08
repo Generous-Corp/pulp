@@ -101,10 +101,10 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
         impl->completion_policy_supported = created.effective_policy == created.requested_policy;
         impl->session = std::make_unique<detail::SharedIoProgramSession>();
         const auto bytes = static_cast<std::size_t>(config.descriptor.block_size) * sizeof(float);
-        if (!impl->session->prepare({std::move(created.provider), std::move(created.program)},
-                                    {.slots = config.slots,
-                                     .input_bytes_per_slot = bytes,
-                                     .output_bytes_per_slot = bytes})) {
+        auto provider_pair = created.take_provider_pair();
+        if (!impl->session->prepare(std::move(provider_pair), {.slots = config.slots,
+                                                               .input_bytes_per_slot = bytes,
+                                                               .output_bytes_per_slot = bytes})) {
             result.error = GpuWaveNetSessionError::PreparationFailed;
             // Keep the owner alive so its provider can retry a physical drain
             // barrier if preparation had already allocated shared resources.
