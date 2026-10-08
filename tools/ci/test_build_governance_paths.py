@@ -48,6 +48,18 @@ class BuildGovernancePathTests(unittest.TestCase):
                 self.assertNotRegex(command, r"cmake --build[^'\n]*(?:-j\S*|--parallel(?:=|\s))")
         self.assertGreaterEqual(checked, 1)
 
+    def test_gcc_compile_workflow_builds_use_governor(self) -> None:
+        source = read_source(".github/workflows/gcc-compile-gate.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn("tools/ci/governed-build.sh cmake --build", build_lines[0])
+        self.assertNotRegex(
+            build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))"
+        )
+
     def test_sanitizer_workflow_builds_use_governor(self) -> None:
         source = read_source(".github/workflows/sanitizers.yml")
         build_lines = [line for line in source.splitlines() if "cmake --build" in line]

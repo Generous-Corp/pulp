@@ -6599,6 +6599,11 @@ core libraries with `g++` and nothing else:
 | `PULP_ENABLE_DESIGN_IMPORT` | `OFF` | authoring subsystem, not core portability |
 | `PULP_ENABLE_INSPECTOR` | `OFF` | dev surface, not core portability |
 
+The discovered core-target list is built through
+`tools/ci/governed-build.sh cmake --build build-gcc --target $(cat targets.txt)`,
+so the gate's target coverage stays dynamic while job selection remains under the
+shared governor.
+
 **Read a failure here literally.** The lane runs no tests and touches no
 hardware, so it cannot flake on load or timing the way the GPU-perf lanes can.
 A red result is a real compiler divergence. Clang accepting the same code does
