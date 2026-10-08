@@ -943,6 +943,13 @@ TEST_CASE("native text clipping invariant catches separator-sized label ancestor
         for (const auto& [text, width] : labels) {
             auto caption = label("label-" + text, text,
                                  planted_clip ? 0.0f : width, 15.0f);
+            if (text == "HYBRID") {
+                // Exercise the soft-wrapping path: intrinsic_width() is zero
+                // for this label, so the invariant must use max-content or
+                // painted extents to remain sensitive to clipped ink.
+                caption.style.white_space = "normal";
+                caption.style.height = 30.0f;
+            }
             rail.children.push_back(std::move(caption));
             x += width;
         }
