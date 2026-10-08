@@ -229,6 +229,57 @@ export PULP_AAX_SDK_DIR=~/SDKs/avid/aax-sdk/current
 export PULP_AAX_VALIDATOR_DIR=~/SDKs/avid/aax-validator/current
 ```
 
+## macOS PACE and private tool backup
+
+The Avid SDK and DigiShell validator are developer-supplied materials. Keep
+them outside every public repository, preferably at:
+
+```text
+~/SDKs/avid/aax-sdk/current
+~/SDKs/avid/aax-validator/current
+```
+
+Keep PACE Fusion installers and a small hash manifest in a private directory,
+for example:
+
+```text
+~/SDKs/private/pace/fusion/6.0.1/
+```
+
+The manifest should record the source files, Fusion version, date, and SHA-256
+hashes. Do not put iLok credentials, developer certificates, wrap configs, or
+license receipts in Git, shell history, command arguments, or build logs.
+
+The macOS Fusion package installs several components. The `Fusion_tools_Lite`
+component provides `wraptool`, normally at:
+
+```text
+/Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool
+```
+
+The full installer has a brittle preflight that rejects any process whose name
+contains `xcodebuild`. Confirm that no real `xcodebuild` compilation is active
+before installing. Persistent `xcodebuildmcp` helpers can trigger the same
+message even when no build is running; do not kill shared helpers merely to
+satisfy that check. If needed, install the signed component packages from the
+mounted PACE installer individually, preserving the parent DMG/pkg hash and
+recording the component versions. Existing iLok/license support may already be
+installed; verify receipts with `pkgutil --pkg-info` before upgrading.
+
+PACE installation does not sign an AAX binary automatically. Treat these as
+separate gates:
+
+1. AAX compile/link against the out-of-tree Avid SDK.
+2. Apple/PACE signing with the developer's own identities and wrap
+   configuration.
+3. DigiShell/AAX Validator checks.
+4. Discovery and editor/audio smoke in Pro Tools.
+
+An ad-hoc or linker-signed bundle can pass data-model and parameter validation
+while still failing `wraptool verify` or Pro Tools's production signature
+requirements. Never claim the signing or Pro Tools gates from a successful
+compile alone. Windows setup and signing remain a separate, deferred path.
+
 ## Core Commands
 
 Check current AAX availability:
