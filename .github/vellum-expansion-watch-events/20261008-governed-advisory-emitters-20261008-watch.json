@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261008-governed-advisory-emitters-20261008-watch",
+  "created_at": "2026-10-08T17:56:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Route the active non-Skia compile guard and Scene3D advisory target builds through tools/ci/governed-build.sh, removing whole-host or generator-default build parallelism without changing target selection, advisory status, or failure handling. The workflows remain Pulp-owned CI orchestration; no renderer, asset, importer, DesignIR, Skia/Dawn, or Vellum implementation authority moves.",
+  "tests": [
+    "python3 tools/scripts/decisions_contract.py --mode validate",
+    "tools/scripts/gates.sh origin/main",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
