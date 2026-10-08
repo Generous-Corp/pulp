@@ -21,7 +21,6 @@
     {
       "path": "test/ctest_script_inputs.json",
       "needles": [
-        "pulp-materialized-runtime-conformance",
         "pulp-test-cli-ui-command"
       ]
     }
