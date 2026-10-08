@@ -9,6 +9,22 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09351"></a>
+## [0.935.1] - 2026-10-08
+
+- release/version bump ([#9923](https://github.com/Generous-Corp/pulp/pull/9923))
+- codex/governed pr safe linux 20261008 ([#9924](https://github.com/Generous-Corp/pulp/pull/9924))
+- codex/governed freshness 20261008 ([#9921](https://github.com/Generous-Corp/pulp/pull/9921))
+- codex/wgpu lifecycle packet rebase 20261008 ([#9916](https://github.com/Generous-Corp/pulp/pull/9916))
+- codex/governed advisory emitters 20261008 ([#9920](https://github.com/Generous-Corp/pulp/pull/9920))
+- codex/default import sizing fix 20261008 ([#9919](https://github.com/Generous-Corp/pulp/pull/9919))
+- codex/dspx adapter integration 20261008 ([#9918](https://github.com/Generous-Corp/pulp/pull/9918))
+- codex/neural admission campaign refresh 20261008 ([#9917](https://github.com/Generous-Corp/pulp/pull/9917))
+- codex/gpu audio timestamp probe 20261007 ([#9914](https://github.com/Generous-Corp/pulp/pull/9914))
+- codex/neural admission audit 20261008 ([#9915](https://github.com/Generous-Corp/pulp/pull/9915))
+- codex/spectr fit authored frame 20261008 r2 ([#9889](https://github.com/Generous-Corp/pulp/pull/9889))
+- codex/native text clip fix pr 20261008 ([#9913](https://github.com/Generous-Corp/pulp/pull/9913))
+
 <a id="v09350"></a>
 ## [0.935.0] - 2026-10-08
 
@@ -10209,6 +10225,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.935.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.935.1
 [0.935.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.935.0
 [0.934.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.934.0
 [0.933.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.933.2
