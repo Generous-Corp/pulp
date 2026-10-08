@@ -147,29 +147,40 @@ async function measureAuthoredFrame(cdp) {
       }
       if (!element) return null;
       const bounds = element.getBoundingClientRect();
+      // getBoundingClientRect() is expressed after ancestor transforms. Fit
+      // discovery needs the authored layout box so a fixed design surface
+      // scaled into the seed viewport is not mistaken for a smaller design.
+      // Keep the transformed bounds above as the capture-space geometry; the
+      // intrinsic dimensions are used only to choose and verify the viewport.
+      const authoredWidth = Number(element.offsetWidth);
+      const authoredHeight = Number(element.offsetHeight);
       return {
         x: bounds.left + window.scrollX,
         y: bounds.top + window.scrollY,
         width: bounds.width,
         height: bounds.height,
+        authoredWidth: authoredWidth > 0 ? authoredWidth : bounds.width,
+        authoredHeight: authoredHeight > 0 ? authoredHeight : bounds.height,
       };
     })()`,
     returnByValue: true,
   });
   const frame = evaluated.result?.value;
-  if (!frame || ![frame.x, frame.y, frame.width, frame.height]
-      .every(Number.isFinite) || frame.width <= 0 || frame.height <= 0) {
+  if (!frame || ![frame.x, frame.y, frame.width, frame.height,
+    frame.authoredWidth, frame.authoredHeight].every(Number.isFinite) ||
+      frame.width <= 0 || frame.height <= 0 ||
+      frame.authoredWidth <= 0 || frame.authoredHeight <= 0) {
     return null;
   }
   return frame;
 }
 
 function verifyAuthoredViewport(frame, target) {
-  if (Math.ceil(frame.width) !== target.width ||
-      Math.ceil(frame.height) !== target.height) {
+  if (Math.ceil(frame.authoredWidth) !== target.width ||
+      Math.ceil(frame.authoredHeight) !== target.height) {
     const error = new Error(
       `authored frame changed from ${target.width}x${target.height} to ` +
-      `${frame.width}x${frame.height} after one same-target reload`);
+      `${frame.authoredWidth}x${frame.authoredHeight} after one same-target reload`);
     error.code = "capture-authored-viewport-nonconvergent";
     throw error;
   }
@@ -1467,8 +1478,8 @@ async function runCapture(options) {
           "the first occupying body child did not resolve to a finite frame");
       }
       const target = {
-        width: Math.ceil(discoveredFrame.width),
-        height: Math.ceil(discoveredFrame.height),
+        width: Math.ceil(discoveredFrame.authoredWidth),
+        height: Math.ceil(discoveredFrame.authoredHeight),
       };
       validateCaptureDimensions(
         target.width, target.height, dpr, "derived authored viewport");

@@ -79,6 +79,119 @@ test("authored-frame fitting reloads once at a contained fixed point",
     }
   });
 
+test("authored-frame fitting resolves a responsive scaled design surface",
+  { timeout: captureCaseTimeout(1, FIT_RELOAD_DEADLINE_MS) }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-authored-fit-scaled-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      // This is the shape used by fixed design surfaces such as Spectr: the
+      // authored box remains 1320x860 while a transform scales it to the
+      // available viewport. Fit discovery must use the untransformed layout
+      // box, then reload at that authored size so the final frame is 1:1.
+      await writeFile(input, `<!doctype html><style>
+  html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#111}
+  #panel{position:absolute;left:50%;top:50%;width:1320px;height:860px;
+    transform-origin:center center;background:#246}
+</style><div id="panel"></div><script>
+  const panel = document.getElementById('panel');
+  const resize = () => {
+    panel.style.transform = 'translate(-50%,-50%) scale(' +
+      Math.min(innerWidth / 1320, innerHeight / 860) + ')';
+  };
+  resize();
+  addEventListener('resize', resize);
+</script>
+`);
+
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "1280",
+        "--initial-height", "800",
+        "--dpr", "2",
+        "--timeout-ms", String(FIT_RELOAD_DEADLINE_MS),
+        "--fit-authored-frame",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const envelope = JSON.parse(
+        await readFile(path.join(output, "capture.json"), "utf8"));
+      const viewport = envelope.provenance.viewport;
+      assert.deepEqual(viewport.initial, { width: 1280, height: 800 });
+      assert.deepEqual(viewport.resolved, { width: 1320, height: 860 });
+      assert.equal(viewport.resolution.mode, "authored-frame-fixed-point");
+      assert.deepEqual(viewport.resolution.target, { width: 1320, height: 860 });
+      assert.equal(viewport.resolution.fixed_point, true);
+      assert.equal(viewport.resolution.contained, true);
+      assert.equal(viewport.resolution.reload_count, 1);
+      assert.deepEqual(envelope.reference.authored_frame,
+        { x: 0, y: 0, width: 1320, height: 860 });
+      assert.equal(envelope.reference.logical_width, 1320);
+      assert.equal(envelope.reference.logical_height, 860);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("authored-frame fitting refuses a control clipped by the authored root",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-authored-fit-clipped-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><style>
+  html,body{margin:0;background:#111}
+  #panel{width:920px;height:200px;overflow:hidden;background:#246}
+  #clipped{position:absolute;left:20px;top:180px;width:160px;height:40px}
+</style><div id="panel"><button id="clipped" data-pulp-param="cutoff">CUT</button></div>
+`);
+
+      await assert.rejects(execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "1280",
+        "--initial-height", "300",
+        "--dpr", "2",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
+        "--fit-authored-frame",
+      ], { maxBuffer: 1024 * 1024 }), (error) => {
+        assert.ok(error.stderr.includes("capture-control-clipped"));
+        assert.ok(error.stderr.includes("cutoff"));
+        return true;
+      });
+      const diagnostic = JSON.parse(
+        await readFile(path.join(output, "capture-error.json"), "utf8"));
+      assert.equal(diagnostic.code, "capture-control-clipped");
+      await assert.rejects(access(path.join(output, "capture.json")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("authored-frame fitting rejects a viewport-relative non-fixed point",
   { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
