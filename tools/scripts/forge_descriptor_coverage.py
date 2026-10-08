@@ -215,7 +215,11 @@ def main() -> int:
     if len(roles) != len(set(roles)):
         ok = False
         print("sample-region authoring roles are duplicated", file=sys.stderr)
-    route_match = re.search(r"region_keys\[\]\s*=\s*\{(?P<body>.*?)\};", export_text, re.S)
+    # The sample-region projection is allowed to live in its private adapter
+    # translation unit; retain the source-level route-order guard across the
+    # legacy dispatcher name and the extracted adapter name.
+    route_match = re.search(r"(?:region_keys|kRegionKeys)\[\]\s*=\s*\{(?P<body>.*?)\};",
+                            export_text, re.S)
     route_keys = STRING_RE.findall(route_match.group("body")) if route_match else []
     if route_keys != ["sample_region_" + role for role in roles]:
         ok = False
