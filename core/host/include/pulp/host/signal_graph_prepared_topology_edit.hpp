@@ -1,12 +1,17 @@
 #pragma once
 
-#include <pulp/host/detail/prepared_lifecycle_ownership.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 
 #include <optional>
 
 namespace pulp::host {
+
+namespace detail {
+struct QuiescedPluginLifecycle;
+struct QuiescedCustomLifecycle;
+struct QuiescedProcessorLifecycle;
+} // namespace detail
 
 /// Passkey authorizing exact-parameter-event node claims on a prepared edit.
 /// Only TimelineGraphPlaybackBinding can mint one, so ownership of a node's
