@@ -24,5 +24,7 @@
   "producer": "pulp import-design --emit source",
   "schema": "pulp.clean-output-corpus.v1",
   "source_fixture": "test/fixtures/imports/claude/2024.10/example.html",
+  "source_fixture_output": "conformance/claude-design.html",
+  "source_fixture_sha256": "8011c77001e19d0ea672d20fb614264ebd320f13269634fbf266758674cedb3f",
   "source_kind": "claude-design-conformance"
 }

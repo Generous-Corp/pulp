@@ -12,6 +12,7 @@ has a stable path/line/code so corpus reports can be diffed between runs.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import re
@@ -26,6 +27,11 @@ COMPONENT_DECL = re.compile(r"\b(?:function\s+|const\s+)([A-Z][A-Za-z0-9_]*)")
 FUNCTION_DECL = re.compile(r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\(")
 STATIC_STYLE = re.compile(r"style\s*=\s*\{\s*\{(?P<body>[^{}]*)\}\s*\}")
 OPEN_TAG = re.compile(r"<([A-Za-z][\w.-]*)(?:\s+[^<>]*?)?\s*/?>")
+# This scanner is intentionally conservative: it only compares complete
+# non-self-closing JSX elements with balanced tag names. It is not a TSX
+# parser, so malformed/unbalanced markup produces no structural finding and
+# remains the compiler's responsibility.
+JSX_TAG = re.compile(r"</?([A-Za-z][\w.-]*)(?:\s+[^<>]*?)?\s*/?>", re.S)
 CLICK_TARGET = re.compile(r"<(?:div|span|section|label)\b(?P<attrs>[^<>]*\bonClick\s*=\s*[^<>]+)", re.I)
 RANDOMNESS = re.compile(r"\b(?:Date\.now|Math\.random|performance\.now|new\s+Date\s*\()")
 COLOR_LITERAL = re.compile(r"(?:#[0-9a-fA-F]{3,8}\b|rgba?\s*\(|hsla?\s*\()")
@@ -44,6 +50,78 @@ LINTABLE_ROLES = frozenset({"owned-source", "emitted-source"})
 EXCLUDED_ROLES = frozenset({"generated", "vendor", "generated-vendor"})
 CONFORMANCE_ROLES = frozenset({"conformance-fixture"})
 KNOWN_ROLES = LINTABLE_ROLES | EXCLUDED_ROLES | CONFORMANCE_ROLES
+
+
+def _repository_root(path: Path) -> Path | None:
+    """Find the checkout root for a repo-relative provenance path."""
+    resolved = path.resolve()
+    for candidate in (resolved.parent, *resolved.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _validate_source_provenance(
+    manifest: dict, manifest_path: Path, files: list[dict]
+) -> str | None:
+    """Bind a claimed source fixture to its recorded copied output bytes.
+
+    Older ad-hoc manifests do not claim a source fixture and remain valid. A
+    manifest that declares ``source_kind`` must carry both the repository
+    fixture digest and the corpus output path so a checked-in copy cannot drift
+    while its manifest remains self-consistent.
+    """
+    if "source_kind" not in manifest and "source_fixture" not in manifest:
+        return None
+    source_kind = manifest.get("source_kind")
+    source_fixture = manifest.get("source_fixture")
+    source_digest = manifest.get("source_fixture_sha256")
+    output_relative = manifest.get("source_fixture_output")
+    if not isinstance(source_kind, str) or not source_kind:
+        return "generated-output manifest source_kind must be a non-empty string"
+    if not isinstance(source_fixture, str) or not source_fixture:
+        return "generated-output manifest source_fixture is required"
+    fixture_path = Path(source_fixture)
+    if (fixture_path.is_absolute() or fixture_path.as_posix() != source_fixture or
+            any(part in ("", ".", "..") for part in fixture_path.parts) or
+            "\\" in source_fixture):
+        return "generated-output manifest source_fixture path is not canonical"
+    if not isinstance(source_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", source_digest):
+        return "generated-output manifest source_fixture_sha256 is invalid"
+    if not isinstance(output_relative, str) or not output_relative:
+        return "generated-output manifest source_fixture_output is required"
+    output_path = Path(output_relative)
+    if (output_path.is_absolute() or output_path.as_posix() != output_relative or
+            any(part in ("", ".", "..") for part in output_path.parts) or
+            "\\" in output_relative):
+        return "generated-output manifest source_fixture_output path is not canonical"
+
+    repo_root = _repository_root(manifest_path)
+    if repo_root is None:
+        return "generated-output manifest provenance requires a repository root"
+    fixture = repo_root / fixture_path
+    ancestor = repo_root
+    for part in fixture_path.parts:
+        ancestor /= part
+        if ancestor.is_symlink():
+            return f"generated-output source fixture must not use a symlink: {source_fixture}"
+    try:
+        resolved_fixture = fixture.resolve(strict=True)
+        resolved_fixture.relative_to(repo_root.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return f"generated-output source fixture escapes the repository: {source_fixture}"
+    if not fixture.is_file():
+        return f"generated-output source fixture is missing: {source_fixture}"
+    actual_digest = hashlib.sha256(resolved_fixture.read_bytes()).hexdigest()
+    if actual_digest != source_digest:
+        return f"generated-output source fixture hash mismatch: {source_fixture}"
+
+    output_entry = next((entry for entry in files if entry.get("path") == output_relative), None)
+    if output_entry is None:
+        return f"generated-output manifest source fixture output is missing: {output_relative}"
+    if output_entry.get("sha256") != source_digest:
+        return f"generated-output source fixture output hash differs: {output_relative}"
+    return None
 
 
 def _load_corpus_manifest(source: Path, manifest_path: Path) -> tuple[str | None, set[str] | None]:
@@ -143,6 +221,9 @@ def _load_corpus_manifest(source: Path, manifest_path: Path) -> tuple[str | None
     lint_paths = {path for path, role in roles.items() if role in LINTABLE_ROLES}
     if not lint_paths:
         return "generated-output manifest selects no owned source files for lint", None
+    provenance_error = _validate_source_provenance(manifest, manifest_path, files)
+    if provenance_error:
+        return provenance_error, None
     return None, lint_paths
 
 
@@ -165,6 +246,106 @@ def _source_files(root: Path) -> list[Path]:
     if root.is_file():
         return [root] if root.suffix in SOURCE_SUFFIXES else []
     return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix in SOURCE_SUFFIXES)
+
+
+def _canonical_markup(text: str) -> str:
+    """Normalize formatting while preserving the markup/text distinction."""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _mask_non_markup_regions(text: str) -> str:
+    """Blank comments and quoted JavaScript regions without changing offsets.
+
+    The duplicate scanner is intentionally dependency-free rather than a TSX
+    parser. Keeping line breaks and replacing the other bytes with spaces
+    prevents markup-looking documentation, string, and template-literal text
+    from being mistaken for JSX while preserving source offsets for findings.
+    A template literal is treated as one quoted region; JSX embedded in a
+    ``${...}`` expression is therefore a conservative false negative rather
+    than a false positive.
+    """
+    masked = list(text)
+    length = len(text)
+    index = 0
+
+    def blank(start: int, end: int) -> None:
+        for position in range(start, end):
+            if masked[position] != "\n":
+                masked[position] = " "
+
+    while index < length:
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            if end < 0:
+                end = length
+            blank(index, end)
+            index = end
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            end = length if end < 0 else end + 2
+            blank(index, end)
+            index = end
+            continue
+        if text[index] not in "'\"`":
+            index += 1
+            continue
+
+        quote = text[index]
+        end = index + 1
+        escaped = False
+        while end < length:
+            character = text[end]
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                end += 1
+                break
+            end += 1
+        blank(index, end)
+        index = end
+    return "".join(masked)
+
+
+def _duplicate_subtree_findings(text: str) -> list[tuple[int, int, str]]:
+    """Return duplicate complete JSX subtrees as (line, count, signature).
+
+    A mapped list contains one source subtree and therefore does not trigger.
+    Two copied subtrees with the same normalized opening tag and contents do,
+    even when their tags are split across lines. Self-closing leaves are left
+    to the existing same-line control because repeated icons are common and do
+    not establish a duplicated subtree.
+    """
+    stack: list[tuple[str, int, str]] = []
+    complete: list[tuple[str, int]] = []
+    masked = _mask_non_markup_regions(text)
+    for match in JSX_TAG.finditer(masked):
+        token = match.group(0)
+        name = match.group(1)
+        if token.startswith("</"):
+            if not stack or stack[-1][0] != name:
+                # A fragment, expression, or malformed source can make this
+                # lightweight scanner lose balance. Fail closed by dropping
+                # the partial parse rather than guessing at ownership.
+                stack.clear()
+                continue
+            _, start, _ = stack.pop()
+            complete.append((_canonical_markup(text[start:match.end()]),
+                             _line_for(text, start)))
+            continue
+        if token.rstrip().endswith("/>"):
+            continue
+        stack.append((name, match.start(), token))
+
+    counts = Counter(signature for signature, _ in complete)
+    findings: list[tuple[int, int, str]] = []
+    for signature, count in sorted(counts.items()):
+        lines = {line for candidate, line in complete if candidate == signature}
+        if count > 1 and len(lines) > 1:
+            findings.append((min(lines), count, signature))
+    return findings
 
 
 def lint_source(root: Path, *, enforce_size: bool = False, max_component_lines: int = 150,
@@ -241,12 +422,8 @@ def lint_source(root: Path, *, enforce_size: bool = False, max_component_lines: 
         for match in RANDOMNESS.finditer(text):
             findings.append(Finding("nondeterministic-expression", rel, _line_for(text, match.start()),
                                     "runtime output depends on an unseeded clock or random source"))
-        # A simple structural duplicate detector catches repeated identical
-        # opening tags while ignoring whitespace and source locations.
-        # Count repeated opening markup within one source line.  Repeated tags
-        # on different lines are often an intentional mapped list; a same-line
-        # duplicate is the high-signal planted duplicate-subtree control. A
-        # future AST-backed pass can widen this to full subtree hashes.
+        # Keep the high-signal same-line control for repeated leaves, then use
+        # the balanced subtree scanner below for copied markup that spans lines.
         for line_number, source_line in enumerate(text.splitlines(), 1):
             tags = []
             for match in OPEN_TAG.finditer(source_line):
@@ -258,6 +435,10 @@ def lint_source(root: Path, *, enforce_size: bool = False, max_component_lines: 
                 if count > 1:
                     findings.append(Finding("duplicate-markup", rel, line_number,
                                             f"opening markup occurs {count} times on one line: {tag[:80]}"))
+        for line_number, count, signature in _duplicate_subtree_findings(text):
+            findings.append(Finding(
+                "duplicate-markup", rel, line_number,
+                f"complete JSX subtree occurs {count} times across lines: {signature[:80]}"))
         if enforce_size:
             lines = text.count("\n") + 1
             for match in COMPONENT_DECL.finditer(text):

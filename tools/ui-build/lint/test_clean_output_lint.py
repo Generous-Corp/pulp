@@ -9,6 +9,13 @@ from pathlib import Path
 
 from clean_output_lint import lint_source
 
+# CTest input tracking: these are consumed through subprocesses, dynamic
+# imports, and the checked-in provenance fixture rather than Python imports.
+# "tools/ui-build/ui_build.py"
+# "tools/ui-build/lint/clean_output_lint.py"
+# "tools/ui-build/lint/fixtures/generated"
+# "test/fixtures/imports/claude/2024.10"
+
 
 class CleanOutputLintTests(unittest.TestCase):
     def _report(self, source: str, name: str = "Panel.tsx"):
@@ -42,6 +49,59 @@ export function Other() {
         self.assertTrue({"generic-name", "inline-static-style", "literal-color",
                          "nonsemantic-click-target", "nondeterministic-expression",
                          "duplicate-markup"} <= codes, report)
+
+    def test_multiline_duplicate_subtree_fails(self):
+        report = self._report(
+            """export function Panel() {
+  return <>
+    <div className="duplicate">
+      <span>same</span>
+    </div>
+    <div className="duplicate">
+      <span>same</span>
+    </div>
+  </>;
+}
+"""
+        )
+        duplicates = [f for f in report["findings"] if f["code"] == "duplicate-markup"]
+        self.assertFalse(report["ok"], report)
+        self.assertTrue(duplicates, report)
+        self.assertTrue(any("across lines" in f["message"] for f in duplicates), report)
+
+    def test_distinct_multiline_subtrees_pass(self):
+        report = self._report(
+            """export function Panel() {
+  return <>
+    <div className="first">one</div>
+    <div className="second">two</div>
+  </>;
+}
+"""
+        )
+        self.assertTrue(report["ok"], report)
+
+    def test_multiline_markup_in_strings_and_comments_is_ignored(self):
+        report = self._report(
+            """const documentation = `
+  <div className="duplicate">
+    <span>same</span>
+  </div>
+  <div className="duplicate">
+    <span>same</span>
+  </div>
+`;
+/*
+  <aside>
+    <span>comment</span>
+  </aside>
+  <aside>
+    <span>comment</span>
+  </aside>
+*/
+"""
+        )
+        self.assertTrue(report["ok"], report)
 
     def test_json_report_is_deterministic(self):
         first = self._report("export function Knob() { return <button data-pulp-action=\"x\">x</button>; }\n")
@@ -105,6 +165,48 @@ export function Other() {
                 text=True, capture_output=True, check=False, encoding="utf-8")
             self.assertNotEqual(stale.returncode, 0)
             self.assertIn("invalid-corpus-manifest", stale.stdout)
+
+    def test_checked_in_corpus_binds_source_fixture_provenance(self):
+        lint = Path(__file__).with_name("clean_output_lint.py")
+        repo = Path(__file__).parents[3]
+        source = repo / "tools/ui-build/lint/fixtures/generated"
+        manifest = source / "manifest.json"
+        result = subprocess.run(
+            [sys.executable, str(lint), str(source), "--manifest", str(manifest), "--json"],
+            text=True, capture_output=True, check=False, encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["files"], 2)
+
+        with tempfile.TemporaryDirectory(dir=repo) as directory:
+            stale = Path(directory) / "manifest.json"
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+            document["source_fixture_sha256"] = "0" * 64
+            stale.write_text(json.dumps(document), encoding="utf-8")
+            rejected = subprocess.run(
+                [sys.executable, str(lint), str(source), "--manifest", str(stale), "--json"],
+                text=True, capture_output=True, check=False, encoding="utf-8")
+            self.assertNotEqual(rejected.returncode, 0)
+            report = json.loads(rejected.stdout)
+            self.assertEqual(report["findings"][0]["code"], "invalid-corpus-manifest")
+            self.assertIn("source fixture hash mismatch", report["findings"][0]["message"])
+
+        with tempfile.TemporaryDirectory() as outside, tempfile.TemporaryDirectory(dir=repo) as directory:
+            outside_fixture = Path(outside) / "example.html"
+            outside_fixture.write_bytes(
+                (repo / "test/fixtures/imports/claude/2024.10/example.html").read_bytes())
+            symlink = Path(directory) / "source-link"
+            symlink.symlink_to(Path(outside))
+            escaped = Path(directory) / "manifest.json"
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+            document["source_fixture"] = f"{Path(directory).name}/source-link/example.html"
+            escaped.write_text(json.dumps(document), encoding="utf-8")
+            rejected = subprocess.run(
+                [sys.executable, str(lint), str(source), "--manifest", str(escaped), "--json"],
+                text=True, capture_output=True, check=False, encoding="utf-8")
+            self.assertNotEqual(rejected.returncode, 0)
+            report = json.loads(rejected.stdout)
+            self.assertEqual(report["findings"][0]["code"], "invalid-corpus-manifest")
+            self.assertIn("symlink", report["findings"][0]["message"])
 
     def test_manifest_binds_the_complete_sorted_source_set(self):
         lint = Path(__file__).with_name("clean_output_lint.py")
