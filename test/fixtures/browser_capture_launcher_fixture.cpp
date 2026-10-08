@@ -33,7 +33,11 @@ int main(int argc, char** argv) {
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) args.emplace_back(argv[i]);
     if (args.size() == 1 && args[0] == "--version") {
-        std::cout << "v22.0.0\n";
+        // This binary is used as the browser executable in the production
+        // importer test. Advertise a supported Chromium-shaped version so
+        // discovery reaches capture and the test can exercise the intended
+        // provenance rejection rather than failing at the version floor.
+        std::cout << "Google Chrome 151.0.7922.72\n";
         return 0;
     }
     if (args.size() < 2) return 64;
