@@ -272,24 +272,27 @@ inline bool register_state_store_set_parameter_handler(
     if (key_to_id->empty())
         return false;
 
-    register_set_parameter(bridge,
-                           [store, owner_alive, key_to_id](const SetParameterRequest& request) {
-                               const auto store_lease = store.lock();
-                               if (!store_lease || !runtime::AliveToken::is_alive(owner_alive))
-                                   return false;
-                               const auto found = key_to_id->find(request.key);
-                               if (found == key_to_id->end())
-                                   return false;
-                               const auto value = static_cast<float>(request.value);
-                               // The wire contract carries a double, while StateStore stores
-                               // float. A finite double can still overflow during narrowing;
-                               // reject it instead of letting StateStore sanitize it to the
-                               // parameter default while reporting accepted=true.
-                               if (!std::isfinite(value))
-                                   return false;
-                               store_lease->set_value(found->second, value);
-                               return true;
-                           });
+    register_set_parameter(
+        bridge, [store, owner_alive, key_to_id](const SetParameterRequest& request) {
+            const auto store_lease = store.lock();
+            if (!store_lease || !runtime::AliveToken::is_alive(owner_alive))
+                return false;
+            const auto found = key_to_id->find(request.key);
+            if (found == key_to_id->end())
+                return false;
+            // The wire contract carries a double, while StateStore stores
+            // float. Check representability before narrowing: converting an
+            // out-of-range double to float is implementation-defined and can
+            // otherwise turn an accepted write into a default/clamped value.
+            constexpr auto max_float = static_cast<double>(std::numeric_limits<float>::max());
+            if (request.value > max_float || request.value < -max_float)
+                return false;
+            const auto value = static_cast<float>(request.value);
+            if (!std::isfinite(value))
+                return false;
+            store_lease->set_value(found->second, value);
+            return true;
+        });
     return true;
 }
 """
@@ -328,6 +331,7 @@ def render_cpp(data: dict[str, Any]) -> str:
         "#include <cmath>\n"
         "#include <functional>\n"
         "#include <initializer_list>\n"
+        "#include <limits>\n"
         "#include <map>\n"
         "#include <memory>\n"
         "#include <set>\n"
