@@ -19,7 +19,7 @@
   ],
   "evidence": [
     {
-      "path": "core/format/src/projection_capability.hpp",
+      "path": "core/format/include/pulp/format/projection_capability.hpp",
       "needles": [
         "ProjectionSurface",
         "ProjectionResult",
@@ -33,7 +33,7 @@
       "needles": [
         "ProjectionSurface::clap",
         "ProjectionSurface::wam",
-        "!projection_capability",
+        "REQUIRE_FALSE",
         "ProjectionSurface::au"
       ]
     },
@@ -43,7 +43,8 @@
         "DSPX-07",
         "bounded baked",
         "Dense modulation",
-        "Forge, Spectr, and GPU-NAM"
+        "installed SDK",
+        "Spectr and GPU-NAM"
       ]
     },
     {
