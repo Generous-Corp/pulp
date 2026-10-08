@@ -222,8 +222,7 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
               << ",\"wait_any_max_wall_ns\":" << stats.wait_any_max_wall_ns
               << ",\"timestamp_submissions\":" << stats.timestamp_submissions
               << ",\"timestamp_samples\":" << stats.timestamp_samples
-              << ",\"timestamp_failures\":" << stats.timestamp_failures
-              << ",\"gpu_elapsed_ns\":";
+              << ",\"timestamp_failures\":" << stats.timestamp_failures << ",\"gpu_elapsed_ns\":";
     if (gpu_elapsed_ns)
         std::cout << *gpu_elapsed_ns;
     else
@@ -441,13 +440,14 @@ int main(int argc, char** argv) {
     for (std::size_t size_index = 0; passed && size_index < size_count; ++size_index) {
         const auto& buffer_size = sizes[size_index % std::size(sizes)];
         SharedIoArena arena;
-        const bool prepared =
-            arena.prepare(*created.provider, {.slots = 2,
-                                              .input_bytes_per_slot = buffer_size.input,
-                                              .output_bytes_per_slot = buffer_size.output,
-                                              .storage_kind = scenario->timestamp_staged
-                                                                  ? DawnSharedIoProvider::StorageKind::Staged
-                                                                  : DawnSharedIoProvider::StorageKind::ImportedHostPointer});
+        const bool prepared = arena.prepare(
+            *created.provider,
+            {.slots = 2,
+             .input_bytes_per_slot = buffer_size.input,
+             .output_bytes_per_slot = buffer_size.output,
+             .storage_kind = scenario->timestamp_staged
+                                 ? DawnSharedIoProvider::StorageKind::Staged
+                                 : DawnSharedIoProvider::StorageKind::ImportedHostPointer});
         if (scenario->expect_prepare_failure) {
             passed = !prepared && !arena.prepared();
             if (passed) {
@@ -637,13 +637,12 @@ int main(int argc, char** argv) {
 
     const auto transfers = transfer_counter->snapshot();
     const bool transfers_pass =
-        scenario->timestamp_staged
-            ? (transfers.queue_submit_calls == submissions &&
-               transfers.submitted_command_buffers == submissions &&
-               transfers.queue_write_buffer_calls == submissions &&
-               transfers.copy_buffer_to_buffer_calls >= submissions * 2 &&
-               transfers.buffer_map_async_calls >= submissions * 2)
-            : scenario->transfer_control == TransferControl::None
+        scenario->timestamp_staged ? (transfers.queue_submit_calls == submissions &&
+                                      transfers.submitted_command_buffers == submissions &&
+                                      transfers.queue_write_buffer_calls == submissions &&
+                                      transfers.copy_buffer_to_buffer_calls >= submissions * 2 &&
+                                      transfers.buffer_map_async_calls >= submissions * 2)
+        : scenario->transfer_control == TransferControl::None
             ? transfer_oracle(transfers, submissions)
             : transfer_control_oracle(transfers, submissions, scenario->transfer_control);
     passed = passed && transfers_pass && installs == 1;
