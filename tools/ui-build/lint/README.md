@@ -15,7 +15,17 @@ closed so a corpus cannot silently drift outside the recorded artifact set.
 
 ```sh
 python3 tools/ui-build/lint/clean_output_lint.py native-ui/src --json
+pulp ui lint --source native-ui/src --json
 ```
+
+`pulp ui lint` is the user-facing dispatcher for the same linter. A captured
+corpus can pass `--manifest`; every listed entry is hash-checked, while only
+entries with the `owned-source` or `emitted-source` role are linted. Generated
+or vendor entries such as `generated-vendor` remain covered by the manifest
+integrity check but are excluded from the semantic source report. Non-source
+conformance inputs may use the `conformance-fixture` role; they are also
+hash-checked without being treated as TSX source. Supported source files must
+still appear in the manifest as a complete set.
 
 Component/function size is reported only when `--enforce-size` is supplied;
 the program plan keeps those thresholds advisory until DP-2 has measured the
