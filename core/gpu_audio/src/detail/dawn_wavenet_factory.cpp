@@ -20,13 +20,16 @@ DawnWaveNetFactoryResult create_dawn_wavenet(const WavenetProgramSpec& spec,
         auto created = DawnSharedIoProvider::create(
             {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
              .completion_policy = policy,
-             .completion_wait_ns = config.completion_wait_ns});
+             .completion_wait_ns = config.completion_wait_ns,
+             .storage_kind = config.storage_kind});
         if (!created.provider)
             return result;
         result.effective_policy = created.provider->completion_policy();
         result.program = created.provider->make_wavenet_program(spec);
         if (!result.program)
             return {};
+        result.provider_identity = created.provider->provider_identity();
+        result.provider_capabilities = created.provider->provider_capabilities();
         result.provider = std::move(created.provider);
     } catch (...) {
         return {};

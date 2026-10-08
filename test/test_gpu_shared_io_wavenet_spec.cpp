@@ -1,7 +1,8 @@
 #include "detail/dawn_shared_io_provider.hpp"
 #include "detail/dawn_shared_io_wavenet_program.hpp"
-#include "detail/shared_io_wavenet_spec.hpp"
+#include "detail/dawn_wavenet_factory.hpp"
 #include "detail/shared_io_arena.hpp"
+#include "detail/shared_io_wavenet_spec.hpp"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -118,6 +119,41 @@ TEST_CASE("WaveNet shared spec authenticates the serialized head scale",
     fixture.weights.back() = spec.head_scale;
     CHECK(validate_wavenet_spec(spec).error == WavenetSpecError::InvalidScale);
 }
+
+#if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
+TEST_CASE("staged WaveNet factory exposes authenticated neutral capability receipt",
+          "[gpu_audio][shared_io][wavenet][portability]") {
+    Fixture fixture;
+    const WavenetProgramSpec spec{
+        .block_size = 32,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    REQUIRE(validate_wavenet_spec(spec).accepted());
+
+    auto created =
+        create_dawn_wavenet(spec, {.storage_kind = SharedIoArenaProvider::StorageKind::Staged});
+    INFO(created.provider_identity.provider_revision);
+    REQUIRE(created.provider);
+    CHECK(created.provider_identity.authenticated);
+    CHECK_FALSE(created.provider_capabilities.imported_host_pointer);
+    CHECK(created.provider_capabilities.completion_service);
+
+    auto pair = created.take_provider_pair();
+    REQUIRE(pair.provider);
+    REQUIRE(pair.program);
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(*pair.provider,
+                          {.slots = 2,
+                           .input_bytes_per_slot = spec.block_size * sizeof(float),
+                           .output_bytes_per_slot = spec.block_size * sizeof(float),
+                           .storage_kind = SharedIoArenaProvider::StorageKind::Staged},
+                          std::move(pair.program)));
+    CHECK(arena.release());
+}
+#endif
 
 TEST_CASE("WaveNet shared spec rejects non-mono conditioning and broken layer chains",
           "[gpu_audio][shared_io][wavenet]") {
