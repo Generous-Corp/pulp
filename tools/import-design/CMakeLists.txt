@@ -5,6 +5,7 @@
 # along.
 add_library(pulp-browser-capture-backend STATIC
     browser_capture_backend.cpp
+    browser_capture_provenance.cpp
     browser_discovery.cpp
     browser_capture_diagnostics.cpp
     node_runtime.cpp)
@@ -16,7 +17,8 @@ target_include_directories(pulp-browser-capture-backend PUBLIC
 target_compile_definitions(pulp-browser-capture-backend PRIVATE
     PULP_BROWSER_CAPTURE_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/browser_capture/capture.mjs")
 target_link_libraries(pulp-browser-capture-backend PUBLIC
-    pulp::platform)
+    pulp::platform
+    pulp::runtime)
 
 # Keep the pure CLI compatibility policy in one compiled object shared by the
 # production tool and its adapter tests. Besides avoiding implementation drift,

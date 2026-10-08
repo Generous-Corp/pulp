@@ -21,6 +21,22 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
 
+### Browser capture provenance is an import boundary
+
+The native importer validates `capture.json` before lowering the browser tree
+or emitting a materialized runtime. Treat the capture envelope as a binding to
+one exact input and capture environment: it must carry the staged `editor.html`
+SHA-256, Chromium CDP identity, initial/resolved/document viewport dimensions,
+matching device scale factor and reference viewport, plus a contained
+materialized-document sidecar whose SHA-256, schema/version, HTML field, and
+asset count agree with the envelope. A stale, hand-edited, mismatched, or
+path-escaping envelope fails closed with the
+`browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
+from the same capture directory; do not copy one from an older browser run or
+rewrite its source hash to bypass validation. The focused native coverage is
+`pulp-test-browser-capture-backend [*provenance*]`, and a real import must pass
+the browser capture receipt before any native or materialized parity claim.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
