@@ -185,7 +185,7 @@ jobs:
           -DPULP_ENABLE_AUDIO_PROBES=OFF
 
       - name: Build
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
+        run: tools/ci/governed-build.sh cmake --build build --config ${{ env.BUILD_TYPE }}
 
       # NOTE: the release build does NOT re-run the unit-test suite. A release-
       # artifact build is not a test gate — by the time a commit is tagged it has
