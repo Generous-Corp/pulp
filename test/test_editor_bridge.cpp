@@ -38,6 +38,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -330,6 +331,34 @@ TEST_CASE("generated StateStore registration routes stable keys safely",
     CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
         duplicate, store, duplicate_alive.capture(), {{"gain", 1}, {"gain_alias", 1}}));
     CHECK(duplicate.handler_count() == 0);
+
+    // Wire keys are also identities. Distinct ParamIDs must not be allowed to
+    // collapse onto one key, or a later binding would silently win in the map.
+    EditorBridge duplicate_key;
+    pulp::runtime::AliveToken duplicate_key_alive;
+    CHECK_FALSE(pulp::view::editor_bridge_contract::register_state_store_set_parameter_handler(
+        duplicate_key, store, duplicate_key_alive.capture(), {{"gain", 1}, {"gain", 2}}));
+    CHECK(duplicate_key.handler_count() == 0);
+}
+
+TEST_CASE("generated StateStore helper rejects a post-narrowing nonfinite value",
+          "[editor_bridge][typed-contract][state][negative]") {
+    namespace contract = pulp::view::editor_bridge_contract;
+    auto store = std::make_shared<pulp::state::StateStore>();
+    store->add_parameter({.id = 1, .name = "Gain", .range = {-60.0f, 12.0f, 0.0f}});
+    pulp::runtime::AliveToken owner_alive;
+    const auto key_to_id = std::make_shared<const std::map<std::string, pulp::state::ParamID>>(
+        std::map<std::string, pulp::state::ParamID>{{"gain", 1}});
+    const auto before = store->get_value(1);
+
+    // The JSON decoder rejects nonfinite wire values before this callback. The
+    // callback is still a public generated production seam, so exercise it
+    // directly to prove the defensive post-narrowing guard remains effective
+    // for an admitted in-process request as well.
+    const contract::SetParameterRequest request{"gain", std::numeric_limits<double>::quiet_NaN()};
+    CHECK_FALSE(contract::apply_state_store_set_parameter(store, owner_alive.capture(), key_to_id,
+                                                          request));
+    CHECK(store->get_value(1) == Approx(before));
 }
 
 TEST_CASE("generated StateStore handler leases an admitted write across concurrent retirement",
