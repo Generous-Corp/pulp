@@ -29,6 +29,7 @@ target_sources(pulp-host PRIVATE
     src/node_pack.cpp
     src/forge_descriptor_audit.cpp
     src/forge_catalog_export.cpp
+    src/forge_catalog_export_sample_region.cpp
     src/forge_catalog_export_effects.cpp
     src/forge_catalog_export_eurorack_drums.cpp
     src/forge_catalog_export_dynamics.cpp
