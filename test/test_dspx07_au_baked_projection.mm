@@ -2,12 +2,12 @@
 
 #include "../core/format/src/projection_capability.hpp"
 
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
+#include <pulp/format/registry.hpp>
 #include <pulp/host/baked_graph_processor.hpp>
 #include <pulp/host/signal_graph.hpp>
-#include <pulp/format/registry.hpp>
 
 #import "../core/format/src/au_audio_unit.h"
 
@@ -34,8 +34,8 @@ AudioStreamBasicDescription mono_float_format() {
     AudioStreamBasicDescription format{};
     format.mSampleRate = 48000.0;
     format.mFormatID = kAudioFormatLinearPCM;
-    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
-                          kAudioFormatFlagIsNonInterleaved;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
     format.mBytesPerPacket = sizeof(float);
     format.mFramesPerPacket = 1;
     format.mBytesPerFrame = sizeof(float);
@@ -50,13 +50,14 @@ struct ScopedFactoryRegistration {
         : previous(pulp::format::registered_factory()) {
         pulp::format::register_plugin(factory);
     }
-    ~ScopedFactoryRegistration() { pulp::format::register_plugin(previous); }
+    ~ScopedFactoryRegistration() {
+        pulp::format::register_plugin(previous);
+    }
 };
 
 } // namespace
 
-TEST_CASE("DSPX-07 admits AU only for bounded baked processors",
-          "[dspx][au][capability]") {
+TEST_CASE("DSPX-07 admits AU only for bounded baked processors", "[dspx][au][capability]") {
     using namespace pulp::format;
     REQUIRE(projection_capability(ProjectionSurface::au, true, true).supported());
     REQUIRE_FALSE(projection_capability(ProjectionSurface::au, false, true).supported());
@@ -75,8 +76,8 @@ TEST_CASE("DSPX-07 baked processor reaches the real AU v2 render path",
     REQUIRE(effect.Output(0).SetStreamFormat(format) == noErr);
     UInt32 max_frames = frames;
     REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
-                                       kAudioUnitScope_Global, 0,
-                                       &max_frames, sizeof(max_frames)) == noErr);
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
     REQUIRE(effect.DoInitialize() == noErr);
     REQUIRE(effect.GetLatency() == 0.0);
 
@@ -115,10 +116,9 @@ TEST_CASE("DSPX-07 baked processor reaches the real AU v3 render path",
         description.componentSubType = 'DspX';
         description.componentManufacturer = 'Plup';
         NSError* error = nil;
-        PulpAudioUnit* unit =
-            [[PulpAudioUnit alloc] initWithComponentDescription:description
-                                                           options:0
-                                                             error:&error];
+        PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:description
+                                                                          options:0
+                                                                            error:&error];
         REQUIRE(unit != nil);
         REQUIRE(error == nil);
         unit.maximumFramesToRender = 64;
@@ -137,18 +137,16 @@ TEST_CASE("DSPX-07 baked processor reaches the real AU v3 render path",
 
         AUInternalRenderBlock render = [unit internalRenderBlock];
         REQUIRE(render != nil);
-        AURenderPullInputBlock pull = ^AUAudioUnitStatus(AudioUnitRenderActionFlags*,
-                                                         const AudioTimeStamp*,
-                                                         AUAudioFrameCount frame_count,
-                                                         NSInteger,
-                                                         AudioBufferList* input_data) {
-            REQUIRE(frame_count == input.size());
-            REQUIRE(input_data != nullptr);
-            input_data->mNumberBuffers = 1;
-            input_data->mBuffers[0].mNumberChannels = 1;
-            input_data->mBuffers[0].mDataByteSize = sizeof(input);
-            input_data->mBuffers[0].mData = const_cast<float*>(input.data());
-            return noErr;
+        AURenderPullInputBlock pull = ^AUAudioUnitStatus(
+            AudioUnitRenderActionFlags*, const AudioTimeStamp*, AUAudioFrameCount frame_count,
+            NSInteger, AudioBufferList* input_data) {
+          REQUIRE(frame_count == input.size());
+          REQUIRE(input_data != nullptr);
+          input_data->mNumberBuffers = 1;
+          input_data->mBuffers[0].mNumberChannels = 1;
+          input_data->mBuffers[0].mDataByteSize = sizeof(input);
+          input_data->mBuffers[0].mData = const_cast<float*>(input.data());
+          return noErr;
         };
         AudioUnitRenderActionFlags flags = 0;
         AudioTimeStamp timestamp{};
