@@ -1436,6 +1436,13 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
             runtime::log_error("SignalGraph: failed to prepare Processor node '{}'", n.name);
             return false;
         }
+        // ProcessorNode deliberately reuses the Plugin topology kind. Cache
+        // its prepare-stable latency in the same metadata snapshot consumed by
+        // both the legacy walk and executor PDC pass; reading the live
+        // processor during compile would reintroduce the swap-time race this
+        // cache avoids.
+        prepared_plugin_meta_[n.id] = PreparedPluginMetadata{
+            {}, std::max(0, processor->second->instance->processor().latency_samples()), false};
     }
 
     // Create/prepare stateful custom-node instances on this UI thread before
