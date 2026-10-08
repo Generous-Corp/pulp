@@ -9,16 +9,20 @@ The collector samples:
 
 - `tools/scripts/host_vitals.sh --json` for pressure and one-minute load;
 - `ps` for process and `WindowServer` CPU contention;
-- `pmset -g therm` for thermal/performance warnings; and
-- `ioreg -r -c IOAccelerator -l` for active GPU work queues.
+- `pmset -g therm` for historical thermal/performance warning fields; and
+- `ioreg -r -c IOAccelerator -l` for diagnostic accelerator registry fields.
 
 The receipt passes only when all observations are available, the source tree is
-clean and bound to an immutable commit, load is at most half the reported CPU
-count, no sampled process exceeds the contention threshold, WindowServer is
-present and below its UI threshold, thermal warnings are absent, and the GPU
-reports zero busy work queues. Otherwise it writes a `blocked` receipt and
-exits non-zero. A blocked receipt is useful evidence that the host is not
-admitted; it cannot be supplied to the campaign driver as a pass.
+clean and bound to an immutable commit, load is finite and at most half the
+reported CPU count, no sampled process has a non-finite or over-threshold CPU
+value, WindowServer is present and below its UI threshold, and supported
+current thermal and GPU-idle telemetry is available. `pmset` warning absence
+is retained as an observation but is not current thermal proof. Likewise,
+IORegistry `busy 0` is not authenticated execution-queue evidence, so this
+producer reports GPU status as `unknown` and blocks until a supported queue or
+utilization source is wired. Otherwise it writes a `blocked` receipt and exits
+non-zero. A blocked receipt is useful evidence that the host is not admitted;
+it cannot be supplied to the campaign driver as a pass.
 
 Run on a reserved host with:
 

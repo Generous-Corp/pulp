@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import platform
 import re
@@ -91,7 +92,11 @@ def _parse_gpu(raw: str) -> tuple[str, int | None]:
     busy = re.findall(r"\bbusy\s+(\d+)", raw, flags=re.IGNORECASE)
     if not busy:
         return "unknown", None
-    return "passed", sum(int(value) for value in busy)
+    # IORegistry's ``busy`` field is a registry bookkeeping value.  It is not
+    # authenticated evidence that the accelerator execution queues are idle.
+    # Preserve the parsed value for diagnostics, but never admit a campaign
+    # from it.
+    return "unknown", sum(int(value) for value in busy)
 
 
 def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
@@ -109,9 +114,15 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
     reasons: list[str] = []
     try:
         vitals = json.loads(observations[0]["stdout"])
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         vitals = {}
         reasons.append("host_vitals_invalid")
+    if not isinstance(vitals, dict):
+        vitals = {}
+        if "host_vitals_invalid" not in reasons:
+            reasons.append("host_vitals_invalid")
+    if observations[0]["returncode"] != 0:
+        reasons.append("host_vitals_unavailable")
     processes = _parse_processes(observations[1]["stdout"])
     ncpu = int(vitals.get("ncpu", 0)) if str(vitals.get("ncpu", "")).isdigit() else 0
     try:
@@ -122,11 +133,14 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
         reasons.append("host_vitals_not_green")
     if ncpu <= 0 or load1 is None:
         reasons.append("load_unknown")
+    elif not math.isfinite(load1):
+        reasons.append("load_unknown")
     elif load1 > ncpu * 0.5:
         reasons.append("load_above_quiet_threshold")
     if observations[1]["returncode"] != 0 or not processes:
         reasons.append("process_observation_unavailable")
-    high_cpu = [p for p in processes if p["cpu_pct"] >= 25.0 and p["command"] != "kernel_task"]
+    high_cpu = [p for p in processes if not math.isfinite(p["cpu_pct"]) or
+                p["cpu_pct"] >= 25.0]
     if high_cpu:
         reasons.append("contending_processes_present")
     windows = [p for p in processes if p["command"].endswith("/WindowServer") or
