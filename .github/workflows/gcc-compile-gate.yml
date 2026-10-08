@@ -165,7 +165,7 @@ jobs:
         run: |
           # Word splitting is intended: one target name per line.
           # shellcheck disable=SC2046
-          cmake --build build-gcc --parallel 4 --target $(cat targets.txt)
+          tools/ci/governed-build.sh cmake --build build-gcc --target $(cat targets.txt)
 
       - name: Summarize
         if: always() && steps.scope.outputs.relevant == 'true'

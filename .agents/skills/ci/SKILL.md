@@ -95,6 +95,12 @@ directory explicit, including secondary artifact trees and the Linux RTSan
 lane, but do not include `-j`, `--parallel`, or a host-core probe: the
 governor owns parallelism, leases, and build-directory locking.
 
+The GCC core-compile gate also routes its dynamically discovered target list
+through the wrapper (`tools/ci/governed-build.sh cmake --build build-gcc --target
+$(cat targets.txt)`); keep the target discovery and the governor invocation in the
+same workflow step so adding a core library cannot silently restore a raw
+parallel build.
+
 The `web-plugins.yml` WAMv2 and WebCLAP build steps run under nested
 `working-directory` values. Use the absolute workspace-root wrapper path in
 those steps (`bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`); relative
