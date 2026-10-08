@@ -25,7 +25,9 @@ PULP_CLAP_PLUGIN(create_baked_projection)
 TEST_CASE("DSPX-07 baked processor reaches the real CLAP adapter lifecycle", "[dspx][clap]") {
     using namespace pulp::format;
     REQUIRE(projection_capability(ProjectionSurface::clap, true, true).supported());
-    REQUIRE_FALSE(projection_capability(ProjectionSurface::au, true, true).supported());
+    // AUv2/v3 now share the accepted baked-graph admission contract exercised
+    // by the native AU lifecycle tests in this change.
+    REQUIRE(projection_capability(ProjectionSurface::au, true, true).supported());
 
     REQUIRE(clap_entry.init("dspx07-baked-clap"));
     const auto* factory =
