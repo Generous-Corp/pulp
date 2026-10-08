@@ -166,7 +166,10 @@ inline bool apply_state_store_set_parameter(
     const std::shared_ptr<const std::map<std::string, state::ParamID>>& key_to_id,
     const SetParameterRequest& request) {
     const auto store_lease = store.lock();
-    if (!store_lease || !runtime::AliveToken::is_alive(owner_alive))
+    if (!store_lease)
+        return false;
+    const auto alive_lease = runtime::AliveToken::try_acquire(owner_alive);
+    if (!alive_lease)
         return false;
     const auto found = key_to_id->find(request.key);
     if (found == key_to_id->end())
@@ -192,7 +195,8 @@ inline bool register_state_store_set_parameter_handler(
     const auto store_lease = store.lock();
     if (!store_lease)
         return false;
-    if (!runtime::AliveToken::is_alive(owner_alive))
+    const auto registration_lease = runtime::AliveToken::try_acquire(owner_alive);
+    if (!registration_lease)
         return false;
     auto key_to_id = std::make_shared<std::map<std::string, state::ParamID>>();
     std::set<state::ParamID> ids;

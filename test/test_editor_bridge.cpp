@@ -23,6 +23,7 @@
 #include "pulp/view/widgets.hpp"
 #include "pulp/state/store.hpp"
 #include "support/unique_temp_dir.hpp"
+#include "support/thread_progress.hpp"
 
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
@@ -408,7 +409,12 @@ TEST_CASE("generated StateStore handler leases an admitted write across concurre
     });
     const bool reached_listener = entered_future.wait_for(5s) == std::future_status::ready;
     const long active_owners = reached_listener ? entered_future.get() : 0;
-    owner_alive.retire();
+    // Retirement must publish the invalidation immediately but wait for the
+    // admitted dispatch lease. Keep it asynchronous while the listener is
+    // deliberately blocked so the test can prove both halves of the contract.
+    auto retirement = std::async(std::launch::async, [&owner_alive] { owner_alive.retire(); });
+    REQUIRE(retirement.wait_for(50ms) == std::future_status::timeout);
+
     // Drop the only external owner while the dispatch thread is inside
     // StateStore::set_value. The handler's strong lease must be the reason
     // this raw weak reference remains valid until the synchronous listener
@@ -418,7 +424,8 @@ TEST_CASE("generated StateStore handler leases an admitted write across concurre
     const int destroyed_during_callback = destructions.load();
     resume.set_value();
     const auto response = dispatched.get(); // join before any test assertion can throw
-    store.reset();
+    REQUIRE(retirement.wait_for(1s) == std::future_status::ready);
+    retirement.get();
 
     REQUIRE(reached_listener);
     CHECK(active_owners == 2);
@@ -485,6 +492,109 @@ TEST_CASE("generated StateStore handler rejects expired store without owner reti
     const auto response =
         bridge.dispatch_json(R"({"type":"set_parameter","payload":{"key":"gain","value":0.5}})");
     CHECK_FALSE(choc::json::parse(response)["accepted"].getBool());
+}
+
+TEST_CASE("legacy AliveToken Handle invalidation stays nonblocking",
+          "[editor_bridge][typed-contract][state][concurrency][negative]") {
+    pulp::runtime::AliveToken owner_alive;
+    const auto owner_handle = owner_alive.capture();
+    auto lease = pulp::runtime::AliveToken::try_acquire(owner_handle);
+    REQUIRE(lease);
+
+    // Existing callback teardown sites use Handle::store(false) directly.
+    // That compatibility path must remain nonblocking even if a newer bridge
+    // callback happens to hold an explicit lease. Owner teardown that needs
+    // quiescence uses AliveToken::retire() instead.
+    auto invalidation = std::async(std::launch::async, [owner_handle] {
+        owner_handle->store(false, std::memory_order_release);
+    });
+    CHECK(invalidation.wait_for(std::chrono::milliseconds(50)) == std::future_status::ready);
+    lease.reset();
+    REQUIRE(invalidation.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    invalidation.get();
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(owner_handle));
+}
+
+TEST_CASE("retired AliveToken Handle cannot be resurrected",
+          "[editor_bridge][typed-contract][state][negative]") {
+    pulp::runtime::AliveToken owner_alive;
+    const auto stale_handle = owner_alive.capture();
+    owner_alive.retire();
+
+    // A delayed callback may still hold the shared Handle and attempt to
+    // publish true. Retirement is irreversible for that State; reset() is the
+    // explicit API that creates a fresh admission state.
+    stale_handle->store(true, std::memory_order_release);
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(stale_handle));
+    CHECK_FALSE(static_cast<bool>(pulp::runtime::AliveToken::try_acquire(stale_handle)));
+
+    owner_alive.reset();
+    CHECK(pulp::runtime::AliveToken::is_alive(owner_alive.capture()));
+}
+
+TEST_CASE("AliveToken rejects concurrent admission after Handle invalidation",
+          "[editor_bridge][typed-contract][state][concurrency][negative]") {
+    pulp::runtime::AliveToken owner_alive;
+    const auto handle = owner_alive.capture();
+    std::atomic<bool> start{false};
+    std::atomic<bool> invalidated{false};
+    std::atomic<unsigned> admitted_after_invalidation{0};
+
+    std::thread invalidator([&] {
+        if (!pulp::test::wait_for_condition([&] { return start.load(std::memory_order_acquire); }))
+            return;
+        handle->store(false, std::memory_order_release);
+        invalidated.store(true, std::memory_order_release);
+    });
+    std::thread acquirer([&] {
+        start.store(true, std::memory_order_release);
+        if (!pulp::test::wait_for_condition(
+                [&] { return invalidated.load(std::memory_order_acquire); }))
+            return;
+        for (unsigned i = 0; i < 1000; ++i) {
+            if (pulp::runtime::AliveToken::try_acquire(handle))
+                admitted_after_invalidation.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+    invalidator.join();
+    acquirer.join();
+
+    CHECK(admitted_after_invalidation.load(std::memory_order_relaxed) == 0);
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(handle));
+}
+
+TEST_CASE("AliveToken compatibility handles and lease moves are exercised",
+          "[editor_bridge][typed-contract][state][lifetime]") {
+    pulp::runtime::AliveToken owner_alive;
+    const auto handle = owner_alive.capture();
+    CHECK(handle->load(std::memory_order_acquire));
+    handle->store(true, std::memory_order_release);
+    CHECK(pulp::runtime::AliveToken::is_alive(handle));
+
+    auto first = pulp::runtime::AliveToken::try_acquire(handle);
+    REQUIRE(first);
+    auto moved = std::move(first);
+    CHECK_FALSE(static_cast<bool>(first));
+    pulp::runtime::AliveToken::Lease assigned;
+    assigned = std::move(moved);
+    CHECK_FALSE(static_cast<bool>(moved));
+    assigned.reset();
+    CHECK_FALSE(static_cast<bool>(assigned));
+
+    const pulp::runtime::AliveToken::Handle empty;
+    CHECK_FALSE(static_cast<bool>(pulp::runtime::AliveToken::try_acquire(empty)));
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(empty));
+
+    auto legacy = std::make_shared<std::atomic<bool>>(true);
+    CHECK(pulp::runtime::AliveToken::is_alive(legacy));
+    legacy->store(false, std::memory_order_release);
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(legacy));
+
+    owner_alive.retire();
+    handle->store(true, std::memory_order_release);
+    CHECK_FALSE(pulp::runtime::AliveToken::is_alive(handle));
+    owner_alive.reset();
+    CHECK(pulp::runtime::AliveToken::is_alive(owner_alive.capture()));
 }
 
 TEST_CASE("generated TypeScript client reaches the C++ bridge and StateStore",
