@@ -266,6 +266,20 @@ mounted PACE installer individually, preserving the parent DMG/pkg hash and
 recording the component versions. Existing iLok/license support may already be
 installed; verify receipts with `pkgutil --pkg-info` before upgrading.
 
+After installation, verify the expected macOS receipts and tool path without
+printing account data:
+
+```bash
+pkgutil --pkgs | grep -E 'com\.paceap\.pkg\.eden\.(licensed|activationexperience|fusion\.tools\.lite\.6|iLokLicenseManager)'
+ls -l /Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool
+/Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool list
+```
+
+Keep the original installer DMG/PKG and a SHA-256 manifest in the private
+backup. A useful restore record includes the Fusion version, package names,
+installation date, and hashes; it does not include iLok credentials, customer
+numbers, certificates, or wrap passwords.
+
 PACE installation does not sign an AAX binary automatically. Treat these as
 separate gates:
 
