@@ -201,6 +201,18 @@ class BuildGovernancePathTests(unittest.TestCase):
             r"^governed-build dry-run receipt: jobs=[1-9][0-9]* grant=tier0 command=.*cmake --build build --target pulp-test-state$",
         )
 
+    def test_intel_portability_build_routes_through_governor(self) -> None:
+        source = read_source(".github/workflows/intel-portability.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn("tools/ci/governed-build.sh cmake --build", build_lines[0])
+        self.assertNotRegex(
+            build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
+
     def test_web_plugins_builds_route_through_governor(self) -> None:
         source = read_source(".github/workflows/web-plugins.yml")
         build_lines = [
