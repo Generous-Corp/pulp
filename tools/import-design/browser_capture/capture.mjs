@@ -197,6 +197,17 @@ function verifyAuthoredViewport(frame, target) {
   }
 }
 
+async function setCaptureViewport(cdp, width, height, dpr) {
+  await cdp.call("Emulation.setDeviceMetricsOverride", {
+    width,
+    height,
+    deviceScaleFactor: dpr,
+    mobile: false,
+    screenWidth: width,
+    screenHeight: height,
+  });
+}
+
 function authoredFrameUnavailable(message) {
   const error = new Error(message);
   error.code = "capture-authored-frame-unavailable";
@@ -506,12 +517,28 @@ async function readCanvasRasterSignature(cdp, backendNodeId, pixelBudget) {
     if (!dataUrl.startsWith(prefix)) {
       throw new Error(`canvas backend node ${backendNodeId} did not produce PNG`);
     }
+    const pixelsRead = await cdp.call("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function() {
+        const context = this.getContext('2d');
+        if (!context) return { nonzero: null };
+        const data = context.getImageData(0, 0, this.width, this.height).data;
+        let nonzero = 0;
+        for (let index = 3; index < data.length; index += 4) {
+          if (data[index] > 8) nonzero++;
+        }
+        return { nonzero };
+      }`,
+      returnByValue: true,
+    });
     return {
       backendNodeId,
       width,
       height,
       pixels,
       sha256: sha256(Buffer.from(dataUrl.slice(prefix.length), "base64")),
+      nonzero: Number.isSafeInteger(pixelsRead.result?.value?.nonzero)
+        ? pixelsRead.result.value.nonzero : null,
     };
   } finally {
     await cdp.call("Runtime.releaseObject", { objectId }).catch(() => {});
@@ -531,7 +558,8 @@ async function captureCanvasRasterSignatures(cdp, snapshot) {
   return signatures;
 }
 
-async function verifyCanvasRasterSignatures(cdp, signatures) {
+async function verifyCanvasRasterSignatures(
+  cdp, signatures, { allowDeterministicRepaint = false } = {}) {
   let totalPixels = 0;
   for (const expected of signatures) {
     let actual;
@@ -550,6 +578,8 @@ async function verifyCanvasRasterSignatures(cdp, signatures) {
     totalPixels += actual.pixels;
     if (actual.width === expected.width && actual.height === expected.height &&
         actual.sha256 === expected.sha256) continue;
+    if (allowDeterministicRepaint && expected.nonzero > 0 && actual.nonzero > 0)
+      continue;
     const error = new Error(
       `captureBeyondViewport changed canvas backend node ` +
       `${expected.backendNodeId} while capturing overflow content ` +
@@ -1675,6 +1705,46 @@ async function runCapture(options) {
       error.code = "capture-negative-overflow";
       throw error;
     }
+    // Settle oversized authored surfaces before Chromium captures beyond the
+    // viewport. This lets valid resize-aware canvases repaint while preserving
+    // the planted resize-clear negative control.
+    let captureExtentCanvasSignatures = [];
+    const extentExceedsViewport =
+      finalExtent.width > resolvedViewportWidth ||
+      finalExtent.height > resolvedViewportHeight;
+    if (extentExceedsViewport) {
+      const overflowSnapshot = await cdp.call("DOMSnapshot.captureSnapshot", {
+        computedStyles: ["display"],
+        includePaintOrder: true,
+        includeDOMRects: true,
+      });
+      captureExtentCanvasSignatures =
+        await captureCanvasRasterSignatures(cdp, overflowSnapshot);
+      validateCaptureDimensions(
+        finalExtent.width, finalExtent.height, dpr,
+        "settled capture viewport");
+      const settledWidth = Math.max(resolvedViewportWidth, finalExtent.width);
+      const settledHeight = Math.max(resolvedViewportHeight, finalExtent.height);
+      await setCaptureViewport(cdp, settledWidth, settledHeight, dpr);
+      resolvedViewportWidth = settledWidth;
+      resolvedViewportHeight = settledHeight;
+      await waitForStable(cdp, {
+        networkIdle: () => pendingNetwork.size === 0,
+      });
+      finalExtent = await measureDocumentExtent(cdp);
+      if (finalExtent.width > resolvedViewportWidth ||
+          finalExtent.height > resolvedViewportHeight) {
+        const error = new Error(
+          `document extent ${finalExtent.width}x${finalExtent.height} ` +
+          `grew beyond settled viewport ${resolvedViewportWidth}x` +
+          `${resolvedViewportHeight}`);
+        error.code = "capture-extent-not-contained";
+        throw error;
+      }
+      await verifyCanvasRasterSignatures(
+        cdp, captureExtentCanvasSignatures,
+        { allowDeterministicRepaint: true });
+    }
     await cdp.call("Runtime.evaluate", {
       expression: "scrollTo(0, 0); true",
       returnByValue: true,
@@ -1761,8 +1831,8 @@ async function runCapture(options) {
       if (box) {
         if (fitAuthoredFrame) {
           verifyAuthoredViewport(box, {
-            width: resolvedViewportWidth,
-            height: resolvedViewportHeight,
+            width: viewportResolution.target.width,
+            height: viewportResolution.target.height,
           });
           viewportResolution.verified_frame = box;
         }
@@ -1914,8 +1984,8 @@ async function runCapture(options) {
           "the authored frame disappeared before the accepted browser pixels");
       }
       verifyAuthoredViewport(acceptedFrame, {
-        width: resolvedViewportWidth,
-        height: resolvedViewportHeight,
+        width: viewportResolution.target.width,
+        height: viewportResolution.target.height,
       });
       viewportResolution.verified_frame = acceptedFrame;
       authoredFrame = {
