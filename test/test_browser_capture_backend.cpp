@@ -119,6 +119,8 @@ capture::BrowserInstallation fixture_browser() {
         "Fixture Chromium",
         "123.4.5.6",
         123,
+        "1.3",
+        "fixture",
     };
 }
 
@@ -151,8 +153,13 @@ struct ProvenanceFixture {
     fs::path source;
     fs::path envelope;
     fs::path materialized;
-    capture::BrowserInstallation browser{"fixture-chrome", capture::BrowserOrigin::system,
-                                         "Fixture Chromium", "123.4.5.6", 123};
+    capture::BrowserInstallation browser{"fixture-chrome",
+                                         capture::BrowserOrigin::system,
+                                         "Fixture Chromium",
+                                         "123.4.5.6",
+                                         123,
+                                         "1.3",
+                                         "fixture"};
 };
 
 ProvenanceFixture write_provenance_fixture(const TempTree& tree) {
@@ -256,6 +263,33 @@ TEST_CASE("browser capture provenance rejects materialized schema hash browser a
     }
     SECTION("browser identity") {
         CHECK_FALSE(run(replace_once(base, "123.4.5.6", "124.0.0.0")));
+    }
+    SECTION("Chrome product aliases are canonicalized") {
+        auto alias = replace_once(base, "Fixture Chromium", "Chrome");
+        auto request = fixture.browser;
+        request.product = "Google Chrome";
+        tree.write("capture.json", alias);
+        const auto result = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = request,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE(result);
+    }
+    SECTION("CDP protocol identity") {
+        CHECK_FALSE(run(
+            replace_once(base, "\"protocol_version\":\"1.3\"", "\"protocol_version\":\"1.4\"")));
+    }
+    SECTION("CDP build identity") {
+        CHECK_FALSE(run(
+            replace_once(base, "\"build_hash\":\"fixture\"", "\"build_hash\":\"other-build\"")));
+    }
+    SECTION("browser origin") {
+        CHECK_FALSE(run(replace_once(base, "\"origin\":\"system\"", "\"origin\":\"managed\"")));
     }
     SECTION("DPR") {
         CHECK_FALSE(
@@ -509,6 +543,8 @@ TEST_CASE("browser discovery probes in order and never falls through an override
             result.product = "Chromium";
             result.version = "123.0.0.0";
             result.major_version = 123;
+            result.protocol_version = "1.3";
+            result.build_hash = "fixture";
             return result;
         });
     REQUIRE(discovery.ok());
@@ -674,6 +710,30 @@ TEST_CASE("a capability probe that is refused names the refusal in the headline"
     const auto& message = discovery.diagnostic.message;
     CHECK(message.find("Page.captureScreenshot is not supported") != std::string::npos);
     CHECK(message.find("timed out") == std::string::npos);
+}
+
+TEST_CASE("capability probe rejects a browser-family swap",
+          "[import-design][browser-capture][negative]") {
+    TempTree tree("probe-product-family");
+    const auto browser =
+        tree.write("browser-wrapper",
+                   "#!/bin/sh\n"
+                   "echo 'Google Chrome 151.0.7922.72'\n"
+                   "# The launcher fixture reads this marker only for the CDP response.\n"
+                   "# Keep the version probe Chrome-shaped while returning Firefox from CDP.\n"
+                   "# pulp-capability-firefox\n");
+    fs::permissions(browser,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto discovery = capture::discover_browser(options);
+    REQUIRE_FALSE(discovery.ok());
+    REQUIRE(discovery.probes.size() == 1);
+    INFO(discovery.probes[0].failure);
+    CHECK(discovery.probes[0].failure.find("product family") != std::string::npos);
 }
 
 TEST_CASE("the probe deadline can be raised from the environment",
@@ -1191,14 +1251,20 @@ TEST_CASE("capture clears known stale artifacts before validating fresh output",
     for (const auto name : {
              "capture.json",
              "browser.png",
+             "browser-static.png",
+             "browser-chrome.png",
+             "browser-canvas-composite.png",
              "semantic-report.json",
              "tokens.json",
              "dom-snapshot.json",
+             "platform-fonts.json",
+             "materialized-document.json",
              "interaction-report.json",
              "capture-error.json",
          }) {
         std::ofstream(request.output_directory / name) << "stale";
     }
+    std::ofstream(request.output_directory / "canvas-123.png") << "stale";
     std::ofstream(request.output_directory / "keep.me") << "unrelated";
 
     const auto result =
@@ -1207,6 +1273,12 @@ TEST_CASE("capture clears known stale artifacts before validating fresh output",
     CHECK(result.diagnostic.code == "browser-capture-incomplete");
     CHECK_FALSE(fs::exists(
         request.output_directory / "semantic-report.json"));
+    CHECK_FALSE(fs::exists(request.output_directory / "browser-static.png"));
+    CHECK_FALSE(fs::exists(request.output_directory / "browser-chrome.png"));
+    CHECK_FALSE(fs::exists(request.output_directory / "browser-canvas-composite.png"));
+    CHECK_FALSE(fs::exists(request.output_directory / "platform-fonts.json"));
+    CHECK_FALSE(fs::exists(request.output_directory / "materialized-document.json"));
+    CHECK_FALSE(fs::exists(request.output_directory / "canvas-123.png"));
     CHECK_FALSE(fs::exists(
         request.output_directory / "interaction-report.json"));
     CHECK(fs::exists(request.output_directory / "capture-error.json"));

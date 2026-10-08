@@ -166,12 +166,23 @@ CaptureProvenanceResult validate_capture_provenance(const CaptureProvenanceReque
     const auto browser = object_member(provenance, "browser");
     const auto browser_product = required_string(browser, "product");
     const auto browser_version = required_string(browser, "version");
-    for (const char* key : {"protocol_version", "build_hash", "origin"})
-        if (!required_string(browser, key))
-            return fail(std::string("capture browser envelope is missing ") + key);
-    if (!browser_product || !browser_version || *browser_product != request.browser.product ||
+    const auto browser_protocol = required_string(browser, "protocol_version");
+    const auto browser_build = required_string(browser, "build_hash");
+    const auto browser_origin = required_string(browser, "origin");
+    if (!browser_protocol || !browser_build || !browser_origin)
+        return fail("capture browser envelope is missing protocol, build, or origin identity");
+    if (!browser_product || !browser_version ||
+        canonical_browser_product(*browser_product) !=
+            canonical_browser_product(request.browser.product) ||
         *browser_version != request.browser.version)
         return fail("capture browser identity does not match the selected browser");
+    if (request.browser.protocol_version.empty() || request.browser.build_hash.empty())
+        return fail("selected browser is missing CDP protocol/build identity");
+    if (*browser_protocol != request.browser.protocol_version ||
+        *browser_build != request.browser.build_hash)
+        return fail("capture CDP protocol/build identity does not match the selected browser");
+    if (*browser_origin != browser_origin_name(request.browser.origin))
+        return fail("capture browser origin does not match the selected browser");
 
     const auto viewport = object_member(provenance, "viewport");
     const auto initial = object_member(viewport, "initial");

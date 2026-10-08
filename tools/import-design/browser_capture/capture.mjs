@@ -251,11 +251,23 @@ function exitAfterCleanupDeadline(expiry, outputDir, browser) {
 // records of captures that never produce an envelope. Browser behaviour around
 // screenshots and virtual time changes between Chromium releases, so a failure
 // report that does not name the browser cannot be triaged.
+function canonicalBrowserProduct(product) {
+  const value = String(product ?? "").trim();
+  const matches = (alias) => value.startsWith(alias) &&
+    (value.length === alias.length || value[alias.length] === " " ||
+     value[alias.length] === "/");
+  if (matches("Google Chrome") || matches("Google Chrome for Testing") ||
+      matches("Chrome for Testing") || matches("Chrome")) {
+    return "Chrome";
+  }
+  return value;
+}
+
 function reportBrowser(version) {
   const product = String(version?.product ?? "");
   const [name, release] = product.split("/");
   const browser = {
-    product: name || "Chromium",
+    product: canonicalBrowserProduct(name || "Chromium"),
     version: release || "",
     protocol_version: version?.protocolVersion ?? "",
     build_hash: version?.revision ?? "",
@@ -1378,6 +1390,30 @@ async function runCapture(options) {
 
     progress.enterPhase("page-configuration");
     browser = reportBrowser(await cdp.call("Browser.getVersion"));
+    const expectedBrowser = {
+      product: canonicalBrowserProduct(
+        options.values.get("--browser-product") ?? ""),
+      version: options.values.get("--browser-version") ?? "",
+      protocol_version: options.values.get("--browser-protocol-version") ?? "",
+      build_hash: options.values.get("--browser-build-hash") ?? "",
+    };
+    if ((expectedBrowser.product &&
+         browser.product !== expectedBrowser.product) ||
+        (expectedBrowser.version && browser.version !== expectedBrowser.version) ||
+        (expectedBrowser.protocol_version &&
+         browser.protocol_version !== expectedBrowser.protocol_version) ||
+        (expectedBrowser.build_hash &&
+         browser.build_hash !== expectedBrowser.build_hash)) {
+      const error = new Error(
+        `selected browser identity changed during capture: expected ` +
+        `${expectedBrowser.product}/${expectedBrowser.version} ` +
+        `protocol=${expectedBrowser.protocol_version} ` +
+        `build=${expectedBrowser.build_hash}, got ` +
+        `${browser.product}/${browser.version} ` +
+        `protocol=${browser.protocol_version} build=${browser.build_hash}`);
+      error.code = "browser-identity-drift";
+      throw error;
+    }
     await configurePage(cdp, initialWidth, initialHeight, dpr);
     await installDynamicWorkTracker(cdp);
     const healthMonitor = installCaptureHealthMonitor(cdp);
@@ -2052,7 +2088,8 @@ async function runCapture(options) {
         : []),
     ]);
 
-    const browserProductArg = options.values.get("--browser-product") ?? "";
+    const browserProductArg = canonicalBrowserProduct(
+      options.values.get("--browser-product") ?? "");
     const browserVersionArg = options.values.get("--browser-version") ?? "";
     const envelope = {
       schema: "pulp-browser-capture-v1",
