@@ -362,6 +362,11 @@ jobs:
         # IPC/network readers (InterprocessConnection/ChildProcessManager,
         # Osc/WebSocket/Channel), and MIDI/MPE/UMP buffer threading. Catches
         # what TSan exists for;
+        # SignalGraph's compile-first lifecycle contracts are included by their
+        # exact case names: compile_() vs a live process(), the mutation-lock
+        # hook, and the no-silence prepare_swap publication. Do not broaden this
+        # to every graph case: the differential/parity matrix is covered by its
+        # ordinary lanes, while these three cases are the thread-race proof.
         # ASan + UBSan still cover the full matrix.
         # AudioWorkgroup's deterministic first-entry hammer claims the one
         # thread-affine join operation before touching the OS token, so this
@@ -373,7 +378,7 @@ jobs:
           ctest --test-dir build-tsan --output-on-failure -j1 \
             --repeat until-pass:2 \
             --timeout 120 \
-            --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Osc|WebSocket|Channel|Control|Broker|Grant|Admission|Receipt|Artifact|control protocol|control artifact|control service|control client|control main-thread|per-call|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree' \
+            --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Osc|WebSocket|Channel|Control|Broker|Grant|Admission|Receipt|Artifact|control protocol|control artifact|control service|control client|control main-thread|per-call|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree|SignalGraph compile_|compile_snapshot_for_test holds|prepare_swap publishes' \
             --exclude-regex 'AudioWorkgroup'  # Timer race fixed by the Timer::start/stop shared_ptr fix (#414)
 
   ubsan:
