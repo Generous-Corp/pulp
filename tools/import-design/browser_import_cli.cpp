@@ -696,6 +696,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
                "not match the browser.\n";
         return BrowserImportNotApplicable{};
     } else {
+        if (request.require_canvas_ink) {
+            std::cerr
+                << "Error: --require-canvas-ink applies only to browser-backed "
+                   "HTML import\n";
+            return BrowserImportFailure{2};
+        }
         if (request.fit_authored_frame) {
             std::cerr
                 << "Error: --fit-authored-frame applies only to "

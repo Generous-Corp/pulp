@@ -54,17 +54,6 @@ validate_browser_import_cli_options(bool fit_authored_frame, bool render_size_ex
     return std::nullopt;
 }
 
-std::optional<int> validate_require_canvas_ink_source_cli(
-    bool require_canvas_ink, std::string_view source) {
-    if (!require_canvas_ink || source == "html" || source == "claude" ||
-        source == "stitch") {
-        return std::nullopt;
-    }
-    std::cerr << "Error: --require-canvas-ink applies only to browser-backed "
-                 "HTML import\n";
-    return 2;
-}
-
 std::optional<int> validate_fit_authored_frame_source_cli(
     bool fit_authored_frame,
     std::string_view source) {

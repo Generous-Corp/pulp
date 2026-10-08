@@ -2455,9 +2455,6 @@ int main(int argc, char* argv[]) {
         pulp::import_design::print_usage();
         return 1;
     }
-    if (auto code = pulp::import_design::validate_require_canvas_ink_source_cli(
-            cli.require_canvas_ink, source_str))
-        return *code;
     if (auto code = pulp::import_design::validate_fit_authored_frame_source_cli(cli.fit_authored_frame, source_str)) return *code;
     // `--from fig`: decode a local Figma save file offline. The lane either
     // prints a read-only outline and returns, or rewrites source_str/input_file

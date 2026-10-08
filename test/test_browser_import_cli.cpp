@@ -136,10 +136,40 @@ TEST_CASE("browser CLI adapter tags non-browser input as not applicable",
     CHECK(std::holds_alternative<id::BrowserImportNotApplicable>(result));
 }
 
+TEST_CASE("required canvas ink rejects non-browser dispatch",
+          "[import-design][browser-capture][cli-adapter]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.require_canvas_ink = true;
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [](const id::BrowserHtmlImportRequest&, std::string_view) {
+            return id::BrowserHtmlImportResult{};
+        };
+    operations.validate_capture =
+        [](const pulp::view::DesignIR&,
+           const id::BrowserCaptureValidationOptions&) {
+            FAIL("non-browser input must not validate");
+            return id::BrowserCaptureValidationResult{};
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            FAIL("non-browser input must not localize");
+            return false;
+        };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "not html", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 2);
+}
+
 TEST_CASE("authored-frame CLI policy rejects every incompatible route",
           "[import-design][browser-capture][cli-adapter]") {
     using id::validate_browser_import_cli_options;
-    using id::validate_fit_authored_frame_source_cli;
 
     CHECK(validate_browser_import_cli_options(
               true, true, false, false, false, false, false, false) == 2);
@@ -166,13 +196,7 @@ TEST_CASE("authored-frame CLI policy rejects every incompatible route",
     CHECK_FALSE(validate_browser_import_cli_options(
         true, false, false, false, false, false, false, false));
 
-    using id::validate_require_canvas_ink_source_cli;
-    CHECK_FALSE(validate_require_canvas_ink_source_cli(true, "html"));
-    CHECK_FALSE(validate_require_canvas_ink_source_cli(true, "claude"));
-    CHECK_FALSE(validate_require_canvas_ink_source_cli(true, "stitch"));
-    CHECK_FALSE(validate_require_canvas_ink_source_cli(false, "figma"));
-    CHECK(validate_require_canvas_ink_source_cli(true, "figma") == 2);
-
+    using id::validate_fit_authored_frame_source_cli;
     CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "html"));
     CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "claude"));
     CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "stitch"));
