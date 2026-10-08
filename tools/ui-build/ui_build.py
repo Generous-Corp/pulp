@@ -9,6 +9,7 @@ owns a JavaScript compiler or native runtime bundler.
 Commands:
   pulp ui build [--source DIR] [--out DIR]
   pulp ui check [--source DIR] [--out DIR]
+  pulp ui lint [--source DIR] [--manifest FILE]
 
 ``build`` validates source output, copies regular files in canonical path
 order, and writes ``ui-build-manifest.json``.  ``check`` performs the same
@@ -142,6 +143,28 @@ def _load_lint(source: Path) -> dict[str, Any]:
     return report
 
 
+def _lint(source: Path, manifest: Path | None, *, enforce_size: bool,
+          json_output: bool) -> int:
+    """Run the clean-output linter through the public ``pulp ui`` seam."""
+    lint_path = Path(__file__).parent / "lint" / "clean_output_lint.py"
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("pulp_ui_clean_output_lint_cli", lint_path)
+    if spec is None or spec.loader is None:
+        raise UiBuildError(f"cannot load clean-output lint: {lint_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    args = [str(source)]
+    if manifest is not None:
+        args.extend(("--manifest", str(manifest)))
+    if json_output:
+        args.append("--json")
+    if enforce_size:
+        args.append("--enforce-size")
+    return module.main(args)
+
+
 def _validate_manifest(manifest: Any, source: Path, out: Path, files: list[SourceFile]) -> list[str]:
     errors: list[str] = []
     if not isinstance(manifest, dict):
@@ -210,12 +233,25 @@ def _args(argv: list[str]) -> argparse.Namespace:
         cmd.add_argument("--out", type=Path, default=Path("build/native-ui"),
                          help="build output root (default: build/native-ui)")
         cmd.add_argument("--json", action="store_true", help="emit a machine-readable receipt")
+    lint = sub.add_parser("lint", help="lint owned UI source or a captured output corpus")
+    lint.add_argument("--source", type=Path, default=Path("native-ui/src"),
+                      help="source root (default: native-ui/src)")
+    lint.add_argument("--manifest", type=Path,
+                      help="captured corpus manifest; roles select files to lint")
+    lint.add_argument("--json", action="store_true", help="emit a machine-readable report")
+    lint.add_argument("--enforce-size", action="store_true")
     return parser.parse_args(argv)
 
 
-def run(command: str, source_arg: Path, out_arg: Path, *, json_output: bool = False) -> int:
+def run(command: str, source_arg: Path, out_arg: Path, *, json_output: bool = False,
+        manifest_arg: Path | None = None, enforce_size: bool = False) -> int:
     cwd = Path.cwd().resolve()
     source = _resolve_inside((cwd / source_arg).resolve(), cwd, "source root")
+    if command == "lint":
+        manifest = None
+        if manifest_arg is not None:
+            manifest = _resolve_inside((cwd / manifest_arg).resolve(), cwd, "manifest")
+        return _lint(source, manifest, enforce_size=enforce_size, json_output=json_output)
     out = _resolve_inside((cwd / out_arg).resolve(), cwd, "output root")
     if source == out or out.is_relative_to(source):
         raise UiBuildError("output root must be outside the source root")
@@ -268,7 +304,9 @@ def run(command: str, source_arg: Path, out_arg: Path, *, json_output: bool = Fa
 def main(argv: list[str] | None = None) -> int:
     try:
         args = _args(sys.argv[1:] if argv is None else argv)
-        return run(args.command, args.source, args.out, json_output=args.json)
+        return run(args.command, args.source, getattr(args, "out", Path("build/native-ui")),
+                   json_output=args.json, manifest_arg=getattr(args, "manifest", None),
+                   enforce_size=getattr(args, "enforce_size", False))
     except UiBuildError as exc:
         print(f"pulp ui: {exc}", file=sys.stderr)
         return 1

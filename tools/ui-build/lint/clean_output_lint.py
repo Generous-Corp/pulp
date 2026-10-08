@@ -40,71 +40,82 @@ class Finding:
     severity: str = "error"
 
 
-def validate_corpus_manifest(source: Path, manifest_path: Path) -> str | None:
+LINTABLE_ROLES = frozenset({"owned-source", "emitted-source"})
+EXCLUDED_ROLES = frozenset({"generated", "vendor", "generated-vendor"})
+CONFORMANCE_ROLES = frozenset({"conformance-fixture"})
+KNOWN_ROLES = LINTABLE_ROLES | EXCLUDED_ROLES | CONFORMANCE_ROLES
+
+
+def _load_corpus_manifest(source: Path, manifest_path: Path) -> tuple[str | None, set[str] | None]:
     """Verify that a captured output corpus is the exact recorded artifact.
 
     A digest check alone is insufficient for a corpus: an unlisted source file
     can still be linted while remaining outside the recorded artifact set, and
     a duplicate or non-canonical path makes the manifest order dependent.  We
     therefore bind the manifest to the complete source suffix set and require
-    canonical, sorted relative paths.  This keeps two agents running the gate
-    against the same corpus from silently describing different trees.
+    canonical, sorted relative paths.  Every entry also has a known role;
+    owned/emitted source is linted while generated/vendor bytes are only
+    integrity-checked. This keeps two agents running the gate against the same
+    corpus from silently describing different trees.
     """
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return f"generated-output manifest cannot be read: {exc}"
+        return f"generated-output manifest cannot be read: {exc}", None
     if not isinstance(manifest, dict):
-        return "generated-output manifest must be a JSON object"
+        return "generated-output manifest must be a JSON object", None
     if manifest.get("schema") != "pulp.clean-output-corpus.v1":
-        return "generated-output manifest has an unsupported schema"
+        return "generated-output manifest has an unsupported schema", None
     if manifest.get("producer") != "pulp import-design --emit source":
-        return "generated-output manifest has an unsupported producer"
+        return "generated-output manifest has an unsupported producer", None
     files = manifest.get("files")
     if not isinstance(files, list) or not files:
-        return "generated-output manifest must list at least one file"
+        return "generated-output manifest must list at least one file", None
     if source.is_symlink():
-        return "generated-output corpus source root must not be a symlink"
+        return "generated-output corpus source root must not be a symlink", None
     if not source.exists():
-        return f"generated-output corpus source root is missing: {source}"
+        return f"generated-output corpus source root is missing: {source}", None
     source_root = source if source.is_dir() else source.parent
     root = source_root.resolve()
     manifest_paths: list[str] = []
+    manifest_source_paths: list[str] = []
     seen_paths: set[str] = set()
     for entry in files:
         if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or \
                 not isinstance(entry.get("sha256"), str):
-            return "generated-output manifest contains a malformed file entry"
+            return "generated-output manifest contains a malformed file entry", None
         relative = entry["path"]
         relative_path = Path(relative)
         if (not relative or "\x00" in relative or relative_path.is_absolute() or
                 relative_path.as_posix() != relative or
                 any(part in ("", ".", "..") for part in relative_path.parts) or
                 "\\" in relative):
-            return f"generated-output manifest path is not canonical: {relative}"
+            return f"generated-output manifest path is not canonical: {relative}", None
         if relative in seen_paths:
-            return f"generated-output manifest contains duplicate file path: {relative}"
+            return f"generated-output manifest contains duplicate file path: {relative}", None
         seen_paths.add(relative)
         manifest_paths.append(relative)
+        if relative_path.suffix.lower() in SOURCE_SUFFIXES:
+            manifest_source_paths.append(relative)
         digest = entry["sha256"]
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
-            return f"generated-output manifest has an invalid sha256 for {relative}"
+            return f"generated-output manifest has an invalid sha256 for {relative}", None
         unresolved_path = source_root / relative
         if unresolved_path.is_symlink():
-            return f"generated-output manifest file must not be a symlink: {relative}"
+            return f"generated-output manifest file must not be a symlink: {relative}", None
         path = unresolved_path.resolve()
         try:
             path.relative_to(root)
         except ValueError:
-            return f"generated-output manifest path escapes the source root: {relative}"
+            return f"generated-output manifest path escapes the source root: {relative}", None
         if not path.is_file():
-            return f"generated-output manifest file is missing: {relative}"
+            return f"generated-output manifest file is missing: {relative}", None
         actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual_digest != digest:
-            return f"generated-output manifest hash mismatch: {relative}"
+            return f"generated-output manifest hash mismatch: {relative}", None
 
     if manifest_paths != sorted(manifest_paths):
-        return "generated-output manifest file paths are not sorted"
+        return "generated-output manifest file paths are not sorted", None
 
     actual_files = _source_files(source)
     actual_paths = [
@@ -114,16 +125,36 @@ def validate_corpus_manifest(source: Path, manifest_path: Path) -> str | None:
     if any(path.is_symlink() for path in actual_files):
         relative = next(path.relative_to(source_root).as_posix()
                         for path in actual_files if path.is_symlink())
-        return f"generated-output corpus file must not be a symlink: {relative}"
+        return f"generated-output corpus file must not be a symlink: {relative}", None
     expected = set(actual_paths)
-    recorded = set(manifest_paths)
+    recorded = set(manifest_source_paths)
     missing = sorted(expected - recorded)
     extra = sorted(recorded - expected)
     if missing:
-        return "generated-output manifest omits source file(s): " + ", ".join(missing)
+        return "generated-output manifest omits source file(s): " + ", ".join(missing), None
     if extra:
-        return "generated-output manifest lists non-source file(s): " + ", ".join(extra)
-    return None
+        return "generated-output manifest lists non-source file(s): " + ", ".join(extra), None
+
+    roles = {entry["path"]: entry.get("role", "owned-source") for entry in files}
+    invalid_roles = [role for role in roles.values()
+                     if not isinstance(role, str) or role not in KNOWN_ROLES]
+    if invalid_roles:
+        return "generated-output manifest contains an invalid file role", None
+    lint_paths = {path for path, role in roles.items() if role in LINTABLE_ROLES}
+    if not lint_paths:
+        return "generated-output manifest selects no owned source files for lint", None
+    return None, lint_paths
+
+
+def validate_corpus_manifest(source: Path, manifest_path: Path) -> str | None:
+    """Validate a corpus manifest without changing the historical API."""
+    error, _ = _load_corpus_manifest(source, manifest_path)
+    return error
+
+
+def corpus_lint_paths(source: Path, manifest_path: Path) -> tuple[str | None, set[str] | None]:
+    """Validate a corpus and return the explicitly lintable file paths."""
+    return _load_corpus_manifest(source, manifest_path)
 
 
 def _line_for(text: str, offset: int) -> int:
@@ -137,7 +168,7 @@ def _source_files(root: Path) -> list[Path]:
 
 
 def lint_source(root: Path, *, enforce_size: bool = False, max_component_lines: int = 150,
-                max_function_lines: int = 80) -> dict:
+                max_function_lines: int = 80, include_paths: set[str] | None = None) -> dict:
     findings: list[Finding] = []
     if not root.exists():
         return {
@@ -150,6 +181,19 @@ def lint_source(root: Path, *, enforce_size: bool = False, max_component_lines: 
             "ok": False,
         }
     files = _source_files(root)
+    if include_paths is not None:
+        files = [path for path in files
+                 if path.relative_to(root if root.is_dir() else path.parent).as_posix() in include_paths]
+        if not files:
+            return {
+                "schema": "pulp-clean-output-v1",
+                "files": 0,
+                "components": 0,
+                "findings": [asdict(Finding(
+                    "empty-lint-selection", ".", 1,
+                    "corpus manifest selects no source files for lint"))],
+                "ok": False,
+            }
     if not files:
         return {
             "schema": "pulp-clean-output-v1",
@@ -247,12 +291,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--enforce-size", action="store_true")
     args = parser.parse_args(argv)
     if args.manifest:
-        error = validate_corpus_manifest(args.source, args.manifest)
+        error, include_paths = corpus_lint_paths(args.source, args.manifest)
         if error:
-            print("pulp-clean-output-v1: FAIL (1 findings)")
-            print(f".:1: invalid-corpus-manifest: {error}")
+            finding = asdict(Finding("invalid-corpus-manifest", ".", 1, error))
+            report = {
+                "schema": "pulp-clean-output-v1",
+                "files": 0,
+                "components": 0,
+                "findings": [finding],
+                "ok": False,
+            }
+            if args.json:
+                print(json.dumps(report, indent=2, sort_keys=True))
+            else:
+                print("pulp-clean-output-v1: FAIL (1 findings)")
+                print(f".:1: invalid-corpus-manifest: {error}")
             return 1
-    report = lint_source(args.source, enforce_size=args.enforce_size)
+    else:
+        include_paths = None
+    report = lint_source(args.source, enforce_size=args.enforce_size, include_paths=include_paths)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
