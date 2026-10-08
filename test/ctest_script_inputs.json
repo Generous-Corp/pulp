@@ -4749,6 +4749,15 @@
    ],
    "kind": "python"
   },
+  "gpu-audio-p2-host-preflight-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_p2_host_preflight.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/scripts/host_vitals.sh",
+    "tools/scripts/test_gpu_audio_p2_host_preflight.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-p4-evidence-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p4_evidence.py",
    "inputs": [
