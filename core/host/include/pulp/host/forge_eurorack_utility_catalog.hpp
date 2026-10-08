@@ -11,7 +11,7 @@
 // detection with a 0.1 V low / 1.0 V high hysteresis band.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <algorithm>
 #include <cmath>

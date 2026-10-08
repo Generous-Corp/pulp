@@ -6,7 +6,7 @@
 #include <memory>
 #include <pulp/host/custom_node_diagnostics.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/signal/nonlin_ambience.hpp>
 #include <pulp/signal/speaker_cabinet.hpp>
 #include <pulp/signal/zero_latency_convolver.hpp>

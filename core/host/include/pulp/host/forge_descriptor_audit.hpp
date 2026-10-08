@@ -12,7 +12,7 @@
 // catalog pack is covered the moment it is indexed.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <algorithm>
 #include <string>
