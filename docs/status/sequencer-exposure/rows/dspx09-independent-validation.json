@@ -7,6 +7,7 @@
   "owned_paths": [
     "test/test_dspx09_independent_validation.cpp",
     "test/test_dspx09_followup.cpp",
+    "test/test_retained_history_dspx03.cpp",
     "test/cmake/sampler_runtime_tests.cmake",
     "docs/guides/dspx09-independent-validation.md",
     "docs/status/sequencer-exposure/rows/dspx09-independent-validation.json",
@@ -17,9 +18,7 @@
       "path": "test/test_dspx09_independent_validation.cpp",
       "needles": [
         "DSPX-09 independent allpass oracle",
-        "DSPX-09 retained-history refusal",
         "DSPX-09 automation base and offset oracle",
-        "RetainedHistoryMode::Refuse",
         "BaseOffsetRefusal::NonFiniteBase"
       ]
     },
@@ -40,6 +39,13 @@
         "DSPX-09 follow-up automation route",
         "DSPX-09 follow-up projection comparator",
         "DeferredExternalOwner"
+      ]
+    },
+    {
+      "path": "test/test_retained_history_dspx03.cpp",
+      "needles": [
+        "DSPX-09 retained-history refusal reaches the live swap path",
+        "RetainedHistoryMode::Refuse"
       ]
     }
   ],
