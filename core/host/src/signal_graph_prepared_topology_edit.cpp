@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <pulp/host/detail/prepared_lifecycle_ownership.hpp>
 #include <pulp/host/sample_region_plan.hpp>
 #include <thread>
 #include <utility>
@@ -42,8 +43,12 @@ class PreparedOwnedBuiltInSlot final : public PluginSlot {
         }
     }
 
-    const PluginInfo& info() const override { return inner_->info(); }
-    bool is_loaded() const override { return inner_->is_loaded(); }
+    const PluginInfo& info() const override {
+        return inner_->info();
+    }
+    bool is_loaded() const override {
+        return inner_->is_loaded();
+    }
     bool prepare(double sample_rate, int maximum_block_size) override {
         prepare_entered_ = true;
         return inner_->prepare(sample_rate, maximum_block_size);
@@ -59,27 +64,45 @@ class PreparedOwnedBuiltInSlot final : public PluginSlot {
                  const ParameterEventQueue& events, int frames) override {
         inner_->process(output, input, midi_in, midi_out, events, frames);
     }
-    std::vector<HostParamInfo> parameters() const override { return inner_->parameters(); }
-    float get_parameter(std::uint32_t id) const override { return inner_->get_parameter(id); }
+    std::vector<HostParamInfo> parameters() const override {
+        return inner_->parameters();
+    }
+    float get_parameter(std::uint32_t id) const override {
+        return inner_->get_parameter(id);
+    }
     void set_parameter(std::uint32_t id, float value) override {
         inner_->set_parameter(id, value);
     }
-    void set_bypass(bool bypassed) override { inner_->set_bypass(bypassed); }
-    bool is_bypassed() const override { return inner_->is_bypassed(); }
-    BypassSurface bypass_surface() const override { return inner_->bypass_surface(); }
-    std::vector<std::uint8_t> save_state() const override { return inner_->save_state(); }
+    void set_bypass(bool bypassed) override {
+        inner_->set_bypass(bypassed);
+    }
+    bool is_bypassed() const override {
+        return inner_->is_bypassed();
+    }
+    BypassSurface bypass_surface() const override {
+        return inner_->bypass_surface();
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return inner_->save_state();
+    }
     bool restore_state(const std::vector<std::uint8_t>& data) override {
         return inner_->restore_state(data);
     }
-    bool has_editor() const override { return inner_->has_editor(); }
+    bool has_editor() const override {
+        return inner_->has_editor();
+    }
 #if defined(__GNUC__) || defined(__clang__)
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
-    void* create_editor_view() override { return inner_->create_editor_view(); }
-    void destroy_editor_view() override { inner_->destroy_editor_view(); }
+    void* create_editor_view() override {
+        return inner_->create_editor_view();
+    }
+    void destroy_editor_view() override {
+        inner_->destroy_editor_view();
+    }
 #if defined(__GNUC__) || defined(__clang__)
-#  pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
 #endif
     std::unique_ptr<HostedEditor> create_hosted_editor(void* parent) override {
         return inner_->create_hosted_editor(parent);
@@ -87,13 +110,19 @@ class PreparedOwnedBuiltInSlot final : public PluginSlot {
     void destroy_hosted_editor(std::unique_ptr<HostedEditor> editor) override {
         inner_->destroy_hosted_editor(std::move(editor));
     }
-    int latency_samples() const override { return inner_->latency_samples(); }
-    int tail_samples() const override { return inner_->tail_samples(); }
+    int latency_samples() const override {
+        return inner_->latency_samples();
+    }
+    int tail_samples() const override {
+        return inner_->tail_samples();
+    }
     // Forwarded alongside the number it qualifies. Without this the wrapper
     // inherits the base default of `Available`, so a backend that cannot read a
     // latency at all is reported as confidently answering zero, and a caller
     // that checks before reading gets a fact where none exists.
-    LatencyQuery latency_query() const override { return inner_->latency_query(); }
+    LatencyQuery latency_query() const override {
+        return inner_->latency_query();
+    }
 
   private:
     std::unique_ptr<PluginSlot> inner_;
@@ -185,9 +214,9 @@ std::optional<SignalGraph::PreparedTopologyEdit::Result>
 SignalGraph::PreparedTopologyEdit::baseline_removal_rejection_locked_() const {
     owner_->assert_graph_mutation_locked_();
     for (const auto& baseline : owner_->nodes_) {
-        const bool retained = std::any_of(
-            candidate_->nodes_.begin(), candidate_->nodes_.end(),
-            [&](const GraphNode& node) { return node.id == baseline.id; });
+        const bool retained =
+            std::any_of(candidate_->nodes_.begin(), candidate_->nodes_.end(),
+                        [&](const GraphNode& node) { return node.id == baseline.id; });
         if (retained)
             continue;
         if (baseline.type == NodeType::Plugin &&
@@ -309,8 +338,7 @@ void SignalGraph::PreparedTopologyEdit::release_new_custom_instances_() noexcept
 }
 
 bool SignalGraph::PreparedTopologyEdit::register_custom_node_type(CustomNodeType type) {
-    if (mutation_failed_ || committed_ || prepare_attempted_ ||
-        !type.is_valid_registration()) {
+    if (mutation_failed_ || committed_ || prepare_attempted_ || !type.is_valid_registration()) {
         mutation_failed_ = true;
         return false;
     }
@@ -873,10 +901,11 @@ void SignalGraph::PreparedTopologyEdit::set_anticipation_enabled(bool enabled) n
 }
 
 bool SignalGraph::PreparedTopologyEdit::set_exact_parameter_event_nodes(
-    const std::shared_ptr<detail::ExactParameterIngressOwner>& owner,
-    std::span<const NodeId> nodes, ExactParameterNodeClaimPasskey) {
+    const std::shared_ptr<detail::ExactParameterIngressOwner>& owner, std::span<const NodeId> nodes,
+    ExactParameterNodeClaimPasskey) {
     return mutate_([&] {
-        if (!owner) return false;
+        if (!owner)
+            return false;
         std::unordered_set<NodeId> claimed;
         claimed.reserve(nodes.size());
         for (const auto id : nodes) {
@@ -900,9 +929,11 @@ bool SignalGraph::PreparedTopologyEdit::set_exact_parameter_event_nodes(
         }
         for (const auto id : claimed) {
             const auto found = claims.find(id);
-            if (found != claims.end() && !found->second.expired()) return false;
+            if (found != claims.end() && !found->second.expired())
+                return false;
         }
-        for (const auto id : claimed) claims[id] = owner;
+        for (const auto id : claimed)
+            claims[id] = owner;
         return true;
     });
 }
@@ -1130,10 +1161,9 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                 live_shape->second.type != next_shape->second.type) {
                 continue;
             }
-            if (rt.parameter_input_mailbox
-                && live_rt->second.parameter_input_mailbox
-                && rt.exact_parameter_event_owner.lock()
-                    == live_rt->second.exact_parameter_event_owner.lock()) {
+            if (rt.parameter_input_mailbox && live_rt->second.parameter_input_mailbox &&
+                rt.exact_parameter_event_owner.lock() ==
+                    live_rt->second.exact_parameter_event_owner.lock()) {
                 rt.parameter_input_mailbox = live_rt->second.parameter_input_mailbox;
             }
             if (rt.midi_input_mailbox && live_rt->second.midi_input_mailbox) {
@@ -1148,8 +1178,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                         ? &rt->second.parameter_input_mailbox->sequence_seen
                         : nullptr;
                 ctx.parameter_events_exact_sequence_seen =
-                    rt != next->runtime.end()
-                            && rt->second.exact_parameter_input_mailbox
+                    rt != next->runtime.end() && rt->second.exact_parameter_input_mailbox
                         ? &rt->second.exact_parameter_input_mailbox->sequence_seen
                         : nullptr;
             }
@@ -1237,8 +1266,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
 }
 
 SignalGraph::PreparedTopologyEdit::Result
-SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
-                                                     int max_block_size) {
+SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate, int max_block_size) {
     if (committed_)
         return last_result_ = Result::AlreadyCommitted;
     if (mutation_failed_)
@@ -1287,8 +1315,7 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
         if (node.type != NodeType::Custom || !node.custom_instance)
             continue;
         const auto owner_node = std::find_if(
-            owner_->nodes_.begin(), owner_->nodes_.end(),
-            [&](const GraphNode& current) {
+            owner_->nodes_.begin(), owner_->nodes_.end(), [&](const GraphNode& current) {
                 return current.id == node.id && current.custom_instance == node.custom_instance;
             });
         if (owner_node == owner_->nodes_.end())
@@ -1297,14 +1324,13 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
                 prepared_custom_key(node.custom_type_id, node.custom_type_version)) != 0) {
             return last_result_ = Result::ExistingCustomReprepareRequired;
         }
-        const auto* candidate_type = candidate_->custom_node_type(
-            node.custom_type_id, node.custom_type_version);
-        const auto* owner_type = owner_->custom_node_type(
-            owner_node->custom_type_id, owner_node->custom_type_version);
+        const auto* candidate_type =
+            candidate_->custom_node_type(node.custom_type_id, node.custom_type_version);
+        const auto* owner_type =
+            owner_->custom_node_type(owner_node->custom_type_id, owner_node->custom_type_version);
         if (candidate_type != nullptr && candidate_type->prepare && owner_type != nullptr) {
             quiesced_customs_.push_back(
-                {node.custom_instance, owner_type->prepare, owner_type->release,
-                 false});
+                {node.custom_instance, owner_type->prepare, owner_type->release, false});
         }
     }
     quiesced_lifecycles_dirty_ =
@@ -1333,8 +1359,8 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
         },
     };
     try {
-        candidate_prepared = candidate_->prepare_impl_(
-            sample_rate, max_block_size, &lifecycle_observer);
+        candidate_prepared =
+            candidate_->prepare_impl_(sample_rate, max_block_size, &lifecycle_observer);
     } catch (...) {
         candidate_prepared = false;
     }
@@ -1347,9 +1373,9 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     for (const auto& node : candidate_->nodes_) {
         if (node.type != NodeType::Custom || !node.custom_instance)
             continue;
-        const auto owner_node = std::find_if(
-            owner_->nodes_.begin(), owner_->nodes_.end(),
-            [&](const GraphNode& current) { return current.id == node.id; });
+        const auto owner_node =
+            std::find_if(owner_->nodes_.begin(), owner_->nodes_.end(),
+                         [&](const GraphNode& current) { return current.id == node.id; });
         if (owner_node == owner_->nodes_.end() ||
             owner_node->custom_instance != node.custom_instance) {
             prepared_new_custom_ids_.push_back(node.id);
@@ -1406,11 +1432,9 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         owner_->live_slot_.prepare_publish();
 
         if (candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) &&
-            prepared_snapshot_->routed.parallel.valid &&
-            owner_->worker_pool_.worker_count() == 0) {
+            prepared_snapshot_->routed.parallel.valid && owner_->worker_pool_.worker_count() == 0) {
             const unsigned hw = std::thread::hardware_concurrency();
-            const std::uint32_t workers =
-                std::clamp<std::uint32_t>(hw == 0 ? 2 : hw, 2, 16);
+            const std::uint32_t workers = std::clamp<std::uint32_t>(hw == 0 ? 2 : hw, 2, 16);
             if (!owner_->worker_pool_.start(workers))
                 return fail_before_commit(Result::ParallelWorkerStartFailed);
         }
@@ -1439,8 +1463,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
             }
             auto current = it++;
             auto node = candidate_->node_load_.extract(current);
-            [[maybe_unused]] const auto inserted =
-                owner_->node_load_.insert(std::move(node));
+            [[maybe_unused]] const auto inserted = owner_->node_load_.insert(std::move(node));
             assert(inserted.inserted);
         }
     }
@@ -1463,8 +1486,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     owner_->next_id_ = candidate_->next_id_;
     owner_->limits_ = candidate_->limits_;
     owner_->prepared_plugin_meta_ = std::move(candidate_->prepared_plugin_meta_);
-    owner_->exact_parameter_event_claims_ =
-        std::move(candidate_->exact_parameter_event_claims_);
+    owner_->exact_parameter_event_claims_ = std::move(candidate_->exact_parameter_event_claims_);
     owner_->canonical_executor_routing_enabled_.store(
         candidate_->canonical_executor_routing_enabled_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);

@@ -1,12 +1,17 @@
 #pragma once
 
-#include <pulp/host/detail/prepared_lifecycle_ownership.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 
 #include <optional>
 
 namespace pulp::host {
+
+namespace detail {
+struct QuiescedPluginLifecycle;
+struct QuiescedCustomLifecycle;
+struct QuiescedProcessorLifecycle;
+} // namespace detail
 
 /// Passkey authorizing exact-parameter-event node claims on a prepared edit.
 /// Only TimelineGraphPlaybackBinding can mint one, so ownership of a node's
@@ -68,11 +73,9 @@ class SignalGraph::PreparedTopologyEdit {
     NodeId add_processor_node(std::unique_ptr<format::Processor> processor,
                               const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id, const std::string& name = {});
-    NodeId add_custom_node(std::string_view type_id, int version,
-                           const std::string& name = {});
-    NodeId add_unresolved_custom_node(std::string_view type_id, int version,
-                                      int num_inputs, int num_outputs,
-                                      const std::string& name);
+    NodeId add_custom_node(std::string_view type_id, int version, const std::string& name = {});
+    NodeId add_unresolved_custom_node(std::string_view type_id, int version, int num_inputs,
+                                      int num_outputs, const std::string& name);
     bool remove_node(NodeId id);
     bool connect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
     bool connect_automation(NodeId source, PortIndex source_port, NodeId dest,
@@ -82,8 +85,7 @@ class SignalGraph::PreparedTopologyEdit {
                                        uint32_t dest_param_id, float range_lo, float range_hi,
                                        float smoothing_ms = 0.0f,
                                        AutomationMix mix = AutomationMix::Replace);
-    bool connect_feedback(NodeId source, PortIndex source_port, NodeId dest,
-                          PortIndex dest_port);
+    bool connect_feedback(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
     bool connect_midi(NodeId source, NodeId dest);
     bool disconnect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
     bool disconnect_modulation(NodeId source, PortIndex source_port, NodeId dest,
@@ -125,7 +127,9 @@ class SignalGraph::PreparedTopologyEdit {
     ExecutionSnapshot committed_execution_snapshot() const noexcept {
         return ExecutionSnapshot(*owner_, committed_snapshot_);
     }
-    Result last_result() const noexcept { return last_result_; }
+    Result last_result() const noexcept {
+        return last_result_;
+    }
 
     // Claims a set of plugin nodes as exact-generation parameter-event sinks
     // owned by `owner`. Gated by a passkey only the timeline binding can mint.
