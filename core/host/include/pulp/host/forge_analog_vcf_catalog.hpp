@@ -9,7 +9,7 @@
 // becoming the owner of analog DSP policy.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/signal/analog_vcf.hpp>
 
 #include <cstddef>

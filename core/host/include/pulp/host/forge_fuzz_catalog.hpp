@@ -4,7 +4,7 @@
 // both are circuit identity, and oversampling changes reported latency.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/signal/fuzz_pair.hpp>
 
 #include <cstdint>
