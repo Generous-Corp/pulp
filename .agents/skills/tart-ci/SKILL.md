@@ -53,6 +53,13 @@ Pulp labels and host declarations out of generic TartCI/Shipyard code.
 | `pulp-worktree.sh` | Per-branch worktrees + shared ccache (host-side dev isolation; complements the VM lane). |
 | `.shipyard/vm-image.toml` | **The per-repo reuse unit** (see below). |
 
+The direct Tart guest build must invoke `tools/ci/governed-build.sh` for its
+`cmake --build` step. The guest may have a TartCI profile or may run standalone;
+the governed wrapper selects the bounded lease/profile share or its tier-0
+fallback in either case. Do not reintroduce a caller-owned `--parallel` value
+in `tart-run-job.sh`, because that bypasses the same build policy used by the
+local and Shipyard paths.
+
 The reusable runner path is now the sibling `tartci` repo:
 - `tartci serve macos --once|--loop --labels ...` owns ephemeral JIT runners.
 - `tartci observe macos --json [--runner <name>]` ties GitHub job, local VM,
