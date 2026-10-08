@@ -147,9 +147,11 @@ async function measureAuthoredFrame(cdp) {
       }
       if (!element) return null;
       const bounds = element.getBoundingClientRect();
-      // getBoundingClientRect() includes ancestor transforms. Fit discovery
-      // needs the authored layout box so a fixed design surface scaled into
-      // the seed viewport is not mistaken for a smaller design.
+      // getBoundingClientRect() is expressed after ancestor transforms. Fit
+      // discovery needs the authored layout box so a fixed design surface
+      // scaled into the seed viewport is not mistaken for a smaller design.
+      // Keep the transformed bounds above as the capture-space geometry; the
+      // intrinsic dimensions are used only to choose and verify the viewport.
       const authoredWidth = Number(element.offsetWidth);
       const authoredHeight = Number(element.offsetHeight);
       return {
@@ -576,10 +578,6 @@ async function verifyCanvasRasterSignatures(
     totalPixels += actual.pixels;
     if (actual.width === expected.width && actual.height === expected.height &&
         actual.sha256 === expected.sha256) continue;
-    // A deliberate viewport settlement can invoke a canvas resize handler. A
-    // repaint is valid when both frames retain visible pixels; a handler that
-    // only clears the backing store remains a planted incomplete-evidence
-    // control and must still fail closed.
     if (allowDeterministicRepaint && expected.nonzero > 0 && actual.nonzero > 0)
       continue;
     const error = new Error(
@@ -1707,12 +1705,9 @@ async function runCapture(options) {
       error.code = "capture-negative-overflow";
       throw error;
     }
-    // A fixed authored surface can be larger than the seed viewport. Letting
-    // Page.captureScreenshot capture that overflow asks Chromium to resize the
-    // page surface; resize handlers can clear or repaint a canvas after the
-    // accepted frame was chosen. Settle the viewport to the measured extent
-    // first, and compare every canvas across that resize so valid deterministic
-    // surfaces succeed while resize-sensitive incomplete evidence still fails.
+    // Settle oversized authored surfaces before Chromium captures beyond the
+    // viewport. This lets valid resize-aware canvases repaint while preserving
+    // the planted resize-clear negative control.
     let captureExtentCanvasSignatures = [];
     const extentExceedsViewport =
       finalExtent.width > resolvedViewportWidth ||
