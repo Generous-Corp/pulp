@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09313"></a>
+## [0.931.3] - 2026-10-07
+
+- release/version bump ([#9866](https://github.com/Generous-Corp/pulp/pull/9866))
+- fix/windows sdk font target matrix 20261007 ([#9860](https://github.com/Generous-Corp/pulp/pull/9860))
+- codex/forge space current 20261007 ([#9832](https://github.com/Generous-Corp/pulp/pull/9832))
+- codex/provider factory 20261007 ([#9864](https://github.com/Generous-Corp/pulp/pull/9864))
+- codex/governed local tools 20261007 ([#9862](https://github.com/Generous-Corp/pulp/pull/9862))
+
 <a id="v09312"></a>
 ## [0.931.2] - 2026-10-07
 
@@ -10144,6 +10153,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.931.3]: https://github.com/Generous-Corp/pulp/releases/tag/v0.931.3
 [0.931.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.931.2
 [0.931.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.931.1
 [0.931.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.931.0
