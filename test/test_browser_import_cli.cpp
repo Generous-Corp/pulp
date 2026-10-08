@@ -143,25 +143,21 @@ TEST_CASE("required canvas ink rejects non-browser dispatch",
     request.require_canvas_ink = true;
 
     id::internal::BrowserImportCliOperations operations;
-    operations.import_html =
-        [](const id::BrowserHtmlImportRequest&, std::string_view) {
-            return id::BrowserHtmlImportResult{};
-        };
-    operations.validate_capture =
-        [](const pulp::view::DesignIR&,
-           const id::BrowserCaptureValidationOptions&) {
-            FAIL("non-browser input must not validate");
-            return id::BrowserCaptureValidationResult{};
-        };
-    operations.localize_assets =
-        [](pulp::view::DesignIR&, const std::string&, std::string*) {
-            FAIL("non-browser input must not localize");
-            return false;
-        };
+    operations.import_html = [](const id::BrowserHtmlImportRequest&, std::string_view) {
+        return id::BrowserHtmlImportResult{};
+    };
+    operations.validate_capture = [](const pulp::view::DesignIR&,
+                                     const id::BrowserCaptureValidationOptions&) {
+        FAIL("non-browser input must not validate");
+        return id::BrowserCaptureValidationResult{};
+    };
+    operations.localize_assets = [](pulp::view::DesignIR&, const std::string&, std::string*) {
+        FAIL("non-browser input must not localize");
+        return false;
+    };
 
     const auto result =
-        id::internal::run_browser_import_cli_with_operations(
-            request, "not html", operations);
+        id::internal::run_browser_import_cli_with_operations(request, "not html", operations);
     const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
     REQUIRE(failure);
     CHECK(failure->exit_code == 2);
