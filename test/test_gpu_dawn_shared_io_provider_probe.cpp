@@ -175,7 +175,8 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
           std::uint32_t alignment, std::uint64_t installs,
           const pulp::test::DawnTransferCallCounter::Snapshot& transfers, std::uint64_t submissions,
           const DawnSharedIoProvider::Stats& stats,
-          const DawnSharedIoProvider::AdapterIdentity& adapter) {
+          const DawnSharedIoProvider::AdapterIdentity& adapter,
+          std::optional<std::uint64_t> gpu_elapsed_ns) {
     struct utsname system_info{};
     const bool have_system_info = uname(&system_info) == 0;
     std::cout << "{\"schema\":\"pulp.gpu-dawn-shared-io-provider.v2\","
@@ -222,7 +223,12 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
               << ",\"timestamp_submissions\":" << stats.timestamp_submissions
               << ",\"timestamp_samples\":" << stats.timestamp_samples
               << ",\"timestamp_failures\":" << stats.timestamp_failures
-              << ",\"fault_injections\":" << stats.fault_injections << ",\"hardware_model\":\""
+              << ",\"gpu_elapsed_ns\":";
+    if (gpu_elapsed_ns)
+        std::cout << *gpu_elapsed_ns;
+    else
+        std::cout << "null";
+    std::cout << ",\"fault_injections\":" << stats.fault_injections << ",\"hardware_model\":\""
               << json_escape(hardware_model()) << "\""
               << ",\"os\":\"" << json_escape(have_system_info ? system_info.sysname : "unknown")
               << "\""
@@ -368,6 +374,7 @@ int main(int argc, char** argv) {
 
     bool passed = true;
     std::optional<bool> oracle;
+    std::optional<std::uint64_t> gpu_elapsed_ns;
     std::string_view reason = "shared_io_oracle";
     std::uint64_t submissions = 0;
     struct BufferSizes {
@@ -559,6 +566,15 @@ int main(int argc, char** argv) {
             }
             oracle = oracle.value_or(true) && trial_oracle;
             const auto token = output->token;
+            if (scenario->timestamp_staged) {
+                const auto timestamp = created.provider->gpu_timestamp(token);
+                if (!timestamp || timestamp->elapsed_ns == 0) {
+                    passed = false;
+                    reason = "gpu_elapsed_timestamp_missing";
+                    break;
+                }
+                gpu_elapsed_ns = timestamp->elapsed_ns;
+            }
             output.reset();
             if (!arena.release_output({token})) {
                 passed = false;
@@ -701,6 +717,6 @@ int main(int argc, char** argv) {
     }
     created.provider.reset();
     emit(scenario->name, passed ? "passed" : "failed", reason, completion_policy, oracle, alignment,
-         installs, transfers, submissions, stats, adapter);
+         installs, transfers, submissions, stats, adapter, gpu_elapsed_ns);
     return passed ? 0 : 1;
 }

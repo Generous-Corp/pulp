@@ -220,6 +220,8 @@
 
             add_executable(pulp-gpu-dawn-shared-io-provider-probe
                 test_gpu_dawn_shared_io_provider_probe.cpp)
+            add_dependencies(pulp-gpu-dawn-shared-io-provider-probe
+                pulp-gpu-host-mapped-pointer-probe)
             target_link_libraries(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
                 pulp::gpu-audio)
             target_include_directories(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
