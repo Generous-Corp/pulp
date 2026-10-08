@@ -309,6 +309,24 @@ class WorkflowAuthorOwnsWholeMachineTest(unittest.TestCase):
                 if re.search(r'cmake\s+--build.*-j"?\$\(sysctl -n hw\.ncpu\)', stripped):
                     self.fail(f"{rel}: un-governed whole-machine build survives: {stripped}")
 
+    def test_timeline_hardening_build_uses_the_governor(self):
+        """The focused timeline lane uses Ninja, whose default fan-out is
+        host-sized even when the workflow also supplies a small parallel flag.
+        Keep the shared governor on this build so memory and lease policy stay
+        authoritative if the target list or runner changes."""
+        import re
+        path = guard.REPO_ROOT / ".github/workflows/timeline-hardening.yml"
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if re.search(r"cmake\s+--build", stripped):
+                context = "\n".join(lines[max(0, index - 2):index + 1])
+                self.assertIn("tools/ci/governed-build.sh", context,
+                              f"timeline hardening build is not governed: {stripped}")
+
 
 NINJA_CONFIGURE = (
     'cmake -S "$src" -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release\n')
