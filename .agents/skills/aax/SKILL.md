@@ -286,6 +286,19 @@ identity. If neither is available, stop at the compile/validator gates and
 report that missing PACE configuration; do not guess identifiers or put a
 password in a command line.
 
+### Optional macOS environment management with mise
+
+`mise` can be useful for the non-proprietary parts of this setup: pinning
+supported CLI versions, defining repeatable `build`/`validate` tasks, and
+selecting environment variables such as `PULP_AAX_SDK_DIR` and
+`PULP_AAX_VALIDATOR_DIR`. Keep that configuration in a private machine-setup
+repository if it contains local paths. Do not use `mise` to distribute or
+manage the Avid SDK, DigiShell, PACE Fusion binaries, iLok state, signing
+certificates, customer numbers, wrap configurations, or credentials. Those
+remain developer-supplied macOS assets and should be restored from the private
+backup with their recorded hashes. Windows setup and signing can adopt the same
+boundary later, but is intentionally not specified here.
+
 ## Core Commands
 
 Check current AAX availability:
