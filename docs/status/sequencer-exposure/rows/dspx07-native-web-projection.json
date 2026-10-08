@@ -1,6 +1,6 @@
 {
   "id": "dspx07-native-web-projection",
-  "title": "Bounded baked Processor projection for native and web adapters",
+  "title": "Bounded baked Processor projection for native, web, and Audio Unit adapters",
   "classification": "public_sdk",
   "delivery_state": "pending",
   "claim_id": "7c6e0b8a-2a54-4a12-9ef7-4f67b1d9c6a2",
@@ -12,6 +12,8 @@
     "core/format/include/pulp/format/web/wam_adapter.hpp",
     "core/format/include/pulp/format/web/wclap_adapter.hpp",
     "test/test_dspx07_projection.cpp",
+    "test/test_dspx07_au_baked_projection.mm",
+    "test/cmake/core_audio_platform_format_tests.cmake",
     "docs/guides/native-web-projection.md",
     "docs/status/sequencer-exposure/rows/dspx07-native-web-projection.json"
   ],
@@ -42,6 +44,15 @@
         "bounded baked",
         "Dense modulation",
         "Forge, Spectr, and GPU-NAM"
+      ]
+    },
+    {
+      "path": "test/test_dspx07_au_baked_projection.mm",
+      "needles": [
+        "ProjectionSurface::au",
+        "create_baked_au_processor",
+        "AU v2 render path",
+        "AU v3 render path"
       ]
     }
   ],
