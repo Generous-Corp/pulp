@@ -231,7 +231,7 @@ jobs:
           set -euo pipefail
           emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
             -DPULP_WAM_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
-          cmake --build build -j"$(nproc)"
+          bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build
 
       - name: WAMv2 Node validations
         working-directory: examples/web-demos/wasm-build
@@ -284,7 +284,7 @@ jobs:
           cmake -S . -B build \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j"$(nproc)"
+          bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build
 
       - name: WebCLAP Node validations
         run: |
@@ -370,7 +370,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DSKIA_DIR="$SKIA_DIR" \
             -DPULP_WEBUI_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
-          cmake --build build-webui -j"$(nproc)"
+          tools/ci/governed-build.sh cmake --build build-webui
 
       - name: Pulp UI browser fixture (headless Chrome)
         env:
@@ -415,7 +415,7 @@ jobs:
           set -euo pipefail
           emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-gpu-dsp -j"$(nproc)"
+          tools/ci/governed-build.sh cmake --build build-gpu-dsp
 
       - name: GPU-audio browser proof (skips with a reason where there is no adapter)
         env:
