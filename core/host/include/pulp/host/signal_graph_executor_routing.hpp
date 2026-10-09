@@ -5,7 +5,6 @@
 #include <pulp/host/custom_node_events.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/parameter_event_queue.hpp>
-#include <pulp/host/plugin_slot.hpp>
 #include <pulp/midi/buffer.hpp>
 
 #include <atomic>
@@ -15,7 +14,14 @@
 #include <span>
 #include <vector>
 
+namespace pulp::audio {
+class AudioProcessLoadMeasurer;
+}
+
 namespace pulp::host {
+
+struct HostParamInfo;
+class PluginSlot;
 
 class SignalGraph;
 struct GraphNode;
