@@ -46,9 +46,19 @@ class HostPreflightTests(unittest.TestCase):
                 "recommendations": [], "probes": [{
                     "probe_id": "gpu-compute-magnitude", "required": True, "verdict": "pass",
                     "adapter": {"status": "authentic", "class": "hardware",
-                                 "name": "Apple M5 Ultra", "backend": "Metal", "device": "apple-m5"},
-                    "measurements": {"compute_initialized": True, "compute_oracle_passed": True,
-                                      "device_lost": False},
+                                 "name": "Apple M5 Ultra", "vendor": "apple",
+                                 "architecture": "metal-3", "backend": "Metal", "device": "apple-m5"},
+                    "measurements": {"command_submitted": None, "readback_completed": None,
+                                      "pixel_output_produced": None, "content_floor_passed": None,
+                                      "compute_initialized": True, "compute_oracle_passed": True,
+                                      "device_lost": False, "non_transparent_pixel_count": None,
+                                      "distinct_color_count": None, "rgba_fingerprint": None},
+                    "events": [{"sequence": 0, "stage": "adapter", "verdict": "pass",
+                                 "code": "gpu_compute_adapter_acquired",
+                                 "detail": "GpuCompute acquired authentic hardware adapter"},
+                               {"sequence": 1, "stage": "compute", "verdict": "pass",
+                                "code": "gpu_compute_oracle_passed",
+                                "detail": "Compute output matched the independent oracle"}],
                 }],
             }), "")
         return HostPreflightTests.runner(command, **kwargs)
