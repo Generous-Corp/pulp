@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09381"></a>
+## [0.938.1] - 2026-10-09
+
+- codex/neural head anchor repair 20261009 ([#9962](https://github.com/Generous-Corp/pulp/pull/9962))
+- release/version bump ([#9961](https://github.com/Generous-Corp/pulp/pull/9961))
+- test/declare editor bridge ts read ([#9959](https://github.com/Generous-Corp/pulp/pull/9959))
+- build/script inputs gate equal ([#9958](https://github.com/Generous-Corp/pulp/pull/9958))
+- codex/aax macos docs 20261008 ([#9922](https://github.com/Generous-Corp/pulp/pull/9922))
+- feat/rack generation lock ([#9681](https://github.com/Generous-Corp/pulp/pull/9681))
+- fix/gcc ledger row local ci ([#9956](https://github.com/Generous-Corp/pulp/pull/9956))
+- codex/deadline threading protected 20261008 ([#9955](https://github.com/Generous-Corp/pulp/pull/9955))
+- refactor/governed install consumer 20261008 ([#9952](https://github.com/Generous-Corp/pulp/pull/9952))
+- test/pulp pluck unique test names ([#9688](https://github.com/Generous-Corp/pulp/pull/9688))
+- fix/v2 semantic kind 20261008 ([#9865](https://github.com/Generous-Corp/pulp/pull/9865))
+
 <a id="v09380"></a>
 ## [0.938.0] - 2026-10-09
 
@@ -10278,6 +10293,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.938.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.938.1
 [0.938.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.938.0
 [0.937.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.937.0
 [0.936.3]: https://github.com/Generous-Corp/pulp/releases/tag/v0.936.3
