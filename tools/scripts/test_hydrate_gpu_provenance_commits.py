@@ -212,6 +212,45 @@ class HydrationTests(unittest.TestCase):
                 for t in seen_timeouts),
             seen_timeouts)
 
+    def test_a_spent_budget_skips_the_remaining_candidates(self) -> None:
+        """Once one hung fetch spends the shared budget, no further fetch runs.
+
+        Each later candidate is recorded as not fetched, and the ancestry check
+        still decides the outcome.
+        """
+        revision = "a" * 40
+        clock = [1000.0]
+        fetched: list[str] = []
+
+        def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            if command[:3] == ["git", "rev-parse", "--is-shallow-repository"]:
+                return subprocess.CompletedProcess(command, 0, "true\n", "")
+            if command[:2] == ["git", "fetch"]:
+                fetched.append(command[-1])
+                # The hung fetch consumes the whole budget before timing out.
+                clock[0] += hydration.FETCH_TIMEOUT_SECONDS + 1
+                raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 0)
+            if command[:2] == ["git", "merge-base"]:
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        err = io.StringIO()
+        with (
+            mock.patch.object(hydration, "required_commits", return_value=[revision]),
+            mock.patch.object(hydration, "is_commit", return_value=True),
+            mock.patch.object(hydration.subprocess, "run", side_effect=run),
+            mock.patch.object(hydration.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.dict(
+                os.environ,
+                {"GITHUB_REF": "refs/pull/7882/merge", "GITHUB_SHA": "b" * 40},
+            ),
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertEqual(hydration.hydrate(pathlib.Path("/repo"), "origin"), (1, 0))
+        self.assertEqual(len(fetched), 1, fetched)
+        self.assertIn("refs/pull/7882/merge", fetched[0])
+        self.assertEqual(err.getvalue().count("fetch budget is spent"), 2, err.getvalue())
+
     def _hydrate_with_fetch_errors(
         self, event_ref: str, errors: dict[str, str], event_sha: str = "",
         commits_present: bool = True,

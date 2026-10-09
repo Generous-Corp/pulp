@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261007-governed-import-validation-20261007-watch",
+  "created_at": "2026-10-07T08:33:04Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "This change routes the existing importer validation builds through Pulp governed-build.sh, removing an unbounded host parallelism flag and preserving the same fixtures, targets, and artifacts. It changes no design-import authority, parser behavior, Chromium behavior, rendering ownership, packaging, or generated output.",
+  "tests": [
+    "python3 tools/ci/test_build_governance_paths.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

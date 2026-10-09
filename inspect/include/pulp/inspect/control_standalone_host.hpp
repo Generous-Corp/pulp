@@ -12,6 +12,10 @@
 #include <memory>
 #include <string_view>
 
+namespace pulp::host {
+class SignalGraphControlAuthority;
+}
+
 namespace pulp::inspect {
 
 class RuntimeEvaluator;
@@ -100,6 +104,16 @@ bool install_standalone_timeline_document_session_factory(
     StandaloneTimelineDocumentSessionFactory factory) noexcept;
 std::optional<ControlTimelineDocumentSessionSource>
 create_standalone_timeline_document_session_source(const ControlAdmissionPlan& plan);
+
+/// Installs the product-owned binding for live SignalGraph modulation-route control.
+/// The factory must return the authority for the same graph owned by the Processor.
+/// Without a factory, the registered operation remains typed HostUnavailable.
+using StandaloneSignalGraphAuthorityFactory =
+    pulp::host::SignalGraphControlAuthority* (*)(format::Processor&);
+bool install_standalone_signal_graph_authority_factory(
+    StandaloneSignalGraphAuthorityFactory factory) noexcept;
+pulp::host::SignalGraphControlAuthority*
+create_standalone_signal_graph_authority(format::Processor& processor);
 
 /// Installs the product-owned binding between a live Processor graph and the
 /// unified sample-region executors. The factory must return a target backed by

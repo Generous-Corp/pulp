@@ -530,6 +530,22 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
                   "adapter_backend", "provider", "generated_utc"):
         if not _nonempty(manifest.get(field)):
             errors.append(f"line 1: {field} must be non-empty")
+    scheduling = manifest.get("scheduling")
+    if not isinstance(scheduling, dict):
+        errors.append("line 1: scheduling must be an object")
+    else:
+        for field in ("worker", "contention", "thermal_state", "power_state"):
+            value = scheduling.get(field)
+            if not _nonempty(value) or "\n" in value or "\r" in value:
+                errors.append(f"line 1: scheduling.{field} must be a non-empty single-line string")
+        if scheduling.get("worker") not in {"ordinary_worker", "audio_workgroup"}:
+            errors.append("line 1: scheduling.worker is invalid")
+        if not isinstance(scheduling.get("workgroup_joined"), bool):
+            errors.append("line 1: scheduling.workgroup_joined must be boolean")
+        if not _integer_at_least(scheduling.get("workgroup_join_failures"), 0):
+            errors.append("line 1: scheduling.workgroup_join_failures must be non-negative")
+        if scheduling.get("worker") == "audio_workgroup" and not scheduling.get("workgroup_joined"):
+            errors.append("line 1: audio_workgroup scheduling requires workgroup_joined=true")
     if not isinstance(manifest.get("provider_revision"), str) or not SHA_RE.fullmatch(
         manifest["provider_revision"]
     ):
@@ -1045,6 +1061,7 @@ def summarize(records: Sequence[dict[str, Any]], *,
                     "device_id": manifest["adapter_device_id"]},
         "provider": {"name": manifest["provider"], "revision": manifest["provider_revision"],
                      "asset_sha256": manifest["provider_asset_sha256"]},
+        "scheduling": manifest["scheduling"],
         "build": {"type": manifest["build_type"], "flags": manifest["build_flags"]},
         "generated_utc": manifest["generated_utc"],
         "row": manifest["row"],
@@ -1080,7 +1097,10 @@ def _write_csv_handle(records: Iterable[dict[str, Any]], handle: TextIO, *,
                         "machine_id", "machine_model", "os_version", "adapter_name",
                         "adapter_backend", "adapter_registry_id", "adapter_vendor_id",
                         "adapter_device_id", "provider", "provider_revision", "provider_asset_sha256"]
-    columns = ["evidence_sha256"] + identity_columns + ["record_kind", "trial_id", "pair_id",
+    columns = ["evidence_sha256"] + identity_columns + ["scheduling_worker",
+               "scheduling_contention", "scheduling_thermal_state", "scheduling_power_state",
+               "scheduling_workgroup_joined", "scheduling_workgroup_join_failures",
+               "record_kind", "trial_id", "pair_id",
                "path", "block_ordinal", "engine_id", "generation", "sequence",
                "gpu_terminal", "delivery", "deadline_miss", "watchdog_expiry",
                "late_completion", "resync_drop"]
@@ -1105,6 +1125,15 @@ def _write_csv_handle(records: Iterable[dict[str, Any]], handle: TextIO, *,
         if manifest is None:
             raise ValueError("manifest must precede block records")
         row = {key: manifest[key] for key in identity_columns}
+        scheduling = manifest["scheduling"]
+        row.update({
+            "scheduling_worker": scheduling["worker"],
+            "scheduling_contention": scheduling["contention"],
+            "scheduling_thermal_state": scheduling["thermal_state"],
+            "scheduling_power_state": scheduling["power_state"],
+            "scheduling_workgroup_joined": scheduling["workgroup_joined"],
+            "scheduling_workgroup_join_failures": scheduling["workgroup_join_failures"],
+        })
         row["evidence_sha256"] = evidence_sha256 or ""
         row["record_kind"] = record["record_kind"]
         for key in ("trial_id", "pair_id", "path", "block_ordinal", "engine_id",

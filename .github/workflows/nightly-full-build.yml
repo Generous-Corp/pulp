@@ -100,7 +100,7 @@ jobs:
           # cmake itself has no --keep-going flag — pass Ninja's
           # keep-going (`-k 0`) through `--` so one broken target does
           # not mask the rest. tee the full output for the report.
-          if cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-nightly.log; then
+          if tools/ci/governed-build.sh cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-nightly.log; then
             echo "status=pass" >> "$GITHUB_OUTPUT"
           else
             echo "status=fail" >> "$GITHUB_OUTPUT"

@@ -50,7 +50,7 @@ UNWATCHED_PATH = "docs/guides/fixture-probe.md"
 def _git(repo: Path, *args: str) -> str:
     out = subprocess.run(
         ["git", "-C", str(repo), *args],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8"
     )
     return out.stdout.strip()
 
@@ -82,7 +82,7 @@ class _PreflightRepo:
     def _write(self, rel: str, text: str) -> None:
         path = self.repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8")
 
     def _commit(self, message: str) -> str:
         _git(self.repo, "add", "-A")
@@ -95,7 +95,7 @@ class _PreflightRepo:
         completed = subprocess.run(
             ["python3", str(PREFLIGHT), "--repo", str(self.repo),
              "--base", base, "--head", head, *extra],
-            cwd=self.repo, check=False, capture_output=True, text=True,
+            cwd=self.repo, check=False, capture_output=True, text=True, encoding="utf-8"
         )
         return completed.returncode, completed.stdout + completed.stderr
 
@@ -379,7 +379,7 @@ class VellumWatchPreflightTest(_PreflightRepo, unittest.TestCase):
         """
         import re
         for rel in ("tools/scripts/gates.sh", ".githooks/pre-push"):
-            source = (ROOT / rel).read_text()
+            source = (ROOT / rel).read_text(encoding="utf-8")
             self.assertIn("vellum_watch_preflight.py", source,
                           msg=f"{rel} does not run the Vellum gate")
             # Both call sites reach the script through a variable, so scanning
@@ -477,7 +477,7 @@ class VellumFreezePreflightTest(_PreflightRepo, unittest.TestCase):
         otherwise pass for the wrong reason."""
         import json
         freeze = self._import_freeze()
-        mapping = json.loads((ROOT / ".github/vellum-ownership.json").read_text())
+        mapping = json.loads((ROOT / ".github/vellum-ownership.json").read_text(encoding="utf-8"))
         self.assertEqual(list(freeze.affected_slices([mapping], [SLICE_PATH])),
                          [SLICE_ID])
         self.assertEqual(freeze.affected_slices([mapping], [UNWATCHED_PATH]), {})
@@ -560,7 +560,7 @@ class VellumFreezePreflightTest(_PreflightRepo, unittest.TestCase):
             ["python3", "tools/scripts/vellum_freeze_check.py",
              "--base", _git(self.repo, "merge-base", "main", "HEAD"),
              "--head", _git(self.repo, "rev-parse", "HEAD"), "--output", os.devnull],
-            cwd=self.repo, capture_output=True, text=True, check=False)
+            cwd=self.repo, capture_output=True, text=True, check=False, encoding="utf-8")
         self.assertEqual(done.returncode, 0, msg=done.stderr)
 
     def test_write_change_event_refuses_a_placeholder_or_nothing_owed(self) -> None:
@@ -598,7 +598,7 @@ class VellumFreezePreflightTest(_PreflightRepo, unittest.TestCase):
             ["python3", "tools/scripts/vellum_freeze_check.py",
              "--base", _git(self.repo, "rev-parse", "main"),
              "--head", _git(self.repo, "rev-parse", "HEAD"), "--output", os.devnull],
-            cwd=self.repo, capture_output=True, text=True, check=False)
+            cwd=self.repo, capture_output=True, text=True, check=False, encoding="utf-8")
         self.assertEqual(done.returncode, 1, msg="the tip comparison came back clean")
 
     def test_a_crashing_freeze_checker_never_blocks(self) -> None:

@@ -1,0 +1,63 @@
+{
+  "id": "dspx04-host-authority-control",
+  "title": "DSPX-04 host authority exposes bounded modulation route control",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "dspx04-host-authority-20261001",
+  "owned_paths": [
+    "core/host/include/pulp/host/signal_graph_runtime.hpp",
+    "core/host/include/pulp/host/signal_graph_control.hpp",
+    "inspect/src/control_signal_graph_executor.cpp",
+    "docs/status/sequencer-exposure/rows/dspx04-host-authority-control.json",
+    "inspect/src/control_manifest.cpp"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/signal_graph_control.hpp",
+      "needles": [
+        "SignalGraphControlAuthority",
+        "DenseQueueOverflow"
+      ]
+    },
+    {
+      "path": "test/test_signal_graph_control_authority.cpp",
+      "needles": [
+        "DSPX-04 host authority lifecycle",
+        "DenseQueueOverflow"
+      ]
+    },
+    {
+      "path": "inspect/src/control_signal_graph_executor.cpp",
+      "needles": [
+        "dev.pulp.graph/modulation-route.edit@1",
+        "dense modulation command batch exceeds"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The host authority is an internal graph control seam; no new public SDK type is exported."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline timeline CLI verb is added; the generic control CLI consumes the canonical operation registry."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No offline timeline MCP tool is added; generated MCP projections consume the canonical operation registry."
+    },
+    "live_product_control": {
+      "disposition": "deferred",
+      "owner": "codex/dspx04-host-authority",
+      "dependencies": [
+        "live-host-resolver-integration"
+      ],
+      "rationale": "The typed graph operation and executor are registered; integration must install the resolver on a live host before promotion."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability manifest is changed by this runtime authority packet."
+    }
+  }
+}

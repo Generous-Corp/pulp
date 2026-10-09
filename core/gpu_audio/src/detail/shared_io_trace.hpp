@@ -162,6 +162,11 @@ struct SharedIoTraceConfig {
     std::uint64_t generation = 0;
     SharedIoExecutionContract contract;
     std::uint32_t success_stride = 64;
+    // Optional private-trial retention bound. When non-zero, the owning
+    // session drains the bounded producer queues on every service pass into a
+    // pre-reserved diagnostic vector so long campaigns cannot overflow the
+    // fixed SPSC queues. The callback never observes or mutates this storage.
+    std::uint32_t retention_capacity = 0;
     // Diagnostic full-lifecycle mode. Every admission is written to a separate
     // dispatcher->diagnostic SPSC queue so a lossless stride-1 capture can
     // prove missing/orphaned terminal identities mechanically.

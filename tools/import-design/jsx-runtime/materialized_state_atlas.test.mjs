@@ -1,13 +1,22 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { loadMaterializedStateAtlas } from './materialized_state_atlas.mjs';
 
+// Every fixture lives under one suite root that is removed when the suite
+// finishes, so a run leaves nothing behind in the shared temp directory.
+const suiteRoot = mkdtempSync(join(tmpdir(), 'pulp-materialized-suite-'));
+after(() => rmSync(suiteRoot, { recursive: true, force: true }));
+
+function scratch(prefix) {
+  return mkdtempSync(join(suiteRoot, prefix));
+}
+
 function fixture(atlas) {
-  const root = mkdtempSync(join(tmpdir(), 'pulp-materialized-atlas-'));
+  const root = scratch('pulp-materialized-atlas-');
   const image = join(root, 'settings.png');
   writeFileSync(image, 'png');
   const atlasPath = join(root, 'atlas.json');
@@ -61,6 +70,7 @@ test('loads captured state geometry independently from captured paint', () => {
     atlasPath, { visualAuthority: 'native' })[0];
   assert.equal(state.image, '');
   assert.deepEqual(state.metadata.layout_bindings, [{
+    id: 'pulp-layout-01bebc6698495063',
     anchor: '#root', path: [{ tag: 'div', index: 0 }],
     box: { left: 10, top: 20, width: 300, height: 200 },
   }]);
@@ -94,7 +104,7 @@ test('native visual authority validates behavior without embedding screenshots',
 });
 
 test('native authority retains semantic state metadata without paint planes', () => {
-  const temp = mkdtempSync(join(tmpdir(), 'pulp-native-state-metadata-'));
+  const temp = scratch('pulp-native-state-metadata-');
   writeFileSync(join(temp, 'state.json'), JSON.stringify({
     schema: 'pulp-materialized-browser-document-v1', version: 1,
     font_bindings: [],
@@ -128,7 +138,7 @@ test('rejects missing, escaped, and malformed captured state metadata', () => {
     id: 'settings', image: 'settings.png',
     materialized_document: 'escaped.json',
   }] });
-  const outsideRoot = mkdtempSync(join(tmpdir(), 'pulp-materialized-metadata-'));
+  const outsideRoot = scratch('pulp-materialized-metadata-');
   const outsideDocument = join(outsideRoot, 'outside.json');
   writeFileSync(outsideDocument, JSON.stringify({ schema: 'wrong', version: 1 }));
   symlinkSync(outsideDocument, join(escaped.atlasPath, '..', 'escaped.json'));
@@ -208,7 +218,7 @@ test('bounds state count, selectors, activation programs, and event data', () =>
 
 test('reference paint must be a regular file contained by the atlas directory', () => {
   const base = { schema: 'pulp-materialized-state-atlas-v1', version: 1 };
-  const outsideRoot = mkdtempSync(join(tmpdir(), 'pulp-materialized-outside-'));
+  const outsideRoot = scratch('pulp-materialized-outside-');
   const outsideImage = join(outsideRoot, 'outside.png');
   writeFileSync(outsideImage, 'png');
 
@@ -229,7 +239,7 @@ test('portable state paint cannot escape the packaged runtime directory', () => 
     schema: 'pulp-materialized-state-atlas-v1', version: 1,
     states: [{ id: 'settings', image: 'settings.png' }],
   });
-  const outsideRoot = mkdtempSync(join(tmpdir(), 'pulp-materialized-runtime-'));
+  const outsideRoot = scratch('pulp-materialized-runtime-');
   assert.throws(() => loadMaterializedStateAtlas(atlasPath, {
     runtimeBase: outsideRoot,
   }), /escapes the portable runtime directory/);

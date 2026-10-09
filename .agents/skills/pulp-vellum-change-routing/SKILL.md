@@ -5,8 +5,37 @@ description: Route repository-qualified changes across Pulp and Vellum using Pul
 
 # Route Pulp and Vellum changes
 
+## Design-import refactor event contract
+
+The design-import refactor keeps generic importer, compiler, bridge-contract,
+and SDK work in Pulp until Vellum is activated. Two independent event kinds
+remain in force: a **watch** event under
+`.github/vellum-expansion-watch-events/` for watched capability-family paths,
+and a **change** event under `.github/vellum-change-events/` for a transferred
+slice. A planned change event uses disposition `pulp-only` and its rationale
+starts with the exact prefix:
+
+`design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)`
+
+The watch event has `disposition: watch-only-no-authority` and
+`authority_effect: none`. Record every change event in
+`docs/contracts/vellum-inheritance-ledger.md`; do not use
+`emergency-exception` or `framework-backport` for this planned program.
+
 Run from the Pulp repository root. Treat the projection as authority; do not
 infer ownership from similar directory names or broad path prefixes.
+
+### Routing, watch receipts, and gates are separate evidence
+
+Run the ownership route before the validation gates and retain both outputs.
+`status: pass` on a Vellum expansion watch receipt proves that the affected
+capability family was covered by the watch event; with
+`authority_effect: none` it does **not** grant Vellum authority, acknowledge a
+handoff, or prove native/render parity. A route result of `single-owner` or
+`pulp-only` likewise authorizes routing only. Keep the normal Pulp gate receipt
+(including `tools/scripts/gates.sh origin/main` before push) separate from the
+watch/route receipt, and do not collapse either into a release or downstream
+cutover claim.
 
 ## Route changed paths
 

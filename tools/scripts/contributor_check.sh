@@ -198,7 +198,8 @@ elif [ ! -d build-tests ] && [ ! -d build ]; then
 else
     bdir=build-tests; [ -d "$bdir" ] || bdir=build
     echo "  building + running: ${TARGETS[*]} (in $bdir)"
-    if cmake --build "$bdir" -j"$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 4) / 2 ))" \
+    if PULP_BUILD_JOBS="$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 4) / 2 ))" \
+            bash "$ROOT/tools/ci/governed-build.sh" cmake --build "$bdir" \
             --target ${TARGETS[@]+"${TARGETS[@]}"} >/tmp/contrib-build.log 2>&1; then
         if ctest --test-dir "$bdir" --output-on-failure \
                  -R "$(printf '%s|' ${TARGETS[@]+"${TARGETS[@]}"} | sed 's/|$//')" \

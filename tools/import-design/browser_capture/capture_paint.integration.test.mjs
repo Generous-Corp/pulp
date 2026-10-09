@@ -184,6 +184,162 @@ test("real browser capture freezes a canvas animation and names its browser",
     }
   });
 
+// A full-panel canvas often sizes its backing store from a resize observer or
+// window resize handler. Chrome's beyond-viewport screenshot path can deliver
+// that resize even when the settled document exactly fills the active
+// viewport. The handler clears the backing store, and the capture has already
+// disabled rAF, so a second paint cannot repair the accepted frame.
+test("viewport capture preserves a canvas across resize-sensitive panels",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-canvas-resize-sensitive-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 320px; height: 240px; overflow: hidden; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+<canvas id="surface"></canvas>
+<script>
+  const canvas = document.getElementById("surface");
+  const resize = () => {
+    canvas.width = innerWidth * devicePixelRatio;
+    canvas.height = innerHeight * devicePixelRatio;
+  };
+  resize();
+  window.addEventListener("resize", resize);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "rgb(210, 40, 70)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+</script>
+`);
+      await runCapture(script, browser, input, root, output, 320, 240);
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const [red, green, blue, alpha] = rgbaPixel(screenshot, 100, 100);
+      assert.ok(red > 180 && green < 80 && blue < 110 && alpha > 240,
+        `resize-sensitive canvas was lost: rgba(${red}, ${green}, ${blue}, ${alpha})`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+// A genuine overflow frame still uses captureBeyondViewport, but a canvas with
+// stable backing dimensions is safe to include in it. Keep this positive case
+// beside the refusal control below so a future guard cannot simply reject every
+// overflow canvas and call that fidelity.
+test("overflow capture preserves a stable canvas and its full extent",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-canvas-overflow-stable-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 320px; height: 500px; overflow: hidden; }
+  canvas { display: block; width: 320px; height: 500px; }
+</style>
+<canvas id="surface" width="640" height="1000"></canvas>
+<script>
+  const canvas = document.getElementById("surface");
+  const context = canvas.getContext("2d");
+  context.fillStyle = "rgb(210, 40, 70)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+</script>
+`);
+      await runCapture(script, browser, input, root, output, 320, 240);
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const [red, green, blue, alpha] = rgbaPixel(screenshot, 100, 700);
+      assert.ok(red > 180 && green < 80 && blue < 110 && alpha > 240,
+        `stable overflow canvas was lost: rgba(${red}, ${green}, ${blue}, ${alpha})`);
+      const envelope = JSON.parse(
+        await readFile(path.join(output, "capture.json"), "utf8"));
+      assert.equal(envelope.reference.logical_width, 320);
+      assert.equal(envelope.reference.logical_height, 500);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+// This is the planted negative control for the overflow guard. Chrome's
+// beyond-viewport path dispatches resize, the handler clears the canvas, and a
+// successful exit would publish a blank frame unless the capture refuses it.
+test("overflow capture refuses a canvas changed by the resize path",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-canvas-overflow-resize-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 320px; height: 500px; overflow: hidden; }
+  canvas { display: block; width: 320px; height: 500px; }
+</style>
+<canvas id="surface"></canvas>
+<script>
+  const canvas = document.getElementById("surface");
+  const resize = () => {
+    canvas.width = innerWidth * devicePixelRatio;
+    canvas.height = innerHeight * devicePixelRatio;
+  };
+  resize();
+  window.addEventListener("resize", resize);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "rgb(210, 40, 70)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+</script>
+`);
+      await assert.rejects(execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "240",
+        "--dpr", "2",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
+      ], { maxBuffer: 1024 * 1024 }), (error) => {
+        assert.ok(error.stderr.includes("capture-canvas-overflow-resize"));
+        assert.ok(error.stderr.includes("refusing to publish incomplete canvas evidence"));
+        return true;
+      });
+      const diagnostic = JSON.parse(
+        await readFile(path.join(output, "capture-error.json"), "utf8"));
+      assert.equal(diagnostic.code, "capture-canvas-overflow-resize");
+      assert.equal(
+        diagnostic.message.includes("refusing to publish incomplete canvas evidence"),
+        true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 // The capture is what decides what can ever be drawn. Every assertion here is
 // a property whose absence renders as a plausible wrong picture: a tiled grid
 // collapsed to one hairline, a dashed left edge silently gone, a layered panel

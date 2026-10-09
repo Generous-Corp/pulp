@@ -54,6 +54,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from process_liveness import pid_alive
 
 MARKER_NAME = ".pulp-build-active"
 
@@ -62,7 +63,7 @@ def repo_root(start: Path) -> Path | None:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            cwd=start, capture_output=True, text=True, check=False,
+            cwd=start, capture_output=True, text=True, check=False, encoding="utf-8"
         )
     except OSError:
         return None
@@ -80,16 +81,7 @@ def parse_marker(text: str) -> dict[str, str]:
 
 
 def pid_is_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Owned by another user: it exists, which is what we asked.
-        return True
-    except OSError:
-        return False
-    return True
+    return pid_alive(pid) is True
 
 
 def reap_marker(marker: Path) -> str | None:
@@ -192,4 +184,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows pipes default to the ANSI code page, which cannot encode the
+    # non-ASCII marks this tool prints.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

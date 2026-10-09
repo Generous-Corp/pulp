@@ -1,7 +1,8 @@
 #include "detail/dawn_shared_io_provider.hpp"
 #include "detail/dawn_shared_io_wavenet_program.hpp"
-#include "detail/dawn_shared_io_wavenet_spec.hpp"
+#include "detail/dawn_wavenet_factory.hpp"
 #include "detail/shared_io_arena.hpp"
+#include "detail/shared_io_wavenet_spec.hpp"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -20,7 +21,7 @@ using namespace pulp::gpu_audio::detail;
 namespace {
 struct Fixture {
     std::array<std::uint32_t, 2> dilations{1, 2};
-    DawnSharedIoWavenetLayerSpec layer{
+    WavenetLayerSpec layer{
         .input_size = 1,
         .condition_size = 1,
         .channels = 2,
@@ -71,14 +72,14 @@ struct TinyReference {
 TEST_CASE("WaveNet shared spec accepts the authenticated flat-weight shape",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
-    const DawnSharedIoWavenetProgramSpec spec{
+    const WavenetProgramSpec spec{
         .block_size = 32,
         .head_scale = 1.0f,
         .stream_instances = 2,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
-    CHECK(validate_dawn_shared_io_wavenet_spec(spec).accepted());
+    CHECK(validate_wavenet_spec(spec).accepted());
 #if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
     auto program = DawnSharedIoWavenetProgram::create(spec);
     REQUIRE(program);
@@ -91,120 +92,152 @@ TEST_CASE("WaveNet shared spec rejects mismatched flat weights before allocation
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
     fixture.weights.pop_back();
-    const DawnSharedIoWavenetProgramSpec spec{
+    const WavenetProgramSpec spec{
         .block_size = 32,
         .head_scale = 1.0f,
         .stream_instances = 2,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
-    CHECK(validate_dawn_shared_io_wavenet_spec(spec).error ==
-          DawnSharedIoWavenetSpecError::WeightBlobMismatch);
+    CHECK(validate_wavenet_spec(spec).error == WavenetSpecError::WeightBlobMismatch);
 }
 
 TEST_CASE("WaveNet shared spec authenticates the serialized head scale",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
     fixture.weights.back() = 0.5f;
-    DawnSharedIoWavenetProgramSpec spec{
+    WavenetProgramSpec spec{
         .block_size = 32,
         .head_scale = 1.0f,
         .stream_instances = 1,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
-    CHECK(validate_dawn_shared_io_wavenet_spec(spec).error ==
-          DawnSharedIoWavenetSpecError::InvalidScale);
+    CHECK(validate_wavenet_spec(spec).error == WavenetSpecError::InvalidScale);
 
     spec.head_scale = std::numeric_limits<float>::quiet_NaN();
     fixture.weights.back() = spec.head_scale;
-    CHECK(validate_dawn_shared_io_wavenet_spec(spec).error ==
-          DawnSharedIoWavenetSpecError::InvalidScale);
+    CHECK(validate_wavenet_spec(spec).error == WavenetSpecError::InvalidScale);
 }
+
+#if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
+TEST_CASE("staged WaveNet factory exposes authenticated neutral capability receipt",
+          "[gpu_audio][shared_io][wavenet][portability]") {
+    Fixture fixture;
+    const WavenetProgramSpec spec{
+        .block_size = 32,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    REQUIRE(validate_wavenet_spec(spec).accepted());
+
+    auto created =
+        create_dawn_wavenet(spec, {.storage_kind = SharedIoArenaProvider::StorageKind::Staged});
+    INFO(created.provider_identity.provider_revision);
+    REQUIRE(created.provider);
+    CHECK(created.provider_identity.authenticated);
+    CHECK_FALSE(created.provider_capabilities.imported_host_pointer);
+    CHECK(created.provider_capabilities.completion_service);
+
+    auto pair = created.take_provider_pair();
+    REQUIRE(pair.provider);
+    REQUIRE(pair.program);
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(*pair.provider,
+                          {.slots = 2,
+                           .input_bytes_per_slot = spec.block_size * sizeof(float),
+                           .output_bytes_per_slot = spec.block_size * sizeof(float),
+                           .storage_kind = SharedIoArenaProvider::StorageKind::Staged},
+                          std::move(pair.program)));
+    CHECK(arena.release());
+}
+#endif
 
 TEST_CASE("WaveNet shared spec rejects non-mono conditioning and broken layer chains",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
     fixture.layer.condition_size = 2;
-    const DawnSharedIoWavenetProgramSpec condition_spec{
+    const WavenetProgramSpec condition_spec{
         .block_size = 32,
         .head_scale = 1.0f,
         .stream_instances = 2,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
-    auto result = validate_dawn_shared_io_wavenet_spec(condition_spec);
-    CHECK(result.error == DawnSharedIoWavenetSpecError::InvalidCondition);
+    auto result = validate_wavenet_spec(condition_spec);
+    CHECK(result.error == WavenetSpecError::InvalidCondition);
 
     fixture.layer.condition_size = 1;
     fixture.layer.input_size = 2;
-    const DawnSharedIoWavenetProgramSpec chain_spec{
+    const WavenetProgramSpec chain_spec{
         .block_size = 32,
         .head_scale = 1.0f,
         .stream_instances = 2,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
-    result = validate_dawn_shared_io_wavenet_spec(chain_spec);
-    CHECK(result.error == DawnSharedIoWavenetSpecError::InvalidChain);
+    result = validate_wavenet_spec(chain_spec);
+    CHECK(result.error == WavenetSpecError::InvalidChain);
 }
 
 TEST_CASE("WaveNet shared spec rejects zero stream instances and dilation",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
     fixture.dilations[0] = 0;
-    const DawnSharedIoWavenetProgramSpec dilation_spec{
+    const WavenetProgramSpec dilation_spec{
         .block_size = 32,
         .head_scale = 1.0f,
         .stream_instances = 2,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
-    auto result = validate_dawn_shared_io_wavenet_spec(dilation_spec);
-    CHECK(result.error == DawnSharedIoWavenetSpecError::InvalidDilation);
+    auto result = validate_wavenet_spec(dilation_spec);
+    CHECK(result.error == WavenetSpecError::InvalidDilation);
 
     fixture.dilations[0] = 1;
-    const DawnSharedIoWavenetProgramSpec instance_spec{
+    const WavenetProgramSpec instance_spec{
         .block_size = 32,
         .head_scale = 1.0f,
         .stream_instances = 0,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
-    result = validate_dawn_shared_io_wavenet_spec(instance_spec);
-    CHECK(result.error == DawnSharedIoWavenetSpecError::InvalidShape);
+    result = validate_wavenet_spec(instance_spec);
+    CHECK(result.error == WavenetSpecError::InvalidShape);
 }
 
 TEST_CASE("WaveNet shared spec rejects invalid flags and non-mono final heads",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
     const auto validate = [&] {
-        return validate_dawn_shared_io_wavenet_spec({
+        return validate_wavenet_spec({
             .block_size = 32,
             .head_scale = 1.0f,
             .stream_instances = 1,
-            .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+            .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
             .weights = fixture.weights,
         });
     };
 
     fixture.layer.gated = 2;
-    CHECK(validate().error == DawnSharedIoWavenetSpecError::InvalidLayer);
+    CHECK(validate().error == WavenetSpecError::InvalidLayer);
 
     fixture.layer.gated = 1;
     fixture.layer.head_bias = 2;
-    CHECK(validate().error == DawnSharedIoWavenetSpecError::InvalidLayer);
+    CHECK(validate().error == WavenetSpecError::InvalidLayer);
 
     fixture.layer.head_bias = 1;
     fixture.layer.head_size = 2;
-    CHECK(validate().error == DawnSharedIoWavenetSpecError::InvalidChain);
+    CHECK(validate().error == WavenetSpecError::InvalidChain);
 }
 
 TEST_CASE("WaveNet shared spec rejects history and resource-size overflow",
           "[gpu_audio][shared_io][wavenet]") {
     const std::array<float, 1> weights{0.0f};
     const std::uint32_t dilation = 2;
-    DawnSharedIoWavenetLayerSpec layer{
+    WavenetLayerSpec layer{
         .input_size = 1,
         .condition_size = 1,
         .channels = 1,
@@ -215,21 +248,21 @@ TEST_CASE("WaveNet shared spec rejects history and resource-size overflow",
         .dilations = std::span<const std::uint32_t>(&dilation, 1),
     };
     const auto validate = [&] {
-        return validate_dawn_shared_io_wavenet_spec({
+        return validate_wavenet_spec({
             .block_size = 32,
             .head_scale = 1.0f,
             .stream_instances = 1,
-            .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&layer, 1),
+            .arrays = std::span<const WavenetLayerSpec>(&layer, 1),
             .weights = weights,
         });
     };
 
-    CHECK(validate().error == DawnSharedIoWavenetSpecError::HistoryOverflow);
+    CHECK(validate().error == WavenetSpecError::HistoryOverflow);
 
     layer.kernel = 1;
     layer.channels = 2;
     layer.head_size = std::numeric_limits<std::uint32_t>::max();
-    CHECK(validate().error == DawnSharedIoWavenetSpecError::ResourceOverflow);
+    CHECK(validate().error == WavenetSpecError::ResourceOverflow);
 }
 
 #if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
@@ -246,11 +279,11 @@ TEST_CASE("authenticated Dawn WaveNet preserves causal history across rotating s
     // rechannel=1; conv reads 0.5 * the immediately previous sample and
     // ignores the current sample; the residual path is disabled; head=1.
     fixture.weights = {1.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f};
-    const DawnSharedIoWavenetProgramSpec spec{
+    const WavenetProgramSpec spec{
         .block_size = 2,
         .head_scale = 1.0f,
         .stream_instances = 1,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
     auto created = DawnSharedIoProvider::create({});
@@ -331,7 +364,7 @@ TEST_CASE("authenticated Dawn WaveNet matches a two-array multi-dilation CPU ora
           "[gpu_audio][shared_io][wavenet]") {
     const std::array<std::uint32_t, 2> first_dilations{1, 2};
     const std::array<std::uint32_t, 1> second_dilations{1};
-    const std::array<DawnSharedIoWavenetLayerSpec, 2> arrays{{
+    const std::array<WavenetLayerSpec, 2> arrays{{
         {.input_size = 1,
          .condition_size = 1,
          .channels = 1,
@@ -356,14 +389,14 @@ TEST_CASE("authenticated Dawn WaveNet matches a two-array multi-dilation CPU ora
         1.0f,  0.2f, 0.4f, 0.1f,  0.05f, 0.3f,  -0.02f, -0.1f, 0.25f, -0.03f, 0.04f,  0.2f,
         0.01f, 0.7f, 0.8f, 0.15f, 0.35f, 0.02f, -0.05f, 0.1f,  0.03f, 0.6f,   -0.04f, 0.5f,
     };
-    const DawnSharedIoWavenetProgramSpec spec{
+    const WavenetProgramSpec spec{
         .block_size = 3,
         .head_scale = 0.5f,
         .stream_instances = 1,
         .arrays = arrays,
         .weights = weights,
     };
-    REQUIRE(validate_dawn_shared_io_wavenet_spec(spec).accepted());
+    REQUIRE(validate_wavenet_spec(spec).accepted());
 
     auto created = DawnSharedIoProvider::create({});
     INFO(created.reason);
@@ -429,7 +462,7 @@ TEST_CASE("authenticated Dawn WaveNet matches a two-array multi-dilation CPU ora
 TEST_CASE("authenticated Dawn WaveNet executes channel matrices and cross-array head seeding",
           "[gpu_audio][shared_io][wavenet]") {
     const std::uint32_t dilation = 1;
-    const std::array<DawnSharedIoWavenetLayerSpec, 2> arrays{{
+    const std::array<WavenetLayerSpec, 2> arrays{{
         {.input_size = 1,
          .condition_size = 1,
          .channels = 2,
@@ -492,14 +525,14 @@ TEST_CASE("authenticated Dawn WaveNet executes channel matrices and cross-array 
         -0.5f,
         2.0f,
     };
-    const DawnSharedIoWavenetProgramSpec spec{
+    const WavenetProgramSpec spec{
         .block_size = 3,
         .head_scale = 2.0f,
         .stream_instances = 1,
         .arrays = arrays,
         .weights = weights,
     };
-    REQUIRE(validate_dawn_shared_io_wavenet_spec(spec).accepted());
+    REQUIRE(validate_wavenet_spec(spec).accepted());
 
     auto created = DawnSharedIoProvider::create({});
     INFO(created.reason);
@@ -556,11 +589,11 @@ TEST_CASE("authenticated Dawn WaveNet resets history at a new preparation epoch"
     fixture.layer.head_bias = 0;
     fixture.layer.dilations = std::span<const std::uint32_t>(fixture.dilations.data(), 1);
     fixture.weights = {1.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f};
-    const DawnSharedIoWavenetProgramSpec spec{
+    const WavenetProgramSpec spec{
         .block_size = 2,
         .head_scale = 1.0f,
         .stream_instances = 1,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
     auto created = DawnSharedIoProvider::create({});
@@ -615,11 +648,11 @@ TEST_CASE("authenticated Dawn WaveNet rejects sequence overflow after UINT64_MAX
     fixture.layer.head_bias = 0;
     fixture.layer.dilations = std::span<const std::uint32_t>(fixture.dilations.data(), 1);
     fixture.weights = {1.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f};
-    const DawnSharedIoWavenetProgramSpec spec{
+    const WavenetProgramSpec spec{
         .block_size = 2,
         .head_scale = 1.0f,
         .stream_instances = 1,
-        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
         .weights = fixture.weights,
     };
     auto created = DawnSharedIoProvider::create({});

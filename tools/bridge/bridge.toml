@@ -1,0 +1,31 @@
+version = 1
+name = "editor"
+
+# This is the intentionally small seed contract used by the generated
+# example. Plugin contracts can add commands and publications without
+# changing EditorBridge's envelope or error handling.
+
+[[commands]]
+name = "set_parameter"
+request = [
+  { name = "key", type = "string" },
+  { name = "value", type = "number" },
+]
+response = [
+  { name = "accepted", type = "boolean" },
+]
+
+[[commands]]
+name = "begin_gesture"
+request = [{ name = "key", type = "string" }]
+
+[[commands]]
+name = "end_gesture"
+request = [{ name = "key", type = "string" }]
+
+[[publications]]
+name = "parameter_changed"
+fields = [
+  { name = "key", type = "string" },
+  { name = "value", type = "number" },
+]

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dawn_shared_io_wavenet_spec.hpp"
+#include "shared_io_wavenet_spec.hpp"
 #include "shared_io_arena.hpp"
 
 #include <cstddef>
@@ -18,10 +18,9 @@ class DawnSharedIoProvider;
 // shape and delegates preparation/submission to that provider.
 class DawnSharedIoWavenetProgram final : public SharedIoPreparedProgram {
   public:
-    static std::unique_ptr<DawnSharedIoWavenetProgram>
-    create(DawnSharedIoProvider& provider, const DawnSharedIoWavenetProgramSpec& spec);
-    static std::unique_ptr<DawnSharedIoWavenetProgram>
-    create(const DawnSharedIoWavenetProgramSpec& spec);
+    static std::unique_ptr<DawnSharedIoWavenetProgram> create(DawnSharedIoProvider& provider,
+                                                              const WavenetProgramSpec& spec);
+    static std::unique_ptr<DawnSharedIoWavenetProgram> create(const WavenetProgramSpec& spec);
 
     ~DawnSharedIoWavenetProgram() override = default;
     DawnSharedIoWavenetProgram(const DawnSharedIoWavenetProgram&) = delete;
@@ -44,15 +43,14 @@ class DawnSharedIoWavenetProgram final : public SharedIoPreparedProgram {
     }
 
   private:
-    DawnSharedIoWavenetProgram(DawnSharedIoProvider* provider,
-                               const DawnSharedIoWavenetProgramSpec& spec);
+    DawnSharedIoWavenetProgram(DawnSharedIoProvider* provider, const WavenetProgramSpec& spec);
 
     DawnSharedIoProvider* provider_ = nullptr;
     std::uint32_t block_size_ = 0;
     std::uint32_t stream_instances_ = 0;
     std::vector<float> weights_;
     std::vector<std::byte> history_;
-    std::vector<DawnSharedIoWavenetLayerSpec> arrays_;
+    std::vector<WavenetLayerSpec> arrays_;
     std::vector<std::vector<std::uint32_t>> dilations_;
     float head_scale_ = 1.0f;
     bool prepared_ = false;

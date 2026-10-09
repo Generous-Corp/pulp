@@ -12,6 +12,10 @@ import os
 from pathlib import Path
 import signal
 import time
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from process_liveness import pid_alive as _pid_alive  # noqa: E402
 
 
 def _component_focus_summary(
@@ -127,13 +131,7 @@ def _should_capture_generated_reaper_secondary_window(video_context: dict | None
 
 
 def _pid_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return _pid_alive(pid) is not False
 
 
 def _terminate_pid(pid: int, *, sleep_fn: Callable[[float], None]) -> None:

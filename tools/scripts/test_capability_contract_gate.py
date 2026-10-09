@@ -48,8 +48,8 @@ def _predicate(text: str) -> str:
 
 class CapabilityContractGateWiring(unittest.TestCase):
     def setUp(self) -> None:
-        self.gates = GATES.read_text()
-        self.hook = HOOK.read_text()
+        self.gates = GATES.read_text(encoding="utf-8")
+        self.hook = HOOK.read_text(encoding="utf-8")
 
     def test_both_push_surfaces_run_the_check(self) -> None:
         for name, text in (("gates.sh", self.gates), ("pre-push", self.hook)):

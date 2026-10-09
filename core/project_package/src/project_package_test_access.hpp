@@ -36,6 +36,12 @@ class ProjectPackageTestAccess {
 };
 
 void invoke_fault_hook(PackageFaultPoint point) noexcept;
+#if defined(_WIN32)
+/// Whether a private-staging parent owned by `owner` (a PSID) is acceptable to
+/// the caller whose token user is `token_user`: the caller itself, SYSTEM, or
+/// BUILTIN\Administrators.
+bool staging_parent_owner_trusted(void* owner, void* token_user) noexcept;
+#endif
 #if defined(PULP_PROJECT_PACKAGE_ENABLE_TEST_MUTATIONS)
 bool skip_reference_validation_for_test() noexcept;
 #endif

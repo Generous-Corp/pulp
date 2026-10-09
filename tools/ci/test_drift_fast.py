@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import pathlib
 import sys
 import tempfile
@@ -155,13 +156,23 @@ class ContractTests(unittest.TestCase):
         self.assertIn("filters its trigger with paths:", out)
 
     def test_workflow_with_conditional_job_fails(self):
+        runs_on = "    runs-on: ${{ fromJSON(vars.PULP_DRIFT_FAST_RUNS_ON_JSON || '\"ubuntu-latest\"') }}\n"
         text = drift_fast.WORKFLOW.read_text(encoding="utf-8").replace(
-            "    runs-on: ubuntu-latest\n",
-            "    if: github.event_name == 'merge_group'\n    runs-on: ubuntu-latest\n",
+            runs_on, "    if: github.event_name == 'merge_group'\n" + runs_on
         )
         rc, out = self.check(text)
         self.assertEqual(rc, 1)
         self.assertIn("job-level if:", out)
+
+    def test_runner_is_hosted_unless_the_routing_variable_is_set(self):
+        # With PULP_DRIFT_FAST_RUNS_ON_JSON unset the expression's fallback is
+        # what GitHub parses; it must be the hosted label, as JSON.
+        text = drift_fast.WORKFLOW.read_text(encoding="utf-8")
+        match = re.search(
+            r"runs-on: \$\{\{ fromJSON\(vars\.PULP_DRIFT_FAST_RUNS_ON_JSON \|\| '([^']*)'\) \}\}", text)
+        self.assertIsNotNone(match, "drift-fast must route through PULP_DRIFT_FAST_RUNS_ON_JSON")
+        self.assertEqual(json.loads(match.group(1)), "ubuntu-latest")
+        self.assertEqual(text.count("runs-on:"), 1)
 
     def test_workflow_not_calling_run_fails(self):
         text = drift_fast.WORKFLOW.read_text(encoding="utf-8").replace(

@@ -65,6 +65,37 @@ PluginInfo make_plugin_info(std::string name,
     info.category = std::move(category);
     return info;
 }
+
+// A design importer can retain this small, value-only capability while it
+// prepares a control-side topology update. It deliberately carries no
+// GraphNode pointer: the receipt proves that the graph authoring state has not
+// changed, while NodeId is resolved again inside the transaction. This keeps
+// the experiment scoped to the existing SignalGraph API instead of adding a
+// frontend graph abstraction.
+struct ImportedNodeCapability {
+    GraphAuthoringReceipt receipt;
+    NodeId node = 0;
+};
+
+bool apply_imported_gain_batch(SignalGraph& graph,
+                               const std::vector<ImportedNodeCapability>& capabilities,
+                               float gain) {
+    for (const auto& capability : capabilities) {
+        if (graph.validate_authoring_receipt(capability.receipt) !=
+                GraphAuthoringReceiptStatus::Current ||
+            graph.node(capability.node) == nullptr)
+            return false;
+    }
+
+    auto edit = graph.begin_prepared_topology_edit();
+    for (const auto& capability : capabilities) {
+        if (!edit->set_node_gain(capability.node, gain))
+            return false;
+    }
+    if (edit->prepare(48000.0, 32) != SignalGraph::PreparedTopologyEdit::Result::Prepared)
+        return false;
+    return edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed;
+}
 } // namespace
 
 // ── SignalGraph tests ───────────────────────────────────────────────────
@@ -83,6 +114,75 @@ TEST_CASE("SignalGraph add and remove nodes", "[host][graph]") {
     REQUIRE(graph.remove_node(input));
     REQUIRE(graph.nodes().size() == 1);
     REQUIRE(graph.node(input) == nullptr);
+}
+
+TEST_CASE("SignalGraph authoring receipts reject stale and cross-graph edits",
+          "[host][graph][lineage]") {
+    SignalGraph graph;
+    const auto initial = graph.authoring_receipt();
+    REQUIRE(initial.valid());
+    REQUIRE(graph.validate_authoring_receipt(initial) == GraphAuthoringReceiptStatus::Current);
+
+    // A mutation advances the receipt even before a new audio snapshot is
+    // prepared.  A caller holding the old receipt must not mistake the compact
+    // NodeId space for a stable authoring identity.
+    const auto node = graph.add_gain_node("Imported gain");
+    REQUIRE(node != 0);
+    REQUIRE(graph.validate_authoring_receipt(initial) == GraphAuthoringReceiptStatus::Stale);
+    const auto after_add = graph.authoring_receipt();
+    REQUIRE(after_add.graph_identity == initial.graph_identity);
+    REQUIRE(after_add.generation != initial.generation);
+    REQUIRE(graph.validate_authoring_receipt(after_add) == GraphAuthoringReceiptStatus::Current);
+
+    SignalGraph other_graph;
+    REQUIRE(other_graph.validate_authoring_receipt(initial) ==
+            GraphAuthoringReceiptStatus::WrongGraph);
+
+    // clear() intentionally recycles NodeIds for compact runtime arrays.  The
+    // graph identity + generation pair still makes a pre-clear receipt stale.
+    graph.clear();
+    const auto recycled = graph.add_gain_node("Recycled gain");
+    REQUIRE(recycled == node);
+    REQUIRE(graph.validate_authoring_receipt(after_add) == GraphAuthoringReceiptStatus::Stale);
+}
+
+TEST_CASE("imported node capabilities batch through one receipt-checked transaction",
+          "[host][graph][lineage][design-import]") {
+    SignalGraph graph;
+    const auto first = graph.add_gain_node("Imported first");
+    const auto second = graph.add_gain_node("Imported second");
+    const auto receipt = graph.authoring_receipt();
+    const std::vector<ImportedNodeCapability> capabilities{{receipt, first}, {receipt, second}};
+
+    REQUIRE(apply_imported_gain_batch(graph, capabilities, 0.25f));
+    CHECK(graph.node_gain(first) == 0.25f);
+    CHECK(graph.node_gain(second) == 0.25f);
+
+    // Another control-side writer makes the first capability stale while the
+    // second one is refreshed. The negative control proves that validation
+    // happens before staging, so a mixed batch cannot partially update one
+    // node.
+    REQUIRE(graph.set_node_gain(first, 0.5f));
+    const auto current_after_first = graph.authoring_receipt();
+    const std::vector<ImportedNodeCapability> mixed_capabilities{{receipt, first},
+                                                                 {current_after_first, second}};
+    CHECK_FALSE(apply_imported_gain_batch(graph, mixed_capabilities, 0.75f));
+    CHECK(graph.node_gain(first) == 0.5f);
+    CHECK(graph.node_gain(second) == 0.25f);
+
+    // Recycled compact NodeIds remain unusable with an old receipt, even when
+    // the importer sees the same numeric node id after clear().
+    graph.clear();
+    const auto recycled = graph.add_gain_node("Recycled imported node");
+    REQUIRE(recycled == first);
+    const ImportedNodeCapability stale_recycled{receipt, recycled};
+    CHECK_FALSE(apply_imported_gain_batch(graph, {stale_recycled}, 0.9f));
+    CHECK(graph.node_gain(recycled) == 1.0f);
+
+    SignalGraph other;
+    const auto foreign = other.add_gain_node("Foreign graph node");
+    CHECK_FALSE(apply_imported_gain_batch(other, {{receipt, foreign}}, 0.9f));
+    CHECK(other.node_gain(foreign) == 1.0f);
 }
 
 TEST_CASE("SignalGraph registers and processes custom nodes",
@@ -524,6 +624,25 @@ TEST_CASE("SignalGraph topological sort", "[host][graph]") {
     auto pos_c = std::find(order.begin(), order.end(), c) - order.begin();
     REQUIRE(pos_a < pos_b);
     REQUIRE(pos_b < pos_c);
+}
+
+TEST_CASE("SignalGraph topological sort uses authored order for ready nodes",
+          "[host][graph][determinism]") {
+    SignalGraph graph;
+    const auto first = graph.add_gain_node("first");
+    const auto second = graph.add_gain_node("second");
+    const auto third = graph.add_gain_node("third");
+
+    // Independent nodes are observable through event and MIDI side effects,
+    // so their order follows the authored node vector rather than hash-table
+    // iteration or an incidental identity ordering.
+    REQUIRE(graph.processing_order() == std::vector<NodeId>{first, second, third});
+
+    // Removing a node compacts the authored vector while IDs remain stable.
+    // The remaining and newly authored nodes must still use vector order.
+    REQUIRE(graph.remove_node(first));
+    const auto fourth = graph.add_gain_node("fourth");
+    REQUIRE(graph.processing_order() == std::vector<NodeId>{second, third, fourth});
 }
 
 TEST_CASE("SignalGraph clear", "[host][graph]") {

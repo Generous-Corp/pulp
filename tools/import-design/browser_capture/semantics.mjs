@@ -1003,11 +1003,16 @@ function snapshotElementNodes(snapshot) {
   return result;
 }
 
-function elementBackendIds(snapshot) {
+function snapshotAttributeValue(snapshot, nodeIndex, wanted) {
   const nodes = snapshot.documents?.[0]?.nodes;
-  if (!nodes) return [];
-  return snapshotElementNodes(snapshot).map(
-    (index) => nodes.backendNodeId?.[index] ?? null);
+  const strings = snapshot.strings ?? [];
+  const attributes = nodes?.attributes?.[nodeIndex] ?? [];
+  for (let index = 0; index + 1 < attributes.length; index += 2) {
+    const name = String(strings[attributes[index]] ?? '').toLowerCase();
+    if (name === wanted.toLowerCase())
+      return String(strings[attributes[index + 1]] ?? '');
+  }
+  return '';
 }
 
 // Lowercased element names in the same order, so a candidate can be checked
@@ -1093,7 +1098,9 @@ export async function evaluateSemantics(cdp, snapshot, viewport) {
     returnByValue: true,
   });
   const candidates = result.result?.value ?? [];
-  const backendIds = elementBackendIds(snapshot);
+  const elementNodes = snapshotElementNodes(snapshot);
+  const backendIds = elementNodes.map((index) =>
+    snapshot.documents?.[0]?.nodes?.backendNodeId?.[index] ?? null);
   const paintOrders = elementPaintOrders(snapshot);
   const tagNames = elementTagNames(snapshot);
   for (const candidate of candidates) {
@@ -1112,6 +1119,10 @@ export async function evaluateSemantics(cdp, snapshot, viewport) {
       throw error;
     }
     candidate.backend_node_id = backendIds[candidate.dom_index] ?? null;
+    const pulpId = snapshotAttributeValue(
+      snapshot, elementNodes[candidate.dom_index],
+      'data-pulp-id');
+    if (pulpId) candidate.pulp_id = pulpId;
     // Explicitly null rather than absent when the element has no layout entry,
     // so a consumer can distinguish "not painted" from "order not collected".
     candidate.paint_order = paintOrders[candidate.dom_index] ?? null;

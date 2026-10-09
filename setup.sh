@@ -419,6 +419,164 @@ wgpu_runtime_url_name() {
     fi
 }
 
+# ── Shared source cache: locks and completion markers ───────────────────────
+#
+# A priming step holds `.<dir>.lock` (an mkdir lock) while it populates a cache
+# directory. The lock records its owner so a lock left by a killed run is
+# reclaimed instead of waited on forever, and a finished cache gets
+# `.<dir>.complete` written LAST, so a directory that a killed run left empty or
+# half-written never reads as ready.
+
+# Only for a lock whose owner's liveness cannot be checked from this host (an
+# owner on another machine, an unreadable pid, or no owner record): past this
+# bound it is treated as abandoned. A live owner on this host is never reclaimed.
+SOURCE_CACHE_LOCK_STALE_SECONDS="${PULP_SOURCE_CACHE_LOCK_STALE_SECONDS:-7200}"
+
+source_cache_host() {
+    hostname 2>/dev/null || uname -n 2>/dev/null || echo unknown
+}
+
+source_cache_pid_alive() {
+    ps -p "$1" >/dev/null 2>&1
+}
+
+source_cache_owner_field() {
+    printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1
+}
+
+# reclaim_stale_source_cache_lock <lockdir> <label>
+# Returns 0 after removing a lock whose owner is gone or which is past the
+# staleness bound; 1 when the lock is live, already gone, or someone else is
+# reclaiming it. Only the exact lock judged stale is removed: the owner record
+# is re-read under a short reclaim mutex and must be unchanged.
+reclaim_stale_source_cache_lock() {
+    local lockdir="$1" label="$2" mutex="$1.reclaim"
+    local owner pid host started now reason="" stale_minutes
+    [ -d "$lockdir" ] || return 1
+    owner="$(cat "$lockdir/owner" 2>/dev/null || true)"
+    now="$(date +%s)"
+    stale_minutes=$(( (SOURCE_CACHE_LOCK_STALE_SECONDS + 59) / 60 ))
+    if [ -n "$owner" ]; then
+        pid="$(source_cache_owner_field "$owner" pid)"
+        host="$(source_cache_owner_field "$owner" host)"
+        started="$(source_cache_owner_field "$owner" started)"
+        if [ "$host" = "$(source_cache_host)" ] && [[ "$pid" =~ ^[0-9]+$ ]]; then
+            # Liveness is knowable here, so it alone decides: a slow priming run
+            # on a loaded host keeps its lock however long it takes.
+            source_cache_pid_alive "$pid" \
+                || reason="its owner (pid $pid) is no longer running"
+        elif [[ "$started" =~ ^[0-9]+$ ]] \
+            && [ $((now - started)) -ge "$SOURCE_CACHE_LOCK_STALE_SECONDS" ]; then
+            # Another host, or an unreadable pid: age is the only evidence.
+            reason="it has been held for $((now - started))s, past the ${SOURCE_CACHE_LOCK_STALE_SECONDS}s bound, by an owner whose liveness cannot be checked here"
+        fi
+    elif [ -n "$(find "$lockdir" -maxdepth 0 -mmin "+$stale_minutes" 2>/dev/null)" ]; then
+        # The owner record is written just after mkdir, so a lock without one is
+        # either being created right now or was left by a setup.sh that wrote no
+        # owner. Only its age can tell those apart.
+        reason="it has no owner record and is older than ${SOURCE_CACHE_LOCK_STALE_SECONDS}s"
+    fi
+    [ -n "$reason" ] || return 1
+
+    if ! mkdir "$mutex" 2>/dev/null; then
+        # A reclaim takes milliseconds; a mutex older than a minute is itself left over.
+        if [ -n "$(find "$mutex" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+            rm -rf "$mutex"
+        fi
+        return 1
+    fi
+    if [ -d "$lockdir" ] && [ "$(cat "$lockdir/owner" 2>/dev/null || true)" = "$owner" ]; then
+        warn "Reclaiming the shared $label source cache lock because $reason: $lockdir"
+        rm -rf "$lockdir"
+        rm -rf "$mutex"
+        return 0
+    fi
+    rm -rf "$mutex"
+    return 1
+}
+
+# describe_source_cache_lock_owner <lockdir>: one line naming who holds it.
+# A live same-host owner is never reclaimed, so if its pid was reused by an
+# unrelated long-lived process after the real owner died, the wait has no end.
+# Naming the pid, its age and the command now running under it is what lets an
+# operator see that case.
+describe_source_cache_lock_owner() {
+    local owner pid host started command age="?"
+    owner="$(cat "$1/owner" 2>/dev/null || true)"
+    [ -n "$owner" ] || { printf 'no owner record'; return; }
+    pid="$(source_cache_owner_field "$owner" pid)"
+    host="$(source_cache_owner_field "$owner" host)"
+    started="$(source_cache_owner_field "$owner" started)"
+    [[ "$started" =~ ^[0-9]+$ ]] && age="$(( $(date +%s) - started ))s"
+    printf 'pid %s on %s, held %s' "${pid:-?}" "${host:-?}" "$age"
+    if [ "$host" = "$(source_cache_host)" ] && [[ "$pid" =~ ^[0-9]+$ ]]; then
+        command="$(ps -p "$pid" -o comm= 2>/dev/null | head -1)"
+        [ -z "$command" ] || printf ', running %s' "$command"
+    fi
+}
+
+# acquire_source_cache_lock <lockdir> <label>: blocks until this shell owns it.
+acquire_source_cache_lock() {
+    local lockdir="$1" label="$2" waited=0
+    while ! mkdir "$lockdir" 2>/dev/null; do
+        if reclaim_stale_source_cache_lock "$lockdir" "$label"; then
+            continue
+        fi
+        # Say who holds it at once, then again every five minutes of waiting.
+        if [ $((waited % 300)) -eq 0 ]; then
+            info "Waiting for shared $label source cache lock ($(describe_source_cache_lock_owner "$lockdir")): $lockdir"
+        fi
+        waited=$((waited + 1))
+        sleep 1
+    done
+    # The owner is this shell. In a ( ... ) subshell $$ still names the parent
+    # and bash 3.2 (macOS /bin/bash) has no $BASHPID, so a child started
+    # directly by this shell (not inside $( ), which would add a short-lived
+    # intermediate process) reports it as its parent.
+    {
+        printf 'pid='
+        sh -c 'echo $PPID'
+        printf 'host=%s\nstarted=%s\n' "$(source_cache_host)" "$(date +%s)"
+    } > "$lockdir/owner"
+}
+
+release_source_cache_lock() {
+    rm -rf "$1" >/dev/null 2>&1 || true
+}
+
+source_cache_marker() {
+    printf '%s/.%s.complete\n' "$FETCHCONTENT_CACHE_ROOT" "$1"
+}
+
+# Written as the last step of a successful priming, never before.
+mark_source_cache_complete() {
+    printf 'ref=%s\ncompleted=%s\n' "$2" "$(date +%s)" > "$(source_cache_marker "$1").tmp" \
+        && mv -f "$(source_cache_marker "$1").tmp" "$(source_cache_marker "$1")"
+}
+
+# Move an untrusted cache directory out of the way so the caller re-fetches it.
+# Renaming first means a failed delete can never leave it looking ready.
+discard_incomplete_source_cache() {
+    local target="$1" label="$2" aside
+    aside="${target}.incomplete.${RANDOM}${RANDOM}"
+    warn "Shared $label source cache at $target is incomplete; re-fetching it"
+    mv "$target" "$aside" || { fail "cannot move incomplete $label cache aside: $target"; return 1; }
+    rm -rf "$aside" || warn "could not delete $aside; remove it by hand"
+}
+
+# A git cache is complete when HEAD resolves, the index equals HEAD's tree, and
+# every tracked file exists. A clone killed before its first checkout has an
+# empty index, so the worktree check alone (which reads the index) would pass it
+# with no files on disk. Local modifications do not fail it: an older live
+# worktree may legitimately have edited a legacy shared cache.
+git_source_cache_is_complete() {
+    local dir="$1"
+    [ -d "$dir/.git" ] || return 1
+    git -C "$dir" rev-parse -q --verify HEAD^{commit} >/dev/null 2>&1 || return 1
+    git -C "$dir" diff-index --cached --quiet HEAD -- 2>/dev/null || return 1
+    git_worktree_is_complete "$dir"
+}
+
 ensure_shared_archive_source() {
     local label="$1"
     local url="$2"
@@ -431,24 +589,23 @@ ensure_shared_archive_source() {
 
     (
         set -e
-        waited=false
-        while ! mkdir "$lockdir" 2>/dev/null; do
-            if [ "$waited" = false ]; then
-                info "Waiting for shared $label source cache lock..."
-                waited=true
-            fi
-            sleep 1
-        done
-        trap 'rmdir "$lockdir" >/dev/null 2>&1 || true' EXIT
+        acquire_source_cache_lock "$lockdir" "$label"
+        trap 'release_source_cache_lock "$lockdir"' EXIT
 
-        if [ -d "$target" ]; then
+        if [ -d "$target" ] && [ -e "$(source_cache_marker "$dir_name")" ]; then
             return 0
+        fi
+        if [ -e "$target" ]; then
+            discard_incomplete_source_cache "$target" "$label"
         fi
 
         if [ -d "$seed_dir" ]; then
             info "Seeding shared $label source cache from local directory: $seed_dir"
             if ! dry "cp -R $seed_dir $target"; then
-                cp -R "$seed_dir" "$target"
+                rm -rf "$target.partial"
+                cp -R "$seed_dir" "$target.partial" || exit 1
+                mv "$target.partial" "$target" || exit 1
+                mark_source_cache_complete "$dir_name" "$url"
             fi
             return 0
         fi
@@ -460,15 +617,23 @@ ensure_shared_archive_source() {
 
         local tmpdir
         tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/pulp-${dir_name}.XXXXXX")"
-        trap 'rm -rf "$tmpdir" >/dev/null 2>&1 || true; rmdir "$lockdir" >/dev/null 2>&1 || true' EXIT
+        trap 'rm -rf "$tmpdir" >/dev/null 2>&1 || true; release_source_cache_lock "$lockdir"' EXIT
         # Release-asset hosts return transient 5xx and drop connections; one
         # such blip used to fail the whole bootstrap. --retry-all-errors also
         # retries HTTP errors that --fail turns into a non-zero exit, and each
         # attempt rewrites the same output file from the start.
+        # Every step checks its own status. This subshell's `set -e` is inert
+        # whenever a caller tests the result (`ensure_... || rc=$?`), and a
+        # failed download must never be followed by a completion marker.
         curl -L --fail --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 \
-            "$url" -o "$tmpdir/archive.zip"
-        mkdir -p "$target"
-        unzip -q "$tmpdir/archive.zip" -d "$target"
+            "$url" -o "$tmpdir/archive.zip" || exit 1
+        # Extract beside the target and rename it into place, so a killed
+        # extraction leaves only a .partial directory, never a half-filled cache.
+        rm -rf "$target.partial"
+        mkdir -p "$target.partial" || exit 1
+        unzip -q "$tmpdir/archive.zip" -d "$target.partial" || exit 1
+        mv "$target.partial" "$target" || exit 1
+        mark_source_cache_complete "$dir_name" "$url" || exit 1
         rm -rf "$tmpdir"
     )
 }
@@ -590,9 +755,9 @@ ensure_shared_git_source_with_retry() {
                     rm -rf "$target"
                 fi
             fi
-            # Best-effort lock release in case the inner subshell exited
-            # before its EXIT trap fired (e.g. SIGKILL / 127).
-            rmdir "$lockdir" >/dev/null 2>&1 || true
+            # The inner subshell may have died before its EXIT trap ran (SIGKILL,
+            # 127); its lock names a pid that is gone, so reclaim exactly that.
+            reclaim_stale_source_cache_lock "$lockdir" "$label" || true
             sleep "$sleep_s"
             sleep_s=$((sleep_s * 2))
         else
@@ -718,15 +883,18 @@ ensure_shared_git_source() {
 
     (
         set -e
-        waited=false
-        while ! mkdir "$lockdir" 2>/dev/null; do
-            if [ "$waited" = false ]; then
-                info "Waiting for shared $label source cache lock..."
-                waited=true
-            fi
-            sleep 1
-        done
-        trap 'rmdir "$lockdir" >/dev/null 2>&1 || true' EXIT
+        acquire_source_cache_lock "$lockdir" "$label"
+        trap 'release_source_cache_lock "$lockdir"' EXIT
+
+        # Without a completion marker a cache is trusted only if it verifies:
+        # a run killed mid-clone leaves .git with an empty index and no files.
+        # A legacy cache from before markers existed that verifies is adopted
+        # rather than re-downloaded; one that does not is re-fetched.
+        if [ -e "$target" ] && [ ! -e "$(source_cache_marker "$dir_name")" ] \
+            && ! git_source_cache_is_complete "$target"; then
+            discard_incomplete_source_cache "$target" "$label"
+        fi
+        rm -f "$(source_cache_marker "$dir_name")"
 
         if [ -d "$target/.git" ]; then
             current_remote="$(git -C "$target" remote get-url origin 2>/dev/null || true)"
@@ -824,6 +992,14 @@ ensure_shared_git_source() {
             dry "git -c protocol.file.allow=always -C $target submodule update --init --recursive" || \
                 retry_git "$label submodule update" \
                     git -c protocol.file.allow=always -C "$target" submodule update --init --recursive
+        fi
+
+        if ! $DRY_RUN; then
+            git_source_cache_is_complete "$target" || {
+                fail "$label source cache at $target is incomplete after priming $ref"
+                exit 1
+            }
+            mark_source_cache_complete "$dir_name" "$ref"
         fi
     )
 }

@@ -47,8 +47,8 @@ fn expected_installed_banner() -> String {
             "  doctor         Diagnose environment issues\n  gpu            Run deterministic GPU evidence probes\n",
         )
         .replace(
-            "  import         Detect a framework project and emit a Pulp migration scaffold\n",
-            "  import         Detect a framework project and emit a Pulp migration scaffold\n  identity       Manage the .pulp/identity.lock contract\n",
+            "  ui             Build or verify an imported UI source snapshot\n",
+            "  ui             Build or verify an imported UI source snapshot\n  identity       Manage the .pulp/identity.lock contract\n",
         )
 }
 

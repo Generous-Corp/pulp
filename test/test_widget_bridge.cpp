@@ -1,5 +1,154 @@
 #include "widget_bridge_test_support.hpp"
 
+TEST_CASE("WidgetBridge counts native calls used by imported UI mount and steps",
+          "[view][bridge][wp0]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.reset_bridge_call_count();
+    bridge.load_script("createLabel('imported-label', 10, 10, 100, 20);");
+    const auto mount_calls = bridge.bridge_call_count();
+    REQUIRE(mount_calls > 0);
+
+    bridge.reset_bridge_call_count();
+    bridge.load_script("setText('imported-label', 'step');");
+    REQUIRE(bridge.bridge_call_count() > 0);
+}
+
+TEST_CASE("WidgetBridge counter ignores pure JavaScript work",
+          "[view][bridge][wp0][negative-control]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.reset_bridge_call_count();
+    engine.evaluate("globalThis.__wp0PureJs = (21 + 21);");
+    REQUIRE(bridge.bridge_call_count() == 0);
+}
+
+TEST_CASE("WidgetBridge counter covers host-object methods and deferred promise calls",
+          "[view][bridge][wp0][secondary-registrars]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // navigatorGPU.getPreferredCanvasFormat is a HostObjectMethod. It must be
+    // counted even though the host-object adapter installs an internal global
+    // function behind the scenes.
+    bridge.reset_bridge_call_count();
+    auto format = engine.evaluate("navigatorGPU.getPreferredCanvasFormat()");
+    REQUIRE(format.getWithDefault<std::string>("") != "");
+    REQUIRE(bridge.bridge_call_count() == 1);
+
+    // __requestAdapterImpl is registered through the promise path. The native
+    // body runs on the microtask pump, so measuring immediately after evaluate
+    // proves the counter is attached to invocation rather than registration.
+    bridge.reset_bridge_call_count();
+    engine.evaluate("__requestAdapterImpl()");
+    REQUIRE(bridge.bridge_call_count() == 0);
+    engine.pump_message_loop();
+    REQUIRE(bridge.bridge_call_count() == 1);
+}
+
+TEST_CASE("WidgetBridge callback delivery does not masquerade as native dispatch",
+          "[view][bridge][wp0][callback-path]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        globalThis.__wp0Clicked = false;
+        createToggleButton('callback-label', '');
+        on('callback-label', 'click', function() { globalThis.__wp0Clicked = true; });
+    )JS");
+    bridge.reset_bridge_call_count();
+
+    // Native input invokes the JS callback (C++ -> JS). That direction is not
+    // a JS-to-native bridge dispatch and must leave the counter unchanged.
+    auto* callback_widget = bridge.widget("callback-label");
+    REQUIRE(callback_widget != nullptr);
+    REQUIRE(static_cast<bool>(callback_widget->on_click));
+    callback_widget->on_click();
+    REQUIRE(engine.evaluate("__wp0Clicked === true").getWithDefault<bool>(false));
+    REQUIRE(bridge.bridge_call_count() == 0);
+}
+
+TEST_CASE("WidgetBridge counter remains exact under repeated native calls",
+          "[view][bridge][wp0][overhead]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.reset_bridge_call_count();
+    constexpr int calls = 128;
+    for (int i = 0; i < calls; ++i)
+        engine.evaluate("getGPUInfo()");
+    REQUIRE(bridge.bridge_call_count() == static_cast<std::uint64_t>(calls));
+}
+
+TEST_CASE("WidgetBridge failed construction restores the prior counter registration",
+          "[view][bridge][wp0][lifetime][negative-control]") {
+    ScriptEngine engine;
+    View first_root;
+    first_root.set_bounds({0, 0, 400, 300});
+    StateStore first_store;
+    WidgetBridge first(engine, first_root, first_store);
+    const auto first_counter = engine.bridge_call_counter();
+
+    // A second bridge on the same engine reaches the native-symbol uniqueness
+    // guard during construction. Its destructor cannot run, so the counter
+    // registration must restore the first bridge from the constructor's scope
+    // guard.
+    View second_root;
+    second_root.set_bounds({0, 0, 400, 300});
+    StateStore second_store;
+    REQUIRE_THROWS(WidgetBridge(engine, second_root, second_store));
+    REQUIRE(engine.bridge_call_counter() == first_counter);
+
+    // The first bridge's already-registered wrappers still own its counter
+    // state; the failed second construction must not replace the first bridge's
+    // registration or corrupt its measurement.
+    first.reset_bridge_call_count();
+    first.load_script("createLabel('rollback-label', 'ok', 10, 10, 100, 20);");
+    REQUIRE(first.bridge_call_count() > 0);
+}
+
+TEST_CASE("WidgetBridge counter survives retained stateless calls after bridge teardown",
+          "[view][bridge][wp0][lifetime]") {
+    auto engine = std::make_unique<ScriptEngine>();
+    View root;
+    StateStore store;
+    auto bridge = std::make_unique<WidgetBridge>(*engine, root, store);
+    std::weak_ptr<std::atomic<std::uint64_t>> counter = engine->bridge_call_counter();
+    bridge->reset_bridge_call_count();
+
+    // setStyle is stateless. Its wrapper must remain safe for as long as the
+    // engine retains it, including a Promise queued before bridge teardown.
+    engine->evaluate("setStyle(); Promise.resolve().then(() => setStyle());");
+    REQUIRE(bridge->bridge_call_count() == 1);
+    bridge.reset();
+    REQUIRE(engine->bridge_call_counter() == nullptr);
+    REQUIRE_FALSE(counter.expired());
+
+    engine->pump_message_loop();
+    REQUIRE(counter.lock()->load(std::memory_order_relaxed) == 2);
+    engine->evaluate("setStyle();");
+    REQUIRE(counter.lock()->load(std::memory_order_relaxed) == 3);
+    engine.reset();
+    REQUIRE(counter.expired());
+}
+
 TEST_CASE("WidgetBridge creates knob from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;

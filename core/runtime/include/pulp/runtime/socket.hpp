@@ -2,6 +2,7 @@
 
 // TCP, UDP, and OS-local socket abstraction.
 
+#include <atomic>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -97,6 +98,7 @@ public:
     void close();
 
     /// Interrupt blocking stream operations without closing the socket handle.
+    /// A receive() blocked in another thread returns 0, as at end of stream.
     void shutdown();
 
     /// Whether the socket is open.
@@ -121,6 +123,13 @@ private:
     std::string bound_local_path_;
     std::uint64_t bound_local_device_ = 0;
     std::uint64_t bound_local_inode_ = 0;
+#ifdef _WIN32
+    // Winsock does not wake a recv() blocked in another thread when the socket
+    // is shut down locally, so receive() waits for readiness in short slices,
+    // checks this flag between them, and enforces the read timeout itself.
+    std::atomic<bool> shutdown_requested_{false};
+    std::atomic<std::int64_t> read_timeout_ms_{0};
+#endif
 
     bool connect_address(const void* address, std::size_t address_size,
                          std::chrono::milliseconds timeout);

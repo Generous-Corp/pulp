@@ -2,10 +2,12 @@
 """Verify an installed Pulp SDK is internally consistent with its source tree.
 
 The design importer is a BINARY plus a `browser_capture-v1/` JavaScript runtime
-that ships beside it. They are two halves of one tool: the binary drives the
-browser, the runtime defines the capture protocol and every gate that runs
-inside the page. Refreshing one without the other produces an SDK that looks
-updated, links fine, and silently runs an old protocol.
+and (for materialized imports) a sibling `jsx-runtime/` contract that ships
+beside it. They are the halves of one tool: the binary drives the browser, the
+runtime defines the capture protocol and every gate that runs inside the page,
+and the sibling contract defines the shared binding schema. Refreshing one
+without the others produces an SDK that looks updated, links fine, and silently
+runs an old protocol.
 
 That is not hypothetical. A capture gate added to the runtime was never copied
 into an SDK whose binary HAD been refreshed, so a panel that the gate rejects
@@ -48,6 +50,35 @@ def _node_runtime_required(prefix: Path, source: Path) -> bool:
     return _version_tuple(version) >= _version_tuple(floor)
 
 
+def _materialized_contract_required(prefix: Path, source: Path) -> bool:
+    version = (prefix / "version.txt").read_text(encoding="utf-8").strip()
+    matrix_path = source / "tools/scripts/release_product_matrix.json"
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    floor = str(matrix.get("materialized_binding_contract_floor", "999999.0.0"))
+    return _version_tuple(version) >= _version_tuple(floor)
+
+
+def _runtime_manifest(source_runtime: Path) -> list[Path]:
+    """Return the shipped runtime paths from the source manifest.
+
+    The manifest is authoritative because the runtime contains both modules
+    and data files (currently a JSON interaction protocol). Enumerating only
+    ``*.mjs`` silently lets a stale JSON payload pass the SDK completeness
+    check.
+    """
+    manifest = source_runtime / "runtime_manifest.txt"
+    entries: list[Path] = []
+    for raw in manifest.read_text(encoding="utf-8").splitlines():
+        value = raw.split("#", 1)[0].strip()
+        if not value:
+            continue
+        relative = Path(value)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"invalid runtime manifest entry: {value!r}")
+        entries.append(relative)
+    return entries
+
+
 def check(prefix: Path, source: Path) -> list[str]:
     """Return a list of problems; empty means the SDK is consistent."""
     problems: list[str] = []
@@ -56,10 +87,16 @@ def check(prefix: Path, source: Path) -> list[str]:
     runtime = prefix / "bin" / "browser_capture-v1"
     node = runtime / ("node.exe" if sys.platform == "win32" else "node")
     node_license = runtime / "node.LICENSE"
+    contract = prefix / "bin" / "jsx-runtime" / "materialized_binding_contract.mjs"
     src_runtime = source / "tools" / "import-design" / "browser_capture"
+    src_contract = (
+        source / "tools" / "import-design" / "jsx-runtime"
+        / "materialized_binding_contract.mjs"
+    )
 
     try:
         require_node = _node_runtime_required(prefix, source)
+        require_contract = _materialized_contract_required(prefix, source)
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         problems.append(f"cannot determine bundled Node requirement: {exc}")
         return problems
@@ -70,6 +107,8 @@ def check(prefix: Path, source: Path) -> list[str]:
         problems.append(f"missing bundled Node runtime: {node}")
     if require_node and not node_license.is_file():
         problems.append(f"missing bundled Node license: {node_license}")
+    if require_contract and not contract.is_file():
+        problems.append(f"missing materialized binding contract: {contract}")
     if not runtime.is_dir():
         problems.append(f"missing capture runtime directory: {runtime}")
     if problems:
@@ -78,22 +117,34 @@ def check(prefix: Path, source: Path) -> list[str]:
     if not src_runtime.is_dir():
         problems.append(f"source capture runtime not found: {src_runtime}")
         return problems
+    if require_contract and not src_contract.is_file():
+        problems.append(f"source materialized binding contract not found: {src_contract}")
+    elif require_contract and not filecmp.cmp(src_contract, contract, shallow=False):
+        problems.append(
+            f"materialized binding contract is STALE in the SDK: {src_contract.name} "
+            f"(copy {src_contract} -> {contract})"
+        )
 
-    # Only the runtime modules matter. Test files (*.test.mjs) are not shipped,
-    # so their absence is correct and must not read as drift.
-    shipped = sorted(
-        p for p in src_runtime.glob("*.mjs") if not p.name.endswith(".test.mjs"))
+    try:
+        shipped = _runtime_manifest(src_runtime)
+    except (OSError, ValueError) as exc:
+        problems.append(f"cannot read source runtime manifest: {exc}")
+        return problems
     if not shipped:
-        problems.append(f"no runtime modules found in {src_runtime}")
+        problems.append(f"source runtime manifest is empty: {src_runtime}")
         return problems
 
-    for src in shipped:
-        installed = runtime / src.name
+    for relative in shipped:
+        src = src_runtime / relative
+        installed = runtime / relative
+        if not src.is_file():
+            problems.append(f"runtime file missing from source tree: {relative}")
+            continue
         if not installed.exists():
-            problems.append(f"runtime module missing from the SDK: {src.name}")
+            problems.append(f"runtime file missing from the SDK: {relative}")
         elif not filecmp.cmp(src, installed, shallow=False):
             # The message names the fix, because the instinct on seeing this is
-            # to rebuild the binary — which is already current and is not what
+            # to rebuild the binary, which is already current and is not what
             # drifted.
             problems.append(
                 f"runtime module is STALE in the SDK: {src.name} "

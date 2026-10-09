@@ -19,6 +19,7 @@ import type {
     IntrinsicElementName,
 } from './types.js';
 import { requestLayoutFlush } from './layout-flush.js';
+import { beginBridgeBatch, endBridgeBatch, queueBridgeCall } from './bridge-batch.js';
 import {
     applyAllProps,
     applyChangedProps,
@@ -280,6 +281,7 @@ function call(name: string, ...args: unknown[]): unknown {
             lg('[hc#' + _hc_count + '] ' + name + '(' + a0 + (args.length > 1 ? ',' + a1 : '') + ')');
         }
     }
+    if (queueBridgeCall(name, fn, args)) return;
     return fn(...args);
 }
 
@@ -1186,9 +1188,11 @@ export const PulpHostConfig: HostConfig<
     // ── Per-commit flush ───────────────────────────────────────────
     prepareForCommit(_container) {
         mountFocusClaim = 'none';
+        beginBridgeBatch();
         return null;
     },
     resetAfterCommit(_container) {
+        endBridgeBatch();
         // Materialized imports may install renderer-neutral Chromium evidence
         // (captured text line boxes today, with room for other stable metadata
         // later). Apply it only after React has committed the complete native

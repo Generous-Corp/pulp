@@ -406,3 +406,170 @@ TEST_CASE("serialized NAM loader rejects divergent runtime head scale",
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
 }
+TEST_CASE("serialized NAM loader preserves the live artifact on a failed replacement",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    std::ifstream source(fixture_path());
+    std::stringstream contents;
+    contents << source.rdbuf();
+    auto replacement = contents.str();
+    const auto sample_rate_marker = std::string("\"sample_rate\": 48000");
+    const auto sample_rate_position = replacement.find(sample_rate_marker);
+    REQUIRE(sample_rate_position != std::string::npos);
+    replacement.replace(sample_rate_position, sample_rate_marker.size(), "\"sample_rate\": 0");
+    const auto weight_marker = std::string("-0.6180188059806824");
+    const auto weight_position = replacement.find(weight_marker);
+    REQUIRE(weight_position != std::string::npos);
+    replacement.replace(weight_position, weight_marker.size(), "10.0");
+    const auto path = std::filesystem::temp_directory_path() / "pulp-nam-loader-transaction.nam";
+    {
+        NamTcnArtifact artifact;
+        REQUIRE(artifact.load(fixture_path()));
+        std::array<float, 8> input{};
+        for (std::size_t i = 0; i < input.size(); ++i)
+            input[i] = std::sin(static_cast<float>(i) * 0.17f);
+        std::array<float, 8> expected{};
+        artifact.process(input.data(), expected.data(), input.size());
+        artifact.reset();
+
+        std::ofstream output(path);
+        output << replacement;
+        output.close();
+        std::string error;
+        CHECK_FALSE(artifact.load(path.string(), &error));
+        CHECK(artifact.loaded());
+        CHECK(artifact.sample_rate() == Catch::Approx(48000.0));
+        CHECK(artifact.receptive_field() == 22);
+        CHECK(artifact.state_bytes() == 232);
+
+        std::array<float, 8> replay{};
+        artifact.reset();
+        artifact.process(input.data(), replay.data(), input.size());
+        CHECK(replay == expected);
+    }
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+TEST_CASE("serialized NAM adapter keeps the live preparation on a failed replacement",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    std::ifstream source(fixture_path());
+    std::stringstream contents;
+    contents << source.rdbuf();
+    const auto path = std::filesystem::temp_directory_path() / "pulp-nam-adapter-transaction.nam";
+    {
+        std::ofstream output(path);
+        output << contents.str();
+    }
+
+    const auto spec_value = artifact_spec();
+    NamTcnArtifactAdapter model(spec_value, path.string());
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "example.nam",
+                                                 .artifact_hash = spec_value.weights_hash,
+                                                 .max_frames = 128};
+    REQUIRE(model.prepare(context));
+
+    std::array<float, 8> input{};
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = std::sin(static_cast<float>(i) * 0.17f);
+    std::array<float, 8> expected{};
+    const float* input_channels[] = {input.data()};
+    float* expected_channels[] = {expected.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, input.size());
+    auto expected_view = pulp::audio::BufferView<float>(expected_channels, 1, expected.size());
+    model.process_cpu(in, expected_view, input.size(), {.epoch = 1, .sequence = 0});
+
+    std::ifstream replacement_source(fixture_path());
+    std::stringstream replacement_contents;
+    replacement_contents << replacement_source.rdbuf();
+    auto replacement = replacement_contents.str();
+    const auto marker = std::string("\"sample_rate\": 48000");
+    const auto position = replacement.find(marker);
+    REQUIRE(position != std::string::npos);
+    replacement.replace(position, marker.size(), "\"sample_rate\": 44100");
+    {
+        std::ofstream output(path);
+        output << replacement;
+    }
+
+    CHECK_FALSE(model.prepare(context));
+    CHECK(model.quiesce());
+    std::array<float, 8> replay{};
+    float* replay_channels[] = {replay.data()};
+    auto replay_view = pulp::audio::BufferView<float>(replay_channels, 1, replay.size());
+    model.reset(2, StreamingResetReason::ModelSwap);
+    model.process_cpu(in, replay_view, input.size(), {.epoch = 2, .sequence = 0});
+    CHECK(replay == expected);
+    REQUIRE(model.release());
+
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+TEST_CASE("serialized NAM loader rejects absent and non-finite sample rates",
+          "[gpu_audio][neural][nam][validation]") {
+    std::ifstream source(fixture_path());
+    std::stringstream contents;
+    contents << source.rdbuf();
+    const auto marker = std::string(", \"sample_rate\": 48000");
+    const auto position = contents.str().find(marker);
+    REQUIRE(position != std::string::npos);
+
+    auto missing_sample_rate = contents.str();
+    missing_sample_rate.erase(position, marker.size());
+    const auto missing_path =
+        std::filesystem::temp_directory_path() / "pulp-nam-missing-sample-rate.nam";
+    {
+        std::ofstream output(missing_path);
+        output << missing_sample_rate;
+    }
+    NamTcnArtifact missing_artifact;
+    std::string missing_error;
+    CHECK_FALSE(missing_artifact.load(missing_path.string(), &missing_error));
+    CHECK(missing_error.find("sample_rate") != std::string::npos);
+
+    auto infinite_sample_rate = contents.str();
+    const auto value_marker = std::string("\"sample_rate\": 48000");
+    const auto value_position = infinite_sample_rate.find(value_marker);
+    REQUIRE(value_position != std::string::npos);
+    infinite_sample_rate.replace(value_position, value_marker.size(), "\"sample_rate\": 1e999");
+    const auto infinite_path =
+        std::filesystem::temp_directory_path() / "pulp-nam-infinite-sample-rate.nam";
+    {
+        std::ofstream output(infinite_path);
+        output << infinite_sample_rate;
+    }
+    NamTcnArtifact infinite_artifact;
+    std::string infinite_error;
+    CHECK_FALSE(infinite_artifact.load(infinite_path.string(), &infinite_error));
+    CHECK(infinite_error.find("sample_rate") != std::string::npos);
+
+    std::error_code ignored;
+    std::filesystem::remove(missing_path, ignored);
+    std::filesystem::remove(infinite_path, ignored);
+}
+
+TEST_CASE("serialized NAM adapter rejects each runtime shape mismatch",
+          "[gpu_audio][neural][nam][validation]") {
+    const auto path = fixture_path();
+
+    auto receptive_field_spec = artifact_spec();
+    ++receptive_field_spec.receptive_field_samples;
+    NamTcnArtifactAdapter receptive_field_model(receptive_field_spec, path);
+    const auto receptive_field_context =
+        StreamingPrepareContext{.spec = &receptive_field_model.spec(),
+                                .artifact_id = "example.nam",
+                                .artifact_hash = receptive_field_spec.weights_hash,
+                                .max_frames = 128};
+    CHECK_FALSE(receptive_field_model.prepare(receptive_field_context));
+
+    auto state_bytes_spec = artifact_spec();
+    ++state_bytes_spec.state_bytes;
+    NamTcnArtifactAdapter state_bytes_model(state_bytes_spec, path);
+    const auto state_bytes_context =
+        StreamingPrepareContext{.spec = &state_bytes_model.spec(),
+                                .artifact_id = "example.nam",
+                                .artifact_hash = state_bytes_spec.weights_hash,
+                                .max_frames = 128};
+    CHECK_FALSE(state_bytes_model.prepare(state_bytes_context));
+}

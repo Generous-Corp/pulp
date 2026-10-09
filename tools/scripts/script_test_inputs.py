@@ -81,6 +81,10 @@ GATE_BUILD_SCOPE = {"PULP_BUILD_TESTS": "ON", "PULP_BUILD_EXAMPLES": "OFF"}
 # list is generated from the gate's configure, so a build of any other shape
 # cannot be compared with it, or written into it.
 SKIP_EXIT = 77
+# The list is written from the required macOS gate's configure. Another
+# platform registers a different set of tests (Linux-only selftests, other
+# feature switches), so its registrations cannot be compared with the list.
+GATE_SYSTEM_NAME = "Darwin"
 # Prefixes a literal string must start with to count as a repository path.
 REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/", "ship/",
                  "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
@@ -161,7 +165,38 @@ def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
     build_type = cache.get("CMAKE_BUILD_TYPE", "")
     if build_type and build_type != "Release":
         reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
+    # Without a format SDK the configure registers none of that format's
+    # tests or plugin targets, so the list it writes silently drops their
+    # inputs. A cache from before a flag existed omits it and is not judged.
+    for flag, sdk in (("PULP_HAS_VST3", "external/vst3sdk"), ("PULP_HAS_AUSDK", "external/AudioUnitSDK")):
+        if flag in cache and off(cache[flag]):
+            reasons.append(f"{flag}={cache[flag]} (the gate configures with {sdk} checked out)")
     return reasons
+
+
+def configured_system(build_dir: Path) -> str | None:
+    """CMAKE_SYSTEM_NAME as the configure recorded it. It is not a cache
+    variable: CMake writes it to CMakeFiles/<version>/CMakeSystem.cmake."""
+    for path in sorted(build_dir.glob("CMakeFiles/*/CMakeSystem.cmake"),
+                       key=lambda q: q.stat().st_mtime, reverse=True):
+        try:
+            m = re.search(r'set\(CMAKE_SYSTEM_NAME "([^"]*)"\)', path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if m:
+            return m.group(1)
+    return None
+
+
+def outside_gate_platform(build_dir: Path | None) -> str | None:
+    """Why this build cannot be compared with the list at all: it targets a
+    different system than the gate's. None for a gate-platform build, and for
+    one with no CMakeCache.txt to read."""
+    system = configured_system(build_dir) if build_dir else None
+    if not system or system == GATE_SYSTEM_NAME:
+        return None
+    return (f"CMAKE_SYSTEM_NAME={system} (the list is written from the {GATE_SYSTEM_NAME} gate's "
+            "configure, and another platform registers different tests)")
 
 
 def registered_from(test: dict, inventory: dict) -> str | None:
@@ -380,11 +415,25 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
+# A test run through the temp-leak guard (`python tmp_leak_guard.py [opts] --
+# CMD...`) is declared as the command it wraps; the guard is one more input.
+TMP_LEAK_GUARD = "tmp_leak_guard.py"
+
+
+def unwrap_guard(command: list[str]) -> tuple[list[str], list[str]]:
+    """(the wrapped command, the guard scripts that wrapped it)."""
+    if (len(command) > 2 and os.path.basename(command[0]).startswith("python")
+            and os.path.basename(command[1]) == TMP_LEAK_GUARD and "--" in command[2:]):
+        return command[command.index("--", 2) + 1:], [command[1]]
+    return command, []
+
+
 def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
                walker: Walker | None = None, tracked: set[str] | None = None) -> dict | None:
     props = {p["name"]: p["value"] for p in test.get("properties", [])}
     wd = Path(props.get("WORKING_DIRECTORY") or root)
-    kind, entry, args = classify(test.get("command") or [], root)
+    command, guards = unwrap_guard(test.get("command") or [])
+    kind, entry, args = classify(command, root)
     if kind == "undeclarable":
         return None
     w = walker or Walker(root)
@@ -417,6 +466,8 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
         w.walk_node(entry, seen)
     else:
         w.walk_shell(entry, seen)
+    for guard in guards:
+        w.walk_python(Path(guard) if os.path.isabs(guard) else wd / guard, search, seen)
     for a in args:
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
@@ -955,6 +1006,19 @@ def drift(current: dict, checked_in: dict) -> list[tuple[str, str, set[str]]]:
     return problems
 
 
+def unscanned_executables(current: dict, checked_in: dict,
+                          scanned: dict[str, dict]) -> list[tuple[str, str, set[str]]]:
+    """Executables this configuration scans that the list does not name. A
+    clean executable has no `executables` entry, so `executables_scanned` is
+    the only record that it was scanned; a name missing from it reads to a
+    selector as never scanned. `paths` is the executable's own sources."""
+    if "executables_scanned" not in checked_in:
+        return []
+    listed = set(checked_in.get("executables_scanned") or [])
+    return [("unscanned executable", name, set((scanned.get(name) or {}).get("sources") or []))
+            for name in current.get("executables_scanned") or [] if name not in listed]
+
+
 def compiled_entry_paths(rec: dict) -> set[str]:
     """What a change must touch to own a compiled entry's drift: the sources
     whose text decided it, data readers and spawn sites alike (a spawns-only
@@ -1083,6 +1147,15 @@ def main(argv: list[str]) -> int:
             return 2
         print(json.dumps(summary, indent=1, sort_keys=True))
         return 0
+    off_platform = outside_gate_platform(build_dir)
+    if off_platform and a.write:
+        print("script-test-inputs: refusing to write: " + off_platform + ".\nRegenerate from a "
+              f"{GATE_SYSTEM_NAME} gate-profile configure.", file=sys.stderr)
+        return 2
+    if off_platform:
+        print("script-test-inputs: SKIPPED: " + off_platform + ". The required gate checks the list; "
+              "this is a skip, not a pass.")
+        return SKIP_EXIT
     current = build_list(inventory, root, build_dir)
     off_profile = outside_gate_profile_build(build_dir) if "executables" in current else []
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
@@ -1116,6 +1189,8 @@ def main(argv: list[str]) -> int:
         # and the result says so.
         current = {k: v for k, v in current.items() if k != "executables"}
     problems = drift(current, checked_in)
+    if "executables" in current:
+        problems += unscanned_executables(current, checked_in, test_executables(build_dir) or {})
     if not current["tests"]:
         print("script-test-inputs: ERROR: no script-driven test found; wrong build directory?", file=sys.stderr)
         return 2
@@ -1135,6 +1210,8 @@ def main(argv: list[str]) -> int:
         if kind == "missing from list":
             entry = current["tests"][name].get("entry") or ""
             return bool(entry) and entry in changed
+        if kind == "unscanned executable":
+            return bool(paths & changed)
         if kind == "missing compiled entry":
             # Only the entry's own sources, not its declared inputs: a shared
             # fixture directory must not make every new entry this change's.

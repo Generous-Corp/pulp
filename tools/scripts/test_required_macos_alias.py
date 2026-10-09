@@ -34,6 +34,9 @@ require(
 
 pr_alias = job_body(text, "macos")
 merge_bootstrap = job_body(text, "macos-merge-group")
+# The verdict lives in a script the job runs; read it with the job.
+if "tools/ci/macos_merge_group_bootstrap.sh" in merge_bootstrap:
+    merge_bootstrap += (ROOT / "tools/ci/macos_merge_group_bootstrap.sh").read_text(encoding="utf-8")
 build = job_body(text, "build")
 
 require(

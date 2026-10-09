@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-scene3d-null-adapter-frame-watch",
+  "created_at": "2026-10-05T18:54:39Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Renderer3D's success rule moves into a public pure function, readback_holds_frame(), and adds one condition: the adapter is not Dawn's Null adapter, which submits commands and draws nothing. On macOS the Null readback was zeros, so success was already false there; on Linux its readback held 169 colours and read as a rendered frame. Real adapters are unaffected: the colour and coverage conditions are unchanged. No design-import, Chromium, rendering pipeline, packaging, golden or Vellum-owned source changes, and no authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'Null-adapter readback|Dawn null backend'",
+    "ctest --test-dir build -R scene3d-renderer-probe-adapter-selection-route-contract",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

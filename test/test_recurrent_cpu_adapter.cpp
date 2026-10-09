@@ -3,6 +3,7 @@
 
 #include "detail/neural_processor.hpp"
 #include "detail/recurrent_cpu_adapter.hpp"
+#include "detail/shared_io_execution_contract.hpp"
 #include "harness/rt_contract_probe.hpp"
 #include "harness/scoped_rt_process_probe.hpp"
 
@@ -370,6 +371,43 @@ TEST_CASE("recurrent CPU adapter reset and NeuralProcessor reprepare lifecycle",
     REQUIRE(processor.publish());
     CHECK(processor.snapshot().generation == 3);
     REQUIRE(processor.release());
+}
+
+TEST_CASE("recurrent CPU preparation is the fail-closed fallback admission proof",
+          "[gpu_audio][neural][recurrent][fallback][lifecycle]") {
+    const auto spec = make_spec(RecurrentFamily::Gru);
+    SyntheticKernel kernel{.family = RecurrentFamily::Gru};
+    RecurrentCpuAdapter adapter(spec, make_shape(RecurrentFamily::Gru), make_kernel(kernel));
+    NeuralProcessor processor(adapter);
+    const auto context =
+        StreamingPrepareContext{.spec = &adapter.spec(),
+                                .artifact_id = "synthetic-recurrent",
+                                .artifact_hash = "synthetic-weights",
+                                .fallback = StreamingFallbackStrategy::ContinuouslyPrimedCpuShadow,
+                                .max_frames = 64};
+
+    SharedIoExecutionContract contract{.channels = 1,
+                                       .block_size = spec.block_size,
+                                       .sample_rate = spec.sample_rate,
+                                       .active_path = SharedIoPath::Cpu,
+                                       .miss_policy = pulp::gpu_audio::MissPolicy::CpuFallback,
+                                       .cpu_fallback_prepared = processor.snapshot().prepared};
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::CpuFallbackNotPrepared);
+
+    REQUIRE(processor.prepare(context));
+    // A pending model is not yet published to the execution path.
+    contract.cpu_fallback_prepared = processor.snapshot().prepared;
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::CpuFallbackNotPrepared);
+    REQUIRE(processor.publish());
+    contract.cpu_fallback_prepared = processor.snapshot().prepared;
+    REQUIRE(validate_shared_io_contract(contract).accepted());
+
+    REQUIRE(processor.release());
+    contract.cpu_fallback_prepared = processor.snapshot().prepared;
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::CpuFallbackNotPrepared);
 }
 
 TEST_CASE("recurrent CPU adapter rejects noncausal and malformed shapes",

@@ -14,7 +14,7 @@
 pulp_add_test_group(pulp-test-group-sampler-audio LIBRARIES pulp::audio)
 pulp_add_test_group(pulp-test-group-sampler-host-graph
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::runtime
-              pulp::signal pulp::state)
+              pulp::signal pulp::state pulp::audio-analysis)
 pulp_add_test_group(pulp-test-group-sampler-format LIBRARIES pulp::format)
 pulp_add_test_group(pulp-test-group-sampler-timebase LIBRARIES pulp::timebase)
 pulp_add_test_group(pulp-test-group-sampler-graph-runtime LIBRARIES pulp::graph)
@@ -511,8 +511,17 @@ pulp_add_test_suite(pulp-test-processor-node-adapter
 pulp_add_test_suite(pulp-test-generated-dsp-graph-parity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_generated_dsp_graph_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# DSPX-03 retained-history policy: exact-key adoption, clear, reseed, and refusal.
+# DSPX-09 independent reference examples: allpass oracle, retained-history refusal, and automation validation.
+pulp_add_test_suite(pulp-test-dspx09-independent-validation GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_dspx09_independent_validation.cpp
+    LIBRARIES pulp::host pulp::signal pulp::state)
 
-# Reviewed plugin-loader calls (tools/cmake/PulpTestData.cmake).
-pulp_test_spawns(pulp-test-baked-graph-processor-parity NONE REASON "adds only in-memory PluginSlot instances and reloads graphs it serialized from them with GraphSerializer::from_json, so it loads nothing the tree builds")
-pulp_test_spawns(pulp-test-group-sampler-host-graph NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")
-pulp_test_spawns(pulp-test-signal-graph-executor-parity NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")
+# DSPX-09 follow-up: executable lifecycle/refusal and typed cross-host projection controls.
+pulp_add_test_suite(pulp-test-dspx09-followup GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_dspx09_followup.cpp
+    LIBRARIES pulp::host pulp::signal pulp::state)
+
+pulp_add_test_suite(pulp-test-retained-history-dspx03 GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_retained_history_dspx03.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::audio-analysis)

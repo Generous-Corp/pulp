@@ -1,11 +1,12 @@
-#include <catch2/catch_test_macros.hpp>
-#include <pulp/platform/child_process.hpp>
-#include <miniz.h>
 #include "envelope_merge.hpp"
 #include "fig_lane.hpp"
 #include "node_runtime.hpp"
 #include "render_artifact_path.hpp"
 #include "support/isolated_pulp_home.hpp"
+#include "support/unique_temp_dir.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <miniz.h>
+#include <pulp/platform/child_process.hpp>
 
 #include <iostream>
 
@@ -128,9 +129,7 @@ ProcessResult run_import_design_in(const fs::path& cwd,
 class TempDir {
 public:
     explicit TempDir(const std::string& prefix) {
-        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
 
     ~TempDir() {
@@ -210,9 +209,7 @@ private:
 class ScopedTempRoot {
 public:
     explicit ScopedTempRoot(const std::string& prefix) {
-        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
         // std::filesystem::temp_directory_path consults TMPDIR on POSIX and
         // TMP/TEMP on Windows; set every name so both agree with `path`.
         for (const char* name : {"TMPDIR", "TMP", "TEMP"}) {
@@ -356,7 +353,8 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.stdout_output.find("pulp import-design") != std::string::npos);
         REQUIRE(r.stdout_output.find("--from <source>") != std::string::npos);
         REQUIRE(r.stdout_output.find("--output <path>   Destination file for the primary artifact") != std::string::npos);
-        REQUIRE(r.stdout_output.find("--emit {js|ir-json|cpp|swiftui}") != std::string::npos);
+        REQUIRE(r.stdout_output.find("--emit {js|ir-json|cpp|swiftui|materialized-runtime}") !=
+                std::string::npos);
         REQUIRE(r.stdout_output.find("--mode {live|baked}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--snapshot-semantics {fail|warn|accept}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--fit-authored-frame") != std::string::npos);
