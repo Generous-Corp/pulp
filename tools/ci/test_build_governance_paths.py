@@ -302,6 +302,20 @@ class BuildGovernancePathTests(unittest.TestCase):
                 line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
             )
 
+    def test_local_release_builds_route_through_governor(self) -> None:
+        source = read_source("tools/scripts/release-cli-local.sh")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 4)
+        for line in build_lines:
+            self.assertIn("governed-build.sh", line)
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
