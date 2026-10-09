@@ -21,7 +21,7 @@ spec.loader.exec_module(registry)
 
 
 projection = registry.extract(ROOT)
-assert len(projection["catalogs"]) == 31
+assert len(projection["catalogs"]) == 30
 assert sum(len(c["type_ids"]) for c in projection["catalogs"]) == 115
 assert sum(len(n["baked_params"]) for c in projection["catalogs"] for n in c["nodes"]) == 400
 
