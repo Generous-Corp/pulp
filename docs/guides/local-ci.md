@@ -1232,8 +1232,9 @@ leaves them out of its link map. Loaders of system libraries only are not in
 scope, because the runner image names those.
 
 A change to a pin file (`tools/deps/manifest.json`,
-`tools/cmake/PulpDependencies.cmake`, `tools/cmake/PulpFetchContent.cmake`, or
-a FetchContent block of the root `CMakeLists.txt`)
+`tools/cmake/PulpDependencies.cmake`, `tools/cmake/PulpFetchContent.cmake`, a
+FetchContent block of the root `CMakeLists.txt`, or a `*_SDK_REF` assignment in
+`setup.sh`, which pins the SDKs it clones outside the tree)
 marks always_run `dependency_pin` only the executables that build against a
 dependency it moved on this platform. `tools/ci/dependency_pins.py` names the
 moved dependencies: manifest entries by name (documentation fields and

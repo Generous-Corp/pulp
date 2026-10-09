@@ -2,8 +2,8 @@
 """Which dependencies a change to the pin files moved, on one platform.
 
 The pin files are tools/deps/manifest.json, tools/cmake/PulpDependencies.cmake,
-tools/cmake/PulpFetchContent.cmake and the FetchContent blocks of the root
-CMakeLists.txt. A change to one of them can move a
+tools/cmake/PulpFetchContent.cmake, the FetchContent blocks of the root
+CMakeLists.txt and the SDK refs setup.sh clones. A change to one of them can move a
 dependency's content without moving any path the codemodel digests, so the
 key code treats the executables that build against a moved dependency as
 `dependency_pin`. This module says which dependencies moved, or that the
@@ -28,6 +28,19 @@ Attribution is by dependency name (the manifest's `name`):
                      dependency count, and any platform-effective change to
                      one moves all; the rest of the file reaches executables
                      through their codemodel digests.
+  setup.sh           only what it clones counts: a changed `*_SDK_REF=`
+                     assignment moves the name whose map entry lists it
+                     (`setup_refs`), and a changed clone call (its URL, ref or
+                     a variable it reads) moves the dependency it names; an
+                     unclaimed ref or clone, or any change to the fetch
+                     functions every clone runs, moves all. A call's
+                     signature takes every assignment, anywhere in the
+                     script, of each variable its arguments read, so editing
+                     one (REPO_ROOT, which the wgpu-native download reads)
+                     moves every clone that reads it, and a cache-path
+                     refactor of the fetch functions moves everything. Both
+                     are deliberate: the safe direction, not a defect. The sources it clones
+                     can live outside the tree, so nothing else keys them.
 
 Everything that cannot be attributed moves all (`scope` "all"): a file that
 does not parse, a changed block no anchor claims, blocks added, removed or
@@ -50,7 +63,21 @@ MANIFEST = "tools/deps/manifest.json"
 DEPENDENCIES_CMAKE = "tools/cmake/PulpDependencies.cmake"
 FETCHCONTENT_CMAKE = "tools/cmake/PulpFetchContent.cmake"
 ROOT_CMAKE = "CMakeLists.txt"
-PIN_PATHS = (MANIFEST, DEPENDENCIES_CMAKE, FETCHCONTENT_CMAKE, ROOT_CMAKE)
+SETUP_SCRIPT = "setup.sh"
+PIN_PATHS = (MANIFEST, DEPENDENCIES_CMAKE, FETCHCONTENT_CMAKE, ROOT_CMAKE, SETUP_SCRIPT)
+# A cloned SDK's ref, assigned in setup.sh (`VST3_SDK_REF="..."`).
+# A clone of a dependency's source into the shared cache, whose first
+# argument is its name (`ensure_shared_git_source_with_retry "VST3 SDK" URL REF
+# DIR`); the rest of the line is what it fetches.
+CLONE_CALL = re.compile(r"^[ \t]*ensure_shared_(?:git|archive)_source(?:_with_retry)?[ \t]+\"([^\"$]+)\"(.*)$",
+                        re.MULTILINE)
+SHELL_ASSIGNMENT = re.compile(r"^[ \t]*(?:export[ \t]+|local[ \t]+|readonly[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*?)[ \t]*$",
+                              re.MULTILINE)
+SHELL_FUNCTION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\)[ \t]*\{[ \t]*\n(.*?)^\}[ \t]*$", re.MULTILINE | re.DOTALL)
+SHELL_ONE_LINE_FUNCTION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\)[ \t]*\{(.*)\}[ \t]*$", re.MULTILINE)
+SHELL_VARIABLE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
+SDK_REF = re.compile(r"^[ \t]*(?:export[ \t]+|local[ \t]+|readonly[ \t]+)?([A-Za-z0-9_]*_SDK_REF)=(.*?)[ \t]*$",
+                     re.MULTILINE)
 # Commands that declare or fetch a FetchContent dependency.
 FETCHCONTENT_COMMANDS = frozenset({"fetchcontent_declare", "fetchcontent_makeavailable", "fetchcontent_populate",
                                    "fetchcontent_getproperties", "pulp_register_fetchcontent_source"})
@@ -367,6 +394,80 @@ def cmake_names(base: str | None, head: str | None, platform: str, dep_map: dict
     return moved
 
 
+def setup_names(base: str | None, head: str | None, dep_map: dict) -> set[str]:
+    if base is None or head is None:
+        raise Unattributable(f"{SETUP_SCRIPT} is absent on one side")
+    refs = []
+    for text in (base, head):
+        found: dict[str, list[str]] = {}
+        for m in SDK_REF.finditer(text):
+            found.setdefault(m.group(1), []).append(m.group(2))
+        refs.append(found)
+    owner = {ref: name for name, entry in dep_map.items() for ref in entry.get("setup_refs") or []}
+    moved: set[str] = set()
+    for ref in set(refs[0]) | set(refs[1]):
+        if refs[0].get(ref) == refs[1].get(ref):
+            continue
+        if ref not in owner:
+            raise Unattributable(f"{SETUP_SCRIPT} changed {ref}, which no dependency claims")
+        moved.add(owner[ref])
+    if _fetch_logic(base) != _fetch_logic(head):
+        raise Unattributable(f"{SETUP_SCRIPT} changed the shared fetch logic every clone runs")
+    clones = [_clones(text) for text in (base, head)]
+    for label in set(clones[0]) | set(clones[1]):
+        if clones[0].get(label) == clones[1].get(label):
+            continue
+        name = next((n for n in dep_map if n.lower() == label.lower()), None)
+        if name is None:
+            raise Unattributable(f"{SETUP_SCRIPT} changed the clone of {label}, which no dependency claims")
+        moved.add(name)
+    return moved
+
+
+def _shell_functions(text: str) -> dict[str, str]:
+    """name -> body, for `name() {` ... `}` blocks and one-line definitions."""
+    out = {m.group(1): m.group(2) for m in SHELL_FUNCTION.finditer(text)}
+    out.update({m.group(1): m.group(2) for m in SHELL_ONE_LINE_FUNCTION.finditer(text) if m.group(1) not in out})
+    return out
+
+
+def _fetch_logic(text: str) -> dict[str, list[str]]:
+    """The code every clone runs: the clone functions, the functions their
+    calls' arguments run, and everything those call, each body without
+    comments or layout. A change here can move every fetched source."""
+    functions = _shell_functions(text)
+    calls = " ".join(m.group(2) for m in CLONE_CALL.finditer(text.replace("\\\n", " ")))
+    pending = [n for n in functions if n.startswith("ensure_shared_")
+               or re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", calls)]
+    seen: dict[str, list[str]] = {}
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        body = functions[name]
+        seen[name] = [line.strip() for line in body.splitlines()
+                      if line.strip() and not line.strip().startswith("#")]
+        pending += [n for n in functions if n not in seen
+                    and re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", body)]
+    return seen
+
+
+def _clones(text: str) -> dict[str, list[tuple[str, tuple]]]:
+    """Each clone call by its label (the dependency's name): the call's
+    arguments and the values assigned to every variable they read, so a
+    changed URL, ref or ref variable all change it."""
+    joined = text.replace("\\\n", " ")
+    assigned: dict[str, list[str]] = {}
+    for m in SHELL_ASSIGNMENT.finditer(joined):
+        assigned.setdefault(m.group(1), []).append(m.group(2))
+    out: dict[str, list[tuple[str, tuple]]] = {}
+    for m in CLONE_CALL.finditer(joined):
+        args = m.group(2).strip()
+        reads = tuple((v, tuple(assigned.get(v, ()))) for v in sorted(set(SHELL_VARIABLE.findall(args))))
+        out.setdefault(m.group(1), []).append((args, reads))
+    return out
+
+
 def fetchcontent_blocks(text: str | None, platform: str) -> list[list[str]] | None:
     """The platform-effective text of the root file's FetchContent blocks."""
     if text is None:
@@ -391,6 +492,8 @@ def attribute(base: dict[str, str | None], head: dict[str, str | None], platform
                 moved |= manifest_names(b, h, platform)
             elif path == DEPENDENCIES_CMAKE:
                 moved |= cmake_names(b, h, platform, dep_map)
+            elif path == SETUP_SCRIPT:
+                moved |= setup_names(b, h, dep_map)
             elif path == ROOT_CMAKE:
                 if fetchcontent_blocks(b, platform) != fetchcontent_blocks(h, platform):
                     raise Unattributable(f"a FetchContent block in {ROOT_CMAKE} changed")

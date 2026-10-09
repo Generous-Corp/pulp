@@ -124,10 +124,11 @@ CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
 # content without changing any path the codemodel digests or any archive a
 # recorded link names (FetchContent archives are treated as pinned), so an
 # executable that builds against a moved dependency is not keyed. The root
-# CMakeLists.txt counts only through its FetchContent blocks
-# (dependency_pins.PIN_PATHS); this set is the files that are pins as a whole,
-# which the reuse replay's blunter rule reads.
-DEPENDENCY_PIN_PATHS = frozenset(dependency_pins.PIN_PATHS) - {dependency_pins.ROOT_CMAKE}
+# CMakeLists.txt counts only through its FetchContent blocks and setup.sh only
+# through its SDK refs (dependency_pins.PIN_PATHS); this set is the files that
+# are pins as a whole, which the reuse replay's blunter rule reads.
+DEPENDENCY_PIN_PATHS = frozenset(dependency_pins.PIN_PATHS) - {dependency_pins.ROOT_CMAKE,
+                                                               dependency_pins.SETUP_SCRIPT}
 # Registration labels that mean the test drives a shared host resource.
 ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
 COMPILE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".mm", ".m")

@@ -323,6 +323,21 @@ class RealRecordTests(unittest.TestCase):
         self.assertGreater(linkers, 100)
         self.assertLess(linkers, len(self.executables))
 
+    def test_an_sdk_ref_bump_rekeys_exactly_that_sdks_linkers_of_a_real_record(self):
+        for old, new, name, target in (("build_66", "build_67", "VST3 SDK", "vst3-sdk"),
+                                       ("AudioUnitSDK-1.3.0", "AudioUnitSDK-1.4.0", "AudioUnitSDK", "ausdk")):
+            with self.subTest(name=name):
+                pins = dp.attribute({dp.SETUP_SCRIPT: SETUP}, {dp.SETUP_SCRIPT: SETUP.replace(old, new)},
+                                    "darwin", MAP)
+                self.assertEqual(pins, dp.Pins("names", frozenset({name})))
+                linkers = sum(target in self.index._deps(t) for t in self.executables.values())
+                self.assertEqual(self.rekeyed(pins), linkers)
+                self.assertGreater(linkers, 0)
+                self.assertLess(linkers, len(self.executables))
+        unrelated = dp.attribute({dp.SETUP_SCRIPT: SETUP}, {dp.SETUP_SCRIPT: SETUP.replace("echo done", "echo ok")},
+                                 "darwin", MAP)
+        self.assertEqual(self.rekeyed(unrelated), 0)
+
     @unittest.skipIf(tomllib is None, "tomllib unavailable; cannot read .shipyard/config.toml")
     def test_the_record_still_binds_under_this_base_record_policy(self):
         # rules_digest hashes this table; a fact added to strand older records
@@ -367,6 +382,97 @@ class RootCMakeTests(unittest.TestCase):
         self.assertTrue(dp.fetchcontent_blocks(text, "darwin"))
 
 
+SETUP = """#!/usr/bin/env bash
+VST3_SDK_REF="v3.8.0_build_66"
+ensure_shared_git_source_with_retry "VST3 SDK" "https://github.com/steinbergmedia/vst3sdk.git" \\
+    "$VST3_SDK_REF" "$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
+ensure_shared_git_source_with_retry "woff2" "https://github.com/google/woff2.git" \\
+    "fb9c3379" "$(fetchcontent_cache_dir_name "woff2" "fb9c3379")"
+WGPU_NATIVE_VERSION="v24.0.3.1"
+ensure_shared_archive_source "wgpu-native runtime" \\
+    "https://github.com/gfx-rs/wgpu-native/releases/download/${WGPU_NATIVE_VERSION}/x.zip"
+if [ "$(uname)" = Darwin ]; then
+    AU_SDK_REF="AudioUnitSDK-1.3.0"
+fi
+echo done
+"""
+
+
+class SetupScriptTests(unittest.TestCase):
+    def moved(self, head: str) -> dp.Pins:
+        return dp.attribute({dp.SETUP_SCRIPT: SETUP}, {dp.SETUP_SCRIPT: head}, "darwin", MAP)
+
+    def test_a_ref_bump_moves_its_sdk(self):
+        self.assertEqual(self.moved(SETUP.replace("v3.8.0_build_66", "v3.9.0_build_1")),
+                         dp.Pins("names", frozenset({"VST3 SDK"})))
+        self.assertEqual(self.moved(SETUP.replace("AudioUnitSDK-1.3.0", "AudioUnitSDK-1.4.0")),
+                         dp.Pins("names", frozenset({"AudioUnitSDK"})))
+
+    def test_a_clone_source_change_moves_its_dependency(self):
+        fork = SETUP.replace("github.com/steinbergmedia/vst3sdk.git", "github.com/someone/vst3sdk.git")
+        self.assertEqual(self.moved(fork), dp.Pins("names", frozenset({"VST3 SDK"})))
+        # The clone's label is the manifest name, matched without case.
+        self.assertEqual(self.moved(SETUP.replace('"fb9c3379"', '"fb9c3380"', 1)),
+                         dp.Pins("names", frozenset({"WOFF2"})))
+
+    def test_a_clone_no_dependency_claims_moves_all(self):
+        for head in (SETUP.replace("v24.0.3.1", "v25.0.0"),  # a variable the unclaimed clone reads
+                     SETUP + 'ensure_shared_git_source_with_retry "Unknown" "https://x/y.git" "1"\n'):
+            with self.subTest(head=head[-60:]):
+                pins = self.moved(head)
+                self.assertEqual(pins.scope, "all")
+                self.assertIn("which no dependency claims", pins.why)
+
+    FETCH = """retry_git() {
+    git "$@"
+}
+
+ensure_shared_git_source() {
+    # clone into the shared cache
+    retry_git clone "$2" "$4"
+}
+
+unrelated() {
+    echo "$1"
+}
+""" + SETUP
+
+    def test_a_change_to_the_shared_fetch_logic_moves_all(self):
+        for old, new in (('retry_git clone "$2" "$4"', 'retry_git clone --mirror "$2" "$4"'),  # the clone function
+                         ('    git "$@"', '    git -c http.proxy=x "$@"')):                   # a function it calls
+            with self.subTest(new=new):
+                pins = dp.attribute({dp.SETUP_SCRIPT: self.FETCH}, {dp.SETUP_SCRIPT: self.FETCH.replace(old, new)},
+                                    "darwin", MAP)
+                self.assertEqual((pins.scope, pins.why),
+                                 ("all", "setup.sh changed the shared fetch logic every clone runs"))
+
+    def test_comments_in_and_functions_outside_the_fetch_logic_move_nothing(self):
+        for old, new in (("# clone into the shared cache", "# clone it"), ('echo "$1"', 'echo "$2"')):
+            with self.subTest(new=new):
+                self.assertEqual(dp.attribute({dp.SETUP_SCRIPT: self.FETCH},
+                                              {dp.SETUP_SCRIPT: self.FETCH.replace(old, new)}, "darwin", MAP),
+                                 dp.Pins("names"))
+
+    def test_the_live_fetch_logic_holds_the_clone_functions(self):
+        logic = dp._fetch_logic((HERE.parents[1] / dp.SETUP_SCRIPT).read_text(encoding="utf-8"))
+        self.assertTrue({"ensure_shared_git_source", "ensure_shared_git_source_with_retry",
+                         "ensure_shared_archive_source", "fetchcontent_cache_dir_name"} <= set(logic))
+
+    def test_other_setup_lines_move_nothing(self):
+        self.assertEqual(self.moved(SETUP.replace("echo done", "echo finished\nset -x")), dp.Pins("names"))
+
+    def test_a_ref_no_dependency_claims_moves_all(self):
+        pins = self.moved(SETUP + 'NEW_SDK_REF="1"\n')
+        self.assertEqual((pins.scope, pins.why), ("all", "setup.sh changed NEW_SDK_REF, which no dependency claims"))
+
+    def test_every_sdk_ref_in_the_live_script_is_claimed(self):
+        text = (HERE.parents[1] / dp.SETUP_SCRIPT).read_text(encoding="utf-8")
+        refs = {m.group(1) for m in dp.SDK_REF.finditer(text)}
+        claimed = {r for e in MAP.values() for r in e.get("setup_refs") or []}
+        self.assertTrue(refs)
+        self.assertEqual(sorted(refs - claimed), [])
+
+
 # Source kinds that never link into a C++ executable; every other kind must
 # be mapped or listed as unmapped with a reason.
 NON_LINKING_KINDS = frozenset({"npm", "python-pip", "transitive-python", "cargo", "release-asset"})
@@ -408,7 +514,8 @@ class MapTests(unittest.TestCase):
         for name, entry in MAP.items():
             with self.subTest(name=name):
                 self.assertTrue(entry.get("fetchcontent") or entry.get("targets") or entry.get("archives"))
-                self.assertEqual(set(entry) - {"fetchcontent", "targets", "archives", "anchors", "platforms"}, set())
+                self.assertEqual(set(entry) - {"fetchcontent", "targets", "archives", "anchors", "platforms",
+                                                       "setup_refs"}, set())
 
     def test_every_anchor_claims_a_block_in_the_live_file(self):
         text = (HERE.parents[1] / dp.DEPENDENCIES_CMAKE).read_text(encoding="utf-8")

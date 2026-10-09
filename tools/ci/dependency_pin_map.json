@@ -1,7 +1,7 @@
 {
  "schema": "pulp-dependency-pin-map/v1",
  "dependencies": {
-  "AudioUnitSDK": {"targets": ["ausdk"], "anchors": ["\\badd_library\\(ausdk\\b"]},
+  "AudioUnitSDK": {"targets": ["ausdk"], "setup_refs": ["AU_SDK_REF"], "anchors": ["\\badd_library\\(ausdk\\b"]},
   "Brotli": {"fetchcontent": ["brotli"], "targets": ["pulp-canvas"]},
   "Catch2": {"fetchcontent": ["catch2"]},
   "DRACO": {"fetchcontent": ["draco"]},
@@ -13,7 +13,7 @@
   "SheenBidi": {"fetchcontent": ["sheenbidi"]},
   "simdjson": {"fetchcontent": ["simdjson"]},
   "Skia": {"archives": ["*/pulp/skia/*", "<src>/external/skia-build/*"], "anchors": ["\\bPULP_SKIA_AUTOFETCH\\b", "\\bset\\(PULP_HAS_SKIA FALSE\\b"]},
-  "VST3 SDK": {"targets": ["vst3-sdk"], "anchors": ["\\badd_library\\(vst3-sdk\\b"]},
+  "VST3 SDK": {"targets": ["vst3-sdk"], "setup_refs": ["VST3_SDK_REF"], "anchors": ["\\badd_library\\(vst3-sdk\\b"]},
   "WebGPU-distribution": {"fetchcontent": ["webgpu"]},
   "WOFF2": {"fetchcontent": ["woff2"], "targets": ["pulp-canvas"]},
   "yaml-cpp": {"fetchcontent": ["yaml-cpp"]},
