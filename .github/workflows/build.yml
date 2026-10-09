@@ -1286,6 +1286,15 @@ jobs:
       matrix: ${{ fromJSON(needs.protected-receipt-reuse.outputs.matrix_json || needs.resolve-provider.outputs.matrix_json || '{"include":[]}') }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
+    # In a merge group only the macOS child is a required context; the Linux
+    # child is advisory and the queue never waits on it. Without this, a red
+    # advisory leg turns the whole run's conclusion to `failure` while every
+    # required check is green, and anything that reads run conclusions (the
+    # Actions list, `gh run list`, queue audits) reports a healthy batch as
+    # failed. The leg's own check run still shows its result. The macOS child
+    # is never covered, so a real required failure still fails the run, and PR
+    # and push runs keep their existing conclusions.
+    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.key != 'macos' }}
     # The macOS child owns the required `macos` context directly on PR heads,
     # Shipyard workflow dispatches, and merge groups. A reporter cannot depend
     # on one matrix child, so

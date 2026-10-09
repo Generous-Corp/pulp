@@ -229,12 +229,59 @@ E: Failed to fetch https://packages.microsoft.com/repos/azure-cli/dists/noble/In
                 sleeper=lambda _: None,
             )
 
-            self.assertEqual(calls[0], ["apt-get", "update"])
+            update_prefix = [
+                "timeout",
+                f"--kill-after={MODULE.TIMEOUT_KILL_AFTER_SECONDS}",
+                str(MODULE.UPDATE_ATTEMPT_SECONDS),
+                "apt-get",
+                *MODULE.APT_ACQUIRE_OPTIONS,
+            ]
+            install_prefix = [
+                *update_prefix[:2],
+                str(MODULE.INSTALL_ATTEMPT_SECONDS),
+                *update_prefix[3:],
+            ]
+            self.assertEqual(calls[0], [*update_prefix, "update"])
             self.assertEqual(len(calls), 3)
             self.assertEqual(calls[1][-1], "update")
             self.assertEqual(calls[2][-4:], ["install", "-y", "cmake", "ninja-build"])
-            self.assertEqual(calls[1][1:-1], calls[2][1:-4])
-            self.assertIn("Dir::Etc::sourcelist=", " ".join(calls[1]))
+            quarantine_options = calls[1][len(update_prefix):-1]
+            self.assertEqual(calls[2][:len(install_prefix)], install_prefix)
+            self.assertEqual(
+                calls[2][len(install_prefix):-4], quarantine_options
+            )
+            self.assertIn("Dir::Etc::sourcelist=", " ".join(quarantine_options))
+
+    def test_every_apt_attempt_is_bounded_and_a_hang_is_retried(self) -> None:
+        # A stalled mirror produces no output and no exit. Each attempt must
+        # carry apt's connection timeout and a wall-clock bound, and an attempt
+        # the bound ends (exit 124) must be retried rather than fail the lane.
+        calls: list[list[str]] = []
+        outcomes = iter([MODULE.TIMEOUT_EXIT_CODE, 0, 0])
+
+        def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            calls.append(list(command))
+            return subprocess.CompletedProcess(command, next(outcomes), stdout="")
+
+        MODULE.install(
+            ["cmake"],
+            source_root=pathlib.Path("/nonexistent"),
+            platform="linux",
+            euid=1000,
+            subprocess_runner=runner,
+            sleeper=lambda _: None,
+        )
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0], calls[1])
+        for command in calls:
+            self.assertEqual(command[:2], ["sudo", "timeout"])
+            self.assertEqual(command[4], "apt-get")
+            joined = " ".join(command)
+            self.assertIn("Acquire::http::Timeout=30", joined)
+            self.assertIn("Acquire::https::Timeout=30", joined)
+        self.assertEqual(calls[0][3], str(MODULE.UPDATE_ATTEMPT_SECONDS))
+        self.assertEqual(calls[2][3], str(MODULE.INSTALL_ATTEMPT_SECONDS))
+        self.assertEqual(calls[2][-2:], ["-y", "cmake"])
 
     def test_dry_run_resolves_without_invoking_apt(self) -> None:
         result = subprocess.run(

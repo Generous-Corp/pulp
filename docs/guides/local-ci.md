@@ -2510,9 +2510,11 @@ tell an executed `macos` suite from a reused receipt), the other workflows'
 jobs through one `commits/<sha>/check-runs` read kept to those runs' check
 suites (so a push run on the landed commit is never read as the gate), and the
 commit's statuses for a context published as a status. Never by a run's
-conclusion, which also folds in advisory legs: while hosted Linux was failing
+conclusion, which used to fold in advisory legs: while hosted Linux was failing
 every merge group, reading the run called every green tip red and turned the
-Linux failure into a fake batch streak. And never by `macos` alone: on
+Linux failure into a fake batch streak. In a merge group the Linux matrix leg is
+now job-level `continue-on-error`, so it no longer turns the run's conclusion
+red, but a run conclusion still cannot say which required context failed. And never by `macos` alone: on
 2026-09-29 the required `drift-fast` context was red on main for about fourteen
 hours while `macos` stayed green, the macos-only detector read `healthy`
 throughout, and every batch that failed `drift-fast` read as a pass, so the
