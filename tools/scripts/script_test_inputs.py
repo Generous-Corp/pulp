@@ -151,7 +151,7 @@ def _cache_values(build_dir: Path) -> dict[str, str] | None:
 def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
     """Why this build's compiled entries cannot stand for the gate's: each
     switch whose value differs from the gate's configure (examples off, a
-    Release build, no sanitizer). Empty for a gate-shaped build, and for one
+    Release build, no sanitizer, the exact-provider proof off). Empty for a gate-shaped build, and for one
     with no CMakeCache.txt to read (no build tree, no compiled entries)."""
     cache = _cache_values(build_dir) if build_dir else None
     if cache is None:
@@ -165,6 +165,12 @@ def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
     build_type = cache.get("CMAKE_BUILD_TYPE", "")
     if build_type and build_type != "Release":
         reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
+    # The GPU-audio exact-provider proof registers its probes only when ON;
+    # the gate configures it OFF, so a list written ON names tests the gate
+    # never has.
+    proof = cache.get("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF", "OFF")
+    if not off(proof):
+        reasons.append(f"PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF={proof} (the gate configures OFF)")
     # Without a format SDK the configure registers none of that format's
     # tests or plugin targets, so the list it writes silently drops their
     # inputs. A cache from before a flag existed omits it and is not judged.
@@ -1163,7 +1169,8 @@ def main(argv: list[str]) -> int:
     if a.write and off_profile:
         print("script-test-inputs: refusing to write: the compiled entries depend on the configuration and "
               "this build is not the gate's: " + "; ".join(off_profile) + ".\nRegenerate from a gate-profile "
-              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
+              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER, "
+              "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF OFF).",
               file=sys.stderr)
         return 2
     if a.write:
