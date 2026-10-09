@@ -16,23 +16,35 @@ class P2CampaignContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "host-preflight.json"
             source = "a" * 40
-            path.write_text(json.dumps({
+            executable = Path(root) / "pulp"
+            executable.write_bytes(b"pulp-fixture")
+            executable.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+            manifest = Path(root) / "build-info.hpp"
+            manifest.write_text("kGitSha = \"" + source + "\"\n", encoding="utf-8")
+            receipt = {
                 "schema": "pulp.gpu-audio.p2.host-preflight.v1",
                 "status": "passed", "source_revision": source, "host_id": "m5-studio",
                 "sampled_at": datetime.now(timezone.utc).isoformat(),
                 "quiet_host": True, "host_vitals_level": "green",
                 "gpu_contention": False, "ui_contention": False,
                 "thermal_state": "nominal",
-            }), encoding="utf-8")
+                "gpu_health_observation": {"status": "valid", "observation": {
+                    "status": "valid", "schema": "pulp.gpu-health-result.v2",
+                    "run_id": "fixture", "probe_id": "gpu-compute-magnitude",
+                    "adapter": {"status": "authentic", "class": "hardware",
+                                 "name": "Apple M5", "backend": "Metal", "device": "m5"},
+                }},
+                "gpu_health_source": {"status": "valid", "path": str(executable),
+                                       "sha256": campaign.sha256(executable),
+                                       "source_revision": source,
+                                       "manifest_path": str(manifest),
+                                       "manifest_sha256": campaign.sha256(manifest)},
+            }
+            path.write_text(json.dumps(receipt), encoding="utf-8")
             receipt = campaign.validate_host_preflight(path, source)
             self.assertEqual(receipt["host_id"], "m5-studio")
-            path.write_text(json.dumps({
-                "schema": "pulp.gpu-audio.p2.host-preflight.v1",
-                "status": "passed", "source_revision": source, "host_id": "m5-studio",
-                "sampled_at": "2000-01-01T00:00:00Z", "quiet_host": True,
-                "host_vitals_level": "green", "gpu_contention": False,
-                "ui_contention": False, "thermal_state": "nominal",
-            }), encoding="utf-8")
+            receipt["sampled_at"] = "2000-01-01T00:00:00Z"
+            path.write_text(json.dumps(receipt), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "fresh"):
                 campaign.validate_host_preflight(path, source)
 
@@ -49,6 +61,19 @@ class P2CampaignContractTests(unittest.TestCase):
             }), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "source_revision|contention"):
                 campaign.validate_host_preflight(path, "a" * 40)
+
+    def test_host_preflight_rejects_missing_gpu_health_binding(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "host-preflight.json"
+            source = "a" * 40
+            path.write_text(json.dumps({
+                "schema": "pulp.gpu-audio.p2.host-preflight.v1", "status": "passed",
+                "source_revision": source, "host_id": "m5", "sampled_at": datetime.now(timezone.utc).isoformat(),
+                "quiet_host": True, "host_vitals_level": "green", "gpu_contention": False,
+                "ui_contention": False, "thermal_state": "nominal",
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "gpu_health|gpu_build_identity"):
+                campaign.validate_host_preflight(path, source)
 
     def test_host_preflight_mutation_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:

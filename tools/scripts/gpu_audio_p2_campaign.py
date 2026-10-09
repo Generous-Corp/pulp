@@ -149,6 +149,16 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _matches_sha256(path: Path | None, expected: Any) -> bool:
+    if path is None or not path.is_file() or path.is_symlink() \
+            or not isinstance(expected, str) or SHA256_RE.fullmatch(expected) is None:
+        return False
+    try:
+        return sha256(path) == expected
+    except OSError:
+        return False
+
+
 def validate_host_preflight(path: Path, expected_source_revision: str,
                             max_age_seconds: int = 900) -> dict[str, Any]:
     """Require a fresh, quiet, source-bound host admission receipt.
@@ -178,6 +188,33 @@ def validate_host_preflight(path: Path, expected_source_revision: str,
         "thermal": isinstance(receipt.get("thermal_state"), str)
         and bool(receipt["thermal_state"].strip()),
     }
+    gpu_observation = receipt.get("gpu_health_observation")
+    gpu_source = receipt.get("gpu_health_source")
+    observation = (gpu_observation.get("observation")
+                   if isinstance(gpu_observation, dict) else None)
+    adapter = observation.get("adapter") if isinstance(observation, dict) else None
+    source_path = Path(gpu_source.get("path")) if isinstance(gpu_source, dict) and isinstance(
+        gpu_source.get("path"), str) else None
+    manifest_path = Path(gpu_source.get("manifest_path")) if isinstance(gpu_source, dict) and isinstance(
+        gpu_source.get("manifest_path"), str) else None
+    required["gpu_health"] = (
+        isinstance(gpu_observation, dict) and gpu_observation.get("status") == "valid"
+        and isinstance(observation, dict)
+        and observation.get("status") == "valid"
+        and observation.get("schema") == "pulp.gpu-health-result.v2"
+        and isinstance(observation.get("run_id"), str) and bool(observation["run_id"].strip())
+        and observation.get("probe_id") == "gpu-compute-magnitude"
+        and isinstance(adapter, dict) and adapter.get("status") == "authentic"
+        and adapter.get("class") == "hardware"
+        and all(isinstance(adapter.get(key), str) and adapter[key]
+                for key in ("name", "backend", "device"))
+    )
+    required["gpu_build_identity"] = (
+        isinstance(gpu_source, dict) and gpu_source.get("status") == "valid"
+        and gpu_source.get("source_revision") == expected_source_revision
+        and _matches_sha256(source_path, gpu_source.get("sha256"))
+        and _matches_sha256(manifest_path, gpu_source.get("manifest_sha256"))
+    )
     sampled_at = receipt.get("sampled_at")
     try:
         sampled_epoch = datetime.fromisoformat(sampled_at.replace("Z", "+00:00")).timestamp()

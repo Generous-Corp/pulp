@@ -35,6 +35,12 @@ UTC_MEASURED_RE = re.compile(
     r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
     r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
 )
+PINNED_TOOLS = {
+    "ps": ("/bin/ps", "/usr/bin/ps"),
+    "pmset": ("/usr/bin/pmset",),
+    "ioreg": ("/usr/sbin/ioreg",),
+    "swift": ("/usr/bin/swift",),
+}
 
 
 def _canonical(value: Any) -> bytes:
@@ -81,6 +87,21 @@ def _command_provenance(command: list[str]) -> dict[str, Any]:
     except OSError:
         resolved = None
     return {"argv0": raw, "path": resolved, "sha256": digest}
+
+
+def _pinned_tool(name: str) -> str:
+    """Resolve a system observation tool without consulting PATH."""
+    for raw in PINNED_TOOLS.get(name, ()):
+        candidate = Path(raw)
+        try:
+            if (candidate.is_file() and not candidate.is_symlink()
+                    and candidate.stat().st_mode & 0o111):
+                return str(candidate)
+        except OSError:
+            continue
+    # Keep the intended absolute path in the receipt when unavailable; _run
+    # records a non-zero result and collect() fails closed.
+    return PINNED_TOOLS.get(name, (f"/pulp/missing/{name}",))[0]
 
 
 def _git_head() -> str:
@@ -172,6 +193,39 @@ def _gpu_health_command() -> list[str]:
     return [str(REPO_ROOT / "build" / "pulp"), "doctor", "gpu", "--json"]
 
 
+def _gpu_health_identity(command: list[str], source_revision: str) -> dict[str, Any]:
+    """Verify a doctor executable belongs to this checkout's exact build."""
+    executable = Path(command[0])
+    try:
+        executable = executable.resolve(strict=True)
+        root = REPO_ROOT.resolve(strict=True)
+        if executable.is_symlink() or root not in executable.parents:
+            return {"status": "invalid", "reason": "executable_outside_checkout"}
+        manifest = None
+        for parent in (executable.parent, *executable.parents):
+            candidate = parent / "core/runtime/generated/Release/pulp/runtime/build_info.hpp"
+            if candidate.is_file() and not candidate.is_symlink():
+                manifest = candidate
+                break
+        if manifest is None:
+            return {"status": "invalid", "reason": "build_identity_missing"}
+        text = manifest.read_text(encoding="utf-8")
+        match = re.search(r'kGitSha\s*=\s*"([0-9a-f]{40})"', text)
+        if match is None or match.group(1) != source_revision:
+            return {"status": "invalid", "reason": "build_source_revision_mismatch"}
+        executable_sha = _file_sha256(executable)
+        manifest_sha = _file_sha256(manifest)
+        if executable_sha is None or manifest_sha is None:
+            return {"status": "invalid", "reason": "build_identity_unreadable"}
+        return {
+            "status": "valid", "path": str(executable), "sha256": executable_sha,
+            "source_revision": source_revision, "manifest_path": str(manifest),
+            "manifest_sha256": manifest_sha,
+        }
+    except (OSError, UnicodeError):
+        return {"status": "invalid", "reason": "build_identity_unreadable"}
+
+
 def _parse_gpu_health(raw: str, *, now: datetime | None = None) -> tuple[str, dict[str, Any]]:
     """Accept only a fresh, machine-produced authentic compute health result."""
     now = now or datetime.now(timezone.utc)
@@ -181,6 +235,13 @@ def _parse_gpu_health(raw: str, *, now: datetime | None = None) -> tuple[str, di
         return "unknown", {"status": "invalid", "reason": "json_invalid"}
     if not isinstance(value, dict) or value.get("schema") != GPU_HEALTH_SCHEMA:
         return "unknown", {"status": "invalid", "reason": "schema_invalid"}
+    if (value.get("version") != 2
+            or not isinstance(value.get("run_id"), str) or not value["run_id"].strip()
+            or value.get("render_requested") is not True
+            or not isinstance(value.get("recommendations"), list)
+            or not isinstance(value.get("probes"), list)
+            or not value["probes"]):
+        return "unknown", {"status": "invalid", "reason": "top_level_shape_invalid"}
     if value.get("verdict") != "pass" or value.get("health_state") != "healthy":
         return "unknown", {"status": "invalid", "reason": "health_not_passing"}
     sampled_at = value.get("measured_at_utc")
@@ -259,16 +320,21 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
     source = source_revision or _git_head()
     if not re.fullmatch(r"[0-9a-f]{40}", source):
         raise RuntimeError("source_revision is not an immutable commit SHA")
-    swift_provenance = _tool_provenance("swift")
     observations = [
         _run([str(HOST_VITALS), "--json"], runner),
-        _run(["ps", "-axo", "pid=,pcpu=,comm="], runner),
-        _run(["pmset", "-g", "therm"], runner),
-        _run(["ioreg", "-r", "-c", "IOAccelerator", "-l"], runner),
-        _run(["swift", str(THERMAL_HELPER)], runner),
+        _run([_pinned_tool("ps"), "-axo", "pid=,pcpu=,comm="], runner),
+        _run([_pinned_tool("pmset"), "-g", "therm"], runner),
+        _run([_pinned_tool("ioreg"), "-r", "-c", "IOAccelerator", "-l"], runner),
+        _run([_pinned_tool("swift"), str(THERMAL_HELPER)], runner),
         _run(_gpu_health_command(), runner, timeout=30),
     ]
     gpu_health_command = observations[5]["argv"]
+    gpu_health_source = _gpu_health_identity(gpu_health_command, source)
+    observation_tools = {
+        name: _command_provenance([observations[index]["argv"][0]])
+        for name, index in (("host_vitals", 0), ("ps", 1), ("pmset", 2),
+                            ("ioreg", 3), ("swift", 4))
+    }
     reasons: list[str] = []
     try:
         vitals = json.loads(observations[0]["stdout"])
@@ -318,7 +384,8 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
     _, gpu_busy = _parse_gpu(observations[3]["stdout"])
     gpu_status, gpu_health_observation = _parse_gpu_health(
         observations[5]["stdout"] if observations[5]["returncode"] == 0 else "")
-    if observations[5]["returncode"] != 0 or gpu_status != "passed":
+    if (observations[5]["returncode"] != 0 or gpu_status != "passed"
+            or gpu_health_source.get("status") != "valid"):
         reasons.append("gpu_observation_unavailable")
     # A non-zero registry counter remains a conservative negative control.  It
     # can block, but a zero value can never establish the positive proof.
@@ -337,15 +404,16 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
         "gpu_contention": "gpu_work_queues_busy" in reasons,
         "gpu_observation_status": gpu_status, "gpu_busy_work_queues": gpu_busy,
         "gpu_health_observation": gpu_health_observation,
-        "gpu_health_source": _command_provenance(gpu_health_command),
+        "gpu_health_source": gpu_health_source,
         "ui_contention": "ui_contention_present" in reasons,
         "thermal_state": thermal_state, "thermal_observation": thermal_observation,
         "thermal_source": {
             "schema": THERMAL_SCHEMA,
             "helper": str(THERMAL_HELPER),
             "helper_sha256": _file_sha256(THERMAL_HELPER),
-            "tool": swift_provenance,
+            "tool": observation_tools["swift"],
         },
+        "observation_tools": observation_tools,
         "reasons": reasons,
         "raw_observations_sha256": raw_hash, "observations": observations,
     }
