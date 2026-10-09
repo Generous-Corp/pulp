@@ -5,6 +5,7 @@
 # along.
 add_library(pulp-browser-capture-backend STATIC
     browser_capture_backend.cpp
+    browser_capture_provenance.cpp
     browser_discovery.cpp
     browser_capture_diagnostics.cpp
     node_runtime.cpp)
@@ -16,7 +17,8 @@ target_include_directories(pulp-browser-capture-backend PUBLIC
 target_compile_definitions(pulp-browser-capture-backend PRIVATE
     PULP_BROWSER_CAPTURE_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/browser_capture/capture.mjs")
 target_link_libraries(pulp-browser-capture-backend PUBLIC
-    pulp::platform)
+    pulp::platform
+    pulp::runtime)
 
 # Keep the pure CLI compatibility policy in one compiled object shared by the
 # production tool and its adapter tests. Besides avoiding implementation drift,
@@ -103,6 +105,46 @@ add_custom_target(pulp-browser-capture-runtime
     COMMENT "Staging browser-capture runtime beside pulp-import-design")
 add_dependencies(pulp-import-design pulp-browser-capture-runtime)
 
+# capture.mjs intentionally imports the shared materialized binding contract
+# from the sibling jsx-runtime directory. Keep that source of truth in one
+# place while staging the relative layout expected by the packaged helper.
+set(_pulp_materialized_binding_contract
+    "${CMAKE_CURRENT_SOURCE_DIR}/jsx-runtime/materialized_binding_contract.mjs")
+set(_pulp_materialized_source_emitter
+    "${CMAKE_CURRENT_SOURCE_DIR}/jsx-runtime/materialized_source_emitter.mjs")
+set(_pulp_materialized_ids_map
+    "${CMAKE_CURRENT_SOURCE_DIR}/jsx-runtime/materialized_ids_map.mjs")
+add_custom_target(pulp-jsx-runtime-materialized-contract
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_pulp_materialized_binding_contract}"
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime/materialized_binding_contract.mjs"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS "${_pulp_materialized_binding_contract}"
+    COMMENT "Staging shared materialized binding contract beside pulp-import-design")
+add_dependencies(pulp-import-design pulp-jsx-runtime-materialized-contract)
+add_custom_target(pulp-jsx-runtime-materialized-emitter
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_pulp_materialized_source_emitter}"
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime/materialized_source_emitter.mjs"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS "${_pulp_materialized_source_emitter}"
+    COMMENT "Staging materialized runtime source emitter beside pulp-import-design")
+add_dependencies(pulp-import-design pulp-jsx-runtime-materialized-emitter)
+add_custom_target(pulp-jsx-runtime-materialized-ids-map
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_pulp_materialized_ids_map}"
+        "$<TARGET_FILE_DIR:pulp-import-design>/jsx-runtime/materialized_ids_map.mjs"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS "${_pulp_materialized_ids_map}"
+    COMMENT "Staging materialized ids map helper beside pulp-import-design")
+add_dependencies(pulp-import-design pulp-jsx-runtime-materialized-ids-map)
+
 set(PULP_NODE_RUNTIME_EXECUTABLE "" CACHE FILEPATH
     "Self-contained target-architecture Node executable staged with design import")
 if(PULP_NODE_RUNTIME_EXECUTABLE)
@@ -147,6 +189,15 @@ install(TARGETS pulp-import-design
     BUNDLE DESTINATION bin)
 install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
+install(FILES
+    "${_pulp_materialized_binding_contract}"
+    "${_pulp_materialized_source_emitter}"
+    "${_pulp_materialized_ids_map}"
+    DESTINATION bin/jsx-runtime)
+install(FILES
+    "${_pulp_materialized_source_emitter}"
+    "${_pulp_materialized_ids_map}"
+    DESTINATION bin/jsx-runtime)
 
 add_executable(pulp-design-import-bench
     design_import_benchmark.cpp)

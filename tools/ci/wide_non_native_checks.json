@@ -23,6 +23,10 @@
       "argv": ["{repo}/tools/scripts/forced_restore_lint.py", "--root", "{repo}"]
     },
     {
+      "name": "vellum-boundary-lint",
+      "argv": ["{repo}/tools/scripts/vellum_boundary_lint.py"]
+    },
+    {
       "name": "framework-neutrality",
       "argv": ["{repo}/tools/scripts/framework_neutrality_check.py"]
     },

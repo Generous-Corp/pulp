@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import json_schema_lite
+from script_argv import argv_for
 import gpu_first_visible_a3_trace_producer_overhead as trace_producer_overhead
 
 
@@ -531,7 +532,7 @@ def validate_generated_evidence(
         wrapper_ref, evidence_root, kind, implementation_head,
     )
     completed = subprocess.run(
-        [str(producer), "verify-a3-evidence", "--kind", kind, "--artifact", str(artifact), "--json"],
+        [*argv_for(producer), "verify-a3-evidence", "--kind", kind, "--artifact", str(artifact), "--json"],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
     )
     try:
@@ -878,7 +879,7 @@ def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, impleme
         raise V2AcceptanceError(f"{role_id} sample producer is not executable")
     raw_path = resolve_artifact_path(campaign["raw_samples"], evidence_root, f"{role_id}.raw_samples")
     completed = subprocess.run(
-        [str(producer), "verify-a3-samples", "--raw", str(raw_path), "--trace", str(trace_path),
+        [*argv_for(producer), "verify-a3-samples", "--raw", str(raw_path), "--trace", str(trace_path),
          "--identity-sha256", identity_digest, "--json"],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
     )
@@ -910,7 +911,7 @@ def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, impleme
     ):
         raise V2AcceptanceError(f"{role_id} trace analyzer identity is invalid")
     completed = subprocess.run(
-        [str(analyzer), "trace", "gpu-startup", "--trace", str(trace_path), "--json"],
+        [*argv_for(analyzer), "trace", "gpu-startup", "--trace", str(trace_path), "--json"],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
     )
     try:

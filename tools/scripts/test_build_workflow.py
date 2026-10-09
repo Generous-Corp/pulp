@@ -12,10 +12,15 @@ import yaml
 WORKFLOW = (Path(__file__).parents[2] / ".github/workflows/build.yml").read_text(
     encoding="utf-8"
 )
+SANITIZERS_WORKFLOW_PATH = Path(__file__).parents[2] / ".github/workflows/sanitizers.yml"
 
 
 def _workflow() -> dict[str, object]:
     return yaml.safe_load(WORKFLOW)
+
+
+def _sanitizers_workflow() -> dict[str, object]:
+    return yaml.safe_load(SANITIZERS_WORKFLOW_PATH.read_text(encoding="utf-8"))
 
 
 class ProtectedReceiptWorkflowTest(unittest.TestCase):
@@ -65,7 +70,12 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
             "\n  linux:", 1
         )[0]
         self.assertIn("protected-receipt-reuse.outputs.macos_reused == 'true'", alias)
-        self.assertIn("protected receipt decision unavailable", alias)
+        # The verdict lives in the script the job runs.
+        self.assertIn("run: bash tools/ci/macos_merge_group_bootstrap.sh", alias)
+        verdict = (Path(__file__).parents[2] / "tools/ci/macos_merge_group_bootstrap.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("protected receipt decision unavailable", verdict)
 
     def test_receipts_are_only_published_after_successful_pr_validation(self) -> None:
         issue = WORKFLOW.split("- name: Issue exact protected-validation receipt", 1)[1].split(
@@ -105,6 +115,79 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         self.assertIn('--checkout-sha "$checkout_sha"', issuer)
         self.assertNotIn('--checkout-sha "$GITHUB_SHA"', issuer)
         self.assertIn('--base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA"', issuer)
+
+
+class LinuxRuntimeNodeProvisioningTest(unittest.TestCase):
+    """The Linux matrix must provision Node before materialized-runtime npm ci."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.steps = _build_steps()
+        cls.setup = cls.steps["Set up Node.js for materialized runtime tests (Linux)"]
+        cls.install = cls.steps["Install materialized runtime Node test dependencies (Linux)"]
+
+    def test_setup_node_is_linux_only_and_pinned(self) -> None:
+        self.assertEqual(self.setup["if"], "runner.os == 'Linux'")
+        self.assertEqual(self.setup["uses"], "actions/setup-node@v4")
+        self.assertEqual(self.setup["with"]["node-version"], "22.15.0")
+        self.assertEqual(self.setup["with"]["cache"], "npm")
+        self.assertEqual(
+            self.setup["with"]["cache-dependency-path"],
+            "tools/import-design/jsx-runtime/package-lock.json",
+        )
+
+    def test_runtime_install_is_linux_only_and_follows_provisioning(self) -> None:
+        self.assertEqual(self.install["if"], "runner.os == 'Linux'")
+        self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", self.install["run"])
+        names = [step.get("name") for step in _workflow()["jobs"]["build"]["steps"]]
+        self.assertLess(names.index(self.setup["name"]), names.index(self.install["name"]))
+
+    def test_runtime_install_is_present_for_macos(self) -> None:
+        steps = _build_steps()
+        install = steps["Install materialized runtime Node test dependencies (macOS)"]
+        self.assertEqual(install["if"], "runner.os == 'macOS'")
+        self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", install["run"])
+
+    def test_other_matrix_legs_do_not_claim_linux_runtime_install(self) -> None:
+        self.assertNotIn("runner.os != 'Linux'", str(self.install["if"]))
+        self.assertNotIn("npm ci --prefix tools/import-design/jsx-runtime", self.setup.get("run", ""))
+
+
+class SanitizerRuntimeNodeProvisioningTest(unittest.TestCase):
+    """ASan and UBSan provision JSX runtime dependencies before CTest."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = _sanitizers_workflow()
+
+    def test_asan_and_ubsan_install_locked_runtime_dependencies_before_ctest(self) -> None:
+        for job_name in ("asan", "ubsan"):
+            with self.subTest(job=job_name):
+                steps = self.workflow["jobs"][job_name]["steps"]
+                names = [step.get("name") for step in steps]
+                setup_name = "Set up Node.js for materialized runtime tests"
+                install_name = "Install materialized runtime Node test dependencies"
+                self.assertIn(setup_name, names)
+                self.assertIn(install_name, names)
+                setup = next(step for step in steps if step.get("name") == setup_name)
+                install = next(step for step in steps if step.get("name") == install_name)
+                self.assertEqual(setup.get("uses"), "actions/setup-node@v4")
+                self.assertEqual(setup["with"].get("node-version"), "22.15.0")
+                self.assertEqual(setup["with"].get("cache"), "npm")
+                self.assertEqual(
+                    setup["with"].get("cache-dependency-path"),
+                    "tools/import-design/jsx-runtime/package-lock.json",
+                )
+                self.assertIn(
+                    "npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund",
+                    install.get("run", ""),
+                )
+                first_ctest = next(
+                    index for index, step in enumerate(steps)
+                    if "ctest" in str(step.get("run", ""))
+                )
+                self.assertLess(names.index(setup_name), first_ctest)
+                self.assertLess(names.index(install_name), first_ctest)
 
 
 def _build_steps() -> dict[str, dict[str, object]]:
@@ -343,7 +426,18 @@ class LocalProofWorkflowTest(unittest.TestCase):
         self.assertTrue(ordinary)
         for name in sorted(ordinary):
             with self.subTest(job=name):
-                self.assertIn("!inputs.local_proof", str(self.jobs[name].get("if", "")))
+                condition = " ".join(str(self.jobs[name].get("if", "")).split())
+                # Dispatch inputs are absent on pull_request/merge_group events.
+                # The workflow therefore uses an event-aware equivalent guard;
+                # retain acceptance of the original direct negation as well.
+                self.assertTrue(
+                    "!inputs.local_proof" in condition
+                    or (
+                        "inputs.local_proof != true" in condition
+                        and "inputs.local_proof != 'true'" in condition
+                    ),
+                    condition,
+                )
 
 
 class CtestParallelismTest(unittest.TestCase):

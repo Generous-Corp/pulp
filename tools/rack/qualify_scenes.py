@@ -204,6 +204,10 @@ def _json_object_receipt(path: Path) -> bool:
 
 
 def _fsync_directory(path: Path) -> None:
+    # Windows cannot open a directory as a file descriptor, and NTFS makes the
+    # rename itself durable, so there is no directory entry to flush there.
+    if os.name == "nt":
+        return
     descriptor = os.open(path, os.O_RDONLY)
     try:
         os.fsync(descriptor)

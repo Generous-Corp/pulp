@@ -345,3 +345,30 @@ want that, say so — it is a packaging decision, not a technical obstacle.
 - `.agents/skills/audio-harness/SKILL.md` — the agent-facing workflow
 - `test/test_latency_contract.cpp` — the contract's own tests, including the
   SpectralFrameEngine case
+
+## DSPX-06 graph timing boundary
+
+The graph timing contract is a control-thread, integer-sample receipt exposed by
+`pulp/host/graph_timing_contract.hpp`. It records semantic delay separately from
+algorithmic latency and host PDC, and accepts only an explicit
+`GraphTimingMeasurements` bundle. The supported proof uses an independent
+impulse/group-delay oracle on a zero-delay Gain graph, checks the prepared
+partition/block capacity, tail declaration, and routed scheduling readiness, and
+pins the prepared runtime snapshot while preserving graph state.
+The direct proof is:
+
+```bash
+./build/test/pulp-test-dspx06-graph-timing "[dspx-06]"
+```
+
+A declaration is refused when the graph is unprepared, the block exceeds the
+prepared capacity, fields are invalid, any of semantic delay, algorithmic
+latency, host PDC, or impulse group delay is not independently measured, a
+measurement disagrees with the declaration or aggregate impulse delay, the
+algorithmic latency disagrees with the graph, or the required routed path is
+unavailable. Fractional delay and multi-tap declarations
+are typed `Unsupported` and are never rounded into an integer proof. Partition
+sizes other than the prepared capacity and non-zero tails are also explicitly
+unsupported. The installed SDK boundary is the claim-owned host header; there is
+currently no CLI, MCP, live-control, or design-time authoring surface for these
+receipts, so those surfaces remain explicit gaps.

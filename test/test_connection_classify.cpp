@@ -45,6 +45,7 @@ TEST_CASE("classify maps each host Connection variant to one runtime lane",
         CHECK(cls.kind == Kind::Audio);
         CHECK_FALSE(cls.feedback);
         CHECK_FALSE(cls.audio_rate);
+        CHECK_FALSE(cls.sidechain);
         CHECK(connection_affects_latency(make()));
     }
     SECTION("MIDI edge is the Event lane") {
@@ -75,6 +76,7 @@ TEST_CASE("classify maps each host Connection variant to one runtime lane",
             classify(make(false, false, false, false, /*sidechain=*/true));
         CHECK(cls.kind == Kind::Audio);
         CHECK_FALSE(cls.feedback);
+        CHECK(cls.sidechain);
         CHECK(connection_affects_latency(make(false, false, false, false, true)));
     }
     SECTION("feedback edge is plain Audio with the orthogonal feedback flag set") {

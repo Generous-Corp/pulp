@@ -19,6 +19,7 @@ struct BrowserCaptureAdoption {
     int render_height = 800;
     std::string reference_image;
     bool similarity_failed = false;
+    std::optional<std::filesystem::path> materialized_document;
     pulp::view::DesignIR design_ir;
 };
 

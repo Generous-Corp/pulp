@@ -1,11 +1,46 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_html_import.hpp"
 #include "tools/import-design/html_intake.hpp"
+
+#include <filesystem>
+#include <fstream>
 
 using pulp::import_design::HtmlExportShape;
 using pulp::import_design::classify_html_intake;
 using pulp::import_design::import_browser_html;
+
+namespace {
+
+namespace fs = std::filesystem;
+
+struct CaptureRuntimeFixture {
+    fs::path root = pulp::test::make_unique_temp_dir("pulp-browser-provenance-import");
+    fs::path importer;
+
+    CaptureRuntimeFixture() {
+        importer = root / "pulp-import-design";
+        fs::copy_file(PULP_BROWSER_CAPTURE_FIXTURE_PATH, importer);
+        fs::permissions(importer,
+                        fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
+                        fs::perm_options::add);
+        const auto runtime = root / "browser_capture";
+        fs::create_directories(runtime);
+        std::ofstream(runtime / "capture.mjs") << "// fixture";
+        fs::copy_file(PULP_BROWSER_CAPTURE_FIXTURE_PATH, runtime / "node");
+        fs::permissions(runtime / "node",
+                        fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
+                        fs::perm_options::add);
+    }
+
+    ~CaptureRuntimeFixture() {
+        std::error_code ec;
+        fs::remove_all(root, ec);
+    }
+};
+
+} // namespace
 
 TEST_CASE("HTML intake chooses one browser evaluator across Claude export shapes",
           "[import-design][browser-capture][intake]") {
@@ -88,4 +123,23 @@ TEST_CASE("explicit non-HTML source cannot be stolen by browser sniffing",
         R"({"source":"claude","root":{"name":"<body","type":"frame"}})");
     REQUIRE(std::holds_alternative<
             pulp::import_design::BrowserHtmlNotApplicable>(claude_result));
+}
+
+TEST_CASE("browser HTML import rejects a capture without provenance before lowering",
+          "[import-design][browser-capture][provenance][negative]") {
+    CaptureRuntimeFixture runtime;
+    pulp::import_design::BrowserHtmlImportRequest request;
+    request.input_file = runtime.root / "editor.html";
+    request.output_file = runtime.root / "out/ui.js";
+    request.importer_executable = runtime.importer;
+    request.browser_executable = PULP_BROWSER_CAPTURE_FIXTURE_PATH;
+    request.source = pulp::view::DesignSource::claude;
+    std::ofstream(runtime.root / "editor.html") << "<!doctype html><main>fixture</main>";
+
+    const auto result = import_browser_html(request, "<!doctype html><main>fixture</main>");
+    const auto* failure = std::get_if<pulp::import_design::BrowserHtmlFailure>(&result);
+    REQUIRE(failure);
+    INFO(failure->error);
+    CHECK(failure->exit_code == 3);
+    CHECK(failure->error.find("browser-capture-provenance-invalid") != std::string::npos);
 }

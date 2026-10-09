@@ -67,7 +67,7 @@ jobs:
       # Compile only — no tests. The failure mode being guarded is "does not compile",
       # and keeping it to a compile is what makes this fast enough to be required.
       - name: Compile core/view
-        run: cmake --build build-noskia --target pulp-view-core
+        run: tools/ci/governed-build.sh cmake --build build-noskia --target pulp-view-core
 
       - name: Compile core/format (guards the WAM/adapter signature class of break)
-        run: cmake --build build-noskia --target pulp-format-core || true
+        run: tools/ci/governed-build.sh cmake --build build-noskia --target pulp-format-core || true

@@ -26,9 +26,16 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 build_dir="${1:-${repo_root}/build-wasm-fixture}"
-jobs="${2:-4}"
+# A caller may request a lower cap, but governed-build remains the authority
+# after lease admission and never lets this lane claim the whole host.
+jobs="${2:-}"
 corpus="${repo_root}/test/fixtures/timeline"
 runner="${build_dir}/pulp-fixture-runner.js"
+
+if [ -n "$jobs" ] && ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+    echo "wasm-fixture-lane: jobs must be a positive integer" >&2
+    exit 2
+fi
 
 for tool in emcmake node; do
     command -v "$tool" >/dev/null 2>&1 || {
@@ -43,7 +50,12 @@ trap 'rm -rf "$scratch"' EXIT
 echo "== build (emscripten) =="
 emcmake cmake -S "${repo_root}/core/interchange/wasm" -B "$build_dir" \
     -DCMAKE_BUILD_TYPE=Release
-cmake --build "$build_dir" -j"$jobs"
+if [ -n "$jobs" ]; then
+    PULP_BUILD_JOBS="$jobs" \
+        bash "$repo_root/tools/ci/governed-build.sh" cmake --build "$build_dir"
+else
+    bash "$repo_root/tools/ci/governed-build.sh" cmake --build "$build_dir"
+fi
 
 echo
 echo "== the committed corpus must pass =="

@@ -10,6 +10,10 @@ import http.server
 import json
 import os
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from process_liveness import pid_alive as _pid_alive  # noqa: E402
 import shutil
 import socket
 import subprocess
@@ -52,15 +56,7 @@ def desktop_serve_state_path(publish_root: Path, label: str) -> Path:
 
 
 def process_is_running(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+    return _pid_alive(pid) is True
 
 
 

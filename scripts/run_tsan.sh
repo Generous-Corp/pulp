@@ -31,7 +31,8 @@ cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" \
     -DPULP_SANITIZER=thread
 
 echo "=== Building ==="
-cmake --build "${BUILD_DIR}" -j"${JOBS}"
+PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
+    cmake --build "${BUILD_DIR}"
 
 # halt_on_error=1 → fail on first real race.
 # history_size=7 → deeper history for diagnosis (default 4).

@@ -38,6 +38,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <functional>
 #include <regex>
@@ -428,6 +429,63 @@ std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html) {
     return bundle;
 }
 
+namespace {
+
+bool valid_materialized_binding_id(std::string_view id) {
+    if (id.size() < 2 || id.size() > 128)
+        return false;
+    const auto first = static_cast<unsigned char>(id.front());
+    if (first < 'a' || first > 'z')
+        return false;
+    for (const auto ch : id.substr(1)) {
+        const auto c = static_cast<unsigned char>(ch);
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+              c == ':' || c == '-'))
+            return false;
+    }
+    return true;
+}
+
+bool parse_materialized_binding_map(const choc::value::ValueView& root, ClaudeBundle& bundle) {
+    if (!root.hasObjectMember("bindings_by_id") || !root["bindings_by_id"].isObject())
+        return false;
+
+    const auto by_id = root["bindings_by_id"];
+    static constexpr std::array<std::string_view, 5> kinds = {"semantic", "layout", "text", "paint",
+                                                              "canvas"};
+    std::unordered_set<std::string> ids;
+    constexpr std::size_t max_per_kind = 16'384;
+    constexpr std::size_t max_total = max_per_kind * kinds.size();
+    std::size_t total = 0;
+    for (const auto kind : kinds) {
+        if (!by_id.hasObjectMember(kind.data()) || !by_id[kind.data()].isObject())
+            return false;
+        const auto entries = by_id[kind.data()];
+        if (entries.size() > max_per_kind)
+            return false;
+        for (uint32_t index = 0; index < entries.size(); ++index) {
+            const auto member = entries.getObjectMemberAt(index);
+            const std::string id(member.name);
+            if (!valid_materialized_binding_id(id) || !ids.insert(id).second ||
+                !member.value.isObject() || !member.value.hasObjectMember("id") ||
+                !member.value["id"].isString() || member.value["id"].getString() != id)
+                return false;
+            if (member.value.hasObjectMember("kind")) {
+                const auto declared = member.value["kind"];
+                if (!declared.isString() || declared.getString() != kind)
+                    return false;
+            }
+            bundle.materialized_bindings.push_back(
+                {id, std::string(kind), choc::json::toString(member.value, false)});
+            if (++total > max_total)
+                return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 std::optional<ClaudeBundle> parse_materialized_browser_document(
     const std::string& json) {
     choc::value::Value root;
@@ -435,16 +493,23 @@ std::optional<ClaudeBundle> parse_materialized_browser_document(
     catch (...) { return std::nullopt; }
     if (!root.isObject() || !root.hasObjectMember("schema") ||
         !root["schema"].isString() ||
-        root["schema"].getString() != "pulp-materialized-browser-document-v1" ||
         !root.hasObjectMember("version") || !root["version"].isInt() ||
-        root["version"].getInt64() != 1 ||
         !root.hasObjectMember("html") || !root["html"].isString() ||
         !root.hasObjectMember("assets") || !root["assets"].isArray()) {
         return std::nullopt;
     }
+    const auto schema = root["schema"].getString();
+    const auto version = root["version"].getInt64();
+    const bool v1 = schema == "pulp-materialized-browser-document-v1" && version == 1;
+    const bool v2 = schema == "pulp-materialized-browser-document-v2" && version == 2;
+    if (!v1 && !v2)
+        return std::nullopt;
 
     ClaudeBundle bundle;
+    bundle.materialized_schema_version = v2 ? 2u : 1u;
     bundle.template_html = std::string(root["html"].getString());
+    if (v2 && !parse_materialized_binding_map(root, bundle))
+        return std::nullopt;
     auto assets = root["assets"];
     if (assets.size() > 256) return std::nullopt;
     size_t total_bytes = 0;

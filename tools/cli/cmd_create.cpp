@@ -8,6 +8,8 @@
 #include "package_registry.hpp"
 #include "projects_registry.hpp"
 
+#include <pulp/runtime/safe_relative_path.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -243,17 +245,10 @@ static std::optional<TemplateKitSelection> resolve_template_kit(const std::strin
     }
 
     fs::path rel(templates.front());
-    if (rel.empty() || rel.is_absolute()) {
+    if (!pulp::runtime::is_safe_relative_path(rel)) {
         error = "template kit `" + validation.summary.id
             + "` exports an unsafe template path";
         return std::nullopt;
-    }
-    for (const auto& part : rel) {
-        if (part == "." || part == "..") {
-            error = "template kit `" + validation.summary.id
-                + "` exports an unsafe template path";
-            return std::nullopt;
-        }
     }
 
     auto template_dir = validation.summary.root / rel;

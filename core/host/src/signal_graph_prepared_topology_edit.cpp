@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <pulp/host/detail/prepared_lifecycle_ownership.hpp>
 #include <pulp/host/sample_region_plan.hpp>
 #include <thread>
 #include <utility>

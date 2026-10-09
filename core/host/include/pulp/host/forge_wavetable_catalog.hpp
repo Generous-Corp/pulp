@@ -7,7 +7,7 @@
 // control-thread lifetime; prepare and process only update scalar state.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/signal/wavetable.hpp>
 
 #include <algorithm>

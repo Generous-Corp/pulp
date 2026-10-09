@@ -75,8 +75,15 @@ if(_PULP_NODE_FOR_TESTS)
     list(REMOVE_ITEM _PULP_MATERIALIZED_RUNTIME_NODE_TESTS
          ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS})
 
+    # The aggregate runs in a private temp directory and fails if any suite
+    # leaves scratch there, which would otherwise pile up on the boot volume.
+    set(_PULP_NODE_UNIT_TMP_GUARD)
+    if(Python3_Interpreter_FOUND)
+        set(_PULP_NODE_UNIT_TMP_GUARD ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/tmp_leak_guard.py --)
+    endif()
     add_test(NAME pulp-browser-capture-node-unit
-             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+             COMMAND ${_PULP_NODE_UNIT_TMP_GUARD} ${_PULP_NODE_FOR_TESTS} --test
                      ${_PULP_BROWSER_CAPTURE_NODE_TESTS}
                      ${_PULP_MATERIALIZED_RUNTIME_NODE_TESTS})
     set_tests_properties(pulp-browser-capture-node-unit PROPERTIES
@@ -122,6 +129,21 @@ if(_PULP_NODE_FOR_TESTS)
         TIMEOUT 600
         LABELS "parser-import;browser-capture;node")
 
+    # The checked-in canonicalizer this probe drives imports esbuild, so it
+    # registers only where the jsx-runtime dependencies are installed
+    # (`npm ci --prefix tools/import-design/jsx-runtime`). Without them Node
+    # fails at module load with ERR_MODULE_NOT_FOUND before any fixture is
+    # checked. Where esbuild is present the probe stays required.
+    if(EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/esbuild/package.json")
+        add_test(NAME pulp-materialized-runtime-conformance
+                 COMMAND ${_PULP_NODE_FOR_TESTS}
+                         ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs
+                         --json)
+        set_tests_properties(pulp-materialized-runtime-conformance PROPERTIES
+            TIMEOUT 30
+            LABELS "parser-import;browser-capture;node;conformance")
+    endif()
+
     if(EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/esbuild/package.json"
        AND EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/@babel/parser/package.json")
         add_test(NAME pulp-materialized-runtime-node-dependencies
@@ -129,6 +151,7 @@ if(_PULP_NODE_FOR_TESTS)
                          ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS})
         set_tests_properties(pulp-materialized-runtime-node-dependencies PROPERTIES
             TIMEOUT 60
+            PULP_OPTIONAL TRUE
             LABELS "parser-import;browser-capture;node")
     endif()
 endif()
@@ -183,7 +206,10 @@ target_include_directories(pulp-test-browser-capture-import PRIVATE
 # `content` on ::before / ::after, and a non-blur `backdrop-filter` list.
 target_compile_definitions(pulp-test-browser-capture-import PRIVATE
     PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style"
-    PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures")
+    PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures"
+    PULP_BROWSER_CAPTURE_FIXTURE_PATH="$<TARGET_FILE:pulp-browser-capture-launcher-fixture>")
+add_dependencies(pulp-test-browser-capture-import
+    pulp-browser-capture-launcher-fixture)
 target_link_libraries(pulp-test-browser-capture-import PRIVATE
     pulp::browser-capture-backend
     pulp-import-design-cli-policy

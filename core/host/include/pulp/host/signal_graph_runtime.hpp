@@ -26,6 +26,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
 #include <pulp/host/sample_region_runtime.hpp>
+#include <pulp/host/signal_graph_authoring.hpp>
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/signal_graph_execution_status.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
@@ -344,6 +345,14 @@ public:
     const GraphNode* node(NodeId id) const;
     const std::vector<GraphNode>& nodes() const { return nodes_; }
     const std::vector<Connection>& connections() const { return connections_; }
+
+    // Capture and validate control-side authoring lineage.  These operations
+    // take the same mutation lock as graph edits, so a receipt is never a
+    // mixed read of graph identity and generation.  A receipt is observational
+    // only; PreparedTopologyEdit remains the publication boundary and performs
+    // its own stale-base check at commit().
+    GraphAuthoringReceipt authoring_receipt() const;
+    GraphAuthoringReceiptStatus validate_authoring_receipt(GraphAuthoringReceipt receipt) const;
 
     // Check if connecting would create a cycle
     bool would_create_cycle(NodeId source, NodeId dest) const;

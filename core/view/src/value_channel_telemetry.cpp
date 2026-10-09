@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #include <pulp/runtime/spsc_queue.hpp>
@@ -29,13 +31,42 @@ struct ContinuousSnapshot {
     bool available = false;
 };
 
-}  // namespace
+} // namespace
+
+namespace {
+
+struct ChannelNameHash {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view value) const noexcept {
+        return std::hash<std::string_view>{}(value);
+    }
+    std::size_t operator()(const std::string& value) const noexcept {
+        return operator()(std::string_view(value));
+    }
+};
+struct ChannelNameEqual {
+    using is_transparent = void;
+    bool operator()(std::string_view lhs, std::string_view rhs) const noexcept {
+        return lhs == rhs;
+    }
+};
+struct ChannelIndexEntry {
+    std::size_t index;
+    ValueChannelShape shape;
+};
+using ChannelIndex =
+    std::unordered_map<std::string, ChannelIndexEntry, ChannelNameHash, ChannelNameEqual>;
+} // namespace
 
 class ValueChannelTelemetryControl {
 public:
     const std::uint64_t generation_identity =
         next_value_channel_set_identity.fetch_add(1, std::memory_order_relaxed);
     std::atomic<bool> claimed{false};
+    // Declarations are completed before audio/UI readers start. Keeping this
+    // index on the existing per-set control makes steady-state lookups direct
+    // and lock-free while preserving ValueChannelSet's public layout.
+    ChannelIndex channels;
 };
 
 class ValueChannelTelemetryState {
@@ -175,6 +206,24 @@ std::shared_ptr<ValueChannelTelemetryControl> make_value_channel_telemetry_contr
 std::uint64_t value_channel_telemetry_control_identity(
     const ValueChannelTelemetryControl* control) noexcept {
     return control != nullptr ? control->generation_identity : 0;
+}
+
+void value_channel_telemetry_index_add(ValueChannelTelemetryControl* control, std::string_view name,
+                                       ValueChannelShape shape, std::size_t index) {
+    if (!control)
+        return;
+    control->channels.emplace(std::string(name), ChannelIndexEntry{index, shape});
+}
+
+std::ptrdiff_t value_channel_telemetry_index_lookup(const ValueChannelTelemetryControl* control,
+                                                    std::string_view name,
+                                                    ValueChannelShape shape) noexcept {
+    if (!control)
+        return -1;
+    const auto it = control->channels.find(name);
+    if (it == control->channels.end() || it->second.shape != shape)
+        return -1;
+    return static_cast<std::ptrdiff_t>(it->second.index);
 }
 
 std::shared_ptr<ValueChannelTelemetryState> make_scalar_telemetry_state() {

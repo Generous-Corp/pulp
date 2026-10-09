@@ -4148,6 +4148,55 @@
         ]
       },
       {
+        "name": "ui",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "build",
+            "arguments": [
+              {
+                "name": "--source",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--json",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "check",
+            "arguments": [
+              {
+                "name": "--source",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--json",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "update",
         "disposition": "pulp-owned",
         "arguments": [
@@ -4868,7 +4917,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.478.4",
+        "version": "0.481.15",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4883,13 +4932,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.478.4",
+        "catalog_version": "0.481.15",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.478.4",
+        "version": "0.481.15",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

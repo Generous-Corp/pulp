@@ -202,6 +202,17 @@ struct ClaudeBundleFontBinding {
     std::string unicode_range;
 };
 
+/// One id-addressed binding from a v2 materialized browser document. The
+/// native runtime currently consumes the executable HTML; retaining this
+/// validated projection on the parsed bundle lets import/re-import tooling and
+/// diagnostics inspect the exact capture evidence without reparsing the
+/// sidecar. `payload_json` is the canonical JSON object for the binding.
+struct ClaudeBundleMaterializedBinding {
+    std::string id;
+    std::string kind; ///< semantic, layout, text, paint, or canvas
+    std::string payload_json;
+};
+
 /// Result of unpacking a Claude Design bundle's `<script type="__bundler/manifest">`
 /// + `<script type="__bundler/template">` pair.
 struct ClaudeBundle {
@@ -209,6 +220,8 @@ struct ClaudeBundle {
     std::vector<size_t> javascript_indices; ///< indices into assets[] of MIME `text/javascript`,
                                             ///< in the order the template's <script src> tags reference them
     std::vector<ClaudeBundleFontBinding> font_bindings; ///< captured @font-face assets
+    std::vector<ClaudeBundleMaterializedBinding> materialized_bindings;
+    std::uint32_t materialized_schema_version = 1;
     std::string template_html;              ///< the unwrapped HTML template (with `<div id="root">` etc.)
 };
 

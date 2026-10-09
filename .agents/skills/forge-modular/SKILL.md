@@ -2213,3 +2213,13 @@ declared map alone, and the sweep tallies those separately from offenders. Keep
 a positive check on the classifier itself — a synthetic flat map whose
 `from_display` must return `None` — or the branch silently swallows every real
 offender the day the predicate goes wrong.
+
+## The generation lock goes through `file_lock`, so it holds on Windows
+
+`generate.py` serialises generations against one module pack with a lock file
+in the temp directory. It takes that lock through `tools/rack/file_lock.py`
+(`flock` on POSIX, `msvcrt.locking` on Windows) via `claim_generation_lock()`;
+an unconditional `import fcntl` made every rack tool that imports `generate`
+fail to load on Windows. `GenerationLockSafety` in `test_generate_safety.py`
+pins that a second claim exits with "already running" and that closing the
+holder frees it.

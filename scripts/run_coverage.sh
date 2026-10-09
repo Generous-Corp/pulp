@@ -172,7 +172,8 @@ fi
 
 echo "=== Building ==="
 BUILD_LOG="${BUILD_DIR}/build.log"
-if ! cmake --build "${BUILD_DIR}" -j"${JOBS}" > /dev/null 2>"${BUILD_LOG}"; then
+if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
+    cmake --build "${BUILD_DIR}" > /dev/null 2>"${BUILD_LOG}"; then
     echo "=== Coverage build failed; last 200 log lines ===" >&2
     tail -n 200 "${BUILD_LOG}" >&2 || true
     exit 1

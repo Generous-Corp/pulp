@@ -103,7 +103,8 @@ log "bundle: $SIZE bytes"
 # ─── 4. Build the smoke test ────────────────────────────────────────────
 if [ "$SKIP_BUILD" -eq 0 ]; then
     log "building pulp-test-design-import-jsx-runtime"
-    cmake --build "$BUILD_DIR" --target pulp-test-design-import-jsx-runtime -j8 \
+    bash "$PULP_DIR/tools/ci/governed-build.sh" cmake --build "$BUILD_DIR" \
+        --target pulp-test-design-import-jsx-runtime \
         2>&1 | tail -5 | sed 's/^/    /'
 fi
 

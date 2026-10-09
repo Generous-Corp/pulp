@@ -1351,7 +1351,7 @@ def process_exists(pid: int) -> bool:
     if os.name == "nt":
         return _windows_pid_alive(pid)
     try:
-        os.kill(pid, 0)
+        os.kill(pid, 0)  # raw-pid-probe-lint: skip sealed single-file producer; its own nt route runs first
     except ProcessLookupError:
         return False
     except PermissionError:

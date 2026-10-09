@@ -38,6 +38,8 @@ IRNode make_node(std::string type, std::string text = {}, std::string role = {},
 std::size_t count_anchored(const IRNode& node) {
     std::size_t n = (node.stable_anchor_id && !node.stable_anchor_id->empty()) ? 1 : 0;
     for (const auto& c : node.children) n += count_anchored(c);
+    for (const auto& f : node.alternate_frames)
+        n += count_anchored(f);
     return n;
 }
 
@@ -45,12 +47,16 @@ std::size_t count_anchored(const IRNode& node) {
 void collect_anchors(const IRNode& node, std::vector<std::string>& out) {
     if (node.stable_anchor_id) out.push_back(*node.stable_anchor_id);
     for (const auto& c : node.children) collect_anchors(c, out);
+    for (const auto& f : node.alternate_frames)
+        collect_anchors(f, out);
 }
 
 // Recursive total node count.
 std::size_t count_nodes(const IRNode& node) {
     std::size_t n = 1;
     for (const auto& c : node.children) n += count_nodes(c);
+    for (const auto& f : node.alternate_frames)
+        n += count_nodes(f);
     return n;
 }
 
@@ -96,6 +102,187 @@ TEST_CASE("content-hash anchors are deterministic across re-runs",
     collect_anchors(a, aa);
     collect_anchors(b, bb);
     REQUIRE(aa == bb);
+}
+
+// Native C++ IR only: the TS package currently has no alternate_frames field,
+// so cross-language anchor vectors intentionally remain on the rendered axis.
+TEST_CASE("anchors cover alternate frames and their descendants",
+          "[view][import][anchors][alternate]") {
+    IRNode root = make_node("frame");
+    root.children.push_back(make_node("frame", "ordinary"));
+    IRNode first = make_node("frame", "state");
+    first.children.push_back(make_node("button", "Play"));
+    IRNode second = make_node("frame", "state");
+    second.children.push_back(make_node("button", "Stop"));
+    root.alternate_frames.push_back(std::move(first));
+    root.alternate_frames.push_back(std::move(second));
+
+    assign_anchors(root, AnchorStrategy::path);
+
+    REQUIRE(count_anchored(root) == count_nodes(root));
+    REQUIRE(root.alternate_frames[0].stable_anchor_id == "frame[0]/@alternate[0]");
+    REQUIRE(root.alternate_frames[1].stable_anchor_id == "frame[0]/@alternate[1]");
+    REQUIRE(root.alternate_frames[0].children[0].stable_anchor_id ==
+            "frame[0]/@alternate[0]/button[0]");
+
+    // Negative control for the old omission: an ordinary child and an
+    // alternate root of the same source type must never share identity.
+    REQUIRE(root.children[0].stable_anchor_id != root.alternate_frames[0].stable_anchor_id);
+}
+
+TEST_CASE("content-hash alternate roots are distinct and deterministic",
+          "[view][import][anchors][alternate]") {
+    auto build = [] {
+        IRNode root = make_node("frame");
+        root.alternate_frames.push_back(make_node("frame", "same state"));
+        root.alternate_frames.push_back(make_node("frame", "same state"));
+        return root;
+    };
+    IRNode a = build();
+    IRNode b = build();
+    assign_anchors(a, AnchorStrategy::content_hash);
+    assign_anchors(b, AnchorStrategy::content_hash);
+
+    REQUIRE(a.alternate_frames[0].stable_anchor_id.has_value());
+    REQUIRE(a.alternate_frames[1].stable_anchor_id.has_value());
+    REQUIRE(*a.alternate_frames[0].stable_anchor_id != *a.alternate_frames[1].stable_anchor_id);
+    REQUIRE(a.alternate_frames[0].stable_anchor_id == b.alternate_frames[0].stable_anchor_id);
+    REQUIRE(a.alternate_frames[1].stable_anchor_id == b.alternate_frames[1].stable_anchor_id);
+}
+
+TEST_CASE("content-hash alternate namespace preserves source type",
+          "[view][import][anchors][alternate]") {
+    IRNode root = make_node("frame");
+    // Same text/role and same alternate position discriminator, but different
+    // source types. The reserved namespace must not erase that distinction.
+    root.alternate_frames.push_back(make_node("frame", "same state"));
+    root.alternate_frames.push_back(make_node("group", "same state"));
+
+    assign_anchors(root, AnchorStrategy::content_hash);
+
+    REQUIRE(root.alternate_frames[0].stable_anchor_id.has_value());
+    REQUIRE(root.alternate_frames[1].stable_anchor_id.has_value());
+    REQUIRE(*root.alternate_frames[0].stable_anchor_id !=
+            *root.alternate_frames[1].stable_anchor_id);
+}
+
+TEST_CASE("content-hash alternate descendants avoid ordinary collisions and retain state identity",
+          "[view][import][anchors][alternate]") {
+    IRNode root = make_node("frame");
+    // Match the alternate child at the same hash depth with an ordinary
+    // descendant. Before descendant namespace propagation both hash inputs
+    // were {button, empty role, Play, depth=2, sigIndex=0}.
+    root.children.push_back(make_node("group", "ordinary"));
+    root.children[0].children.push_back(make_node("button", "Play"));
+
+    IRNode first = make_node("frame", "state one");
+    first.children.push_back(make_node("button", "Play"));
+    IRNode second = make_node("frame", "state two");
+    second.children.push_back(make_node("button", "Play"));
+    root.alternate_frames.push_back(std::move(first));
+    root.alternate_frames.push_back(std::move(second));
+
+    assign_anchors(root, AnchorStrategy::content_hash);
+
+    const auto& ordinary = root.children[0].children[0].stable_anchor_id;
+    const auto& first_state = root.alternate_frames[0].children[0].stable_anchor_id;
+    const auto& second_state = root.alternate_frames[1].children[0].stable_anchor_id;
+    REQUIRE(ordinary.has_value());
+    REQUIRE(first_state.has_value());
+    REQUIRE(second_state.has_value());
+    CHECK(*ordinary != *first_state);
+    CHECK(*first_state == *second_state);
+}
+
+TEST_CASE("nested alternate frames receive deterministic path anchors",
+          "[view][import][anchors][alternate]") {
+    IRNode root = make_node("frame");
+    root.alternate_frames.push_back(make_node("frame", "state"));
+    root.alternate_frames[0].alternate_frames.push_back(make_node("frame", "nested state"));
+
+    assign_anchors(root, AnchorStrategy::path);
+
+    REQUIRE(root.alternate_frames[0].stable_anchor_id == "frame[0]/@alternate[0]");
+    REQUIRE(root.alternate_frames[0].alternate_frames[0].stable_anchor_id ==
+            "frame[0]/@alternate[0]/@alternate[0]");
+}
+
+TEST_CASE("pre-existing alternate anchors are preserved and scope descendants",
+          "[view][import][anchors][alternate]") {
+    IRNode root = make_node("frame");
+    root.alternate_frames.push_back(make_node("frame", "state"));
+    root.alternate_frames[0].stable_anchor_id = "authored-state";
+    root.alternate_frames[0].children.push_back(make_node("button", "Play"));
+
+    assign_anchors(root, AnchorStrategy::path);
+
+    REQUIRE(root.alternate_frames[0].stable_anchor_id == "authored-state");
+    REQUIRE(root.alternate_frames[0].children[0].stable_anchor_id == "authored-state/button[0]");
+}
+
+TEST_CASE("alternate anchor stability follows strategy semantics on reorder",
+          "[view][import][anchors][alternate]") {
+    auto build = [](bool reverse) {
+        IRNode root = make_node("frame");
+        IRNode first = make_node("frame", "first");
+        IRNode second = make_node("group", "second");
+        if (reverse) {
+            root.alternate_frames.push_back(std::move(second));
+            root.alternate_frames.push_back(std::move(first));
+        } else {
+            root.alternate_frames.push_back(std::move(first));
+            root.alternate_frames.push_back(std::move(second));
+        }
+        return root;
+    };
+
+    IRNode path_a = build(false);
+    IRNode path_b = build(true);
+    assign_anchors(path_a, AnchorStrategy::path);
+    assign_anchors(path_b, AnchorStrategy::path);
+    // Path identity is intentionally positional because swap targets address
+    // frames by index; reordering changes the state at a slot, not its slot ID.
+    REQUIRE(path_a.alternate_frames[0].stable_anchor_id ==
+            path_b.alternate_frames[0].stable_anchor_id);
+    REQUIRE(path_a.alternate_frames[1].stable_anchor_id ==
+            path_b.alternate_frames[1].stable_anchor_id);
+    REQUIRE(path_a.alternate_frames[0].text_content != path_b.alternate_frames[0].text_content);
+
+    IRNode hash_a = build(false);
+    IRNode hash_b = build(true);
+    assign_anchors(hash_a, AnchorStrategy::content_hash);
+    assign_anchors(hash_b, AnchorStrategy::content_hash);
+    REQUIRE(hash_a.alternate_frames[0].stable_anchor_id ==
+            hash_b.alternate_frames[1].stable_anchor_id);
+    REQUIRE(hash_a.alternate_frames[1].stable_anchor_id ==
+            hash_b.alternate_frames[0].stable_anchor_id);
+}
+
+TEST_CASE("adapter anchors cover alternate frames without changing source identity",
+          "[view][import][anchors][alternate]") {
+    IRNode root = make_node("frame", {}, {}, "root");
+    root.alternate_frames.push_back(make_node("frame", "state", {}, "state:1"));
+    root.alternate_frames[0].children.push_back(make_node("button", "Play", {}, "button:1"));
+
+    assign_anchors(root, AnchorStrategy::adapter, "figma");
+
+    REQUIRE(root.alternate_frames[0].stable_anchor_id == "figma:state:1");
+    REQUIRE(root.alternate_frames[0].children[0].stable_anchor_id == "figma:button:1");
+}
+
+TEST_CASE("adapter alternate anchors preserve duplicate authored IDs",
+          "[view][import][anchors][alternate]") {
+    IRNode root = make_node("frame", {}, {}, "root");
+    root.alternate_frames.push_back(make_node("frame", "state A", {}, "shared"));
+    root.alternate_frames.push_back(make_node("frame", "state B", {}, "shared"));
+
+    // The adapter strategy is a source-identity passthrough. Duplicate IDs
+    // are malformed source input and remain the adapter's responsibility to
+    // diagnose; this low-level walker must not invent a different identity.
+    assign_anchors(root, AnchorStrategy::adapter, "figma");
+
+    REQUIRE(root.alternate_frames[0].stable_anchor_id == "figma:shared");
+    REQUIRE(root.alternate_frames[1].stable_anchor_id == "figma:shared");
 }
 
 TEST_CASE("content-hash discriminates duplicate-signature siblings",

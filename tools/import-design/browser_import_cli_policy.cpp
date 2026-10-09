@@ -4,15 +4,11 @@
 
 namespace pulp::import_design {
 
-std::optional<int> validate_browser_import_cli_options(
-    bool fit_authored_frame,
-    bool render_size_explicit,
-    bool has_browser_interactions,
-    bool offline,
-    bool export_tokens,
-    bool detect_only,
-    bool native_panel_lowering,
-    bool materialized_canvas_composition) {
+std::optional<int>
+validate_browser_import_cli_options(bool fit_authored_frame, bool render_size_explicit,
+                                    bool has_browser_interactions, bool offline, bool export_tokens,
+                                    bool detect_only, bool native_panel_lowering,
+                                    bool materialized_canvas_composition, bool require_canvas_ink) {
     if (fit_authored_frame) {
         const char* conflict = render_size_explicit       ? "--render-size"
                                : has_browser_interactions ? "--browser-interactions"
@@ -33,6 +29,26 @@ std::optional<int> validate_browser_import_cli_options(
     if (native_panel_lowering && materialized_canvas_composition) {
         std::cerr << "Error: --native-panel-lowering and "
                      "--materialized-canvas-composition are mutually exclusive\n";
+        return 2;
+    }
+    if (require_canvas_ink && !materialized_canvas_composition) {
+        std::cerr << "Error: --require-canvas-ink requires "
+                     "--materialized-canvas-composition\n";
+        return 2;
+    }
+    if (require_canvas_ink && offline) {
+        std::cerr << "Error: --require-canvas-ink cannot be combined with "
+                     "--offline\n";
+        return 2;
+    }
+    if (require_canvas_ink && export_tokens) {
+        std::cerr << "Error: --require-canvas-ink cannot be combined with "
+                     "--export-tokens\n";
+        return 2;
+    }
+    if (require_canvas_ink && detect_only) {
+        std::cerr << "Error: --require-canvas-ink cannot be combined with "
+                     "--detect-only or --report-new-format\n";
         return 2;
     }
     return std::nullopt;

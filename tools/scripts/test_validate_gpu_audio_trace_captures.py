@@ -119,6 +119,7 @@ class ValidateGpuAudioTraceCapturesTests(unittest.TestCase):
                     self.processor, self.definitions, self.positive, self.negative,
                 )
 
+    @unittest.skipIf(os.name == "nt", "Windows has no executable bit to withhold")
     def test_nonexecutable_processor_is_refused_before_query(self) -> None:
         self.processor.chmod(stat.S_IRUSR | stat.S_IWUSR)
         with self.assertRaisesRegex(MODULE.ValidationError, "not executable"):

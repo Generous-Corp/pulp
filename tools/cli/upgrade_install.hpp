@@ -470,29 +470,30 @@ inline std::string browser_capture_runtime_install_name() {
 // apart silently, and the failure lands at capture time as a module that
 // cannot resolve rather than at install time as a short manifest.
 inline constexpr std::string_view browser_capture_runtime_files[]{
-        "browser_process.mjs",
-        "capture.mjs",
-        "health.mjs",
-        "interaction_executor.mjs",
-        "interaction_plan.mjs",
-        "interaction_plan_protocol.json",
-        "lifecycle.mjs",
-        "materialized_layout_bindings.mjs",
-        "materialized_coordinate_space.mjs",
-        "materialized_paint_bindings.mjs",
-        "materialized_text_bindings.mjs",
-        "network_dependencies.mjs",
-        // The capture imports this for the per-node platform-font answer; an
-        // upgraded install missing it fails module resolution at capture time,
-        // not at install time, so the break surfaces as a broken import rather
-        // than a broken upgrade.
-        "platform_fonts.mjs",
-        "renderers.mjs",
-        "security.mjs",
-        "semantics.mjs",
-        "settle.mjs",
-        "tokens.mjs",
-    };
+    "browser_process.mjs",
+    "capture.mjs",
+    "health.mjs",
+    "interaction_executor.mjs",
+    "interaction_plan.mjs",
+    "interaction_plan_protocol.json",
+    "lifecycle.mjs",
+    "materialized_layout_bindings.mjs",
+    "materialized_coordinate_space.mjs",
+    "materialized_paint_bindings.mjs",
+    "materialized_text_bindings.mjs",
+    "network_dependencies.mjs",
+    // The capture imports this for the per-node platform-font answer; an
+    // upgraded install missing it fails module resolution at capture time,
+    // not at install time, so the break surfaces as a broken import rather
+    // than a broken upgrade.
+    "platform_fonts.mjs",
+    "renderers.mjs",
+    "security.mjs",
+    "semantics.mjs",
+    "settle.mjs",
+    "tokens.mjs",
+    "vendor_payload.mjs",
+};
 
 inline bool has_any_exec_bit(const fs::path& path) {
 #ifdef _WIN32
@@ -680,89 +681,154 @@ inline void install_import_design_protocol_runtime(
         [](ImportDesignInstallPhase) {});
 }
 
+// `install_sibling_payloads` publishes more than one path.  Keep the
+// callback-only phase separate from the import-runtime phases above so tests
+// can inject a failure after one payload has been published and prove that
+// the complete sibling set is rolled back together.
+enum class SiblingInstallPhase {
+    payload_published,
+};
+
 inline bool is_import_design_managed_payload(const fs::path& filename) {
     return filename == import_design_binary_name() ||
            filename == browser_capture_runtime_name() ||
            filename == browser_capture_runtime_install_name();
 }
 
-inline std::vector<fs::path> install_sibling_payloads(
-    const fs::path& extracted_root,
-    const fs::path& install_dir,
-    const fs::path& primary_binary,
-    const fs::path& downloaded_archive) {
+template <typename PhaseObserver>
+inline std::vector<fs::path>
+install_sibling_payloads_impl(const fs::path& extracted_root, const fs::path& install_dir,
+                              const fs::path& primary_binary, const fs::path& downloaded_archive,
+                              PhaseObserver&& observe_phase) {
+    // Stage every sibling below one transaction root.  The old implementation
+    // published the import helper/runtime first and copied generic siblings
+    // afterwards, so a later copy failure left a mixed release in place.
+    const auto transaction = detail::create_unique_import_design_transaction(install_dir);
+    const auto staged_root = transaction / "payloads";
+    fs::create_directory(staged_root);
+
+    struct PublishedPayload {
+        fs::path destination;
+        fs::path backup;
+        bool had_backup = false;
+    };
+    std::vector<PublishedPayload> published;
     std::vector<fs::path> installed;
+    bool rollback_failed = false;
     fs::path import_source;
     fs::path runtime_source;
-    for (const auto& entry : fs::directory_iterator(extracted_root)) {
-        const auto src = entry.path();
-        if (src.filename() == import_design_binary_name()) {
-            import_source = src;
-        } else if (src.filename() == browser_capture_runtime_name()) {
-            runtime_source = src;
-        }
-    }
-
-    if (import_source.empty() != runtime_source.empty()) {
-        throw std::runtime_error(
-            "release archive must contain both " +
-            import_design_binary_name() + " and " +
-            browser_capture_runtime_name());
-    }
-    if (!import_source.empty()) {
-        if (!fs::is_regular_file(import_source) ||
-            !fs::is_directory(runtime_source) ||
-            !has_complete_capture_runtime(runtime_source)) {
-            throw std::runtime_error(
-                "release archive contains an invalid import-design runtime pair");
-        }
-        install_import_design_protocol_runtime(
-            install_dir, import_source, runtime_source);
-        installed.push_back(
-            install_dir / browser_capture_runtime_install_name());
-        installed.push_back(install_dir / import_design_binary_name());
-    }
-
-    for (const auto& entry : fs::directory_iterator(extracted_root)) {
-        const auto src = entry.path();
-        if (same_path(src, primary_binary) || same_path(src, downloaded_archive)) {
-            continue;
-        }
-        if (is_import_design_managed_payload(src.filename())) {
-            continue;
+    try {
+        for (const auto& entry : fs::directory_iterator(extracted_root)) {
+            const auto src = entry.path();
+            if (src.filename() == import_design_binary_name()) {
+                import_source = src;
+            } else if (src.filename() == browser_capture_runtime_name()) {
+                runtime_source = src;
+            }
         }
 
-        const auto dst = install_dir / src.filename();
-        if (entry.is_directory()) {
-            const auto staged = install_dir /
-                ("." + src.filename().string() + ".tmp");
-            const auto backup = install_dir /
-                ("." + src.filename().string() + ".bak");
-            std::error_code ec;
-            fs::remove_all(staged, ec);
-            fs::remove_all(backup, ec);
-            fs::copy(src, staged,
-                     fs::copy_options::recursive |
-                         fs::copy_options::overwrite_existing);
-            if (fs::exists(dst)) fs::rename(dst, backup);
+        if (import_source.empty() != runtime_source.empty()) {
+            throw std::runtime_error("release archive must contain both " +
+                                     import_design_binary_name() + " and " +
+                                     browser_capture_runtime_name());
+        }
+        if (!import_source.empty()) {
+            if (!fs::is_regular_file(import_source) || !fs::is_directory(runtime_source) ||
+                !has_complete_capture_runtime(runtime_source)) {
+                throw std::runtime_error(
+                    "release archive contains an invalid import-design runtime pair");
+            }
+            const auto contract =
+                extracted_root / "jsx-runtime" / "materialized_binding_contract.mjs";
+            if (!fs::is_regular_file(contract)) {
+                throw std::runtime_error(
+                    "release archive is missing the materialized binding contract");
+            }
+
+            // Use the existing runtime transaction inside the outer staging
+            // root.  It validates and materializes the versioned runtime and
+            // helper without touching the user's install directory.
+            install_import_design_protocol_runtime(staged_root, import_source, runtime_source);
+        }
+
+        for (const auto& entry : fs::directory_iterator(extracted_root)) {
+            const auto src = entry.path();
+            if (same_path(src, primary_binary) || same_path(src, downloaded_archive)) {
+                continue;
+            }
+            if (is_import_design_managed_payload(src.filename())) {
+                continue;
+            }
+
+            const auto staged = staged_root / src.filename();
+            remove_path_best_effort(staged);
+            if (entry.is_directory()) {
+                fs::copy(src, staged,
+                         fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+                continue;
+            }
+            if (!entry.is_regular_file())
+                continue;
+            fs::copy_file(src, staged, fs::copy_options::overwrite_existing);
+            if (should_add_exec_permissions(src)) {
+                add_exec_permissions(staged);
+            }
+        }
+
+        const auto backup_root = transaction / "backups";
+        fs::create_directory(backup_root);
+        std::size_t backup_index = 0;
+        for (const auto& entry : fs::directory_iterator(staged_root)) {
+            const auto staged = entry.path();
+            const auto destination = install_dir / staged.filename();
+            const auto backup =
+                backup_root / (std::to_string(backup_index++) + "-" + staged.filename().string());
+            const bool had_backup = path_entry_exists(destination);
+            if (had_backup)
+                fs::rename(destination, backup);
             try {
-                fs::rename(staged, dst);
+                fs::rename(staged, destination);
             } catch (...) {
-                if (fs::exists(backup)) fs::rename(backup, dst);
+                if (had_backup) {
+                    std::error_code restore_ec;
+                    fs::rename(backup, destination, restore_ec);
+                    rollback_failed = bool(restore_ec);
+                }
                 throw;
             }
-            fs::remove_all(backup, ec);
-            installed.push_back(dst);
-            continue;
+            published.push_back({destination, backup, had_backup});
+            observe_phase(SiblingInstallPhase::payload_published);
         }
-        if (!entry.is_regular_file()) continue;
-        fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
-        if (should_add_exec_permissions(src)) {
-            add_exec_permissions(dst);
+
+        for (const auto& payload : published) {
+            installed.push_back(payload.destination);
         }
-        installed.push_back(dst);
+        remove_path_best_effort(transaction);
+        return installed;
+    } catch (...) {
+        // Reverse publication order.  A failed observer is intentionally
+        // treated exactly like an I/O failure so callers never observe a
+        // partially upgraded sibling set.
+        for (auto it = published.rbegin(); it != published.rend(); ++it) {
+            remove_path_best_effort(it->destination);
+            if (it->had_backup) {
+                std::error_code restore_ec;
+                fs::rename(it->backup, it->destination, restore_ec);
+                rollback_failed = rollback_failed || bool(restore_ec);
+            }
+        }
+        if (!rollback_failed)
+            remove_path_best_effort(transaction);
+        throw;
     }
-    return installed;
+}
+
+inline std::vector<fs::path> install_sibling_payloads(const fs::path& extracted_root,
+                                                      const fs::path& install_dir,
+                                                      const fs::path& primary_binary,
+                                                      const fs::path& downloaded_archive) {
+    return install_sibling_payloads_impl(extracted_root, install_dir, primary_binary,
+                                         downloaded_archive, [](SiblingInstallPhase) {});
 }
 
 inline bool installed_cpp_delegate(const std::vector<fs::path>& installed) {

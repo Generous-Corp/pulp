@@ -196,9 +196,7 @@ jobs:
       # is where the SkUnicode core/icu order bug surfaces (and where
       # the fontconfig undefineds surfaced in the previous Skia bump).
       - name: Build pulp-cli (release path)
-        run: |
-          jobs=$(nproc 2>/dev/null || sysctl -n hw.ncpu)
-          cmake --build build --config Release --target pulp-cli -j"$jobs"
+        run: tools/ci/governed-build.sh cmake --build build --config Release --target pulp-cli
         shell: bash
 
       # Sanity: the binary actually runs. release-cli.yml has a

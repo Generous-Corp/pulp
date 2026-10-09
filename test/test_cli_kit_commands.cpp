@@ -2875,6 +2875,11 @@ TEST_CASE("safe_archive_rel rejects unsafe archive entry names", "[cli][kit][fs-
     REQUIRE_FALSE(safe_archive_rel(fs::path("a/../../escape.txt")));
     REQUIRE_FALSE(safe_archive_rel(fs::path("./a.txt")));
     REQUIRE_FALSE(safe_archive_rel(fs::path("a/./b.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("\\abs\\file.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("C:file.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("C:\\file.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("\\\\server\\share\\file.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("a\\..\\..\\escape.txt")));
 }
 
 TEST_CASE("is_package_archive_path recognizes package containers", "[cli][kit][fs-safety]") {

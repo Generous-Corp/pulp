@@ -4,6 +4,7 @@
 #include "json_writer.hpp"
 
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/safe_relative_path.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -157,15 +158,9 @@ bool exact_keys(const JsonValue& object, std::initializer_list<const char*> expe
 }
 
 bool safe_relative(const std::string& value, bool installed) {
-    if (value.empty() || value.find('\\') != std::string::npos)
-        return false;
     const fs::path path(value);
-    if (path.is_absolute())
+    if (!pulp::runtime::is_safe_relative_path(path))
         return false;
-    for (const auto& part : path) {
-        if (part.empty() || part == "." || part == "..")
-            return false;
-    }
     if (!installed)
         return true;
     auto it = path.begin();

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-test-tmp-leaks-20261005-watch",
+  "created_at": "2026-10-05T07:49:18Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Test hygiene and one MCP tool cleanup only. The jsx-runtime Node suites, the SwiftUI codegen swiftc gate and the MCP audio tools now remove the temp scratch they create, and the Node unit aggregate runs inside tools/scripts/tmp_leak_guard.py, which fails when a suite leaves anything in its temp dir. No importer, Chromium capture, DesignIR, rendering or packaging behavior changes: no production design-import source, capture path or codegen output is touched, and every existing assertion is unchanged.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-swift-codegen",
+    "ctest --test-dir build -R pulp-test-mcp-server",
+    "node --test tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
+    "node --test tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs",
+    "python3 tools/scripts/test_generated_version_bump_check.py",
+    "python3 tools/scripts/test_script_test_inputs.py",
+    "python3 tools/scripts/test_tmp_leak_guard.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

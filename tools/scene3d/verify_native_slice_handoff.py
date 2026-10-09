@@ -136,6 +136,17 @@ def read_text(path: Path):
         raise RuntimeError(f"{path}: {exc}") from exc
 
 
+def planning_not_checked_out(repo_root):
+    """Why the plan cannot be read, or None when it can. The plan lives in the
+    private `planning` submodule, which a public clone or a CI checkout without
+    submodules does not have: there the directory is empty and has no `.git`.
+    An initialised submodule that lacks the plan is drift, not this case."""
+    planning = repo_root / "planning"
+    if (planning / ".git").exists():
+        return None
+    return f"{planning} is not a checked-out submodule (no .git), so the plan cannot be read"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Verify the native glTF/bake first-slice handoff surface.")
@@ -146,6 +157,10 @@ def main():
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
+    absent = planning_not_checked_out(repo_root)
+    if absent:
+        print(f"native_slice_handoff_skipped={absent}")
+        return 0
     ctest_text = "\n".join(read_text(path) for path in args.ctest_file)
     doc_text = read_text(args.doc_file)
     plan_text = read_text(args.plan_file)

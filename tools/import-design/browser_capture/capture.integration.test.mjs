@@ -284,6 +284,16 @@ test("real browser capture preserves the executable pre-mount document",
 
       const materialized = JSON.parse(await readFile(
         path.join(output, "materialized-document.json"), "utf8"));
+      assert.equal(materialized.schema,
+        "pulp-materialized-browser-document-v2");
+      assert.equal(materialized.version, 2);
+      for (const kind of ["semantic", "layout", "text", "paint", "canvas"]) {
+        assert.ok(materialized.bindings_by_id?.[kind]);
+        for (const binding of materialized[`${kind}_bindings`] ?? []) {
+          assert.equal(binding.id, materialized.bindings_by_id[kind][binding.id].id);
+          assert.match(binding.id, new RegExp(`^pulp-${kind}-`));
+        }
+      }
       assert.match(materialized.html, /<button[^>]*>READY<\/button>/);
       assert.doesNotMatch(materialized.html, /STALE HELPER/);
       assert.doesNotMatch(materialized.html, /blob:/);
