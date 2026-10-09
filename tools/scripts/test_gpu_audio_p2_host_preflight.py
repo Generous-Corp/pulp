@@ -89,6 +89,18 @@ class HostPreflightTests(unittest.TestCase):
         self.assertEqual(receipt["gpu_health_observation"]["reason"],
                          "compute_identity_or_proof_invalid")
 
+        def offset_timestamp_runner(command, **kwargs):
+            result = self.passing_gpu_runner(command, **kwargs)
+            if command[0] == "pulp" or command[0].endswith("/pulp"):
+                value = json.loads(result.stdout)
+                value["measured_at_utc"] = value["measured_at_utc"].replace("Z", "+00:00")
+                result.stdout = json.dumps(value)
+            return result
+
+        receipt = preflight.collect(runner=offset_timestamp_runner, source_revision="5" * 40)
+        self.assertEqual(receipt["status"], "blocked")
+        self.assertEqual(receipt["gpu_health_observation"]["reason"], "measured_at_invalid")
+
     def test_positive_receipt_contains_hashed_real_observations(self):
         receipt = preflight.collect(runner=self.runner, source_revision="a" * 40)
         # IORegistry ``busy`` is diagnostic bookkeeping, not authenticated

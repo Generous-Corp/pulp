@@ -31,6 +31,10 @@ THERMAL_STATES = frozenset({"nominal", "fair", "serious", "critical", "unknown"}
 THERMAL_MAX_AGE_SECONDS = 30.0
 GPU_HEALTH_MAX_AGE_SECONDS = 30.0
 GPU_HEALTH_SCHEMA = "pulp.gpu-health-result.v2"
+UTC_MEASURED_RE = re.compile(
+    r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+)
 
 
 def _canonical(value: Any) -> bytes:
@@ -180,8 +184,10 @@ def _parse_gpu_health(raw: str, *, now: datetime | None = None) -> tuple[str, di
     if value.get("verdict") != "pass" or value.get("health_state") != "healthy":
         return "unknown", {"status": "invalid", "reason": "health_not_passing"}
     sampled_at = value.get("measured_at_utc")
+    if not isinstance(sampled_at, str) or UTC_MEASURED_RE.fullmatch(sampled_at) is None:
+        return "unknown", {"status": "invalid", "reason": "measured_at_invalid"}
     try:
-        sampled = datetime.fromisoformat(str(sampled_at).replace("Z", "+00:00"))
+        sampled = datetime.fromisoformat(sampled_at.replace("Z", "+00:00"))
         age = (now - sampled).total_seconds()
     except (TypeError, ValueError):
         return "unknown", {"status": "invalid", "reason": "measured_at_invalid"}
