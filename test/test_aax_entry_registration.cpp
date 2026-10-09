@@ -69,7 +69,11 @@ std::unique_ptr<pulp::format::Processor> make_gain() {
 /// none of them are what this suite is about.
 class FakePropertyMap final : public AAX_IPropertyMap {
 public:
-    AAX_Result AddProperty(AAX_EProperty, AAX_CPropertyValue) override { return AAX_SUCCESS; }
+    std::vector<std::pair<AAX_EProperty, AAX_CPropertyValue>> properties;
+    AAX_Result AddProperty(AAX_EProperty property, AAX_CPropertyValue value) override {
+        properties.emplace_back(property, value);
+        return AAX_SUCCESS;
+    }
     AAX_Result AddPointerProperty(AAX_EProperty, const void*) override { return AAX_SUCCESS; }
     AAX_Result AddPointerProperty(AAX_EProperty, const char*) override { return AAX_SUCCESS; }
     AAX_Result AddPropertyWithIDArray(AAX_EProperty, const AAX_SPlugInIdentifierTriad*, uint32_t) override {
@@ -86,6 +90,8 @@ public:
 
 class FakeComponentDescriptor final : public AAX_IComponentDescriptor {
 public:
+    mutable std::vector<std::unique_ptr<FakePropertyMap>> maps_;
+    FakePropertyMap* process_properties = nullptr;
     AAX_Result Clear() override { return AAX_SUCCESS; }
     AAX_IPropertyMap* NewPropertyMap() const override {
         maps_.push_back(std::make_unique<FakePropertyMap>());
@@ -107,8 +113,9 @@ public:
     AAX_Result AddMIDINode(AAX_CFieldIndex, AAX_EMIDINodeType, const char[], uint32_t) override {
         return AAX_SUCCESS;
     }
-    AAX_Result AddProcessProc_Native(AAX_CProcessProc, AAX_IPropertyMap*, AAX_CInstanceInitProc,
+    AAX_Result AddProcessProc_Native(AAX_CProcessProc, AAX_IPropertyMap* properties, AAX_CInstanceInitProc,
                                      AAX_CBackgroundProc, AAX_CSelector*) override {
+        process_properties = static_cast<FakePropertyMap*>(properties);
         return AAX_SUCCESS;
     }
     AAX_Result AddProcessProc_TI(const char[], const char[], AAX_IPropertyMap*, const char[], const char[],
@@ -118,8 +125,6 @@ public:
     AAX_Result AddProcessProc(AAX_IPropertyMap*, AAX_CSelector*, int32_t) override { return AAX_SUCCESS; }
     AAX_Result AddMeters(AAX_CFieldIndex, const AAX_CTypeID*, const uint32_t) override { return AAX_SUCCESS; }
 
-private:
-    mutable std::vector<std::unique_ptr<FakePropertyMap>> maps_;
 };
 
 /// Records the proc IDs the entry point registers. The proc IDs are the whole
@@ -127,6 +132,8 @@ private:
 class FakeEffectDescriptor final : public AAX_IEffectDescriptor {
 public:
     std::vector<AAX_CProcPtrID> proc_ids;
+    std::vector<std::unique_ptr<FakeComponentDescriptor>> components_;
+    std::vector<std::unique_ptr<FakePropertyMap>> maps_;
 
     AAX_IComponentDescriptor* NewComponentDescriptor() override {
         components_.push_back(std::make_unique<FakeComponentDescriptor>());
@@ -161,9 +168,6 @@ public:
                          static_cast<AAX_CProcPtrID>(kAAX_ProcPtrID_Create_EffectParameters)) != proc_ids.end();
     }
 
-private:
-    std::vector<std::unique_ptr<FakeComponentDescriptor>> components_;
-    std::vector<std::unique_ptr<FakePropertyMap>> maps_;
 };
 
 class FakeCollection final : public AAX_ICollection {
@@ -218,6 +222,30 @@ TEST_CASE("PULP_AAX_PLUGIN_WITH_GUI registers the custom editor", "[aax][entry]"
 
     REQUIRE(collection.descriptor.registered_gui());
     REQUIRE(collection.descriptor.registered_parameters());
+}
+
+TEST_CASE("AAX component properties identify the GUI lane and data-model placement", "[aax][entry]") {
+    FakeCollection strip;
+    REQUIRE(default_entry::GetEffectDescriptions(&strip) == AAX_SUCCESS);
+    REQUIRE(strip.descriptor.components_.size() == 1);
+    const auto& strip_props = strip.descriptor.components_.front()->process_properties->properties;
+    const auto property_value = [&](const auto& props, AAX_EProperty property) {
+        const auto it = std::find_if(props.begin(), props.end(), [property](const auto& item) {
+            return item.first == property;
+        });
+        REQUIRE(it != props.end());
+        return it->second;
+    };
+    REQUIRE(property_value(strip_props, AAX_eProperty_UsesClientGUI) == 1);
+    REQUIRE(property_value(strip_props, AAX_eProperty_Constraint_Location)
+            == AAX_eConstraintLocationMask_DataModel);
+
+    FakeCollection gui;
+    REQUIRE(gui_entry::GetEffectDescriptions(&gui) == AAX_SUCCESS);
+    const auto& gui_props = gui.descriptor.components_.front()->process_properties->properties;
+    REQUIRE(property_value(gui_props, AAX_eProperty_UsesClientGUI) == 0);
+    REQUIRE(property_value(gui_props, AAX_eProperty_Constraint_Location)
+            == AAX_eConstraintLocationMask_DataModel);
 }
 
 TEST_CASE("the entry macros differ only in the editor proc", "[aax][entry]") {

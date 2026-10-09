@@ -1130,7 +1130,8 @@ AAX_Result add_component_ports(AAX_IComponentDescriptor* component,
 
 AAX_Result add_component_process(AAX_IComponentDescriptor* component,
                                  const PluginDefinition& definition,
-                                 const ComponentLayout& layout)
+                                 const ComponentLayout& layout,
+                                 bool has_client_gui)
 {
     auto* properties = component->NewPropertyMap();
     if (!properties) {
@@ -1162,6 +1163,18 @@ AAX_Result add_component_process(AAX_IComponentDescriptor* component,
         result != AAX_SUCCESS) return result;
     if (auto result = add(AAX_eProperty_CanBypass, 1); result != AAX_SUCCESS) return result;
     if (auto result = add(AAX_eProperty_Constraint_MultiMonoSupport, 0); result != AAX_SUCCESS) return result;
+    // Tell Pro Tools where the AAX process object must live.  In particular,
+    // custom-editor components need the data model and process proc on the
+    // same host location; omitting this leaves host placement ambiguous and
+    // can make editor attach/resize behavior host-version dependent.
+    if (auto result = add(AAX_eProperty_Constraint_Location,
+                          AAX_eConstraintLocationMask_DataModel);
+        result != AAX_SUCCESS) return result;
+    // AAX's UsesClientGUI flag belongs to the component property map.  Keep
+    // it explicit for both lanes so a GUI build cannot be mistaken for a
+    // host-generated parameter strip (and vice versa).
+    if (auto result = add(AAX_eProperty_UsesClientGUI, has_client_gui ? 0 : 1);
+        result != AAX_SUCCESS) return result;
     if (definition.supports_sidechain) {
         if (auto result = add(AAX_eProperty_SupportsSideChainInput, 1); result != AAX_SUCCESS) return result;
         if (auto result = add(AAX_eProperty_SideChainStemFormat,
@@ -1296,7 +1309,9 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         if (auto status = add_component_ports(component, definition, component_layout); status != AAX_SUCCESS) {
             return status;
         }
-        if (auto status = add_component_process(component, definition, component_layout); status != AAX_SUCCESS) {
+        if (auto status = add_component_process(component, definition, component_layout,
+                                                create_gui_proc != nullptr);
+            status != AAX_SUCCESS) {
             return status;
         }
         if (auto status = effect->AddComponent(component); status != AAX_SUCCESS) {
