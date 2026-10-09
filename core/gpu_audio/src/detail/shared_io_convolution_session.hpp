@@ -49,6 +49,7 @@ class SharedIoConvolutionSession {
         SharedIoTraceConfig trace;
         SharedIoArenaProvider::StorageKind storage_kind =
             SharedIoArenaProvider::StorageKind::ImportedHostPointer;
+        SharedIoExecutionPredictor::Config prediction{};
     };
 
     struct ProviderPair {
@@ -193,6 +194,9 @@ class SharedIoConvolutionSession {
     void drain_trace_to_retention() noexcept;
     static std::uint64_t trace_now_ns() noexcept;
     bool pack_input(const SharedIoConvolutionPipeline::Lease&, SharedIoArena::WriteLease&) noexcept;
+
+    std::optional<std::uint64_t>
+    callback_deadline_ns(const SharedIoConvolutionPipeline::Lease&) const noexcept;
     void fail_closed() noexcept;
     bool drain_completions(std::uint64_t now_ns, ServiceResult&) noexcept;
     bool submit_available(ServiceResult&) noexcept;

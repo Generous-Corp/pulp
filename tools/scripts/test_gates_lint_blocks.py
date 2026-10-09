@@ -17,7 +17,8 @@ import subprocess
 import tempfile
 import unittest
 
-GATES = pathlib.Path(__file__).resolve().with_name("gates.sh")
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+GATES = ROOT / "tools/scripts/gates.sh"
 BLOCK_START = re.compile(r'^if \[ -f "\$(?P<var>[A-Z0-9_]+)" \]; then$')
 
 

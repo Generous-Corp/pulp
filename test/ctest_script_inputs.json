@@ -3259,6 +3259,7 @@
    "inputs": [
     ".github/workflows/build.yml",
     ".github/workflows/format-baseline-diff.yml",
+    ".github/workflows/install-consumer-smoke.yml",
     ".github/workflows/timeline-hardening.yml",
     ".github/workflows/tracing-build.yml",
     ".github/workflows/web-plugins.yml",
@@ -4715,6 +4716,7 @@
   "gates-sh-fail-flag-selftest": {
    "entry": "tools/scripts/test_gates_lint_blocks.py",
    "inputs": [
+    "tools/scripts/gates.sh",
     "tools/scripts/test_gates_lint_blocks.py"
    ],
    "kind": "python"
@@ -6646,6 +6648,49 @@
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_build_time_report.py",
+    "tools/scripts/test_generated_version_bump_check.py"
+   ],
+   "kind": "python"
+  },
+  "pr-head-diff-scoped-registrations": {
+   "entry": "tools/ci/pr_head_affected_tests.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "core/host",
+    "core/host/include",
+    "docs/status",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "test/cmake/pr_fast_tests.cmake",
+    "test/fixtures",
+    "test/support",
+    "tools/ci",
+    "tools/ci/build_dir_lock.py",
+    "tools/ci/changed_surface_lane_reds.json",
+    "tools/ci/cmake_registration_impact.py",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/executable_keys.py",
+    "tools/ci/executable_selection.py",
+    "tools/ci/install_visual_python_deps.sh",
+    "tools/ci/key_blind_executables.json",
+    "tools/ci/lane_reuse_record.py",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/pr_head_affected_tests.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/source_selftests.py",
+    "tools/ci/spawn_none_build_path_reviews.json",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/affected_targets.py",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/process_liveness.py",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"

@@ -1,5 +1,12 @@
 # Neural audio program status (2026-10-06, protected-head successor)
 
+> **Freshness correction (2026-10-08):** The protected-head SHA named below is
+> a historical audit anchor, not the current `origin/main`. The current
+> protected snapshot for this packet is
+> [`ca6e605d60e0f872765abe4b1a4769a17fdb1011`](https://github.com/Generous-Corp/pulp/commit/ca6e605d60e0f872765abe4b1a4769a17fdb1011).
+> Revalidate any head-sensitive claim before using this older receipt as
+> current acceptance evidence.
+
 This receipt is audited against the current protected `origin/main` head
 [`9660876c9af59b6132491fbaaba71d0760195e7c`](https://github.com/Generous-Corp/pulp/commit/9660876c9af59b6132491fbaaba71d0760195e7c), which includes the earlier neural-audio merges plus PR9577, PR9582, PR9602, PR9605, PR9622, PR9624, and PR9625, along with the subsequent CI, host-scheduling, GPU-batching, and Windows portability merges. The superseded 2026-10-05 status packet referenced an older protected snapshot; this successor is audited against the fetched head above. The older `f85a50352a46b7e2a6a302f1b4208fdc4f8ee0fa`, `eca392cdccaf34ca24edce592bc8c7fdb4150f76`, `5a19a802233be92a6ba29947ef99d306f9764b5d`, `bf7a25335161ed3ac81e40105a23d05983dc8a9d`, `8e845a48503e4abd066011300f01255d437bce6b`, `3dd81fc3fc64a77559229dc87e5836f8c92ee570`, and `a72faee66b762cf408e0c8dc09225d6401fb7855` anchors are retained only as historical provenance; none is treated as current. Claims remain fail-closed: synthetic, CPU-only, metadata-only, and unavailable-counter evidence does not establish provider execution or product performance.
 

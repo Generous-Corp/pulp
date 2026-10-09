@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261007-v2-semantic-kind-20261008-watch",
+  "created_at": "2026-10-07T21:39:52Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The v2 materialized binding parser now accepts importer-emitted semantic payload roles such as button and slider while still rejecting non-string kind values; this preserves the existing Pulp parser boundary and adds no design-import, Chromium, rendering, or packaging authority move.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-claude-bundle",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
