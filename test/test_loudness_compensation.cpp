@@ -7,8 +7,11 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/signal/biquad.hpp>
 #include <pulp/signal/fir_design.hpp>
+#include <pulp/signal/frequency_response.hpp>
 #include <pulp/signal/loudness_compensation.hpp>
+#include <pulp/signal/multi_channel_meter.hpp>
 
 #include <atomic>
 #include <cmath>
@@ -183,8 +186,8 @@ TEST_CASE("MinimumPhaseResponse keeps the magnitude and has minimum phase",
     CHECK(worst < 1e-3);
 }
 
-// The FIR designer allocates on the control thread; Auto Gain keeps a prepared
-// response workspace for real-time use. Compare their complex responses, not
+// The FIR designer allocates on the control thread; MinimumPhaseResponse keeps
+// a prepared response workspace for real-time use. Compare their complex responses, not
 // just magnitudes, so a cepstrum-folding or phase-sign mismatch is observable.
 TEST_CASE("MinimumPhaseResponse agrees with the offline FIR designer",
           "[loudness-compensation][pure]") {
@@ -681,4 +684,139 @@ TEST_CASE("The realtime calls do not allocate", "[loudness-compensation][rt-safe
     g_counting = false;
     delete probe;
     REQUIRE(g_allocations.load() > 0);
+}
+
+// ── Closed loop: the make-up restores the measured loudness ────────────────
+namespace {
+
+// Seeded pink noise (Kellett's economy filter over Gaussian white noise): equal
+// energy per octave, so on a linear bin grid nearly all of its energy sits in
+// the few bins below a few hundred hertz. A flat-weighted make-up counts bins
+// instead and all but ignores a bass boost's loudness.
+std::vector<float> pink(std::size_t n, unsigned seed, double amplitude = 0.05) {
+    const auto w = noise(n, seed, 1.0);
+    std::vector<float> x(n);
+    double b0 = 0.0, b1 = 0.0, b2 = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        b0 = 0.99765 * b0 + w[i] * 0.0990460;
+        b1 = 0.96300 * b1 + w[i] * 0.2965164;
+        b2 = 0.57000 * b2 + w[i] * 1.0526913;
+        x[i] = static_cast<float>(amplitude * (b0 + b1 + b2 + w[i] * 0.1848));
+    }
+    return x;
+}
+
+// BS.1770 gated integrated loudness, by the time-domain meter (an
+// implementation independent of the estimator's frequency-domain model).
+double integrated_lufs(const std::vector<float>& x) {
+    MultiChannelMeter meter;
+    meter.prepare(kRate, 1);
+    const float* ch[] = {x.data()};
+    constexpr int block = 512;
+    for (std::size_t at = 0; at < x.size(); at += block) {
+        const float* chunk[] = {ch[0] + at};
+        meter.process(chunk, 1, static_cast<int>(std::min<std::size_t>(block, x.size() - at)));
+    }
+    return meter.snapshot().lufs_integrated;
+}
+
+struct ClosedLoop {
+    double dry_lufs;
+    double shaped_lufs;
+    double compensated_lufs;
+    float makeup_db;
+};
+
+// Material through a +12 dB low shelf at 300 Hz, the make-up computed from
+// the estimator's spectrum of that material and the shelf's response on its
+// bin grid, then applied to the shaped signal.
+ClosedLoop closed_loop(bool weight_by_material) {
+    const auto dry = pink(static_cast<std::size_t>(12.0 * kRate), 1234);
+
+    Biquad shelf;
+    shelf.set_coefficients(Biquad::Type::low_shelf, 300.0f, 0.707f,
+                           static_cast<float>(kRate), 12.0f);
+    auto shaped = dry;
+    shelf.process(shaped.data(), static_cast<int>(shaped.size()));
+
+    LoudnessCompensationConfig config;
+    config.weight_by_material = weight_by_material;
+    LongTermSpectrum s;
+    s.prepare(kRate, 1, config);
+    const float* ch[] = {dry.data()};
+    s.push(ch, 1, static_cast<int>(dry.size()));
+
+    std::vector<double> response(static_cast<std::size_t>(s.bins()));
+    const double bin_hz = kRate / static_cast<double>(s.fft_size());
+    for (std::size_t b = 0; b < response.size(); ++b) {
+        const double m = section_magnitude(shelf.coefficients(),
+                                           angular_frequency(static_cast<double>(b) * bin_hz, kRate));
+        response[b] = m * m;
+    }
+    const float makeup = makeup_gain_db(response, s.spectrum(), {24.0f, 24.0f});
+
+    auto compensated = shaped;
+    const float g = std::pow(10.0f, makeup / 20.0f);
+    for (auto& v : compensated)
+        v *= g;
+    return {integrated_lufs(dry), integrated_lufs(shaped), integrated_lufs(compensated), makeup};
+}
+
+} // namespace
+
+// Tolerance 0.5 LU. Detection floor: the uncompensated shelf moves the
+// loudness by more than 3 LU, so a make-up of 0 dB misses by far more than
+// the tolerance, and the flat-weighted negative control below must miss by
+// more than 2 LU on the same material.
+TEST_CASE("The make-up restores the dry loudness of tilted material through a shelf",
+          "[loudness-compensation][closed-loop]") {
+    const auto r = closed_loop(true);
+    INFO("dry " << r.dry_lufs << " LUFS, shaped " << r.shaped_lufs << " LUFS, compensated "
+                << r.compensated_lufs << " LUFS, make-up " << r.makeup_db << " dB");
+    REQUIRE(std::isfinite(r.dry_lufs));
+    CHECK(std::abs(r.shaped_lufs - r.dry_lufs) > 3.0);
+    CHECK(std::abs(r.compensated_lufs - r.dry_lufs) < 0.5);
+}
+
+TEST_CASE("Flat weighting misses the dry loudness on tilted material",
+          "[loudness-compensation][closed-loop]") {
+    const auto r = closed_loop(false);
+    INFO("dry " << r.dry_lufs << " LUFS, compensated " << r.compensated_lufs
+                << " LUFS, make-up " << r.makeup_db << " dB");
+    CHECK(std::abs(r.compensated_lufs - r.dry_lufs) > 2.0);
+}
+
+// A call with fewer channels than prepared feeds the rest silence: the same
+// estimate as passing explicit zeros, never the older audio still in the
+// unused channels' history.
+TEST_CASE("A narrower push feeds the unused channels silence",
+          "[loudness-compensation][state]") {
+    const auto loud_l = noise(static_cast<std::size_t>(2.0 * kRate), 11, 0.3);
+    const auto loud_r = noise(static_cast<std::size_t>(2.0 * kRate), 12, 0.3);
+    const auto quiet = tone(static_cast<std::size_t>(3.0 * kRate), 300.0, 0.05);
+    const std::vector<float> zeros(quiet.size(), 0.0f);
+
+    auto run = [&](bool narrow) {
+        LoudnessCompensationConfig config;
+        LongTermSpectrum s;
+        s.prepare(kRate, 2, config);
+        const float* both[] = {loud_l.data(), loud_r.data()};
+        s.push(both, 2, static_cast<int>(loud_l.size()));
+        if (narrow) {
+            const float* one[] = {quiet.data()};
+            s.push(one, 1, static_cast<int>(quiet.size()));
+        } else {
+            const float* padded[] = {quiet.data(), zeros.data()};
+            s.push(padded, 2, static_cast<int>(quiet.size()));
+        }
+        return std::vector<double>(s.spectrum().begin(), s.spectrum().end());
+    };
+    const auto narrow = run(true);
+    const auto padded = run(false);
+    REQUIRE(narrow.size() == padded.size());
+    double worst = 0.0;
+    for (std::size_t b = 0; b < narrow.size(); ++b)
+        worst = std::max(worst, std::abs(narrow[b] - padded[b]));
+    INFO("worst per-bin difference " << worst);
+    CHECK(worst == 0.0);
 }

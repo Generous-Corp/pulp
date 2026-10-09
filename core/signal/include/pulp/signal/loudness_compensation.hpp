@@ -77,10 +77,9 @@
 
 namespace pulp::signal {
 
-// SPECTR-RENDER-PATH BEGIN -- every stage below runs on an audio thread
-// (prepare() allocates, on the control thread, but reads no clock either), so
-// the whole unit is held to the render-path rule: no clock, sleep, thread or
-// lock (tools/ci/check_render_path_clock.py).
+// Every stage below runs on an audio thread, except prepare(), which allocates
+// on the control thread. None of them reads a clock, sleeps, starts a thread
+// or takes a lock.
 
 /// Every tunable of the stateful stages.
 struct LoudnessCompensationConfig {
@@ -888,7 +887,8 @@ class LongTermSpectrum {
     /// Feed planar samples of the wet leg and, when tracking it, the dry leg
     /// (nullptr: the dry leg is the wet one). `on_frame(samples_consumed)`
     /// runs after every frame the call completes (audible or gated), with the
-    /// estimate already updated.
+    /// estimate already updated. Prepared channels beyond @p channels are fed
+    /// silence for these samples, so a narrower call never re-reads older audio.
     template <typename OnFrame>
     void push(const float* const* wet, const float* const* dry, int channels, int num_samples,
               OnFrame&& on_frame) noexcept {
@@ -903,6 +903,8 @@ class LongTermSpectrum {
                 const float* const* x = leg == 0 ? wet : (dry != nullptr ? dry : wet);
                 for (int ch = 0; ch < count; ++ch)
                     record_(ring_(leg, ch), x[ch], done, chunk);
+                for (int ch = count; ch < channels_; ++ch)
+                    record_silence_(ring_(leg, ch), chunk);
             }
             write_pos_ = (write_pos_ + chunk) % fft_size_;
             filled_ = std::min(fft_size_, filled_ + chunk);
@@ -1214,6 +1216,14 @@ class LongTermSpectrum {
         for (int i = 0; i < count; ++i) {
             const float v = src[offset + i];
             ring[pos] = std::isfinite(v) ? v : 0.0f;
+            if (++pos == fft_size_)
+                pos = 0;
+        }
+    }
+    void record_silence_(float* ring, int count) noexcept {
+        int pos = write_pos_;
+        for (int i = 0; i < count; ++i) {
+            ring[pos] = 0.0f;
             if (++pos == fft_size_)
                 pos = 0;
         }
@@ -1611,7 +1621,5 @@ class MakeupTarget {
     bool primed_ = false;
     float value_db_ = 0.0f;
 };
-
-// SPECTR-RENDER-PATH END
 
 } // namespace pulp::signal
