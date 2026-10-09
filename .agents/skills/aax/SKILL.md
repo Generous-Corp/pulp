@@ -28,6 +28,44 @@ want to build and validate AAX plugins locally.
 
 ## The custom editor
 
+### Processor-only AAX is the default shipping safety lane
+
+Plugins that need reliable host discovery and audio instantiation should use
+`pulp_add_plugin(... AAX_HEADLESS FORMATS AAX ...)` and emit `PULP_AAX_PLUGIN`.
+This target deliberately links `pulp::format-core`, omits `aax_effect_gui.cpp`
+and the view target, does not stage WebGPU/Skia sidecars, and advertises
+`AAX_eProperty_UsesClientGUI = 0`. It therefore cannot load the native editor
+stack while Pro Tools is scanning the component. The normal AU/VST3/CLAP/
+Standalone target remains editor-enabled. This option is reusable by Spectr,
+Forge, GPU-NAM, and other products.
+
+The AAX private-data lifecycle is also a hard gate: `ResetFieldData` must
+construct the processor state, reset must destroy and recreate it, and remove
+must destroy it exactly once. A nonzero private-storage pointer is not proof of
+construction; use the runtime lifecycle tests plus `load_unload`, `parameters`,
+and a host audio render before claiming DSP works.
+
+### Acceptance gates
+
+For a macOS release build, run these in order:
+
+1. Build the headless AAX target with governed tooling and inspect `otool -L`;
+   it must have no Metal, MetalKit, CoreHaptics, Skia, or WebGPU dependency and
+   no `libwgpu_native.dylib` sidecar.
+2. Run the SDK-gated entry/lifecycle tests and the AAX Validator's
+   `test.describe_validation`, `test.load_unload`, and `test.parameters`.
+3. Developer-ID sign nested non-PACE dylibs first, then PACE-wrap/sign the
+   outer AAX. Run Apple strict verification and `wraptool verify`; never run
+   outer `codesign` after PACE signing.
+4. Install exactly one copy under `/Library/Application Support/Avid/Audio/Plug-Ins`.
+   A validator pass is not a Pro Tools audio proof: insert the plug-in in a
+   real session and verify rendered or metered signal passes through it.
+
+Keep AAX SDK, validator, PACE binaries, customer identifiers, passwords, and
+license receipts outside repositories and command transcripts. A private setup
+backup may record versions, paths, checksums, and setup steps, but never the
+credentials themselves.
+
 `core/format/src/aax_effect_gui.cpp` embeds a Pulp editor in the Pro Tools
 plugin window through the shared, format-agnostic `view::PluginViewHost` — the
 same seam VST3 / AU v2 / AU v3 / CLAP use, so there is no AAX-specific render
