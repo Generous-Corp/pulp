@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dawn_shared_io_wavenet_spec.hpp"
+#include "shared_io_wavenet_spec.hpp"
 #include "shared_io_arena.hpp"
 
 #include <cstddef>
@@ -152,7 +152,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     // private implementation is intentionally mono-only; multi-instance models
     // require an instance-qualified submit token before they can be enabled.
     std::unique_ptr<SharedIoPreparedProgram>
-    make_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec) noexcept;
+    make_wavenet_program(const WavenetProgramSpec& spec) noexcept;
     ~DawnSharedIoProvider() override;
 
     DawnSharedIoProvider(const DawnSharedIoProvider&) = delete;
@@ -179,6 +179,8 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     void service_until(std::uint64_t deadline_ns) noexcept override;
     AdapterIdentity adapter_identity() const;
     std::string dawn_revision() const;
+    SharedIoProviderIdentity provider_identity() const noexcept override;
+    SharedIoProviderCapabilities provider_capabilities() const noexcept override;
     // Quiescent only: no slots/programs/futures; failed device cannot be reused.
     bool reconfigure_storage_kind(StorageKind kind) noexcept;
     StorageKind storage_kind() const noexcept;
@@ -186,7 +188,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     bool timestamps_enabled() const noexcept;
     std::optional<GpuTimestamp> gpu_timestamp(const SlotToken& token) const noexcept;
 
-    bool prepare_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec,
+    bool prepare_wavenet_program(const WavenetProgramSpec& spec,
                                  std::span<const SlotBufferHandle> slots) noexcept;
     bool submit_wavenet_program(const SlotResources&, SlotToken,
                                 std::shared_ptr<SharedIoTerminalInbox>) noexcept;

@@ -147,29 +147,40 @@ async function measureAuthoredFrame(cdp) {
       }
       if (!element) return null;
       const bounds = element.getBoundingClientRect();
+      // getBoundingClientRect() is expressed after ancestor transforms. Fit
+      // discovery needs the authored layout box so a fixed design surface
+      // scaled into the seed viewport is not mistaken for a smaller design.
+      // Keep the transformed bounds above as the capture-space geometry; the
+      // intrinsic dimensions are used only to choose and verify the viewport.
+      const authoredWidth = Number(element.offsetWidth);
+      const authoredHeight = Number(element.offsetHeight);
       return {
         x: bounds.left + window.scrollX,
         y: bounds.top + window.scrollY,
         width: bounds.width,
         height: bounds.height,
+        authoredWidth: authoredWidth > 0 ? authoredWidth : bounds.width,
+        authoredHeight: authoredHeight > 0 ? authoredHeight : bounds.height,
       };
     })()`,
     returnByValue: true,
   });
   const frame = evaluated.result?.value;
-  if (!frame || ![frame.x, frame.y, frame.width, frame.height]
-      .every(Number.isFinite) || frame.width <= 0 || frame.height <= 0) {
+  if (!frame || ![frame.x, frame.y, frame.width, frame.height,
+    frame.authoredWidth, frame.authoredHeight].every(Number.isFinite) ||
+      frame.width <= 0 || frame.height <= 0 ||
+      frame.authoredWidth <= 0 || frame.authoredHeight <= 0) {
     return null;
   }
   return frame;
 }
 
 function verifyAuthoredViewport(frame, target) {
-  if (Math.ceil(frame.width) !== target.width ||
-      Math.ceil(frame.height) !== target.height) {
+  if (Math.ceil(frame.authoredWidth) !== target.width ||
+      Math.ceil(frame.authoredHeight) !== target.height) {
     const error = new Error(
       `authored frame changed from ${target.width}x${target.height} to ` +
-      `${frame.width}x${frame.height} after one same-target reload`);
+      `${frame.authoredWidth}x${frame.authoredHeight} after one same-target reload`);
     error.code = "capture-authored-viewport-nonconvergent";
     throw error;
   }
@@ -184,6 +195,17 @@ function verifyAuthoredViewport(frame, target) {
     error.code = "capture-authored-frame-not-contained";
     throw error;
   }
+}
+
+async function setCaptureViewport(cdp, width, height, dpr) {
+  await cdp.call("Emulation.setDeviceMetricsOverride", {
+    width,
+    height,
+    deviceScaleFactor: dpr,
+    mobile: false,
+    screenWidth: width,
+    screenHeight: height,
+  });
 }
 
 function authoredFrameUnavailable(message) {
@@ -251,11 +273,23 @@ function exitAfterCleanupDeadline(expiry, outputDir, browser) {
 // records of captures that never produce an envelope. Browser behaviour around
 // screenshots and virtual time changes between Chromium releases, so a failure
 // report that does not name the browser cannot be triaged.
+function canonicalBrowserProduct(product) {
+  const value = String(product ?? "").trim();
+  const matches = (alias) => value.startsWith(alias) &&
+    (value.length === alias.length || value[alias.length] === " " ||
+     value[alias.length] === "/");
+  if (matches("Google Chrome") || matches("Google Chrome for Testing") ||
+      matches("Chrome for Testing") || matches("Chrome")) {
+    return "Chrome";
+  }
+  return value;
+}
+
 function reportBrowser(version) {
   const product = String(version?.product ?? "");
   const [name, release] = product.split("/");
   const browser = {
-    product: name || "Chromium",
+    product: canonicalBrowserProduct(name || "Chromium"),
     version: release || "",
     protocol_version: version?.protocolVersion ?? "",
     build_hash: version?.revision ?? "",
@@ -483,12 +517,28 @@ async function readCanvasRasterSignature(cdp, backendNodeId, pixelBudget) {
     if (!dataUrl.startsWith(prefix)) {
       throw new Error(`canvas backend node ${backendNodeId} did not produce PNG`);
     }
+    const pixelsRead = await cdp.call("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function() {
+        const context = this.getContext('2d');
+        if (!context) return { nonzero: null };
+        const data = context.getImageData(0, 0, this.width, this.height).data;
+        let nonzero = 0;
+        for (let index = 3; index < data.length; index += 4) {
+          if (data[index] > 8) nonzero++;
+        }
+        return { nonzero };
+      }`,
+      returnByValue: true,
+    });
     return {
       backendNodeId,
       width,
       height,
       pixels,
       sha256: sha256(Buffer.from(dataUrl.slice(prefix.length), "base64")),
+      nonzero: Number.isSafeInteger(pixelsRead.result?.value?.nonzero)
+        ? pixelsRead.result.value.nonzero : null,
     };
   } finally {
     await cdp.call("Runtime.releaseObject", { objectId }).catch(() => {});
@@ -508,7 +558,8 @@ async function captureCanvasRasterSignatures(cdp, snapshot) {
   return signatures;
 }
 
-async function verifyCanvasRasterSignatures(cdp, signatures) {
+async function verifyCanvasRasterSignatures(
+  cdp, signatures, { allowDeterministicRepaint = false } = {}) {
   let totalPixels = 0;
   for (const expected of signatures) {
     let actual;
@@ -527,6 +578,8 @@ async function verifyCanvasRasterSignatures(cdp, signatures) {
     totalPixels += actual.pixels;
     if (actual.width === expected.width && actual.height === expected.height &&
         actual.sha256 === expected.sha256) continue;
+    if (allowDeterministicRepaint && expected.nonzero > 0 && actual.nonzero > 0)
+      continue;
     const error = new Error(
       `captureBeyondViewport changed canvas backend node ` +
       `${expected.backendNodeId} while capturing overflow content ` +
@@ -1378,6 +1431,30 @@ async function runCapture(options) {
 
     progress.enterPhase("page-configuration");
     browser = reportBrowser(await cdp.call("Browser.getVersion"));
+    const expectedBrowser = {
+      product: canonicalBrowserProduct(
+        options.values.get("--browser-product") ?? ""),
+      version: options.values.get("--browser-version") ?? "",
+      protocol_version: options.values.get("--browser-protocol-version") ?? "",
+      build_hash: options.values.get("--browser-build-hash") ?? "",
+    };
+    if ((expectedBrowser.product &&
+         browser.product !== expectedBrowser.product) ||
+        (expectedBrowser.version && browser.version !== expectedBrowser.version) ||
+        (expectedBrowser.protocol_version &&
+         browser.protocol_version !== expectedBrowser.protocol_version) ||
+        (expectedBrowser.build_hash &&
+         browser.build_hash !== expectedBrowser.build_hash)) {
+      const error = new Error(
+        `selected browser identity changed during capture: expected ` +
+        `${expectedBrowser.product}/${expectedBrowser.version} ` +
+        `protocol=${expectedBrowser.protocol_version} ` +
+        `build=${expectedBrowser.build_hash}, got ` +
+        `${browser.product}/${browser.version} ` +
+        `protocol=${browser.protocol_version} build=${browser.build_hash}`);
+      error.code = "browser-identity-drift";
+      throw error;
+    }
     await configurePage(cdp, initialWidth, initialHeight, dpr);
     await installDynamicWorkTracker(cdp);
     const healthMonitor = installCaptureHealthMonitor(cdp);
@@ -1431,8 +1508,8 @@ async function runCapture(options) {
           "the first occupying body child did not resolve to a finite frame");
       }
       const target = {
-        width: Math.ceil(discoveredFrame.width),
-        height: Math.ceil(discoveredFrame.height),
+        width: Math.ceil(discoveredFrame.authoredWidth),
+        height: Math.ceil(discoveredFrame.authoredHeight),
       };
       validateCaptureDimensions(
         target.width, target.height, dpr, "derived authored viewport");
@@ -1628,6 +1705,46 @@ async function runCapture(options) {
       error.code = "capture-negative-overflow";
       throw error;
     }
+    // Settle oversized authored surfaces before Chromium captures beyond the
+    // viewport. This lets valid resize-aware canvases repaint while preserving
+    // the planted resize-clear negative control.
+    let captureExtentCanvasSignatures = [];
+    const extentExceedsViewport =
+      finalExtent.width > resolvedViewportWidth ||
+      finalExtent.height > resolvedViewportHeight;
+    if (extentExceedsViewport) {
+      const overflowSnapshot = await cdp.call("DOMSnapshot.captureSnapshot", {
+        computedStyles: ["display"],
+        includePaintOrder: true,
+        includeDOMRects: true,
+      });
+      captureExtentCanvasSignatures =
+        await captureCanvasRasterSignatures(cdp, overflowSnapshot);
+      validateCaptureDimensions(
+        finalExtent.width, finalExtent.height, dpr,
+        "settled capture viewport");
+      const settledWidth = Math.max(resolvedViewportWidth, finalExtent.width);
+      const settledHeight = Math.max(resolvedViewportHeight, finalExtent.height);
+      await setCaptureViewport(cdp, settledWidth, settledHeight, dpr);
+      resolvedViewportWidth = settledWidth;
+      resolvedViewportHeight = settledHeight;
+      await waitForStable(cdp, {
+        networkIdle: () => pendingNetwork.size === 0,
+      });
+      finalExtent = await measureDocumentExtent(cdp);
+      if (finalExtent.width > resolvedViewportWidth ||
+          finalExtent.height > resolvedViewportHeight) {
+        const error = new Error(
+          `document extent ${finalExtent.width}x${finalExtent.height} ` +
+          `grew beyond settled viewport ${resolvedViewportWidth}x` +
+          `${resolvedViewportHeight}`);
+        error.code = "capture-extent-not-contained";
+        throw error;
+      }
+      await verifyCanvasRasterSignatures(
+        cdp, captureExtentCanvasSignatures,
+        { allowDeterministicRepaint: true });
+    }
     await cdp.call("Runtime.evaluate", {
       expression: "scrollTo(0, 0); true",
       returnByValue: true,
@@ -1714,8 +1831,8 @@ async function runCapture(options) {
       if (box) {
         if (fitAuthoredFrame) {
           verifyAuthoredViewport(box, {
-            width: resolvedViewportWidth,
-            height: resolvedViewportHeight,
+            width: viewportResolution.target.width,
+            height: viewportResolution.target.height,
           });
           viewportResolution.verified_frame = box;
         }
@@ -1867,8 +1984,8 @@ async function runCapture(options) {
           "the authored frame disappeared before the accepted browser pixels");
       }
       verifyAuthoredViewport(acceptedFrame, {
-        width: resolvedViewportWidth,
-        height: resolvedViewportHeight,
+        width: viewportResolution.target.width,
+        height: viewportResolution.target.height,
       });
       viewportResolution.verified_frame = acceptedFrame;
       authoredFrame = {
@@ -2052,7 +2169,8 @@ async function runCapture(options) {
         : []),
     ]);
 
-    const browserProductArg = options.values.get("--browser-product") ?? "";
+    const browserProductArg = canonicalBrowserProduct(
+      options.values.get("--browser-product") ?? "");
     const browserVersionArg = options.values.get("--browser-version") ?? "";
     const envelope = {
       schema: "pulp-browser-capture-v1",

@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import re
@@ -481,7 +483,8 @@ class GeneratedFamiliesTest(FamilyFixture):
 class DriftCheckTest(FamilyFixture):
     """`--check` blocks only a change a stale family could bound wrongly."""
 
-    def check(self, touched: list[str] | None, merge_group: bool = False) -> int:
+    def check(self, touched: list[str] | None, merge_group: bool = False,
+              build: str = "/b", mode: str = "--check") -> int:
         self.add_whole_tree()
         self.write("tools/scripts/test_a.py", "")
         self.script_test("a-selftest", "tools/scripts/test_a.py")
@@ -501,7 +504,7 @@ class DriftCheckTest(FamilyFixture):
         families.script_test_inputs.changed_files = lambda _root, _base: set(touched or [])
         families.script_test_inputs.advisory_here = lambda: merge_group
         try:
-            return families.main(["--repo-root", str(self.root), "--build-dir", "/b", "--check"])
+            return families.main(["--repo-root", str(self.root), "--build-dir", build, mode])
         finally:
             inventory.codemodel_reply_available = saved_reply
             (inventory.load_ctest_json, inventory.load_codemodel_targets,
@@ -515,6 +518,57 @@ class DriftCheckTest(FamilyFixture):
                      "tools/scripts/changed_surface_script_families.py"]:
             with self.subTest(path=path):
                 self.assertEqual(self.check([path]), 1)
+
+    def build_with_cache(self, **cache: str) -> str:
+        build = self.root / "build-profile"
+        build.mkdir(exist_ok=True)
+        (build / "CMakeCache.txt").write_text(
+            "".join(f"{key}:STRING={value}\n" for key, value in cache.items()), encoding="utf-8")
+        return str(build)
+
+    def test_a_gate_profile_build_still_blocks_drift(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="OFF")
+        self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build), 1)
+
+    def test_a_build_outside_the_gate_profile_skips_the_check(self) -> None:
+        """The proof option registers GPU probes the gate never does, so a
+        file written or judged on such a build disagrees with the gate's."""
+        for cache in ({"CMAKE_BUILD_TYPE": "Release", "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF": "ON"},
+                      {"CMAKE_BUILD_TYPE": "Debug"}):
+            with self.subTest(cache=cache):
+                build = self.build_with_cache(**cache)
+                self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build),
+                                 families.SKIP_EXIT)
+
+    def test_a_build_outside_the_gate_profile_refuses_to_write(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.check(["tools/scripts/test_a.py"], build=build, mode="--write")
+        self.assertEqual(rc, 2)
+        self.assertIn("refusing to write", err.getvalue())
+        self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", err.getvalue())
+        self.assertEqual((self.root / families.FAMILIES_FILE).read_text(encoding="utf-8"),
+                         "# stale\n")
+
+    def test_a_gate_profile_build_writes(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="OFF")
+        self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build, mode="--write"), 0)
+        written = (self.root / families.FAMILIES_FILE).read_text(encoding="utf-8")
+        self.assertIn('"a-selftest"', written)
+
+    def test_the_skip_names_why(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build),
+                             families.SKIP_EXIT)
+        self.assertIn("SKIP", out.getvalue())
+        self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", out.getvalue())
 
     def test_missing_codemodel_is_a_reported_skip(self) -> None:
         saved = inventory.codemodel_reply_available

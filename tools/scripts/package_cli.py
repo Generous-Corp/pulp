@@ -303,6 +303,10 @@ def main() -> int:
                    help="Browser-capture .mjs runtime directory bundled with import-design.")
     p.add_argument("--import-design-contract", required=False, type=Path, default=None,
                    help="Shared materialized binding contract bundled beside the browser-capture runtime.")
+    p.add_argument("--import-design-source-emitter", required=False, type=Path, default=None,
+                   help="Materialized JSX source emitter bundled beside the import-design helper.")
+    p.add_argument("--import-design-ids-map", required=False, type=Path, default=None,
+                   help="Materialized JSX ids map bundled beside the import-design helper.")
     p.add_argument(
         "--allow-missing-import-design-contract",
         action="store_true",
@@ -359,24 +363,33 @@ def main() -> int:
         print("FAIL: import-design binary and runtime directory must be supplied together",
               file=sys.stderr)
         return 2
-    if args.import_design_contract is not None and args.import_design_binary is None:
-        print("FAIL: --import-design-contract requires --import-design-binary",
+    materialized_payload = (
+        args.import_design_contract,
+        args.import_design_source_emitter,
+        args.import_design_ids_map,
+    )
+    if any(path is not None for path in materialized_payload) and args.import_design_binary is None:
+        print("FAIL: materialized JSX runtime siblings require --import-design-binary",
               file=sys.stderr)
         return 2
     if args.allow_missing_import_design_contract and args.import_design_binary is None:
         print("FAIL: --allow-missing-import-design-contract requires --import-design-binary",
               file=sys.stderr)
         return 2
+    for flag, path in (
+        ("--import-design-contract", args.import_design_contract),
+        ("--import-design-source-emitter", args.import_design_source_emitter),
+        ("--import-design-ids-map", args.import_design_ids_map),
+    ):
+        if path is not None and not path.is_file():
+            print(f"FAIL: {flag} not at {path}", file=sys.stderr)
+            return 2
     if (
         args.import_design_binary is not None
-        and args.import_design_contract is None
+        and any(path is None for path in materialized_payload)
         and not args.allow_missing_import_design_contract
     ):
-        print("FAIL: import-design binary and materialized binding contract must be supplied together",
-              file=sys.stderr)
-        return 2
-    if args.import_design_contract is not None and not args.import_design_contract.is_file():
-        print(f"FAIL: --import-design-contract not at {args.import_design_contract}",
+        print("FAIL: import-design binary and all materialized JSX runtime siblings (including the materialized binding contract) must be supplied together",
               file=sys.stderr)
         return 2
     if (args.node_runtime is None) != (args.node_license is None):
@@ -474,14 +487,17 @@ def main() -> int:
             files.append(staged_import)
             names.append(import_name)
             if args.import_design_contract is not None:
-                staged_import_contract = stage / "jsx-runtime" / "materialized_binding_contract.mjs"
-                staged_import_contract.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(args.import_design_contract, staged_import_contract)
-                files.append(staged_import_contract)
-                names.append("jsx-runtime/materialized_binding_contract.mjs")
-                print("bundled: "
-                      f"{args.import_design_contract} -> "
-                      "jsx-runtime/materialized_binding_contract.mjs", flush=True)
+                for source, member in (
+                    (args.import_design_contract, "materialized_binding_contract.mjs"),
+                    (args.import_design_source_emitter, "materialized_source_emitter.mjs"),
+                    (args.import_design_ids_map, "materialized_ids_map.mjs"),
+                ):
+                    staged = stage / "jsx-runtime" / member
+                    staged.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, staged)
+                    files.append(staged)
+                    names.append(f"jsx-runtime/{member}")
+                    print(f"bundled: {source} -> jsx-runtime/{member}", flush=True)
             else:
                 print("note: packaging a pre-contract import-design payload without "
                       "jsx-runtime/materialized_binding_contract.mjs", flush=True)

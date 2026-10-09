@@ -14,6 +14,8 @@
 
 using pulp::gpu_audio::detail::SharedIoArena;
 using pulp::gpu_audio::detail::SharedIoArenaProvider;
+using pulp::gpu_audio::detail::SharedIoProviderCapabilities;
+using pulp::gpu_audio::detail::SharedIoProviderIdentity;
 using pulp::gpu_audio::detail::SharedIoSlotLedger;
 using pulp::gpu_audio::detail::SharedIoTerminalInbox;
 using pulp::gpu_audio::detail::SharedIoTerminalStatus;
@@ -314,6 +316,16 @@ namespace {
 
 class FakeSharedIoProvider final : public SharedIoArenaProvider {
   public:
+    SharedIoProviderIdentity identity;
+    SharedIoProviderCapabilities capabilities;
+
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        return identity;
+    }
+    SharedIoProviderCapabilities provider_capabilities() const noexcept override {
+        return capabilities;
+    }
+
     struct Allocation {
         std::uint32_t slot = 0;
         std::unique_ptr<std::byte[]> input;
@@ -680,6 +692,58 @@ TEST_CASE("staged arena backing uses the same terminal ownership without claimin
     CHECK(provider.host_frees == 2);
     CHECK(provider.live_allocations == 0);
     CHECK_FALSE(provider.destroy_before_dispose);
+}
+
+TEST_CASE("provider identity and capabilities stay provider-owned across arena lifecycle",
+          "[gpu_audio][shared_io][provider][identity]") {
+    FakeSharedIoProvider provider;
+    provider.identity = {.authenticated = true,
+                         .provider_revision = "fake-provider-1",
+                         .adapter_name = "deterministic-fake",
+                         .adapter_backend = "native",
+                         .adapter_vendor_id = 0xfeed,
+                         .adapter_device_id = 0xbeef,
+                         .native_runtime_authenticated = true,
+                         .native_runtime_name = "fake-runtime",
+                         .native_runtime_backend = "native"};
+    provider.capabilities = {.imported_host_pointer = true,
+                             .ordered_causal_state = true,
+                             .completion_service = true,
+                             .device_loss_recovery = false,
+                             .gpu_timestamps = true};
+
+    const auto before = provider.provider_identity();
+    CHECK(before.authenticated);
+    CHECK(before.adapter_backend == "native");
+    CHECK(provider.provider_capabilities().ordered_causal_state);
+
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(provider, arena_config(1)));
+    CHECK(provider.provider_identity().provider_revision == "fake-provider-1");
+    CHECK(provider.provider_capabilities().imported_host_pointer);
+    const auto token = publish_and_submit(arena, 19);
+    REQUIRE(provider.complete(0, SharedIoTerminalStatus::RetiredSuccess) ==
+            SharedIoTerminalInbox::PushResult::Accepted);
+    REQUIRE(arena.drain_completions().accepted == 1);
+    const auto output = arena.acquire_output(token.preparation_epoch, token.stream_sequence);
+    REQUIRE(output);
+    REQUIRE(arena.release_output({output->token}));
+    REQUIRE(arena.release());
+    CHECK(provider.provider_identity().native_runtime_authenticated);
+}
+
+TEST_CASE("unknown fake providers report no identity or capabilities",
+          "[gpu_audio][shared_io][provider][identity]") {
+    FakeSharedIoProvider provider;
+    const auto identity = provider.provider_identity();
+    const auto capabilities = provider.provider_capabilities();
+    CHECK_FALSE(identity.authenticated);
+    CHECK_FALSE(identity.native_runtime_authenticated);
+    CHECK_FALSE(capabilities.imported_host_pointer);
+    CHECK_FALSE(capabilities.ordered_causal_state);
+    CHECK_FALSE(capabilities.completion_service);
+    CHECK_FALSE(capabilities.device_loss_recovery);
+    CHECK_FALSE(capabilities.gpu_timestamps);
 }
 
 TEST_CASE("arena storage selection rejects mismatched backing and false import claims",

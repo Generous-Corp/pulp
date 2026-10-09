@@ -19,6 +19,14 @@ the *same* wasm UI module mounts against both a WAM and a WebCLAP demo. Build it
 once; if it looks different across the two ABIs, that is a shared-player bug, not
 a per-demo tweak.
 
+## Governed CI builds
+
+Every Web-Plugins workflow build must use `tools/ci/governed-build.sh cmake
+--build ...` so Emscripten and wasi-sdk jobs share the host governor. The WAMv2
+and WebCLAP steps run from nested working directories, so those two calls must
+use `bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`; a relative
+`tools/ci/` path resolves inside the demo tree and fails before compilation.
+
 ## wasm DSP builds get `pulp::simd` as inline scalar code
 
 Signal headers (`fir_filter.hpp`, `oversampling*.hpp`, `zero_latency_convolver.hpp`,

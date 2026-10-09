@@ -2,6 +2,7 @@ import stat
 import tempfile
 import unittest
 import json
+from datetime import datetime, timezone
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -11,6 +12,53 @@ import gpu_audio_p2_campaign as campaign
 
 
 class P2CampaignContractTests(unittest.TestCase):
+    def test_host_preflight_requires_fresh_source_bound_quiet_receipt(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "host-preflight.json"
+            source = "a" * 40
+            path.write_text(json.dumps({
+                "schema": "pulp.gpu-audio.p2.host-preflight.v1",
+                "status": "passed", "source_revision": source, "host_id": "m5-studio",
+                "sampled_at": datetime.now(timezone.utc).isoformat(),
+                "quiet_host": True, "host_vitals_level": "green",
+                "gpu_contention": False, "ui_contention": False,
+                "thermal_state": "nominal",
+            }), encoding="utf-8")
+            receipt = campaign.validate_host_preflight(path, source)
+            self.assertEqual(receipt["host_id"], "m5-studio")
+            path.write_text(json.dumps({
+                "schema": "pulp.gpu-audio.p2.host-preflight.v1",
+                "status": "passed", "source_revision": source, "host_id": "m5-studio",
+                "sampled_at": "2000-01-01T00:00:00Z", "quiet_host": True,
+                "host_vitals_level": "green", "gpu_contention": False,
+                "ui_contention": False, "thermal_state": "nominal",
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "fresh"):
+                campaign.validate_host_preflight(path, source)
+
+    def test_host_preflight_rejects_contention_or_source_mismatch(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "host-preflight.json"
+            path.write_text(json.dumps({
+                "schema": "pulp.gpu-audio.p2.host-preflight.v1",
+                "status": "passed", "source_revision": "b" * 40, "host_id": "m5",
+                "sampled_at": datetime.now(timezone.utc).isoformat(),
+                "quiet_host": True, "host_vitals_level": "green",
+                "gpu_contention": True, "ui_contention": False,
+                "thermal_state": "nominal",
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "source_revision|contention"):
+                campaign.validate_host_preflight(path, "a" * 40)
+
+    def test_host_preflight_mutation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "host-preflight.json"
+            path.write_text('{"status":"passed"}\n', encoding="utf-8")
+            digest = campaign.sha256(path)
+            campaign.require_unchanged_host_preflight(path, digest)
+            path.write_text('{"status":"changed"}\n', encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "changed"):
+                campaign.require_unchanged_host_preflight(path, digest)
     @staticmethod
     def _rows():
         bindings = {
@@ -340,6 +388,15 @@ class P2CampaignContractTests(unittest.TestCase):
             {"slots": 16, "lead": 1}, {"slots": 16, "lead": 8},
         ])
         self.assertEqual(plan["trial_count"], 4 * 2 * campaign.RUNS_PER_KIND)
+
+    def test_process_receipts_expand_to_logical_trials_once(self):
+        self.assertEqual(campaign.logical_trial_repetitions("cold", 4), (4,))
+        self.assertEqual(
+            campaign.logical_trial_repetitions("steady", 1),
+            tuple(range(1, campaign.RUNS_PER_KIND + 1)),
+        )
+        with self.assertRaises(ValueError):
+            campaign.logical_trial_repetitions("other", 1)
 
     def test_matrix_axis_rejects_duplicates_and_unknown_values(self):
         with self.assertRaises(SystemExit):

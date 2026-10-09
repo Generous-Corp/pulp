@@ -158,6 +158,23 @@ test('strict canonicalization rejects a padded vendor marker spoof', () => {
   assert.match(result.html, /src="react"/);
 });
 
+test('preserves every asset when a trusted vendor id collides with authored bytes', () => {
+  const react = trustedReact();
+  const authored = 'globalThis.Authored = true;';
+  // Put the trusted entry last: an id-only removal implementation would let
+  // it overwrite the authored entry in its classification map and then filter
+  // both payloads out of the document.
+  const result = canonicalizeSynthetic({
+    html: '<script src="react"></script>',
+    assets: [vendorAsset('react', authored, 'react'),
+      vendorAsset('react', react, 'react')],
+  });
+  assert.equal(result.runtime_canonicalization.duplicate_asset_ids_preserved, 1);
+  assert.equal(result.runtime_canonicalization.browser_vendor_assets_removed, 0);
+  assert.equal(result.assets.length, 2);
+  assert.match(result.html, /src="react"/);
+});
+
 test('canonicalizes application/javascript vendor assets consistently', () => {
   const source = trustedReact();
   const result = canonicalizeSynthetic({

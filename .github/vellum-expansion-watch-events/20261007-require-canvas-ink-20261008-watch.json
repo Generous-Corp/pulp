@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261007-require-canvas-ink-20261008-watch",
+  "created_at": "2026-10-07T21:10:58Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Adds an opt-in browser import validation guard that requires hash-verified materialized canvas evidence to contain at least one non-transparent pixel. The change preserves DesignIR as authored authority and keeps browser capture plus native canvas evidence in their existing validation lanes; it moves no source authority, ownership, or rendering responsibilities to Vellum.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-browser-import-cli",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

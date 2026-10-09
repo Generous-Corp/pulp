@@ -5,6 +5,7 @@
 # along.
 add_library(pulp-browser-capture-backend STATIC
     browser_capture_backend.cpp
+    browser_capture_provenance.cpp
     browser_discovery.cpp
     browser_capture_diagnostics.cpp
     node_runtime.cpp)
@@ -16,7 +17,8 @@ target_include_directories(pulp-browser-capture-backend PUBLIC
 target_compile_definitions(pulp-browser-capture-backend PRIVATE
     PULP_BROWSER_CAPTURE_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/browser_capture/capture.mjs")
 target_link_libraries(pulp-browser-capture-backend PUBLIC
-    pulp::platform)
+    pulp::platform
+    pulp::runtime)
 
 # Keep the pure CLI compatibility policy in one compiled object shared by the
 # production tool and its adapter tests. Besides avoiding implementation drift,
@@ -187,7 +189,14 @@ install(TARGETS pulp-import-design
     BUNDLE DESTINATION bin)
 install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
-install(FILES "${_pulp_materialized_binding_contract}"
+install(FILES
+    "${_pulp_materialized_binding_contract}"
+    "${_pulp_materialized_source_emitter}"
+    "${_pulp_materialized_ids_map}"
+    DESTINATION bin/jsx-runtime)
+install(FILES
+    "${_pulp_materialized_source_emitter}"
+    "${_pulp_materialized_ids_map}"
     DESTINATION bin/jsx-runtime)
 
 add_executable(pulp-design-import-bench

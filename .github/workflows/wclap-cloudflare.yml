@@ -284,7 +284,7 @@ jobs:
             -DPULP_EXAMPLE_PLUGINS_DIR="$GITHUB_WORKSPACE/_ext/pulp-example-plugins" \
             -DPULP_CLASSIC_EFFECTS_DIR="$GITHUB_WORKSPACE/_ext/pulp-classic-effects" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j"$(nproc)"
+          bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build
 
           # A gallery target that got skipped builds NOTHING and says nothing, and the
           # failure then surfaces hundreds of lines later as a missing wasm in the
@@ -338,7 +338,7 @@ jobs:
           # ABI, and the assembler emits the pair or neither.
           emcmake cmake -S examples/web-demos/wasm-build -B examples/web-demos/wasm-build/build \
             -DCMAKE_BUILD_TYPE=Release -DPULP_WAM_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
-          cmake --build examples/web-demos/wasm-build/build -j"$(nproc)"
+          bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build examples/web-demos/wasm-build/build
 
           # Skia wasm slice (Ganesh/WebGL2) — the Pulp UI module's one binary dependency.
           # URL + sha256 come from the manifest, so this lane and the dependency audit
@@ -361,7 +361,7 @@ jobs:
           # Pulp's own GPU UI, compiled to wasm. Both SuperConvolver pages mount it.
           emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
             -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm"
-          cmake --build build-webui -j"$(nproc)"
+          bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build-webui
 
           # The Skia-free WebGPU DSP module the GPU page's worker instantiates. Guarded:
           # the GPU-audio lane does not exist on every branch this workflow runs from, and
@@ -371,7 +371,7 @@ jobs:
           if [ -d examples/web-demos/gpu-audio ]; then
             emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
               -DCMAKE_BUILD_TYPE=Release
-            cmake --build build-gpu-dsp -j"$(nproc)"
+            bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build-gpu-dsp
           else
             echo "note: examples/web-demos/gpu-audio is not in this tree — /super-convolver-gpu/ will not be emitted."
           fi

@@ -89,7 +89,7 @@ jobs:
         shell: bash
 
       - name: Build stub
-        run: cmake --build build-stub --config Release
+        run: tools/ci/governed-build.sh cmake --build build-stub --config Release
         shell: bash
 
       - name: Run stub

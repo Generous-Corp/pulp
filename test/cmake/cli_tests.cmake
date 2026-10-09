@@ -22,6 +22,21 @@ target_link_libraries(pulp-test-cli-design-binding PRIVATE Catch2::Catch2WithMai
 catch_discover_tests(pulp-test-cli-design-binding
     PROPERTIES LABELS "parser-import")
 
+# `pulp ui` keeps the user-facing help contract in the native dispatcher while
+# delegating implementation to the dependency-free Python emitter. Test both
+# the help path and the forwarding/exit-status boundary without launching a
+# subprocess or mutating a checkout.
+add_executable(pulp-test-cli-ui-command
+    test_cli_ui.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cmd_ui.cpp
+)
+target_include_directories(pulp-test-cli-ui-command PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/runtime/include)
+target_link_libraries(pulp-test-cli-ui-command PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-ui-command
+    PROPERTIES LABELS "cli;ui")
+
 # CLI create target selection tests
 add_executable(pulp-test-cli-create-targets test_cli_create_targets.cpp ${CMAKE_SOURCE_DIR}/tools/cli/create_build_commands.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/create_targets.cpp

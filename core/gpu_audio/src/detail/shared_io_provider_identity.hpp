@@ -20,4 +20,16 @@ struct SharedIoProviderIdentity {
     std::string native_runtime_backend;
 };
 
+// Provider-owned execution capabilities.  These are deliberately semantic
+// facts used by the private realtime seam; they contain no Dawn, WebGPU, or
+// native-device types.  A provider that cannot authenticate a capability must
+// leave it false so diagnostics and admission remain fail-closed.
+struct SharedIoProviderCapabilities {
+    bool imported_host_pointer = false;
+    bool ordered_causal_state = false;
+    bool completion_service = false;
+    bool device_loss_recovery = false;
+    bool gpu_timestamps = false;
+};
+
 } // namespace pulp::gpu_audio::detail
