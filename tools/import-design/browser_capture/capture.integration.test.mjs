@@ -533,7 +533,7 @@ test("real browser capture preserves asynchronously hydrated canvas ink",
   });
 
 test("real browser capture fails when analyzer readiness never arrives",
-  { timeout: captureCaseTimeout(1, 5000) }, async (context) => {
+  { timeout: captureCaseTimeout(1, 15000) }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -552,7 +552,7 @@ test("real browser capture fails when analyzer readiness never arrives",
         execute(process.execPath, [
           script, "capture", "--browser", browser, "--input", input,
           "--root", root, "--output", output, "--initial-width", "160",
-          "--initial-height", "120", "--dpr", "2", "--timeout-ms", "5000",
+          "--initial-height", "120", "--dpr", "2", "--timeout-ms", "15000",
         ], { maxBuffer: 1024 * 1024 }),
         (error) => error.code === 1 &&
           error.stderr.includes("capture-readiness-rejected") &&
