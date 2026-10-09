@@ -6,6 +6,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/fir_design.hpp>
@@ -630,8 +631,12 @@ TEST_CASE("LongTermSpectrum: a restored estimate is a prior; a carried one is wa
 }
 
 TEST_CASE("The realtime calls do not allocate", "[loudness-compensation][rt-safety]") {
+    // Both leg modes: a single-leg estimator takes its own branches (the dry
+    // and cross spectra copied from the wet one on import).
+    const bool track_dry_leg = GENERATE(true, false);
+    INFO("track_dry_leg " << track_dry_leg);
     LoudnessCompensationConfig config;
-    config.track_dry_leg = true;
+    config.track_dry_leg = track_dry_leg;
     LongTermSpectrum s;
     s.prepare(kRate, 2, config);
     MinimumPhaseResponse mp;
