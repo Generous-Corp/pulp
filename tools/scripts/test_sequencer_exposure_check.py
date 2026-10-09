@@ -1335,8 +1335,12 @@ def main() -> int:
         # from the map and not from the path's shape.
         if config_doc_errors(owning_guide, guide_root):
             raise AssertionError("a guide was refused with no config-doc map present")
-        write(guide_root, "tools/scripts/config_doc_map.json", json.dumps(
-            {"entries": [{"paths": ["fixture.yml"], "docs": [fixture_guide], "why": "fixture"}]}))
+        # The owned guide sits in the SECOND entry, so a reader that stops at
+        # the first entry is caught.
+        write(guide_root, "tools/scripts/config_doc_map.json", json.dumps({"entries": [
+            {"paths": ["other.yml"], "docs": ["docs/guides/other-guide.md"], "why": "fixture"},
+            {"paths": ["fixture.yml"], "docs": [fixture_guide], "why": "fixture"},
+        ]}))
         planted = config_doc_errors(owning_guide, guide_root)
         if not any(fixture_guide in error and "owned_paths" in error for error in planted):
             raise AssertionError(f"a row owning a mapped guide was accepted: {planted}")
@@ -1359,6 +1363,13 @@ def main() -> int:
         # the map present.
         if config_doc_errors(valid, guide_root):
             raise AssertionError("the map refused a row that owns no mapped guide")
+        # A map that names no guide is an error, not a refusal of nothing.
+        for empty in ({"entries": []}, {"entries": [{"paths": ["x.yml"], "docs": [], "why": "x"}]}):
+            fixture_map.write_text(json.dumps(empty), encoding="utf-8")
+            empty_map = config_doc_errors(valid, guide_root)
+            if not any("config-doc map names no guide" in error for error in empty_map):
+                raise AssertionError(f"an empty config-doc map was accepted: {empty} {empty_map}")
+        _CHECK_TALLY["calibrated"] += 1
         fixture_map.write_text("{not json", encoding="utf-8")
         unreadable_map = config_doc_errors(valid, guide_root)
         if not any("unreadable config-doc map" in error for error in unreadable_map):
@@ -1385,11 +1396,14 @@ def main() -> int:
     )
     if owned_guides:
         raise AssertionError(f"shipped ledger owns config-doc guides: {owned_guides}")
-    real_guide = sorted(mapped_guides)[0]
-    owning_real = copy.deepcopy(valid)
-    owning_real["rows"][0]["owned_paths"] = [*valid["rows"][0]["owned_paths"], real_guide]
-    if not any(real_guide in error for error in config_doc_errors(owning_real, checkout_root)):
-        raise AssertionError(f"the checked-in map did not refuse its own guide {real_guide}")
+    # Every guide the checked-in map names is refused, not only the first.
+    for real_guide in sorted(mapped_guides):
+        owning_real = copy.deepcopy(valid)
+        owning_real["rows"][0]["owned_paths"] = [*valid["rows"][0]["owned_paths"], real_guide]
+        if not any(real_guide in error for error in config_doc_errors(owning_real, checkout_root)):
+            raise AssertionError(f"the checked-in map did not refuse its own guide {real_guide}")
+    if len(mapped_guides) < 2:
+        raise AssertionError(f"the real-map loop covers too few guides to tell entries apart: {mapped_guides}")
     _CHECK_TALLY["calibrated"] += 1
 
     # ── The ledger is carried as one file per row ────────────────────────────
