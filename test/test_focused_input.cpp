@@ -66,8 +66,7 @@ TEST_CASE("View::release_input_focus clears only if this holds it [issue-1708]",
 // THE crash regression: destroying the focused widget must clear the
 // global slot so the platform host's next text-input dispatch reads
 // nullptr instead of a freed View*.
-TEST_CASE("~View() clears focused_input_ if this holds it [issue-1708]",
-          "[view][focus]") {
+TEST_CASE("View destructor clears focused_input_ if this holds it [issue-1708]", "[view][focus]") {
     FocusGuard g;
     {
         TestView v;
@@ -77,7 +76,7 @@ TEST_CASE("~View() clears focused_input_ if this holds it [issue-1708]",
     REQUIRE(View::focused_input_ == nullptr);
 }
 
-TEST_CASE("~View() does not clear focused_input_ if a sibling holds it [issue-1708]",
+TEST_CASE("View destructor does not clear focused_input_ if a sibling holds it [issue-1708]",
           "[view][focus]") {
     FocusGuard g;
     TestView holder;

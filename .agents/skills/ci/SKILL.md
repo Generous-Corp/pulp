@@ -2802,9 +2802,9 @@ amended before its first push was never on any remote ref.
 ## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
 
 `tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py`,
-`clock_only_temp_key_guard.py` and `check_skip_not_pass.py` before every push.
-All are whole-tree text scans of a few seconds at most, with no build tree and
-no configure. The required gate already runs them
+`catch_test_name_guard.py`, `clock_only_temp_key_guard.py` and `check_skip_not_pass.py`
+before every push. All are whole-tree text scans of a few seconds at most,
+with no build tree and no configure. The required gate already runs them
 as ctests, so this adds no coverage; it moves *when* you find out.
 
 That timing is the whole point. A batch is main plus every entry ahead of it, so
@@ -2829,6 +2829,16 @@ What each one refuses:
   `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
   since the skip marker evades the thing the guard exists to catch.
 
+- **A Catch2 test name that reads as a test-spec expression.** CTest runs each
+  case as `<binary> "<name>"` and Catch2 parses that as a spec;
+  `PulpCatchAddTests.cmake` escapes only `\ , [ ]`. A leading `~` (or
+  `exclude:`) makes the entry run every OTHER case in the binary and never its
+  own; a leading or trailing `*` pulls in sibling cases; a leading `-` is read
+  as an option. Two `~View()` names ran a whole group binary twice in parallel,
+  and a shared temp path in another case of that binary then reddened the
+  required gate. Rename the case ("View destructor ..."); the guard honours
+  `catch-test-name-guard: skip <reason>`. Test scratch files must also be
+  unique per process, since CTest can run two entries of one binary at once.
 - **A test temp path keyed on a clock reading alone.** CTest runs cases as
   concurrent processes, and two that read the same `steady_clock` tick share
   the directory and read or delete each other's files (a browser-capture case
