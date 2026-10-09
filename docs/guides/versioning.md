@@ -177,10 +177,12 @@ GraphQL shows the branch's open PR in the queue.
 | Setting | Effect |
 |---------|--------|
 | (default) | refuse a push to a queued PR; armed-but-not-queued only gets the advisory hint |
-| `PULP_ALLOW_QUEUED_PUSH=1` | push anyway, after a deliberate dequeue or when you mean to replace the queued head |
 | `PULP_QUEUE_REBASE_TIMEOUT` | lookup budget in seconds (default 3) |
 
-`PULP_SKIP_PREPUSH=1` does not bypass the refusal. A lookup that cannot answer
+There is no override, and `PULP_SKIP_PREPUSH=1` does not bypass the refusal:
+an override recreates the dequeue loop. To change a queued PR, either open a new
+PR, or dequeue it through the guarded `ghapp` path with a stated reason
+(`GHAPP_QUEUE_REMOVAL_REASON=defect-fix`) and then push. A lookup that cannot answer
 (no `ghapp`/`gh`, auth, network, timeout, bad JSON) prints
 `queued-PR check skipped` and lets the push continue.
 

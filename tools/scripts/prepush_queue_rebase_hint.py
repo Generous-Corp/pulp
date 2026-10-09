@@ -32,8 +32,10 @@ is IN the merge queue (``mergeQueueEntry`` set) it prints why and exits 1,
 whatever the push contains. A queued PR never needs a rebase or a merge of main:
 the queue builds it on top of current main. Moving its head while queued is the
 loop that rebuilt for minutes, had GitHub re-queue the new head, got rejected,
-and dequeued again. ``PULP_SKIP_PREPUSH`` does not bypass it; the explicit
-bypass is ``PULP_ALLOW_QUEUED_PUSH=1``. A lookup that cannot answer (no ``gh``,
+and dequeued again. There is no override, and ``PULP_SKIP_PREPUSH`` does not
+bypass it: an override recreates that loop. The refusal names the only two ways
+forward: open a new PR, or dequeue through the guarded path with a stated
+reason and then push. A lookup that cannot answer (no ``gh``,
 auth, network, timeout, bad JSON) fails OPEN with a one-line notice. Armed but
 not yet queued is left to the advisory hint.
 """
@@ -163,7 +165,7 @@ def lookup_pr(owner: str, name: str, branch: str) -> dict | None:
         "-f", f"owner={owner}", "-f", f"name={name}", "-f", f"branch={branch}",
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
     except subprocess.TimeoutExpired:
         raise LookupError_(f"GitHub lookup timed out after {timeout:g}s") from None
     except OSError as exc:
@@ -200,8 +202,11 @@ def refuse_queued_message(branch: str, pr: dict) -> str:
             f"x pre-push: refusing to push {branch}: PR #{pr.get('number')} is in the merge queue.",
             "   This PR is in the merge queue; a queued PR does not need a rebase, the queue merges it",
             "   on top of current main. To change it anyway, dequeue deliberately first.",
-            "   PULP_SKIP_PREPUSH does not bypass this check. Bypass on purpose:",
-            "     PULP_ALLOW_QUEUED_PUSH=1 git push ...",
+            "   There is no override for this check. The only ways forward are:",
+            "     1. open a new PR for the change, or",
+            "     2. dequeue through the guarded path with a stated reason, e.g.",
+            "        GHAPP_ALLOW_QUEUE_REMOVAL=1 GHAPP_QUEUE_REMOVAL_REASON=defect-fix (dequeuePullRequest),",
+            "        then push.",
             "",
         ]
     )
@@ -224,8 +229,6 @@ def update_records(text: str):
 
 def refuse_queued(records: str, owner: str, name: str) -> int:
     """Exit status for --refuse-queued: 1 when any pushed branch's PR is queued."""
-    if os.environ.get("PULP_ALLOW_QUEUED_PUSH") == "1":
-        return 0
     rc = 0
     for branch, _local_sha, _remote_sha in update_records(records):
         try:

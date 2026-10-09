@@ -6119,7 +6119,10 @@ on top of current main; to change it anyway, dequeue deliberately first",
 whatever the push contains. It exists because agents rebased queued PRs, the
 pre-push build ran for minutes while GitHub re-queued the new head, the push was
 rejected, and the agent dequeued to retry; one PR looped ten times.
-`PULP_SKIP_PREPUSH=1` does **not** bypass it; `PULP_ALLOW_QUEUED_PUSH=1` does.
+There is **no override**, and `PULP_SKIP_PREPUSH=1` does not bypass it, because
+an override recreates the dequeue loop. The only ways forward are a new PR, or a
+dequeue through the guarded path with a stated reason
+(`GHAPP_QUEUE_REMOVAL_REASON=defect-fix`) followed by the push.
 A lookup that cannot answer fails open with a one-line `queued-PR check skipped`
 notice. Armed but not yet queued stays advisory.
 

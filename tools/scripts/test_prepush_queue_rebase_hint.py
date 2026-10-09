@@ -291,7 +291,9 @@ class QueuedPrGuardHookTests(unittest.TestCase):
         self.assertIn("PR #4242 is in the merge queue", res.stderr)
         self.assertIn(self.REFUSAL, res.stderr)
         self.assertIn("dequeue deliberately first", res.stderr)
-        self.assertIn("PULP_ALLOW_QUEUED_PUSH=1", res.stderr)
+        self.assertIn("There is no override", res.stderr)
+        self.assertIn("open a new PR", res.stderr)
+        self.assertIn("GHAPP_QUEUE_REMOVAL_REASON=defect-fix", res.stderr)
         self.assertNotIn("skipping gates", res.stderr)
 
     def test_not_queued_proceeds(self) -> None:
@@ -323,12 +325,16 @@ class QueuedPrGuardHookTests(unittest.TestCase):
         self.assertProceeded(res)
         self.assertIn("queued-PR check skipped", res.stderr)
 
-    def test_explicit_bypass_proceeds_without_a_lookup(self) -> None:
+    def test_no_env_override_bypasses_the_refusal(self) -> None:
+        # An override would recreate the dequeue loop, so none exists. The
+        # previously proposed name, the skip knobs and the hint's own silencer
+        # must all leave the refusal in place.
         self.repo.set_pr(pr_fixture(queued=True))
         res = self.repo.run_hook(
-            PULP_SKIP_PREPUSH="1", PULP_ALLOW_QUEUED_PUSH="1", PULP_ALLOW_QUEUE_REBASE="1")
-        self.assertProceeded(res)
-        self.assertEqual(self.repo.lookups(), 0)
+            PULP_SKIP_PREPUSH="1", PULP_DISABLE_PREPUSH_GATES="1",
+            PULP_ALLOW_QUEUED_PUSH="1", PULP_ALLOW_QUEUE_REBASE="1")
+        self.assertEqual(res.returncode, 1, res.stderr)
+        self.assertIn(self.REFUSAL, res.stderr)
 
     def test_guard_runs_before_the_diff_cover_build(self) -> None:
         text = HOOK.read_text(encoding="utf-8")

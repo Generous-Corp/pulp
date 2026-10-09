@@ -15,7 +15,6 @@
 #   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/compat-aggregate/node-ABI/docs-noise/source-contract/hotspot-size/deps/vellum-watch)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
 #   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies)
-#   PULP_ALLOW_QUEUED_PUSH=1       # push to a PR that is in the merge queue
 #
 # Migration note (pulp #1144): the old `PULP_ENFORCE_PREPUSH=1` and
 # `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env vars used to *promote* advisory
@@ -84,8 +83,9 @@ fi
 # rejected, and the agent dequeued to retry, in a loop. This asks GitHub
 # (GraphQL mergeQueueEntry, bounded by PULP_QUEUE_REBASE_TIMEOUT) and refuses
 # the push when the branch's PR is queued. A lookup that cannot answer fails
-# open with a notice. PULP_SKIP_PREPUSH does not bypass it, because a
-# post-rebase force-push is exactly the case; PULP_ALLOW_QUEUED_PUSH=1 does.
+# open with a notice. There is no override and PULP_SKIP_PREPUSH does not
+# bypass it: an override recreates the dequeue loop. Open a new PR, or dequeue
+# through the guarded path with a stated reason, then push.
 QUEUED_PR_GUARD="$ROOT/tools/scripts/prepush_queue_rebase_hint.py"
 if [ -f "$QUEUED_PR_GUARD" ]; then
     printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
