@@ -26,6 +26,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
 #include <pulp/host/sample_region_runtime.hpp>
+#include <pulp/host/signal_graph_authoring.hpp>
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/signal_graph_execution_status.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
@@ -293,6 +294,12 @@ public:
                                        float smoothing_ms = 0.0f,
                                        AutomationMix mix = AutomationMix::Replace);
 
+    /// Remove one automation or audio-rate modulation edge by its typed target.
+    /// The route kind is part of the identity so sparse and dense edges cannot
+    /// be confused by a control operation.
+    bool disconnect_modulation(NodeId src, PortIndex src_audio_port, NodeId dest,
+                               uint32_t dest_param_id, bool audio_rate);
+
     // Project an accepted graph audio-rate modulation edge into the typed
     // modulation-lane contract used by instruments, adapters, and generated
     // graphs. Returns false for non-modulation edges or unresolved metadata.
@@ -338,6 +345,14 @@ public:
     const GraphNode* node(NodeId id) const;
     const std::vector<GraphNode>& nodes() const { return nodes_; }
     const std::vector<Connection>& connections() const { return connections_; }
+
+    // Capture and validate control-side authoring lineage.  These operations
+    // take the same mutation lock as graph edits, so a receipt is never a
+    // mixed read of graph identity and generation.  A receipt is observational
+    // only; PreparedTopologyEdit remains the publication boundary and performs
+    // its own stale-base check at commit().
+    GraphAuthoringReceipt authoring_receipt() const;
+    GraphAuthoringReceiptStatus validate_authoring_receipt(GraphAuthoringReceipt receipt) const;
 
     // Check if connecting would create a cycle
     bool would_create_cycle(NodeId source, NodeId dest) const;

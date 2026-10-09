@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261008-release-dry-run-governed-build-20261008-watch",
+  "created_at": "2026-10-08T23:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Route the release dry-run CLI build through tools/ci/governed-build.sh instead of deriving a whole-machine --parallel count. This changes only build scheduling in the rehearsal workflow; package contents, target selection, release configuration, and dry-run publication behavior remain unchanged. The workflow is Pulp-owned CI orchestration and no renderer, importer, DesignIR, or Vellum implementation authority moves. Registered as watch-only so coverage remains explicit for the release packaging selector.",
+  "tests": [
+    "python3 -m unittest tools.scripts.test_release_workflow_test_step.ReleaseBuildParallelismExplicit tools.ci.test_build_governance_paths",
+    "actionlint .github/workflows/release-dry-run.yml",
+    "tools/scripts/gates.sh origin/main",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

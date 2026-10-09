@@ -1,0 +1,16 @@
+{
+  "schema": "pulp.ui.package.v1",
+  "name": "pulp-import-design",
+  "root": "tools/import-design",
+  "kind": "importer",
+  "dependencies": [
+    "pulp::view::design_import",
+    "pulp::view::design_ir",
+    "pulp::view::design_codegen"
+  ],
+  "test_targets": [
+    "pulp-test-design-import-designmd",
+    "pulp-test-import-design-tool",
+    "import-design-javascript-contracts"
+  ]
+}

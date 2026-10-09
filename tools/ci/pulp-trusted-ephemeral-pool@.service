@@ -3,6 +3,13 @@ Description=Pulp trusted ephemeral Linux CI runner slot %i
 Documentation=https://github.com/Generous-Corp/pulp/blob/main/docs/guides/local-ci.md
 After=network-online.target pve-guests.service
 Wants=network-online.target
+# Restart-loop ceiling. A slot that fails 40 times inside an hour (well past one
+# fast failure per 90 s) stops and stays failed, where `systemctl --failed` and
+# the host health check report it, instead of retrying the same fault forever.
+# Governor refusals do not reach it: the supervisor waits ~5 minutes per refusal.
+# Recover with `systemctl reset-failed <unit> && systemctl start <unit>`.
+StartLimitIntervalSec=3600
+StartLimitBurst=40
 
 [Service]
 Type=simple

@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.ui.package.v1",
+  "name": "pulp-ui-build",
+  "root": "tools/ui-build",
+  "kind": "compiler",
+  "dependencies": [
+    "pulp-import-design",
+    "pulp::view::design_ir"
+  ],
+  "test_targets": [
+    "pulp-ui-build-contracts"
+  ]
+}

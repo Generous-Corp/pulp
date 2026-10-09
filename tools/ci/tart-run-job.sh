@@ -129,8 +129,10 @@ cmake -S "$HOME/src" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-# Keep each disposable VM bounded; Tart can run several jobs on one host.
-cmake --build "$BUILD" --parallel 4
+# Route the guest build through the same governor as every other Pulp build.
+# It derives the VM's bounded share from its TartCI profile/lease when present
+# and falls back to the normal tier-0 bound when the guest is standalone.
+bash "$HOME/src/tools/ci/governed-build.sh" cmake --build "$BUILD"
 echo "=== ccache stats (warmth) ==="
 ccache --show-stats | grep -iE 'cacheable|hit|miss|cache size' || ccache -s
 ctest --test-dir "$BUILD" $CTEST_ARGS

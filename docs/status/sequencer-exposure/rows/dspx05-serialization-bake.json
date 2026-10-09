@@ -1,0 +1,105 @@
+{
+  "id": "dspx05-serialization-bake",
+  "title": "DSPX-05 canonical serialization and bounded bake codec",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "dspx05-20261006-integration",
+  "owned_paths": [
+    "core/host/src/graph_serializer.cpp",
+    "core/host/include/pulp/host/baked_codec.hpp",
+    "core/host/src/baked_codec.cpp",
+    "docs/guides/serialization.md",
+    "docs/status/sequencer-exposure/rows/dspx05-serialization-bake.json"
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "Canonical graph serialization and bounded signed bake codec are implemented and covered by existing codec/parity tests.",
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      },
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/baked_codec.hpp",
+          "needles": [
+            "parse_plan_bounded",
+            "verify_and_extract_plan"
+          ]
+        }
+      ]
+    },
+    "offline_timeline_cli": {
+      "disposition": "deferred",
+      "rationale": "No complete CLI lifecycle receipt is claimed.",
+      "owner": "DSPX-05 owner",
+      "dependencies": [
+        "dspx05-serialization-lifecycle"
+      ]
+    },
+    "offline_timeline_mcp": {
+      "disposition": "deferred",
+      "rationale": "No complete MCP lifecycle receipt is claimed.",
+      "owner": "DSPX-05 owner",
+      "dependencies": [
+        "dspx05-serialization-lifecycle"
+      ]
+    },
+    "live_product_control": {
+      "disposition": "deferred",
+      "rationale": "No live-product executor lifecycle receipt is claimed.",
+      "owner": "DSPX-05 owner",
+      "dependencies": [
+        "dspx05-serialization-lifecycle"
+      ]
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "This namespaced row is the design-time discovery projection.",
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      },
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "core/host/include/pulp/host/baked_codec.hpp",
+          "needles": [
+            "parse_plan_bounded",
+            "verify_and_extract_plan"
+          ]
+        }
+      ]
+    }
+  },
+  "evidence": [
+    {
+      "path": "core/host/src/graph_serializer.cpp",
+      "needles": [
+        "kFormatVersion",
+        "canonical",
+        "migrate_graph_json"
+      ]
+    },
+    {
+      "path": "core/host/include/pulp/host/baked_codec.hpp",
+      "needles": [
+        "kBakedMaxPlanBytes",
+        "parse_plan_bounded",
+        "verify_and_extract_plan"
+      ]
+    },
+    {
+      "path": "test/test_baked_codec.cpp",
+      "needles": [
+        "round-trip",
+        "malformed"
+      ]
+    }
+  ]
+}

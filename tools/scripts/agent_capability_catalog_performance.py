@@ -44,7 +44,7 @@ EXPORTS = [
                 include="pulp/format/processor.hpp",
                 qualified_name="pulp::format::Processor::process_block",
                 target="Pulp::format",
-                header_fingerprint="sha256:095202e7161b1c2a1d8e408ee90e616a7a7f3f7ccb9ff3e62060f5a1aed88aa5",
+                header_fingerprint="sha256:50bbf265dd33bd4504a2d071901a5b941a7e910f9cfe3efceac8753c8110525a",
                 address_expression=(
                     "static_cast<bool (pulp::format::Processor::*)("
                     "pulp::format::ProcessBlock&)>(&pulp::format::Processor::process_block)"
@@ -975,13 +975,17 @@ EXPORTS = [
     capability(
         key="midi.channel-routing",
         domain="midi",
+        contract_version={"major": 2, "minor": 0},
         summary="Lifecycle-safe MIDI channel routing with overlapping-note ownership.",
         rt_class="audio",
         lifecycle={
-            "construction": "any", "prepare": "reserve MIDI and UMP output on control",
-            "process": "audio", "reset": "audio with prepared output", "release": "none",
+            "construction": "control", "prepare": "reserve MIDI and UMP output on control",
+            "process": "audio", "reset": "audio with prepared output", "release": "control",
         },
-        state_model="Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+        state_model=(
+            "Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt, held in one heap ledger allocated by the constructor; "
+            "a moved-from object refuses every entry point."
+        ),
         seed_model="none",
         determinism={
             "repeatability": "bit_exact", "block_partition": "fixed_partition_only",
@@ -996,7 +1000,7 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::ChannelRouter", target="Pulp::midi",
-            header_fingerprint="sha256:b37237cdb793ec5b300da4bb4c0850be8dab0c2bb24b243b45c554af6929a64a",
+            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::ChannelRouter",
@@ -1006,13 +1010,17 @@ EXPORTS = [
     capability(
         key="midi.note-range-filtering",
         domain="midi",
+        contract_version={"major": 2, "minor": 0},
         summary="Lifecycle-safe note-range filtering for MIDI 1 and UMP event streams.",
         rt_class="audio",
         lifecycle={
-            "construction": "any", "prepare": "reserve MIDI and UMP output on control",
-            "process": "audio", "reset": "audio with prepared output", "release": "none",
+            "construction": "control", "prepare": "reserve MIDI and UMP output on control",
+            "process": "audio", "reset": "audio with prepared output", "release": "control",
         },
-        state_model="Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+        state_model=(
+            "Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt, held in one heap ledger allocated by the constructor; "
+            "a moved-from object refuses every entry point."
+        ),
         seed_model="none",
         determinism={
             "repeatability": "bit_exact", "block_partition": "fixed_partition_only",
@@ -1026,7 +1034,7 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::NoteRangeFilter", target="Pulp::midi",
-            header_fingerprint="sha256:b37237cdb793ec5b300da4bb4c0850be8dab0c2bb24b243b45c554af6929a64a",
+            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::NoteRangeFilter",
@@ -1036,13 +1044,17 @@ EXPORTS = [
     capability(
         key="midi.keyboard-split",
         domain="midi",
+        contract_version={"major": 2, "minor": 0},
         summary="Lifecycle-safe two-way keyboard split for MIDI 1 and UMP event streams.",
         rt_class="audio",
         lifecycle={
-            "construction": "any", "prepare": "reserve both MIDI and UMP outputs on control",
-            "process": "audio", "reset": "audio with prepared outputs", "release": "none",
+            "construction": "control", "prepare": "reserve both MIDI and UMP outputs on control",
+            "process": "audio", "reset": "audio with prepared outputs", "release": "control",
         },
-        state_model="Two fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+        state_model=(
+            "Two fixed forwarded and suppressed MIDI and UMP ledgers plus release debt, held in one heap ledger allocated by the constructor; "
+            "a moved-from object refuses every entry point."
+        ),
         seed_model="none",
         determinism={
             "repeatability": "bit_exact", "block_partition": "fixed_partition_only",
@@ -1056,7 +1068,7 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::KeyboardSplit", target="Pulp::midi",
-            header_fingerprint="sha256:b37237cdb793ec5b300da4bb4c0850be8dab0c2bb24b243b45c554af6929a64a",
+            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::KeyboardSplit",

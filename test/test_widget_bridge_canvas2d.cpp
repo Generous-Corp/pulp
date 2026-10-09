@@ -650,6 +650,30 @@ TEST_CASE("WidgetBridge requestAnimationFrame chain keeps requesting paints (iss
     REQUIRE(host.repaint_calls >= repaint_baseline + 3);
 }
 
+TEST_CASE("WidgetBridge requestAnimationFrame preserves the shared timestamp",
+          "[view][bridge][async][raf][performance]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The native flush resolves one timestamp per service pass and invokes
+    // each callback through the compiled function entry point. Pin the
+    // browser contract while exercising that path with a fractional value
+    // that would expose accidental integer coercion.
+    bridge.load_script(R"(
+        globalThis.__pulpAnimationFrameTimestamp__ = function () { return 123.5; };
+        var raf_timestamp = null;
+        window.requestAnimationFrame(function (timestamp) { raf_timestamp = timestamp; });
+    )");
+
+    // Keep the assertion tied to the explicit host-facing drain as well as
+    // the synchronous load-script settle path used by this bridge fixture.
+    bridge.service_frame_callbacks();
+    REQUIRE(engine.evaluate("raf_timestamp").getWithDefault<double>(-1.0) == 123.5);
+}
+
 // ── canvasMeasureText / canvasSetLineDash / canvasDrawImage / canvasGetImageData / canvasPutImageData (issue-916) ──
 //
 // These five CanvasRenderingContext2D bridge functions close the gap

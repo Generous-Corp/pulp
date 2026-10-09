@@ -46,4 +46,9 @@ void append_pitch_sequencing(Nodes& nodes);
 /// Append space, synthesis, tape and wavetable.
 void append_space_synthesis(Nodes& nodes);
 
+// Append the Forge-facing projection of the generic sample-region registry.
+// This keeps catalog membership, labels, and builder placement policy out of
+// the family dispatcher while preserving the existing public export records.
+void append_sample_region(Nodes& nodes);
+
 } // namespace pulp::host::forge_catalog_export_detail

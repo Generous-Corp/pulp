@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
-import fcntl
 import hashlib
 import json
 import os
@@ -104,6 +103,7 @@ EMITTER = os.path.join(HERE, "forge_modular.py")
 # is never shipped in any Forge artifact and never sits inside a checkout;
 # the user's machine fetches it, which is why resolve_sdk() may download.
 import fetch_sdk
+import file_lock
 import attempt_artifacts
 import toolchain_headers
 
@@ -984,12 +984,7 @@ def _main(argv, resources: contextlib.ExitStack):
     lock_path = os.path.join(tempfile.gettempdir(),
                              f"forge-module-{lock_key}.lock")
     lock = resources.enter_context(open(lock_path, "w", encoding="utf-8"))
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        raise SystemExit(
-            "another generation is already running against this module pack. "
-            "Wait for it to finish — two at once would corrupt both.")
+    claim_generation_lock(lock)
 
     # Snapshot, so a failed generation leaves the pack exactly as it was.
     transaction = PackSnapshot(PACK)
@@ -1183,6 +1178,18 @@ def _main(argv, resources: contextlib.ExitStack):
     lock.close()
     raise SystemExit(f"gave up after {attempts} attempts; pack restored unchanged")
 
+
+
+def claim_generation_lock(lock) -> None:
+    """Hold the module pack's generation lock, or exit naming the other run.
+
+    Portable through file_lock: flock on POSIX, msvcrt.locking on Windows."""
+    try:
+        file_lock.exclusive_nonblocking(lock.fileno())
+    except OSError:
+        raise SystemExit(
+            "another generation is already running against this module pack. "
+            "Wait for it to finish — two at once would corrupt both.")
 
 def main(argv):
     """Exception-safe public entry point: every unsuccessful exit rolls back."""

@@ -228,6 +228,28 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         # wasm configure would provision (and then fail to find) a linux slice.
         set(_pulp_skia_plat "wasm")
         set(_pulp_skia_cache_suffix "-wasm")
+    elseif(WIN32)
+        # Select the Skia slice from the TARGET architecture. On Windows,
+        # CMAKE_SYSTEM_PROCESSOR can describe the host when cross-compiling,
+        # so prefer CMAKE_GENERATOR_PLATFORM (the -A target) when present.
+        if(CMAKE_GENERATOR_PLATFORM)
+            string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" _pulp_req_arch)
+        else()
+            string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_req_arch)
+        endif()
+        if(_pulp_req_arch STREQUAL "arm64" OR _pulp_req_arch STREQUAL "aarch64")
+            set(_pulp_skia_plat "windows-arm64")
+            set(_pulp_skia_cache_suffix "-arm64")
+        elseif(_pulp_req_arch STREQUAL "x64" OR _pulp_req_arch STREQUAL "amd64" OR _pulp_req_arch STREQUAL "x86_64")
+            set(_pulp_skia_plat "windows-x64")
+            set(_pulp_skia_cache_suffix "-x64")
+        else()
+            message(FATAL_ERROR
+                "Pulp: cannot select a prebuilt Windows Skia slice for "
+                "target architecture '${_pulp_req_arch}'. Supported values "
+                "are ARM64 and x64 (set -A ARM64 or -A x64 when cross-compiling).")
+        endif()
+        unset(_pulp_req_arch)
     elseif(UNIX)
         if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
             set(_pulp_skia_plat "linux-arm64")
@@ -248,7 +270,11 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
     if(_pulp_skia_keying STREQUAL "")
         set(_pulp_skia_keying "1")
     endif()
-    file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/libskia.a")
+    if(WIN32)
+        file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/skia.lib")
+    else()
+        file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/libskia.a")
+    endif()
     # In keyed mode, accept a checkout-local bundle only when the canonical
     # validator proves its exact manifest stamp plus materialized Skia/Dawn
     # archives. This preserves explicit release-path fetches while excluding a
@@ -270,9 +296,6 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
             set(_pulp_local_skia "")
         endif()
     endif()
-    # Windows has no published Skia prebuilt in the release manifest. Preserve
-    # its existing local-only fallback instead of asking the shared-cache
-    # resolver to resolve an empty platform name.
     if(NOT _pulp_local_skia AND _pulp_skia_plat)
         include(${PULP_ROOT_DIR}/tools/cmake/PulpSkiaCache.cmake)
         pulp_resolve_skia_cache(

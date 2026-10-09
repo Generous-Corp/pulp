@@ -41,6 +41,18 @@ class DesktopVideoPrerequisitesTests(unittest.TestCase):
         )
         self.assertIsInstance(remediations, list)
 
+    def test_reaper_build_remediation_uses_governed_build(self):
+        remediations = self.mod.desktop_video_doctor_remediations(
+            [{"name": "reaper.clap_bundle", "ok": False, "plugin": "PulpEffect"}],
+            target_name="mac",
+        )
+        build = next(item for item in remediations if item["check"] == "reaper.clap_bundle")
+        self.assertEqual(
+            build["command"],
+            "tools/ci/governed-build.sh cmake --build build-video-nogpu --target PulpEffect_CLAP",
+        )
+        self.assertNotIn("-j", build["command"])
+
 
 if __name__ == "__main__":
     unittest.main()

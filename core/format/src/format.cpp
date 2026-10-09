@@ -42,8 +42,9 @@
 // view headers. The Skia/Dawn closure the split exists to remove stays
 // removed; only this one translation unit needs the headers, privately.
 //
-// The SettingsSection special members ALSO need view::View complete
-// (SettingsSection owns a unique_ptr<view::View>), so they live in
+// SettingsSection holds its view through a type-erased deleter, so its
+// special members are defaulted in processor.hpp; only the constructor that
+// adopts a view and take_view() need view::View complete, and they live in
 // settings_section.cpp on the view side of the split.
 #include <pulp/format/format.hpp>
 #include <pulp/view/view.hpp>

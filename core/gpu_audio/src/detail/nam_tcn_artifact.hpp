@@ -6,6 +6,7 @@
 // off the callback.  The prepared object only mutates fixed-size causal state.
 
 #include "nam_tcn_adapter.hpp"
+#include <pulp/gpu_audio/gpu_wavenet.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -149,14 +150,40 @@ class NamTcnArtifact final {
         Model candidate;
         if (!candidate.configure(parsed, weights, scale, error))
             return false;
+        const auto sample_rate =
+            root.hasObjectMember("sample_rate") ? number(root["sample_rate"]) : -1.0;
+        if (!(sample_rate > 0.0) || !std::isfinite(sample_rate))
+            return fail("invalid sample_rate");
+        // Commit the fully validated candidate only after every field has
+        // passed validation. A failed replacement must leave the live
+        // artifact, including its metadata and causal state, untouched.
         arrays_ = std::move(candidate.arrays);
         head_scale_ = candidate.head_scale;
-        sample_rate_ = root.hasObjectMember("sample_rate") ? number(root["sample_rate"]) : -1.0;
-        if (!(sample_rate_ > 0.0) || !std::isfinite(sample_rate_))
-            return fail("invalid sample_rate");
+        sample_rate_ = sample_rate;
         receptive_field_ = candidate.receptive_field;
         state_bytes_ = candidate.state_bytes;
         weights_size_ = weights.size();
+        gpu_layers_.clear();
+        gpu_dilations_.clear();
+        gpu_weights_ = weights;
+        gpu_layers_.reserve(parsed.size());
+        gpu_dilations_.reserve(parsed.size());
+        for (const auto& layer : parsed) {
+            gpu_dilations_.emplace_back();
+            for (const auto dilation : layer.dilations)
+                gpu_dilations_.back().push_back(static_cast<std::uint32_t>(dilation));
+            gpu_layers_.push_back(
+                {.input_size = static_cast<std::uint32_t>(layer.input_size),
+                 .condition_size = static_cast<std::uint32_t>(layer.condition_size),
+                 .channels = static_cast<std::uint32_t>(layer.channels),
+                 .kernel = static_cast<std::uint32_t>(layer.kernel_size),
+                 .head_size = static_cast<std::uint32_t>(layer.head_size),
+                 .dilation = 0,
+                 .gated = layer.gated,
+                 .head_bias = layer.head_bias,
+                 .tanh_activation = layer.activation == "Tanh",
+                 .dilations = gpu_dilations_.back()});
+        }
         loaded_ = true;
         reset();
         return true;
@@ -176,6 +203,26 @@ class NamTcnArtifact final {
     }
     std::size_t weights_size() const noexcept {
         return weights_size_;
+    }
+
+    bool make_gpu_wavenet_descriptor(std::uint32_t block_size, GpuWaveNetDescriptor& descriptor,
+                                     std::vector<GpuWaveNetLayerDescriptor>& layers,
+                                     std::vector<std::vector<std::uint32_t>>& dilations,
+                                     std::vector<float>& weights) const {
+        if (!loaded_ || block_size == 0 || gpu_layers_.empty())
+            return false;
+        layers = gpu_layers_;
+        dilations = gpu_dilations_;
+        for (std::size_t i = 0; i < layers.size(); ++i)
+            layers[i].dilations = dilations[i];
+        weights = gpu_weights_;
+        descriptor = {.block_size = block_size,
+                      .sample_rate = static_cast<std::uint32_t>(sample_rate_),
+                      .stream_instances = 1,
+                      .head_scale = head_scale_,
+                      .layers = layers,
+                      .weight_count = weights.size()};
+        return validate_gpu_wavenet_descriptor(descriptor).accepted();
     }
 
     void reset() noexcept {
@@ -495,6 +542,9 @@ class NamTcnArtifact final {
     std::uint32_t receptive_field_ = 0;
     std::uint64_t state_bytes_ = 0;
     std::size_t weights_size_ = 0;
+    std::vector<GpuWaveNetLayerDescriptor> gpu_layers_;
+    std::vector<std::vector<std::uint32_t>> gpu_dilations_;
+    std::vector<float> gpu_weights_;
     bool loaded_ = false;
 };
 
@@ -511,7 +561,10 @@ class NamTcnArtifactAdapter final : public StreamingModel {
     }
 
     bool prepare(const StreamingPrepareContext& context) noexcept override {
-        prepared_ = false;
+        // Replacement is an explicit release/prepare transaction. Keep the
+        // live artifact available when a caller attempts to prepare over it.
+        if (prepared_)
+            return false;
         if (!valid_streaming_prepare_context(context) || context.spec != &spec_ ||
             context.max_frames == 0 || spec_.input_channels != 1 || spec_.output_channels != 1)
             return false;

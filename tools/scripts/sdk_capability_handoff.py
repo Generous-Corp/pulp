@@ -38,22 +38,42 @@ def importer_path(platform: str) -> Path:
 def _installed_importer_runtime(
     prefix: Path, expected_paths: set[str]
 ) -> dict[str, bytes]:
-    root = prefix / IMPORTER_RUNTIME_ROOT
-    try:
-        children = sorted(root.iterdir())
-    except OSError as exc:
-        raise HandoffError(f"cannot read importer runtime {root}: {exc}") from exc
-    if not children or any(not path.is_file() for path in children):
-        raise HandoffError(f"invalid importer runtime directory: {root}")
-    runtime = {
-        path.relative_to(prefix).as_posix(): _read_bytes(
-            path, limit=MAX_IMPORTER_RUNTIME_BYTES
-        )
-        for path in children
-    }
-    if set(runtime) != expected_paths:
+    # The importer runtime is intentionally a small set of files under the
+    # browser-capture directory plus any declared sibling modules (currently
+    # `bin/jsx-runtime/materialized_binding_contract.mjs`). Read exactly the
+    # selected paths and reject both missing files and undeclared additions so
+    # the handoff cannot bless a partial or stale runtime tree.
+    normalized_paths: set[str] = set()
+    for value in expected_paths:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts:
+            raise HandoffError(f"invalid importer runtime path: {value!r}")
+        normalized_paths.add(path.as_posix())
+    if not normalized_paths:
+        raise HandoffError("empty importer runtime contract")
+
+    roots = {prefix / Path(value).parent for value in normalized_paths}
+    actual: dict[str, bytes] = {}
+    for root in sorted(roots, key=lambda path: path.as_posix()):
+        try:
+            children = sorted(root.rglob("*"))
+        except OSError as exc:
+            raise HandoffError(f"cannot read importer runtime {root}: {exc}") from exc
+        if not root.is_dir() or not children:
+            raise HandoffError(
+                f"installed importer runtime does not match the selected contract: {root}"
+            )
+        for path in children:
+            if path.is_dir():
+                continue
+            if not path.is_file():
+                raise HandoffError(f"invalid importer runtime member: {path}")
+            relative = path.relative_to(prefix).as_posix()
+            actual[relative] = _read_bytes(path, limit=MAX_IMPORTER_RUNTIME_BYTES)
+    runtime = {path: actual[path] for path in sorted(actual)}
+    if set(runtime) != normalized_paths:
         raise HandoffError(
-            f"installed importer runtime does not match the selected contract"
+            "installed importer runtime does not match the selected contract"
         )
     return runtime
 

@@ -10,6 +10,7 @@
 // user hits on day one.
 
 #include "../tools/cli/json_parser.hpp"
+#include "support/unique_temp_dir.hpp"
 #include "test_cli_shellout_helpers.hpp"
 
 #include <optional>
@@ -1943,9 +1944,7 @@ TEST_CASE("pulp create scaffolds a no-build app project with Android files",
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-create-app-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-create-app");
     auto home = base / "home";
     auto project = base / "out" / "neon-drum";
     fs::create_directories(home);
@@ -2004,9 +2003,7 @@ TEST_CASE("pulp create rejects invalid type before scaffolding",
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-create-invalid-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-create-invalid");
     auto home = base / "home";
     auto project = base / "out" / "bad-type";
     fs::create_directories(home);
@@ -2037,9 +2034,7 @@ TEST_CASE("pulp create validates parser errors before scaffolding", "[cli][shell
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-create-parser-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-create-parser");
     auto home = base / "home";
     auto out = base / "out";
     fs::create_directories(home);
@@ -2207,10 +2202,7 @@ TEST_CASE("pulp build fails fast when standalone SDK is ahead of the installed C
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-build-skew-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(tmp);
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-build-skew");
     {
         std::ofstream f(tmp / "pulp.toml");
         f << "[pulp]\n"
@@ -2328,10 +2320,7 @@ TEST_CASE("pulp with update.mode=off never prints a banner",
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-mode-off-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(tmp);
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-mode-off");
     {
         std::ofstream cfg(tmp / "config.toml");
         cfg << "[update]\nmode = \"off\"\n";
@@ -2383,10 +2372,7 @@ TEST_CASE("pulp with update.mode=manual prints the manual notice",
         SKIP("pulp not built");
     }
 
-    auto tmp = fs::temp_directory_path() /
-               ("pulp-shellout-mode-manual-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(tmp);
+    auto tmp = pulp::test::make_unique_temp_dir("pulp-shellout-mode-manual");
     {
         std::ofstream cfg(tmp / "config.toml");
         cfg << "[update]\nmode = \"manual\"\n";
@@ -2497,9 +2483,7 @@ TEST_CASE("pulp project unpin switches a pinned project to floating mode",
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-unpin-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-unpin");
     auto home = base / "home";
     auto project = base / "out" / "my-plugin";
     fs::create_directories(home);
@@ -2634,9 +2618,7 @@ TEST_CASE("pulp project bump updates standalone SDK pins and undo reverts them",
         SKIP("pulp not built");
     }
 
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-project-bump-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-project-bump");
     auto project = base / "Clock";
     auto home = base / "home";
     fs::create_directories(project);
@@ -2970,9 +2952,7 @@ TEST_CASE("pulp run --headless --screenshot --frames writes a PNG",
     }
 
     // Build a fake project tree that cmd_run can navigate.
-    auto base = fs::temp_directory_path() /
-                ("pulp-shellout-run-headless-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto base = pulp::test::make_unique_temp_dir("pulp-shellout-run-headless");
     auto build_dir = base / "build";
     auto bin_dir = build_dir / "bin";
     fs::create_directories(bin_dir);

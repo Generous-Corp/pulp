@@ -5,7 +5,6 @@
 #include <pulp/host/custom_node_events.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/parameter_event_queue.hpp>
-#include <pulp/host/plugin_slot.hpp>
 #include <pulp/midi/buffer.hpp>
 
 #include <atomic>
@@ -15,7 +14,14 @@
 #include <span>
 #include <vector>
 
+namespace pulp::audio {
+class AudioProcessLoadMeasurer;
+}
+
 namespace pulp::host {
+
+struct HostParamInfo;
+class PluginSlot;
 
 class SignalGraph;
 struct GraphNode;
@@ -29,13 +35,13 @@ struct Connection;
 // runtime connection structs; `feedback` is the orthogonal back-edge flag;
 // `audio_rate` distinguishes a dense audio-rate modulation edge from a sparse
 // two-point automation edge (both have kind == Automation). A sidechain edge is
-// deliberately NOT special-cased: it arrives as a plain-audio Connection with
-// the destination's sidechain input port already resolved, so it classifies as
-// Audio.
+// plain audio too, but its marker is carried separately so runtime adjacency
+// canonicalization never reorders sidechain edges.
 struct ConnectionClass {
     graph::GraphRuntimeConnectionKind kind = graph::GraphRuntimeConnectionKind::Audio;
     bool feedback = false;
     bool audio_rate = false;
+    bool sidechain = false;
 };
 
 ConnectionClass classify(const Connection& c);

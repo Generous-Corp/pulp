@@ -1,0 +1,84 @@
+<!--
+  Synthetic Claude Design fixture (Anthropic Labs export, pulp #468 / #1035 / #1031).
+
+  Two roles in one file:
+    1. pulp #1035 — exercise the classname extractor's happy paths via
+       the <style> blocks below (mono / tnum / card / btn-primary /
+       btn-secondary / numeric and the various skip cases).
+    2. pulp #1031 — versioned import-design detection. The single
+       fingerprint clause is the inline bundler script tag the Claude
+       Design export injects:
+         {"kind": "html-script-type", "value": "__bundler/template"}
+-->
+<!DOCTYPE html>
+<html>
+<head>
+<title>Synthetic Claude Design export — pulp #1035 / #1031 fixture</title>
+<style>
+/*
+ * pulp #1035 fixture: this <style> block exercises the classname
+ * extractor's happy paths.
+ *   - mono / tnum: plain single-class single-prop rules (matches the
+ *     issue body's expected JSON shape exactly).
+ *   - card: multi-property class with a multi-token shorthand value.
+ *   - btn-primary / btn-secondary: comma-separated selector list with
+ *     a hyphenated classname — both names should land in the artifact
+ *     with identical declarations.
+ * Skipped:
+ *   - :root and .scheme-paper carry theme tokens, not classname rules.
+ *   - .btn:hover carries a pseudo-class — not a plain classname rule.
+ *   - @media wraps an at-rule — bypassed entirely.
+ *   - empty .ghost {} contributes nothing.
+ */
+:root {
+    --bg: #05070a;
+    --fg: #e6e7ee;
+}
+.scheme-paper {
+    --bg: #f5f3ec;
+    --fg: #1a1a1f;
+}
+.mono { font-family: ui-monospace, SFMono-Regular, monospace; }
+.tnum { font-variant-numeric: tabular-nums; }
+.card {
+    background-color: var(--bg);
+    color: var(--fg);
+    border-radius: 8px;
+    padding: 12px 16px;
+}
+.btn-primary, .btn-secondary {
+    border: 1px solid var(--fg);
+    cursor: pointer;
+}
+.btn:hover {
+    opacity: 0.8;
+}
+.ghost {}
+@media (max-width: 600px) {
+    .responsive-only { display: none; }
+}
+</style>
+<style>
+/* Second <style> block — values here cascade over the first block
+ * for the same classname. Confirms multi-block merge semantics
+ * (later overrides earlier per-property, unrelated props preserved). */
+.card { padding: 16px 20px; }
+.numeric { font-feature-settings: "tnum"; }
+</style>
+<style>
+@font-face {
+    font-family: "InterVariable";
+    src: url("/fonts/inter.woff2") format("woff2-variations");
+}
+.this-is-skipped-because-of-font-face-head { color: red; }
+</style>
+</head>
+<body>
+<div class="card mono"><span class="tnum">123.45</span></div>
+<button class="btn-primary">OK</button>
+<button class="btn-secondary">Cancel</button>
+<script type="__bundler/template">
+  // bundled React app placeholder — real exports are multi-MB
+</script>
+</body>
+</html>

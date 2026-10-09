@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <pulp/host/detail/prepared_lifecycle_ownership.hpp>
 #include <pulp/host/sample_region_plan.hpp>
 #include <thread>
 #include <utility>
@@ -487,6 +488,25 @@ bool SignalGraph::PreparedTopologyEdit::connect(NodeId source, PortIndex source_
     return mutate_([&] { return candidate_->connect(source, source_port, dest, dest_port); });
 }
 
+bool SignalGraph::PreparedTopologyEdit::connect_automation(NodeId source, PortIndex source_port,
+                                                           NodeId dest, uint32_t dest_param_id,
+                                                           float range_lo, float range_hi,
+                                                           float smoothing_ms, AutomationMix mix) {
+    return mutate_([&] {
+        return candidate_->connect_automation(source, source_port, dest, dest_param_id, range_lo,
+                                              range_hi, smoothing_ms, mix);
+    });
+}
+
+bool SignalGraph::PreparedTopologyEdit::connect_audio_rate_modulation(
+    NodeId source, PortIndex source_port, NodeId dest, uint32_t dest_param_id, float range_lo,
+    float range_hi, float smoothing_ms, AutomationMix mix) {
+    return mutate_([&] {
+        return candidate_->connect_audio_rate_modulation(source, source_port, dest, dest_param_id,
+                                                         range_lo, range_hi, smoothing_ms, mix);
+    });
+}
+
 bool SignalGraph::PreparedTopologyEdit::connect_feedback(NodeId source, PortIndex source_port,
                                                          NodeId dest, PortIndex dest_port) {
     return mutate_(
@@ -500,6 +520,15 @@ bool SignalGraph::PreparedTopologyEdit::connect_midi(NodeId source, NodeId dest)
 bool SignalGraph::PreparedTopologyEdit::disconnect(NodeId source, PortIndex source_port,
                                                    NodeId dest, PortIndex dest_port) {
     return mutate_([&] { return candidate_->disconnect(source, source_port, dest, dest_port); });
+}
+
+bool SignalGraph::PreparedTopologyEdit::disconnect_modulation(NodeId source, PortIndex source_port,
+                                                              NodeId dest, uint32_t dest_param_id,
+                                                              bool audio_rate) {
+    return mutate_([&] {
+        return candidate_->disconnect_modulation(source, source_port, dest, dest_param_id,
+                                                 audio_rate);
+    });
 }
 
 bool SignalGraph::PreparedTopologyEdit::set_node_gain(NodeId id, float linear_gain) {

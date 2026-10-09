@@ -130,7 +130,8 @@
 // it, holding a knob still would still redesign twenty bands per sample.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
+#include <pulp/host/graph_types.hpp>
 
 #include <pulp/signal/additive_bank.hpp>
 #include <pulp/signal/cyclic_stretch.hpp>

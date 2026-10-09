@@ -10,6 +10,7 @@
 #   3. The retired Inspector screenshot route does not return.
 #   4. Capture is delegated to the canonical control platform.
 #   5. The existing-candidate continuation is explicit.
+#   6. The optional CDP browser receipt preflight remains wired.
 #
 # Hermetic: reads only the script source; no launch of Spectr or image tools.
 
@@ -56,4 +57,15 @@ if ! grep -q -- '--skip-capture' "$HARNESS"; then
 fi
 pass "external capture continuation is explicit"
 
-echo "OK — all 5 assertions passed."
+# 6. Acceptance lanes must be able to validate the browser oracle before the
+# native diff.  Keep this as a source contract so a future script cleanup
+# cannot silently strand the reusable receipt verifier.
+if ! grep -q 'SPECTR_BROWSER_RECEIPT' "$HARNESS"; then
+    fail "browser receipt environment seam is missing"
+fi
+if ! grep -q 'verify_browser_fidelity_receipt.py' "$HARNESS"; then
+    fail "browser receipt verifier is not invoked"
+fi
+pass "CDP browser receipt preflight seam is wired"
+
+echo "OK — all 6 assertions passed."

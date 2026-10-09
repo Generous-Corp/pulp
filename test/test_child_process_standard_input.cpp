@@ -2,12 +2,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <ctime>
 #include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
@@ -356,11 +357,7 @@ TEST_CASE("post-spawn input write timeout cleans the child and parent handles",
 TEST_CASE("post-spawn input stays off argv environment and filesystem",
           "[child_process][standard-input][security]") {
     constexpr std::string_view secret = "provider-secret-7f3a";
-    const auto working_directory =
-        std::filesystem::temp_directory_path() /
-        ("pulp-child-input-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::filesystem::create_directories(working_directory);
+    const auto working_directory = pulp::test::make_unique_temp_dir("pulp-child-input");
 
     ChildProcess child;
     ProcessOptions options;
@@ -382,11 +379,7 @@ TEST_CASE("post-spawn input stays off argv environment and filesystem",
 #ifndef _WIN32
 TEST_CASE("post-spawn input honors a pinned working-directory descriptor",
           "[child_process][standard-input][working-directory]") {
-    const auto working_directory =
-        std::filesystem::temp_directory_path() /
-        ("pulp-child-input-descriptor-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::filesystem::create_directories(working_directory);
+    const auto working_directory = pulp::test::make_unique_temp_dir("pulp-child-input-descriptor");
 
     const auto descriptor = ::open(working_directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     REQUIRE(descriptor >= 0);

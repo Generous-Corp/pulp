@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_runtime.hpp>
 
 namespace pulp::host {
 

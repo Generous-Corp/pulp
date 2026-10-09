@@ -28,7 +28,7 @@
 // dry/wet balance is a per-patch decision, not a fixed sum.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <pulp/signal/character_delay.hpp>
 

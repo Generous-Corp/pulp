@@ -410,6 +410,17 @@ class SdkProvenanceTests(unittest.TestCase):
         self.assertIn("bin/browser_capture-v1/node.exe", windows)
         self.assertNotIn("bin/browser_capture-v1/node", windows)
 
+    def test_importer_runtime_paths_include_materialized_sibling_at_floor(self) -> None:
+        sibling = "bin/jsx-runtime/materialized_binding_contract.mjs"
+        (self.prefix / "version.txt").write_text("0.917.0\n", encoding="utf-8")
+        before = provenance._importer_runtime_paths(self.prefix, "linux-x64")
+        self.assertNotIn(sibling, before)
+        (self.prefix / "version.txt").write_text("0.918.0\n", encoding="utf-8")
+        at_floor = provenance._importer_runtime_paths(self.prefix, "linux-x64")
+        self.assertIn(sibling, at_floor)
+        self.assertIn("bin/jsx-runtime/materialized_source_emitter.mjs", at_floor)
+        self.assertIn("bin/jsx-runtime/materialized_ids_map.mjs", at_floor)
+
     def test_historical_matrix_without_node_floor_remains_supported(self) -> None:
         matrix = self.root / "historical-release-product-matrix.json"
         matrix.write_text(

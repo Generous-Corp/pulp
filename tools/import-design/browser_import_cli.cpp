@@ -296,23 +296,20 @@ public:
 };
 
 struct internal::BrowserImportCliResultBuilder {
-    static BrowserCapturedImport make(
-        pulp::view::DesignIR design_ir,
-        int render_width,
-        int render_height,
-        bool similarity_failed,
-        std::string reference_image,
-        fs::path transient_capture,
-        fs::path durable_capture,
-        std::vector<ArtifactPublication> published_artifacts,
-        std::vector<fs::path> protected_paths,
-        std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces) {
+    static BrowserCapturedImport
+    make(pulp::view::DesignIR design_ir, int render_width, int render_height,
+         bool similarity_failed, std::string reference_image,
+         std::optional<fs::path> materialized_document, fs::path transient_capture,
+         fs::path durable_capture, std::vector<ArtifactPublication> published_artifacts,
+         std::vector<fs::path> protected_paths,
+         std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces) {
         BrowserCapturedImport result;
         result.design_ir_ = std::move(design_ir);
         result.render_width_ = render_width;
         result.render_height_ = render_height;
         result.similarity_failed_ = similarity_failed;
         result.reference_image_ = std::move(reference_image);
+        result.materialized_document_ = std::move(materialized_document);
         result.evidence_ =
             std::make_unique<BrowserCapturedImport::EvidenceTransaction>();
         result.evidence_->transient_capture = std::move(transient_capture);
@@ -595,6 +592,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
     pulp::view::DesignIR design_ir;
     fs::path transient_capture;
     fs::path durable_capture;
+    std::optional<fs::path> materialized_document;
     std::vector<fs::path> protected_paths =
         request.reserved_output_paths;
     protected_paths.push_back(request.output_file);
@@ -616,16 +614,13 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .initial_width = request.initial_width,
          .initial_height = request.initial_height,
          .offline = request.offline,
-         .skia_validation =
-             request.screenshot_backend ==
-             pulp::view::ScreenshotBackend::skia,
+         .skia_validation = request.screenshot_backend == pulp::view::ScreenshotBackend::skia,
          .allow_browser_network = request.allow_browser_network,
          .dry_run = request.dry_run,
-         .supports_faithful_capture =
-             request.supports_faithful_capture,
+         .supports_faithful_capture = request.supports_faithful_capture,
          .native_panel_lowering = request.native_panel_lowering,
-         .materialized_canvas_composition =
-             request.materialized_canvas_composition},
+         .materialized_canvas_composition = request.materialized_canvas_composition,
+         .require_canvas_ink = request.require_canvas_ink},
         content);
 
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;
@@ -638,6 +633,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         transient_capture = captured->capture_directory;
         durable_capture =
             captured->durable_capture_directory;
+        materialized_document = captured->materialized_document;
 
         // --render-size is Chromium's initial responsive viewport. Validation
         // must use the settled portable canvas to avoid cropping tall or fixed
@@ -700,6 +696,11 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
                "not match the browser.\n";
         return BrowserImportNotApplicable{};
     } else {
+        if (request.require_canvas_ink) {
+            std::cerr << "Error: --require-canvas-ink applies only to browser-backed "
+                         "HTML import\n";
+            return BrowserImportFailure{2};
+        }
         if (request.fit_authored_frame) {
             std::cerr
                 << "Error: --fit-authored-frame applies only to "
@@ -785,15 +786,15 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
     // recovered from a faithful_capture child's negative offset, and native
     // panel lowering emits no such child, so the crop silently became zero and
     // every native panel was scored against a misregistered oracle.
-    const auto comparison = operations.validate_capture(
-        design_ir,
-        {.reference = reference_image,
-         .rendered = rendered_path,
-         .diff = diff_path,
-         .width = render_width,
-         .height = render_height,
-         .fail_below_percent = request.fail_below_percent,
-         .backend = request.screenshot_backend});
+    const auto comparison =
+        operations.validate_capture(design_ir, {.reference = reference_image,
+                                                .rendered = rendered_path,
+                                                .diff = diff_path,
+                                                .width = render_width,
+                                                .height = render_height,
+                                                .fail_below_percent = request.fail_below_percent,
+                                                .require_canvas_ink = request.require_canvas_ink,
+                                                .backend = request.screenshot_backend});
     if (!comparison.valid) {
         std::cerr << "Validation error: " << comparison.error << "\n";
         return BrowserImportFailure{1};
@@ -891,11 +892,9 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
     }
 
     return internal::BrowserImportCliResultBuilder::make(
-        std::move(design_ir), render_width, render_height,
-        similarity_failed, std::move(reference_image),
-        std::move(transient_capture), std::move(durable_capture),
-        std::move(published_artifacts),
-        std::move(protected_paths),
+        std::move(design_ir), render_width, render_height, similarity_failed,
+        std::move(reference_image), std::move(materialized_document), std::move(transient_capture),
+        std::move(durable_capture), std::move(published_artifacts), std::move(protected_paths),
         std::move(workspaces));
 }
 

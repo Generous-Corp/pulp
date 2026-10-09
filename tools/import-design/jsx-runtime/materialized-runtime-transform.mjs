@@ -13,6 +13,10 @@ import {
   normalizeMaterializedMetadata,
 } from './materialized_metadata_contract.mjs';
 import {
+  isMaterializedBrowserDocumentSchema,
+  normalizeMaterializedBindingDocument,
+} from './materialized_binding_contract.mjs';
+import {
   validateMaterializedLayerContract,
 } from './materialized_layer_contract.mjs';
 import { resolveMaterializedFrames } from './materialized_frame_contract.mjs';
@@ -91,9 +95,10 @@ const requestedStatePrelude = requestedState
   : '';
 validateMaterializedLayerContract();
 const parsed = JSON.parse(readFileSync(input, 'utf8'));
-if (parsed.schema !== 'pulp-materialized-browser-document-v1' || parsed.version !== 1) {
-  throw new Error('input is not a materialized browser document v1');
+if (!isMaterializedBrowserDocumentSchema(parsed)) {
+  throw new Error('input is not a materialized browser document v1 or v2');
 }
+const normalizedDocument = normalizeMaterializedBindingDocument(parsed);
 const presentationTime = Number(parsed.presentation_time_ms ?? 0);
 if (!Number.isFinite(presentationTime) || presentationTime < 0) {
   throw new Error('materialized browser presentation time is invalid');
@@ -107,7 +112,7 @@ if (surfaceBackground.length > 128 ||
     /[;{}<>]/.test(surfaceBackground)) {
   throw new Error('materialized browser surface background is invalid');
 }
-const mainMetadata = normalizeMaterializedMetadata(parsed);
+const mainMetadata = normalizeMaterializedMetadata(normalizedDocument);
 const fontBindings = mainMetadata.font_bindings;
 const layoutBindings = mainMetadata.layout_bindings;
 const textBindings = mainMetadata.text_bindings;
@@ -142,7 +147,7 @@ const injectPrelude = (html) => {
     `<head$1><script>\n${requestedStatePrelude}${productPrelude}\n</script>`);
 };
 const runtimeDocument = canonicalizeMaterializedRuntimeDocument({
-  ...parsed, html: injectPrelude(parsed.html),
+  ...normalizedDocument, html: injectPrelude(normalizedDocument.html),
 });
 const sidecar = JSON.stringify(runtimeDocument);
 if (runtimeDocumentAsset) {
@@ -151,8 +156,7 @@ if (runtimeDocumentAsset) {
   writeFileSync(assetOutput, sidecar);
 }
 
-const canvasBindings = Array.isArray(parsed.canvas_bindings)
-  ? parsed.canvas_bindings : [];
+const canvasBindings = mainMetadata.canvas_bindings;
 let behaviorCanvasAnchors = Array.isArray(parsed.behavior_canvas_anchors)
   ? parsed.behavior_canvas_anchors : [];
 const ir = JSON.parse(readFileSync(designIrArg, 'utf8'));

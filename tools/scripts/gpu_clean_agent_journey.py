@@ -247,6 +247,10 @@ def _write_bytes(path: pathlib.Path, payload: bytes, *, replace: bool = False) -
 
 
 def _fsync_directory(path: pathlib.Path) -> None:
+    # Windows cannot open a directory as a file descriptor, and NTFS makes the
+    # rename itself durable, so there is no directory entry to flush there.
+    if os.name == "nt":
+        return
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         os.fsync(descriptor)

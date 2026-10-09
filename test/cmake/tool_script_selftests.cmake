@@ -9,6 +9,21 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME audio-glitch-trace-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/audio/test_glitch_trace.py")
     set_tests_properties(audio-glitch-trace-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # macos_merge_group_bootstrap.sh: the merge-group `macos` verdict. A failed
+    # or missing dependency fails closed; a cancelled classify (never given a
+    # runner) is classified in-job, and the verdict proceeds on that answer.
+    add_test(NAME macos-merge-group-bootstrap-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_macos_merge_group_bootstrap.py")
+    set_tests_properties(macos-merge-group-bootstrap-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # clock_only_temp_key_guard.py: a test temp path named from a clock reading
+    # alone is shared by two concurrent cases that read the same tick. The
+    # selftest proves the scan reads real sources (an empty scan is an error).
+    add_test(NAME clock-only-temp-key-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/clock_only_temp_key_guard.py")
+    set_tests_properties(clock-only-temp-key-guard PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME clock-only-temp-key-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_clock_only_temp_key_guard.py")
+    set_tests_properties(clock-only-temp-key-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME deps-audit-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/test_audit.py")
     set_tests_properties(deps-audit-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
@@ -72,6 +87,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME import-validation-source-contract-schema-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_source_contract_schema.py")
     set_tests_properties(import-validation-source-contract-schema-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME import-validation-browser-fidelity-receipt-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_verify_browser_fidelity_receipt.py")
+    set_tests_properties(import-validation-browser-fidelity-receipt-selftest PROPERTIES
+        LABELS "tools;selftest" TIMEOUT 120 ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/import-validation")
     add_test(NAME import-project-import-ir-schema-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import/test_project_import_ir_schema.py")
     set_tests_properties(import-project-import-ir-schema-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

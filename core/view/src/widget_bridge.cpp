@@ -486,6 +486,33 @@ static void invoke_or_throw(ScriptEngine& engine,
 // is safe: the standard bridge ctor/dtor lifecycle is host-driven, and
 // recursive_mutex defensively tolerates same-thread reentry.
 namespace {
+class BridgeCallCounterGuard {
+  public:
+    BridgeCallCounterGuard(ScriptEngine& engine,
+                           const std::shared_ptr<std::atomic<std::uint64_t>>& counter)
+        : engine_(engine), counter_(counter), previous_(engine.bridge_call_counter()) {
+        engine_.set_bridge_call_counter(counter_);
+    }
+
+    BridgeCallCounterGuard(const BridgeCallCounterGuard&) = delete;
+    BridgeCallCounterGuard& operator=(const BridgeCallCounterGuard&) = delete;
+
+    ~BridgeCallCounterGuard() {
+        if (active_ && engine_.bridge_call_counter() == counter_)
+            engine_.set_bridge_call_counter(previous_);
+    }
+
+    void release() noexcept {
+        active_ = false;
+    }
+
+  private:
+    ScriptEngine& engine_;
+    std::shared_ptr<std::atomic<std::uint64_t>> counter_;
+    std::shared_ptr<std::atomic<std::uint64_t>> previous_;
+    bool active_ = true;
+};
+
 std::recursive_mutex& all_bridges_mutex() {
     static std::recursive_mutex m;
     return m;
@@ -507,6 +534,7 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
       granted_capabilities_(granted_capabilities), gpu_surface_(gpu_surface),
       widgets_(owned_widgets_),
       callback_alive_(std::make_shared<BridgeCallbackState>(&root_)) {
+    BridgeCallCounterGuard counter_guard(engine_, bridge_call_count_);
     callback_alive_->track_engine(engine.liveness_token());
     if (detail::widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
@@ -598,9 +626,12 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
         std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
         all_bridges_set().insert(this);
     }
+    counter_guard.release();
 }
 
 WidgetBridge::~WidgetBridge() {
+    if (callback_alive_->engine_alive() && engine_.bridge_call_counter() == bridge_call_count_)
+        engine_.set_bridge_call_counter(nullptr);
     release_document_navigation_focus();
     unregister_global_dispatch();
     if (callback_alive_) {

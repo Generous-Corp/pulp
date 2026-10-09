@@ -102,11 +102,17 @@ INERT_PREFIXES = (
 # The replay fixture lists every path of 177 merged pull requests and is read
 # only by this module's own test; as a referrer it would block everything.
 REPLAY_FIXTURE = "tools/scripts/fixtures/wide_non_native_replay.json"
+# The text-encoding baseline names nearly every Python file under tools/ and
+# test/, and is read only by text_encoding_lint.py, which runs in gates.sh and
+# version-skill-check, never in the native gate. As a referrer it would block
+# every tools/ change from the widening.
+TEXT_ENCODING_BASELINE = "tools/scripts/text_encoding_baseline.json"
 INERT_EXACT = frozenset(
     {
         LANE_MANIFEST,
         TIER_MANIFEST,
         REPLAY_FIXTURE,
+        TEXT_ENCODING_BASELINE,
         SELECTOR_FAMILIES_FILE,
         ".gitattributes",
         "CODEOWNERS",

@@ -246,6 +246,7 @@ TEST_CASE("shared IO execution predictor is opt-in and conservative",
     predictor.configure({.enabled = true, .minimum_samples = 2, .safety_margin_ns = 100});
     predictor.observe(1000);
     REQUIRE_FALSE(predictor.estimate().ready);
+    REQUIRE_FALSE(predictor.admit(1000, 2000));
     predictor.observe(1200);
 
     const auto estimate = predictor.estimate();
@@ -265,6 +266,65 @@ TEST_CASE("shared IO execution predictor is opt-in and conservative",
     predictor.configure({});
     REQUIRE_FALSE(predictor.estimate().enabled);
     REQUIRE(predictor.admit(10'000, 10'001));
+}
+
+TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle boundaries",
+          "[gpu_audio][shared_io][prediction]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+
+    // A failed terminal is retained in the lifecycle receipt but cannot train
+    // the execution predictor.
+    provider.terminal_status = SharedIoArena::CompletionStatus::RetiredFailed;
+    auto failed_input = plan.acquire_input(1, 0);
+    REQUIRE(failed_input);
+    REQUIRE(plan.submit({failed_input->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto failed = plan.pop_completion();
+    REQUIRE(failed);
+    CHECK(plan.prediction_estimate().samples == 0);
+    REQUIRE(plan.discard_completion(*failed));
+    REQUIRE(plan.reprime_when_quiescent());
+
+    provider.terminal_status = SharedIoArena::CompletionStatus::RetiredSuccess;
+    auto successful_input = plan.acquire_input(2, 0);
+    REQUIRE(successful_input);
+    REQUIRE(plan.submit({successful_input->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto successful = plan.pop_completion();
+    REQUIRE(successful);
+    CHECK(plan.prediction_estimate().ready);
+    CHECK(plan.telemetry().prediction_samples == 1);
+    REQUIRE(plan.discard_completion(*successful));
+
+    // A calibrated future deadline is admitted.
+    const auto future_deadline =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count()) +
+        1'000'000'000;
+    auto admitted_input = plan.acquire_input(3, future_deadline);
+    REQUIRE(admitted_input);
+    REQUIRE(plan.cancel({admitted_input->token, future_deadline}));
+
+    // An expired deadline is refused, which lets the caller take its CPU
+    // fallback path without consuming a provider slot.
+    const auto expired_deadline = future_deadline - 2'000'000'000;
+    CHECK_FALSE(plan.acquire_input(4, expired_deadline));
+    CHECK(plan.telemetry().prediction_refusals == 1);
+    REQUIRE(plan.reprime_when_quiescent());
+    CHECK(plan.prediction_estimate().samples == 0);
+    CHECK(plan.prediction_estimate().enabled);
+
+    // Disabling the policy restores the established admission behavior.
+    plan.set_prediction_policy({});
+    auto disabled_input = plan.acquire_input(4, 1);
+    REQUIRE(disabled_input);
+    REQUIRE(plan.cancel({disabled_input->token, 1}));
+    REQUIRE(plan.release());
 }
 
 TEST_CASE("shared IO compute plan classifies completion after bounded wake",
@@ -696,6 +756,22 @@ TEST_CASE("shared IO compute plan exposes retired output and cancels refused lea
     CHECK(reinterpret_cast<const float*>(output->bytes.data())[0] == 3.0f);
     REQUIRE(plan.release_output({output->token}));
 
+    const auto receipts = plan.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 1);
+    CHECK(receipts[0].generation == input->token.preparation_epoch);
+    CHECK(receipts[0].sequence == 3);
+    CHECK(receipts[0].submit_ns >= 0);
+    CHECK(receipts[0].terminal);
+    CHECK(receipts[0].terminal_ns >= 0);
+    CHECK(receipts[0].service_ns >= receipts[0].terminal_ns);
+    CHECK(receipts[0].delivery_ns >= 0);
+    CHECK(receipts[0].output_acquired);
+    CHECK(receipts[0].output_released);
+    CHECK_FALSE(receipts[0].gpu_timestamp_available);
+    CHECK(receipts[0].gpu_elapsed_ns == -1);
+    CHECK_FALSE(receipts[0].device_lost);
+    CHECK(plan.lifecycle_receipt_valid());
+
     auto refused = plan.acquire_input(4, 0);
     REQUIRE(refused);
     REQUIRE(plan.cancel({refused->token, 0}));
@@ -759,6 +835,16 @@ TEST_CASE("shared IO compute plan reprimes persistent slots only after quiescenc
     REQUIRE(reprime);
     CHECK(reprime->token.preparation_epoch == first_epoch + 1);
     REQUIRE(plan.cancel({reprime->token, 0}));
+    const auto receipts = plan.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 2);
+    CHECK(receipts[0].generation == first_epoch);
+    CHECK(receipts[0].sequence == 20);
+    CHECK(receipts[0].output_released);
+    CHECK(receipts[0].gpu_elapsed_ns == -1);
+    CHECK(receipts[1].generation == first_epoch + 1);
+    CHECK(receipts[1].sequence == 21);
+    CHECK(receipts[1].discarded);
+    CHECK_FALSE(receipts[1].terminal);
     REQUIRE(plan.release());
 }
 
@@ -810,6 +896,65 @@ TEST_CASE("shared IO compute plan bounds saturation and retires refused or faile
     auto after_failure = plan.acquire_input(35, 0);
     REQUIRE(after_failure);
     REQUIRE(plan.cancel({after_failure->token, 0}));
+    const auto receipts = plan.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 6);
+    CHECK(receipts[0].sequence == 30);
+    CHECK(receipts[1].sequence == 31);
+    CHECK(receipts[2].sequence == 32);
+    CHECK(receipts[2].discarded);
+    CHECK(receipts[3].sequence == 33);
+    CHECK(receipts[3].discarded);
+    CHECK(receipts[4].sequence == 34);
+    CHECK(receipts[4].terminal);
+    CHECK(receipts[4].discarded);
+    CHECK_FALSE(receipts[4].gpu_timestamp_available);
+    CHECK(receipts[4].gpu_elapsed_ns == -1);
+    CHECK(receipts[5].sequence == 35);
+    CHECK(receipts[5].discarded);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO lifecycle receipts fail closed on bounded retention overflow",
+          "[gpu_audio][shared_io][p3]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    for (std::uint64_t sequence = 0; sequence <= SharedIoComputePlan::kLifecycleReceiptCapacity;
+         ++sequence) {
+        auto input = plan.acquire_input(sequence, 0);
+        REQUIRE(input);
+        REQUIRE(plan.cancel({input->token, 0}));
+    }
+    CHECK(plan.lifecycle_receipt_overflow());
+    CHECK_FALSE(plan.lifecycle_receipt_valid());
+    CHECK(plan.take_lifecycle_receipts().size() == SharedIoComputePlan::kLifecycleReceiptCapacity);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO lifecycle receipt separates observed service time from delivery",
+          "[gpu_audio][shared_io][p3]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    auto input = plan.acquire_input(90, 0);
+    REQUIRE(input);
+    REQUIRE(plan.submit({input->token, 0}));
+    CHECK(plan.take_lifecycle_receipts().empty());
+    REQUIRE(plan.drain_until(0, 1) == 1);
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    auto output = plan.acquire_output(*completion);
+    REQUIRE(output);
+    REQUIRE(plan.release_output({output->token}));
+    const auto receipts = plan.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 1);
+    CHECK(receipts[0].submit_ns >= 0);
+    CHECK(receipts[0].terminal_ns >= receipts[0].submit_ns);
+    CHECK(receipts[0].service_ns >= receipts[0].terminal_ns);
+    CHECK(receipts[0].delivery_ns >= receipts[0].service_ns);
+    CHECK(receipts[0].gpu_elapsed_ns == -1);
     REQUIRE(plan.release());
 }
 

@@ -71,8 +71,15 @@ import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs"
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
 import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mjs";
 import {
+  normalizeMaterializedBindingDocument,
+} from "../jsx-runtime/materialized_binding_contract.mjs";
+import {
   materializedCoordinateSpaceFromQuad,
 } from "./materialized_coordinate_space.mjs";
+import {
+  annotateCapturedVendorReferences,
+  classifyTrustedCapturedVendorPayload,
+} from "./vendor_payload.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -140,29 +147,40 @@ async function measureAuthoredFrame(cdp) {
       }
       if (!element) return null;
       const bounds = element.getBoundingClientRect();
+      // getBoundingClientRect() is expressed after ancestor transforms. Fit
+      // discovery needs the authored layout box so a fixed design surface
+      // scaled into the seed viewport is not mistaken for a smaller design.
+      // Keep the transformed bounds above as the capture-space geometry; the
+      // intrinsic dimensions are used only to choose and verify the viewport.
+      const authoredWidth = Number(element.offsetWidth);
+      const authoredHeight = Number(element.offsetHeight);
       return {
         x: bounds.left + window.scrollX,
         y: bounds.top + window.scrollY,
         width: bounds.width,
         height: bounds.height,
+        authoredWidth: authoredWidth > 0 ? authoredWidth : bounds.width,
+        authoredHeight: authoredHeight > 0 ? authoredHeight : bounds.height,
       };
     })()`,
     returnByValue: true,
   });
   const frame = evaluated.result?.value;
-  if (!frame || ![frame.x, frame.y, frame.width, frame.height]
-      .every(Number.isFinite) || frame.width <= 0 || frame.height <= 0) {
+  if (!frame || ![frame.x, frame.y, frame.width, frame.height,
+    frame.authoredWidth, frame.authoredHeight].every(Number.isFinite) ||
+      frame.width <= 0 || frame.height <= 0 ||
+      frame.authoredWidth <= 0 || frame.authoredHeight <= 0) {
     return null;
   }
   return frame;
 }
 
 function verifyAuthoredViewport(frame, target) {
-  if (Math.ceil(frame.width) !== target.width ||
-      Math.ceil(frame.height) !== target.height) {
+  if (Math.ceil(frame.authoredWidth) !== target.width ||
+      Math.ceil(frame.authoredHeight) !== target.height) {
     const error = new Error(
       `authored frame changed from ${target.width}x${target.height} to ` +
-      `${frame.width}x${frame.height} after one same-target reload`);
+      `${frame.authoredWidth}x${frame.authoredHeight} after one same-target reload`);
     error.code = "capture-authored-viewport-nonconvergent";
     throw error;
   }
@@ -177,6 +195,17 @@ function verifyAuthoredViewport(frame, target) {
     error.code = "capture-authored-frame-not-contained";
     throw error;
   }
+}
+
+async function setCaptureViewport(cdp, width, height, dpr) {
+  await cdp.call("Emulation.setDeviceMetricsOverride", {
+    width,
+    height,
+    deviceScaleFactor: dpr,
+    mobile: false,
+    screenWidth: width,
+    screenHeight: height,
+  });
 }
 
 function authoredFrameUnavailable(message) {
@@ -244,11 +273,23 @@ function exitAfterCleanupDeadline(expiry, outputDir, browser) {
 // records of captures that never produce an envelope. Browser behaviour around
 // screenshots and virtual time changes between Chromium releases, so a failure
 // report that does not name the browser cannot be triaged.
+function canonicalBrowserProduct(product) {
+  const value = String(product ?? "").trim();
+  const matches = (alias) => value.startsWith(alias) &&
+    (value.length === alias.length || value[alias.length] === " " ||
+     value[alias.length] === "/");
+  if (matches("Google Chrome") || matches("Google Chrome for Testing") ||
+      matches("Chrome for Testing") || matches("Chrome")) {
+    return "Chrome";
+  }
+  return value;
+}
+
 function reportBrowser(version) {
   const product = String(version?.product ?? "");
   const [name, release] = product.split("/");
   const browser = {
-    product: name || "Chromium",
+    product: canonicalBrowserProduct(name || "Chromium"),
     version: release || "",
     protocol_version: version?.protocolVersion ?? "",
     build_hash: version?.revision ?? "",
@@ -393,7 +434,7 @@ function pngDimensions(bytes) {
 const MAX_CAPTURED_CANVASES = 32;
 const MAX_CAPTURED_CANVAS_PIXELS = 64 * 1024 * 1024;
 
-async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
+function capturedCanvasNodes(snapshot) {
   const document = snapshot.documents?.[0];
   const nodes = document?.nodes;
   const strings = snapshot.strings ?? [];
@@ -411,17 +452,151 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
         `browser capture found duplicate canvas backend node ${backendNodeId}`);
     }
     seenBackendNodeIds.add(backendNodeId);
-    canvases.push(backendNodeId);
+    let pulpId = '';
+    const attributes = nodes.attributes?.[index] ?? [];
+    for (let attr = 0; attr + 1 < attributes.length; attr += 2) {
+      const name = String(strings[attributes[attr]] ?? '').toLowerCase();
+      if (name !== 'data-pulp-id') continue;
+      pulpId = String(strings[attributes[attr + 1]] ?? '');
+      break;
+    }
+    canvases.push({ backendNodeId, pulpId });
   }
   if (canvases.length > MAX_CAPTURED_CANVASES) {
     throw new Error(
       `browser capture found ${canvases.length} canvases; maximum is ` +
       `${MAX_CAPTURED_CANVASES}`);
   }
+  return canvases;
+}
+
+// Read a canvas's raster only when the backing-store dimensions are within the
+// remaining capture budget. This is used around captureBeyondViewport: Chrome
+// may dispatch a resize while producing that screenshot, and a page resize
+// handler can clear a canvas after the accepted frame has already been chosen.
+// Keeping the check outside the screenshot path makes that mutation fail closed
+// instead of publishing a plausible but incomplete browser.png.
+async function readCanvasRasterSignature(cdp, backendNodeId, pixelBudget) {
+  const resolved = await cdp.call("DOM.resolveNode", { backendNodeId });
+  const objectId = resolved.object?.objectId;
+  if (!objectId) {
+    throw new Error(`could not resolve canvas backend node ${backendNodeId}`);
+  }
+  try {
+    const measured = await cdp.call("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function() {
+        if (!(this instanceof HTMLCanvasElement))
+          throw new Error('resolved node is not a canvas');
+        return { width: this.width, height: this.height };
+      }`,
+      returnByValue: true,
+    });
+    const width = Number(measured.result?.value?.width);
+    const height = Number(measured.result?.value?.height);
+    const pixels = width * height;
+    if (!Number.isInteger(width) || !Number.isInteger(height) ||
+        width <= 0 || height <= 0 || !Number.isSafeInteger(pixels)) {
+      throw new Error(`canvas backend node ${backendNodeId} has invalid size`);
+    }
+    if (pixels > pixelBudget) {
+      throw new Error(
+        `captured canvas pixels exceed ${MAX_CAPTURED_CANVAS_PIXELS}`);
+    }
+    const encoded = await cdp.call("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function() {
+        if (!(this instanceof HTMLCanvasElement))
+          throw new Error('resolved node is not a canvas');
+        return this.toDataURL('image/png');
+      }`,
+      returnByValue: true,
+    });
+    const dataUrl = String(encoded.result?.value ?? "");
+    const prefix = "data:image/png;base64,";
+    if (!dataUrl.startsWith(prefix)) {
+      throw new Error(`canvas backend node ${backendNodeId} did not produce PNG`);
+    }
+    const pixelsRead = await cdp.call("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function() {
+        const context = this.getContext('2d');
+        if (!context) return { nonzero: null };
+        const data = context.getImageData(0, 0, this.width, this.height).data;
+        let nonzero = 0;
+        for (let index = 3; index < data.length; index += 4) {
+          if (data[index] > 8) nonzero++;
+        }
+        return { nonzero };
+      }`,
+      returnByValue: true,
+    });
+    return {
+      backendNodeId,
+      width,
+      height,
+      pixels,
+      sha256: sha256(Buffer.from(dataUrl.slice(prefix.length), "base64")),
+      nonzero: Number.isSafeInteger(pixelsRead.result?.value?.nonzero)
+        ? pixelsRead.result.value.nonzero : null,
+    };
+  } finally {
+    await cdp.call("Runtime.releaseObject", { objectId }).catch(() => {});
+  }
+}
+
+async function captureCanvasRasterSignatures(cdp, snapshot) {
+  const canvases = capturedCanvasNodes(snapshot);
+  const signatures = [];
+  let totalPixels = 0;
+  for (const { backendNodeId } of canvases) {
+    const signature = await readCanvasRasterSignature(
+      cdp, backendNodeId, MAX_CAPTURED_CANVAS_PIXELS - totalPixels);
+    totalPixels += signature.pixels;
+    signatures.push(signature);
+  }
+  return signatures;
+}
+
+async function verifyCanvasRasterSignatures(
+  cdp, signatures, { allowDeterministicRepaint = false } = {}) {
+  let totalPixels = 0;
+  for (const expected of signatures) {
+    let actual;
+    try {
+      actual = await readCanvasRasterSignature(
+        cdp, expected.backendNodeId,
+        MAX_CAPTURED_CANVAS_PIXELS - totalPixels);
+    } catch (cause) {
+      const error = new Error(
+        `captureBeyondViewport could not verify canvas backend node ` +
+        `${expected.backendNodeId} after capturing overflow content: ` +
+        `${cause.message}; refusing to publish incomplete canvas evidence`);
+      error.code = "capture-canvas-overflow-resize";
+      throw error;
+    }
+    totalPixels += actual.pixels;
+    if (actual.width === expected.width && actual.height === expected.height &&
+        actual.sha256 === expected.sha256) continue;
+    if (allowDeterministicRepaint && expected.nonzero > 0 && actual.nonzero > 0)
+      continue;
+    const error = new Error(
+      `captureBeyondViewport changed canvas backend node ` +
+      `${expected.backendNodeId} while capturing overflow content ` +
+      `(before ${expected.width}x${expected.height}/${expected.sha256}, ` +
+      `after ${actual.width}x${actual.height}/${actual.sha256}); ` +
+      "refusing to publish incomplete canvas evidence");
+    error.code = "capture-canvas-overflow-resize";
+    throw error;
+  }
+}
+
+async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
+  const canvases = capturedCanvasNodes(snapshot);
 
   const assets = [];
   let totalPixels = 0;
-  for (const backendNodeId of canvases) {
+  for (const { backendNodeId, pulpId } of canvases) {
     const resolved = await cdp.call("DOM.resolveNode", { backendNodeId });
     const objectId = resolved.object?.objectId;
     if (!objectId) {
@@ -527,6 +702,7 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
         width_px: dimensions.width,
         height_px: dimensions.height,
         backend_node_id: backendNodeId,
+        ...(pulpId ? { pulp_id: pulpId } : {}),
         bounds: {
           left: Number(measured.result?.value?.bounds?.left ?? 0),
           top: Number(measured.result?.value?.bounds?.top ?? 0),
@@ -740,6 +916,31 @@ async function configurePage(cdp, width, height, dpr) {
   }
 }
 
+function capturedAttribute(openTag, wanted) {
+  let i = openTag.toLowerCase().indexOf('script') + 6;
+  while (i < openTag.length) {
+    while (/\s/.test(openTag[i])) ++i;
+    if (i >= openTag.length || openTag[i] === '>' || openTag[i] === '/') break;
+    const start = i;
+    while (i < openTag.length && !/[\s=/>]/.test(openTag[i])) ++i;
+    const name = openTag.slice(start, i).toLowerCase();
+    while (/\s/.test(openTag[i])) ++i;
+    let value = '';
+    if (openTag[i] === '=') {
+      ++i;
+      while (/\s/.test(openTag[i])) ++i;
+      const quote = openTag[i] === '"' || openTag[i] === "'" ? openTag[i++] : '';
+      const valueStart = i;
+      if (quote) while (i < openTag.length && openTag[i] !== quote) ++i;
+      else while (i < openTag.length && !/[\s>]/.test(openTag[i])) ++i;
+      value = openTag.slice(valueStart, i);
+      if (quote && openTag[i] === quote) ++i;
+    }
+    if (name === wanted) return value;
+  }
+  return undefined;
+}
+
 async function captureMaterializedDocument(cdp) {
   const metadata = await cdp.call("Runtime.evaluate", {
     expression: `(async () => {
@@ -770,8 +971,8 @@ async function captureMaterializedDocument(cdp) {
         });
       }
       return {
-        schema: 'pulp-materialized-browser-document-v1',
-        version: 1,
+        schema: 'pulp-materialized-browser-document-v2',
+        version: 2,
         html: document.html,
         mime_type: document.mime_type,
         assets
@@ -841,6 +1042,59 @@ async function captureMaterializedDocument(cdp) {
       throw new Error(`materialized blob ${index} length changed during capture`);
     }
     materialized.assets[index].sha256 = sha256(bytes);
+    // Record vendor classification as capture metadata. The canonicalizer
+    // consumes this explicit role; it never guesses from arbitrary authored
+    // asset text. A vendor must be an empty script reference in the captured
+    // executable document and match the complete, known signature.
+    const asset = materialized.assets[index];
+    const scriptRefs = [];
+    const lowerHtml = materialized.html.toLowerCase();
+    let cursor = 0;
+    while (cursor < materialized.html.length) {
+      const start = lowerHtml.indexOf("<script", cursor);
+      if (start < 0) break;
+      const boundary = lowerHtml[start + 7];
+      if (boundary && !/[\s/>]/.test(boundary)) {
+        cursor = start + 7;
+        continue;
+      }
+      let openEnd = start + 7;
+      let quote = "";
+      for (; openEnd < materialized.html.length; ++openEnd) {
+        const ch = materialized.html[openEnd];
+        if (quote) { if (ch === quote) quote = ""; }
+        else if (ch === "\"" || ch === "'") quote = ch;
+        else if (ch === ">") break;
+      }
+      if (openEnd >= materialized.html.length) break;
+      const openTag = materialized.html.slice(start, openEnd + 1);
+      const close = lowerHtml.indexOf("</script", openEnd + 1);
+      const src = capturedAttribute(openTag, 'src');
+      if (src !== undefined && close >= 0) {
+        if (src === asset.url) {
+          scriptRefs.push({
+            empty: materialized.html.slice(openEnd + 1, close).trim() === "",
+            vendor: capturedAttribute(openTag, 'data-pulp-vendor') || '',
+          });
+        }
+      }
+      cursor = close >= 0 ? close + 8 : openEnd + 1;
+    }
+    const emptyScript = scriptRefs.length > 0 && scriptRefs.every((ref) => ref.empty);
+    const javascriptMime = /^(?:text|application)\/javascript(?:\s*;|$)/i.test(asset.mime_type);
+    const trustedVendor = javascriptMime
+      ? classifyTrustedCapturedVendorPayload(
+        Buffer.from(dataBase64, "base64").toString("utf8"))
+      : "";
+    if (emptyScript && trustedVendor &&
+        scriptRefs.every((ref) => !ref.vendor || ref.vendor === trustedVendor)) {
+      // Normal browser loaders omit capture metadata.  Once the exact
+      // allowlisted bytes are known, emit the marker ourselves so the
+      // canonicalizer can remove only this capture-owned vendor asset.
+      materialized.html = annotateCapturedVendorReferences(
+        materialized.html, asset.url, trustedVendor);
+      asset.vendor_kind = trustedVendor;
+    }
   }
 
   // Blob URLs are realm-scoped and typically contain a fresh UUID on every
@@ -848,6 +1102,7 @@ async function captureMaterializedDocument(cdp) {
   // the executable document to content-addressed asset IDs so identical source
   // material produces byte-identical sidecars across captures.
   const stableAssets = new Map();
+  const ambiguousAssetIds = new Set();
   for (const asset of materialized.assets) {
     const id = `pulp-materialized-asset-${asset.sha256}`;
     materialized.html = materialized.html.split(asset.url).join(id);
@@ -861,7 +1116,19 @@ async function captureMaterializedDocument(cdp) {
         byte_length: asset.byte_length,
         data_base64: asset.data_base64,
         sha256: asset.sha256,
+        ...(asset.vendor_kind ? { vendor_kind: asset.vendor_kind } : {}),
       });
+    } else {
+      const existing = stableAssets.get(id);
+      if (existing.vendor_kind && asset.vendor_kind &&
+          existing.vendor_kind !== asset.vendor_kind) {
+        // Conflicting provenance for identical bytes is ambiguous. Preserve
+        // the asset and require a later explicit capture to classify it.
+        delete existing.vendor_kind;
+        ambiguousAssetIds.add(id);
+      } else if (!ambiguousAssetIds.has(id) && !existing.vendor_kind && asset.vendor_kind) {
+        existing.vendor_kind = asset.vendor_kind;
+      }
     }
   }
   materialized.assets = [...stableAssets.values()];
@@ -1164,6 +1431,30 @@ async function runCapture(options) {
 
     progress.enterPhase("page-configuration");
     browser = reportBrowser(await cdp.call("Browser.getVersion"));
+    const expectedBrowser = {
+      product: canonicalBrowserProduct(
+        options.values.get("--browser-product") ?? ""),
+      version: options.values.get("--browser-version") ?? "",
+      protocol_version: options.values.get("--browser-protocol-version") ?? "",
+      build_hash: options.values.get("--browser-build-hash") ?? "",
+    };
+    if ((expectedBrowser.product &&
+         browser.product !== expectedBrowser.product) ||
+        (expectedBrowser.version && browser.version !== expectedBrowser.version) ||
+        (expectedBrowser.protocol_version &&
+         browser.protocol_version !== expectedBrowser.protocol_version) ||
+        (expectedBrowser.build_hash &&
+         browser.build_hash !== expectedBrowser.build_hash)) {
+      const error = new Error(
+        `selected browser identity changed during capture: expected ` +
+        `${expectedBrowser.product}/${expectedBrowser.version} ` +
+        `protocol=${expectedBrowser.protocol_version} ` +
+        `build=${expectedBrowser.build_hash}, got ` +
+        `${browser.product}/${browser.version} ` +
+        `protocol=${browser.protocol_version} build=${browser.build_hash}`);
+      error.code = "browser-identity-drift";
+      throw error;
+    }
     await configurePage(cdp, initialWidth, initialHeight, dpr);
     await installDynamicWorkTracker(cdp);
     const healthMonitor = installCaptureHealthMonitor(cdp);
@@ -1217,8 +1508,8 @@ async function runCapture(options) {
           "the first occupying body child did not resolve to a finite frame");
       }
       const target = {
-        width: Math.ceil(discoveredFrame.width),
-        height: Math.ceil(discoveredFrame.height),
+        width: Math.ceil(discoveredFrame.authoredWidth),
+        height: Math.ceil(discoveredFrame.authoredHeight),
       };
       validateCaptureDimensions(
         target.width, target.height, dpr, "derived authored viewport");
@@ -1414,6 +1705,46 @@ async function runCapture(options) {
       error.code = "capture-negative-overflow";
       throw error;
     }
+    // Settle oversized authored surfaces before Chromium captures beyond the
+    // viewport. This lets valid resize-aware canvases repaint while preserving
+    // the planted resize-clear negative control.
+    let captureExtentCanvasSignatures = [];
+    const extentExceedsViewport =
+      finalExtent.width > resolvedViewportWidth ||
+      finalExtent.height > resolvedViewportHeight;
+    if (extentExceedsViewport) {
+      const overflowSnapshot = await cdp.call("DOMSnapshot.captureSnapshot", {
+        computedStyles: ["display"],
+        includePaintOrder: true,
+        includeDOMRects: true,
+      });
+      captureExtentCanvasSignatures =
+        await captureCanvasRasterSignatures(cdp, overflowSnapshot);
+      validateCaptureDimensions(
+        finalExtent.width, finalExtent.height, dpr,
+        "settled capture viewport");
+      const settledWidth = Math.max(resolvedViewportWidth, finalExtent.width);
+      const settledHeight = Math.max(resolvedViewportHeight, finalExtent.height);
+      await setCaptureViewport(cdp, settledWidth, settledHeight, dpr);
+      resolvedViewportWidth = settledWidth;
+      resolvedViewportHeight = settledHeight;
+      await waitForStable(cdp, {
+        networkIdle: () => pendingNetwork.size === 0,
+      });
+      finalExtent = await measureDocumentExtent(cdp);
+      if (finalExtent.width > resolvedViewportWidth ||
+          finalExtent.height > resolvedViewportHeight) {
+        const error = new Error(
+          `document extent ${finalExtent.width}x${finalExtent.height} ` +
+          `grew beyond settled viewport ${resolvedViewportWidth}x` +
+          `${resolvedViewportHeight}`);
+        error.code = "capture-extent-not-contained";
+        throw error;
+      }
+      await verifyCanvasRasterSignatures(
+        cdp, captureExtentCanvasSignatures,
+        { allowDeterministicRepaint: true });
+    }
     await cdp.call("Runtime.evaluate", {
       expression: "scrollTo(0, 0); true",
       returnByValue: true,
@@ -1500,8 +1831,8 @@ async function runCapture(options) {
       if (box) {
         if (fitAuthoredFrame) {
           verifyAuthoredViewport(box, {
-            width: resolvedViewportWidth,
-            height: resolvedViewportHeight,
+            width: viewportResolution.target.width,
+            height: viewportResolution.target.height,
           });
           viewportResolution.verified_frame = box;
         }
@@ -1522,7 +1853,18 @@ async function runCapture(options) {
       captureWidth, captureHeight, dpr, "final capture extent");
     const screenshotOptions = {
       format: "png",
-      captureBeyondViewport: true,
+      // Chrome may dispatch a viewport resize while producing a
+      // captureBeyondViewport screenshot. Canvas-backed panels commonly use
+      // that event to reset their backing store; with page animation frozen
+      // there is no subsequent rAF to repaint it, so the accepted frame would
+      // silently lose the canvas. The settled extent equals the authored
+      // viewport for the common full-panel case (including Spectr), where a
+      // viewport screenshot is both complete and preserves the painted
+      // backing stores. Only request beyond-viewport capture when content
+      // actually exceeds the active viewport.
+      captureBeyondViewport:
+        captureWidth > resolvedViewportWidth ||
+        captureHeight > resolvedViewportHeight,
       fromSurface: true,
       clip: {
         x: 0,
@@ -1565,6 +1907,7 @@ async function runCapture(options) {
           kind: String(candidate.kind ?? "unknown"),
           tag: String(candidate.tag ?? ""),
           name: String(candidate.name ?? ""),
+          ...(candidate.pulp_id ? { pulp_id: String(candidate.pulp_id) } : {}),
           bounds: {
             left: Number(candidate.bounds?.left ?? 0),
             top: Number(candidate.bounds?.top ?? 0),
@@ -1599,6 +1942,13 @@ async function runCapture(options) {
     // Pixels are different: the compositor cannot present a new frame with
     // virtual time paused, so the screenshot loop below runs with virtual time
     // released again.
+    // An overflow screenshot can resize the capture surface. Snapshot every
+    // canvas before that boundary and verify it immediately after the accepted
+    // stable frame; a resize handler that clears or changes a backing store is
+    // rejected before any incomplete browser evidence is published.
+    const overflowCanvasSignatures = screenshotOptions.captureBeyondViewport
+      ? await captureCanvasRasterSignatures(cdp, snapshot)
+      : [];
     await resumeDynamicTime(cdp);
     // Compositor-backed pages can need several post-freeze presentation
     // boundaries even after DOM/timer motion is frozen. Always observe the
@@ -1619,6 +1969,8 @@ async function runCapture(options) {
       error.code = "capture-frame-not-deterministic";
       throw error;
     }
+    if (overflowCanvasSignatures.length > 0)
+      await verifyCanvasRasterSignatures(cdp, overflowCanvasSignatures);
     // This is the authoritative pixel boundary: dynamic time has resumed and
     // the compositor has produced the byte-stable frame stored as browser.png.
     // Semantics, token, font, and health collection all follow the earlier
@@ -1632,8 +1984,8 @@ async function runCapture(options) {
           "the authored frame disappeared before the accepted browser pixels");
       }
       verifyAuthoredViewport(acceptedFrame, {
-        width: resolvedViewportWidth,
-        height: resolvedViewportHeight,
+        width: viewportResolution.target.width,
+        height: viewportResolution.target.height,
       });
       viewportResolution.verified_frame = acceptedFrame;
       authoredFrame = {
@@ -1655,6 +2007,7 @@ async function runCapture(options) {
         (asset, index) => ({
           index,
           anchor: `chromium:backend-node:${asset.backend_node_id}`,
+          ...(asset.pulp_id ? { pulp_id: asset.pulp_id } : {}),
           bounds: {
             left: asset.bounds.left - finalExtent.left,
             top: asset.bounds.top - finalExtent.top,
@@ -1662,6 +2015,13 @@ async function runCapture(options) {
             height: asset.bounds.height,
           },
         }));
+      // Emit both the replay-friendly arrays and the v2 id-addressed view.
+      // Capture is the identity authority: once a source-owned data-pulp-id is
+      // present it survives sibling insertion; otherwise the deterministic
+      // fallback is retained for v1-shaped inputs and reported by the sidecar.
+      Object.assign(materializedDocument,
+        normalizeMaterializedBindingDocument(materializedDocument,
+          { upgradeSchema: true }));
     }
     // Capture the exact authored body beneath declared moving indicators.
     // Visibility removes only the marked paint without changing its layout,
@@ -1809,7 +2169,8 @@ async function runCapture(options) {
         : []),
     ]);
 
-    const browserProductArg = options.values.get("--browser-product") ?? "";
+    const browserProductArg = canonicalBrowserProduct(
+      options.values.get("--browser-product") ?? "");
     const browserVersionArg = options.values.get("--browser-version") ?? "";
     const envelope = {
       schema: "pulp-browser-capture-v1",

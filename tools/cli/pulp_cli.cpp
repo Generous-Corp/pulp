@@ -64,6 +64,7 @@ static const Command commands[] = {
     {"scan", "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins", cmd_scan},
     {"host", "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"import", "Detect a framework project and emit a Pulp migration scaffold", cmd_import},
+    {"ui", "Build or verify an imported UI source snapshot", cmd_ui},
     {"kit", "Inspect and apply local Pulp package manifests", pulp::cli::kit::cmd_kit},
     {"content", "Validate and install data-only content packs", pulp::cli::content::cmd_content},
     {"pr", "One-shot push-a-PR: gates + bump + ship", cmd_pr},

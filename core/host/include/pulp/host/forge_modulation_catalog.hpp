@@ -42,7 +42,7 @@
 // side effect of adding nodes.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <pulp/signal/envelope.hpp>
 #include <pulp/signal/lfo.hpp>

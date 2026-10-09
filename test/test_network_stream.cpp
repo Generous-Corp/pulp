@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <thread>
@@ -1369,4 +1370,65 @@ TEST_CASE("HttpStream POST factory exposes successful response bodies",
     REQUIRE(read.bytes == 10);
     REQUIRE(std::string(reinterpret_cast<char*>(buffer.data()), read.bytes) == "payload=42");
     REQUIRE(stream->read(buffer.data(), buffer.size()).closed());
+}
+
+namespace {
+
+struct LoopbackPair {
+    Socket listener;
+    Socket client;
+    std::optional<Socket> server;
+
+    LoopbackPair() {
+        REQUIRE(listener.create(SocketType::TCP));
+        REQUIRE(listener.bind("127.0.0.1", 0));
+        REQUIRE(listener.listen(1));
+        REQUIRE(client.create(SocketType::TCP));
+        REQUIRE(client.connect("127.0.0.1", listener.local_port(), 2000ms));
+        server = listener.accept(2000ms);
+        REQUIRE(server.has_value());
+    }
+};
+
+} // namespace
+
+TEST_CASE("Socket shutdown wakes a receive blocked in another thread",
+          "[runtime][socket][regression]") {
+    LoopbackPair pair;
+    std::atomic<bool> returned{false};
+    std::atomic<int> received{-99};
+    std::thread reader([&] {
+        std::uint8_t byte = 0;
+        received.store(pair.client.receive(&byte, 1), std::memory_order_relaxed);
+        returned.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(100ms);
+    REQUIRE_FALSE(returned.load(std::memory_order_acquire));
+
+    // The peer stays connected and silent: only the local shutdown may wake it.
+    pair.client.shutdown();
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (!returned.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(5ms);
+    const bool woke = returned.load(std::memory_order_acquire);
+    if (!woke)
+        pair.server->close(); // unblock the reader so the join below returns
+    reader.join();
+
+    REQUIRE(woke);
+    REQUIRE(received.load(std::memory_order_relaxed) <= 0);
+}
+
+TEST_CASE("Socket read timeout bounds a receive from a silent peer",
+          "[runtime][socket][regression]") {
+    LoopbackPair pair;
+    REQUIRE(pair.client.set_read_timeout(150ms));
+    std::uint8_t byte = 0;
+    const auto started = std::chrono::steady_clock::now();
+    const int received = pair.client.receive(&byte, 1);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    REQUIRE(received < 0);
+    REQUIRE(elapsed >= 100ms);
+    REQUIRE(elapsed < 2s);
 }

@@ -1,0 +1,67 @@
+{
+  "id": "dspx-03-retained-history",
+  "title": "Retained DSP history policy for live graph replacement",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "dspx03-20261001-agent5",
+  "owned_paths": [
+    "core/host/include/pulp/host/signal_graph_node.hpp",
+    "core/host/include/pulp/host/plugin_slot.hpp",
+    "core/host/src/signal_graph_live_swap.cpp",
+    "test/test_retained_history_dspx03.cpp",
+    "docs/status/sequencer-exposure/rows/dspx-03-retained-history.json",
+    "docs/guides/retained-history-live-swaps.md"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_retained_history_dspx03.cpp",
+      "needles": [
+        "DSPX-03 retained history",
+        "RetainedHistoryMode::Adopt",
+        "RetainedHistoryMode::Crossfade",
+        "RetainedHistoryMode::Refuse"
+      ]
+    },
+    {
+      "path": "docs/guides/retained-history-live-swaps.md",
+      "needles": [
+        "exact history key",
+        "HistoryRefused"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "deferred",
+      "rationale": "The policy is implemented on the protected-head worktree and awaits packet integration into an installed SDK.",
+      "owner": "dspx-03",
+      "dependencies": [
+        "DSPX-03-acceptance"
+      ]
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "Offline timeline edits do not run live instance replacement."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "MCP does not own realtime snapshot ownership or history continuity."
+    },
+    "live_product_control": {
+      "disposition": "deferred",
+      "rationale": "The live-swap policy is proven in the graph test lane; publication awaits DSPX-03 acceptance.",
+      "owner": "dspx-03",
+      "dependencies": [
+        "DSPX-03-acceptance"
+      ]
+    },
+    "design_time_agent_manifest": {
+      "disposition": "deferred",
+      "rationale": "The namespaced policy row is documented; generated manifest publication awaits DSPX-03 acceptance.",
+      "owner": "dspx-03",
+      "dependencies": [
+        "DSPX-03-acceptance"
+      ]
+    }
+  }
+}

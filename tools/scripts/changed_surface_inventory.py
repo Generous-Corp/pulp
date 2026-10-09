@@ -1459,7 +1459,7 @@ IGNORED_PROJECTION_PROPERTIES = frozenset({"WORKING_DIRECTORY", "_BACKTRACE_TRIP
 EXAMPLE_PRODUCT_DIRS = ("examples", "AU", "AUv3", "CLAP", "VST3", "LV2")
 # Registrations whose arguments depend on PULP_CHANGED_SURFACE_INVENTORY_TARGET,
 # which only the Shipyard lane enables: the selector's own inventory check.
-INVENTORY_TARGET_GATED = frozenset({"changed-surface-policy-selftest"})
+INVENTORY_TARGET_GATED = frozenset({"changed-surface-policy-inventory"})
 
 
 def load_ctest_payload(build_dir: Path) -> dict[str, Any]:

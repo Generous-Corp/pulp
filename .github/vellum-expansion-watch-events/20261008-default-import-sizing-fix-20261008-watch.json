@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261008-default-import-sizing-fix-20261008-watch",
+  "created_at": "2026-10-08T17:45:49Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "The browser capture now settles a valid oversized authored canvas before sidecar and screenshot capture, while comparing pre/post raster signatures so resize-sensitive incomplete evidence still fails. This is a bounded importer validation repair; it moves no design-import, Chromium, rendering, or packaging authority.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/capture_frame_fitting.integration.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

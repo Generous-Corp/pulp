@@ -1,0 +1,30 @@
+{
+  "files": [
+    {
+      "path": "CapturedClaudeDesign.tsx",
+      "role": "owned-source",
+      "sha256": "7fc5e21623ebd463d8a6f7afc51a4e73de4eb5d871709ea143384ccbc980ac3e"
+    },
+    {
+      "path": "CapturedFilterPanel.tsx",
+      "role": "emitted-source",
+      "sha256": "c81ee94818270a82565e5945445f07437383a5f68ea69be3f354b8dfe9c1f524"
+    },
+    {
+      "path": "conformance/claude-design.html",
+      "role": "conformance-fixture",
+      "sha256": "8011c77001e19d0ea672d20fb614264ebd320f13269634fbf266758674cedb3f"
+    },
+    {
+      "path": "vendor/runtime.js",
+      "role": "generated-vendor",
+      "sha256": "ea2aba1baa3308b87ef0aaa39b10691ffaa1193d55863aa9bbb35783dbfd9cf8"
+    }
+  ],
+  "producer": "pulp import-design --emit source",
+  "schema": "pulp.clean-output-corpus.v1",
+  "source_fixture": "test/fixtures/imports/claude/2024.10/example.html",
+  "source_fixture_output": "conformance/claude-design.html",
+  "source_fixture_sha256": "8011c77001e19d0ea672d20fb614264ebd320f13269634fbf266758674cedb3f",
+  "source_kind": "claude-design-conformance"
+}
