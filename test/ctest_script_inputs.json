@@ -4397,12 +4397,12 @@
    "kind": "python"
   },
   "dspx07-projection-installed-sdk-selftest": {
+   "kind": "python",
    "entry": "tools/validation/test_dspx07_projection_installed_sdk.py",
    "inputs": [
-    "tools/validation/dspx07_projection_installed_sdk.py",
+    "core/format/include/pulp/format/projection_capability.hpp",
     "tools/validation/test_dspx07_projection_installed_sdk.py"
-   ],
-   "kind": "python"
+   ]
   },
   "ensure-signing-ready": {
    "entry": "tools/scripts/test_ensure_signing_ready.sh",
