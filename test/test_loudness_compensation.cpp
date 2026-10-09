@@ -734,8 +734,8 @@ ClosedLoop closed_loop(bool weight_by_material) {
     const auto dry = pink(static_cast<std::size_t>(12.0 * kRate), 1234);
 
     Biquad shelf;
-    shelf.set_coefficients(Biquad::Type::low_shelf, 300.0f, 0.707f,
-                           static_cast<float>(kRate), 12.0f);
+    shelf.set_coefficients(Biquad::Type::low_shelf, 300.0f, 0.707f, static_cast<float>(kRate),
+                           12.0f);
     auto shaped = dry;
     shelf.process(shaped.data(), static_cast<int>(shaped.size()));
 
@@ -749,8 +749,8 @@ ClosedLoop closed_loop(bool weight_by_material) {
     std::vector<double> response(static_cast<std::size_t>(s.bins()));
     const double bin_hz = kRate / static_cast<double>(s.fft_size());
     for (std::size_t b = 0; b < response.size(); ++b) {
-        const double m = section_magnitude(shelf.coefficients(),
-                                           angular_frequency(static_cast<double>(b) * bin_hz, kRate));
+        const double m = section_magnitude(
+            shelf.coefficients(), angular_frequency(static_cast<double>(b) * bin_hz, kRate));
         response[b] = m * m;
     }
     const float makeup = makeup_gain_db(response, s.spectrum(), {24.0f, 24.0f});
@@ -781,16 +781,15 @@ TEST_CASE("The make-up restores the dry loudness of tilted material through a sh
 TEST_CASE("Flat weighting misses the dry loudness on tilted material",
           "[loudness-compensation][closed-loop]") {
     const auto r = closed_loop(false);
-    INFO("dry " << r.dry_lufs << " LUFS, compensated " << r.compensated_lufs
-                << " LUFS, make-up " << r.makeup_db << " dB");
+    INFO("dry " << r.dry_lufs << " LUFS, compensated " << r.compensated_lufs << " LUFS, make-up "
+                << r.makeup_db << " dB");
     CHECK(std::abs(r.compensated_lufs - r.dry_lufs) > 2.0);
 }
 
 // A call with fewer channels than prepared feeds the rest silence: the same
 // estimate as passing explicit zeros, never the older audio still in the
 // unused channels' history.
-TEST_CASE("A narrower push feeds the unused channels silence",
-          "[loudness-compensation][state]") {
+TEST_CASE("A narrower push feeds the unused channels silence", "[loudness-compensation][state]") {
     const auto loud_l = noise(static_cast<std::size_t>(2.0 * kRate), 11, 0.3);
     const auto loud_r = noise(static_cast<std::size_t>(2.0 * kRate), 12, 0.3);
     const auto quiet = tone(static_cast<std::size_t>(3.0 * kRate), 300.0, 0.05);
