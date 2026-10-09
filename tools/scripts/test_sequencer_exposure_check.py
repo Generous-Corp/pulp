@@ -26,6 +26,7 @@ from sequencer_exposure_check import (
     _mechanical_version_paths,
     _semantic_added_paths,
     assemble_ledger,
+    config_doc_targets,
     is_ledger_path,
     is_sequencer_owned_path,
     load_ledger_from_worktree,
@@ -1311,6 +1312,84 @@ def main() -> int:
             "a tombstone annexed a shared registry and was accepted: "
             f"{tombstone_errors}"
         )
+    _CHECK_TALLY["calibrated"] += 1
+
+    # ── A guide the config-doc gate maps cannot be owned ─────────────────────
+    # config_doc_check.py makes every change to a mapped CI/release config also
+    # edit one of the guides its map names. A row that owned one such guide was
+    # its only owner, so every PR changing that config failed this gate unless
+    # it carried a ledger row. The map decides which guides are refused.
+    def config_doc_errors(document: dict, at: Path) -> list[str]:
+        return [error for error in validate_document(document, at)
+                if "config-doc gate maps" in error or "config-doc map" in error]
+
+    fixture_guide = "docs/guides/fixture-config-guide.md"
+    with tempfile.TemporaryDirectory(prefix="pulp-config-doc-guide-") as guide_directory:
+        guide_root = Path(guide_directory)
+        fixture_map = guide_root / "tools/scripts/config_doc_map.json"
+        owning_guide = copy.deepcopy(valid)
+        owning_guide["rows"][0]["owned_paths"] = [
+            *valid["rows"][0]["owned_paths"], fixture_guide
+        ]
+        # CONTROL: without a map, the same row is clean, so the refusal below comes
+        # from the map and not from the path's shape.
+        if config_doc_errors(owning_guide, guide_root):
+            raise AssertionError("a guide was refused with no config-doc map present")
+        write(guide_root, "tools/scripts/config_doc_map.json", json.dumps(
+            {"entries": [{"paths": ["fixture.yml"], "docs": [fixture_guide], "why": "fixture"}]}))
+        planted = config_doc_errors(owning_guide, guide_root)
+        if not any(fixture_guide in error and "owned_paths" in error for error in planted):
+            raise AssertionError(f"a row owning a mapped guide was accepted: {planted}")
+        _CHECK_TALLY["calibrated"] += 1
+        owning_guide_tombstone = copy.deepcopy(valid)
+        owning_guide_tombstone["tombstones"] = [
+            {
+                "id": "retired-guide-annexation",
+                "delivery_state": "pending",
+                "claim_id": "0c6a2e2b-8b1f-4c41-9d0e-3f3c6a1d2b7e",
+                "owned_paths": [fixture_guide],
+                "rationale": "A tombstone may not own a mapped guide either.",
+            }
+        ]
+        tombstone_refusals = config_doc_errors(owning_guide_tombstone, guide_root)
+        if not any(fixture_guide in error for error in tombstone_refusals):
+            raise AssertionError("a tombstone owning a mapped guide was accepted")
+        _CHECK_TALLY["calibrated"] += 1
+        # CONTROL: the valid fixture, which owns no mapped guide, stays clean with
+        # the map present.
+        if config_doc_errors(valid, guide_root):
+            raise AssertionError("the map refused a row that owns no mapped guide")
+        fixture_map.write_text("{not json", encoding="utf-8")
+        unreadable_map = config_doc_errors(valid, guide_root)
+        if not any("unreadable config-doc map" in error for error in unreadable_map):
+            raise AssertionError("an unreadable config-doc map was read as no mapped guide")
+        _CHECK_TALLY["calibrated"] += 1
+        fixture_map.unlink()
+
+    # The checked-in map refuses its own guides, and no shipped row or
+    # tombstone owns one. The real map and ledger are the control, because the
+    # failure mode is a row landing in the checked-in tree.
+    mapped_guides, map_errors = config_doc_targets(checkout_root)
+    if map_errors or not mapped_guides:
+        raise AssertionError(
+            f"the checked-in config-doc map is unreadable or empty: {map_errors}"
+        )
+    shipped_rows, _, load_errors = load_ledger_from_worktree(checkout_root)
+    if load_errors or not shipped_rows or not shipped_rows["rows"]:
+        raise AssertionError(f"shipped ledger did not load: {load_errors}")
+    owned_guides = sorted(
+        (entry["id"], path)
+        for entry in [*shipped_rows["rows"], *shipped_rows["tombstones"]]
+        for path in entry.get("owned_paths", [])
+        if path in mapped_guides
+    )
+    if owned_guides:
+        raise AssertionError(f"shipped ledger owns config-doc guides: {owned_guides}")
+    real_guide = sorted(mapped_guides)[0]
+    owning_real = copy.deepcopy(valid)
+    owning_real["rows"][0]["owned_paths"] = [*valid["rows"][0]["owned_paths"], real_guide]
+    if not any(real_guide in error for error in config_doc_errors(owning_real, checkout_root)):
+        raise AssertionError(f"the checked-in map did not refuse its own guide {real_guide}")
     _CHECK_TALLY["calibrated"] += 1
 
     # ── The ledger is carried as one file per row ────────────────────────────
