@@ -15,6 +15,7 @@
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFetchContent.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpConfigureCheckCache.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSimdSupport.cmake)
 include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 
@@ -714,21 +715,38 @@ endif()
 # with tag-name resolution under load. SHA pins are also
 # more cache-friendly: FetchContent's UPDATE_DISCONNECTED check sees a
 # stable ref and skips the re-fetch on every reconfigure.
-set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-pulp_register_fetchcontent_source(highway REF 1.2.0)
-FetchContent_Declare(
-    highway
-    GIT_REPOSITORY https://github.com/google/highway.git
-    # 1.2.0 release commit
-    GIT_TAG 457c891775a7397bdb0376bb1031e6e027af1c48
-)
-FetchContent_MakeAvailable(highway)
-set(PULP_HAS_HIGHWAY TRUE)
-message(STATUS "Pulp: Highway SIMD library enabled")
+#
+# MSVC ARM64EC defines both the ARM64 and x64 architecture macros. Highway
+# 1.2.0 intentionally rejects that ambiguous combination at configure time,
+# so an ARM64EC Pulp build must use the scalar reference backend. Detect the
+# target architecture from CMake's compiler identity (with the generator
+# platform as a fallback for older CMake/toolchain combinations) before
+# declaring Highway; this keeps the unusable target out of the install export
+# as well as out of the pulp-simd link line.
+pulp_simd_target_is_arm64ec(_pulp_simd_arm64ec)
+
+if(_pulp_simd_arm64ec)
+    set(PULP_HAS_HIGHWAY FALSE)
+    message(STATUS
+        "Pulp: ARM64EC target detected; Highway SIMD disabled, using scalar fallback")
+else()
+    set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    pulp_register_fetchcontent_source(highway REF 1.2.0)
+    FetchContent_Declare(
+        highway
+        GIT_REPOSITORY https://github.com/google/highway.git
+        # 1.2.0 release commit
+        GIT_TAG 457c891775a7397bdb0376bb1031e6e027af1c48
+    )
+    FetchContent_MakeAvailable(highway)
+    set(PULP_HAS_HIGHWAY TRUE)
+    message(STATUS "Pulp: Highway SIMD library enabled")
+endif()
+unset(_pulp_simd_arm64ec)
 
 # Mbed TLS (Apache 2.0) — cryptographic primitives (SHA-256, RSA, AES)
 # Pinned to the exact SHA for v3.6.2. Keep this as a full clone: CMake's shallow
