@@ -723,6 +723,7 @@ endif()
 # platform as a fallback for older CMake/toolchain combinations) before
 # declaring Highway; this keeps the unusable target out of the install export
 # as well as out of the pulp-simd link line.
+pulp_register_fetchcontent_source(highway REF 1.2.0)
 pulp_simd_target_is_arm64ec(_pulp_simd_arm64ec)
 
 if(_pulp_simd_arm64ec)
@@ -735,7 +736,6 @@ else()
     set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
     set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-    pulp_register_fetchcontent_source(highway REF 1.2.0)
     FetchContent_Declare(
         highway
         GIT_REPOSITORY https://github.com/google/highway.git
