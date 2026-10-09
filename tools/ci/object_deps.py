@@ -172,9 +172,9 @@ def unusable(doc: dict | None) -> str | None:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("collect")
+    c = sub.add_parser("collect", allow_abbrev=False)
     c.add_argument("--build-dir", required=True)
     c.add_argument("--source-root", required=True)
     c.add_argument("--out", required=True)
