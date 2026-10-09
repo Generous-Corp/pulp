@@ -437,38 +437,123 @@ test("real browser capture separates authored geometry from its affine transform
   });
 
 
-test("real browser capture preserves runtime-hydrated canvas ink",
+function runtimeCanvasFixture({ dispatchAnalyzerFrame }) {
+  const analyzerDispatch = dispatchAnalyzerFrame ? `
+    setTimeout(() => {
+      for (const callback of listeners.get("analyzer_frame") || []) {
+        callback({
+          type: "analyzer_frame",
+          payload: { magnitude_db: [0, 1, 2] },
+        });
+      }
+    }, 1400);` : "";
+  return `<!doctype html>
+<style>
+  html, body { margin: 0; width: 160px; height: 120px; overflow: hidden; }
+  canvas { display: block; width: 160px; height: 120px; }
+</style>
+<canvas id="surface" data-pulp-id="runtime-analyzer" width="320" height="240"></canvas>
+<script>
+  const canvas = document.getElementById("surface");
+  const context = canvas.getContext("2d");
+  const listeners = new Map();
+  globalThis.__pulpCaptureReady = new Promise((resolve) => {
+    globalThis.__pulpResolveCapture = resolve;
+  });
+  globalThis.pulp = {
+    on(type, callback) {
+      const bucket = listeners.get(type) || new Set();
+      bucket.add(callback);
+      listeners.set(type, bucket);
+      return () => bucket.delete(callback);
+    },
+    postMessage(type) {
+      if (type !== "editor_ready") return Promise.resolve({ ok: true });
+${analyzerDispatch}
+      return Promise.resolve({ ok: true });
+    },
+  };
+  pulp.on("analyzer_frame", ({ type }) => {
+    if (type !== "analyzer_frame") return;
+    context.fillStyle = "#28d7ff";
+    context.fillRect(24, 20, 272, 160);
+    globalThis.__pulpResolveCapture();
+  });
+  pulp.postMessage("editor_ready");
+</script>`;
+}
+
+test("real browser capture preserves asynchronously hydrated canvas ink",
   { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
       return;
     }
-    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-runtime-canvas-"));
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-runtime-canvas-"));
     const input = path.join(root, "runtime-canvas.html");
     const output = path.join(root, "capture");
     const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
     try {
-      await writeFile(input, `<!doctype html>
-<style>html,body{margin:0;width:160px;height:120px;overflow:hidden}canvas{display:block;width:160px;height:120px}</style>
-<canvas id="surface" data-pulp-id="runtime-analyzer" width="320" height="240"></canvas>
-<script>
-const canvas=document.getElementById("surface"), context=canvas.getContext("2d"), listeners=new Map();
-globalThis.pulp={on(type,callback){const bucket=listeners.get(type)||new Set();bucket.add(callback);listeners.set(type,bucket);return()=>bucket.delete(callback)},postMessage(type){if(type!=="editor_ready")return Promise.resolve({ok:true});context.fillStyle="#28d7ff";context.fillRect(24,20,272,160);for(const callback of listeners.get("analyzer_frame")||[])callback({type,payload:{magnitude_db:[0,1,2]}});globalThis.__pulpCaptureReady=Promise.resolve();return Promise.resolve({ok:true})}};
-globalThis.__pulpCaptureReady=new Promise(resolve=>{globalThis.__pulpResolveCapture=resolve});pulp.on("analyzer_frame",()=>globalThis.__pulpResolveCapture?.());pulp.postMessage("editor_ready");
-</script>
-`);
-      await execute(process.execPath, [script,"capture","--browser",browser,"--input",input,"--root",root,"--output",output,"--initial-width","160","--initial-height","120","--dpr","2","--timeout-ms",String(CAPTURE_DEADLINE_MS)], { maxBuffer: 1024 * 1024 });
-      const envelope=JSON.parse(await readFile(path.join(output,"capture.json"),"utf8"));
-      assert.deepEqual(envelope.provenance.readiness,{contract:"__pulpCaptureReady",awaited:true});
-      const canvas=envelope.assets.find(asset=>asset.kind==="canvas-snapshot"&&asset.pulp_id==="runtime-analyzer");
-      assert.ok(canvas,"runtime canvas must be captured as a named asset");
-      assert.ok(canvas.width_px>0&&canvas.height_px>0);
-      const png=await readFile(path.join(output,canvas.path));
-      assert.ok(png.length>100,"runtime canvas PNG must not be empty");
-      const [red,green,blue,alpha]=rgbaPixel(png,40,40);
-      assert.ok(blue>180&&green>100&&red<80&&alpha>240);
-    } finally { await rm(root,{recursive:true,force:true}); }
+      await writeFile(
+        input, runtimeCanvasFixture({ dispatchAnalyzerFrame: true }));
+      await execute(process.execPath, [
+        script, "capture", "--browser", browser, "--input", input,
+        "--root", root, "--output", output, "--initial-width", "160",
+        "--initial-height", "120", "--dpr", "2", "--timeout-ms",
+        String(CAPTURE_DEADLINE_MS),
+      ], { maxBuffer: 1024 * 1024 });
+      const envelope = JSON.parse(await readFile(
+        path.join(output, "capture.json"), "utf8"));
+      assert.deepEqual(envelope.provenance.readiness, {
+        contract: "__pulpCaptureReady",
+        awaited: true,
+      });
+      const canvas = envelope.assets.find(
+        (asset) => asset.kind === "canvas-snapshot" &&
+          asset.pulp_id === "runtime-analyzer");
+      assert.ok(canvas, "runtime canvas must be captured as a named asset");
+      assert.ok(canvas.width_px > 0 && canvas.height_px > 0);
+      const png = await readFile(path.join(output, canvas.path));
+      assert.ok(png.length > 100, "runtime canvas PNG must not be empty");
+      const [red, green, blue, alpha] = rgbaPixel(png, 40, 40);
+      assert.ok(blue > 180 && green > 100 && red < 80 && alpha > 240);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("real browser capture fails when analyzer readiness never arrives",
+  { timeout: captureCaseTimeout(1, 5000) }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-runtime-canvas-negative-"));
+    const input = path.join(root, "runtime-canvas.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(
+        input, runtimeCanvasFixture({ dispatchAnalyzerFrame: false }));
+      await assert.rejects(
+        execute(process.execPath, [
+          script, "capture", "--browser", browser, "--input", input,
+          "--root", root, "--output", output, "--initial-width", "160",
+          "--initial-height", "120", "--dpr", "2", "--timeout-ms", "5000",
+        ], { maxBuffer: 1024 * 1024 }),
+        (error) => error.code === 124,
+      );
+      const failure = JSON.parse(await readFile(
+        path.join(output, "capture-error.json"), "utf8"));
+      assert.equal(failure.code, "browser-capture-timeout");
+      assert.equal(failure.phase, "page-settle");
+      assert.match(failure.message, /stalled=/);
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
 test("real browser capture preserves WebGL through software composition",
