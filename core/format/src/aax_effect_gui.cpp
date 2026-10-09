@@ -156,7 +156,13 @@ private:
         host_->set_resize_callback([this, bridge_ptr](uint32_t w, uint32_t h) {
             bridge_ptr->resize(w, h);
             if (auto* view_container = GetViewContainer()) {
-                AAX_Point size(static_cast<float>(h), static_cast<float>(w));
+                // AAX_Point's constructor follows the public field order:
+                // horizontal first, vertical second.  Passing the callback's
+                // height first made every plug-in-driven resize ask Pro Tools
+                // for a transposed frame, leaving the host window and the
+                // native surface with different dimensions (visible as a
+                // clipped/blank half in Pro Tools).
+                AAX_Point size(static_cast<float>(w), static_cast<float>(h));
                 view_container->SetViewSize(size);
             }
         });
