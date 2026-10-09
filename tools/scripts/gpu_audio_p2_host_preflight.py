@@ -86,7 +86,7 @@ def _command_provenance(command: list[str]) -> dict[str, Any]:
         digest = _file_sha256(Path(resolved))
     except OSError:
         resolved = None
-    return {"argv0": raw, "path": resolved, "sha256": digest}
+    return {"name": Path(raw).name, "argv0": raw, "path": resolved, "sha256": digest}
 
 
 def _pinned_tool(name: str) -> str:
@@ -257,11 +257,14 @@ def _parse_gpu_health(raw: str, *, now: datetime | None = None) -> tuple[str, di
     probes = value.get("probes")
     if not isinstance(probes, list):
         return "unknown", {"status": "invalid", "reason": "probes_invalid"}
-    compute = next((probe for probe in probes
-                    if isinstance(probe, dict)
-                    and probe.get("probe_id") == "gpu-compute-magnitude"
-                    and probe.get("required") is True), None)
-    if not isinstance(compute, dict) or compute.get("verdict") != "pass":
+    computes = [probe for probe in probes
+                if isinstance(probe, dict)
+                and probe.get("probe_id") == "gpu-compute-magnitude"
+                and probe.get("required") is True]
+    if len(computes) != 1:
+        return "unknown", {"status": "invalid", "reason": "compute_probe_ambiguous"}
+    compute = computes[0]
+    if compute.get("verdict") != "pass":
         return "unknown", {"status": "invalid", "reason": "compute_probe_missing"}
     adapter = compute.get("adapter")
     measurements = compute.get("measurements")
@@ -278,6 +281,10 @@ def _parse_gpu_health(raw: str, *, now: datetime | None = None) -> tuple[str, di
         "status": "valid", "schema": GPU_HEALTH_SCHEMA, "run_id": value.get("run_id"),
         "measured_at_utc": sampled_at, "age_seconds": age,
         "probe_id": compute.get("probe_id"), "adapter": adapter,
+        "measurements": {
+            key: measurements.get(key) for key in (
+                "compute_initialized", "compute_oracle_passed", "device_lost")
+        },
     }
     return "passed", {"status": "valid", "observation": observation}
 

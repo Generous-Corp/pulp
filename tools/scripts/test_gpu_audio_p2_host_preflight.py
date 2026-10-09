@@ -130,6 +130,11 @@ class HostPreflightTests(unittest.TestCase):
             self.assertEqual(detail["reason"], "top_level_shape_invalid", field)
         status, detail = preflight._parse_gpu_health(raw)
         self.assertEqual(status, "passed")
+        duplicate = json.loads(raw)
+        duplicate["probes"].append(dict(duplicate["probes"][0]))
+        status, detail = preflight._parse_gpu_health(json.dumps(duplicate))
+        self.assertEqual(status, "unknown")
+        self.assertEqual(detail["reason"], "compute_probe_ambiguous")
         identity = preflight._gpu_health_identity(
             ["/definitely/missing/pulp", "doctor", "gpu", "--json"], "a" * 40)
         self.assertEqual(identity["status"], "invalid")
