@@ -438,15 +438,26 @@ test("real browser capture separates authored geometry from its affine transform
 
 
 function runtimeCanvasFixture({ dispatchAnalyzerFrame }) {
-  const analyzerDispatch = dispatchAnalyzerFrame ? `
-    setTimeout(() => {
-      for (const callback of listeners.get("analyzer_frame") || []) {
-        callback({
-          type: "analyzer_frame",
-          payload: { magnitude_db: [0, 1, 2] },
-        });
-      }
-    }, 1400);` : "";
+  const readinessContract = dispatchAnalyzerFrame ? `
+  const captureReady = {
+    then(resolve) {
+      setTimeout(() => {
+        for (const callback of listeners.get("analyzer_frame") || []) {
+          callback({
+            type: "analyzer_frame",
+            payload: { magnitude_db: [0, 1, 2] },
+          });
+        }
+        resolve();
+      }, 0);
+    },
+  };` : `
+  const captureReady = {
+    then(_resolve, reject) {
+      setTimeout(() => reject(new Error(
+        "analyzer_frame readiness missing")), 1500);
+    },
+  };`;
   return `<!doctype html>
 <style>
   html, body { margin: 0; width: 160px; height: 120px; overflow: hidden; }
@@ -457,9 +468,6 @@ function runtimeCanvasFixture({ dispatchAnalyzerFrame }) {
   const canvas = document.getElementById("surface");
   const context = canvas.getContext("2d");
   const listeners = new Map();
-  globalThis.__pulpCaptureReady = new Promise((resolve) => {
-    globalThis.__pulpResolveCapture = resolve;
-  });
   globalThis.pulp = {
     on(type, callback) {
       const bucket = listeners.get(type) || new Set();
@@ -469,16 +477,16 @@ function runtimeCanvasFixture({ dispatchAnalyzerFrame }) {
     },
     postMessage(type) {
       if (type !== "editor_ready") return Promise.resolve({ ok: true });
-${analyzerDispatch}
       return Promise.resolve({ ok: true });
     },
   };
+${readinessContract}
   pulp.on("analyzer_frame", ({ type }) => {
     if (type !== "analyzer_frame") return;
     context.fillStyle = "#28d7ff";
     context.fillRect(24, 20, 272, 160);
-    globalThis.__pulpResolveCapture();
   });
+  globalThis.__pulpCaptureReady = captureReady;
   pulp.postMessage("editor_ready");
 </script>`;
 }
@@ -546,13 +554,15 @@ test("real browser capture fails when analyzer readiness never arrives",
           "--root", root, "--output", output, "--initial-width", "160",
           "--initial-height", "120", "--dpr", "2", "--timeout-ms", "5000",
         ], { maxBuffer: 1024 * 1024 }),
-        (error) => error.code === 124,
+        (error) => error.code === 1 &&
+          error.stderr.includes("capture-readiness-rejected") &&
+          error.stderr.includes("analyzer_frame readiness missing"),
       );
       const failure = JSON.parse(await readFile(
         path.join(output, "capture-error.json"), "utf8"));
-      assert.equal(failure.code, "browser-capture-timeout");
+      assert.equal(failure.code, "capture-readiness-rejected");
       assert.equal(failure.phase, "page-settle");
-      assert.match(failure.message, /stalled=/);
+      assert.match(failure.message, /analyzer_frame readiness missing/);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
