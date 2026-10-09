@@ -3258,6 +3258,7 @@
    "inputs": [
     ".github/workflows/build.yml",
     ".github/workflows/format-baseline-diff.yml",
+    ".github/workflows/install-consumer-smoke.yml",
     ".github/workflows/timeline-hardening.yml",
     ".github/workflows/tracing-build.yml",
     ".github/workflows/web-plugins.yml",
