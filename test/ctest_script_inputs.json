@@ -1705,15 +1705,20 @@
    "undeclared_sources": []
   },
   "pulp-test-group-view-widgets": {
-   "data": "none",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "tools/bridge/generated_editor_bridge.ts"
+   ],
    "kind": "compiled",
    "runtime_targets": [],
-   "sources": [],
+   "sources": [
+    "test/test_editor_bridge.cpp"
+   ],
    "spawning_sources": [
     "test/test_editor_bridge.cpp"
    ],
-   "spawns": "undeclared",
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-host": {
