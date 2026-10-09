@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -51,7 +52,10 @@ namespace {
 struct InstanceState;
 
 struct PrivateDataBlock {
+    static constexpr std::uint32_t kMagic = 0x50414158; // "PAAX"
+    std::uint32_t magic = 0;
     InstanceState* instance = nullptr;
+    const EntryConfig* config = nullptr;
 };
 
 struct AlgorithmContext {
@@ -518,11 +522,29 @@ static_assert(offsetof(InstanceState, store) < offsetof(InstanceState, processor
               "store outlives the Processor that points at it");
 
 void destroy_instance(PrivateDataBlock* block) {
-    if (!block || !block->instance) {
+    if (!block || block->magic != PrivateDataBlock::kMagic) {
         return;
     }
     delete block->instance;
     block->instance = nullptr;
+    block->config = nullptr;
+    block->magic = 0;
+}
+
+bool construct_instance(PrivateDataBlock* block) noexcept {
+    if (!block || block->magic != PrivateDataBlock::kMagic || !block->config) {
+        return false;
+    }
+    if (block->instance) {
+        return true;
+    }
+    try {
+        block->instance = new InstanceState(*block->config);
+    } catch (...) {
+        block->instance = nullptr;
+        return false;
+    }
+    return block->instance != nullptr;
 }
 
 class EffectParameters final : public AAX_CEffectParameters, public EditorHost {
@@ -674,7 +696,25 @@ public:
 
     AAX_Result ResetFieldData(AAX_CFieldIndex field_index, void* data, uint32_t data_size) const override {
         if (field_index == kPrivateDataField && data && data_size >= sizeof(PrivateDataBlock)) {
-            destroy_instance(static_cast<PrivateDataBlock*>(data));
+            auto* block = static_cast<PrivateDataBlock*>(data);
+            // AAX may pass freshly allocated, non-zeroed private storage here;
+            // never inspect or delete an uninitialised pointer. Reset the
+            // storage first, then construct the processor model off-thread.
+            if (block->magic == PrivateDataBlock::kMagic) {
+                destroy_instance(block);
+            } else {
+                block->magic = 0;
+                block->instance = nullptr;
+                block->config = nullptr;
+            }
+            block->magic = PrivateDataBlock::kMagic;
+            block->config = &config_;
+            if (!construct_instance(block)) {
+                block->magic = 0;
+                block->config = nullptr;
+                return AAX_ERROR_NULL_OBJECT;
+            }
+            return AAX_SUCCESS;
         }
         return AAX_CEffectParameters::ResetFieldData(field_index, data, data_size);
     }
@@ -834,10 +874,23 @@ int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
     }
 
     switch (action) {
-        case AAX_eComponentInstanceInitAction_AddingNewInstance:
-        case AAX_eComponentInstanceInitAction_ResetInstance:
         case AAX_eComponentInstanceInitAction_RemovingInstance:
             destroy_instance(context->private_data);
+            break;
+        case AAX_eComponentInstanceInitAction_AddingNewInstance:
+            // ResetFieldData normally constructs this before the callback;
+            // retain that state and repair hosts that skip the reset hook.
+            if (!construct_instance(context->private_data)) {
+                return -1;
+            }
+            break;
+        case AAX_eComponentInstanceInitAction_ResetInstance:
+            // AAX reuses the same private block for reset. Recreate the DSP
+            // object so processor state and prepared buffers are clean.
+            destroy_instance(context->private_data);
+            if (!construct_instance(context->private_data)) {
+                return -1;
+            }
             break;
         default:
             break;
@@ -1217,6 +1270,18 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
             status != AAX_SUCCESS)
         {
             return status;
+        }
+        // A no-GUI entry deliberately uses Pro Tools' host-generated
+        // parameter strip. Advertise that choice explicitly so Pro Tools does
+        // not create a client-widget batcher for a component that registered
+        // no AAX_EffectGUI proc (which otherwise leaves teardown in the host's
+        // GUI manager even though the plug-in is parameter-strip only).
+        if (!create_gui_proc) {
+            if (auto status = effect_properties->AddProperty(AAX_eProperty_UsesClientGUI, 0);
+                status != AAX_SUCCESS)
+            {
+                return status;
+            }
         }
         if (auto status = effect->SetProperties(effect_properties); status != AAX_SUCCESS) {
             return status;

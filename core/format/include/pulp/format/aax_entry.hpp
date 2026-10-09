@@ -1,6 +1,8 @@
 #pragma once
 
+#if !defined(PULP_AAX_HEADLESS)
 #include <pulp/format/aax_effect_gui.hpp>
+#endif
 #include <pulp/format/aax_model.hpp>
 
 #include <AAX.h>
@@ -46,6 +48,15 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
 
 } // namespace pulp::format::aax
 
+#if defined(PULP_AAX_HEADLESS)
+#define PULP_AAX_GUI_THUNK
+#else
+#define PULP_AAX_GUI_THUNK \
+        [[maybe_unused]] static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_gui() { \
+            return ::pulp::format::aax::create_effect_gui(); \
+        }
+#endif
+
 #if !defined(PULP_MANUFACTURER_CODE)
 #error "PULP_MANUFACTURER_CODE must be defined for AAX targets"
 #endif
@@ -74,9 +85,7 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_parameters() { \
             return ::pulp::format::aax::create_effect_parameters(_pulp_aax_entry_config()); \
         } \
-        [[maybe_unused]] static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_gui() { \
-            return ::pulp::format::aax::create_effect_gui(); \
-        } \
+        PULP_AAX_GUI_THUNK \
     } \
     AAX_Result GetEffectDescriptions(AAX_ICollection* outCollection) { \
         return ::pulp::format::aax::get_effect_descriptions( \

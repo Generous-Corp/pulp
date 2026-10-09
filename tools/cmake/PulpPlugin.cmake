@@ -53,7 +53,7 @@ endif()
 #
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;NATIVE_UI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
+        "ACCEPTS_MIDI;NATIVE_UI;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
@@ -221,12 +221,20 @@ function(pulp_add_plugin target)
     # For compiled processors, create OBJECT library.
     if(PLUGIN_SOURCES)
         add_library(${target}_Core OBJECT ${PLUGIN_SOURCES})
-        target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
+        if(PLUGIN_AAX_HEADLESS)
+            target_link_libraries(${target}_Core PUBLIC pulp::format-core)
+        else()
+            target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
+        endif()
         target_include_directories(${target}_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "${PULP_${target}_CORE_OBJECTS}")
     else()
         add_library(${target}_Core INTERFACE)
-        target_link_libraries(${target}_Core INTERFACE ${_PULP_FORMAT_TARGET})
+        if(PLUGIN_AAX_HEADLESS)
+            target_link_libraries(${target}_Core INTERFACE pulp::format-core)
+        else()
+            target_link_libraries(${target}_Core INTERFACE ${_PULP_FORMAT_TARGET})
+        endif()
         target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "")
     endif()
@@ -239,6 +247,9 @@ function(pulp_add_plugin target)
             PULP_BUNDLE_ID="${PLUGIN_BUNDLE_ID}"
             PULP_PLUGIN_VERSION="${PLUGIN_VERSION}"
         )
+        if(PLUGIN_AAX_HEADLESS)
+            target_compile_definitions(${target}_Core PRIVATE PULP_AAX_HEADLESS=1)
+        endif()
     endif()
 
     # ── Design dimensions (auto-sizing for imported-design plugins) ────
@@ -323,7 +334,8 @@ function(pulp_add_plugin target)
             _pulp_add_aax(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
                           "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}"
                           "${PLUGIN_CATEGORY}" "${PLUGIN_MANUFACTURER_CODE}"
-                          "${PLUGIN_AAX_PRODUCT_CODE}" "${PLUGIN_AAX_NATIVE_CODE}")
+                          "${PLUGIN_AAX_PRODUCT_CODE}" "${PLUGIN_AAX_NATIVE_CODE}"
+                          ${PLUGIN_AAX_HEADLESS})
         endif()
     endif()
 
