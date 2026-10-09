@@ -659,6 +659,13 @@ time; they make every keyed run fail to derive or every re-derivation refuse:
   `test_the_configured_rederive_command_parses_with_this_key_code` parses the
   configured command with the same copy's parser.
 
+A new third-party dependency needs an entry in `tools/ci/dependency_pin_map.json`
+(its FetchContent directory, or the archive paths of a prebuilt), or every
+change to its pin reruns every executable as `dependency_pin`. A header-only
+dependency has no target to reach, so it stays unmapped on purpose. Check a
+pin-file change with `dependency_pins.attribute` over the base and head copies
+before assuming what it rekeys.
+
 ## Performance lanes report; they never gate
 
 `dsp-throughput-bench.yml` (weekly + `workflow_dispatch`) is the model for any
