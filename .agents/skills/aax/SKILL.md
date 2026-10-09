@@ -229,6 +229,190 @@ export PULP_AAX_SDK_DIR=~/SDKs/avid/aax-sdk/current
 export PULP_AAX_VALIDATOR_DIR=~/SDKs/avid/aax-validator/current
 ```
 
+## macOS PACE and private tool backup
+
+The Avid SDK and DigiShell validator are developer-supplied materials. Keep
+them outside every public repository, preferably at:
+
+```text
+~/SDKs/avid/aax-sdk/current
+~/SDKs/avid/aax-validator/current
+```
+
+Keep PACE Fusion installers and a small hash manifest in a private directory,
+for example:
+
+```text
+~/SDKs/private/pace/fusion/6.0.1/
+```
+
+The manifest should record the source files, Fusion version, date, and SHA-256
+hashes. Do not put iLok credentials, developer certificates, wrap configs, or
+license receipts in Git, shell history, command arguments, or build logs.
+
+The macOS Fusion package installs several components. The `Fusion_tools_Lite`
+component provides `wraptool`, normally at:
+
+```text
+/Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool
+```
+
+The full installer has a brittle preflight that rejects any process whose name
+contains `xcodebuild`. Confirm that no real `xcodebuild` compilation is active
+before installing. Persistent `xcodebuildmcp` helpers can trigger the same
+message even when no build is running; do not kill shared helpers merely to
+satisfy that check. If needed, install the signed component packages from the
+mounted PACE installer individually, preserving the parent DMG/pkg hash and
+recording the component versions. Existing iLok/license support may already be
+installed; verify receipts with `pkgutil --pkg-info` before upgrading.
+
+After installation, verify the expected macOS receipts and tool path without
+printing account data:
+
+```bash
+pkgutil --pkgs | grep -E 'com\.paceap\.pkg\.eden\.(licensed|activationexperience|fusion\.tools\.lite\.6|iLokLicenseManager)'
+ls -l /Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool
+/Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool list
+```
+
+Keep the original installer DMG/PKG and a SHA-256 manifest in the private
+backup. A useful restore record includes the Fusion version, package names,
+installation date, and hashes; it does not include iLok credentials, customer
+numbers, certificates, or wrap passwords.
+
+PACE installation does not sign an AAX binary automatically. Treat these as
+separate gates:
+
+1. AAX compile/link against the out-of-tree Avid SDK.
+2. Apple/PACE signing with the developer's own identities and wrap
+   configuration.
+3. DigiShell/AAX Validator checks.
+4. Discovery and editor/audio smoke in Pro Tools.
+
+An ad-hoc or linker-signed bundle can pass data-model and parameter validation
+while still failing `wraptool verify` or Pro Tools's production signature
+requirements. Never claim the signing or Pro Tools gates from a successful
+compile alone. Windows setup and signing remain a separate, deferred path.
+
+## Poka-yoke signing and release gates
+
+Make the safe path the easy path and make an unsafe path fail before it can
+produce a misleading artifact. These checks are deliberately redundant:
+
+1. **Keep trust domains separate.** A connected, certified iLok and a successful
+   `wraptool list` prove that the local PACE license can be used. They do not
+   prove that a bundle was signed. Require a fresh `wraptool verify` on the
+   exact final bundle before calling it signed.
+2. **Keep secrets out of process arguments.** Never put an iLok password,
+   customer number, wrap password, certificate private key, or receipt JSON in
+   chat, shell history, an environment capture, a repository, or an argv
+   string. Prefer the interactive PACE prompt or a permissions-restricted
+   file-backed configuration owned by the developer. If a secret is ever
+   pasted into a transcript, rotate it before continuing.
+3. **Refuse unsigned-looking inputs.** Sign only a freshly built bundle from a
+   known build directory. Record its SHA-256 before signing and record the
+   post-signing SHA-256 separately; never overwrite the only unsigned copy.
+4. **Seal the bundle shape before Apple signing.** Arbitrary JSON evidence files
+   under `Contents/MacOS` are treated as nested code by `codesign`. Relocate
+   Pulp's `*.inspector-capabilities.json`, `*.control-shipping.json`, and
+   `*.control-shipping-report.json` sidecars to `Contents/Resources` before
+   signing, then fail if any of those files remain under `Contents/MacOS`.
+5. **Use ordered gates.** The only valid order is: build, inspect bundle shape,
+   Apple/PACE sign, `wraptool verify`, `codesign --verify --deep --strict`,
+   AAX Validator, install the exact verified bundle, then prove discovery and
+   load in Pro Tools. A passing validator or a certified iLok cannot substitute
+   for a later gate.
+6. **Use negative controls when changing the workflow.** A deliberate unsigned
+   copy must fail `wraptool verify`; a deliberate bundle with a sidecar left in
+   `Contents/MacOS` must fail the Apple verification step. Keep these checks
+   disposable and outside public repositories.
+7. **Make installation identity-based.** Install only from the verified
+   artifact, copy to the system and user AAX plug-in locations only when needed
+   for the host test, and compare the installed bundle hash to the verified
+   source hash. Remove stale copies before retrying discovery so a host cannot
+   load an older build by accident.
+8. **Report evidence, not intent.** A release handoff must include the exact
+   source commit, artifact path, artifact SHA-256, signing and validator
+   receipts, install locations, and host result. If Pro Tools was not launched,
+   say that the host gate is pending.
+9. **Drive DigiShell through DTT.** `CommandLineTools/dsh` is an interactive
+   shell, not a conventional `--help` command. Do not invoke it with empty
+   stdin or a pipe that can close early; that can leave a high-CPU process
+   emitting unbounded `Got empty command` failures. Use the supplied
+   `DTT/run_test.command --script ...` entry point, put logs in a disposable
+   private directory, and bound the run with an external timeout. A failed or
+   timed-out harness is an inconclusive validator result and must be reported
+   as such.
+10. **Interpret validator coverage honestly.** `test.describe_validation`,
+    `test.data_model`, `test.load_unload`, `test.parameter_traversal.random.fast`,
+    and `test.parameters` are useful core gates. `test.page_table.automation_list`
+    may pass with a message that no page tables are registered; that is valid
+    when the plug-in declares none. `test.page_table.load` is only applicable
+    when a page-table library is shipped, so a failure saying that the library
+    is absent is an expected non-applicability result, not evidence that the
+    plug-in's data model failed. Keep it separate from the required pass set.
+
+For a local macOS run, the minimum preflight should be equivalent to:
+
+```bash
+set -euo pipefail
+test -x /Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool
+test -d "$AAX_BUNDLE"
+# `set -e` ignores a `!` pipeline, so a negated find would never stop the
+# script. Test the match explicitly.
+if find "$AAX_BUNDLE/Contents/MacOS" -maxdepth 1 -type f \
+    \( -name '*.json' -o -name '*.inspector-capabilities.json' \
+       -o -name '*.control-shipping.json' \
+       -o -name '*.control-shipping-report.json' \) -print -quit | grep -q .; then
+    echo "sidecar left in Contents/MacOS" >&2
+    exit 1
+fi
+# The bundle names its own executable; read it rather than requiring it.
+AAX_BINARY="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+    "$AAX_BUNDLE/Contents/Info.plist")"
+shasum -a 256 "$AAX_BUNDLE/Contents/MacOS/$AAX_BINARY"
+```
+
+The command is a shape check, not a signing recipe: the actual wrap
+configuration and credentials stay in the developer's private PACE setup.
+When the PACE account reports **license verified**, record that as the local
+authorization precondition and continue through the independent signing and
+host gates rather than treating it as completion.
+
+On macOS, `wraptool sign` also needs either a PACE-issued customer number or a
+local wrap-configuration file in addition to the Apple Developer ID signing
+identity. If neither is available, stop at the compile/validator gates and
+report that missing PACE configuration; do not guess identifiers or put a
+password in a command line.
+
+### Optional macOS environment management with mise
+
+`mise` can be useful for the non-proprietary parts of this setup: pinning
+supported CLI versions, defining repeatable `build`/`validate` tasks, and
+selecting environment variables such as `PULP_AAX_SDK_DIR` and
+`PULP_AAX_VALIDATOR_DIR`. Keep that configuration in a private machine-setup
+repository if it contains local paths. Do not use `mise` to distribute or
+manage the Avid SDK, DigiShell, PACE Fusion binaries, iLok state, signing
+certificates, customer numbers, wrap configurations, or credentials. Those
+remain developer-supplied macOS assets and should be restored from the private
+backup with their recorded hashes. Windows setup and signing can adopt the same
+boundary later, but is intentionally not specified here.
+
+Keep a private restore capsule for onboarding another Mac, outside the Pulp
+checkout and never published. It should contain:
+
+- a `README.md` restore runbook;
+- a restore manifest that records the required archive hashes and lists the
+  machine-local state deliberately left out;
+- a restore script that verifies each archive hash and its expected paths
+  before extracting anything;
+- optionally, a `mise.toml` holding only the readiness and bundle-verification
+  checks, never assets or credentials.
+
+Move the capsule through your private backup channel. A new Mac still needs its
+own iLok activation and sign-in, PACE authentication, Apple Developer ID
+private key, and Pro Tools installation; none of those travel in the capsule.
+
 ## Core Commands
 
 Check current AAX availability:

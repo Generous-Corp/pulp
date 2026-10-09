@@ -1612,6 +1612,7 @@
     "test/test_baked_codec.cpp"
    ],
    "spawning_sources": [
+    "test/test_dspx09_followup.cpp",
     "test/test_retained_history_dspx03.cpp",
     "test/test_signal_graph_anticipation.cpp",
     "test/test_signal_graph_live_swap_continuity.cpp",
@@ -1704,15 +1705,20 @@
    "undeclared_sources": []
   },
   "pulp-test-group-view-widgets": {
-   "data": "none",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "tools/bridge/generated_editor_bridge.ts"
+   ],
    "kind": "compiled",
    "runtime_targets": [],
-   "sources": [],
+   "sources": [
+    "test/test_editor_bridge.cpp"
+   ],
    "spawning_sources": [
     "test/test_editor_bridge.cpp"
    ],
-   "spawns": "undeclared",
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-host": {
@@ -2293,14 +2299,8 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
-  "pulp-gpu-dawn-shared-io-provider-probe",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
-  "pulp-gpu-same-device-paired-probe",
-  "pulp-gpu-same-device-storage-probe",
-  "pulp-gpu-shared-io-convolution-session-probe",
-  "pulp-gpu-shared-io-private-convolution-probe",
-  "pulp-gpu-shared-spectral-probe",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -2419,6 +2419,7 @@
   "pulp-test-cli-timeline",
   "pulp-test-cli-tool-registry",
   "pulp-test-cli-tweaks-shellout",
+  "pulp-test-cli-ui-command",
   "pulp-test-cli-update-check",
   "pulp-test-cli-update-mode",
   "pulp-test-cli-upgrade-install",
@@ -2486,6 +2487,9 @@
   "pulp-test-dsl-processor",
   "pulp-test-dsp-runtime-no-alloc",
   "pulp-test-dspx06-graph-timing",
+  "pulp-test-dspx07-au-baked-projection",
+  "pulp-test-dspx07-clap-baked-projection",
+  "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
@@ -2655,6 +2659,7 @@
   "pulp-test-live-dsp-telemetry-graph",
   "pulp-test-live-kernel-crossfade-null",
   "pulp-test-load-measurer",
+  "pulp-test-loudness-compensation",
   "pulp-test-lv2-adapter",
   "pulp-test-lv2-bundle-discovery-e2e",
   "pulp-test-lv2-host-discovery",
@@ -3260,8 +3265,12 @@
    "inputs": [
     ".github/workflows/build.yml",
     ".github/workflows/format-baseline-diff.yml",
+    ".github/workflows/install-consumer-smoke.yml",
+    ".github/workflows/timeline-hardening.yml",
+    ".github/workflows/tracing-build.yml",
     ".github/workflows/web-plugins.yml",
     "test/cmake/test_gpu_health_cpu_only_configure.sh",
+    "tools/ci/governed-build.sh",
     "tools/scripts/local_diff_cover.sh",
     "tools/scripts/test_build_parallelism_guard.py"
    ],
@@ -3341,6 +3350,21 @@
    "inputs": [
     "tools/scripts/catch_discover_timeout_guard.py",
     "tools/scripts/test_catch_discover_timeout_guard.py"
+   ],
+   "kind": "python"
+  },
+  "catch-test-name-guard": {
+   "entry": "tools/scripts/catch_test_name_guard.py",
+   "inputs": [
+    "tools/scripts/catch_test_name_guard.py"
+   ],
+   "kind": "python"
+  },
+  "catch-test-name-guard-selftest": {
+   "entry": "tools/scripts/test_catch_test_name_guard.py",
+   "inputs": [
+    "tools/scripts/catch_test_name_guard.py",
+    "tools/scripts/test_catch_test_name_guard.py"
    ],
    "kind": "python"
   },
@@ -3623,6 +3647,8 @@
     "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/dependency_pin_map.json",
+    "tools/ci/dependency_pins.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/ios_gate_digest.py",
@@ -4260,6 +4286,17 @@
    ],
    "kind": "python"
   },
+  "dependency-pins-selftest": {
+   "entry": "tools/ci/test_dependency_pins.py",
+   "inputs": [
+    "tools/ci/dependency_pins.py",
+    "tools/ci/test_dependency_pins.py",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpFetchContent.cmake",
+    "tools/deps/manifest.json"
+   ],
+   "kind": "python"
+  },
   "deps-audit-extra-selftest": {
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
@@ -4394,6 +4431,14 @@
    ],
    "kind": "python"
   },
+  "dspx07-projection-installed-sdk-selftest": {
+   "entry": "tools/validation/test_dspx07_projection_installed_sdk.py",
+   "inputs": [
+    "core/format/include/pulp/format/projection_capability.hpp",
+    "tools/validation/test_dspx07_projection_installed_sdk.py"
+   ],
+   "kind": "python"
+  },
   "ensure-signing-ready": {
    "entry": "tools/scripts/test_ensure_signing_ready.sh",
    "inputs": [
@@ -4451,6 +4496,8 @@
     "test/support",
     "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
+    "tools/ci/dependency_pin_map.json",
+    "tools/ci/dependency_pins.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/key_blind_executables.json",
@@ -4705,6 +4752,7 @@
   "gates-sh-fail-flag-selftest": {
    "entry": "tools/scripts/test_gates_lint_blocks.py",
    "inputs": [
+    "tools/scripts/gates.sh",
     "tools/scripts/test_gates_lint_blocks.py"
    ],
    "kind": "python"
@@ -4751,6 +4799,16 @@
    "inputs": [
     "tools/scripts/gpu_audio_p2_campaign.py",
     "tools/scripts/test_gpu_audio_p2_campaign.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-p2-host-preflight-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_p2_host_preflight.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/scripts/host_vitals.sh",
+    "tools/scripts/p2_thermal_state.swift",
+    "tools/scripts/test_gpu_audio_p2_host_preflight.py"
    ],
    "kind": "python"
   },
@@ -6630,6 +6688,49 @@
    ],
    "kind": "python"
   },
+  "pr-head-diff-scoped-registrations": {
+   "entry": "tools/ci/pr_head_affected_tests.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "core/host",
+    "core/host/include",
+    "docs/status",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "test/cmake/pr_fast_tests.cmake",
+    "test/fixtures",
+    "test/support",
+    "tools/ci",
+    "tools/ci/build_dir_lock.py",
+    "tools/ci/changed_surface_lane_reds.json",
+    "tools/ci/cmake_registration_impact.py",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/executable_keys.py",
+    "tools/ci/executable_selection.py",
+    "tools/ci/install_visual_python_deps.sh",
+    "tools/ci/key_blind_executables.json",
+    "tools/ci/lane_reuse_record.py",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/pr_head_affected_tests.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/source_selftests.py",
+    "tools/ci/spawn_none_build_path_reviews.json",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/affected_targets.py",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/process_liveness.py",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/test_generated_version_bump_check.py"
+   ],
+   "kind": "python"
+  },
   "prepush-cannot-measure": {
    "entry": "tools/scripts/test_prepush_cannot_measure.py",
    "inputs": [
@@ -6827,45 +6928,6 @@
    ],
    "kind": "node"
   },
-  "pulp-gpu-audio-provider-identity": {
-   "entry": "tools/scripts/gpu_audio_provider_identity.py",
-   "inputs": [
-    "external/skia-build",
-    "tools/deps/manifest.json",
-    "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py",
-    "tools/scripts/process_liveness.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-shared-io-provider-identity": {
-   "entry": "tools/scripts/gpu_audio_provider_identity.py",
-   "inputs": [
-    "external/skia-build",
-    "tools/deps/manifest.json",
-    "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py",
-    "tools/scripts/process_liveness.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-shared-io-provider-lifecycle": {
-   "entry": "test/verify_gpu_dawn_shared_io_provider.py",
-   "inputs": [
-    "test/verify_gpu_dawn_shared_io_provider.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-vellum-d15-source": {
-   "entry": "test/test_gpu_dawn_vellum_d15_source.py",
-   "inputs": [
-    "core/gpu_audio/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
-    "test/cmake/render_gpu_surface_tests.cmake",
-    "test/test_gpu_dawn_vellum_d15_source.py"
-   ],
-   "kind": "python"
-  },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
@@ -6934,7 +6996,9 @@
   "pulp-ui-build-contracts": {
    "entry": "tools/ui-build/test_ui_build.py",
    "inputs": [
-    "tools/ui-build/test_ui_build.py"
+    "tools/ui-build/lint/clean_output_lint.py",
+    "tools/ui-build/test_ui_build.py",
+    "tools/ui-build/ui_build.py"
    ],
    "kind": "python"
   },
@@ -6949,9 +7013,13 @@
   "pulp-ui-clean-output-lint-negative-contract": {
    "entry": "tools/ui-build/lint/test_clean_output_lint.py",
    "inputs": [
+    "test/fixtures/imports/claude/2024.10",
+    "test/fixtures/imports/claude/2024.10/example.html",
     "tools/scripts/gates.sh",
     "tools/ui-build/lint/clean_output_lint.py",
-    "tools/ui-build/lint/test_clean_output_lint.py"
+    "tools/ui-build/lint/fixtures/generated",
+    "tools/ui-build/lint/test_clean_output_lint.py",
+    "tools/ui-build/ui_build.py"
    ],
    "kind": "python"
   },
@@ -7030,7 +7098,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7066,7 +7136,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7102,7 +7174,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7138,7 +7212,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7193,7 +7269,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7230,7 +7308,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7268,7 +7348,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7308,7 +7390,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7345,7 +7429,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7381,7 +7467,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7443,6 +7531,7 @@
     "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7480,7 +7569,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7497,6 +7588,15 @@
     "tools/rack/signal_path.py",
     "tools/rack/test_generation_eligibility.py",
     "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-generation-lock-selftest": {
+   "entry": "tools/rack/test_generation_lock.py",
+   "inputs": [
+    "tools/rack/file_lock.py",
+    "tools/rack/generation_lock.py",
+    "tools/rack/test_generation_lock.py"
    ],
    "kind": "python"
   },
@@ -7543,6 +7643,7 @@
     "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7596,7 +7697,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7634,8 +7737,10 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/fixtures",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7674,7 +7779,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7711,7 +7818,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7768,7 +7877,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7804,7 +7915,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7856,7 +7969,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7893,7 +8008,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7929,7 +8046,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -7976,6 +8095,7 @@
     "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -8027,7 +8147,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -8074,6 +8196,7 @@
     "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
     "tools/rack/generate.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -8137,7 +8260,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -8173,7 +8298,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -8209,7 +8336,9 @@
     "tools/rack/fetch_sdk.py",
     "tools/rack/fidelity.py",
     "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
     "tools/rack/forge_modular.py",
+    "tools/rack/generation_lock.py",
     "tools/rack/idiom_check.py",
     "tools/rack/intent_context.py",
     "tools/rack/knowledge.py",
@@ -8421,6 +8550,8 @@
     "tools/ci/always_run_names.py",
     "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/dependency_pin_map.json",
+    "tools/ci/dependency_pins.py",
     "tools/ci/executable_keys.py",
     "tools/ci/executable_selection.py",
     "tools/ci/ios_gate_digest.py",

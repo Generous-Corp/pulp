@@ -86,7 +86,44 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+## Build emitters always use the governor
+
+Any command that Pulp prints for a user to copy, any generated test driver,
+and every sanitizer workflow build step must invoke
+`tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
+directory explicit, including secondary artifact trees and the Linux RTSan
+lane, but do not include `-j`, `--parallel`, or a host-core probe: the
+governor owns parallelism, leases, and build-directory locking.
+
+The timeline hardening workflow's focused Ninja build follows the same rule:
+`timeline-hardening.yml` must invoke the governor directly and leave worker
+selection to it, even though the lane only builds two timeline test targets.
+
+The `web-plugins.yml` WAMv2 and WebCLAP build steps run under nested
+`working-directory` values. Use the absolute workspace-root wrapper path in
+those steps (`bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`); relative
+`tools/ci/` paths resolve inside the demo directory and fail before the build.
+
+WebCLAP Cloudflare builds use the same absolute workspace-root wrapper for
+every WASI/Emscripten tree. The gallery step runs from
+`examples/web-demos/wclap-build`, so a relative `tools/ci/` path cannot resolve;
+keep configure toolchains and build directories unchanged when routing an
+existing build through the governor.
+
+The timeline fuzz workflow's deterministic and libFuzzer build steps follow the
+same rule. Keep their target lists and build directories unchanged, but route
+both `cmake --build` invocations through `tools/ci/governed-build.sh`; the
+governor owns the worker share on every runner.
+
 ## Focused builds are a dev-loop default, never a landing signal
+
+### Build commands emitted by diagnostics and remediations
+
+Any command that Pulp prints for a user to copy, including desktop video
+doctor/remediation output, is a build emitter and must invoke
+`tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
+directory explicit, but do not include `-j`, `--parallel`, or a host-core
+probe: the governor owns parallelism, leases, and build-directory locking.
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
 and run only what the working diff affects (`pulp affected`, the build-target
@@ -621,6 +658,13 @@ time; they make every keyed run fail to derive or every re-derivation refuse:
   second refusal turns `PULP_REUSE_LIVE` off.
   `test_the_configured_rederive_command_parses_with_this_key_code` parses the
   configured command with the same copy's parser.
+
+A new third-party dependency needs an entry in `tools/ci/dependency_pin_map.json`
+(its FetchContent directory, or the archive paths of a prebuilt), or every
+change to its pin reruns every executable as `dependency_pin`. A header-only
+dependency has no target to reach, so it stays unmapped on purpose. Check a
+pin-file change with `dependency_pins.attribute` over the base and head copies
+before assuming what it rekeys.
 
 ## Performance lanes report; they never gate
 
@@ -2765,9 +2809,9 @@ amended before its first push was never on any remote ref.
 ## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
 
 `tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py`,
-`clock_only_temp_key_guard.py` and `check_skip_not_pass.py` before every push.
-All are whole-tree text scans of a few seconds at most, with no build tree and
-no configure. The required gate already runs them
+`catch_test_name_guard.py`, `clock_only_temp_key_guard.py` and `check_skip_not_pass.py`
+before every push. All are whole-tree text scans of a few seconds at most,
+with no build tree and no configure. The required gate already runs them
 as ctests, so this adds no coverage; it moves *when* you find out.
 
 That timing is the whole point. A batch is main plus every entry ahead of it, so
@@ -2792,6 +2836,16 @@ What each one refuses:
   `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
   since the skip marker evades the thing the guard exists to catch.
 
+- **A Catch2 test name that reads as a test-spec expression.** CTest runs each
+  case as `<binary> "<name>"` and Catch2 parses that as a spec;
+  `PulpCatchAddTests.cmake` escapes only `\ , [ ]`. A leading `~` (or
+  `exclude:`) makes the entry run every OTHER case in the binary and never its
+  own; a leading or trailing `*` pulls in sibling cases; a leading `-` is read
+  as an option. Two `~View()` names ran a whole group binary twice in parallel,
+  and a shared temp path in another case of that binary then reddened the
+  required gate. Rename the case ("View destructor ..."); the guard honours
+  `catch-test-name-guard: skip <reason>`. Test scratch files must also be
+  unique per process, since CTest can run two entries of one binary at once.
 - **A test temp path keyed on a clock reading alone.** CTest runs cases as
   concurrent processes, and two that read the same `steady_clock` tick share
   the directory and read or delete each other's files (a browser-capture case

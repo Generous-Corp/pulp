@@ -588,6 +588,8 @@ command = "python3 tools/scripts/run_changed_surface_tests.py --selection-receip
 switch_variable = "PULP_REUSE_LIVE"
 derivation_paths = [
     "tools/ci/executable_keys.py",
+    "tools/ci/dependency_pins.py",
+    "tools/ci/dependency_pin_map.json",
     "tools/ci/executable_selection.py",
     "tools/ci/link_members.py",
     "tools/ci/object_deps.py",

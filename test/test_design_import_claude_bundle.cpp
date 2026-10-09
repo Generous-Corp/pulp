@@ -209,7 +209,7 @@ TEST_CASE("materialized browser document v2 preserves all five id-addressed bind
         "sha256":"93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82"
       }],
       "bindings_by_id":{
-        "semantic":{"pulp-semantic-a1":{"id":"pulp-semantic-a1","kind":"semantic","backend_node_id":7}},
+        "semantic":{"pulp-semantic-a1":{"id":"pulp-semantic-a1","kind":"button","backend_node_id":7}},
         "layout":{"pulp-layout-b2":{"id":"pulp-layout-b2","kind":"layout","path":[]}},
         "text":{"pulp-text-c3":{"id":"pulp-text-c3","kind":"text","text":"A"}},
         "paint":{"pulp-paint-d4":{"id":"pulp-paint-d4","kind":"paint","tag":"svg"}},
@@ -222,6 +222,7 @@ TEST_CASE("materialized browser document v2 preserves all five id-addressed bind
     REQUIRE(bundle->materialized_bindings.size() == 5);
     CHECK(bundle->materialized_bindings[0].id == "pulp-semantic-a1");
     CHECK(bundle->materialized_bindings[0].kind == "semantic");
+    CHECK(bundle->materialized_bindings[0].payload_json.find("button") != std::string::npos);
     CHECK(bundle->materialized_bindings[4].id == "pulp-canvas-e5");
     CHECK(bundle->materialized_bindings[4].payload_json.find("backend-node:8") !=
           std::string::npos);
@@ -244,6 +245,13 @@ TEST_CASE("materialized browser document v2 rejects duplicate or mismatched bind
     SECTION("map key and declared id disagree") {
         const auto json = prefix + R"JSON({
           "semantic":{"pulp-semantic-a1":{"id":"pulp-semantic-other"}},
+          "layout":{},"text":{},"paint":{},"canvas":{}
+        })JSON" + suffix;
+        REQUIRE_FALSE(parse_materialized_browser_document(json).has_value());
+    }
+    SECTION("semantic payload kind must remain a string") {
+        const auto json = prefix + R"JSON({
+          "semantic":{"pulp-semantic-a1":{"id":"pulp-semantic-a1","kind":42}},
           "layout":{},"text":{},"paint":{},"canvas":{}
         })JSON" + suffix;
         REQUIRE_FALSE(parse_materialized_browser_document(json).has_value());

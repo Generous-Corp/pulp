@@ -1,5 +1,7 @@
 #include "detail/gpu_convolver_raw_trace_jsonl.hpp"
+#include "detail/gpu_convolver_trace_jsonl.hpp"
 #include "detail/shared_io_convolution_session.hpp"
+#include "detail/shared_io_host_scheduling.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
 #include "harness/rt_allocation_probe.hpp"
@@ -8,6 +10,7 @@
 #include <pulp/runtime/trace_session.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <array>
@@ -20,11 +23,28 @@
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
 using namespace pulp::gpu_audio::detail;
+
+void set_authenticated_test_provider_identity(GpuConvolverTrialContext& context) {
+    auto& identity = context.provider_identity;
+    identity = SharedIoProviderIdentity{.authenticated = true,
+                                        .provider_revision = "provider-rev",
+                                        .adapter_name = "adapter",
+                                        .adapter_backend = "backend",
+                                        .adapter_vendor_id = 1,
+                                        .adapter_device_id = 2,
+                                        .native_runtime_authenticated = true,
+                                        .native_runtime_name = "runtime",
+                                        .native_runtime_backend = "runtime-backend"};
+    context.native_runtime_revision = "runtime-rev";
+    context.immutable_receipt_digest =
+        provider_receipt_digest(identity, context.native_runtime_revision);
+}
 
 namespace {
 SharedIoTraceConfig config(std::uint32_t stride = 4) {
@@ -356,6 +376,51 @@ TEST_CASE("strict P4 raw writer rejects unavailable callback timing before outpu
     std::ostringstream output;
     REQUIRE_FALSE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
     REQUIRE(output.str().empty());
+}
+
+TEST_CASE("host scheduling snapshot authenticates immutable policy context",
+          "[gpu_audio][trace][host_scheduling]") {
+    const SharedIoHostSchedulingSnapshot unavailable{};
+    CHECK_FALSE(unavailable.authenticated());
+
+    const SharedIoHostSchedulingSnapshot snapshot{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = SharedIoHostContention::Graphics,
+        .thermal = SharedIoHostThermal::Nominal,
+        .audio_workgroup_joined = true,
+    };
+    CHECK(snapshot.authenticated());
+    CHECK(snapshot.scheduler_policy_id == 42);
+    CHECK(snapshot.contention == SharedIoHostContention::Graphics);
+
+    const SharedIoHostSchedulingSnapshot incomplete{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = SharedIoHostContention::Unavailable,
+        .thermal = SharedIoHostThermal::Nominal,
+    };
+    CHECK_FALSE(incomplete.authenticated());
+
+    const auto invalid_contention = SharedIoHostSchedulingSnapshot{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = static_cast<SharedIoHostContention>(0xff),
+        .thermal = SharedIoHostThermal::Nominal,
+    };
+    CHECK_FALSE(invalid_contention.authenticated());
+
+    const auto invalid_thermal = SharedIoHostSchedulingSnapshot{
+        .captured_ns = 1000,
+        .callback_period_ns = 1'333'333,
+        .scheduler_policy_id = 42,
+        .contention = SharedIoHostContention::Graphics,
+        .thermal = static_cast<SharedIoHostThermal>(0xff),
+    };
+    CHECK_FALSE(invalid_thermal.authenticated());
 }
 
 TEST_CASE("strict P4 raw writer rejects duplicate terminal or delivery identities",
@@ -885,7 +950,8 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
             event.sequence = 0;
             recorder.publish_callback(event);
             drain_shared_io_trace(recorder, {}, 256);
-            for (std::uint64_t sequence = 1000; sequence < 1300; ++sequence) {
+            for (std::uint64_t sequence = 1000;
+                 sequence < 1000 + SharedIoTraceRecorder::capacity + 44; ++sequence) {
                 terminal = record(sequence);
                 terminal.generation = 1;
                 recorder.publish_completed(terminal);
@@ -1295,6 +1361,8 @@ TEST_CASE("staged async records require quiescent ownership before producer drai
 }
 
 TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trace][p4]") {
+    static_assert(noexcept(valid_provider_receipt_digest(
+        std::declval<const SharedIoProviderIdentity&>(), std::string_view{}, std::string_view{})));
     GpuConvolverTrialContext context;
     context.trial_id = context.pair_id = 1;
     context.block_frames = context.channels = context.ir_frames = 1;
@@ -1306,12 +1374,196 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     context.deadline_ns = 1000;
     context.watchdog_ns = 2000;
     context.transfer_counters_direct = context.timing_provenance_direct = true;
+    set_authenticated_test_provider_identity(context);
     REQUIRE(valid_gpu_convolver_trial_context(context));
+    auto tampered_digest = context;
+    tampered_digest.immutable_receipt_digest[0] =
+        tampered_digest.immutable_receipt_digest[0] == '0' ? '1' : '0';
+    CHECK_FALSE(valid_gpu_convolver_trial_context(tampered_digest));
+    auto uppercase_digest = context;
+    uppercase_digest.immutable_receipt_digest[0] = 'A';
+    CHECK_FALSE(valid_gpu_convolver_trial_context(uppercase_digest));
+    auto forged_authentication = context;
+    forged_authentication.provider_identity.authenticated = false;
+    CHECK_FALSE(valid_gpu_convolver_trial_context(forged_authentication));
+    auto forged_runtime_authentication = context;
+    forged_runtime_authentication.provider_identity.native_runtime_authenticated = false;
+    CHECK_FALSE(valid_gpu_convolver_trial_context(forged_runtime_authentication));
     context.max_inflight = 3;
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
     context.max_inflight = 2;
     context.thermal_state = static_cast<GpuConvolverThermalState>(255);
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
+    context.thermal_state = GpuConvolverThermalState::Unavailable;
+    context.provider_identity.adapter_name = "adapter\"forged";
+    REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
+    set_authenticated_test_provider_identity(context);
+    auto quoted_runtime_revision = context;
+    quoted_runtime_revision.native_runtime_revision = "runtime\"-rev";
+    CHECK_FALSE(valid_gpu_convolver_trial_context(quoted_runtime_revision));
+    auto escaped_runtime_revision = context;
+    escaped_runtime_revision.native_runtime_revision = "runtime\\-rev";
+    CHECK_FALSE(valid_gpu_convolver_trial_context(escaped_runtime_revision));
+    auto control_runtime_revision = context;
+    control_runtime_revision.native_runtime_revision = std::string{"runtime\x01-rev"};
+    CHECK_FALSE(valid_gpu_convolver_trial_context(control_runtime_revision));
+    // Allocation failure is not safely injectable in a process-wide allocator;
+    // the noexcept contract plus malformed-revision rejection are the bounded
+    // regression for the catch-all fail-closed digest boundary.
+    CHECK_FALSE(valid_provider_receipt_digest(context.provider_identity, "runtime\"-rev",
+                                              context.immutable_receipt_digest));
+    context.native_runtime_revision.clear();
+    CHECK_FALSE(valid_gpu_convolver_trial_context(context));
+}
+
+TEST_CASE("P4 trace projection keeps provider and timing provenance explicit",
+          "[gpu_audio][trace][p4]") {
+    GpuConvolverTrialContext context;
+    context.trial_id = context.pair_id = 1;
+    context.block_frames = context.channels = context.ir_frames = 1;
+    context.sample_rate_hz = 48000;
+    context.inflight_depth = 3;
+    context.queue_capacity = 4;
+    context.max_inflight = 2;
+    context.lead_blocks = 2;
+    context.deadline_ns = 1000;
+    context.watchdog_ns = 2000;
+    context.transfer_counters_direct = context.timing_provenance_direct = true;
+    set_authenticated_test_provider_identity(context);
+    SharedIoTraceRecord terminal;
+    terminal.generation = 1;
+    terminal.sequence = 7;
+    terminal.gpu_work_admitted = true;
+    terminal.gpu_terminal = SharedIoGpuTerminalDisposition::CompletedAccepted;
+    terminal.outcome = SharedIoTraceOutcome::Success;
+    terminal.reason = terminal.gpu_reason = SharedIoFallbackReason::None;
+    terminal.set(SharedIoTraceStage::SubmitBegin, 100);
+    terminal.set(SharedIoTraceStage::CompletionObserved, 200);
+    std::ostringstream output;
+    REQUIRE(write_gpu_convolver_trace_jsonl(output, context, std::span{&terminal, 1}));
+    const auto text = output.str();
+    CHECK(text.find("\"authenticated\":true") != std::string::npos);
+    CHECK(text.find("\"gpu_terminal\":\"completed_accepted\"") != std::string::npos);
+    CHECK(text.find("\"delivery\":") != std::string::npos);
+    CHECK(text.find("\"delivery_reason\":\"none\"") != std::string::npos);
+    CHECK(text.find("\"gpu_elapsed\":{\"availability\":\"unavailable\"}") != std::string::npos);
+    terminal.callback_timing_available = true;
+    terminal.callback_start_ns = 300;
+    terminal.callback_end_ns = 350;
+    terminal.result_visible_ns = 400;
+    terminal.gpu_elapsed_available = true;
+    terminal.gpu_elapsed_ns = 42;
+    output.str("");
+    output.clear();
+    REQUIRE(write_gpu_convolver_trace_jsonl(output, context, std::span{&terminal, 1}));
+    CHECK(output.str().find("\"availability\":\"available\",\"value_ns\":42") != std::string::npos);
+    CHECK(output.str().find("callback_direct") != std::string::npos);
+    terminal.callback_end_ns = 299;
+    output.str("");
+    output.clear();
+    CHECK_FALSE(write_gpu_convolver_trace_jsonl(output, context, std::span{&terminal, 1}));
+    CHECK(output.str().empty());
+}
+
+TEST_CASE("P4 trace JSONL parses as a schema with authenticated per-row provenance",
+          "[gpu_audio][trace][p4][json]") {
+    GpuConvolverTrialContext context;
+    context.trial_id = context.pair_id = 41;
+    context.block_frames = context.channels = context.ir_frames = 1;
+    context.sample_rate_hz = 48000;
+    context.inflight_depth = 3;
+    context.queue_capacity = 4;
+    context.max_inflight = 2;
+    context.lead_blocks = 2;
+    context.deadline_ns = 1000;
+    context.watchdog_ns = 2000;
+    context.transfer_counters_direct = context.timing_provenance_direct = true;
+    set_authenticated_test_provider_identity(context);
+
+    std::array<SharedIoTraceRecord, 2> records{};
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        auto& record = records[i];
+        record.generation = 1;
+        record.sequence = 7 + i;
+        record.gpu_work_admitted = true;
+        record.gpu_terminal = SharedIoGpuTerminalDisposition::CompletedAccepted;
+        record.outcome = SharedIoTraceOutcome::Success;
+        record.reason = record.gpu_reason = SharedIoFallbackReason::None;
+        record.set(SharedIoTraceStage::SubmitBegin, 100 + i * 100);
+        record.set(SharedIoTraceStage::CompletionObserved, 200 + i * 100);
+    }
+    records[1].callback_timing_available = true;
+    records[1].callback_start_ns = 300;
+    records[1].callback_end_ns = 350;
+    records[1].result_visible_ns = 400;
+    records[1].gpu_elapsed_available = true;
+    records[1].gpu_elapsed_ns = 42;
+
+    std::ostringstream output;
+    REQUIRE(write_gpu_convolver_trace_jsonl(output, context, records));
+
+    // Parse every line as JSON and enforce the receipt contract at the same
+    // boundary a downstream campaign reader uses. In particular, a valid
+    // JSON object with a different row digest is still forged provenance.
+    const auto validate = [&](std::string_view text, std::string_view expected_digest) {
+        std::istringstream lines{std::string{text}};
+        std::string line;
+        std::size_t row = 0;
+        try {
+            while (std::getline(lines, line)) {
+                if (line.empty())
+                    return false;
+                const auto object = choc::json::parse(line);
+                if (!object.isObject() ||
+                    object["schema"].getString() != "pulp.gpu-audio.p4.trace.v1" ||
+                    object["trial_id"].getInt64() != 41 || object["pair_id"].getInt64() != 41)
+                    return false;
+                if (row == 0) {
+                    if (object["record_kind"].getString() != "trial_begin")
+                        return false;
+                    const auto provenance = object["provenance"];
+                    if (!provenance.isObject() || !provenance["authenticated"].getBool() ||
+                        provenance["provider_revision"].getString() != "provider-rev" ||
+                        provenance["adapter_name"].getString() != "adapter" ||
+                        provenance["adapter_backend"].getString() != "backend" ||
+                        provenance["immutable_receipt_digest"].getString() != expected_digest ||
+                        !provenance["native_runtime_authenticated"].getBool() ||
+                        provenance["native_runtime_name"].getString() != "runtime" ||
+                        provenance["native_runtime_backend"].getString() != "runtime-backend" ||
+                        provenance["native_runtime_revision"].getString() != "runtime-rev")
+                        return false;
+                } else {
+                    if (object["record_kind"].getString() != "block" ||
+                        object["block_ordinal"].getInt64() != static_cast<std::int64_t>(row - 1) ||
+                        object["identity_digest"].getString() != expected_digest)
+                        return false;
+                    const auto timings = object["timings"];
+                    if (!timings.isObject() || !timings["gpu_elapsed"].isObject())
+                        return false;
+                    const auto expected = row == 1 ? "unavailable" : "available";
+                    if (timings["gpu_elapsed"]["availability"].getString() != expected)
+                        return false;
+                    if (row == 2 && timings["gpu_elapsed"]["value_ns"].getInt64() != 42)
+                        return false;
+                }
+                ++row;
+            }
+        } catch (const choc::json::ParseError&) {
+            return false;
+        }
+        return row == 3;
+    };
+
+    const auto text = output.str();
+    const auto expected_digest = context.immutable_receipt_digest;
+    REQUIRE(validate(text, expected_digest));
+    auto forged = text;
+    const auto digest = forged.find("\"identity_digest\":\"" + expected_digest + "\"");
+    REQUIRE(digest != std::string::npos);
+    const auto encoded_digest = std::string{"\"identity_digest\":\""} + expected_digest + "\"";
+    forged.replace(digest, encoded_digest.size(),
+                   "\"identity_digest\":\"" + std::string(64, 'f') + "\"");
+    CHECK_FALSE(validate(forged, expected_digest));
 }
 
 TEST_CASE("P4 receipt rejects an unsafe queue admission geometry", "[gpu_audio][trace][raw][p4]") {

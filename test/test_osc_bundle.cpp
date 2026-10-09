@@ -231,7 +231,7 @@ TEST_CASE("OSC address exact match", "[osc][bundle]") {
     REQUIRE_FALSE(address_matches("/foo/bar", "/foo/baz"));
 }
 
-TEST_CASE("OSC address wildcard *", "[osc][bundle]") {
+TEST_CASE("OSC address wildcard asterisk", "[osc][bundle]") {
     REQUIRE(address_matches("/foo/*", "/foo/bar"));
     REQUIRE(address_matches("/*/bar", "/foo/bar"));
     REQUIRE(address_matches("/*", "/anything"));

@@ -412,6 +412,21 @@ TEST_CASE("DSPX-03 retained history refuses incompatible identity or size",
     }
 }
 
+TEST_CASE("DSPX-09 retained-history refusal reaches the live swap path",
+          "[dspx-09][negative][retained-history]") {
+    SlotBehavior old_behavior{.info = make_info("same"), .history_key = "convolver.v1"};
+    SlotBehavior replacement_behavior{.info = make_info("same"), .history_key = "waveguide.v1"};
+    auto policy = allowing_policy();
+    policy.retained_history.mode = RetainedHistoryMode::Refuse;
+    auto s = make_stage_setup(std::move(old_behavior), std::move(replacement_behavior), policy);
+
+    s->graph.begin_swap_edit();
+    CHECK(s->graph.stage_plugin_replacement(s->plugin, s->token) ==
+          SignalGraph::SwapResult::NeedsEagerPrepare);
+    expect_reason(s->graph, LiveSwapFallbackReason::HistoryRefused, s->plugin);
+    CHECK(dsp_restore_count(s->replacement_stats) == 0);
+}
+
 TEST_CASE("DSPX-03 retained history supports clear and deterministic reseed",
           "[dspx-03][retained-history]") {
     SECTION("clear") {

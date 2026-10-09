@@ -304,7 +304,7 @@ def digest_targets(build_dir: Path, source_root: Path, tests: list[dict] | None 
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     ap.add_argument("--build-dir", required=True)
     ap.add_argument("--source-root", required=True)
     ap.add_argument("--ctest-json", help="`ctest --show-only=json-v1` output to attach test registrations")

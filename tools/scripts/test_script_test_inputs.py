@@ -907,7 +907,9 @@ class GateProfileTests(unittest.TestCase):
                                (dict(PULP_SANITIZER="address", CMAKE_BUILD_TYPE="Debug"), "PULP_SANITIZER=address"),
                                (dict(CMAKE_BUILD_TYPE="Debug"), "CMAKE_BUILD_TYPE=Debug"),
                                (dict(PULP_HAS_VST3="FALSE"), "PULP_HAS_VST3=FALSE"),
-                               (dict(PULP_HAS_AUSDK="FALSE"), "PULP_HAS_AUSDK=FALSE")):
+                               (dict(PULP_HAS_AUSDK="FALSE"), "PULP_HAS_AUSDK=FALSE"),
+                               (dict(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON"),
+                                "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON")):
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
                 repo = Repo(Path(tmp)); compiled_evidence(repo)
                 self.assertEqual(self.run_tool(repo, "--write").returncode, 0)   # no cache: the gate's

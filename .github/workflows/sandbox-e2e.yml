@@ -119,7 +119,7 @@ jobs:
             -DPULP_BUILD_WEBVIEW=OFF \
             -DPULP_BUILD_NODEJS=OFF \
             -DPULP_ENABLE_SWIFT=OFF
-          cmake --build build --target pulp-cli --parallel "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
+          tools/ci/governed-build.sh cmake --build build --target pulp-cli
           if [[ -x "$PWD/build/tools/cli/pulp-cpp" ]]; then
             echo "bin=$PWD/build/tools/cli/pulp-cpp" >> "$GITHUB_OUTPUT"
           elif [[ -x "$PWD/build/tools/cli/pulp" ]]; then

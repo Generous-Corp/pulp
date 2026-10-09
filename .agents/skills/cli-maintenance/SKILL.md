@@ -3827,3 +3827,11 @@ helper. A source-compiled test target that does not link `pulp::runtime`
 (`pulp-test-cli-import-emit`, the gpu-probe model library) needs
 `core/runtime/include` on its include path for the header.
 
+
+## UI build and lint command changes
+
+When changing `tools/cli/cmd_ui.cpp`, update this skill with the user-facing
+command contract and run the paired UI build and clean-output lint tests. Keep
+the CLI dispatch, Rust/C++ help summaries, command documentation, and the
+clean-output manifest-role rules synchronized. A generated or vendor fixture
+must be hash-verified even when it is excluded from authored-source linting.

@@ -928,8 +928,22 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(
             run_block,
             r"--import-design-contract\s+build/tools/import-design/jsx-runtime/materialized_binding_contract\.mjs")
+        self.assertRegex(
+            run_block,
+            r"--import-design-source-emitter\s+build/tools/import-design/jsx-runtime/materialized_source_emitter\.mjs")
+        self.assertRegex(
+            run_block,
+            r"--import-design-ids-map\s+build/tools/import-design/jsx-runtime/materialized_ids_map\.mjs")
         self.assertIn(
             "test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs",
+            run_block,
+        )
+        self.assertIn(
+            "test -f build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs",
+            run_block,
+        )
+        self.assertIn(
+            "test -f build/tools/import-design/jsx-runtime/materialized_ids_map.mjs",
             run_block,
         )
         self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
@@ -979,8 +993,16 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             run_block,
             r"'--import-design-contract',\s*"
             r"'build/tools/import-design/Release/jsx-runtime/materialized_binding_contract\.mjs'")
+        self.assertRegex(
+            run_block,
+            r"'--import-design-source-emitter',\s*"
+            r"'build/tools/import-design/Release/jsx-runtime/materialized_source_emitter\.mjs'")
+        self.assertRegex(
+            run_block,
+            r"'--import-design-ids-map',\s*"
+            r"'build/tools/import-design/Release/jsx-runtime/materialized_ids_map\.mjs'")
         self.assertIn(
-            "materialized binding contract missing from import-design build staging",
+            "materialized_binding_contract.mjs",
             run_block,
         )
         self.assertIn(
@@ -2624,6 +2646,16 @@ class ReleaseBuildParallelismExplicit(unittest.TestCase):
                     "count (e.g. --parallel \"$jobs\") or route it through "
                     "tools/ci/governed-build.sh.",
                 )
+
+    def test_release_dry_run_uses_governed_build_contract(self) -> None:
+        source = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        build_lines = self._build_invocations(source)
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build --config Release",
+            build_lines[0],
+        )
+        self.assertNotIn("getconf _NPROCESSORS_ONLN", source)
 
 
 class StdlibGuardStepExtractionMatchesYaml(unittest.TestCase):

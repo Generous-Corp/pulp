@@ -4,7 +4,7 @@
 //
 // One API for vectorized buffer arithmetic, reductions and FIR correlation.
 // Every kernel exists in up to three backends, compiled into the pulp-simd
-// library:
+// library when the target supports them:
 //
 //   backend::scalar      plain sequential loops; the numerical reference and
 //                        the fallback when no other backend is compiled.
@@ -16,9 +16,10 @@
 //
 // The unqualified pulp::simd:: names are the backend chosen at configure time
 // by the PULP_SIMD_BACKEND CMake option (default `auto`: Accelerate on Apple,
-// Highway elsewhere). The choice is a compile-time alias, so a call costs no
-// run-time branch. The explicitly qualified backends stay callable so tests
-// and benchmarks can compare them in one binary.
+// Highway elsewhere, scalar when Highway is unavailable such as MSVC
+// ARM64EC). The choice is a compile-time alias, so a call costs no run-time
+// branch. The explicitly qualified backends stay callable so tests and
+// benchmarks can compare them in one binary when they are compiled.
 //
 // Numerics: the backends agree to rounding, not to the bit. Reductions (sum,
 // dot, sum_squares, correlate, decimate2) accumulate in each backend's own
