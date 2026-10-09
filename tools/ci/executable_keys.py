@@ -611,7 +611,7 @@ def code_digest(source_root: Path, base_sha: str) -> str:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     ap.add_argument("--print-toolchain", action="store_true",
                     help="print this host's identity for --build-dir in job.json shape and exit")
     ap.add_argument("--source-root", type=Path)
