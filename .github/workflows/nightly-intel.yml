@@ -134,7 +134,7 @@ jobs:
           set -o pipefail
           # Comfortably inside `timeout-minutes: 120` so WE decide the outcome, not
           # GitHub's canceller.
-          if python3 tools/ci/run_with_timeout.py 4500 cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-intel-native.log; then
+          if python3 tools/ci/run_with_timeout.py 4500 tools/ci/governed-build.sh cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-intel-native.log; then
             echo "status=pass" >> "$GITHUB_OUTPUT"
           elif [ "${PIPESTATUS[0]}" = "124" ]; then
             # 124 == GNU timeout killed it. This is runner infra, not a product
@@ -263,7 +263,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          if cmake --build "${BUILD_DIR}" \
+          if tools/ci/governed-build.sh cmake --build "${BUILD_DIR}" \
                --target PulpGain_VST3 PulpGain_AU PulpGain_CLAP \
                -- -k 0 2>&1 | tee build-universal.log; then
             echo "status=pass" >> "$GITHUB_OUTPUT"

@@ -155,7 +155,10 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
                 "check": "reaper.clap_bundle",
                 "title": "Build and install the CLAP bundle for REAPER",
                 "detail": f"Build the {plugin} CLAP target and install or symlink it under ~/Library/Audio/Plug-Ins/CLAP before recording the REAPER proof.",
-                "command": f"cmake --build build-video-nogpu --target {plugin}_CLAP -j$(sysctl -n hw.ncpu)",
+                "command": (
+                    "tools/ci/governed-build.sh cmake --build build-video-nogpu "
+                    f"--target {plugin}_CLAP"
+                ),
             }
         )
     reaper_clap_cache = checks_by_name.get("reaper.clap_cache")
@@ -949,5 +952,4 @@ def desktop_video_doctor_payload(
         "remediations": desktop_video_doctor_remediations(checks, target_name=args.target),
     }
     return (0 if all_ok else 1), payload
-
 

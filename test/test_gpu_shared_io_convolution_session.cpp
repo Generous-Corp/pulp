@@ -38,6 +38,16 @@ class FakeProvider final : public SharedIoArenaProvider {
   public:
     explicit FakeProvider(std::shared_ptr<State> state) : state_(std::move(state)) {}
 
+    SharedIoProviderIdentity identity;
+    SharedIoProviderCapabilities capabilities;
+
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        return identity;
+    }
+    SharedIoProviderCapabilities provider_capabilities() const noexcept override {
+        return capabilities;
+    }
+
     bool create_slot(std::uint32_t index, std::size_t input_bytes, std::size_t output_bytes,
                      SlotResources& resources) noexcept override {
         try {
@@ -255,6 +265,36 @@ TEST_CASE("shared convolution session provider identity fails closed before prep
     CHECK_FALSE(identity.native_runtime_authenticated);
     CHECK(identity.provider_revision.empty());
     CHECK(identity.adapter_name.empty());
+}
+
+TEST_CASE("shared convolution session reports provider-owned identity and capabilities",
+          "[gpu_audio][shared_io][provider]") {
+    Fixture fixture;
+    fixture.provider = nullptr;
+    fixture.prepare();
+    REQUIRE(fixture.provider != nullptr);
+    fixture.provider->identity = {.authenticated = true,
+                                  .provider_revision = "fake-provider-1",
+                                  .adapter_name = "fake-adapter",
+                                  .adapter_backend = "native",
+                                  .adapter_vendor_id = 0xfeed,
+                                  .adapter_device_id = 0xbeef,
+                                  .native_runtime_authenticated = true,
+                                  .native_runtime_name = "fake-runtime",
+                                  .native_runtime_backend = "native"};
+    fixture.provider->capabilities = {.imported_host_pointer = true,
+                                      .ordered_causal_state = true,
+                                      .completion_service = true,
+                                      .device_loss_recovery = false,
+                                      .gpu_timestamps = true};
+    const auto identity = fixture.session.provider_identity();
+    const auto capabilities = fixture.session.provider_capabilities();
+    CHECK(identity.authenticated);
+    CHECK(identity.adapter_backend == "native");
+    CHECK(capabilities.imported_host_pointer);
+    CHECK(capabilities.ordered_causal_state);
+    CHECK(capabilities.completion_service);
+    CHECK(capabilities.gpu_timestamps);
 }
 
 TEST_CASE("shared convolution session packs provider slots and delivers exact prepared output",

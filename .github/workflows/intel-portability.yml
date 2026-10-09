@@ -92,7 +92,7 @@ jobs:
 
       - name: Build
         shell: bash
-        run: cmake --build "${BUILD_DIR}" -j"$(sysctl -n hw.ncpu)"
+        run: tools/ci/governed-build.sh cmake --build "${BUILD_DIR}"
 
       - name: Test (x86_64 binaries under Rosetta)
         shell: bash

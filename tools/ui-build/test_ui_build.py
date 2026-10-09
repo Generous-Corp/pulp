@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# CTest input tracking: this suite executes the implementation through a
+# subprocess, and the implementation loads the linter dynamically.
+# "tools/ui-build/ui_build.py"
+# "tools/ui-build/lint/clean_output_lint.py"
 
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "ui_build.py"
@@ -106,6 +112,32 @@ class UiBuildContractTests(unittest.TestCase):
         result = self.run_cli("build", "--source", "native-ui/src", "--out", "build/native-ui")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("contains a symlink", result.stderr)
+
+    def test_lint_command_filters_explicit_generated_vendor_roles(self):
+        vendor = self.source / "vendor" / "runtime.js"
+        vendor.parent.mkdir()
+        vendor.write_text("export const stamp = Math.random();\n", encoding="utf-8")
+        manifest = self.root / "corpus-manifest.json"
+        files = []
+        for path, role in ((self.source / "Editor.tsx", "owned-source"),
+                           (vendor, "generated-vendor")):
+            files.append({
+                "path": path.relative_to(self.source).as_posix(),
+                "role": role,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            })
+        manifest.write_text(json.dumps({
+            "schema": "pulp.clean-output-corpus.v1",
+            "producer": "pulp import-design --emit source",
+            "files": files,
+        }), encoding="utf-8")
+
+        result = self.run_cli("lint", "--source", "native-ui/src",
+                              "--manifest", "corpus-manifest.json", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["files"], 1)
+        self.assertTrue(report["ok"], report)
 
 
 if __name__ == "__main__":

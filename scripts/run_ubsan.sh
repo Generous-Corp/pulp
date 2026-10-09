@@ -36,7 +36,8 @@ cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" \
     -DPULP_SANITIZER=undefined
 
 echo "=== Building ==="
-cmake --build "${BUILD_DIR}" -j"${JOBS}"
+PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
+    cmake --build "${BUILD_DIR}"
 
 # halt_on_error=1 + print_stacktrace=1 → fail on first UB, with trace.
 export UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1:symbolize=1"

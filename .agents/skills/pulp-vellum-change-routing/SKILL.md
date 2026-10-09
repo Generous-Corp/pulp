@@ -25,6 +25,18 @@ The watch event has `disposition: watch-only-no-authority` and
 Run from the Pulp repository root. Treat the projection as authority; do not
 infer ownership from similar directory names or broad path prefixes.
 
+### Routing, watch receipts, and gates are separate evidence
+
+Run the ownership route before the validation gates and retain both outputs.
+`status: pass` on a Vellum expansion watch receipt proves that the affected
+capability family was covered by the watch event; with
+`authority_effect: none` it does **not** grant Vellum authority, acknowledge a
+handoff, or prove native/render parity. A route result of `single-owner` or
+`pulp-only` likewise authorizes routing only. Keep the normal Pulp gate receipt
+(including `tools/scripts/gates.sh origin/main` before push) separate from the
+watch/route receipt, and do not collapse either into a release or downstream
+cutover claim.
+
 ## Route changed paths
 
 Pass the repository where each path currently lives:

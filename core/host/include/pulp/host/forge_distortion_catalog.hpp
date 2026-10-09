@@ -28,7 +28,7 @@
 // which is what instancing two nodes already gives.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <pulp/signal/distortion.hpp>
 #include <pulp/signal/oversampling.hpp>

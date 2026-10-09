@@ -17,6 +17,13 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
                                             std::span<const SharedIoTraceRecord> records) {
     if (!valid_gpu_convolver_trial_context(context) || records.empty())
         return false;
+    // Reject malformed callback timing before writing any receipt prefix.
+    for (const auto& record : records) {
+        if (!record.valid() || (record.callback_timing_available &&
+                                (record.callback_end_ns < record.callback_start_ns ||
+                                 record.result_visible_ns < record.callback_end_ns)))
+            return false;
+    }
 
     const auto path = context.path == GpuConvolverTrialPath::StagedSync    ? "staged_sync"
                       : context.path == GpuConvolverTrialPath::StagedAsync ? "staged_async"
@@ -58,7 +65,20 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
            << (context.workgroup_requested ? "true" : "false") << R"(,"workgroup_joined":)"
            << (context.workgroup_joined ? "true" : "false") << R"(,"thermal_state":")" << thermal
            << R"(","deadline_ns":)" << context.deadline_ns << R"(,"watchdog_ns":)"
-           << context.watchdog_ns << "}\n";
+           << context.watchdog_ns << R"(,"provenance":{"authenticated":)"
+           << (context.provider_identity.authenticated ? "true" : "false")
+           << R"(,"provider_revision":")" << context.provider_identity.provider_revision
+           << R"(","adapter_name":")" << context.provider_identity.adapter_name
+           << R"(","adapter_backend":")" << context.provider_identity.adapter_backend
+           << R"(","adapter_vendor_id":)" << context.provider_identity.adapter_vendor_id
+           << R"(,"adapter_device_id":)" << context.provider_identity.adapter_device_id
+           << R"(,"immutable_receipt_digest":")" << context.immutable_receipt_digest
+           << R"(","native_runtime_authenticated":)"
+           << (context.provider_identity.native_runtime_authenticated ? "true" : "false")
+           << R"(,"native_runtime_name":")" << context.provider_identity.native_runtime_name
+           << R"(","native_runtime_backend":")" << context.provider_identity.native_runtime_backend
+           << R"(","native_runtime_revision":")" << context.native_runtime_revision << R"("})"
+           << "}\n";
 
     for (std::size_t ordinal = 0; ordinal < records.size(); ++ordinal) {
         const auto& record = records[ordinal];
@@ -72,9 +92,16 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
                << context.trial_id << R"(,"pair_id":)" << context.pair_id << R"(,"path":")" << path
                << R"(","block_ordinal":)" << ordinal << R"(,"sequence":)" << record.sequence
                << R"(,"gpu_terminal":")" << shared_io_gpu_terminal_name(record.gpu_terminal)
+               << R"(","identity_digest":")" << context.immutable_receipt_digest
                << R"(","delivery":")" << shared_io_delivery_name(record.delivery)
-               << R"(","timings":{)"
-               << R"("callback_cpu":{"availability":"unavailable"},)"
+               << R"(","gpu_reason":")" << shared_io_fallback_reason_name(record.gpu_reason)
+               << R"(","delivery_reason":")"
+               << shared_io_fallback_reason_name(record.delivery_reason) << R"(","timings":{)"
+               << R"("callback_cpu":{"availability":")"
+               << (record.callback_timing_available ? "available" : "unavailable") << '"';
+        if (record.callback_timing_available && record.callback_end_ns >= record.callback_start_ns)
+            output << ",\"value_ns\":" << (record.callback_end_ns - record.callback_start_ns);
+        output << R"(},)"
                << R"("encode_cpu":{"availability":")"
                << (encode.available ? "available" : "unavailable") << '"';
         if (encode.available)
@@ -87,9 +114,21 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
                << (observed.available ? "available" : "unavailable") << '"';
         if (observed.available)
             output << ",\"value_ns\":" << observed.ns;
-        output << R"(},"gpu_elapsed":{"availability":"unavailable"},)"
-                  R"("publish_to_consumable":{"availability":"unavailable"}},)"
-                  R"("provenance":{"transfer_counters":"direct","timings":"worker_direct"}})"
+        output << R"(},"gpu_elapsed":{"availability":)";
+        if (record.gpu_elapsed_available)
+            output << R"("available","value_ns":)" << record.gpu_elapsed_ns;
+        else
+            output << R"("unavailable")";
+        output << R"(},"publish_to_consumable":{"availability":)";
+        if (record.callback_timing_available && record.result_visible_ns >= record.callback_end_ns)
+            output << R"("available","value_ns":)"
+                   << (record.result_visible_ns - record.callback_end_ns);
+        else
+            output << R"("unavailable")";
+        output << R"(}},)"
+                  R"("provenance":{"transfer_counters":"direct","timings":")"
+               << (record.callback_timing_available ? "callback_direct" : "worker_direct")
+               << R"("}})"
                << "\n";
     }
     return static_cast<bool>(output);

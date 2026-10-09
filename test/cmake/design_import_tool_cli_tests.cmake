@@ -206,7 +206,10 @@ target_include_directories(pulp-test-browser-capture-import PRIVATE
 # `content` on ::before / ::after, and a non-blur `backdrop-filter` list.
 target_compile_definitions(pulp-test-browser-capture-import PRIVATE
     PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style"
-    PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures")
+    PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures"
+    PULP_BROWSER_CAPTURE_FIXTURE_PATH="$<TARGET_FILE:pulp-browser-capture-launcher-fixture>")
+add_dependencies(pulp-test-browser-capture-import
+    pulp-browser-capture-launcher-fixture)
 target_link_libraries(pulp-test-browser-capture-import PRIVATE
     pulp::browser-capture-backend
     pulp-import-design-cli-policy

@@ -86,7 +86,44 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+## Build emitters always use the governor
+
+Any command that Pulp prints for a user to copy, any generated test driver,
+and every sanitizer workflow build step must invoke
+`tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
+directory explicit, including secondary artifact trees and the Linux RTSan
+lane, but do not include `-j`, `--parallel`, or a host-core probe: the
+governor owns parallelism, leases, and build-directory locking.
+
+The timeline hardening workflow's focused Ninja build follows the same rule:
+`timeline-hardening.yml` must invoke the governor directly and leave worker
+selection to it, even though the lane only builds two timeline test targets.
+
+The `web-plugins.yml` WAMv2 and WebCLAP build steps run under nested
+`working-directory` values. Use the absolute workspace-root wrapper path in
+those steps (`bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`); relative
+`tools/ci/` paths resolve inside the demo directory and fail before the build.
+
+WebCLAP Cloudflare builds use the same absolute workspace-root wrapper for
+every WASI/Emscripten tree. The gallery step runs from
+`examples/web-demos/wclap-build`, so a relative `tools/ci/` path cannot resolve;
+keep configure toolchains and build directories unchanged when routing an
+existing build through the governor.
+
+The timeline fuzz workflow's deterministic and libFuzzer build steps follow the
+same rule. Keep their target lists and build directories unchanged, but route
+both `cmake --build` invocations through `tools/ci/governed-build.sh`; the
+governor owns the worker share on every runner.
+
 ## Focused builds are a dev-loop default, never a landing signal
+
+### Build commands emitted by diagnostics and remediations
+
+Any command that Pulp prints for a user to copy, including desktop video
+doctor/remediation output, is a build emitter and must invoke
+`tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
+directory explicit, but do not include `-j`, `--parallel`, or a host-core
+probe: the governor owns parallelism, leases, and build-directory locking.
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
 and run only what the working diff affects (`pulp affected`, the build-target

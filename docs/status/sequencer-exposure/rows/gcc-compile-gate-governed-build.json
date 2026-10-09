@@ -1,0 +1,49 @@
+{
+  "id": "gcc-compile-gate-governed-build",
+  "title": "GCC core compile gate uses the shared bounded build governor",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "governed-gcc-compile-20261008",
+  "owned_paths": [
+    ".github/workflows/gcc-compile-gate.yml",
+    "docs/guides/local-ci.md",
+    "docs/status/sequencer-exposure/rows/gcc-compile-gate-governed-build.json",
+    "tools/ci/test_build_governance_paths.py"
+  ],
+  "evidence": [
+    {
+      "path": ".github/workflows/gcc-compile-gate.yml",
+      "needles": [
+        "tools/ci/governed-build.sh cmake --build build-gcc --target $(cat targets.txt)"
+      ]
+    },
+    {
+      "path": "tools/ci/test_build_governance_paths.py",
+      "needles": [
+        "test_gcc_compile_workflow_builds_use_governor"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This changes only CI build orchestration, its documentation, and a regression guard; no SDK header, target, symbol, or installed artifact changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI command, flag, or output contract changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No runtime operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The change governs a compiler portability test and does not publish a design-time capability."
+    }
+  }
+}

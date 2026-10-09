@@ -1120,7 +1120,7 @@ std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_convolution_
 }
 
 std::unique_ptr<SharedIoPreparedProgram>
-DawnSharedIoProvider::make_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec) noexcept {
+DawnSharedIoProvider::make_wavenet_program(const WavenetProgramSpec& spec) noexcept {
     // The submit token currently carries no stream-instance identity. Refuse
     // multi-instance plans rather than risking causal-history aliasing.
     if (spec.stream_instances != 1)
@@ -1680,10 +1680,9 @@ bool DawnSharedIoProvider::prepare_convolution_program(
 }
 
 bool DawnSharedIoProvider::prepare_wavenet_program(
-    const DawnSharedIoWavenetProgramSpec& spec,
-    std::span<const SlotBufferHandle> handles) noexcept {
+    const WavenetProgramSpec& spec, std::span<const SlotBufferHandle> handles) noexcept {
     if (!impl_ || !impl_->accepting || impl_->wavenet || handles.empty() ||
-        !validate_dawn_shared_io_wavenet_spec(spec).accepted() || spec.stream_instances != 1)
+        !validate_wavenet_spec(spec).accepted() || spec.stream_instances != 1)
         return false;
     try {
         auto plan = std::make_unique<Impl::WavenetPlan>();
@@ -2514,6 +2513,47 @@ DawnSharedIoProvider::CompletionPolicy DawnSharedIoProvider::completion_policy()
 
 DawnSharedIoProvider::AdapterIdentity DawnSharedIoProvider::adapter_identity() const {
     return impl_ ? impl_->adapter_identity : AdapterIdentity{};
+}
+
+SharedIoProviderIdentity DawnSharedIoProvider::provider_identity() const noexcept {
+    SharedIoProviderIdentity identity;
+    if (!impl_)
+        return identity;
+    try {
+        const auto& adapter = impl_->adapter_identity;
+        identity.provider_revision = dawn_revision();
+        identity.adapter_name = adapter.name;
+        identity.adapter_backend = adapter.backend;
+        identity.adapter_vendor_id = adapter.vendor_id;
+        identity.adapter_device_id = adapter.device_id;
+        identity.native_runtime_name = adapter.native_runtime_name;
+        identity.native_runtime_backend = adapter.backend;
+        identity.authenticated =
+            !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
+            !identity.adapter_backend.empty() && identity.adapter_vendor_id != 0 &&
+            !adapter.native_runtime_revision.empty() &&
+            adapter.native_runtime_revision == identity.provider_revision &&
+            !identity.native_runtime_name.empty() &&
+            identity.native_runtime_backend == identity.adapter_backend;
+        identity.native_runtime_authenticated = identity.authenticated;
+    } catch (...) {
+        return {};
+    }
+    return identity;
+}
+
+SharedIoProviderCapabilities DawnSharedIoProvider::provider_capabilities() const noexcept {
+    SharedIoProviderCapabilities capabilities;
+    if (!impl_)
+        return capabilities;
+    capabilities.imported_host_pointer =
+        impl_->options.storage_kind == StorageKind::ImportedHostPointer;
+    // The provider serializes queue submission and terminal publication; the
+    // causal program owns model/state ordering above this transport seam.
+    capabilities.ordered_causal_state = true;
+    capabilities.completion_service = true;
+    capabilities.gpu_timestamps = impl_->timestamps_enabled;
+    return capabilities;
 }
 
 bool DawnSharedIoProvider::reconfigure_storage_kind(StorageKind kind) noexcept {

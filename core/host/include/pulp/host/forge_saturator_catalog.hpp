@@ -34,7 +34,7 @@
 // `oversample_2x` saturator would comb.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <pulp/signal/saturator.hpp>
 
