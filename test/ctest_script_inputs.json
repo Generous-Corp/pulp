@@ -2659,6 +2659,7 @@
   "pulp-test-live-dsp-telemetry-graph",
   "pulp-test-live-kernel-crossfade-null",
   "pulp-test-load-measurer",
+  "pulp-test-loudness-compensation",
   "pulp-test-lv2-adapter",
   "pulp-test-lv2-bundle-discovery-e2e",
   "pulp-test-lv2-host-discovery",

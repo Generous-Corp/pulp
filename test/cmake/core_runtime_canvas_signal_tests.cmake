@@ -178,6 +178,11 @@ pulp_add_test_suite(pulp-test-audio-device-manager
 pulp_add_test_suite(pulp-test-dsp-enhancements GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 
+# Product-independent spectrum-weighted loudness compensation and its RT contract.
+pulp_add_test_suite(pulp-test-loudness-compensation
+    SOURCES test_loudness_compensation.cpp
+    LIBRARIES pulp::signal)
+
 # Elliptic / Jacobi special functions (pulp::signal::special). Kept in its
 # own binary so future elliptic IIR design tests can live
 # beside it without bloating pulp-test-dsp-enhancements.
