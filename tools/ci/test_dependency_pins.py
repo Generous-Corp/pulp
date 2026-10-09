@@ -7,6 +7,7 @@ import copy
 import gzip
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -372,6 +373,20 @@ NON_LINKING_KINDS = frozenset({"npm", "python-pip", "transitive-python", "cargo"
 
 
 class MapTests(unittest.TestCase):
+    def test_load_map_refuses_a_name_in_both_lists(self):
+        good = {"schema": dp.MAP_SCHEMA, "dependencies": {"Yoga": {"fetchcontent": ["yoga"]}},
+                "unmapped": {"CHOC": "header-only"}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "map.json"
+            path.write_text(json.dumps(good), encoding="utf-8")
+            self.assertEqual(dp.load_map(path), good["dependencies"])
+            for bad in ({**good, "unmapped": {"Yoga": "both"}}, {k: v for k, v in good.items() if k != "unmapped"},
+                        {**good, "schema": "other"}):
+                with self.subTest(bad=sorted(bad)):
+                    path.write_text(json.dumps(bad), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        dp.load_map(path)
+
     def test_every_linking_dependency_is_mapped_or_listed_unmapped(self):
         manifest = json.loads((HERE.parents[1] / dp.MANIFEST).read_text(encoding="utf-8"))
         unmapped = dp.load_unmapped()

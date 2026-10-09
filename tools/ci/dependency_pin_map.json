@@ -1,6 +1,7 @@
 {
  "schema": "pulp-dependency-pin-map/v1",
  "dependencies": {
+  "AudioUnitSDK": {"targets": ["ausdk"], "anchors": ["\\badd_library\\(ausdk\\b"]},
   "Brotli": {"fetchcontent": ["brotli"], "targets": ["pulp-canvas"]},
   "Catch2": {"fetchcontent": ["catch2"]},
   "DRACO": {"fetchcontent": ["draco"]},
@@ -12,6 +13,7 @@
   "SheenBidi": {"fetchcontent": ["sheenbidi"]},
   "simdjson": {"fetchcontent": ["simdjson"]},
   "Skia": {"archives": ["*/pulp/skia/*", "<src>/external/skia-build/*"], "anchors": ["\\bPULP_SKIA_AUTOFETCH\\b", "\\bset\\(PULP_HAS_SKIA FALSE\\b"]},
+  "VST3 SDK": {"targets": ["vst3-sdk"], "anchors": ["\\badd_library\\(vst3-sdk\\b"]},
   "WebGPU-distribution": {"fetchcontent": ["webgpu"]},
   "WOFF2": {"fetchcontent": ["woff2"], "targets": ["pulp-canvas"]},
   "yaml-cpp": {"fetchcontent": ["yaml-cpp"]},
@@ -19,7 +21,6 @@
  },
  "unmapped": {
   "AAX SDK": "developer-supplied SDK outside the build's pins, so a change moves all",
-  "AudioUnitSDK": "cloned SDK compiled into format targets without a target of its own, so a change moves all",
   "CHOC": "header-only: no target or archive to reach, so a change moves all",
   "CLAP": "header-only: no target or archive to reach, so a change moves all",
   "cpp-httplib": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
@@ -35,18 +36,17 @@
   "miniz": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "Moonbase": "example-only dependency outside the test build, so a change moves all",
   "msdfgen": "planned, not yet built, so a change moves all",
-  "MTS-ESP": "header-only: no target or archive to reach, so a change moves all",
+  "MTS-ESP": "optional client library behind PULP_ENABLE_MTS_ESP, off in the gate build, so a change moves all",
   "nanosvg": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "Noto Color Emoji": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
-  "Perfetto": "fetched by PulpTracing.cmake without a _deps build directory, so a change moves all",
+  "Perfetto": "declared in PulpTracing.cmake, which is not a pin file; when tracing is built the codemodel keys its sources, so a manifest change moves all",
   "pugixml": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "pybind11": "Python bindings, built outside the test executables, so a change moves all",
   "Remotion": "developer-supplied SDK outside the build's pins, so a change moves all",
-  "Surge Synth Team tuning-library": "header-only: no target or archive to reach, so a change moves all",
-  "three.js": "header-only: no target or archive to reach, so a change moves all",
+  "Surge Synth Team tuning-library": "optional parser behind PULP_ENABLE_SCALA_TUNING whose sources compile into its consumers, with no target of its own, so a change moves all",
+  "three.js": "JavaScript runtime pinned through tools/cmake/threejs-runtime-manifest.json; no executable compiles it, so a change moves all",
   "TweetNaCl": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
-  "V8": "prebuilt whose archives this build does not record, so a change moves all",
-  "Vellum D15 GPU provider": "developer-supplied prebuilt behind an opt-in, so a change moves all",
-  "VST3 SDK": "cloned SDK built into libvst3-sdk without a fetchcontent directory, so a change moves all"
+  "V8": "optional JS engine (PULP_JS_ENGINE=v8), not built in the gate build, so a change moves all",
+  "Vellum D15 GPU provider": "developer-supplied prebuilt behind an opt-in, so a change moves all"
  }
 }
