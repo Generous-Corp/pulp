@@ -127,6 +127,16 @@ set_tests_properties(cmake-js-engine-selection PROPERTIES
     LABELS "cmake;view;js-engine"
     TIMEOUT 30)
 
+# ARM64EC selects the scalar SIMD backend. The detection runs under `cmake -P`
+# against the real module, so every host checks the ARM64EC, ARM64 and x64
+# classifications without a Windows ARM64EC toolchain.
+add_test(NAME pulp-simd-arm64ec-detect
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_simd_support.cmake)
+set_tests_properties(pulp-simd-arm64ec-detect PROPERTIES
+    LABELS "cmake;simd"
+    TIMEOUT 30)
+
 # The Linux CLI's Scene3D archives need a render/scene rescan without placing
 # the higher-level recipe archive in that group. The latter depends back through
 # view and gpu-audio, which makes CMake reject the generated target graph.
