@@ -443,7 +443,8 @@ ahead of everything else:
 
 ```bash
 id=$(ghapp api repos/Generous-Corp/pulp/pulls/<fix-pr> --jq .node_id)
-GHAPP_ALLOW_QUEUE_REMOVAL=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
+GHAPP_ALLOW_QUEUE_REMOVAL=1 GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix \
+  ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
   dequeuePullRequest(input:{id:$id}){mergeQueueEntry{id}}}'
 GHAPP_ALLOW_REARM=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
   enqueuePullRequest(input:{pullRequestId:$id,jump:true}){mergeQueueEntry{position}}}'
@@ -455,6 +456,13 @@ title or body names the failing test or the change being reverted. If no fix PR
 exists, open the revert or the one-line fix and jump that. Record the PR, the
 failing test, and how long main was red. Jumping anything else, or switching on
 an automatic jump, is a maintainer decision.
+
+**The pre-approval is narrow.** `GHAPP_ALLOW_QUEUE_REMOVAL=1` is pre-approved
+only to dequeue the fix PR itself so it can be re-enqueued at the front, and only
+while main is red. Every such call carries
+`GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`, which the queue-removal guard
+logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
+queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
 
 ## Wait on a blocking waiter, not a poll loop
 
@@ -6193,6 +6201,31 @@ ghapp api graphql -f query='mutation{dequeuePullRequest(input:{id:"PR_kwDO..."})
 
 Treat that as an authority action on someone's queued work, not a routine step —
 `ghapp` guards it deliberately.
+
+**A queued PR never needs a rebase, and main moving is never a reason to
+dequeue.** The queue builds every entry on top of current main and the entries
+ahead of it, so `BEHIND` on a queued PR means nothing. Rebasing or merging main
+into it means dequeuing it, and then the push, the pre-push build, the re-queue
+and a fresh gate all repeat; in October 2026, 34 of 46 dequeues were exactly
+this, one PR ten times over.
+
+- **Dequeue only to change the PR's content.** A real fix to the PR itself (a
+  failing check that is its own fault, a review change) is the one reason.
+  Main advancing, a conflict GitHub has not reported, or wanting a fresh gate
+  are not.
+- **To put a fix in front of the queue, jump it; never dequeue the PRs ahead.**
+  Run `shipyard base-health` to read the base-poison signal and print the jump
+  commands for the named fix PR (`enqueuePullRequest` with `jump: true`, see
+  "Main is red" above). `shipyard base-health --act` applies them when
+  `base_health.auto_jump` allows it. Dequeuing other people's entries to make
+  room throws away their in-flight merge-group runs and gains nothing the jump
+  does not.
+- **`GHAPP_ALLOW_QUEUE_REMOVAL=1` needs Daniel's explicit OK.** The `ghapp`
+  queue-removal guard exists because nearly every dequeue it saw was one of the
+  avoidable cases above. The single standing exception is the main-red fix
+  reorder above, tagged `GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`.
+  Anything else is Daniel's decision, made for a named PR; it is never
+  something an agent turns on to get past the guard.
 
 ### Shipyard validated green but could NOT merge — the sanctioned fallback
 
