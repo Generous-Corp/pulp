@@ -1066,8 +1066,12 @@ jobs:
             )
             if python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "0.918.0"; then
               test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
+              test -f build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
+              test -f build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
               import_design_args+=(
                 --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
+                --import-design-source-emitter build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
+                --import-design-ids-map build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
               )
             else
               import_design_args+=(--allow-missing-import-design-contract)
@@ -1119,12 +1123,18 @@ jobs:
               'build/tools/import-design/Release/browser_capture-v1'
             )
             if ([version]$env:RELEASE_TAG.TrimStart('v') -ge [version]'0.918.0') {
-              if (!(Test-Path build/tools/import-design/Release/jsx-runtime/materialized_binding_contract.mjs)) {
-                throw 'materialized binding contract missing from import-design build staging'
+              foreach ($sibling in @('materialized_binding_contract.mjs', 'materialized_source_emitter.mjs', 'materialized_ids_map.mjs')) {
+                if (!(Test-Path "build/tools/import-design/Release/jsx-runtime/$sibling")) {
+                  throw "$sibling missing from import-design build staging"
+                }
               }
               $importDesignArgs += @(
                 '--import-design-contract',
-                'build/tools/import-design/Release/jsx-runtime/materialized_binding_contract.mjs'
+                'build/tools/import-design/Release/jsx-runtime/materialized_binding_contract.mjs',
+                '--import-design-source-emitter',
+                'build/tools/import-design/Release/jsx-runtime/materialized_source_emitter.mjs',
+                '--import-design-ids-map',
+                'build/tools/import-design/Release/jsx-runtime/materialized_ids_map.mjs'
               )
             } else {
               $importDesignArgs += '--allow-missing-import-design-contract'

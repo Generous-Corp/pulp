@@ -328,11 +328,38 @@ def resolve_cli() -> str:
 
 
 def _api(args: list[str]) -> Any:
+    # `gh api --paginate` writes one JSON document per page unless --slurp is
+    # present.  Slurp the pages so the stdout stream is always one valid JSON
+    # document; the callers below flatten the endpoint's row key explicitly.
+    command = list(args)
+    if "--paginate" in command and "--slurp" not in command:
+        command.append("--slurp")
     out = subprocess.run(
-        [resolve_cli(), "api", *args],
+        [resolve_cli(), "api", *command],
         check=True, capture_output=True, text=True, encoding="utf-8"
     )
     return json.loads(out.stdout)
+
+
+def _paginated_rows(data: Any, key: str) -> list[Any]:
+    """Flatten a slurped GitHub response into rows for *key*.
+
+    `gh --paginate --slurp` returns a list of page objects.  Fixture and
+    single-page callers still commonly provide one object, so accept both
+    shapes while rejecting malformed page rows through the normal parsers.
+    """
+    if isinstance(data, list) and data and not any(
+            isinstance(page, dict) and key in page for page in data):
+        # Already-flattened fixture rows (the shape used by the pure tests).
+        return data
+    pages = data if isinstance(data, list) else [data]
+    rows: list[Any] = []
+    for page in pages:
+        if isinstance(page, dict):
+            value = page.get(key, [])
+            if isinstance(value, list):
+                rows.extend(value)
+    return rows
 
 
 def fetch_runners(repo: str) -> list[Runner]:
@@ -403,12 +430,13 @@ def _count_warnings(payload: Any, scope: str) -> list[str]:
     when it means "you did not receive them" — the misreading that cost a
     session on 2026-08-16.
     """
-    if not isinstance(payload, dict):
+    pages = payload if isinstance(payload, list) else [payload]
+    totals = [p.get("total_count") for p in pages
+              if isinstance(p, dict) and isinstance(p.get("total_count"), int)]
+    if not totals:
         return []
-    total = payload.get("total_count")
-    rows = payload.get("runners")
-    if not isinstance(total, int) or not isinstance(rows, list):
-        return []
+    rows = _paginated_rows(payload, "runners")
+    total = max(totals)
     if len(rows) != total:
         return [
             f"{scope} returned {len(rows)} runner rows but reports "
@@ -418,7 +446,7 @@ def _count_warnings(payload: Any, scope: str) -> list[str]:
 
 
 def parse_runners(data: Any) -> list[Runner]:
-    runners = data.get("runners", data) if isinstance(data, dict) else data
+    runners = _paginated_rows(data, "runners") if isinstance(data, (dict, list)) else data
     return [
         Runner(
             name=r["name"],
@@ -436,7 +464,7 @@ def fetch_variables(repo: str) -> dict[str, str]:
 
 
 def parse_variables(data: Any) -> dict[str, str]:
-    items = data.get("variables", data) if isinstance(data, dict) else data
+    items = _paginated_rows(data, "variables") if isinstance(data, (dict, list)) else data
     return {v["name"]: v["value"] for v in items}
 
 

@@ -286,7 +286,7 @@ TEST_CASE("remove_project matches canonical relative paths",
     REQUIRE(read_registry(reg).empty());
 }
 
-TEST_CASE("scan_parent_pulp_projects finds ancestor CMakeLists.txt with pulp_add_*",
+TEST_CASE("scan_parent_pulp_projects finds ancestor CMakeLists.txt with a pulp_add_ call",
           "[projects-registry][issue-552]") {
     TempDir tmp;
     auto outer = tmp.path / "outer";

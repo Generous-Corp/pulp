@@ -178,6 +178,11 @@ pulp_add_test_suite(pulp-test-audio-device-manager
 pulp_add_test_suite(pulp-test-dsp-enhancements GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 
+# Product-independent spectrum-weighted loudness compensation and its RT contract.
+pulp_add_test_suite(pulp-test-loudness-compensation
+    SOURCES test_loudness_compensation.cpp
+    LIBRARIES pulp::signal)
+
 # Elliptic / Jacobi special functions (pulp::signal::special). Kept in its
 # own binary so future elliptic IIR design tests can live
 # beside it without bloating pulp-test-dsp-enhancements.
@@ -709,7 +714,9 @@ pulp_test_data(pulp-test-gpu-wavenet-session PATHS test/fixtures/neural/example.
 # validates model metadata before any provider resource or handle is created.
 pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
     SOURCES test_gpu_shared_io_wavenet_spec.cpp
-    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+    INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+        ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     target_link_libraries(pulp-test-gpu-shared-io-wavenet-spec PRIVATE pulp::gpu-audio)
     target_compile_definitions(pulp-test-gpu-shared-io-wavenet-spec

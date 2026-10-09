@@ -515,13 +515,15 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
         // plugins) so the propagated delays match exactly.
         if (node.type == NodeType::Plugin) {
             PluginSlot* slot = plugin_for ? plugin_for(node.id) : nullptr;
-            if (slot != nullptr) {
-                // 2.2b (H2): prefer cached latency; latency_samples() is a live
-                // plugin call unsafe concurrent with process() during a swap.
-                const int lat = plugin_latency_for ? plugin_latency_for(node.id)
-                                                    : slot->latency_samples();
-                spec.latency_samples = static_cast<std::uint32_t>(std::max(0, lat));
-            }
+            // ProcessorNode deliberately reuses the Plugin topology kind and
+            // has no PluginSlot. The cached resolver is therefore the source
+            // of truth for both node kinds; unresolved plugins still resolve
+            // to zero when no slot or cache entry exists.
+            // 2.2b (H2): prefer cached latency; latency_samples() is a live
+            // plugin call unsafe concurrent with process().
+            const int lat = plugin_latency_for ? plugin_latency_for(node.id)
+                                               : (slot != nullptr ? slot->latency_samples() : 0);
+            spec.latency_samples = static_cast<std::uint32_t>(std::max(0, lat));
         } else if (node.type == NodeType::Custom && custom_latency_for) {
             spec.latency_samples = static_cast<std::uint32_t>(
                 std::max(0, custom_latency_for(node.id)));

@@ -13,7 +13,7 @@
 
 namespace pulp::gpu_audio::detail {
 
-struct DawnSharedIoWavenetLayerSpec {
+struct WavenetLayerSpec {
     std::uint32_t input_size = 0;
     std::uint32_t condition_size = 0;
     std::uint32_t channels = 0;
@@ -24,15 +24,15 @@ struct DawnSharedIoWavenetLayerSpec {
     std::span<const std::uint32_t> dilations;
 };
 
-struct DawnSharedIoWavenetProgramSpec {
+struct WavenetProgramSpec {
     std::uint32_t block_size = 0;
     float head_scale = 1.0f;
     std::uint32_t stream_instances = 0;
-    std::span<const DawnSharedIoWavenetLayerSpec> arrays;
+    std::span<const WavenetLayerSpec> arrays;
     std::span<const float> weights;
 };
 
-enum class DawnSharedIoWavenetSpecError : std::uint8_t {
+enum class WavenetSpecError : std::uint8_t {
     None,
     InvalidShape,
     MissingArrays,
@@ -47,24 +47,23 @@ enum class DawnSharedIoWavenetSpecError : std::uint8_t {
     InvalidScale,
 };
 
-struct DawnSharedIoWavenetSpecValidation {
-    DawnSharedIoWavenetSpecError error = DawnSharedIoWavenetSpecError::None;
+struct WavenetSpecValidation {
+    WavenetSpecError error = WavenetSpecError::None;
 
     constexpr bool accepted() const noexcept {
-        return error == DawnSharedIoWavenetSpecError::None;
+        return error == WavenetSpecError::None;
     }
 };
 
 // Mirrors the flat weight order consumed by render::GpuCompute's WaveNet
 // primitive.  No resource is allocated and no provider is touched here.
-constexpr DawnSharedIoWavenetSpecValidation
-validate_dawn_shared_io_wavenet_spec(const DawnSharedIoWavenetProgramSpec& spec) noexcept {
+constexpr WavenetSpecValidation validate_wavenet_spec(const WavenetProgramSpec& spec) noexcept {
     if (spec.block_size == 0 || spec.stream_instances == 0)
-        return {DawnSharedIoWavenetSpecError::InvalidShape};
+        return {WavenetSpecError::InvalidShape};
     if (spec.arrays.empty())
-        return {DawnSharedIoWavenetSpecError::MissingArrays};
+        return {WavenetSpecError::MissingArrays};
     if (spec.weights.empty())
-        return {DawnSharedIoWavenetSpecError::MissingWeights};
+        return {WavenetSpecError::MissingWeights};
 
     std::uint64_t required = 0;
     for (std::size_t a = 0; a < spec.arrays.size(); ++a) {
@@ -72,44 +71,44 @@ validate_dawn_shared_io_wavenet_spec(const DawnSharedIoWavenetProgramSpec& spec)
         if (layer.channels == 0 || layer.channels > 64 || layer.kernel == 0 ||
             layer.head_size == 0 || layer.dilations.empty() || layer.gated > 1 ||
             layer.head_bias > 1)
-            return {DawnSharedIoWavenetSpecError::InvalidLayer};
+            return {WavenetSpecError::InvalidLayer};
         if (layer.condition_size != 1)
-            return {DawnSharedIoWavenetSpecError::InvalidCondition};
+            return {WavenetSpecError::InvalidCondition};
         const auto expected_input = a == 0 ? 1u : spec.arrays[a - 1].channels;
         if (layer.input_size != expected_input ||
             (a > 0 && spec.arrays[a - 1].head_size != layer.channels))
-            return {DawnSharedIoWavenetSpecError::InvalidChain};
+            return {WavenetSpecError::InvalidChain};
 
         const auto z = layer.gated != 0 ? 2ull * layer.channels : layer.channels;
         required += static_cast<std::uint64_t>(layer.channels) * layer.input_size;
         if (required > std::numeric_limits<std::uint32_t>::max())
-            return {DawnSharedIoWavenetSpecError::ResourceOverflow};
+            return {WavenetSpecError::ResourceOverflow};
         for (const auto dilation : layer.dilations) {
             if (dilation == 0)
-                return {DawnSharedIoWavenetSpecError::InvalidDilation};
+                return {WavenetSpecError::InvalidDilation};
             const auto reach = static_cast<std::uint64_t>(layer.kernel - 1u) * dilation;
             if (reach > std::numeric_limits<std::uint32_t>::max() - spec.block_size)
-                return {DawnSharedIoWavenetSpecError::HistoryOverflow};
+                return {WavenetSpecError::HistoryOverflow};
             required += z * layer.channels * layer.kernel + z + z * layer.condition_size +
                         static_cast<std::uint64_t>(layer.channels) * layer.channels +
                         layer.channels;
             if (required > std::numeric_limits<std::uint32_t>::max())
-                return {DawnSharedIoWavenetSpecError::ResourceOverflow};
+                return {WavenetSpecError::ResourceOverflow};
         }
         required += static_cast<std::uint64_t>(layer.head_size) * layer.channels;
         if (layer.head_bias != 0)
             required += layer.head_size;
         if (required >= std::numeric_limits<std::uint32_t>::max())
-            return {DawnSharedIoWavenetSpecError::ResourceOverflow};
+            return {WavenetSpecError::ResourceOverflow};
     }
     if (spec.arrays.back().head_size != 1)
-        return {DawnSharedIoWavenetSpecError::InvalidChain};
+        return {WavenetSpecError::InvalidChain};
     ++required; // trailing head_scale
     if (required != spec.weights.size())
-        return {DawnSharedIoWavenetSpecError::WeightBlobMismatch};
+        return {WavenetSpecError::WeightBlobMismatch};
     if (!std::isfinite(spec.head_scale) || !std::isfinite(spec.weights.back()) ||
         spec.weights.back() != spec.head_scale)
-        return {DawnSharedIoWavenetSpecError::InvalidScale};
+        return {WavenetSpecError::InvalidScale};
     return {};
 }
 

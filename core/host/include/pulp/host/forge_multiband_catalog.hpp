@@ -7,7 +7,7 @@
 // that composition made directly lowerable, not a parallel DSP implementation.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/linkwitz_riley.hpp>
 

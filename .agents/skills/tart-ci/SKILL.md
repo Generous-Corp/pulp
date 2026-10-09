@@ -53,6 +53,13 @@ Pulp labels and host declarations out of generic TartCI/Shipyard code.
 | `pulp-worktree.sh` | Per-branch worktrees + shared ccache (host-side dev isolation; complements the VM lane). |
 | `.shipyard/vm-image.toml` | **The per-repo reuse unit** (see below). |
 
+The direct Tart guest build must invoke `tools/ci/governed-build.sh` for its
+`cmake --build` step. The guest may have a TartCI profile or may run standalone;
+the governed wrapper selects the bounded lease/profile share or its tier-0
+fallback in either case. Do not reintroduce a caller-owned `--parallel` value
+in `tart-run-job.sh`, because that bypasses the same build policy used by the
+local and Shipyard paths.
+
 The reusable runner path is now the sibling `tartci` repo:
 - `tartci serve macos --once|--loop --labels ...` owns ephemeral JIT runners.
 - `tartci observe macos --json [--runner <name>]` ties GitHub job, local VM,
@@ -375,7 +382,7 @@ main, reddening every PR's macOS gate.)
 - **Sanitizer VM lane — the first idle-gate consumer; localize TSan only.** `tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template` (label `pulp-sanitizer-vm-macos`, workflow `Sanitizer Tests`, cap=1, shared `$HOME/VMs`, merge-group-aware idle-gate env) serves the advisory sanitizer matrix. M1 is no longer a dedicated advisory host: its two event-class-v2 gate slots make the yield keys mandatory there. Pilot is **TSan only**: it is the longest leg (scoped `-j1` serial, ~45 min on `macos-14`), the highest-value for the threaded audio model, and single-core-bound so it gains most from a local M-series host. ASan stays on `macos-15` and UBSan stays on `macos-26` — the four run in parallel on GitHub but serialize (~4×) on one cap=1 lane, slower than hosted except during a backlog; full parallel local sanitizers need a 3rd host. `sanitizers.yml` carries `--deny-labels pulp-build,pulp-build-vm` on the 3 macOS sanitizers so one can never land on the gate pool. Flip `PULP_SANITIZER_TSAN_RUNS_ON_JSON` only after a `workflow_dispatch` proof on the lane, one sanitizer at a time behind a measured gate-latency + matrix-wall-clock go/no-go.
 
 - **A VM boots but never gets an IP: triage the host's VM network top-down, and do not "fix" the normal idle state.** Observed on m5 after a reboot on 2026-10-07: no VM got an address for about 6 h. Tart's NAT network is vmnet shared mode. InternetSharing (`com.apple.NetworkSharing`) creates `bridge100` per VM and writes bootpd's config, and bootpd hands out the address. Check the layers in order; a lower one cannot help until the one above it works:
-  1. **While `tart run` is up, does `bridge100` appear?** (`ifconfig -l`). If it doesn't, the VM network was never created. Read `launchctl print system/com.apple.pfd` (no root). On m5, pfd, which InternetSharing waits on, sat in `spawn scheduled` with `last exit code = 3` and thousands of runs, logging only "no pf starter references held", so InternetSharing never answered any VM. A healthy pfd stays `running`. Restarting the InternetSharing process did not help there. There is no verified remedy yet; compare `sudo pfctl -s info` and `sudo pfctl -s References` with a healthy host. The Internet Sharing toggle and a reboot are the known resets.
+  1. **While `tart run` is up, does `bridge100` appear?** (`ifconfig -l`). If it doesn't, the VM network was never created. Read `launchctl print system/com.apple.pfd` (no root). On m5, pfd, which InternetSharing waits on, sat in `spawn scheduled` with `last exit code = 3` and thousands of runs, logging only "no pf starter references held", so InternetSharing never answered any VM. A healthy pfd serves its requests and then idle-exits with `last exit code = 0`; exit 3 with a climbing run count is the fault. The cause was pf left `Disabled` with no enable reference after a reboot (`sudo pfctl -s info`, `sudo pfctl -s References`). **The fix, verified on m5 on 2026-10-07: `sudo pfctl -E`.** It takes one ref-counted pf enable reference and prints a token; keep the token, which is the undo key (`sudo pfctl -X <token>`). pfd then serves, bridge100 comes up on the next VM, and the VM-DHCP breaker closes on its probe's address. The reference does not survive a reboot, so after any reboot check pfd again. Restarting the InternetSharing process did not help.
   2. **`bridge100` is up but bootpd is not loaded**: `launchctl print system/com.apple.bootpd` exits 113, "Could not find service". Run `sudo launchctl bootstrap system /System/Library/LaunchDaemons/bootps.plist`, proven on m5 with SIP on. A bootpd kickstart, or disable/enable, cannot load a job launchd doesn't have.
   3. **Loaded but silent**: `sudo launchctl kickstart -k system/com.apple.bootpd`.
 
@@ -383,7 +390,7 @@ main, reddening every PR's macOS gate.)
   - the Internet Sharing switch reading OFF in System Settings;
   - an idle `/etc/bootpd.plist` with `dhcp_enabled = false`. InternetSharing rewrites it with `[bridge100]` and a `Subnets` entry when a VM's network comes up, and an idle healthy m3 reads exactly that. Never move it, or `/Library/Preferences/SystemConfiguration/com.apple.vmnet.plist`, aside.
 
-  Never kickstart `com.apple.NetworkSharing` (SIP refuses it: "150: Operation not permitted while System Integrity Protection is engaged"), and never `pfctl -d`. On the host, `tartci doctor fleet` names the failing layer (`vm_dhcp_*`) once the installed tartci records it, and the VM-DHCP breaker probes again by itself.
+  Never kickstart `com.apple.NetworkSharing` (SIP refuses it: "150: Operation not permitted while System Integrity Protection is engaged"), and never `pfctl -d` (it drops every holder's references; undo your own `-E` with `pfctl -X <token>` instead). On the host, `tartci doctor fleet` names the failing layer (`vm_dhcp_*`) once the installed tartci records it, and the VM-DHCP breaker probes again by itself.
 
 ## Store & hygiene
 **`TART_HOME` is declared by the host, never by the repo** — hosts with an external build SSD keep the store on a `/Volumes` mount, hosts on internal storage keep it under `$HOME`, and both are correct. Exclude it from Spotlight (`.metadata_never_index`). Tag goldens `:<date>` + roll `:latest`. Ephemeral job VMs are deleted after use; confirm cleanup (`tart delete` fails silently on a *running* VM — stop → delete → verify). Reclaim with `tart-provision.sh list` + prune.

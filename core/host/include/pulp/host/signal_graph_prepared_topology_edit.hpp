@@ -7,6 +7,12 @@
 
 namespace pulp::host {
 
+namespace detail {
+struct QuiescedPluginLifecycle;
+struct QuiescedCustomLifecycle;
+struct QuiescedProcessorLifecycle;
+} // namespace detail
+
 /// Passkey authorizing exact-parameter-event node claims on a prepared edit.
 /// Only TimelineGraphPlaybackBinding can mint one, so ownership of a node's
 /// exact-generation writer stays with the timeline binding without granting it
@@ -146,22 +152,6 @@ class SignalGraph::PreparedTopologyEdit {
                                              std::string message, NodeId node = 0);
     std::optional<Result> sample_region_preparation_result_(double sample_rate, int max_block_size);
 
-    struct QuiescedPluginLifecycle {
-        std::shared_ptr<PluginSlot> plugin;
-        bool touched = false;
-    };
-    struct QuiescedCustomLifecycle {
-        std::shared_ptr<void> instance;
-        std::function<void(void*, double, int)> prepare;
-        std::function<void(void*)> release;
-        bool touched = false;
-    };
-    struct QuiescedProcessorLifecycle {
-        std::shared_ptr<format::ProcessorNodeInstance> processor;
-        int input_channels = 0;
-        int output_channels = 0;
-    };
-
     template <typename Fn> NodeId add_node_(Fn&& fn) {
         if (mutation_failed_ || committed_ || prepare_attempted_) {
             mutation_failed_ = true;
@@ -191,9 +181,9 @@ class SignalGraph::PreparedTopologyEdit {
     std::unordered_set<std::string> baseline_registry_keys_;
     std::unordered_set<std::string> replaced_registry_keys_;
     std::vector<NodeId> prepared_new_custom_ids_;
-    std::vector<QuiescedPluginLifecycle> quiesced_plugins_;
-    std::vector<QuiescedCustomLifecycle> quiesced_customs_;
-    std::vector<QuiescedProcessorLifecycle> quiesced_processors_;
+    std::vector<detail::QuiescedPluginLifecycle> quiesced_plugins_;
+    std::vector<detail::QuiescedCustomLifecycle> quiesced_customs_;
+    std::vector<detail::QuiescedProcessorLifecycle> quiesced_processors_;
     std::uint64_t base_authoring_generation_ = 0;
     std::shared_ptr<SignalGraph::CompiledGraph> base_live_;
     bool base_canonical_routing_ = false;

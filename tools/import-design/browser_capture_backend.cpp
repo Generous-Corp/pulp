@@ -3,6 +3,8 @@
 #include "browser_capture_diagnostics.hpp"
 #include "node_runtime.hpp"
 
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -29,6 +31,20 @@
 #endif
 
 namespace pulp::import_design::browser_capture {
+
+std::string canonical_browser_product(std::string_view product) {
+    while (!product.empty() && product.back() == '/')
+        product.remove_suffix(1);
+    const auto matches = [&](std::string_view alias) {
+        return product.size() >= alias.size() && product.compare(0, alias.size(), alias) == 0 &&
+               (product.size() == alias.size() || product[alias.size()] == ' ' ||
+                product[alias.size()] == '/');
+    };
+    if (matches("Google Chrome") || matches("Google Chrome for Testing") ||
+        matches("Chrome for Testing") || matches("Chrome"))
+        return "Chrome";
+    return std::string(product);
+}
 
 int probe_timeout_from_environment(int fallback_ms) {
     const char* value = std::getenv("PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS");
@@ -118,6 +134,18 @@ std::string one_line(std::string value) {
         value += "...";
     }
     return value;
+}
+
+std::optional<std::string> capability_string(std::string_view output, const char* key) {
+    try {
+        const auto value = choc::json::parse(std::string(output));
+        if (!value.isObject() || !value.hasObjectMember(key) || !value[key].isString())
+            return std::nullopt;
+        const auto parsed = value[key].toString();
+        return parsed.empty() ? std::nullopt : std::optional<std::string>{parsed};
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 std::string sanitize_subprocess_output(std::string value) {
@@ -497,12 +525,17 @@ std::optional<fs::path> prepare_capture_output_directory(
         return std::nullopt;
     }
 
-    constexpr std::array<std::string_view, 7> kGeneratedArtifacts{
+    constexpr std::array<std::string_view, 12> kGeneratedArtifacts{
         "capture.json",
         "browser.png",
+        "browser-static.png",
+        "browser-chrome.png",
+        "browser-canvas-composite.png",
         "semantic-report.json",
         "tokens.json",
         "dom-snapshot.json",
+        "platform-fonts.json",
+        "materialized-document.json",
         "interaction-report.json",
         "capture-error.json",
     };
@@ -513,6 +546,24 @@ std::optional<fs::path> prepare_capture_output_directory(
                 + std::string(name) + ": " + ec.message();
             return std::nullopt;
         }
+    }
+    // The number and IDs of captured canvases vary between runs. Enumerate
+    // only the capture-owned canvas PNG name pattern; preserve unrelated files
+    // in a caller-supplied output directory.
+    for (fs::directory_iterator it(output, ec), end; !ec && it != end; it.increment(ec)) {
+        const auto name = it->path().filename().string();
+        if (name.size() <= 11 || name.compare(0, 7, "canvas-") != 0 ||
+            name.compare(name.size() - 4, 4, ".png") != 0)
+            continue;
+        fs::remove(it->path(), ec);
+        if (ec) {
+            error = "could not clear prior capture artifact " + name + ": " + ec.message();
+            return std::nullopt;
+        }
+    }
+    if (ec) {
+        error = "could not inspect prior capture artifacts: " + ec.message();
+        return std::nullopt;
     }
     return output;
 }
@@ -679,6 +730,43 @@ BrowserProbeResult probe_browser(
         return result;
     }
 
+    // The probe's stdout is the identity proof from the CDP session. Do not
+    // select a browser when the runtime omitted protocol/build metadata;
+    // accepting a merely non-empty envelope field would allow stale capture
+    // metadata to masquerade as the selected executable.
+    const auto capability_product = capability_string(process.stdout_output, "product");
+    const auto capability_protocol = capability_string(process.stdout_output, "protocolVersion");
+    const auto capability_build = capability_string(process.stdout_output, "revision");
+    if (!capability_product || !capability_protocol || !capability_build) {
+        result.failure_kind = BrowserProbeFailure::capture_capability_unavailable;
+        result.failure =
+            "browser CDP capability probe omitted product, protocol, or build identity";
+        return result;
+    }
+    std::string capability_product_name;
+    std::string capability_version;
+    int capability_major = 0;
+    if (!parse_browser_version(*capability_product, capability_product_name, capability_version,
+                               capability_major) ||
+        capability_version != result.version) {
+        result.failure_kind = BrowserProbeFailure::capture_capability_unavailable;
+        result.failure = "browser CDP capability identity does not match --version";
+        return result;
+    }
+    if (canonical_browser_product(capability_product_name) !=
+        canonical_browser_product(result.product)) {
+        result.failure_kind = BrowserProbeFailure::capture_capability_unavailable;
+        result.failure = "browser CDP product family does not match --version";
+        return result;
+    }
+    if (capability_major != result.major_version) {
+        result.failure_kind = BrowserProbeFailure::capture_capability_unavailable;
+        result.failure = "browser CDP capability major version does not match --version";
+        return result;
+    }
+    result.protocol_version = *capability_protocol;
+    result.build_hash = *capability_build;
+
     result.compatible = true;
     result.failure_kind = BrowserProbeFailure::none;
     return result;
@@ -725,12 +813,11 @@ BrowserDiscoveryResult discover_browser(
         result.probes.push_back(candidate_result);
         if (!candidate_result.compatible) continue;
 
-        result.selected = BrowserInstallation{
-            candidate.executable,
-            candidate.origin,
-            candidate_result.product,
-            candidate_result.version,
-            candidate_result.major_version};
+        result.selected =
+            BrowserInstallation{candidate.executable,           candidate.origin,
+                                candidate_result.product,       candidate_result.version,
+                                candidate_result.major_version, candidate_result.protocol_version,
+                                candidate_result.build_hash};
         return result;
     }
 
@@ -808,20 +895,34 @@ CaptureResult capture_document(
             *output_directory);
     }
 
-    std::vector<std::string> args{
-        script->string(),
-        "capture",
-        "--browser", browser.executable.string(),
-        "--browser-product", browser.product,
-        "--browser-version", browser.version,
-        "--browser-origin", browser_origin_name(browser.origin),
-        "--input", canonical_input.string(),
-        "--root", canonical_root.string(),
-        "--output", output_directory->string(),
-        "--profile-dir", profile->path.string(),
-        "--initial-height", std::to_string(request.initial_height),
-        "--dpr", std::to_string(request.device_scale_factor),
-        "--timeout-ms", std::to_string(request.timeout_ms)};
+    std::vector<std::string> args{script->string(),
+                                  "capture",
+                                  "--browser",
+                                  browser.executable.string(),
+                                  "--browser-product",
+                                  browser.product,
+                                  "--browser-version",
+                                  browser.version,
+                                  "--browser-protocol-version",
+                                  browser.protocol_version,
+                                  "--browser-build-hash",
+                                  browser.build_hash,
+                                  "--browser-origin",
+                                  browser_origin_name(browser.origin),
+                                  "--input",
+                                  canonical_input.string(),
+                                  "--root",
+                                  canonical_root.string(),
+                                  "--output",
+                                  output_directory->string(),
+                                  "--profile-dir",
+                                  profile->path.string(),
+                                  "--initial-height",
+                                  std::to_string(request.initial_height),
+                                  "--dpr",
+                                  std::to_string(request.device_scale_factor),
+                                  "--timeout-ms",
+                                  std::to_string(request.timeout_ms)};
     args.push_back(request.pinned_width ? "--width" : "--initial-width");
     args.push_back(std::to_string(capture_width));
     if (request.fit_authored_frame) args.push_back("--fit-authored-frame");

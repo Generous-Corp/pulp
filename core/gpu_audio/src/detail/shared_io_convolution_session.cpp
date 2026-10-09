@@ -1,23 +1,11 @@
 #include "shared_io_convolution_session.hpp"
 
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-#include "dawn_shared_io_provider.hpp"
-#endif
-
 #include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <limits>
 
 namespace pulp::gpu_audio::detail {
-
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-// The provider is one member of the static gpu-audio archive. Keep an
-// explicit unresolved edge from this session member to the provider member so
-// Apple's one-pass archive scan pulls both members when a consumer only uses
-// the session API. This is a link-time anchor; it does no runtime work.
-void ensure_dawn_shared_io_provider_linked() noexcept;
-#endif
 
 namespace {
 
@@ -64,39 +52,15 @@ SharedIoExecutionContract SharedIoConvolutionSession::execution_contract() const
 }
 
 SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const noexcept {
-    SharedIoProviderIdentity identity;
-#if !defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    return identity;
-#else
-    const auto* provider = dynamic_cast<const DawnSharedIoProvider*>(provider_.get());
-    if (provider == nullptr)
-        return identity;
-    ensure_dawn_shared_io_provider_linked();
-    try {
-        const auto adapter = provider->adapter_identity();
-        identity.provider_revision = provider->dawn_revision();
-        identity.adapter_name = adapter.name;
-        identity.adapter_backend = adapter.backend;
-        identity.adapter_vendor_id = adapter.vendor_id;
-        identity.adapter_device_id = adapter.device_id;
-        identity.native_runtime_name = adapter.native_runtime_name;
-        identity.native_runtime_backend = adapter.backend;
-        identity.authenticated =
-            !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
-            identity.adapter_backend == "metal" && identity.adapter_vendor_id != 0 &&
-            !adapter.native_runtime_revision.empty() &&
-            adapter.native_runtime_revision == identity.provider_revision &&
-            !identity.native_runtime_name.empty() &&
-            identity.native_runtime_backend == identity.adapter_backend;
-        // Metal may report device ID zero for a valid Apple adapter.  Zero is
-        // an observed identifier, not an absent identity; backend, vendor,
-        // name, and immutable provider revision remain mandatory above.
-        identity.native_runtime_authenticated = identity.authenticated;
-    } catch (...) {
-        return SharedIoProviderIdentity{};
-    }
-#endif
-    return identity;
+    if (provider_ == nullptr)
+        return {};
+    return provider_->provider_identity();
+}
+
+SharedIoProviderCapabilities SharedIoConvolutionSession::provider_capabilities() const noexcept {
+    if (provider_ == nullptr)
+        return {};
+    return provider_->provider_capabilities();
 }
 
 bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
@@ -365,6 +329,7 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
         // provider and let explicit release()/destruction retry its barrier.
         return false;
     }
+    plan_.set_prediction_policy(config.prediction);
     if (!pipeline_.prepare(config.pipeline, plan_.preparation_epoch())) {
         (void)plan_.release();
         return false;
@@ -420,6 +385,25 @@ bool SharedIoConvolutionSession::pack_input(const SharedIoConvolutionPipeline::L
         }
     }
     return true;
+}
+
+std::optional<std::uint64_t> SharedIoConvolutionSession::callback_deadline_ns(
+    const SharedIoConvolutionPipeline::Lease& ingress) const noexcept {
+    const auto callback_start_ns = ingress.callback_ingress_ns();
+    if (!config_.pipeline.capture_callback_timing)
+        return std::uint64_t{0};
+    if (callback_start_ns == 0 || config_.sample_rate == 0)
+        return std::nullopt;
+
+    // Match the private convolution callback's existing one-block budget. A
+    // A minimum keeps low-rate or very small blocks from becoming an immediate
+    // admission refusal. Unknown or overflowing timestamps fail closed.
+    const auto block_ns =
+        (std::uint64_t(config_.pipeline.block_size) * 1'000'000'000ull) / config_.sample_rate;
+    const auto budget_ns = std::max<std::uint64_t>(1'000'000ull, block_ns);
+    if (callback_start_ns > std::numeric_limits<std::uint64_t>::max() - budget_ns)
+        return std::nullopt;
+    return callback_start_ns + budget_ns;
 }
 
 bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
@@ -526,13 +510,38 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
                 pipeline.end_worker_admission();
             }
         } admission{pipeline_};
-        auto input = plan_.acquire_input(pending_ingress_->stamp().sequence, 0);
+
+        const auto deadline = callback_deadline_ns(*pending_ingress_);
+        const auto prediction_refusals = plan_.telemetry().prediction_refusals;
+        auto input = deadline ? plan_.acquire_input(pending_ingress_->stamp().sequence, *deadline)
+                              : std::optional<SharedIoArena::WriteLease>{};
         if (!input) {
-            if (plan_.available_slots() == 0)
+            const bool refused =
+                !deadline || plan_.telemetry().prediction_refusals > prediction_refusals;
+            if (!refused && plan_.available_slots() == 0)
                 ++provider_starved_;
-            return true; // retain the bridge lease until a physical slot retires.
+            if (!refused)
+                return true; // retain the bridge lease until a physical slot retires.
+
+            const auto stamp = pending_ingress_->stamp();
+            const bool released = pipeline_.release_input(*pending_ingress_);
+            if (!released)
+                return false;
+            pending_ingress_.reset();
+            ++result.refused;
+            ++result.dropped_ingress;
+            if (!pipeline_.record_terminal(stamp, SharedIoConvolutionPipeline::Terminal::Failed,
+                                           {})) {
+                fail_closed();
+                return false;
+            }
+            ++result.terminal_records;
+            pipeline_.drain_terminals();
+            continue;
         }
-        const auto submit = SharedIoComputePlan::SubmitToken{input->token, 0};
+
+        const auto deadline_ns = *deadline;
+        const auto submit = SharedIoComputePlan::SubmitToken{input->token, deadline_ns};
         trace_admit(input->token);
         trace_stage(input->token, SharedIoTraceStage::EncodeBegin);
         if (!pack_input(*pending_ingress_, *input)) {

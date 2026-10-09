@@ -1,11 +1,19 @@
 # Neural audio program status (2026-10-06, protected-head successor)
 
-This receipt is audited against the current protected `origin/main` head
-[`9660876c9af59b6132491fbaaba71d0760195e7c`](https://github.com/Generous-Corp/pulp/commit/9660876c9af59b6132491fbaaba71d0760195e7c), which includes the earlier neural-audio merges plus PR9577, PR9582, PR9602, PR9605, PR9622, PR9624, and PR9625, along with the subsequent CI, host-scheduling, GPU-batching, and Windows portability merges. The superseded 2026-10-05 status packet referenced an older protected snapshot; this successor is audited against the fetched head above. The older `f85a50352a46b7e2a6a302f1b4208fdc4f8ee0fa`, `eca392cdccaf34ca24edce592bc8c7fdb4150f76`, `5a19a802233be92a6ba29947ef99d306f9764b5d`, `bf7a25335161ed3ac81e40105a23d05983dc8a9d`, `8e845a48503e4abd066011300f01255d437bce6b`, `3dd81fc3fc64a77559229dc87e5836f8c92ee570`, and `a72faee66b762cf408e0c8dc09225d6401fb7855` anchors are retained only as historical provenance; none is treated as current. Claims remain fail-closed: synthetic, CPU-only, metadata-only, and unavailable-counter evidence does not establish provider execution or product performance.
+> **Freshness correction (2026-10-08):** The protected-head SHA named below is
+> a historical audit anchor, not the current `origin/main`. The current
+> protected snapshot for this packet is
+> [`ca6e605d60e0f872765abe4b1a4769a17fdb1011`](https://github.com/Generous-Corp/pulp/commit/ca6e605d60e0f872765abe4b1a4769a17fdb1011).
+> Revalidate any head-sensitive claim before using this older receipt as
+> current acceptance evidence.
+
+This receipt was originally audited against the historical protected snapshot
+[`9660876c9af59b6132491fbaaba71d0760195e7c`](https://github.com/Generous-Corp/pulp/commit/9660876c9af59b6132491fbaaba71d0760195e7c). The current protected snapshot for this follow-up is
+[`174fccfc0b004316a0cc588dec2dc3f0c12ed16a`](https://github.com/Generous-Corp/pulp/commit/174fccfc0b004316a0cc588dec2dc3f0c12ed16a); the older anchor is retained only as historical provenance. Claims remain fail-closed: synthetic, CPU-only, metadata-only, and unavailable-counter evidence does not establish provider execution or product performance.
 
 ## Fresh protected-head reconciliation
 
-- The stale docs/status packet represented by [PR 9665](https://github.com/Generous-Corp/pulp/pull/9665) merged at [`e0b640d3298f1f58b7d50a38e85b3c4cf9e97303`](https://github.com/Generous-Corp/pulp/commit/e0b640d3298f1f58b7d50a38e85b3c4cf9e97303), but it was based on an older protected snapshot; this fresh successor is audited against fetched protected `origin/main` [`9660876c9af59b6132491fbaaba71d0760195e7c`](https://github.com/Generous-Corp/pulp/commit/9660876c9af59b6132491fbaaba71d0760195e7c).
+- The stale docs/status packet represented by [PR 9665](https://github.com/Generous-Corp/pulp/pull/9665) merged at [`e0b640d3298f1f58b7d50a38e85b3c4cf9e97303`](https://github.com/Generous-Corp/pulp/commit/e0b640d3298f1f58b7d50a38e85b3c4cf9e97303), but it was based on an older protected snapshot. The current protected successor is [`174fccfc0b004316a0cc588dec2dc3f0c12ed16a`](https://github.com/Generous-Corp/pulp/commit/174fccfc0b004316a0cc588dec2dc3f0c12ed16a); `9660876c…` remains historical only.
 - The transactional NAM coverage represented by [PR 9659](https://github.com/Generous-Corp/pulp/pull/9659) was explicitly superseded after closure; its scope is carried on this successor as [`7ffe051bc6bc697f9b54c548729ea33b2fadb91f`](https://github.com/Generous-Corp/pulp/commit/7ffe051bc6bc697f9b54c548729ea33b2fadb91f) (coverage), [`c13b2b7f042658e7bbd2d97ec67af9fcf502f277`](https://github.com/Generous-Corp/pulp/commit/c13b2b7f042658e7bbd2d97ec67af9fcf502f277) (failed-replacement fix), and [`cd21e293033871f2f233977704adb4cef4896c35`](https://github.com/Generous-Corp/pulp/commit/cd21e293033871f2f233977704adb4cef4896c35) (format). On this successor branch, the focused `pulp-test-nam-tcn-adapter` binary passed **82 assertions in 14 cases** after the fix; that receipt is local successor evidence, not a claim about the protected base. This is private CPU lifecycle evidence only; it does not establish a named accelerator provider, product model, or performance claim.
 - The protected-head audit remains fail-closed. Queued, skipped, synthetic, metadata-only, and stale receipts are not promoted to product evidence.
 

@@ -34,6 +34,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME rack-portmap-seed-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/rack/test_portmap_seed.py")
     set_tests_properties(rack-portmap-seed-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 120)
+    add_test(NAME rack-generation-lock-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/rack/test_generation_lock.py")
+    set_tests_properties(rack-generation-lock-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 300)
     add_test(NAME rack-prompt-fidelity-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/rack/test_prompt_fidelity.py")
     set_tests_properties(rack-prompt-fidelity-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 600)

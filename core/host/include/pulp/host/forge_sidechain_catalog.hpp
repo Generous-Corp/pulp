@@ -6,7 +6,8 @@
 // implementation is the shipped Compressor::process_with_sidechain path.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
+#include <pulp/host/graph_types.hpp>
 #include <pulp/signal/compressor.hpp>
 
 #include <algorithm>
