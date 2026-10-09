@@ -43,10 +43,8 @@ constexpr ProjectionResult projection_capability(ProjectionSurface surface, bool
     case ProjectionSurface::lv2:
     case ProjectionSurface::wam:
     case ProjectionSurface::wclap:
-        return {ProjectionStatus::supported, {}};
     case ProjectionSurface::au:
-        return {ProjectionStatus::unsupported,
-                "AU projection is deferred to a separate adapter owner"};
+        return {ProjectionStatus::supported, {}};
     }
     return {ProjectionStatus::unsupported, "unknown projection surface"};
 }

@@ -4,8 +4,9 @@ DSPX-07 adapters advertise a graph feature only after a bounded baked `Processor
 descriptor exists. The installed SDK exposes this decision from
 `<pulp/format/projection_capability.hpp>`, so native and browser consumers use
 the same rule. CLAP, VST3, LV2, WAM, and WebCLAP use the same capability rule. A
-graph-only descriptor, an unbounded descriptor, or an AU surface outside this
-packet produces a typed unsupported result and leaves the source state unchanged.
+graph-only or unbounded descriptor produces a typed unsupported result and
+leaves the source state unchanged. Audio Units are admitted only for the
+bounded baked processor path exercised by the AUv2 and AUv3 lifecycle tests.
 
 The projection decision is control-thread metadata. Audio rendering and browser
 execution still require the adapter's ordinary descriptor, latency, parameter,

@@ -54,7 +54,8 @@ def run(sdk: Path, output: Path) -> dict[str, object]:
             "int main() {\n"
             "  using namespace pulp::format;\n"
             "  constexpr std::array supported = {ProjectionSurface::clap, ProjectionSurface::vst3,\n"
-            "      ProjectionSurface::lv2, ProjectionSurface::wam, ProjectionSurface::wclap};\n"
+            "      ProjectionSurface::lv2, ProjectionSurface::wam, ProjectionSurface::wclap,\n"
+            "      ProjectionSurface::au};\n"
             "  for (auto surface : supported) {\n"
             "    auto result = projection_capability(surface, true, true);\n"
             "    if (!result.supported() || !result.reason.empty()) return 10;\n"
@@ -65,8 +66,6 @@ def run(sdk: Path, output: Path) -> dict[str, object]:
             "  auto unbounded = projection_capability(ProjectionSurface::wclap, true, false);\n"
             "  if (unbounded.supported() || unbounded.reason !=\n"
             "      std::string_view{\"descriptor bounds are missing or exceed adapter limits\"}) return 12;\n"
-            "  auto au = projection_capability(ProjectionSurface::au, true, true);\n"
-            "  if (au.supported()) return 13;\n"
             "  return 0;\n"
             "}\n",
             encoding="utf-8",
@@ -98,8 +97,8 @@ def run(sdk: Path, output: Path) -> dict[str, object]:
         "header_sha256": sha256(header),
         "config": "lib/cmake/Pulp/PulpConfig.cmake",
         "compiler": compiler,
-        "positive_surfaces": ["clap", "vst3", "lv2", "wam", "wclap"],
-        "typed_negative_surfaces": ["graph_only", "unbounded", "au"],
+        "positive_surfaces": ["clap", "vst3", "lv2", "wam", "wclap", "au"],
+        "typed_negative_surfaces": ["graph_only", "unbounded"],
     }
     if provenance.is_file():
         receipt["sdk_provenance_sha256"] = sha256(provenance)

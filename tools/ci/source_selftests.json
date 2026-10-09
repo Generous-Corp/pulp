@@ -259,6 +259,12 @@
       ]
     },
     {
+      "name": "dspx07-projection-installed-sdk-selftest",
+      "argv": [
+        "{repo}/tools/validation/test_dspx07_projection_installed_sdk.py"
+      ]
+    },
+    {
       "name": "fleet-remote-probe-selftest",
       "argv": [
         "{repo}/tools/fleet/test_probe_remote.py"

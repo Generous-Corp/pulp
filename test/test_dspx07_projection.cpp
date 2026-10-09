@@ -8,9 +8,9 @@
 TEST_CASE("DSPX-07 bounded baked projections cover native and browser surfaces",
           "[dspx-07][projection]") {
     using namespace pulp::format;
-    constexpr std::array supported = {ProjectionSurface::clap, ProjectionSurface::vst3,
-                                      ProjectionSurface::lv2, ProjectionSurface::wam,
-                                      ProjectionSurface::wclap};
+    constexpr std::array supported = {ProjectionSurface::clap,  ProjectionSurface::vst3,
+                                      ProjectionSurface::lv2,   ProjectionSurface::wam,
+                                      ProjectionSurface::wclap, ProjectionSurface::au};
     for (const auto surface : supported) {
         const auto result = projection_capability(surface, true, true);
         REQUIRE(result.supported());
@@ -28,8 +28,4 @@ TEST_CASE("DSPX-07 refuses unsupported projection inputs with typed reasons",
     const auto unbounded = projection_capability(ProjectionSurface::wclap, true, false);
     REQUIRE_FALSE(unbounded.supported());
     REQUIRE(unbounded.reason == "descriptor bounds are missing or exceed adapter limits");
-
-    const auto au = projection_capability(ProjectionSurface::au, true, true);
-    REQUIRE_FALSE(au.supported());
-    REQUIRE(au.reason == "AU projection is deferred to a separate adapter owner");
 }

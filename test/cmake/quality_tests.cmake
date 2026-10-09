@@ -60,6 +60,13 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
 
+    # The installed-SDK projection validator is a source-only downstream
+    # consumer check. Keep it on the build-free required lane so a public
+    # header or validator regression cannot hide behind native build results.
+    add_test(NAME dspx07-projection-installed-sdk-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_dspx07_projection_installed_sdk.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
