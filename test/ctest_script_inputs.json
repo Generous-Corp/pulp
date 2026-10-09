@@ -2484,6 +2484,7 @@
   "pulp-test-dspx06-graph-timing",
   "pulp-test-dspx07-au-baked-projection",
   "pulp-test-dspx07-clap-baked-projection",
+  "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
