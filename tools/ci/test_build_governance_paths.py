@@ -60,6 +60,21 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_visual_harness_build_uses_governor(self) -> None:
+        source = read_source(".github/workflows/visual-harness.yml")
+        build_lines = [
+            line for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build-visual --config Release --target pulp-test-visual",
+            build_lines[0],
+        )
+        self.assertNotRegex(
+            build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
+
     def test_sanitizer_workflow_builds_use_governor(self) -> None:
         source = read_source(".github/workflows/sanitizers.yml")
         build_lines = [line for line in source.splitlines() if "cmake --build" in line]
