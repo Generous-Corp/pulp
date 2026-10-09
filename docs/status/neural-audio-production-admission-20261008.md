@@ -56,3 +56,15 @@ The next dependency-satisfied packet is therefore:
 - a public ownership-safe recovery contract if third-party consumers must observe device-loss/reprepare.
 
 Until those dependencies are present and the packet above passes, neural GPU-NAM production acceptance remains **FAIL-CLOSED**.
+
+## Next packet execution contract
+
+The next packet is dependency-gated and must be executed in this order:
+
+1. **Model rights:** attach a signed license/redistribution record to the exact model SHA `ceb53469a19ce278e2235da982ae676cb8d5451a8de22a7ecc7a2617d07224d1`. Without that record, the model remains research-only.
+2. **Provider reconciliation:** rebuild or authenticate the current Spectr/Pulp SDK path and prove its source, SDK, provider binary, native library, and model hashes in one receipt. The prior M1 campaign used source `a124520f14317e10bdb28c6a506e7843ac99cabc` and SDK `7858d7edb5a2bbb568c03d7e740043e8c897c0ee`; those are evidence anchors, not current-product proof.
+3. **Realtime campaign:** run absolute sample-paced blocks with GPU/phase timestamps, completion p99, deadline distributions, and `max_inflight={1,4}` on a quiet Apple Silicon host. Any deadline miss fails admission until explained and corrected.
+4. **Fallback and recovery:** inject late, dropped, cancelled, and device-loss events; prove CPU fallback continuity, terminal accounting, physical retirement/reprepare, epoch fencing, and stale-state suppression in the installed product.
+5. **Product acceptance:** run the exact installed Spectr AU/VST3/CLAP package in a host/DAW campaign and retain immutable raw sidecars. Forge registration, `.pulpgraph` exposure, and default-on policy remain prohibited until every preceding gate passes.
+
+The adversarial review must independently check the model rights, exact-hash lineage, timestamp completeness, miss accounting, fallback/recovery identities, installed-host scope, and the absence of any acceptance claim derived only from metadata, synthetic providers, or CPU-shadow parity.
