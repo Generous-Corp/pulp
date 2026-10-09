@@ -131,13 +131,17 @@ def _importer_runtime_paths(prefix: Path, platform: str) -> set[str]:
         for member in members
         if isinstance(member, str) and member.startswith(capture_prefix)
     }
-    contract_member = "jsx-runtime/materialized_binding_contract.mjs"
     version = _version_tuple(_read_text(prefix / "version.txt"))
-    if (
-        contract_member in members
-        and version >= _version_tuple(materialized_contract_floor)
-    ):
-        paths.add("bin/" + contract_member)
+    if version >= _version_tuple(materialized_contract_floor):
+        # These sibling modules are installed with the binding contract but are
+        # intentionally kept out of common_cli_members because that matrix
+        # describes the browser runtime archive. Keep the handoff's exact tree
+        # contract explicit so a complete SDK cannot be rejected as stale.
+        paths.update({
+            "bin/jsx-runtime/materialized_binding_contract.mjs",
+            "bin/jsx-runtime/materialized_source_emitter.mjs",
+            "bin/jsx-runtime/materialized_ids_map.mjs",
+        })
     if not paths:
         raise ProvenanceError(f"empty importer runtime contract in {PRODUCT_MATRIX}")
     if version >= _version_tuple(node_floor):

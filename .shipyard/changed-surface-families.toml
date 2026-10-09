@@ -223,6 +223,7 @@ paths = [
   "tools/scripts/test_spectr_gpu_nam_forge_controls.py",
   "tools/scripts/test_stale_run_reaper.py",
   "tools/scripts/test_summarize_daw_bench_results.py",
+  "tools/scripts/test_text_encoding_lint.py",
   "tools/scripts/test_validate_hosts.py",
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
@@ -506,37 +507,6 @@ tests = [
   "reuse-policy-replay-selftest",
   "source-selftest-lane-contract",
   "source-selftest-lane-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-c298b27989cc"
-paths = [
-  "tools/scripts/gpu_audio_p2_campaign.py",
-  "tools/scripts/test_gpu_audio_p2_campaign.py",
-]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "gpu-audio-p2-campaign-contract-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2307,6 +2277,62 @@ tests = [
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
   "git-stdin-pipe-deadlock-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-c298b27989cc"
+paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-p2-campaign-contract-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-623bb1c5875e"
+paths = ["tools/scripts/test_gpu_audio_p2_host_preflight.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-p2-host-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5193,7 +5219,6 @@ paths = [
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/github_app_jwt.py",
-  "tools/scripts/gpu_audio_p2_campaign.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
@@ -5360,6 +5385,7 @@ paths = [
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
   "tools/scripts/test_gpu_audio_p2_campaign.py",
+  "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
   "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
   "tools/scripts/test_gpu_audio_provider_identity.py",
@@ -5503,6 +5529,7 @@ paths = [
   "tools/scripts/test_status_tone_signal_lint.py",
   "tools/scripts/test_summarize_daw_bench_results.py",
   "tools/scripts/test_tart_home_resolution.py",
+  "tools/scripts/test_text_encoding_lint.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
   "tools/scripts/test_tmp_leak_guard.py",
   "tools/scripts/test_tools_registry_check.py",
@@ -5705,7 +5732,6 @@ paths = [
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/github_app_jwt.py",
-  "tools/scripts/gpu_audio_p2_campaign.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/host_quirks_staleness.py",
@@ -5872,6 +5898,7 @@ paths = [
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
   "tools/scripts/test_gpu_audio_p2_campaign.py",
+  "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
   "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
   "tools/scripts/test_gpu_audio_provider_identity.py",
@@ -6015,6 +6042,7 @@ paths = [
   "tools/scripts/test_status_tone_signal_lint.py",
   "tools/scripts/test_summarize_daw_bench_results.py",
   "tools/scripts/test_tart_home_resolution.py",
+  "tools/scripts/test_text_encoding_lint.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
   "tools/scripts/test_tmp_leak_guard.py",
   "tools/scripts/test_tools_registry_check.py",
@@ -6098,7 +6126,6 @@ tests = [
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
-  "pulp-materialized-runtime-conformance",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
   "pulp_bundle_threejs_for_jsc_smoke",

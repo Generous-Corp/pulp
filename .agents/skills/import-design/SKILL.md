@@ -21,6 +21,32 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
 
+### Browser capture provenance is an import boundary
+
+The native importer validates `capture.json` before lowering the browser tree
+or emitting a materialized runtime. Treat the capture envelope as a binding to
+one exact input and capture environment: it must carry the staged `editor.html`
+SHA-256, Chromium CDP identity, initial/resolved/document viewport dimensions,
+matching device scale factor and reference viewport, plus a contained
+materialized-document sidecar whose SHA-256, schema/version, HTML field, and
+asset count agree with the envelope. A stale, hand-edited, mismatched, or
+path-escaping envelope fails closed with the
+`browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
+from the same capture directory; do not copy one from an older browser run or
+rewrite its source hash to bypass validation. The focused native coverage is
+`pulp-test-browser-capture-backend [*provenance*]`, and a real import must pass
+the browser capture receipt before any native or materialized parity claim.
+
+### Packaged SDK runtime contract
+
+The installed `pulp-import-design` SDK runtime includes the browser-capture
+manifest plus the materialized JSX siblings
+`materialized_binding_contract.mjs`, `materialized_source_emitter.mjs`, and
+`materialized_ids_map.mjs`. Keep all three installed under `bin/jsx-runtime`;
+the release provenance handoff hashes the complete tree and rejects a missing
+sibling or an undeclared extra. Validate the archive with
+`python3 tools/scripts/test_release_artifact_contents.py` before publishing.
+
 ## TOOLS THIS SKILL ALREADY SHIPS — reach for these before hand-rolling (read this first)
 
 Every one of these is documented further down this file. That was not enough:
@@ -90,6 +116,14 @@ deterministic esbuild result for that one document pass, while still emitting
 each script and preserving `jsx_scripts_compiled` as the script count. Keep
 the cache scoped to the call so one untrusted document cannot retain another
 document's source or grow across imports.
+
+**Canonicalization must fail closed on duplicate asset IDs.** Asset IDs join
+HTML references to captured payloads. If malformed input repeats an ID, do not
+let a trusted vendor payload remove an authored payload that shares the key;
+preserve all colliding assets and report the collision in
+`runtime_canonicalization.duplicate_asset_ids_preserved`. Capture-produced
+documents have unique IDs, so this guard is transparent on the normal path.
+Keep a planted collision regression alongside the canonicalization tests.
 
 **Pixel comparison cannot see a bad palette.** Every visual gate above scores
 agreement with the source, so a colour defect the source ALREADY had — an accent
@@ -3816,6 +3850,8 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - Raw Figma Make defaults are intentionally rejected until a preprocessing step exists: unresolved `figma:asset/*` imports, versioned import paths like `<package>@<semver>`, Tailwind `className` utilities, Radix primitives, Code Connect glue files, Next.js wrappers, custom JSX components, non-range inputs, and network/storage/worker APIs.
 - Representative fixtures live under `planning/fixtures/figma/`; the primary one is `level-meter-panel.tsx`. Run `tools/import-validation/figma-roundtrip.sh --parser-only` for the parser/dispatch gate, `tools/import-validation/figma-roundtrip.sh` for parser-emitted screenshot diff, and `tools/import-validation/figma-roundtrip.sh --coverage` before pushing parser PRs.
 
+**Governed validation builds:** every `tools/import-validation/*-roundtrip.sh` build step must invoke `tools/ci/governed-build.sh cmake --build`; do not add a raw `cmake --build`, `-j`, or `--parallel` flag. The governor owns the host lease and `CMAKE_BUILD_PARALLEL_LEVEL`, including the external Spectr checkout; keep the existing fixture, target, and artifact behavior unchanged.
+
 **Stitch (MCP available)**:
 - Use `mcp__stitch__list_screens` to show available screens
 - Use `mcp__stitch__get_screen` to read the selected screen
@@ -3901,6 +3937,17 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   gate even without `--validate`; the flag additionally publishes convenient
   render/diff copies beside the primary output. Authored controls and knob art
   remain pixels; never replace them with Pulp's silver/vector fallback.
+- For dynamic or materialized canvas fixtures, add
+  `--materialized-canvas-composition --require-canvas-ink` when a blank frame
+  would invalidate the result. The opt-in gate inspects the decoded,
+  hash-verified sparse canvas plane rather than trusting `changed_pixels`
+  metadata. It requires at least 256 opaque canvas pixels and a viewport
+  relative floor of 0.1%, so transparent captures or isolated specks cannot
+  produce a false 100% A/B score. Opaque pixels are counted regardless of RGB
+  brightness, so a legitimately dark canvas still satisfies the coverage
+  contract. Keep the flag off for intentionally blank static panels. A passing
+  pixel score without this gate does not prove that an animated canvas actually
+  painted its graph.
 - External browser requests are denied by default. If the export depends on a
   CDN runtime and the health gate reports `capture-source-unresolved`, review
   the listed URLs and retry with `--allow-browser-network`. The opt-in permits
@@ -4766,6 +4813,40 @@ pulp sdk status              # what's installed
 pulp doctor --versions       # CLI vs project vs installed
 ```
 If you ran `pulp upgrade` recently, the CLI bumped but the SDK might not have. Use `pulp sdk install` to pull the latest SDK matching the CLI.
+
+### Authored JSX/TSX re-import receipt (old/new artifact plus screenshot)
+
+The authored-source lane has a different closeout contract from a Figma golden.
+It proves that a selected component can be re-imported without rewriting its
+neighbours, then proves the browser result. Keep one machine-readable receipt
+for each run with:
+
+- the source commit, manifest hash, base artifact hash/size, and re-imported
+  artifact hash/size;
+- selected component names and source/TSX/module hashes, including dependency
+  edges and unresolved/external bindings;
+- a script-span comparison showing that non-selected scripts are byte-identical
+  and the selected span is the only changed region;
+- old and new browser captures at the same viewport/device scale, with
+  `pixel_identical`, `difference_bbox`, image dimensions, panel dimensions, and
+  the screenshot hash; and
+- explicit scope fields for `editor_html`/Vellum changes, app mount,
+  `full_editor_parity`, `native_parity`, and whether patch scripts were retired.
+
+The old/new screenshot is browser evidence. A pixel-identical side-by-side
+proves that the selected re-import did not alter the captured browser panel; it
+does not prove native Skia/Dawn rendering, an editor mount, or production
+cutover. Keep those claims false unless their independent receipts exist.
+Likewise, a component declaration executing in a full artifact shell is useful
+evidence but is not an App/ReactDOM mount. Record that limitation instead of
+promoting the run to full-editor parity.
+
+Require at least one planted mutation in a selected module (for example a
+single CSS height or SVG stroke-width change) and record that the old/new
+comparison detects it. A green import with no negative control can be an
+unchanged artifact. Preserve the original authored source and generated
+`editor.html`; if the run needs either file or a Vellum path changed, stop and
+route that work before claiming a reproducible authored re-import.
 
 ### Diff loop
 

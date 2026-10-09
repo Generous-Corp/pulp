@@ -512,6 +512,10 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
     def test_materialized_binding_contract_is_version_floored(self) -> None:
         member = rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER
         sdk_member = "pulp-sdk/bin/" + member
+        sibling_members = {
+            "pulp-sdk/bin/" + sibling
+            for sibling in rac.MATERIALIZED_RUNTIME_SIBLING_CLI_MEMBERS
+        }
         for platform in ("darwin-arm64", "linux-x64", "windows-x64"):
             with self.subTest(platform=platform):
                 before = rac.cli_members(platform, rac.DEFAULT_MATRIX, "0.917.0")
@@ -526,6 +530,19 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 self.assertIn(member, at_floor)
                 self.assertNotIn(sdk_member, sdk_before)
                 self.assertIn(sdk_member, sdk_at_floor)
+                self.assertTrue(sibling_members.isdisjoint(sdk_before))
+                self.assertTrue(sibling_members <= sdk_at_floor)
+
+    def test_materialized_runtime_siblings_are_installed_into_sdk(self) -> None:
+        cmake = (
+            ROOT / "tools" / "import-design" / "CMakeLists.txt"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '"${_pulp_materialized_source_emitter}"', cmake
+        )
+        self.assertIn(
+            '"${_pulp_materialized_ids_map}"', cmake
+        )
 
     def test_large_private_node_runtime_is_verified(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -794,9 +811,14 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             rac.DEFAULT_MATRIX.cli_binary_stems,
             {"pulp", "pulp-cpp", "pulp-import-design", "pulp-mcp"},
         )
+        materialized_members = {
+            rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER,
+            rac.MATERIALIZED_SOURCE_EMITTER_CLI_MEMBER,
+            rac.MATERIALIZED_IDS_MAP_CLI_MEMBER,
+        }
         self.assertEqual(
             rac.DEFAULT_MATRIX.common_cli_members,
-            runtime_members | {rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER},
+            runtime_members | materialized_members,
             "browser-capture runtime manifest and materialized contract matrix drifted",
         )
         self.assertEqual(
@@ -808,8 +830,10 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 + member.removeprefix("browser_capture/")
                 for member in runtime_members
             }
+            | {"pulp-sdk/bin/" + member for member in materialized_members}
             | {
-                "pulp-sdk/bin/" + rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER
+                "pulp-sdk/bin/" + sibling
+                for sibling in rac.MATERIALIZED_RUNTIME_SIBLING_CLI_MEMBERS
             }
             | {
                 "pulp-sdk/bin/browser_capture-v1/node",
@@ -1020,12 +1044,12 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             },
         )
 
-    def test_windows_library_matrix_tracks_x64_skia_availability(self) -> None:
+    def test_windows_library_matrix_tracks_skia_availability(self) -> None:
         self.assertIn(
             "pulp-bundled-fonts",
             rac.expected_pulp_libraries("windows-x64", rac.DEFAULT_MATRIX),
         )
-        self.assertNotIn(
+        self.assertIn(
             "pulp-bundled-fonts",
             rac.expected_pulp_libraries("windows-arm64", rac.DEFAULT_MATRIX),
         )
@@ -1039,11 +1063,11 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 root, "windows-x64", VERSION, SOURCE_SHA, native_signatures=False
             )
 
-    def test_complete_windows_arm64_matrix_passes_without_bundled_fonts(self) -> None:
+    def test_complete_windows_arm64_matrix_passes_with_bundled_fonts(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             _cli, sdk = make_platform(root, "windows-arm64")
-            self.assertNotIn("pulp-sdk/lib/pulp-bundled-fonts.lib", sdk)
+            self.assertIn("pulp-sdk/lib/pulp-bundled-fonts.lib", sdk)
             rac.verify_platform(
                 root, "windows-arm64", VERSION, SOURCE_SHA,
                 native_signatures=False,
@@ -1066,20 +1090,18 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     native_signatures=False,
                 )
 
-    def test_negative_control_windows_arm64_rejects_bundled_fonts(self) -> None:
+    def test_negative_control_windows_arm64_requires_bundled_fonts(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             _cli, sdk = make_platform(root, "windows-arm64")
-            sdk.add("pulp-sdk/lib/pulp-bundled-fonts.lib")
+            sdk.remove("pulp-sdk/lib/pulp-bundled-fonts.lib")
             write_archive(
                 root / rac.sdk_asset_name("windows-arm64"),
                 sdk,
                 as_zip=True,
                 platform="windows-arm64",
             )
-            with self.assertRaisesRegex(
-                rac.ContentError, "stale_or_unexpected=.*pulp-bundled-fonts"
-            ):
+            with self.assertRaisesRegex(rac.ContentError, "missing SDK product.*pulp-bundled-fonts"):
                 rac.verify_platform(
                     root, "windows-arm64", VERSION, SOURCE_SHA,
                     native_signatures=False,

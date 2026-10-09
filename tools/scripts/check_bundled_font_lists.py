@@ -36,7 +36,7 @@ BLOCK = re.compile(
 
 
 def faces(path: pathlib.Path) -> set[str]:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     block = BLOCK.search(text)
     if not block:
         print(f"check_bundled_font_lists: no pulp-bundled-fonts block in {path}")
@@ -67,4 +67,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows pipes default to the ANSI code page, which cannot encode the
+    # non-ASCII marks this tool prints.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

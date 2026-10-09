@@ -1,0 +1,51 @@
+{
+  "id": "timeline-hardening-governed-build",
+  "title": "Timeline hardening builds use the shared bounded build governor",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "governed-timeline-build-20261008",
+  "owned_paths": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/timeline-hardening.yml",
+    "docs/status/sequencer-exposure/rows/timeline-hardening-governed-build.json",
+    "test/ctest_script_inputs.json",
+    "tools/scripts/test_build_parallelism_guard.py"
+  ],
+  "evidence": [
+    {
+      "path": ".github/workflows/timeline-hardening.yml",
+      "needles": [
+        "tools/ci/governed-build.sh cmake --build build-timeline-hardening",
+        "pulp-test-timeline-scale pulp-test-timeline-agent-view"
+      ]
+    },
+    {
+      "path": "tools/scripts/test_build_parallelism_guard.py",
+      "needles": [
+        "test_timeline_hardening_build_uses_the_governor"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This changes only CI build orchestration and its regression guard; no SDK header, target, symbol, or installed artifact changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI command, flag, or output contract changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No runtime operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The change governs a test build and does not publish a design-time capability."
+    }
+  }
+}

@@ -1063,7 +1063,21 @@ was unknown. Each run ends with one
 platform registers was audited, and no audited executable has a finding.
 `incomplete` means the run cannot vouch for itself. The nightly passes `--fail-on-findings`, so its
 exit follows that verdict: 0 for clean, 1 for findings, 2 for incomplete. A
-red nightly therefore means the streak of clean runs is broken. A clean run's
+red nightly therefore means the streak of clean runs is broken. The streak
+counts clean cron days on main, and only the schedule speaks for a day: the
+counted run is that day's run with event `schedule`, and the day is the UTC
+date that run was created (GitHub fires the cron hours late, so the cron hour
+says nothing). A dispatch counts in its place only when that day's scheduled
+run was cancelled and the dispatch ran on the same head sha after it that day, which is
+the per-ref cancel-in-progress replacement. Every other dispatch is a canary
+precondition or a control and never counts. A day with no counted run is a gap
+and resets the streak like a finding.
+`.github/workflows/read-audit-cadence-check.yml` (`tools/ci/read_audit_cadence.py`)
+rebuilds that ledger every 30 minutes from each run's own stage0 verdict,
+writes each day's counted run, every run it did not count and why, and the
+streak to its summary and artifact, and opens a tracking issue naming any
+recent gap.
+A clean run's
 stage0 block also publishes `covered`, the executables it observed with no
 finding. The key manifest (`tools/ci/executable_keys.py --audit-report`) marks
 any executable outside that set always_run `audit_uncovered`, and every
@@ -6594,6 +6608,11 @@ core libraries with `g++` and nothing else:
 | `PULP_BUILD_EXAMPLES` | `OFF` | same |
 | `PULP_ENABLE_DESIGN_IMPORT` | `OFF` | authoring subsystem, not core portability |
 | `PULP_ENABLE_INSPECTOR` | `OFF` | dev surface, not core portability |
+
+The discovered core-target list is built through
+`tools/ci/governed-build.sh cmake --build build-gcc --target $(cat targets.txt)`,
+so the gate's target coverage stays dynamic while job selection remains under the
+shared governor.
 
 **Read a failure here literally.** The lane runs no tests and touches no
 hardware, so it cannot flake on load or timing the way the GPU-perf lanes can.

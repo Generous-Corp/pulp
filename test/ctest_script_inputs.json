@@ -1418,6 +1418,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-gpu-wavenet-session": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_gpu_wavenet_session.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_gpu_wavenet_session.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-group-app-host": {
    "data": "declared",
    "detected_sources": [
@@ -1598,6 +1612,7 @@
     "test/test_baked_codec.cpp"
    ],
    "spawning_sources": [
+    "test/test_dspx09_followup.cpp",
     "test/test_retained_history_dspx03.cpp",
     "test/test_signal_graph_anticipation.cpp",
     "test/test_signal_graph_live_swap_continuity.cpp",
@@ -2279,18 +2294,8 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
-  "pulp-gpu-audio-coreaudio-workgroup-benchmark",
-  "pulp-gpu-audio-p4-matched-convolution-benchmark",
-  "pulp-gpu-audio-p4-raw-screening",
-  "pulp-gpu-dawn-shared-io-provider-probe",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
-  "pulp-gpu-same-device-paired-probe",
-  "pulp-gpu-same-device-storage-probe",
-  "pulp-gpu-shared-io-convolution-session-probe",
-  "pulp-gpu-shared-io-paced-convolution-probe",
-  "pulp-gpu-shared-io-private-convolution-probe",
-  "pulp-gpu-shared-spectral-probe",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -2409,6 +2414,7 @@
   "pulp-test-cli-timeline",
   "pulp-test-cli-tool-registry",
   "pulp-test-cli-tweaks-shellout",
+  "pulp-test-cli-ui-command",
   "pulp-test-cli-update-check",
   "pulp-test-cli-update-mode",
   "pulp-test-cli-upgrade-install",
@@ -2476,6 +2482,9 @@
   "pulp-test-dsl-processor",
   "pulp-test-dsp-runtime-no-alloc",
   "pulp-test-dspx06-graph-timing",
+  "pulp-test-dspx07-au-baked-projection",
+  "pulp-test-dspx07-clap-baked-projection",
+  "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
@@ -3250,8 +3259,11 @@
    "inputs": [
     ".github/workflows/build.yml",
     ".github/workflows/format-baseline-diff.yml",
+    ".github/workflows/timeline-hardening.yml",
+    ".github/workflows/tracing-build.yml",
     ".github/workflows/web-plugins.yml",
     "test/cmake/test_gpu_health_cpu_only_configure.sh",
+    "tools/ci/governed-build.sh",
     "tools/scripts/local_diff_cover.sh",
     "tools/scripts/test_build_parallelism_guard.py"
    ],
@@ -3573,6 +3585,7 @@
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_run_changed_surface_tests.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],
@@ -3651,6 +3664,7 @@
     "tools/scripts/test_ios_compile_gate_legs.py",
     "tools/scripts/test_prepush_gate_supervisor.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],
@@ -4382,6 +4396,14 @@
    ],
    "kind": "python"
   },
+  "dspx07-projection-installed-sdk-selftest": {
+   "kind": "python",
+   "entry": "tools/validation/test_dspx07_projection_installed_sdk.py",
+   "inputs": [
+    "core/format/include/pulp/format/projection_capability.hpp",
+    "tools/validation/test_dspx07_projection_installed_sdk.py"
+   ]
+  },
   "ensure-signing-ready": {
    "entry": "tools/scripts/test_ensure_signing_ready.sh",
    "inputs": [
@@ -4690,6 +4712,13 @@
    ],
    "kind": "python"
   },
+  "gates-sh-fail-flag-selftest": {
+   "entry": "tools/scripts/test_gates_lint_blocks.py",
+   "inputs": [
+    "tools/scripts/test_gates_lint_blocks.py"
+   ],
+   "kind": "python"
+  },
   "git-read-memo-selftest": {
    "entry": "tools/scripts/test_git_read_memo.py",
    "inputs": [
@@ -4732,6 +4761,16 @@
    "inputs": [
     "tools/scripts/gpu_audio_p2_campaign.py",
     "tools/scripts/test_gpu_audio_p2_campaign.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-p2-host-preflight-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_p2_host_preflight.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/scripts/host_vitals.sh",
+    "tools/scripts/p2_thermal_state.swift",
+    "tools/scripts/test_gpu_audio_p2_host_preflight.py"
    ],
    "kind": "python"
   },
@@ -6808,74 +6847,12 @@
    ],
    "kind": "node"
   },
-  "pulp-gpu-audio-p2-campaign-contract": {
-   "entry": "tools/scripts/gpu_audio_p2_campaign.py",
-   "inputs": [
-    "tools/scripts/gpu_audio_p2_campaign.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-audio-provider-identity": {
-   "entry": "tools/scripts/gpu_audio_provider_identity.py",
-   "inputs": [
-    "external/skia-build",
-    "tools/deps/manifest.json",
-    "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py",
-    "tools/scripts/process_liveness.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-shared-io-provider-identity": {
-   "entry": "tools/scripts/gpu_audio_provider_identity.py",
-   "inputs": [
-    "external/skia-build",
-    "tools/deps/manifest.json",
-    "tools/scripts/fetch_skia_for_release.py",
-    "tools/scripts/gpu_audio_provider_identity.py",
-    "tools/scripts/process_liveness.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-shared-io-provider-lifecycle": {
-   "entry": "test/verify_gpu_dawn_shared_io_provider.py",
-   "inputs": [
-    "test/verify_gpu_dawn_shared_io_provider.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-dawn-vellum-d15-source": {
-   "entry": "test/test_gpu_dawn_vellum_d15_source.py",
-   "inputs": [
-    "core/gpu_audio/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
-    "test/cmake/render_gpu_surface_tests.cmake",
-    "test/test_gpu_dawn_vellum_d15_source.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-shared-io-paced-convolution-probe": {
-   "entry": "test/verify_gpu_shared_io_paced_convolution.py",
-   "inputs": [
-    "test/verify_gpu_shared_io_paced_convolution.py"
-   ],
-   "kind": "python"
-  },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
     "test/test_pulp_installer_mcp_contract.sh"
    ],
    "kind": "shell"
-  },
-  "pulp-materialized-runtime-conformance": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
-   ],
-   "kind": "node"
   },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
@@ -6938,7 +6915,9 @@
   "pulp-ui-build-contracts": {
    "entry": "tools/ui-build/test_ui_build.py",
    "inputs": [
-    "tools/ui-build/test_ui_build.py"
+    "tools/ui-build/lint/clean_output_lint.py",
+    "tools/ui-build/test_ui_build.py",
+    "tools/ui-build/ui_build.py"
    ],
    "kind": "python"
   },
@@ -6953,9 +6932,13 @@
   "pulp-ui-clean-output-lint-negative-contract": {
    "entry": "tools/ui-build/lint/test_clean_output_lint.py",
    "inputs": [
+    "test/fixtures/imports/claude/2024.10",
+    "test/fixtures/imports/claude/2024.10/example.html",
     "tools/scripts/gates.sh",
     "tools/ui-build/lint/clean_output_lint.py",
-    "tools/ui-build/lint/test_clean_output_lint.py"
+    "tools/ui-build/lint/fixtures/generated",
+    "tools/ui-build/lint/test_clean_output_lint.py",
+    "tools/ui-build/ui_build.py"
    ],
    "kind": "python"
   },
@@ -8262,6 +8245,16 @@
    ],
    "kind": "python"
   },
+  "read-audit-cadence-selftest": {
+   "entry": "tools/ci/test_read_audit_cadence.py",
+   "inputs": [
+    ".github/schedule-backstop.json",
+    ".github/workflows/read-audit-cadence-check.yml",
+    "tools/ci/read_audit_cadence.py",
+    "tools/ci/test_read_audit_cadence.py"
+   ],
+   "kind": "python"
+  },
   "read-audit-selftest": {
    "entry": "tools/ci/test_read_audit.py",
    "inputs": [
@@ -8453,6 +8446,7 @@
     "tools/scripts/test_prepush_gate_supervisor.py",
     "tools/scripts/test_reuse_policy_replay.py",
     "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/text_encoding_baseline.json",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
    ],

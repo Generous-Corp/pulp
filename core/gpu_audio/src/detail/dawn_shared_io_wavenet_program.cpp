@@ -10,7 +10,7 @@
 namespace pulp::gpu_audio::detail {
 
 namespace {
-std::optional<std::size_t> history_size(const DawnSharedIoWavenetProgramSpec& spec) noexcept {
+std::optional<std::size_t> history_size(const WavenetProgramSpec& spec) noexcept {
     std::uint64_t samples = 0;
     for (const auto& layer : spec.arrays) {
         std::uint32_t max_history = 0;
@@ -33,7 +33,7 @@ std::optional<std::size_t> history_size(const DawnSharedIoWavenetProgramSpec& sp
 } // namespace
 
 DawnSharedIoWavenetProgram::DawnSharedIoWavenetProgram(DawnSharedIoProvider* provider,
-                                                       const DawnSharedIoWavenetProgramSpec& spec)
+                                                       const WavenetProgramSpec& spec)
     : provider_(provider), block_size_(spec.block_size), stream_instances_(spec.stream_instances),
       weights_(spec.weights.begin(), spec.weights.end()), head_scale_(spec.head_scale) {
     arrays_.reserve(spec.arrays.size());
@@ -49,9 +49,8 @@ DawnSharedIoWavenetProgram::DawnSharedIoWavenetProgram(DawnSharedIoProvider* pro
 }
 
 std::unique_ptr<DawnSharedIoWavenetProgram>
-DawnSharedIoWavenetProgram::create(DawnSharedIoProvider& provider,
-                                   const DawnSharedIoWavenetProgramSpec& spec) {
-    if (!validate_dawn_shared_io_wavenet_spec(spec).accepted())
+DawnSharedIoWavenetProgram::create(DawnSharedIoProvider& provider, const WavenetProgramSpec& spec) {
+    if (!validate_wavenet_spec(spec).accepted())
         return nullptr;
     const auto bytes = history_size(spec);
     if (!bytes)
@@ -66,8 +65,8 @@ DawnSharedIoWavenetProgram::create(DawnSharedIoProvider& provider,
 }
 
 std::unique_ptr<DawnSharedIoWavenetProgram>
-DawnSharedIoWavenetProgram::create(const DawnSharedIoWavenetProgramSpec& spec) {
-    if (!validate_dawn_shared_io_wavenet_spec(spec).accepted())
+DawnSharedIoWavenetProgram::create(const WavenetProgramSpec& spec) {
+    if (!validate_wavenet_spec(spec).accepted())
         return nullptr;
     try {
         return std::unique_ptr<DawnSharedIoWavenetProgram>(

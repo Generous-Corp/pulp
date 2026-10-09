@@ -674,6 +674,21 @@ def main(argv: list[str]) -> int:
         print(f"changed-surface script families: SKIP: {args.build_dir} has no CMake file-API "
               "codemodel reply (touch .cmake/api/v1/query/codemodel-v2 and reconfigure)")
         return SKIP_EXIT
+    off_profile = outside_gate_profile(args.build_dir)
+    if off_profile:
+        # The environment-bound family lists every declared test the configure
+        # registers, so a build the gate does not make writes a file the gate
+        # reads as drift (or reads drift in the gate's file). Only a
+        # gate-profile build may write or judge it.
+        reasons = "; ".join(off_profile)
+        if args.write:
+            print(f"changed-surface script families: refusing to write {FAMILIES_FILE} from a build "
+                  f"that is not the gate's: {reasons}. Regenerate from a gate-profile configure.",
+                  file=sys.stderr)
+            return 2
+        print(f"changed-surface script families: SKIP: {args.build_dir} is not a gate-profile "
+              f"build ({reasons}); the families file holds the gate's and is checked on one")
+        return SKIP_EXIT
     try:
         current = families_path.read_text(encoding="utf-8") if families_path.is_file() else ""
         tests = inventory.load_ctest_json(args.build_dir)
@@ -706,6 +721,22 @@ def main(argv: list[str]) -> int:
               "regenerate on the next push")
         return 0
     return 1
+
+
+def outside_gate_profile(build_dir: Path) -> list[str]:
+    """Why this build registers a different test set from the required gate's
+    configure: script_test_inputs' gate-profile switches, another platform,
+    and the GPU-audio exact-provider proof, which registers its probes only
+    when ON (the gate leaves it OFF). Empty for a gate-profile build."""
+    reasons = script_test_inputs.outside_gate_profile_build(build_dir)
+    platform = script_test_inputs.outside_gate_platform(build_dir)
+    if platform:
+        reasons.append(platform)
+    cache = script_test_inputs._cache_values(build_dir) or {}
+    proof = cache.get("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF", "OFF")
+    if proof.upper() not in ("", "OFF", "FALSE", "0", "NO", "N"):
+        reasons.append(f"PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF={proof} (the gate configures OFF)")
+    return reasons
 
 
 def describe_drift(current: str, regenerated: str) -> list[str]:

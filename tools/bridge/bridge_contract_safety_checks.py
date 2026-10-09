@@ -53,13 +53,18 @@ class BridgeContractSafetyChecks(unittest.TestCase):
         self.assertIn("generated TypeScript wrapper collision: fooBar", problems)
 
     def test_reserved_typescript_wrapper_is_rejected(self) -> None:
-        for name in ("class", "eval", "arguments"):
+        for name, wrapper in (
+            ("class", "class"),
+            ("eval", "eval"),
+            ("arguments", "arguments"),
+            ("json_transport", "jsonTransport"),
+        ):
             data = load_contract(
                 'version = 1\nname = "editor"\n[[commands]]\nname = "'
                 f'{name}"\n'
             )
             self.assertIn(
-                f"wrapper '{name}' is reserved in TypeScript",
+                f"wrapper '{wrapper}' is reserved in TypeScript",
                 "\n".join(auditor.audit(data)),
             )
 

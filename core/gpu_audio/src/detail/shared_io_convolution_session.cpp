@@ -1,23 +1,11 @@
 #include "shared_io_convolution_session.hpp"
 
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-#include "dawn_shared_io_provider.hpp"
-#endif
-
 #include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <limits>
 
 namespace pulp::gpu_audio::detail {
-
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-// The provider is one member of the static gpu-audio archive. Keep an
-// explicit unresolved edge from this session member to the provider member so
-// Apple's one-pass archive scan pulls both members when a consumer only uses
-// the session API. This is a link-time anchor; it does no runtime work.
-void ensure_dawn_shared_io_provider_linked() noexcept;
-#endif
 
 namespace {
 
@@ -64,44 +52,23 @@ SharedIoExecutionContract SharedIoConvolutionSession::execution_contract() const
 }
 
 SharedIoProviderIdentity SharedIoConvolutionSession::provider_identity() const noexcept {
-    SharedIoProviderIdentity identity;
-#if !defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    return identity;
-#else
-    const auto* provider = dynamic_cast<const DawnSharedIoProvider*>(provider_.get());
-    if (provider == nullptr)
-        return identity;
-    ensure_dawn_shared_io_provider_linked();
-    try {
-        const auto adapter = provider->adapter_identity();
-        identity.provider_revision = provider->dawn_revision();
-        identity.adapter_name = adapter.name;
-        identity.adapter_backend = adapter.backend;
-        identity.adapter_vendor_id = adapter.vendor_id;
-        identity.adapter_device_id = adapter.device_id;
-        identity.native_runtime_name = adapter.native_runtime_name;
-        identity.native_runtime_backend = adapter.backend;
-        identity.authenticated =
-            !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
-            identity.adapter_backend == "metal" && identity.adapter_vendor_id != 0 &&
-            !adapter.native_runtime_revision.empty() &&
-            adapter.native_runtime_revision == identity.provider_revision &&
-            !identity.native_runtime_name.empty() &&
-            identity.native_runtime_backend == identity.adapter_backend;
-        // Metal may report device ID zero for a valid Apple adapter.  Zero is
-        // an observed identifier, not an absent identity; backend, vendor,
-        // name, and immutable provider revision remain mandatory above.
-        identity.native_runtime_authenticated = identity.authenticated;
-    } catch (...) {
-        return SharedIoProviderIdentity{};
-    }
-#endif
-    return identity;
+    if (provider_ == nullptr)
+        return {};
+    return provider_->provider_identity();
+}
+
+SharedIoProviderCapabilities SharedIoConvolutionSession::provider_capabilities() const noexcept {
+    if (provider_ == nullptr)
+        return {};
+    return provider_->provider_capabilities();
 }
 
 bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     trace_recorder_.reset();
     trace_telemetry_.reset();
+    const auto contract = execution_contract();
+    trace_telemetry_.configure_depth_lead(
+        {contract.algorithmic_lead_blocks, contract.pipeline_depth, contract.max_inflight});
     retained_trace_records_.clear();
     retained_trace_admissions_.clear();
     trace_retention_overflow_ = false;
@@ -109,7 +76,6 @@ bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     if (!trace_template_.enabled)
         return true;
 
-    auto contract = execution_contract();
     trace_template_.contract = contract;
     trace_template_.generation = plan_.preparation_epoch();
     try {

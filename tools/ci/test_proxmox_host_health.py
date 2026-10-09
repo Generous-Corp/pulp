@@ -85,7 +85,7 @@ class GovernorTests(unittest.TestCase):
                 ["/bin/bash", str(GOVERNOR), *args],
                 capture_output=True,
                 text=True,
-                env=full_env,
+                env=full_env, encoding="utf-8"
             )
 
     def test_reserve_is_derived_from_the_machine(self) -> None:
@@ -166,7 +166,7 @@ class HealthCheckTests(unittest.TestCase):
     def _manifest(self) -> list[tuple[str, str]]:
         out = subprocess.run(
             ["/bin/bash", str(HEALTH), "--manifest"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, encoding="utf-8"
         ).stdout
         return [tuple(line.split()[:2]) for line in out.splitlines() if line.strip()]
 
@@ -209,7 +209,7 @@ class HealthCheckTests(unittest.TestCase):
     def _run(self, *args: str, umask: int | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["/bin/bash", str(HEALTH), *args],
-            capture_output=True, text=True, env=self._env(),
+            capture_output=True, text=True, env=self._env(), encoding="utf-8",
             preexec_fn=None if umask is None else (lambda: os.umask(umask)),
         )
 
@@ -286,10 +286,10 @@ class HealthCheckTests(unittest.TestCase):
         self.assertIn("DRIFT /etc/systemd/system/pulp-ephemeral-reap.timer — installed", result.stdout)
         self.assertIn("reinstall with: ", result.stdout)
         self.assertIn("--install-staged", result.stdout)
-        self.assertIn(f"first_drift_epoch={self.now}", self.drift_state.read_text())
-        self.assertIn(f"ref_sha={self.sha}", self.drift_state.read_text())
+        self.assertIn(f"first_drift_epoch={self.now}", self.drift_state.read_text(encoding="utf-8"))
+        self.assertIn(f"ref_sha={self.sha}", self.drift_state.read_text(encoding="utf-8"))
         stage = self.stage_root / self.sha
-        self.assertEqual((stage / ".verified").read_text().strip(), self.sha)
+        self.assertEqual((stage / ".verified").read_text(encoding="utf-8").strip(), self.sha)
         self.assertEqual(
             (stage / "tools/ci/pulp-ephemeral-reap.timer").read_bytes(),
             (self.remote / "pulp-ephemeral-reap.timer").read_bytes(),

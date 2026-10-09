@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261007-gate-materialized-runtime-conformance-on-esbuild-watch",
+  "created_at": "2026-10-07T08:40:53Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Gates the ctest registration of pulp-materialized-runtime-conformance on tools/import-design/jsx-runtime/node_modules/esbuild, as its sibling pulp-materialized-runtime-node-dependencies already is, and corrects the comment that said it uses only Node built-ins. Only test/cmake/design_import_tool_cli_tests.cmake changes; the probe, the canonicalizer and every import, Chromium, rendering and packaging path are untouched, so no design-import, Chromium, rendering or packaging authority moves. Lanes that install the jsx-runtime dependencies still register the probe as required.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -581,6 +581,73 @@ std::size_t diagnostics_count(const std::vector<ImportDiagnostic>& diagnostics,
     return count;
 }
 
+struct TextClipFailure {
+    std::string id;
+    std::string text;
+    float measured_width = 0.0f;
+    float node_width = 0.0f;
+    float clip_width = 0.0f;
+};
+
+Rect intersect_text_clip_rect(Rect a, Rect b) {
+    const float right = std::min(a.x + a.width, b.x + b.width);
+    const float bottom = std::min(a.y + a.height, b.y + b.height);
+    a.x = std::max(a.x, b.x);
+    a.y = std::max(a.y, b.y);
+    a.width = std::max(0.0f, right - a.x);
+    a.height = std::max(0.0f, bottom - a.y);
+    return a;
+}
+
+void collect_text_clip_failures(const View& view, Rect parent_abs, Rect inherited_clip,
+                                std::vector<TextClipFailure>& failures) {
+    const auto bounds = view.bounds();
+    const Rect abs{parent_abs.x + bounds.x, parent_abs.y + bounds.y, bounds.width, bounds.height};
+    const Rect clip =
+        view.overflow() == View::Overflow::hidden || view.overflow() == View::Overflow::scroll
+            ? intersect_text_clip_rect(inherited_clip, abs)
+            : inherited_clip;
+    if (const auto* label = dynamic_cast<const Label*>(&view)) {
+        // `intrinsic_width()` is intentionally zero for a soft-wrapping
+        // label. Use the max-content/painted extent instead so this invariant
+        // remains useful for both single-line segmented captions and wrapped
+        // imported copy.
+        float measured = label->max_content_width();
+        const auto painted = label->painted_text_extents(std::max(abs.width, 1.0f));
+        if (painted.measured)
+            measured = std::max(measured, painted.width);
+        Rect own_clip = clip;
+        if (const auto& ancestor = label->ancestor_clip_rect()) {
+            // The importer stores this rectangle in the label's local space;
+            // translate it before intersecting with the inherited clip.
+            own_clip = intersect_text_clip_rect(own_clip, {abs.x + ancestor->x, abs.y + ancestor->y,
+                                                           ancestor->width, ancestor->height});
+        }
+        // A zero (or narrower-than-ink) solved box under a tiny inherited clip
+        // is the exact failure seen in the Spectr header: the text shaper has
+        // a useful width, while Yoga/native placement leaves the label inside
+        // a 2px separator clip. Keep this checker independent of the native
+        // analyzer so a planted failure remains observable.
+        if (!label->text().empty() && measured > 0.0f &&
+            (abs.width + 0.01f < measured || own_clip.width + 0.01f < measured) &&
+            own_clip.width <= 2.01f) {
+            failures.push_back({label->id(), label->text(), measured, abs.width, own_clip.width});
+        }
+    }
+    for (auto* child : view.sorted_children_by_z_index())
+        collect_text_clip_failures(*child, abs, clip, failures);
+}
+
+std::vector<TextClipFailure> text_clip_failures(const View& root) {
+    const auto root_bounds = root.bounds();
+    const Rect root_abs{root_bounds.x, root_bounds.y, root_bounds.width, root_bounds.height};
+    return [&] {
+        std::vector<TextClipFailure> failures;
+        collect_text_clip_failures(root, {0, 0, 0, 0}, root_abs, failures);
+        return failures;
+    }();
+}
+
 struct BoundKnobDescriptor {
     std::string route_id;
     std::string param_key;
@@ -851,6 +918,94 @@ TEST_CASE("baked native materializer carries a resolved clip rectangle to the vi
     // parent's rectangle, which is the whole reason the slot is per-node.
     REQUIRE(root->child_count() == 1);
     CHECK_FALSE(root->child_at(0)->ancestor_clip_rect().has_value());
+}
+
+TEST_CASE("native text clipping invariant catches separator-sized label ancestors",
+          "[view][import][native-materializer][text-clip-invariant]") {
+    const std::vector<std::pair<std::string, float>> labels{
+        {"LIVE", 48.0f}, {"PRECISION", 84.0f}, {"IIR", 41.0f}, {"FFT", 42.0f}, {"HYBRID", 63.0f}};
+
+    auto make_fixture = [&](bool planted_clip, bool planted_ancestor_clip) {
+        DesignIR ir;
+        ir.root = frame("text-clip-root", 320.0f, 40.0f, LayoutDirection::row);
+
+        auto rail =
+            frame("segmented-rail", planted_clip ? 2.0f : 278.0f, 22.0f, LayoutDirection::row);
+        if (planted_clip)
+            rail.style.overflow = "hidden";
+
+        for (const auto& [text, width] : labels) {
+            auto caption = label("label-" + text, text, planted_clip ? 0.0f : width, 15.0f);
+            if (text == "HYBRID") {
+                // Exercise the soft-wrapping path: intrinsic_width() is zero
+                // for this label, so the invariant must use max-content or
+                // painted extents to remain sensitive to clipped ink.
+                caption.style.white_space = "normal";
+                caption.style.height = 30.0f;
+            }
+            rail.children.push_back(std::move(caption));
+        }
+        ir.root.children.push_back(std::move(rail));
+
+        std::vector<ImportDiagnostic> diagnostics;
+        auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+        REQUIRE(root != nullptr);
+        REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-failed"));
+        // The importer hands back a detached tree; establish the host bounds
+        // before running the production Yoga path used by native materializer
+        // callers.
+        root->set_bounds({0, 0, 320, 40});
+        root->layout_children();
+
+        // Keep construction and layout on the production materializer path,
+        // then plant the exact post-layout defect for the negative controls.
+        // This avoids teaching the importer to accept an impossible CSS width
+        // of zero while still proving the checker reaches native View objects.
+        auto* materialized_rail = root->child_at(0);
+        REQUIRE(materialized_rail != nullptr);
+        if (planted_clip) {
+            float x = 0.0f;
+            for (std::size_t i = 0; i < labels.size(); ++i) {
+                auto* caption = materialized_rail->child_at(i);
+                REQUIRE(caption != nullptr);
+                caption->set_bounds({x + 10.0f, 4.0f, 0.0f, 15.0f});
+                x += labels[i].second;
+            }
+        }
+        if (planted_ancestor_clip) {
+            auto* caption = materialized_rail->child_at(0);
+            REQUIRE(caption != nullptr);
+            caption->set_ancestor_clip_rect({0.0f, 0.0f, 2.0f, 15.0f});
+            REQUIRE(caption->ancestor_clip_rect().has_value());
+        }
+        return root;
+    };
+
+    const auto positive = make_fixture(false, false);
+    const auto positive_failures = text_clip_failures(*positive);
+    REQUIRE(positive_failures.empty());
+
+    // This is a failure-proving control: if the checker cannot see an
+    // explicitly planted 2px overflow-hidden ancestor, it cannot protect an
+    // imported header from the exact regression found in the Spectr artifact.
+    const auto planted = make_fixture(true, false);
+    const auto planted_failures = text_clip_failures(*planted);
+    REQUIRE(planted_failures.size() == labels.size());
+    for (const auto& failure : planted_failures) {
+        CHECK(failure.measured_width > 0.0f);
+        CHECK(failure.node_width == Catch::Approx(0.0f));
+        CHECK(failure.clip_width == Catch::Approx(2.0f));
+    }
+
+    // Also exercise the importer-owned ancestor clip channel. It clips a
+    // label's own ink without becoming an overflow ancestor for its children,
+    // so the checker must account for it separately from the propagated clip.
+    const auto ancestor_planted = make_fixture(false, true);
+    const auto ancestor_failures = text_clip_failures(*ancestor_planted);
+    REQUIRE(ancestor_failures.size() == 1);
+    CHECK(ancestor_failures.front().text == "LIVE");
+    CHECK(ancestor_failures.front().node_width > 0.0f);
+    CHECK(ancestor_failures.front().clip_width == Catch::Approx(2.0f));
 }
 
 TEST_CASE("baked native materializer applies the SVG fill rule to the path widget",

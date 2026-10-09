@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shared_io_slot_ledger.hpp"
+#include "shared_io_provider_identity.hpp"
 
 #include <atomic>
 #include <cstddef>
@@ -218,6 +219,16 @@ class SharedIoArenaProvider {
     // transaction leave this false and remain CPU-only until reconstructed.
     virtual bool can_resume_after_drain() const noexcept {
         return false;
+    }
+
+    // Host/quiescent provider-owned identity and semantic capabilities.  The
+    // default is intentionally unknown so fake and future providers do not
+    // accidentally inherit Dawn/Metal claims.
+    virtual SharedIoProviderIdentity provider_identity() const noexcept {
+        return {};
+    }
+    virtual SharedIoProviderCapabilities provider_capabilities() const noexcept {
+        return {};
     }
 
     // Optional diagnostic GPU execution duration for a retired submission.

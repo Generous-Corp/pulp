@@ -16,6 +16,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 from typing import Any
 
 SCHEMA = "pulp.gpu-audio.p2.authenticated-slots-lead.v1"
@@ -148,12 +149,65 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def validate_host_preflight(path: Path, expected_source_revision: str,
+                            max_age_seconds: int = 900) -> dict[str, Any]:
+    """Require a fresh, quiet, source-bound host admission receipt.
+
+    The host probe is deliberately an input owned by the campaign/operations
+    lane.  This driver only verifies the stable contract; it does not infer
+    quietness from a local process list or turn a missing field into a pass.
+    """
+
+    if not path.is_file():
+        raise RuntimeError(f"host preflight is missing: {path}")
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("host preflight is not valid JSON") from exc
+    if not isinstance(receipt, dict):
+        raise RuntimeError("host preflight must be a JSON object")
+    required = {
+        "schema": receipt.get("schema") == "pulp.gpu-audio.p2.host-preflight.v1",
+        "status": receipt.get("status") == "passed",
+        "source_revision": receipt.get("source_revision") == expected_source_revision,
+        "host_id": isinstance(receipt.get("host_id"), str) and bool(receipt["host_id"].strip()),
+        "quiet_host": receipt.get("quiet_host") is True,
+        "host_vitals": receipt.get("host_vitals_level") == "green",
+        "contention": receipt.get("gpu_contention") is False
+        and receipt.get("ui_contention") is False,
+        "thermal": isinstance(receipt.get("thermal_state"), str)
+        and bool(receipt["thermal_state"].strip()),
+    }
+    sampled_at = receipt.get("sampled_at")
+    try:
+        sampled_epoch = datetime.fromisoformat(sampled_at.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError("host preflight sampled_at must be an ISO-8601 timestamp") from exc
+    now = time.time()
+    required["fresh"] = 0 <= now - sampled_epoch <= max_age_seconds
+    failed = [name for name, ok in required.items() if not ok]
+    if failed:
+        raise RuntimeError(f"host preflight failed: {', '.join(failed)}")
+    return receipt
+
+
+def require_unchanged_host_preflight(path: Path, expected_sha256: str) -> None:
+    """Keep the admission artifact immutable for the whole campaign."""
+
+    try:
+        observed = sha256(path)
+    except OSError as exc:
+        raise RuntimeError("host preflight disappeared during campaign") from exc
+    if observed != expected_sha256:
+        raise RuntimeError("host preflight changed during campaign")
+
+
 def _source_provenance() -> tuple[str, str]:
     """Return exact HEAD and driver hashes, refusing tracked source drift."""
 
     status = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "status", "--porcelain=v1", "--untracked-files=no"],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, encoding="utf-8"
     )
     if status.returncode != 0:
         raise RuntimeError("unable to establish source tree status")
@@ -173,7 +227,7 @@ def _source_provenance() -> tuple[str, str]:
     tracked = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "--error-unmatch", "--stage", "--",
          str(DRIVER_RELATIVE_PATH)],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, encoding="utf-8"
     )
     if tracked.returncode != 0 or not tracked.stdout.strip():
         raise RuntimeError("campaign driver is not tracked by the source repository")
@@ -183,11 +237,11 @@ def _source_provenance() -> tuple[str, str]:
     try:
         head_blob = subprocess.check_output(
             ["git", "-C", str(REPO_ROOT), "rev-parse", f"HEAD:{DRIVER_RELATIVE_PATH}"],
-            text=True,
+            text=True, encoding="utf-8"
         ).strip()
         worktree_blob = subprocess.check_output(
             ["git", "-C", str(REPO_ROOT), "hash-object", "--", str(DRIVER_PATH)],
-            text=True,
+            text=True, encoding="utf-8"
         ).strip()
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("unable to establish tracked campaign driver blob") from exc
@@ -196,7 +250,7 @@ def _source_provenance() -> tuple[str, str]:
 
     try:
         source_revision = subprocess.check_output(
-            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True,
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True, encoding="utf-8"
         ).strip()
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("unable to resolve source revision") from exc
@@ -295,7 +349,7 @@ def observe_jsonl(path: Path) -> LosslessLifecycleObserver:
     """Read a raw JSONL stream without dropping blank or malformed rows."""
 
     observer = LosslessLifecycleObserver()
-    with path.open() as stream:
+    with path.open(encoding="utf-8") as stream:
         for line_number, line in enumerate(stream, 1):
             if not line.strip():
                 raise RuntimeError(f"raw observer encountered blank line {line_number}")
@@ -310,6 +364,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--probe", type=Path)
     p.add_argument("--output-dir", type=Path)
+    p.add_argument("--host-preflight", type=Path,
+                   help="fresh source-bound quiet-host receipt (required for hardware runs)")
     p.add_argument("--frames", type=int, default=32, choices=(32, 64, 128))
     p.add_argument("--blocks", type=int, default=REQUIRED_MEASURED_BLOCKS)
     p.add_argument("--warmup", type=int, default=16)
@@ -328,6 +384,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="validate and print the complete authenticated matrix without running hardware",
     )
     return p.parse_args(argv)
+
+
+def logical_trial_repetitions(run_kind: str, process_repetition: int) -> tuple[int, ...]:
+    """Map one process receipt to its logical matrix repetitions."""
+
+    if run_kind == "cold":
+        return (process_repetition,)
+    if run_kind == "steady":
+        return tuple(range(1, RUNS_PER_KIND + 1))
+    raise ValueError(f"unknown run kind: {run_kind}")
 
 
 def validate_receipt(receipt: dict, slots: int, lead: int, expected_run_kind: str) -> None:
@@ -596,6 +662,10 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError(f"acceptance campaign requires exactly {REQUIRED_MEASURED_BLOCKS} measured blocks")
     source_revision, driver_sha256 = _source_provenance()
     initial_source_provenance = (source_revision, driver_sha256)
+    if args.host_preflight is None:
+        raise RuntimeError("--host-preflight is required for a hardware campaign")
+    host_preflight = validate_host_preflight(args.host_preflight, source_revision)
+    host_preflight_sha256 = sha256(args.host_preflight)
     if args.expected_source_revision is not None and args.expected_source_revision != source_revision:
         raise RuntimeError("expected source revision does not match the measured source")
     if args.expected_driver_sha256 is not None and args.expected_driver_sha256 != driver_sha256:
@@ -613,11 +683,11 @@ def run(args: argparse.Namespace) -> int:
                    "--run-kind=cold",
                    f"--output-dir={control_dir}", f"--raw-jsonl={control_dir / 'raw.jsonl'}",
                    "--negative-control", "--expect-failure"]
-        control_proc = subprocess.run(control, capture_output=True, text=True, timeout=900)
+        control_proc = subprocess.run(control, capture_output=True, text=True, timeout=900, encoding="utf-8")
         control_receipt_path = control_dir / "receipt.json"
         if control_proc.returncode != 0 or not control_receipt_path.is_file():
             raise RuntimeError("negative control did not return expected-failure status")
-        control_receipt = json.loads(control_receipt_path.read_text())
+        control_receipt = json.loads(control_receipt_path.read_text(encoding="utf-8"))
         control_raw = control_dir / "raw.jsonl"
         validate_negative_control_receipt(control_receipt)
         if not control_raw.is_file():
@@ -650,11 +720,11 @@ def run(args: argparse.Namespace) -> int:
                             command.append(f"--steady-repetitions={RUNS_PER_KIND}")
                         if args.wake_on_write:
                             command.append("--wake-on-write")
-                        proc = subprocess.run(command, capture_output=True, text=True, timeout=900)
+                        proc = subprocess.run(command, capture_output=True, text=True, timeout=900, encoding="utf-8")
                         receipt_path = trial_dir / "receipt.json"
                         if proc.returncode != 0 or not receipt_path.is_file():
                             raise RuntimeError(f"{slots=} {lead=} {run_kind=} {repetition=} probe failed ({proc.returncode})")
-                        receipt = json.loads(receipt_path.read_text())
+                        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
                         validate_receipt(receipt, slots, lead, run_kind)
                         raw_path = trial_dir / "raw.jsonl"
                         if not raw_path.is_file():
@@ -669,10 +739,16 @@ def run(args: argparse.Namespace) -> int:
                             raise RuntimeError(
                                 f"{slots=} {lead=} {run_kind=} provenance run kind disagrees"
                             )
-                        (trial_dir / "command.json").write_text(json.dumps({"argv": command, "returncode": proc.returncode}, indent=2) + "\n")
-                        (trial_dir / "probe.stdout").write_text(proc.stdout)
-                        (trial_dir / "probe.stderr").write_text(proc.stderr)
-                        for logical_repetition in logical_repetitions:
+                        (trial_dir / "command.json").write_text(json.dumps({"argv": command, "returncode": proc.returncode}, indent=2) + "\n", encoding="utf-8")
+                        (trial_dir / "probe.stdout").write_text(proc.stdout, encoding="utf-8")
+                        (trial_dir / "probe.stderr").write_text(proc.stderr, encoding="utf-8")
+                        # Each cold process is one logical repetition. A
+                        # steady process contains all five logical repetitions
+                        # in one resident session. Expanding cold receipts
+                        # five times makes a complete 96-process matrix look
+                        # like 480 logical trials and fails at finalization.
+                        trial_repetitions = logical_trial_repetitions(run_kind, repetition)
+                        for logical_repetition in trial_repetitions:
                             trials.append({"slots": slots, "lead": lead, "run_kind": run_kind,
                                            "repetition": logical_repetition, "receipt_sha256": sha256(receipt_path),
                                            "raw_jsonl_sha256": sha256(raw_path),
@@ -690,6 +766,7 @@ def run(args: argparse.Namespace) -> int:
         args.output_dir.rmdir()
         raise
     _require_unchanged_source(initial_source_provenance)
+    require_unchanged_host_preflight(args.host_preflight, host_preflight_sha256)
     if len(trials) != len(selected_slots) * len(selected_leads) * 2 * RUNS_PER_KIND:
         raise RuntimeError("campaign completed with an incomplete cold/steady matrix")
     if not campaign_manifest_digest:
@@ -702,6 +779,9 @@ def run(args: argparse.Namespace) -> int:
                 "driver_sha256": driver_sha256,
                 "source_tree_clean": True,
                 "probe_sha256": probe_sha256, "probe_path": str(args.probe.resolve()),
+                "host_preflight_sha256": host_preflight_sha256,
+                "host_preflight_path": str(args.host_preflight.resolve()),
+                "host_id": host_preflight["host_id"],
                 "machine_id": platform.node() or "unavailable", "host_platform": platform.platform(),
                 "negative_control": negative_control,
                 "provenance_manifest_sha256": campaign_manifest_digest,
@@ -710,7 +790,7 @@ def run(args: argparse.Namespace) -> int:
                 "run_kinds": ["cold", "steady"], "required_measured_blocks": REQUIRED_MEASURED_BLOCKS,
                 "paced": True, "trials": trials}
     validate_manifest_provenance(manifest, source_revision, driver_sha256)
-    (args.output_dir / "campaign.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    (args.output_dir / "campaign.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"schema": SCHEMA, "status": "completed", "trials": len(trials),
                       "acceptance_status": manifest["acceptance_status"],
                       "performance_verdict": "unassigned"}))

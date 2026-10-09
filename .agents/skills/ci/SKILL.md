@@ -86,7 +86,44 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+## Build emitters always use the governor
+
+Any command that Pulp prints for a user to copy, any generated test driver,
+and every sanitizer workflow build step must invoke
+`tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
+directory explicit, including secondary artifact trees and the Linux RTSan
+lane, but do not include `-j`, `--parallel`, or a host-core probe: the
+governor owns parallelism, leases, and build-directory locking.
+
+The timeline hardening workflow's focused Ninja build follows the same rule:
+`timeline-hardening.yml` must invoke the governor directly and leave worker
+selection to it, even though the lane only builds two timeline test targets.
+
+The `web-plugins.yml` WAMv2 and WebCLAP build steps run under nested
+`working-directory` values. Use the absolute workspace-root wrapper path in
+those steps (`bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`); relative
+`tools/ci/` paths resolve inside the demo directory and fail before the build.
+
+WebCLAP Cloudflare builds use the same absolute workspace-root wrapper for
+every WASI/Emscripten tree. The gallery step runs from
+`examples/web-demos/wclap-build`, so a relative `tools/ci/` path cannot resolve;
+keep configure toolchains and build directories unchanged when routing an
+existing build through the governor.
+
+The timeline fuzz workflow's deterministic and libFuzzer build steps follow the
+same rule. Keep their target lists and build directories unchanged, but route
+both `cmake --build` invocations through `tools/ci/governed-build.sh`; the
+governor owns the worker share on every runner.
+
 ## Focused builds are a dev-loop default, never a landing signal
+
+### Build commands emitted by diagnostics and remediations
+
+Any command that Pulp prints for a user to copy, including desktop video
+doctor/remediation output, is a build emitter and must invoke
+`tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
+directory explicit, but do not include `-j`, `--parallel`, or a host-core
+probe: the governor owns parallelism, leases, and build-directory locking.
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
 and run only what the working diff affects (`pulp affected`, the build-target
@@ -931,7 +968,16 @@ was not flagged has no verdict, because strace saw nothing, and it fails for
 that reason. Once the first run came back clean the nightly
 switched to `--fail-on-findings`: its exit follows the `read-audit stage0:`
 verdict (clean 0, findings 1, incomplete 2). A red nightly is a broken
-Stage 0 streak, not a flake. Read the stage0 line before rerunning it.
+Stage 0 streak, not a flake. Read the stage0 line before rerunning it. The streak counts clean cron DAYS, not runs,
+and only the day's scheduled run counts (the day is the date GitHub created
+it, hours after the cron), or a same-sha dispatch that cancelled and replaced
+it. Any other dispatch is a control, never a day, so dispatching the nightly
+cannot repair the streak. The `read-audit-cadence-check` ledger
+judges each counted run by its report's stage0 verdict, not by the run's
+conclusion: before the fail-on-findings flip (2026-10-03 23:42Z) a green run
+could carry findings. GitHub fires daily crons hours late or drops them, so a
+day with no counted run is a gap, resets the streak, and is named by that
+check's tracking issue.
 
 ### Only a ready-to-land PR head issues a receipt
 
@@ -11750,3 +11796,27 @@ fallback that answers None, and None must never mean "dead".
 ## Design-import clean-output and Vellum boundary gates
 
 The design-import refactor adds two cheap, source-only checks to `tools/scripts/gates.sh`: `vellum_boundary_lint.py` verifies that extractable importer packages use only declared public Pulp view interfaces, and `tools/ui-build/lint/clean_output_lint.py` checks a deterministic clean source fixture. Keep both checks in the gate whenever these package or importer paths change; their planted negative controls are registered in the quality CTest manifest.
+
+## Python text I/O names its encoding: the text-encoding ratchet
+
+Without `encoding=`, Python reads and writes text in the locale code page:
+UTF-8 on the macOS and Linux lanes, cp1252 on Windows, where any non-ASCII byte
+in a source, workflow or doc raises `UnicodeDecodeError: 'charmap' codec`. The
+Windows ctest suite showed twenty such failures at once.
+`tools/scripts/text_encoding_lint.py` (in `gates.sh` and
+`version-skill-check.yml`) flags `read_text`/`write_text`, `open`/`.open` in a
+text or unreadable mode, and `subprocess` calls with `text=True`, all without
+`encoding=`. The backlog lives in `tools/scripts/text_encoding_baseline.json`:
+a file may not exceed its count, a new file must be clean, a count that falls
+must be recorded with `--write` (which refuses to raise one), a line the change
+touches must be clean, and a branch may not raise the base's baseline.
+`--fix PATH...` inserts `encoding="utf-8"` into the calls it can amend without
+guessing (never an `open()` whose mode is a variable). Burn the backlog down a
+directory at a time, avoiding hot files.
+
+Do NOT set `PYTHONUTF8=1` in the Windows lane: it makes the lane green by
+blinding it, and a Windows user running the same tool still crashes. For a tool
+that prints non-ASCII marks, reconfigure its own stdout at its entry point
+(`sys.stdout.reconfigure(encoding="utf-8", errors="replace")`); a Windows pipe
+defaults to the ANSI code page. `PYTHONIOENCODING=cp1252` reproduces that pipe
+on macOS.

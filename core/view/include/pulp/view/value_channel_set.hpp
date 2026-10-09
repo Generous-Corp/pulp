@@ -141,6 +141,8 @@ private:
     /// the set's lifetime.
     std::vector<std::unique_ptr<Entry>> entries_;
     std::vector<ValueChannelInfo> infos_;
+    // Keep the public object layout stable. The setup-only name index lives on
+    // this existing opaque control sidecar.
     std::shared_ptr<detail::ValueChannelTelemetryControl> telemetry_control_;
 };
 

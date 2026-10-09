@@ -60,6 +60,13 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
 
+    # The installed-SDK projection validator is a source-only downstream
+    # consumer check. Keep it on the build-free required lane so a public
+    # header or validator regression cannot hide behind native build results.
+    add_test(NAME dspx07-projection-installed-sdk-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_dspx07_projection_installed_sdk.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
@@ -798,6 +805,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # The read audit's per-day ledger: clean days, resets, missing days.
+        add_test(NAME read-audit-cadence-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_read_audit_cadence.py")
+        set_tests_properties(read-audit-cadence-selftest PROPERTIES TIMEOUT 120)
         # Pure parts of the test-link determinism check (command extraction,
         # the configure's decision file, the loud skip).
         add_test(NAME link-determinism-selftest COMMAND ${Python3_EXECUTABLE}
@@ -1085,6 +1096,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gate-common-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_common.py")
 
+    # Every enforcing lint block in gates.sh must set the failure flag: a block
+    # that reports and falls through lets a red lint pass the whole gate.
+    add_test(NAME gates-sh-fail-flag-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gates_lint_blocks.py")
+
     # The bypass trailers that withhold a release tag, classified through the
     # same parse the pre-merge gates use. A tag that is withheld by a trailer
     # nobody declared reports nothing at all, so this failure mode has no other
@@ -1158,6 +1174,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_provider_identity.py")
     add_test(NAME gpu-audio-p2-campaign-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p2_campaign.py")
+    add_test(NAME gpu-audio-p2-host-preflight-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p2_host_preflight.py")
     add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 

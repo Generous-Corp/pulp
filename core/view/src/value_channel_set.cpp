@@ -36,10 +36,31 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
                                     [&](const ValueChannelInfo& i) { return i.name == name; });
     if (clash != infos_.end()) return fail(DeclareError::duplicate_name);
 
-    infos_.push_back(ValueChannelInfo{std::move(name), std::move(unit), shape, neutral});
-    entries_.push_back(std::make_unique<Entry>());
-    if (!telemetry_control_)
-        telemetry_control_ = detail::make_value_channel_telemetry_control();
+    // Keep the sidecar and ordered declaration vectors in one transaction. The
+    // first declaration creates the sidecar before its metadata can be indexed;
+    // any allocation failure after that point must leave an empty set with no
+    // generation identity or claimable attachment.
+    const bool had_telemetry_control = telemetry_control_ != nullptr;
+    bool info_added = false;
+    bool entry_added = false;
+    try {
+        if (!telemetry_control_)
+            telemetry_control_ = detail::make_value_channel_telemetry_control();
+        infos_.push_back(ValueChannelInfo{std::move(name), std::move(unit), shape, neutral});
+        info_added = true;
+        entries_.push_back(std::make_unique<Entry>());
+        entry_added = true;
+        detail::value_channel_telemetry_index_add(telemetry_control_.get(), infos_.back().name,
+                                                  shape, infos_.size() - 1);
+    } catch (...) {
+        if (entry_added)
+            entries_.pop_back();
+        if (info_added)
+            infos_.pop_back();
+        if (!had_telemetry_control)
+            telemetry_control_.reset();
+        throw;
+    }
     if (error) *error = DeclareError::ok;
     return entries_.back().get();
 }
@@ -90,10 +111,16 @@ EventSource* ValueChannelSet::declare_events(std::string name, std::string unit,
 
 std::ptrdiff_t ValueChannelSet::index_of(std::string_view name,
                                          ValueChannelShape shape) const {
+    // Exact match remains deliberate: a shape mismatch is a miss rather than
+    // a wrong-typed hit, so a binding can never silently read another source.
+    const auto indexed =
+        detail::value_channel_telemetry_index_lookup(telemetry_control_.get(), name, shape);
+    if (indexed >= 0)
+        return indexed;
+    // A control created by an older SDK may not have a populated side index.
+    // Keep the source-compatible behavior correct for that case; new
+    // declarations use the O(1) index above and only misses pay this scan.
     for (std::size_t i = 0; i < infos_.size(); ++i) {
-        // Exact match, deliberately — see the header on why a lookup key is not
-        // canonicalized. A shape mismatch is a miss rather than a wrong-typed
-        // hit, so binding a scope to a meter fails at bind time.
         if (infos_[i].name == name && infos_[i].shape == shape)
             return static_cast<std::ptrdiff_t>(i);
     }

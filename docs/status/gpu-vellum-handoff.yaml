@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "3a512259e68ef734229444be9bf9c35c0a770700",
-          "object_id": "b505f1fda3b55d3f8a1eb251236b07b59b1422ff",
+          "revision": "166a7d18ae6083177f1ad9d5b4095b46aed2d52e",
+          "object_id": "e504b33290ba41033ab58bb3352eecf144e2888a",
           "object_type": "blob"
         },
         {
@@ -2775,16 +2775,16 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "5eeea656fa2cbba115ae8556df0362ac8c89653d",
-          "object_id": "1d8e065a9065367921f1f4aafcb68764188ae202",
+          "revision": "166a7d18ae6083177f1ad9d5b4095b46aed2d52e",
+          "object_id": "a6792cc77c3cc66ba959941dd6a7673648185bdb",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/web-plugins/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "55a6b59a3520b12ef7df90a62e25eadb0ffa52f0",
-          "object_id": "ec84151b5c066949a3f95400f90db2f636c5a5e6",
+          "revision": "217f5d70e500ad746164bbe65854c2264b193616",
+          "object_id": "4eb09a7965a4fac5015b81872a012ac9a8da11fd",
           "object_type": "blob"
         },
         {
@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "53d037af193955ca77b8f746f0de792413c0cc0c",
-          "object_id": "0af369a91685490dd89a3dfe15cfd2d82e25865b",
+          "revision": "b297eee789e580d2b27816e6dc4c0dd5c9399e77",
+          "object_id": "132eee53a7e5045d752f37466e20c06e39753e55",
           "object_type": "blob"
         },
         {
@@ -3042,40 +3042,40 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/package_cli.py",
           "state": "pulp-owned-retained",
-          "revision": "3b8b9f45bd6e7cbb3efda1d28b59673be290abfd",
-          "object_id": "82a93f38b59481cec3a9491d586e63d389d20c75",
+          "revision": "b297eee789e580d2b27816e6dc4c0dd5c9399e77",
+          "object_id": "91bb3e9bac063a5f10a7f4ef3ffd043914a1ab51",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "53d037af193955ca77b8f746f0de792413c0cc0c",
-          "object_id": "2af0a3595a6a439d3d83b72be5213358f27be794",
+          "revision": "e3860f1a777d723af162b5198eab4789022aba1c",
+          "object_id": "202125bee157dd81489b5d32eec999b9c44db682",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "3b8b9f45bd6e7cbb3efda1d28b59673be290abfd",
-          "object_id": "74eaf68036d4aad62f0da726e618f40944267bac",
+          "revision": "ec7d25991696400d1211a0d5b5a02c0c511e7a01",
+          "object_id": "0e7a07a3ae341a0b2635f6417b5f7207fb9a54d1",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_package_cli.py",
           "state": "pulp-owned-retained",
-          "revision": "3b8b9f45bd6e7cbb3efda1d28b59673be290abfd",
-          "object_id": "21697eedfa9c224c7fd2a345da0e1c3ffcc731bf",
+          "revision": "b297eee789e580d2b27816e6dc4c0dd5c9399e77",
+          "object_id": "aa840804de691d75c2a0efb532066fc70bb80623",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "53d037af193955ca77b8f746f0de792413c0cc0c",
-          "object_id": "a14c00c9c181f86098561ec999a4fe9f17c80d59",
+          "revision": "ec7d25991696400d1211a0d5b5a02c0c511e7a01",
+          "object_id": "cdbbbc23b7ee8a6cd8734a3b70995987e7243464",
           "object_type": "blob"
         }
       ],

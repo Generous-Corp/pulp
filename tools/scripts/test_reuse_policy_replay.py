@@ -123,7 +123,7 @@ class CutoffTests(unittest.TestCase):
             rpr.write_jsonl(corpus / "pairs.jsonl", [KeyBlindTests.pair(1, ["test/old-miss"]) | {"group_run_id": "g1"},
                                                      KeyBlindTests.pair(2, []) | {"group_run_id": "g2"}])
             listed = Path(tmp) / "list.json"
-            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}))
+            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}), encoding="utf-8")
             argv = ["key-blind", "--corpus", str(corpus), "--list", str(listed)]
             answers = {"old": False, "new": True}
             with mock.patch.object(rrc, "ancestry", return_value=lambda commit, checkout: answers[checkout]), \
@@ -291,16 +291,16 @@ class Stage0Tests(unittest.TestCase):
             repo = Path(tmp) / "r"
             git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            (repo / "README").write_text("x")
+            (repo / "README").write_text("x", encoding="utf-8")
             subprocess.run(git + ["add", "README"], check=True)
             subprocess.run(git + ["commit", "-q", "-m", "a"], check=True)
-            before = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            before = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True, encoding="utf-8").stdout.strip()
             (repo / "tools" / "ci").mkdir(parents=True)
             (repo / rrc.KEY_BLIND_LIST_PATH).write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {
-                "test/pulp-test-a": {}}}))
+                "test/pulp-test-a": {}}}), encoding="utf-8")
             subprocess.run(git + ["add", rrc.KEY_BLIND_LIST_PATH], check=True)
             subprocess.run(git + ["commit", "-q", "-m", "b"], check=True)
-            after = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            after = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True, encoding="utf-8").stdout.strip()
             c = rrc.Collector.__new__(rrc.Collector)
             c.repo, c.cache, c.gh = repo, Path(tmp) / "cache", None
             self.assertEqual(rrc.key_blind_list_at(c, before), set())
@@ -397,7 +397,7 @@ class KeyBlindTests(unittest.TestCase):
         # The five linked deterministically once -Wl,-objc_stubs_small was
         # passed, so the checked-in list no longer carries them; a key miss
         # on any of them lists it again.
-        checked_in = json.loads((rpr.REPO_ROOT / "tools" / "ci" / "key_blind_executables.json").read_text())
+        checked_in = json.loads((rpr.REPO_ROOT / "tools" / "ci" / "key_blind_executables.json").read_text(encoding="utf-8"))
         stubs = ["test/pulp-test-group-core-standalone", "test/pulp-test-settings-sections",
                  "test/pulp-test-standalone-recording", "test/pulp-test-standalone-rt",
                  "test/pulp-test-timeline-phase1-examples"]
@@ -419,7 +419,7 @@ class KeyBlindTests(unittest.TestCase):
                 self.pair(3, ["test/unknown-group"]) | {"group_run_id": "g9"},
                 self.pair(4, ["test/at-cutoff"]) | {"group_run_id": "g4"}])
             listed = Path(tmp) / "list.json"
-            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}))
+            listed.write_text(json.dumps({"schema": rpr.KEY_BLIND_SCHEMA, "executables": {}}), encoding="utf-8")
             argv = ["key-blind", "--corpus", str(corpus), "--list", str(listed)]
             self.assertEqual(rpr.main(argv + ["--since", "2026-10-04T00:00:00Z"]), 0)
             self.assertEqual(rpr.main(argv + ["--since", "2026-10-04"]), 0)
@@ -438,7 +438,7 @@ class KeyBlindTests(unittest.TestCase):
             self.assertEqual(rpr.main(argv), 1)
             self.assertFalse(listed.exists())
             self.assertEqual(rpr.main(argv + ["--write"]), 0)
-            self.assertIn("test/x", json.loads(listed.read_text())["executables"])
+            self.assertIn("test/x", json.loads(listed.read_text(encoding="utf-8"))["executables"])
             self.assertEqual(rpr.main(argv), 0)                 # nothing new the second time
 
 
@@ -455,16 +455,16 @@ class ScenarioTests(unittest.TestCase):
 
     def test_cli_scenarios_exit_zero(self):
         proc = subprocess.run([sys.executable, str(TOOL), "score", "--scenarios", str(SCENARIOS)],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertNotIn("FAIL", proc.stdout)
 
     def test_a_wrong_expectation_is_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
-            doc = json.loads((SCENARIOS / "inert_drift_rules.json").read_text())
+            doc = json.loads((SCENARIOS / "inert_drift_rules.json").read_text(encoding="utf-8"))
             doc["cases"] = doc["cases"][:1]
             doc["cases"][0]["expect"]["false_skips"] = 0  # the truth is 1
-            (Path(tmp) / "x.json").write_text(json.dumps(doc))
+            (Path(tmp) / "x.json").write_text(json.dumps(doc), encoding="utf-8")
             results = rpr.run_scenarios(Path(tmp))
             self.assertFalse(results[0]["ok"])
             self.assertEqual(results[0]["mismatches"]["false_skips"], {"expected": 0, "actual": 1})
@@ -568,12 +568,12 @@ class ScoreTests(unittest.TestCase):
             rpr.write_jsonl(root / "pairs.jsonl", [pair()])
             rpr.write_jsonl(root / "tests" / "g1.jsonl.gz", [t("a", "fail", 2)])
             proc = subprocess.run([sys.executable, str(TOOL), "score", "--corpus", tmp, "--policy", "inert-drift"],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
             self.assertIn("FALSE SKIPS 1", proc.stdout)
             rpr.write_jsonl(root / "tests" / "g1.jsonl.gz", [t("a")])
             proc = subprocess.run([sys.executable, str(TOOL), "score", "--corpus", tmp, "--policy", "inert-drift"],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
 
@@ -1864,18 +1864,18 @@ class GraftTests(unittest.TestCase):
             git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
             for n in ("a", "b"):
-                (repo / n).write_text(n)
+                (repo / n).write_text(n, encoding="utf-8")
                 subprocess.run(git + ["add", n], check=True)
                 subprocess.run(git + ["commit", "-q", "-m", n], check=True)
             head_sha, parent_sha = subprocess.run(git + ["rev-parse", "HEAD", "HEAD~1"], check=True,
-                                                  capture_output=True, text=True).stdout.split()
-            (repo / ".git" / "shallow").write_text(head_sha + "\n")
+                                                  capture_output=True, text=True, encoding="utf-8").stdout.split()
+            (repo / ".git" / "shallow").write_text(head_sha + "\n", encoding="utf-8")
             # The control is plain git, so an ambient GIT_SHALLOW_FILE (the
             # collector's own override, often exported while replaying) must
             # not reach it.
             plain = {k: v for k, v in os.environ.items() if k != "GIT_SHALLOW_FILE"}
             grafted = subprocess.run(git + ["log", "-1", "--format=%P", head_sha], capture_output=True, text=True,
-                                     env=plain)
+                                     env=plain, encoding="utf-8")
             self.assertEqual(grafted.stdout.strip(), "", "control: the graft hides the parent from plain git")
             c = rrc.Collector.__new__(rrc.Collector)
             c.repo, c.cache = repo, Path(tmp) / "cache"

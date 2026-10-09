@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261007-pr9811-overflow-canvas-watch",
+  "created_at": "2026-10-07T11:53:28Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "PR9811 adds a Pulp-owned browser capture guard that records pre/post canvas dimensions and refuses overflow captures when a backing-store resize changes pixels; stable overflow remains supported and viewport-fit captures preserve the settled canvas. The change hardens importer evidence and tests only; no DesignIR schema, Chromium implementation, rendering, packaging, or authority ownership moves.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

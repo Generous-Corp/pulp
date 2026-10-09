@@ -95,7 +95,7 @@ def run_block(block: str, stub_exit: int, env_value: str | None) -> int:
     """Run a caller's block with format_changed.sh replaced by a stub; return $fail."""
     with tempfile.TemporaryDirectory() as td:
         stub = Path(td) / "format_changed.sh"
-        stub.write_text(f"#!/bin/sh\nexit {stub_exit}\n")
+        stub.write_text(f"#!/bin/sh\nexit {stub_exit}\n", encoding="utf-8")
         script = ("fail=0\nBASE=origin/main\n"
                   'run_gate_captured() { "$@"; }\n'
                   f'FMT="{stub}"\n{block}\necho "fail=$fail"\n')
@@ -103,7 +103,7 @@ def run_block(block: str, stub_exit: int, env_value: str | None) -> int:
         if env_value is not None:
             env["PULP_ENFORCE_PREPUSH_FORMAT"] = env_value
         out = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True,
-                             timeout=30).stdout
+                             timeout=30, encoding="utf-8").stdout
         match = re.search(r"fail=(\d)", out)
         return int(match.group(1)) if match else -1
 

@@ -95,13 +95,13 @@ class Fixture:
         for path, body in self.files.items():
             p = self.root / path
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(body)
+            p.write_text(body, encoding="utf-8")
         (self.root / ek.SCRIPT_INPUTS_PATH).parent.mkdir(parents=True, exist_ok=True)
-        (self.root / ek.SCRIPT_INPUTS_PATH).write_text(json.dumps(self.scan))
+        (self.root / ek.SCRIPT_INPUTS_PATH).write_text(json.dumps(self.scan), encoding="utf-8")
         git = ["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
         subprocess.run(git + ["add", "-A"], check=True)
         subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "c"], check=True)
-        return subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+        return subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
 
     def write_record(self) -> None:
         self.record.mkdir(exist_ok=True)
@@ -112,11 +112,11 @@ class Fixture:
                     "members": {"<build>/core/liba.a": {"liba.cpp.o": [obj("liba", "core/liba.cpp")],
                                                         "unpulled.cpp.o": [obj("liba", "core/unpulled.cpp")]}}}
         (self.record / "codemodel-x.json").write_text(json.dumps(
-            {"schema": V2, "generated_headers": "ninja-deps", "targets": self.base_targets}))
-        (self.record / "link-members-x.json").write_text(json.dumps(self.links))
-        (self.record / "object-deps-x.json").write_text(json.dumps(deps_doc))
+            {"schema": V2, "generated_headers": "ninja-deps", "targets": self.base_targets}), encoding="utf-8")
+        (self.record / "link-members-x.json").write_text(json.dumps(self.links), encoding="utf-8")
+        (self.record / "object-deps-x.json").write_text(json.dumps(deps_doc), encoding="utf-8")
         (self.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "img", "fields": self.record_fields},
-                                                          **self.job_extra}))
+                                                          **self.job_extra}), encoding="utf-8")
 
     def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN,
              key_blind: Path | None = None,
@@ -347,7 +347,7 @@ class KeyTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("#!/bin/sh\n"
                                 f'case "$1" in -print-target-triple) echo arm64-apple-darwin99.0.0 ;; '
-                                f'*) echo "{line}" ;; esac\n')
+                                f'*) echo "{line}" ;; esac\n', encoding="utf-8")
                 path.chmod(0o755)
                 return path
             chosen = compiler(tmp / "toolchain" / "c++", "CMake-chosen clang 1.0")
@@ -356,8 +356,8 @@ class KeyTests(unittest.TestCase):
             (build / "CMakeFiles" / "3.30.0").mkdir(parents=True)
             (build / "CMakeFiles" / "3.30.0" / "CMakeCXXCompiler.cmake").write_text(
                 f'set(CMAKE_CXX_COMPILER "{chosen}")\nset(CMAKE_CXX_COMPILER_ID "AppleClang")\n'
-                'set(CMAKE_CXX_COMPILER_VERSION "1.0.0")\n')
-            (build / "CMakeCache.txt").write_text("CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n")
+                'set(CMAKE_CXX_COMPILER_VERSION "1.0.0")\n', encoding="utf-8")
+            (build / "CMakeCache.txt").write_text("CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n", encoding="utf-8")
             with mock.patch.dict(os.environ, {"PATH": f"{tmp / 'path'}:{os.environ.get('PATH', '')}"}):
                 key = ek.probe_toolchain(build)
             if key is None:
@@ -369,10 +369,10 @@ class KeyTests(unittest.TestCase):
         head = self.head(**{"docs/readme.md": "new\n"})
         listed = Path(self.tmp.name) / "key_blind.json"
         listed.write_text(json.dumps({"schema": ek.KEY_BLIND_SCHEMA, "executables": {
-            EXE: {"example": {"pr": 1, "group_run_id": "g"}, "explained": "linker stub order"}}}))
+            EXE: {"example": {"pr": 1, "group_run_id": "g"}, "explained": "linker stub order"}}}), encoding="utf-8")
         keys = self.fx.keys(head, key_blind=listed)
         self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"]), ("key_blind", None))
-        listed.write_text(json.dumps({"schema": "something-else", "executables": {}}))
+        listed.write_text(json.dumps({"schema": "something-else", "executables": {}}), encoding="utf-8")
         with self.assertRaises(ValueError):                 # an unreadable list is an error, not empty
             self.fx.keys(head, key_blind=listed)
 
@@ -427,28 +427,28 @@ class ManifestTests(unittest.TestCase):
             head = fx.commit()
             fx.write_record()
             cm = Path(tmp) / "cm.json"
-            cm.write_text(json.dumps({"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}))
+            cm.write_text(json.dumps({"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}), encoding="utf-8")
             out = Path(tmp) / "keys.json"
             tc = Path(tmp) / "tc.json"
-            tc.write_text(json.dumps(TOOLCHAIN))
+            tc.write_text(json.dumps(TOOLCHAIN), encoding="utf-8")
             audit = Path(tmp) / "read-audit.json"
             audit.write_text(json.dumps({"schema": ek.READ_AUDIT_SCHEMA, "commit": "c0ffee",
-                                         "stage0": {"verdict": "clean", "covered": ["pulp-test-a", "pulp-test-b"]}}))
+                                         "stage0": {"verdict": "clean", "covered": ["pulp-test-a", "pulp-test-b"]}}), encoding="utf-8")
             argv = ["x", "--source-root", str(fx.root), "--base-sha", fx.base, "--head-sha", head,
                     "--base-record", str(fx.record), "--base-record-run-id", "42", "--head-codemodel", str(cm),
                     "--build-dir", str(fx.build), "--toolchain-json", str(tc), "--audit-report", str(audit),
                     "--out", str(out)]
             # Without the audit report every executable is unvouched for.
             self.assertEqual(ek.main([a for a in argv if a not in ("--audit-report", str(audit))]), 0)
-            absent = json.loads(out.read_text())
+            absent = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual((absent["reasons"], absent["producer"]["audit_status"]),
                              ({"audit_uncovered": 2, "keyed": 1}, "absent"))
             unclean = Path(tmp) / "unclean.json"
-            unclean.write_text(json.dumps({"schema": ek.READ_AUDIT_SCHEMA, "stage0": {"verdict": "findings"}}))
+            unclean.write_text(json.dumps({"schema": ek.READ_AUDIT_SCHEMA, "stage0": {"verdict": "findings"}}), encoding="utf-8")
             self.assertEqual(ek.main([str(unclean) if a == str(audit) else a for a in argv]), 0)
-            self.assertEqual(json.loads(out.read_text())["producer"]["audit_status"], "not_clean")
+            self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["producer"]["audit_status"], "not_clean")
             self.assertEqual(ek.main(argv), 0)
-            doc = json.loads(out.read_text())
+            doc = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual((doc["producer"]["audit_commit"], len(doc["producer"]["audit_report_sha256"]),
                               doc["producer"]["audit_status"]), ("c0ffee", 64, "clean"))
             self.assertEqual(doc["schema"], ek.SCHEMA)
@@ -459,9 +459,9 @@ class ManifestTests(unittest.TestCase):
             first = producer["base_record_sha256"]
             self.assertEqual(producer["toolchain"], TOOLCHAIN)
             self.assertEqual(doc["reasons"], {"keyed": 3})
-            (fx.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "other"}}))
+            (fx.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "other"}}), encoding="utf-8")
             ek.main(argv)
-            doc = json.loads(out.read_text())
+            doc = json.loads(out.read_text(encoding="utf-8"))
             self.assertNotEqual(doc["producer"]["base_record_sha256"], first)
             self.assertEqual(doc["reasons"], {"toolchain_unknown": 3})
 
@@ -513,7 +513,7 @@ class ManifestTests(unittest.TestCase):
             root = Path(tmp)
             for rel, body in (("a/b", "slash\n"), ("a.b", "dot\n"), ("suites/x.xml", "<x/>\n")):
                 (root / rel).parent.mkdir(parents=True, exist_ok=True)
-                (root / rel).write_text(body)
+                (root / rel).write_text(body, encoding="utf-8")
             # The planner reimplements this; byte order puts a.b before a/b.
             self.assertTrue(ek.record_digest_bytes(root).startswith(b"a.b\0"))
             self.assertEqual(ek.load_record(root)[1],

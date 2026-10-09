@@ -332,7 +332,7 @@ class AgentCapabilityInstalledSdkRequiredTests(unittest.TestCase):
             [sys.executable, str(SCRIPT), "--mode=files", "--json", path],
             capture_output=True,
             text=True,
-            check=True,
+            check=True, encoding="utf-8"
         )
         self.assertTrue(json.loads(result.stdout)["native_build_required"])
 
@@ -409,7 +409,7 @@ class IosCompileRequiredTests(unittest.TestCase):
         repo = THIS_DIR.parent.parent
         listed = subprocess.run(
             ["git", "ls-files", "*CMakeLists.txt", "*.cmake", "*.cmake.in"],
-            cwd=repo, capture_output=True, text=True, check=True,
+            cwd=repo, capture_output=True, text=True, check=True, encoding="utf-8"
         ).stdout.split()
         # The root adds the desktop CLI and its GPU probe only for non-iOS
         # configurations, so their CMake never runs in the iOS gate. Pin that
@@ -748,7 +748,7 @@ class CliTests(unittest.TestCase):
             env.update(env_extra)
         return subprocess.run(
             [sys.executable, str(SCRIPT), *args],
-            capture_output=True, text=True, check=False, env=env,
+            capture_output=True, text=True, check=False, env=env, encoding="utf-8"
         )
 
     def test_files_mode_docs_only(self) -> None:
@@ -803,7 +803,7 @@ class CliTests(unittest.TestCase):
             r = self._run("--mode=files", "README.md",
                            env_extra={"GITHUB_OUTPUT": out_path})
             self.assertEqual(r.returncode, 0, r.stderr)
-            content = Path(out_path).read_text()
+            content = Path(out_path).read_text(encoding="utf-8")
             self.assertIn("native_build_required=false", content)
             self.assertIn("ios_compile_required=false", content)
             self.assertIn(
@@ -822,7 +822,7 @@ class CliTests(unittest.TestCase):
             r = self._run("--mode=files", "core/view/src/widget.cpp",
                           env_extra={"GITHUB_OUTPUT": out_path})
             self.assertEqual(r.returncode, 0, r.stderr)
-            content = Path(out_path).read_text()
+            content = Path(out_path).read_text(encoding="utf-8")
             self.assertIn("existing=1\n", content)
             self.assertIn("native_build_required=true\n", content)
             self.assertIn("ios_compile_required=true\n", content)

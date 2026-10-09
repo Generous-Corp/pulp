@@ -136,10 +136,36 @@ TEST_CASE("browser CLI adapter tags non-browser input as not applicable",
     CHECK(std::holds_alternative<id::BrowserImportNotApplicable>(result));
 }
 
+TEST_CASE("required canvas ink rejects non-browser dispatch",
+          "[import-design][browser-capture][cli-adapter]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.require_canvas_ink = true;
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html = [](const id::BrowserHtmlImportRequest&, std::string_view) {
+        return id::BrowserHtmlImportResult{};
+    };
+    operations.validate_capture = [](const pulp::view::DesignIR&,
+                                     const id::BrowserCaptureValidationOptions&) {
+        FAIL("non-browser input must not validate");
+        return id::BrowserCaptureValidationResult{};
+    };
+    operations.localize_assets = [](pulp::view::DesignIR&, const std::string&, std::string*) {
+        FAIL("non-browser input must not localize");
+        return false;
+    };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(request, "not html", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 2);
+}
+
 TEST_CASE("authored-frame CLI policy rejects every incompatible route",
           "[import-design][browser-capture][cli-adapter]") {
     using id::validate_browser_import_cli_options;
-    using id::validate_fit_authored_frame_source_cli;
 
     CHECK(validate_browser_import_cli_options(
               true, true, false, false, false, false, false, false) == 2);
@@ -153,9 +179,20 @@ TEST_CASE("authored-frame CLI policy rejects every incompatible route",
               true, false, false, false, false, true, false, false) == 2);
     CHECK(validate_browser_import_cli_options(
               false, false, false, false, false, false, true, true) == 2);
+    CHECK(validate_browser_import_cli_options(false, false, false, false, false, false, false,
+                                              false, true) == 2);
+    CHECK_FALSE(validate_browser_import_cli_options(false, false, false, false, false, false, false,
+                                                    true, true));
+    CHECK(validate_browser_import_cli_options(false, false, false, true, false, false, false, true,
+                                              true) == 2);
+    CHECK(validate_browser_import_cli_options(false, false, false, false, true, false, false, true,
+                                              true) == 2);
+    CHECK(validate_browser_import_cli_options(false, false, false, false, false, true, false, true,
+                                              true) == 2);
     CHECK_FALSE(validate_browser_import_cli_options(
         true, false, false, false, false, false, false, false));
 
+    using id::validate_fit_authored_frame_source_cli;
     CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "html"));
     CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "claude"));
     CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "stitch"));
@@ -170,6 +207,8 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
     std::optional<fs::path> observed;
     std::optional<int> observed_width;
     bool observed_fit_authored_frame = false;
+    bool observed_materialized_canvas_composition = false;
+    bool observed_require_canvas_ink = false;
 
     id::internal::BrowserImportCliOperations operations;
     operations.import_html =
@@ -179,6 +218,9 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
             observed_width = capture_request.pinned_width;
             observed_fit_authored_frame =
                 capture_request.fit_authored_frame;
+            observed_materialized_canvas_composition =
+                capture_request.materialized_canvas_composition;
+            observed_require_canvas_ink = capture_request.require_canvas_ink;
             return id::BrowserHtmlNotApplicable{};
         };
     operations.validate_capture =
@@ -223,6 +265,20 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
         CHECK_FALSE(observed);
         CHECK_FALSE(observed_width);
         CHECK(observed_fit_authored_frame);
+    }
+
+    SECTION("forwards opt-in canvas ink requirement") {
+        request.materialized_canvas_composition = true;
+        request.require_canvas_ink = true;
+        request.browser_interactions = tree.root / "interactions.json";
+
+        const auto result =
+            id::internal::run_browser_import_cli_with_operations(request, "not html", operations);
+        const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+        REQUIRE(failure);
+        CHECK(failure->exit_code == 2);
+        CHECK(observed_materialized_canvas_composition);
+        CHECK(observed_require_canvas_ink);
     }
 }
 
@@ -1182,13 +1238,16 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
     evidence.width = expected.width;
     evidence.height = expected.height;
     evidence.rgba.resize(expected.rgba.size(), 0);
-    for (int y = 8; y < 16; ++y) {
-        for (int x = 8; x < 16; ++x) {
+    for (int y = 6; y < 22; ++y) {
+        for (int x = 6; x < 22; ++x) {
             const auto pixel = static_cast<std::size_t>(
                 (y * evidence.width + x) * 4);
-            evidence.rgba[pixel] = 231;
-            evidence.rgba[pixel + 1] = 17;
-            evidence.rgba[pixel + 2] = 93;
+            // Deliberately dark paint: the gate measures opaque coverage so a
+            // valid dark canvas cannot be rejected by an absolute brightness
+            // threshold.
+            evidence.rgba[pixel] = 5;
+            evidence.rgba[pixel + 1] = 6;
+            evidence.rgba[pixel + 2] = 9;
             evidence.rgba[pixel + 3] = 255;
             expected.rgba[pixel] = evidence.rgba[pixel];
             expected.rgba[pixel + 1] = evidence.rgba[pixel + 1];
@@ -1210,19 +1269,73 @@ TEST_CASE("materialized validation composes captured canvas evidence without shi
         .height = evidence.height,
     });
 
-    const auto result = id::validate_browser_capture_design_ir(
-        ir,
-        {.reference = reference_path,
-         .rendered = tree.root / "render.png",
-         .diff = tree.root / "diff.png",
-         .width = 32,
-         .height = 32});
+    const auto result =
+        id::validate_browser_capture_design_ir(ir, {.reference = reference_path,
+                                                    .rendered = tree.root / "render.png",
+                                                    .diff = tree.root / "diff.png",
+                                                    .width = 32,
+                                                    .height = 32,
+                                                    .require_canvas_ink = true});
     INFO(result.error);
     INFO(result.registration_reason);
     REQUIRE(result.valid);
     REQUIRE(result.scored);
     CHECK(result.diff_pixels == 0);
     CHECK(result.similarity == 1.0f);
+
+    SECTION("zero-ink sparse evidence is rejected only when requested") {
+        id::ImportPngImage empty;
+        empty.width = evidence.width;
+        empty.height = evidence.height;
+        empty.rgba.resize(evidence.rgba.size(), 0);
+        tree.write(evidence_path, id::encode_png_rgba(empty));
+
+        const auto rejected = id::validate_browser_capture_design_ir(
+            ir, {.reference = reference_path,
+                 .rendered = tree.root / "render-zero-ink.png",
+                 .diff = tree.root / "diff-zero-ink.png",
+                 .width = 32,
+                 .height = 32,
+                 .require_canvas_ink = true});
+        CHECK_FALSE(rejected.valid);
+        CHECK(rejected.error.find("at least 256 opaque canvas pixels") != std::string::npos);
+
+        const auto allowed = id::validate_browser_capture_design_ir(
+            ir, {.reference = reference_path,
+                 .rendered = tree.root / "render-zero-ink-default.png",
+                 .diff = tree.root / "diff-zero-ink-default.png",
+                 .width = 32,
+                 .height = 32});
+        CHECK(allowed.valid);
+        CHECK(allowed.scored);
+    }
+
+    SECTION("127 isolated opaque specks do not satisfy the coverage floor") {
+        id::ImportPngImage specks;
+        specks.width = evidence.width;
+        specks.height = evidence.height;
+        specks.rgba.resize(evidence.rgba.size(), 0);
+        for (std::size_t pixel = 0; pixel < 127; ++pixel) {
+            const auto offset = pixel * 4;
+            // Deliberately dark and opaque: brightness must not be part of the
+            // contract, while isolated coverage must still fail closed.
+            specks.rgba[offset] = 5;
+            specks.rgba[offset + 1] = 6;
+            specks.rgba[offset + 2] = 9;
+            specks.rgba[offset + 3] = 255;
+        }
+        tree.write(evidence_path, id::encode_png_rgba(specks));
+
+        const auto rejected = id::validate_browser_capture_design_ir(
+            ir, {.reference = reference_path,
+                 .rendered = tree.root / "render-low-contrast.png",
+                 .diff = tree.root / "diff-low-contrast.png",
+                 .width = 32,
+                 .height = 32,
+                 .require_canvas_ink = true});
+        CHECK_FALSE(rejected.valid);
+        CHECK(rejected.error.find("at least 256 opaque canvas pixels") != std::string::npos);
+    }
 
     SECTION("removing the evidence fails closed") {
         fs::remove(evidence_path);

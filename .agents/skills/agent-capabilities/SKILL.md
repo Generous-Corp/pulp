@@ -1602,3 +1602,12 @@ produced 85 ending at major 2. Until the tool records the current manifest
 itself, confirm `entries[-1].manifest.capabilities[<key>].contract_version`
 shows the new version and that the file differs from the base by exactly one
 entry before shipping.
+
+## SignalGraph authoring contract header
+
+`pulp/host/signal_graph_authoring.hpp` is a reviewed infrastructure header for
+`GraphAuthoringReceipt` and `GraphAuthoringReceiptStatus`. Keep it in the
+reviewed host tuple and minimal-target registry with an empty capability-key
+list; it describes lineage validation vocabulary and does not advertise a DSP
+capability. Refresh its byte fingerprint and the surface inventory when the
+contract changes.

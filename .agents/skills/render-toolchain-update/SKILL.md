@@ -346,3 +346,11 @@ retain those fields in the PR/landing evidence.
   binding contract through the sibling path. Keep the source module canonical
   under `tools/import-design/jsx-runtime` and test the missing sibling as a
   failure.
+
+## Windows GPU slices
+
+For Windows GPU consumers, record separate `windows-x64` and `windows-arm64`
+release assets in the manifest. Select the slice from the CMake target
+architecture (`CMAKE_GENERATOR_PLATFORM` when cross-compiling) and mirror each
+release digest in `external/skia-build/VERSION.md` before running the fetcher and
+host validation gates.

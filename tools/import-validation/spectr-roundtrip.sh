@@ -25,8 +25,10 @@
 
 set -euo pipefail
 
-PULP="${PULP_DIR:-/Users/danielraffel/Code/pulp}"
-SPECTR="${SPECTR_DIR:-/Users/danielraffel/Code/spectr}"
+PULP_ROOT="${PULP_DIR:-/Users/danielraffel/Code/pulp}"
+SPECTR_ROOT="${SPECTR_DIR:-/Users/danielraffel/Code/spectr}"
+PULP="$(cd "$PULP_ROOT" && pwd -P)"
+SPECTR="$(cd "$SPECTR_ROOT" && pwd -P)"
 EDITOR_HTML="$SPECTR/resources/editor.html"
 REFERENCE="$PULP/planning/screenshots/REFERENCE-spectr-editor-html.png"
 OUT_DIR="$PULP/planning/screenshots"
@@ -123,7 +125,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
     tail -30 /tmp/spectr-rt-cmake.log
     exit 2
   }
-  cmake --build build --config Release -j"$(sysctl -n hw.ncpu)" \
+  bash "$PULP/tools/ci/governed-build.sh" cmake --build "$SPECTR/build" --config Release \
     >/tmp/spectr-rt-build.log 2>&1 || {
     red "ERROR: build failed"
     tail -30 /tmp/spectr-rt-build.log

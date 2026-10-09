@@ -29,7 +29,8 @@ cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" \
     -DPULP_SANITIZER=address
 
 echo "=== Building ==="
-cmake --build "${BUILD_DIR}" -j"${JOBS}"
+PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
+    cmake --build "${BUILD_DIR}"
 
 # Disable ASLR-sensitive features that conflict with ASan on macOS.
 # halt_on_error=1 turns first sanitizer report into non-zero exit.

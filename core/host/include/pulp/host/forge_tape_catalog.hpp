@@ -70,7 +70,7 @@
 
 #include <pulp/host/detail/forge_realization_identity.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <pulp/signal/tape_machine.hpp>
 
