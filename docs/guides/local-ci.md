@@ -300,6 +300,10 @@ makes the reinstall a single verified command:
   journal as before, and also writes the JSON to that file (mode 0644, replaced
   by rename) on every outcome, including `unverified`. Fleet monitoring reads
   the file over the existing root SSH alias and never runs the check itself.
+  `/run` is cleared at boot, so the file is absent until the first reaper pass
+  after a reboot. If the path cannot be written, the previous object stays
+  with its old `checked_at`. A reader therefore treats an absent or stale file
+  as unknown, never as healthy.
   It reports drift older than an hour, any non-healthy state, and a
   `checked_at` older than 30 minutes, since the reaper runs every 15 minutes.
 

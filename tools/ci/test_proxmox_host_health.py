@@ -206,10 +206,11 @@ class HealthCheckTests(unittest.TestCase):
             "PULP_PROXMOX_HEALTH_NOW": str(self.now),
         }
 
-    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def _run(self, *args: str, umask: int | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["/bin/bash", str(HEALTH), *args],
             capture_output=True, text=True, env=self._env(),
+            preexec_fn=None if umask is None else (lambda: os.umask(umask)),
         )
 
     def _json(self) -> tuple[int, dict]:
@@ -384,8 +385,10 @@ class HealthCheckTests(unittest.TestCase):
 
     def test_json_out_writes_every_outcome_to_a_world_readable_file(self) -> None:
         self._install()
+        # A restrictive umask, so the modes asserted below come from the
+        # script and not from the test runner's environment.
         status = self.tmp / "run/pulp-ci-host/health.json"
-        result = self._run("--json-out", str(status))
+        result = self._run("--json-out", str(status), umask=0o077)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("HEALTHY", result.stdout)
         self.assertEqual(status.stat().st_mode & 0o777, 0o644)
@@ -410,6 +413,17 @@ class HealthCheckTests(unittest.TestCase):
         self.assertEqual(written["state"], "unverified")
         self.assertEqual(written["checked_at"], "2027-01-15T08:02:00Z")
         self.assertEqual(sorted(p.name for p in status.parent.iterdir()), ["health.json"])
+
+    def test_json_out_leaves_an_existing_parent_directory_mode_alone(self) -> None:
+        self._install()
+        shared = self.tmp / "shared-tmp"
+        shared.mkdir()
+        shared.chmod(0o1777)
+        status = shared / "health.json"
+        result = self._run("--json-out", str(status), umask=0o077)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(shared.stat().st_mode & 0o7777, 0o1777)
+        self.assertEqual(status.stat().st_mode & 0o777, 0o644)
 
     def test_reaper_publishes_the_status_file_fleet_monitoring_reads(self) -> None:
         service = REAP_SERVICE.read_text(encoding="utf-8")

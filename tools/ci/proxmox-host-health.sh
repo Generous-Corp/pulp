@@ -264,7 +264,9 @@ report() {
     [ "$JSON" = 1 ] && emit_json "$@"
     if [ -n "$JSON_OUT" ]; then
         dir="$(dirname "$JSON_OUT")"
-        mkdir -p "$dir" && chmod 0755 "$dir" \
+        # Create the directory with its mode only when absent: an existing one
+        # (e.g. /tmp, 1777) belongs to someone else and keeps its mode.
+        { [ -d "$dir" ] || install -d -m 0755 "$dir"; } \
             && emit_json "$@" > "${JSON_OUT}.new.$$" \
             && chmod 0644 "${JSON_OUT}.new.$$" \
             && mv -f "${JSON_OUT}.new.$$" "$JSON_OUT" \
