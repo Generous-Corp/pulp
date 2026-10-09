@@ -2,6 +2,11 @@
 
 Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before merging.
 
+The macOS retarget lane keeps the untrusted-runner boundary for contributor
+code and invokes `tools/ci/governed-build.sh` inside that namespace for its
+build. This preserves the lane's runner isolation while applying the same
+bounded worker and build-directory locking policy as the other build emitters.
+
 > Setting up a dedicated machine as a persistent CI runner? See
 > [self-hosted-runner.md](self-hosted-runner.md) for the walkthrough
 > + first-run gotchas (git-lfs hook conflict, Xcode license,

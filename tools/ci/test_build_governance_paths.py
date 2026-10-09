@@ -60,6 +60,17 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_macos_retarget_build_uses_governor_inside_untrusted_runner(self) -> None:
+        source = read_source(".github/workflows/build-macos.yml")
+        self.assertIn(
+            '"$PULP_UNTRUSTED_RUNNER" bash \\\n            "$PULP_UNTRUSTED_SOURCE/tools/ci/governed-build.sh" \\\n            cmake --build "$PULP_BUILD_DIR" --config Release',
+            source,
+        )
+        self.assertNotIn(
+            '"$PULP_UNTRUSTED_RUNNER" cmake --build',
+            source,
+        )
+
     def test_visual_harness_build_uses_governor(self) -> None:
         source = read_source(".github/workflows/visual-harness.yml")
         build_lines = [
