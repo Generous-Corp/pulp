@@ -1705,11 +1705,16 @@
    "undeclared_sources": []
   },
   "pulp-test-group-view-widgets": {
-   "data": "none",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "tools/bridge/generated_editor_bridge.ts"
+   ],
    "kind": "compiled",
    "runtime_targets": [],
-   "sources": [],
+   "sources": [
+    "test/test_editor_bridge.cpp"
+   ],
    "spawning_sources": [
     "test/test_editor_bridge.cpp"
    ],
@@ -4397,12 +4402,12 @@
    "kind": "python"
   },
   "dspx07-projection-installed-sdk-selftest": {
-   "kind": "python",
    "entry": "tools/validation/test_dspx07_projection_installed_sdk.py",
    "inputs": [
     "core/format/include/pulp/format/projection_capability.hpp",
     "tools/validation/test_dspx07_projection_installed_sdk.py"
-   ]
+   ],
+   "kind": "python"
   },
   "ensure-signing-ready": {
    "entry": "tools/scripts/test_ensure_signing_ready.sh",

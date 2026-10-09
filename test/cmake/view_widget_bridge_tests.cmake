@@ -1024,6 +1024,10 @@ pulp_add_test_suite(pulp-test-text-overflow GROUP pulp-test-group-view-widgets L
 
 # Editor bridge tests for the renderer-agnostic envelope/dispatcher
 pulp_add_test_suite(pulp-test-editor-bridge GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+# The generated TypeScript bridge proof imports the checked-in bridge through
+# Node, locating the checkout by walking up from its working directory.
+pulp_test_data(pulp-test-editor-bridge NO_DEFINE
+    PATHS tools/bridge/generated_editor_bridge.ts)
 
 # Input events tests
 pulp_add_test_suite(pulp-test-input-events GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
