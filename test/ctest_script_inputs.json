@@ -1718,7 +1718,7 @@
    "spawning_sources": [
     "test/test_editor_bridge.cpp"
    ],
-   "spawns": "undeclared",
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-host": {
