@@ -5108,6 +5108,7 @@ tests = [
   "executable-keys-selftest",
   "framework-neutrality",
   "framework-neutrality-selftest",
+  "gates-sh-fail-flag-selftest",
   "gpu-audio-trace-validator-selftest",
   "gpu-connected-git-history-selftest",
   "gpu-dpr-experiment-contract-selftest",
