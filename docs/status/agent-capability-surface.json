@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 128,
+  "inventory_version": 129,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 504,
-    "reviewed_headers": 225,
+    "public_headers": 505,
+    "reviewed_headers": 226,
     "legacy_unreviewed_headers": 279,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 44,
-      "infrastructure": 58,
+      "infrastructure": 59,
       "legacy_unreviewed": 279,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 271,
-        "reviewed_headers": 125,
+        "public_headers": 272,
+        "reviewed_headers": 126,
         "legacy_unreviewed_headers": 146,
         "unsupported_headers": 2
       },
@@ -3523,6 +3523,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/loudness_compensation.hpp",
+      "fingerprint": "sha256:cc25f7959641998fdaf14ccc04b3485fdee98191cd8ba01e606a4248dc4d0546",
+      "include": "pulp/signal/loudness_compensation.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Spectrum-weighted loudness compensation is a real-time DSP helper that plugins compose around their own gain policy; it is not an independently selected generator-facing capability in the installed contract."
     },
     {
       "domain": "signal",

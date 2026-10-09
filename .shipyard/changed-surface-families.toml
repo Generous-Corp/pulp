@@ -1232,6 +1232,34 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-6840e5a1fcac"
+paths = ["tools/scripts/test_catch_test_name_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "catch-test-name-guard-selftest",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-df31059184e0"
 paths = ["tools/scripts/test_ccache_pch_isolation.py"]
 tests = [
@@ -5293,6 +5321,7 @@ paths = [
   "tools/scripts/test_capability_contract_gate.py",
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
+  "tools/scripts/test_catch_test_name_guard.py",
   "tools/scripts/test_ccache_pch_isolation.py",
   "tools/scripts/test_changed_surface_policy.py",
   "tools/scripts/test_changed_surface_registration_projection.py",
@@ -5615,6 +5644,8 @@ tests = [
   "canvas-path-flush-lint-selftest",
   "catch-discover-timeout-guard",
   "catch-discover-timeout-guard-selftest",
+  "catch-test-name-guard",
+  "catch-test-name-guard-selftest",
   "changed-surface-policy-inventory",
   "changed-surface-script-families-drift",
   "checkout-location-guard-selftest",
@@ -5808,6 +5839,7 @@ paths = [
   "tools/scripts/test_capability_contract_gate.py",
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
+  "tools/scripts/test_catch_test_name_guard.py",
   "tools/scripts/test_ccache_pch_isolation.py",
   "tools/scripts/test_changed_surface_policy.py",
   "tools/scripts/test_changed_surface_registration_projection.py",

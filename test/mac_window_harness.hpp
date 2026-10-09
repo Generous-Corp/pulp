@@ -60,7 +60,11 @@ struct LiveResizeCoverState {
     bool resize_applied = false;
     bool cover_before = false;
     bool cover_after_present = false;
+    // Still covered when the bounded wait for the release ran out.
     bool cover_after_compositor_interval = false;
+    // Milliseconds from the end of the live resize to the first poll that saw
+    // the cover released; 0 when it was never released.
+    uint64_t cover_release_ms = 0;
 };
 
 /// Construct a hidden GPU-backed NSWindow + CAMetalLayer host suitable for
