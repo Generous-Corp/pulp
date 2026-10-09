@@ -101,7 +101,7 @@ class EntryPointTest(Fixture):
         os.makedirs(home, exist_ok=True)
         env = dict(self.env, RACK_PLUGIN_DIR=plugins, HOME=home, PATH="/usr/bin:/bin")
         return subprocess.run([sys.executable, *args], cwd=HERE, env=env,
-                              capture_output=True, text=True, timeout=120)
+                              capture_output=True, text=True, timeout=120, encoding="utf-8")
 
     def test_patch_build_is_refused_while_its_plugin_directory_is_held(self) -> None:
         plugins = os.path.join(self.root, "plugins")
