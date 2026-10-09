@@ -358,11 +358,19 @@ For a local macOS run, the minimum preflight should be equivalent to:
 set -euo pipefail
 test -x /Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool
 test -d "$AAX_BUNDLE"
-! find "$AAX_BUNDLE/Contents/MacOS" -maxdepth 1 -type f \
+# `set -e` ignores a `!` pipeline, so a negated find would never stop the
+# script. Test the match explicitly.
+if find "$AAX_BUNDLE/Contents/MacOS" -maxdepth 1 -type f \
     \( -name '*.json' -o -name '*.inspector-capabilities.json' \
        -o -name '*.control-shipping.json' \
-       -o -name '*.control-shipping-report.json' \) -print -quit | grep -q .
-shasum -a 256 "$AAX_BUNDLE/Contents/MacOS/$(basename "$AAX_BINARY")"
+       -o -name '*.control-shipping-report.json' \) -print -quit | grep -q .; then
+    echo "sidecar left in Contents/MacOS" >&2
+    exit 1
+fi
+# The bundle names its own executable; read it rather than requiring it.
+AAX_BINARY="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+    "$AAX_BUNDLE/Contents/Info.plist")"
+shasum -a 256 "$AAX_BUNDLE/Contents/MacOS/$AAX_BINARY"
 ```
 
 The command is a shape check, not a signing recipe: the actual wrap
@@ -390,20 +398,20 @@ remain developer-supplied macOS assets and should be restored from the private
 backup with their recorded hashes. Windows setup and signing can adopt the same
 boundary later, but is intentionally not specified here.
 
-The current private handoff capsule is:
+Keep a private restore capsule for onboarding another Mac, outside the Pulp
+checkout and never published. It should contain:
 
-```text
-~/SDKs/private/pulp-aax-macos/
-```
+- a `README.md` restore runbook;
+- a restore manifest that records the required archive hashes and lists the
+  machine-local state deliberately left out;
+- a restore script that verifies each archive hash and its expected paths
+  before extracting anything;
+- optionally, a `mise.toml` holding only the readiness and bundle-verification
+  checks, never assets or credentials.
 
-Its `README.md` is the restore runbook, `RESTORE-MANIFEST.txt` records the
-required archive hashes and deliberately excluded machine-local state, and
-`mise.toml` contains only the optional `aax-ready` and `aax-verify-bundle`
-checks. `restore_toolchains.sh` verifies the archive hash and expected paths
-before extraction. Copy that capsule through the private backup channel when onboarding
-another Mac; never add it to Pulp or publish it. A new Mac still needs its own
-iLok activation/sign-in, PACE authentication, Apple Developer ID private key,
-and Pro Tools installation.
+Move the capsule through your private backup channel. A new Mac still needs its
+own iLok activation and sign-in, PACE authentication, Apple Developer ID
+private key, and Pro Tools installation; none of those travel in the capsule.
 
 ## Core Commands
 
