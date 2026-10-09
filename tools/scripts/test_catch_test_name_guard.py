@@ -22,7 +22,7 @@ def repo(files: dict[str, str]) -> tempfile.TemporaryDirectory:
     for name, text in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(textwrap.dedent(text))
+        path.write_text(textwrap.dedent(text), encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
     return tmp
 
