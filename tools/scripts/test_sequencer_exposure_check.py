@@ -1379,12 +1379,26 @@ def main() -> int:
 
     # The checked-in map refuses its own guides, and no shipped row or
     # tombstone owns one. The real map and ledger are the control, because the
-    # failure mode is a row landing in the checked-in tree.
-    mapped_guides, map_errors = config_doc_targets(checkout_root)
-    if map_errors or not mapped_guides:
+    # failure mode is a row landing in the checked-in tree. The expected guides
+    # are read from the raw map here, not through config_doc_targets(): a set
+    # taken from the function under test would shrink with its bug.
+    raw_entries = json.loads(
+        (checkout_root / "tools/scripts/config_doc_map.json").read_text(encoding="utf-8")
+    )["entries"]
+    mapped_guides = {doc for entry in raw_entries for doc in entry["docs"]}
+    entry_docs = [set(entry["docs"]) for entry in raw_entries]
+    distinct_entries = sum(
+        1 for index, docs in enumerate(entry_docs)
+        if docs - set().union(*entry_docs[:index], *entry_docs[index + 1:])
+    )
+    if distinct_entries < 2:
         raise AssertionError(
-            f"the checked-in config-doc map is unreadable or empty: {map_errors}"
+            "the real map has fewer than two entries naming a guide no other entry "
+            "names, so the loop below cannot catch a first-entry-only reader"
         )
+    _, map_errors = config_doc_targets(checkout_root)
+    if map_errors:
+        raise AssertionError(f"the checked-in config-doc map is unreadable: {map_errors}")
     shipped_rows, _, load_errors = load_ledger_from_worktree(checkout_root)
     if load_errors or not shipped_rows or not shipped_rows["rows"]:
         raise AssertionError(f"shipped ledger did not load: {load_errors}")
@@ -1402,8 +1416,6 @@ def main() -> int:
         owning_real["rows"][0]["owned_paths"] = [*valid["rows"][0]["owned_paths"], real_guide]
         if not any(real_guide in error for error in config_doc_errors(owning_real, checkout_root)):
             raise AssertionError(f"the checked-in map did not refuse its own guide {real_guide}")
-    if len(mapped_guides) < 2:
-        raise AssertionError(f"the real-map loop covers too few guides to tell entries apart: {mapped_guides}")
     _CHECK_TALLY["calibrated"] += 1
 
     # ── The ledger is carried as one file per row ────────────────────────────
