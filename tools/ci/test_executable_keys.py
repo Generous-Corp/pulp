@@ -329,6 +329,15 @@ class KeyTests(unittest.TestCase):
         keys = self.fx.keys(self.head(**{"tools/deps/manifest.json": manifest("2")}))
         self.assertEqual({e["always_run"] for e in keys.values()}, {"dependency_pin"})
 
+    def test_a_root_fetchcontent_block_change_reruns_everything(self):
+        root = ("project(x)\n\n# Tests\nFetchContent_Declare(Catch2 GIT_TAG v1)\n"
+                "FetchContent_MakeAvailable(Catch2)\n\n# Library\nadd_library(x STATIC x.cpp)\n")
+        self.pins_base(**{"CMakeLists.txt": root})
+        elsewhere = self.fx.keys(self.head(**{"CMakeLists.txt": root.replace("x.cpp", "y.cpp")}))
+        self.assertNotIn("dependency_pin", {e["always_run"] for e in elsewhere.values()})
+        moved = self.fx.keys(self.head(**{"CMakeLists.txt": root.replace("GIT_TAG v1", "GIT_TAG v2")}))
+        self.assertEqual({e["always_run"] for e in moved.values()}, {"dependency_pin"})
+
     def test_a_fetchcontent_dependency_reaches_through_its_target(self):
         yoga = {"type": "STATIC_LIBRARY", "digest": "d-yoga", "artifacts": ["<build>/_deps/yoga-build/libyogacore.a"],
                 "dependencies": []}

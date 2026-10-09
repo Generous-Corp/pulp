@@ -123,8 +123,11 @@ CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
 # Files that pin third-party dependencies. A bump can change a dependency's
 # content without changing any path the codemodel digests or any archive a
 # recorded link names (FetchContent archives are treated as pinned), so an
-# executable that builds against a moved dependency is not keyed.
-DEPENDENCY_PIN_PATHS = frozenset(dependency_pins.PIN_PATHS)
+# executable that builds against a moved dependency is not keyed. The root
+# CMakeLists.txt counts only through its FetchContent blocks
+# (dependency_pins.PIN_PATHS); this set is the files that are pins as a whole,
+# which the reuse replay's blunter rule reads.
+DEPENDENCY_PIN_PATHS = frozenset(dependency_pins.PIN_PATHS) - {dependency_pins.ROOT_CMAKE}
 # Registration labels that mean the test drives a shared host resource.
 ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
 COMPILE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".mm", ".m")
@@ -514,7 +517,7 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
     base_tree, head_tree = tree_blobs(source_root, base_sha), tree_blobs(source_root, head_sha)
     changed_paths = {p for p in set(base_tree) | set(head_tree) if base_tree.get(p) != head_tree.get(p)}
     shadowing = {os.path.basename(p) for p in set(base_tree) ^ set(head_tree) if p.endswith(HEADER_SUFFIXES)}
-    pins = moved_pins(source_root, base_sha, head_sha, DEPENDENCY_PIN_PATHS & changed_paths, toolchain)
+    pins = moved_pins(source_root, base_sha, head_sha, set(dependency_pins.PIN_PATHS) & changed_paths, toolchain)
     head_targets = (head_codemodel or {}).get("targets") or {}
     base_cm = (record or {}).get("codemodel")
     base_targets = (base_cm or {}).get("targets") or {}
