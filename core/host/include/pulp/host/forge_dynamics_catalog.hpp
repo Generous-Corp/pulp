@@ -58,7 +58,7 @@
 #include <pulp/host/detail/forge_dynamics_catalog_descriptor.hpp>
 #include <pulp/host/detail/forge_realization_identity.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <pulp/signal/diode_bridge_compressor.hpp>
 #include <pulp/signal/feedforward_compressor.hpp>

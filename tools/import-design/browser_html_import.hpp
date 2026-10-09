@@ -35,6 +35,9 @@ struct BrowserHtmlImportRequest {
     /// because the capture is the A-side of the A/B, not a legacy path.
     bool native_panel_lowering = false;
     bool materialized_canvas_composition = false;
+    /// Fail validation when materialized canvas evidence is completely
+    /// transparent. Only meaningful with materialized canvas composition.
+    bool require_canvas_ink = false;
 };
 
 struct BrowserHtmlNotApplicable {};
@@ -57,6 +60,7 @@ struct BrowserHtmlCaptured {
     std::filesystem::path durable_capture_directory;
     std::filesystem::path reference_png;
     std::filesystem::path semantic_report;
+    std::optional<std::filesystem::path> materialized_document;
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;
     /// Lowering succeeded but part of the design could not be drawn for a
     /// reason the CALLER can fix — carried out so the CLI prints it rather

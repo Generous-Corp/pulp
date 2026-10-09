@@ -145,8 +145,8 @@ def catalog_source(root: pathlib.Path, header: pathlib.Path) -> str:
     source_name = header.name.removesuffix(".hpp") + ".cpp"
     source = root / "core" / "host" / "src" / source_name
     if not source.exists():
-        return header.read_text()
-    return header.read_text() + "\n\n" + source.read_text()
+        return header.read_text(encoding="utf-8")
+    return header.read_text(encoding="utf-8") + "\n\n" + source.read_text(encoding="utf-8")
 
 
 def sample_region_rows(root: pathlib.Path) -> list[dict]:
@@ -159,7 +159,7 @@ def sample_region_rows(root: pathlib.Path) -> list[dict]:
         return []
     pattern = re.compile(r'\{"([^"\n]+)",\s*"([^"\n]+)",\s*"([^"\n]+)",\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*"([^"\n]+)",\s*"([^"\n]+)"\}')
     rows = []
-    for role, type_id, label, tv, kv, inputs, outputs, state_bytes, alignment, config, placement in pattern.findall(source.read_text()):
+    for role, type_id, label, tv, kv, inputs, outputs, state_bytes, alignment, config, placement in pattern.findall(source.read_text(encoding="utf-8")):
         rows.append({"key": type_id, "type_id": type_id, "type_version": int(tv),
                      "sample_kernel_version": int(kv), "factory": "register_builtin_sample_region_types",
                      "baked_params": [], "sample_region_v1": {
@@ -364,7 +364,7 @@ def main() -> int:
 
     if args.write:
         snapshot.parent.mkdir(parents=True, exist_ok=True)
-        snapshot.write_text(rendered)
+        snapshot.write_text(rendered, encoding="utf-8")
         c = registry["counts"]
         print(
             f"dsp-capabilities: wrote {SNAPSHOT} — {c['catalogs']} catalogs, "
@@ -393,7 +393,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        if snapshot.read_text() != rendered:
+        if snapshot.read_text(encoding="utf-8") != rendered:
             print(
                 f"dsp-capabilities: STALE: {SNAPSHOT} does not match the catalog "
                 f"headers. A capability was added or changed without "

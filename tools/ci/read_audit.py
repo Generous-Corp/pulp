@@ -475,7 +475,10 @@ def stage0(report: dict, declared: set[str]) -> dict:
             "declared_clean": len(audited - flagged), "declared_with_findings": sorted(audited & flagged),
             "declared_not_audited": sorted(registered - audited),
             "declared_not_registered": sorted(declared - set(recs)),
-            "undeclared_with_findings": sorted(flagged - declared)}
+            "undeclared_with_findings": sorted(flagged - declared),
+            # Every executable this run observed with no finding: what a
+            # selector may treat as audited (executable_keys.audit_covered).
+            "covered": sorted(e for e, r in recs.items() if r.get("status") == "audited" and not r.get("findings"))}
 
 
 def summarize(report: dict) -> str:

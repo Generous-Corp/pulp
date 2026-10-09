@@ -9,6 +9,10 @@ import {
   materializedTextTargetGeometry,
   normalizeMaterializedMetadata,
 } from './materialized_metadata_contract.mjs';
+import {
+  MATERIALIZED_BROWSER_DOCUMENT_V2,
+  normalizeMaterializedBindingDocument,
+} from './materialized_binding_contract.mjs';
 
 const rectPaint = {
   anchor: '#root',
@@ -90,6 +94,24 @@ test('drops legacy SVG primitive ink bounds from normalized layout metadata', ()
 
   assert.equal(normalized.layout_bindings.length, 1);
   assert.equal(normalized.layout_bindings[0].path.at(-1).tag, 'svg');
+  assert.deepEqual(Object.keys(normalized.bindings_by_id.layout),
+    [normalized.layout_bindings[0].id]);
+  assert.equal(Object.keys(normalized.bindings_by_id.layout).some(id =>
+    id.includes('path')), false);
+});
+
+test('drops filtered legacy layout ids from the normalized id map', () => {
+  const legacy = {
+    id: 'pulp-layout-svg-path', anchor: '#root',
+    path: [{ tag: 'svg', index: 0 }, { tag: 'path', index: 0 }],
+    box: { left: 1, top: 2, width: 3, height: 4 },
+  };
+  const normalized = normalizeMaterializedMetadata({
+    layout_bindings: [legacy],
+    bindings_by_id: { layout: { [legacy.id]: legacy } },
+  });
+  assert.deepEqual(normalized.layout_bindings, []);
+  assert.deepEqual(normalized.bindings_by_id.layout, {});
 });
 
 test('keeps fractional captured text width across first-commit Yoga rounding', () => {
@@ -119,5 +141,80 @@ test('state typography inherits new base targets and overrides matching paths', 
   assert.deepEqual(materializedMergedTextBindings(
     [sculpt, basePeak], [statePeak, menu]), [
       { ...sculpt, runtime_optional: true }, statePeak, menu,
-    ]);
+  ]);
+});
+
+test('normalizes all five binding lists into deterministic id-addressed maps', () => {
+  const input = {
+    schema: MATERIALIZED_BROWSER_DOCUMENT_V2, version: 2,
+    semantic_bindings: [{ anchor: 'chromium:backend-node:7',
+      backend_node_id: 7, kind: 'button', tag: 'button', name: 'READY',
+      bounds: { left: 0, top: 0, width: 10, height: 10 } }],
+    layout_bindings: [{ anchor: '#root', path: [{ tag: 'button', index: 0 }],
+      box: { left: 0, top: 0, width: 10, height: 10 } }],
+    text_bindings: [], paint_bindings: [], canvas_bindings: [{
+      anchor: 'chromium:backend-node:8',
+      bounds: { left: 0, top: 0, width: 10, height: 10 },
+    }],
+  };
+  const first = normalizeMaterializedBindingDocument(input);
+  const second = normalizeMaterializedBindingDocument(input);
+  assert.deepEqual(first.bindings_by_id, second.bindings_by_id);
+  for (const kind of ['semantic', 'layout', 'text', 'paint', 'canvas']) {
+    assert.ok(Object.hasOwn(first.bindings_by_id, kind));
+    for (const binding of first[`${kind}_bindings`]) {
+      assert.match(binding.id, new RegExp(`^pulp-${kind}-`));
+      assert.deepEqual(first.bindings_by_id[kind][binding.id], binding);
+    }
+  }
+});
+
+test('preserves source-owned data-pulp-id values across every binding stream', () => {
+  const input = {
+    layout_bindings: [{ data_pulp_id: 'panel-button', anchor: '#root',
+      path: [{ tag: 'button', index: 0 }],
+      box: { left: 0, top: 0, width: 10, height: 10 } }],
+    semantic_bindings: [{ data_pulp_id: 'panel-button-semantic',
+      anchor: 'chromium:backend-node:7', backend_node_id: 7,
+      kind: 'button', tag: 'button', name: 'READY',
+      bounds: { left: 0, top: 0, width: 10, height: 10 } }],
+    text_bindings: [], paint_bindings: [], canvas_bindings: [],
+  };
+  const normalized = normalizeMaterializedBindingDocument(input);
+  assert.equal(normalized.layout_bindings[0].id,
+    'pulp-layout-panel-button');
+  assert.equal(normalized.semantic_bindings[0].id,
+    'pulp-semantic-panel-button-semantic');
+  assert.equal(normalized.bindings_by_id.layout['pulp-layout-panel-button']
+    .data_pulp_id, 'panel-button');
+  assert.throws(() => normalizeMaterializedBindingDocument({
+    layout_bindings: [{ data_pulp_id: 'panel/button', anchor: '#root',
+      path: [], box: {} }],
+  }), /layout binding has invalid id/);
+});
+
+test('metadata validation preserves semantic and canvas bindings and rejects duplicate ids', () => {
+  const semantic = {
+    id: 'pulp-semantic-ready', anchor: 'chromium:backend-node:7',
+    backend_node_id: 7, kind: 'button', tag: 'button', name: 'READY',
+    bounds: { left: 0, top: 0, width: 10, height: 10 },
+  };
+  const canvas = {
+    id: 'pulp-canvas-scope', anchor: 'chromium:backend-node:8',
+    bounds: { left: 1, top: 2, width: 30, height: 20 },
+  };
+  const normalized = normalizeMaterializedMetadata({
+    semantic_bindings: [semantic], canvas_bindings: [canvas],
+  });
+  assert.deepEqual(normalized.semantic_bindings[0], semantic);
+  assert.deepEqual(normalized.canvas_bindings[0].bounds, canvas.bounds);
+  assert.throws(() => normalizeMaterializedBindingDocument({
+    layout_bindings: [
+      { id: 'pulp-layout-duplicate', anchor: '#root', path: [], box: {} },
+      { id: 'pulp-layout-duplicate', anchor: '#root', path: [], box: {} },
+    ],
+  }), /duplicate materialized binding id/);
+  assert.throws(() => normalizeMaterializedMetadata({
+    canvas_bindings: [{ ...canvas, anchor: 'canvas:8' }],
+  }), /canvas binding 0 is invalid/);
 });

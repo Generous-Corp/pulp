@@ -84,15 +84,9 @@ jobs:
         # binary named `pulp`), so `--target pulp` fails with "No rule to make
         # target 'pulp'" — a latent bug in this dry-run since the Phase-8
         # rename. Building all also produces pulp-cpp + pulp-mcp for packaging.
-        # Explicit full-core parallelism, mirroring release-cli.yml's Build
-        # step — without it the Unix Makefiles generator runs `make` with no
-        # -j (serial), and this rehearsal lane's timing stops resembling the
-        # real release it exists to rehearse.
         run: |
           set -euo pipefail
-          jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-          echo "Build parallelism: --parallel ${jobs}"
-          cmake --build build --config Release --parallel "$jobs"
+          tools/ci/governed-build.sh cmake --build build --config Release
         shell: bash
 
       - name: Package CLI (dry-run — no upload)
@@ -106,6 +100,7 @@ jobs:
             --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json \
             --import-design-binary build/tools/import-design/pulp-import-design \
             --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
+            --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs \
             --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE" \
             --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE" \
             --build-dir build \
@@ -140,6 +135,10 @@ jobs:
           test -x "$HELPER" || { echo "::error::packaged pulp-import-design helper missing"; exit 1; }
           test -s "$(dirname "$BIN")/browser_capture/capture.mjs" || {
             echo "::error::packaged browser-capture runtime missing"
+            exit 1
+          }
+          test -s "$(dirname "$BIN")/jsx-runtime/materialized_binding_contract.mjs" || {
+            echo "::error::packaged materialized binding contract missing"
             exit 1
           }
           ARCHS="$(lipo -archs "$BIN" 2>/dev/null || true)"

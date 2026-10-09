@@ -20,6 +20,15 @@ configuration files, and frontend/preprocessor/architecture forwarding are
 rejected because their effective ordering cannot be established from this
 manifest. Keep the compiler invocation evidence alongside the capture.
 
+The manifest also carries an immutable `scheduling` object. `worker` is either
+`ordinary_worker` or `audio_workgroup`; the latter is accepted only when
+`workgroup_joined` is true. `contention`, `thermal_state`, and `power_state`
+are campaign-wrapper observations and must be non-empty single-line values;
+they are never inferred from worker timing. `workgroup_join_failures` records
+the join attempt count. This binds every block to its host scheduling context
+without moving Dawn work onto the callback. A receipt that omits this object,
+uses an unknown worker mode, or claims an unjoined Audio Workgroup is invalid.
+
 Each block carries `(engine_id, generation, sequence)`, the GPU terminal and
 delivery dispositions, deadline/fallback state, and the named payload-transfer
 counters. Shared records with any `WriteBuffer`, output-copy, `MapAsync`, or

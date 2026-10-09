@@ -185,7 +185,8 @@ bool parent_allows_private_staging(const fs::path& parent) noexcept {
         CreateWellKnownSid(WinLocalSystemSid, nullptr, system_storage.data(), &system_bytes) != 0 &&
         CreateWellKnownSid(WinBuiltinAdministratorsSid, nullptr, administrators_storage.data(),
                            &administrators_bytes) != 0;
-    bool safe = token_user != nullptr && trusted_sids && EqualSid(owner, token_user->User.Sid) != 0;
+    bool safe = token_user != nullptr && trusted_sids &&
+                detail::staging_parent_owner_trusted(owner, token_user->User.Sid);
     constexpr ACCESS_MASK dangerous = FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD |
                                       DELETE | WRITE_DAC | WRITE_OWNER | GENERIC_WRITE |
                                       GENERIC_ALL;
@@ -441,6 +442,32 @@ std::optional<detail::PinnedFile> create_publication_file(const fs::path& path) 
 }
 
 } // namespace
+
+#if defined(_WIN32)
+namespace detail {
+
+bool staging_parent_owner_trusted(void* owner, void* token_user) noexcept {
+    if (owner == nullptr || token_user == nullptr || IsValidSid(owner) == 0 ||
+        IsValidSid(token_user) == 0)
+        return false;
+    if (EqualSid(owner, token_user) != 0)
+        return true;
+    // An elevated administrator's own directories, %TEMP% included, are owned by
+    // BUILTIN\Administrators rather than the user. SYSTEM and Administrators are
+    // the principals the DACL check already trusts with namespace control, so
+    // accepting them as owner grants no one else add, delete or rewrite rights.
+    for (const auto kind : {WinLocalSystemSid, WinBuiltinAdministratorsSid}) {
+        std::array<std::uint8_t, SECURITY_MAX_SID_SIZE> storage{};
+        DWORD bytes = static_cast<DWORD>(storage.size());
+        if (CreateWellKnownSid(kind, nullptr, storage.data(), &bytes) != 0 &&
+            EqualSid(owner, storage.data()) != 0)
+            return true;
+    }
+    return false;
+}
+
+} // namespace detail
+#endif
 
 struct AtomicPublisher::Impl {
     fs::path destination;

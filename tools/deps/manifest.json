@@ -978,7 +978,7 @@
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, and Skia.xcframework slices the upstream does not ship. The chrome/m153 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m153 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "determinism": {
         "skia_branch": "chrome/m153",
         "skia_commit": "8b8c3872fbc03f025855db96ce683f34ec98a815",
@@ -1018,6 +1018,10 @@
           "wasm-wasm32": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-wasm-wasm32-gpu-release.zip",
             "sha256": "a5218b84266b0d79dd9c1ce514be6d06f8898085aaa9309a9830442f29ca4887"
+          },
+          "win-arm64": {
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-arm64-gpu-release.zip",
+            "sha256": "8e6fb2012ad026d8261eadfe3a9f638a165e82cefa2b896f8596dbaece9c6bde"
           },
           "win-x64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-x64-gpu-release.zip",

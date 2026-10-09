@@ -38,10 +38,13 @@ void print_usage() {
     std::cout << "  --json            With --outline, emit the inventory as JSON\n";
     std::cout << "  --screen <name>   Screen to import (Stitch)\n";
     std::cout << "  --output <path>   Destination file for the primary artifact (default: ui.js)\n";
-    std::cout << "  --emit {js|ir-json|cpp|swiftui}\n";
+    std::cout << "  --emit {js|ir-json|cpp|swiftui|materialized-runtime}\n";
     std::cout << "                    Primary artifact kind (built-in default: js). cpp and\n";
     std::cout << "                    swiftui are baked-only; swiftui emits native SwiftUI\n";
     std::cout << "                    (a View + PulpTheme.swift + binding manifest)\n";
+    std::cout << "  --source-out <dir> Directory for --emit materialized-runtime source tree\n";
+    std::cout << "  --ids {stable|positional}\n";
+    std::cout << "                    Stable source identities require complete source tuples\n";
     std::cout << "  --mode {live|baked}\n";
     std::cout << "                    Runtime model (built-in default: live; baked emits IR or C++ artifacts)\n";
     std::cout << "  --snapshot-semantics {fail|warn|accept}\n";
@@ -63,6 +66,11 @@ void print_usage() {
     std::cout << "  --materialized-canvas-composition\n";
     std::cout << "                    Keep the accepted Chromium frame as native Skia paint and\n";
     std::cout << "                    emit transparent, hit-testable canvas behavior targets\n";
+    std::cout << "  --require-canvas-ink\n";
+    std::cout << "                    Require the materialized canvas evidence plane to contain\n";
+    std::cout << "                    at least 256 opaque pixels and a 0.1% viewport floor\n";
+    std::cout << "                    (opt-in; requires\n";
+    std::cout << "                    --materialized-canvas-composition)\n";
     std::cout << "  --offline         Explicitly use the legacy lower-fidelity HTML parser instead\n";
     std::cout << "                    of executing HTML in Chromium\n";
     std::cout << "  --asset-cache <path>\n";

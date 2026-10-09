@@ -4,9 +4,8 @@
 # Resolve a merge conflict in this file by regenerating, never by hand.
 
 [[families]]
-name = "script-readers-1490e4d4ef76"
+name = "script-readers-f4b06d953891"
 paths = [
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -111,6 +110,7 @@ paths = [
   "tools/scripts/test_coverage_diff_comment_extra.py",
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
+  "tools/scripts/test_cross_platform_check_concurrency.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_designated_initializer_lint.py",
   "tools/scripts/test_docs_generate.py",
@@ -196,7 +196,6 @@ paths = [
   "tools/scripts/test_required_gate_liveness.py",
   "tools/scripts/test_required_macos_alias.py",
   "tools/scripts/test_resign_macos_release_tree.py",
-  "tools/scripts/test_resolve_classify_base.py",
   "tools/scripts/test_resolve_linux_route.py",
   "tools/scripts/test_resolve_provider_busy_probe.py",
   "tools/scripts/test_resolve_release_runners.py",
@@ -224,6 +223,7 @@ paths = [
   "tools/scripts/test_spectr_gpu_nam_forge_controls.py",
   "tools/scripts/test_stale_run_reaper.py",
   "tools/scripts/test_summarize_daw_bench_results.py",
+  "tools/scripts/test_text_encoding_lint.py",
   "tools/scripts/test_validate_hosts.py",
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
@@ -261,6 +261,7 @@ paths = [
 ]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -283,11 +284,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-035eca3c3ff2"
+name = "script-readers-c56c3f5b3d1d"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
   "build-parallelism-guard",
   "bundled-font-lists-agree",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -310,10 +312,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1fad3f644b38"
+name = "script-readers-10fe51347e20"
 paths = ["tools/scripts/check_inspector_protocol_registry.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -338,10 +341,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-64b2357fc840"
+name = "script-readers-8095380e2d10"
 paths = ["tools/scripts/check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -366,10 +370,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a07bc990466d"
+name = "script-readers-a9c21277e805"
 paths = ["tools/scripts/ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -394,10 +399,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6692cf7ce6e5"
+name = "script-readers-f97150417585"
 paths = ["tools/scripts/ctest_inventory_parity.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -421,10 +427,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4938c9a72ae9"
+name = "script-readers-ff7586d0e3d7"
 paths = ["tools/scripts/ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -449,10 +456,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-700b34e32dee"
+name = "script-readers-6806039a10c1"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -476,10 +484,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ceb1e2b3647c"
+name = "script-readers-c919a9d1d6f7"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -507,10 +516,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-56cf508a59af"
+name = "script-readers-6b152499de52"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -534,10 +544,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f99cfb27034a"
+name = "script-readers-5972bad321dc"
 paths = ["tools/scripts/mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -562,10 +573,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5523f62603d9"
+name = "script-readers-76ef50375496"
 paths = ["tools/scripts/msvc_string_literal_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -589,10 +601,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5c6b2661352d"
+name = "script-readers-43423993440e"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -618,10 +631,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7b87857b9905"
+name = "script-readers-2edc4e5999c6"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -645,13 +659,14 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9473e027eb08"
+name = "script-readers-f40370d07cc9"
 paths = [
   "tools/scripts/queue_admission_guard.py",
   "tools/scripts/test_queue_batch_attribute.py",
 ]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -675,10 +690,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-90db083da722"
+name = "script-readers-2b39517ae125"
 paths = ["tools/scripts/raw_this_async_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -703,10 +719,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b74e4cb0caec"
+name = "script-readers-6a786f0d7794"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -731,10 +748,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bba1f5f5a9e8"
+name = "script-readers-cb06eb7d1bb8"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -759,10 +777,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-409ab9dcc741"
+name = "script-readers-52c087dab8f5"
 paths = ["tools/scripts/sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -787,10 +806,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5d74701f1570"
+name = "script-readers-b634aa1e61af"
 paths = ["tools/scripts/sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -815,10 +835,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-abcf70e292b8"
+name = "script-readers-05019d8b9884"
 paths = ["tools/scripts/setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -842,10 +863,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2d8eb0a21332"
+name = "script-readers-255a7688cb1b"
 paths = ["tools/scripts/shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -870,10 +892,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2c892159c74b"
+name = "script-readers-d94c59eaa1af"
 paths = ["tools/scripts/status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -897,11 +920,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f151cca27916"
+name = "script-readers-b4246538ba19"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
   "advisory-macos-runner-policy",
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -924,11 +948,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fc03906649ee"
+name = "script-readers-14853229e683"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -951,11 +976,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5fcc4a60233d"
+name = "script-readers-fc969d11987e"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -978,10 +1004,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bfd0c64afd92"
+name = "script-readers-dc4b09cb439b"
 paths = ["tools/scripts/test_build_combined_installer.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1005,11 +1032,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6c7f3fde8991"
+name = "script-readers-d88e5e3f3dd8"
 paths = ["tools/scripts/test_build_parallelism_guard.py"]
 tests = [
   "build-parallelism-guard",
   "build-parallelism-guard-selftest",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1032,11 +1060,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2f80e8e1b899"
+name = "script-readers-f5e2977369e7"
 paths = ["tools/scripts/test_build_speed_proxies.py"]
 tests = [
   "build-parallelism-guard",
   "build-speed-proxies-selftest",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1059,11 +1088,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1e631961462d"
+name = "script-readers-0fa2300f51dc"
 paths = ["tools/scripts/test_build_speed_scorecard.py"]
 tests = [
   "build-parallelism-guard",
   "build-speed-scorecard-selftest",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1086,11 +1116,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-563a14334ac0"
+name = "script-readers-0425f1e0a479"
 paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
   "build-time-report-selftest",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1114,11 +1145,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-08b164c97b0b"
+name = "script-readers-139ec1ddbbe2"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
   "build-parallelism-guard",
   "capability-contract-gate-wiring",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1141,11 +1173,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c1c5247c6cb5"
+name = "script-readers-c67d7ec981c9"
 paths = ["tools/scripts/test_catch_discover_timeout_guard.py"]
 tests = [
   "build-parallelism-guard",
   "catch-discover-timeout-guard-selftest",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1168,10 +1201,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-78302c5412f1"
+name = "script-readers-eeabcffed528"
 paths = ["tools/scripts/test_catch_multilabel_properties.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1195,11 +1229,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f0e1d2ae9069"
+name = "script-readers-df31059184e0"
 paths = ["tools/scripts/test_ccache_pch_isolation.py"]
 tests = [
   "build-parallelism-guard",
   "ccache-pch-isolation",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1222,10 +1257,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0343e709e624"
+name = "script-readers-539c35890e8c"
 paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-registration-projection-selftest",
   "changed-surface-script-families-drift",
@@ -1249,10 +1285,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a2daedd6ead9"
+name = "script-readers-8bd875f79004"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1276,11 +1313,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-099474d73098"
+name = "script-readers-32d15778b961"
 paths = ["tools/scripts/test_check_canvas_path_flush.py"]
 tests = [
   "build-parallelism-guard",
   "canvas-path-flush-lint-selftest",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1303,10 +1341,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-db072f53c684"
+name = "script-readers-be15ec4a1594"
 paths = ["tools/scripts/test_check_installed_rpaths.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1330,10 +1369,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c8835432129b"
+name = "script-readers-323c4e796f1f"
 paths = ["tools/scripts/test_check_skip_not_pass.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1357,10 +1397,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aa13e05462bf"
+name = "script-readers-6ef65e5334a6"
 paths = ["tools/scripts/test_check_test_file_paths.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1384,10 +1425,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b7e6a7693fec"
+name = "script-readers-c3157e59a15e"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1411,10 +1453,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-24cb606d37a1"
+name = "script-readers-24ac71f250b5"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1438,10 +1481,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c7f16c69c392"
+name = "script-readers-0f117b22b2c3"
 paths = ["tools/scripts/test_check_yoga_oracle_pin.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1465,10 +1509,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8c75b4334799"
+name = "script-readers-5a0bec15b86d"
 paths = ["tools/scripts/test_ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1492,10 +1537,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9af1a063918a"
+name = "script-readers-ac4d644d7701"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1519,10 +1565,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-53a67023b57c"
+name = "script-readers-6ce780404e5f"
 paths = ["tools/scripts/test_clean_worktree_builds.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1546,10 +1593,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b95196b99441"
+name = "script-readers-773279d82f9d"
 paths = ["tools/scripts/test_clean_worktrees.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1573,10 +1621,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-684cceaca97b"
+name = "script-readers-e7512fe8f5bf"
 paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1600,10 +1649,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e63b5716a542"
+name = "script-readers-9aa75206c533"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1627,10 +1677,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d0985cdd0263"
+name = "script-readers-e227af5cbb44"
 paths = ["tools/scripts/test_configure_check_cache.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1654,10 +1705,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8b34dd4da2e4"
+name = "script-readers-83da30d79ba7"
 paths = ["tools/scripts/test_connected_git_history.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1681,10 +1733,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-81888372df54"
+name = "script-readers-58f3d692c2af"
 paths = ["tools/scripts/test_consumption_census.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1708,10 +1761,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fc65047f3219"
+name = "script-readers-ab5c096dcc3a"
 paths = ["tools/scripts/test_consumption_census_contract_note.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1735,10 +1789,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d41b4b2fdb7d"
+name = "script-readers-7e3a76e97cdc"
 paths = ["tools/scripts/test_control_profile_downgrade_is_announced.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1762,10 +1817,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-952560fdfd7f"
+name = "script-readers-858293535839"
 paths = ["tools/scripts/test_ctest_duplicate_registration.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1789,10 +1845,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4a844a1e6e9d"
+name = "script-readers-3e5fe0399f24"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1816,10 +1873,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2c9fca9d0157"
+name = "script-readers-061a0e62487c"
 paths = ["tools/scripts/test_ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1843,10 +1901,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-58c7489f4fd8"
+name = "script-readers-9760e864212e"
 paths = ["tools/scripts/test_doxygen_installed_header_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1870,10 +1929,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f49a7456bc49"
+name = "script-readers-3ea937d5331f"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1897,10 +1957,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ff1cf91232e5"
+name = "script-readers-56a90b51631b"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1924,10 +1985,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3df70bf670aa"
+name = "script-readers-99c02a338fed"
 paths = ["tools/scripts/test_example_validation_paths.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1951,10 +2013,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ad1498ed48c2"
+name = "script-readers-52fcaa10a2fa"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -1978,10 +2041,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4a671bcb04c3"
+name = "script-readers-90068834081b"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2005,10 +2069,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-def51aca423d"
+name = "script-readers-e4630fc72874"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2032,10 +2097,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-33210d553715"
+name = "script-readers-16bd80cca263"
 paths = ["tools/scripts/test_format_baseline_diff.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2059,10 +2125,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e01157427a1a"
+name = "script-readers-e241358a053e"
 paths = ["tools/scripts/test_gallery_visual_diff.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2086,10 +2153,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3b31d445954d"
+name = "script-readers-6a2e1f2e6ff2"
 paths = ["tools/scripts/test_gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2113,10 +2181,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4da13e8d6f28"
+name = "script-readers-0fd1d6db49f8"
 paths = ["tools/scripts/test_gate_suite_executed.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2140,10 +2209,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8581912fa979"
+name = "script-readers-cef6e193a96d"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2169,10 +2239,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9ce3a6e0837f"
+name = "script-readers-1ac2dbf4450a"
 paths = ["tools/scripts/test_git_read_memo.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2196,10 +2267,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ce7049396480"
+name = "script-readers-24ce01e2c0d0"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2223,10 +2295,67 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c9e6316b5953"
+name = "script-readers-c298b27989cc"
+paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-p2-campaign-contract-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-623bb1c5875e"
+paths = ["tools/scripts/test_gpu_audio_p2_host_preflight.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-p2-host-preflight-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-db8a5b62e419"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2250,10 +2379,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ef11a4f54499"
+name = "script-readers-862030a6c4d8"
 paths = ["tools/scripts/test_gpu_clean_agent_journey.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2277,10 +2407,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2db65fac5234"
+name = "script-readers-51af590fafca"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2304,10 +2435,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9f779527d0cb"
+name = "script-readers-2aae1fc521b7"
 paths = ["tools/scripts/test_gpu_dpr_pulp_native_adapter.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2331,10 +2463,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2869aafb222f"
+name = "script-readers-c0781f6a1a90"
 paths = ["tools/scripts/test_gpu_dpr_v2_evidence.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2358,10 +2491,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e19a8287f4b8"
+name = "script-readers-283a22bae529"
 paths = ["tools/scripts/test_gpu_dpr_web_adapter.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2385,10 +2519,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fa9b8afd681b"
+name = "script-readers-fd41569d6986"
 paths = ["tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2412,10 +2547,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f4bbef7e350b"
+name = "script-readers-49dd5a4eaaff"
 paths = ["tools/scripts/test_gpu_handoff_pin_freshness.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2439,10 +2575,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-54ae465fd943"
+name = "script-readers-9740568db19c"
 paths = ["tools/scripts/test_gpu_health_contract.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2466,10 +2603,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-65f9f60d58c1"
+name = "script-readers-d13314176376"
 paths = ["tools/scripts/test_gpu_health_read_contract.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2493,10 +2631,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1053332e112d"
+name = "script-readers-977ce486c412"
 paths = ["tools/scripts/test_gpu_health_run_attestation.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2520,10 +2659,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ac039c934e60"
+name = "script-readers-441277a999f9"
 paths = ["tools/scripts/test_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2547,10 +2687,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-56d14cc818e3"
+name = "script-readers-10d19d8c7b49"
 paths = ["tools/scripts/test_gpu_recipe_catalog.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2574,10 +2715,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-182ae5c992a0"
+name = "script-readers-712f4099d7b7"
 paths = ["tools/scripts/test_gpu_test_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2601,10 +2743,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3b8021eaae06"
+name = "script-readers-0de643cd68a3"
 paths = ["tools/scripts/test_hydrate_gpu_provenance_commits.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2628,10 +2771,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f9255ba0b0dd"
+name = "script-readers-e49be0bd99ba"
 paths = ["tools/scripts/test_hydrate_real_git.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2655,10 +2799,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ee21700f26c8"
+name = "script-readers-8c4ae239ca0b"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2682,10 +2827,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-509e7b182824"
+name = "script-readers-949a8d436665"
 paths = ["tools/scripts/test_install_sha256sums.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2709,10 +2855,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-45a48828cdc9"
+name = "script-readers-2028b611946d"
 paths = ["tools/scripts/test_install_shipyard_queue_repair.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2736,10 +2883,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-61faabac337e"
+name = "script-readers-933be0b3145d"
 paths = ["tools/scripts/test_live_build_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2763,10 +2911,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e9f091e85a0d"
+name = "script-readers-08a7601048ea"
 paths = ["tools/scripts/test_mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2790,10 +2939,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2912f2d5298d"
+name = "script-readers-b44c8ce716a7"
 paths = ["tools/scripts/test_measure_min_os.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2817,10 +2967,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9e841ca6481f"
+name = "script-readers-7d27a809ca9e"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2844,10 +2995,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1b71962f3218"
+name = "script-readers-8c3aab7e59f2"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2871,10 +3023,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7c0663198beb"
+name = "script-readers-b214c496b580"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2898,10 +3051,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4682752e6e7f"
+name = "script-readers-c84249403fe4"
 paths = ["tools/scripts/test_planning_gitlink_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2925,10 +3079,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3959f368b2f0"
+name = "script-readers-bcbda5f63a28"
 paths = ["tools/scripts/test_pr_batch_advisor.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2952,10 +3107,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-acc1e4540705"
+name = "script-readers-9a4b34c93e34"
 paths = ["tools/scripts/test_pr_check_triage.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -2979,10 +3135,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e62e0a8a39b7"
+name = "script-readers-24b6544280d1"
 paths = ["tools/scripts/test_pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3006,10 +3163,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0e762cb2bf20"
+name = "script-readers-2da1c59ba19f"
 paths = ["tools/scripts/test_pr_flow_audit.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3033,10 +3191,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5a82972be479"
+name = "script-readers-a7079c15679c"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3060,10 +3219,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e2d13ef87cda"
+name = "script-readers-4dc45e7d9342"
 paths = ["tools/scripts/test_prepush_gate_output.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3087,10 +3247,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9df37473ba92"
+name = "script-readers-5b2379524073"
 paths = ["tools/scripts/test_prepush_queue_rebase_hint.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3114,10 +3275,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3305b061a1c1"
+name = "script-readers-c24ea2520196"
 paths = ["tools/scripts/test_protected_merge_receipt.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3142,10 +3304,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e6bc612dc861"
+name = "script-readers-6a8ba3851d34"
 paths = ["tools/scripts/test_pulp_test_data_cmake.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3169,10 +3332,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fb0f876a1aa4"
+name = "script-readers-8be9e412e50f"
 paths = ["tools/scripts/test_pulp_test_group.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3196,10 +3360,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1af225ef6e75"
+name = "script-readers-0b1244de612c"
 paths = ["tools/scripts/test_pulp_uninstall.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3223,10 +3388,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7d8f563ed4d3"
+name = "script-readers-84cddee5168d"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3250,10 +3416,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-02b1f361f741"
+name = "script-readers-06f990314fc0"
 paths = ["tools/scripts/test_release_trailer_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3277,10 +3444,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8466f3aa072b"
+name = "script-readers-0345d4f69861"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3304,10 +3472,39 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9df02af7d340"
+name = "script-readers-b73b58bf0e45"
+paths = ["tools/scripts/test_resolve_classify_base.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "resolve-classify-base-selftest",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-50fbc8030e63"
 paths = ["tools/scripts/test_run_changed_surface_tests.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-runner-selftest",
   "changed-surface-script-families-drift",
@@ -3331,10 +3528,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e81ad562a8d2"
+name = "script-readers-1a1af4211135"
 paths = ["tools/scripts/test_runner_topology_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3358,10 +3556,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-abc8661b019e"
+name = "script-readers-04c5cd90c9da"
 paths = ["tools/scripts/test_runner_topology_static.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3385,10 +3584,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9016a049cb26"
+name = "script-readers-06f156a44d6b"
 paths = ["tools/scripts/test_rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3412,10 +3612,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4d7928c6ef05"
+name = "script-readers-e27d2416daf8"
 paths = ["tools/scripts/test_sample_region_catalogs.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3439,10 +3640,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dde4e0617d12"
+name = "script-readers-bbeccc51cf17"
 paths = ["tools/scripts/test_sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3466,10 +3668,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a633cfd2772b"
+name = "script-readers-cf22e7452e6c"
 paths = ["tools/scripts/test_schema_drift_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3493,10 +3696,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-44aeeff13eeb"
+name = "script-readers-d1abda652602"
 paths = ["tools/scripts/test_script_argv.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3520,10 +3724,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c41b916f43f0"
+name = "script-readers-4c4cc28797ab"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3547,11 +3752,12 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6c215877708f"
+name = "script-readers-c270bec2f05f"
 paths = ["tools/scripts/test_sdk_capability_handoff.py"]
 tests = [
   "agent-capability-sdk-handoff-selftest",
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3574,10 +3780,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4e0a68f60875"
+name = "script-readers-25b21dc6b263"
 paths = ["tools/scripts/test_sdk_consumer_sweep.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3601,10 +3808,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-698061062bf8"
+name = "script-readers-b8fd1ef1066a"
 paths = ["tools/scripts/test_sdk_consumer_update.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3628,10 +3836,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f04298829721"
+name = "script-readers-c9403f0a163c"
 paths = ["tools/scripts/test_sdk_plist_templates_installed.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3655,10 +3864,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d45b3177518b"
+name = "script-readers-e14e8732cf71"
 paths = ["tools/scripts/test_seed_build_dir.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3682,10 +3892,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bbc1511759c5"
+name = "script-readers-fcd617d37bf7"
 paths = ["tools/scripts/test_sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3709,10 +3920,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b2ce50b0823c"
+name = "script-readers-f2e32b767934"
 paths = ["tools/scripts/test_setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3736,10 +3948,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bfc5cfa71ef9"
+name = "script-readers-a1e654d0ef6b"
 paths = ["tools/scripts/test_shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3763,10 +3976,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e03539855ed4"
+name = "script-readers-18c66ba4432c"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3790,10 +4004,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-543a35af720c"
+name = "script-readers-9c5516b5eafe"
 paths = ["tools/scripts/test_skills_doc_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3817,10 +4032,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dde05361ea67"
+name = "script-readers-d23bb150d9bf"
 paths = ["tools/scripts/test_status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3844,10 +4060,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ae5300c6eed7"
+name = "script-readers-fc52e387e4b3"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3871,10 +4088,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-34e95640cbc0"
+name = "script-readers-fa26e2e0f1bc"
 paths = ["tools/scripts/test_timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3898,10 +4116,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b65ea4a4ca0e"
+name = "script-readers-5e6ff566e37d"
 paths = ["tools/scripts/test_tmp_leak_guard.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3925,10 +4144,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9ece129bb475"
+name = "script-readers-4ea0d40158a1"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3952,10 +4172,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5030faa01de9"
+name = "script-readers-678c43fa0f71"
 paths = ["tools/scripts/test_trace_frame_cost.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -3979,10 +4200,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2bfd1cb2bdad"
+name = "script-readers-ca3131149561"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4006,10 +4228,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d79aed5ac96d"
+name = "script-readers-8391cdc3a5f4"
 paths = ["tools/scripts/test_unbounded_wait_lint.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4033,10 +4256,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b6154c02e795"
+name = "script-readers-bf14e254abe2"
 paths = ["tools/scripts/test_unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4060,10 +4284,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4013d3169ffe"
+name = "script-readers-3b69d3cb1b58"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4087,10 +4312,39 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-30c9434eee40"
+name = "script-readers-ff5b58573345"
+paths = ["tools/scripts/test_vellum_boundary_lint.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "vellum-boundary-lint-negative-contract",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-2144f3f3c34b"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4114,10 +4368,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fe860cd5afb9"
+name = "script-readers-2143f883598a"
 paths = ["tools/scripts/test_vellum_watch_preflight.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4141,10 +4396,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1f6bd1c90fa8"
+name = "script-readers-b80cd54ebf50"
 paths = ["tools/scripts/test_vellum_workflow_dispatch.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4168,10 +4424,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3d72b31960cf"
+name = "script-readers-dea0175a42d9"
 paths = ["tools/scripts/test_verify_create_templates.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4195,10 +4452,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-199b06c7822d"
+name = "script-readers-b02c0a3006fc"
 paths = ["tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4222,10 +4480,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-60e217bc5677"
+name = "script-readers-f6dc620b8d31"
 paths = ["tools/scripts/test_verify_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4249,10 +4508,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fdc26fc28761"
+name = "script-readers-d46816227bec"
 paths = ["tools/scripts/test_verify_rendered_panel.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4276,10 +4536,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0c0d87d91521"
+name = "script-readers-db21591d1085"
 paths = ["tools/scripts/test_version_at_land.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4303,10 +4564,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7376af5725b7"
+name = "script-readers-ee41647c4aec"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4330,10 +4592,39 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3e0000557e2c"
+name = "script-readers-2f8e30b36f08"
+paths = ["tools/scripts/test_windows_posix_shims.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "windows-posix-shims-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-a197cb091ade"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4357,10 +4648,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fefe9b0cc864"
+name = "script-readers-0360bd288c39"
 paths = ["tools/scripts/timeline_engine_dependency_floor_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4385,10 +4677,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-51f7fc708043"
+name = "script-readers-8ad10b5b16c5"
 paths = ["tools/scripts/timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4412,10 +4705,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2be0217c29c8"
+name = "script-readers-9a5af1b65947"
 paths = ["tools/scripts/token_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4439,10 +4733,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3a97f8cfeca7"
+name = "script-readers-31a1a6d9b87f"
 paths = ["tools/scripts/token_key_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4466,10 +4761,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b7c3ad52c6c5"
+name = "script-readers-05466aa7ac49"
 paths = ["tools/scripts/trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4493,10 +4789,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c7f26aca41ae"
+name = "script-readers-c39cfc87395c"
 paths = ["tools/scripts/unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4521,10 +4818,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f407dbb91a3d"
+name = "script-readers-3ba125172486"
 paths = ["tools/scripts/verify_downstream_consumers.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4549,10 +4847,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4dce753842f3"
+name = "script-readers-dee217d9109c"
 paths = ["tools/scripts/verify_downstream_consumers_contract.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4576,10 +4875,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8d01d5023922"
+name = "script-readers-5886cd0122a0"
 paths = ["tools/scripts/verify_refactor_baselines.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4604,10 +4904,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3e0bf567a22b"
+name = "script-readers-c6bca080bb33"
 paths = ["tools/scripts/verify_refactor_baselines_contract.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4631,10 +4932,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4663bc4de560"
+name = "script-readers-32de2fe363ef"
 paths = ["tools/scripts/verify_timeline_launcher_resource_contract.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4660,10 +4962,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-873334bb6a59"
+name = "script-readers-81db4c3bcb2c"
 paths = ["tools/scripts/verify_timeline_live_capture.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4687,10 +4990,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13dde78b3177"
+name = "script-readers-370f3b0f2348"
 paths = ["tools/scripts/verify_timeline_transaction_launcher_complexity.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4715,10 +5019,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b8a6acf600da"
+name = "script-readers-0870416c42b7"
 paths = ["tools/scripts/verify_wasm_skia_slice.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4743,10 +5048,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fde299af5b5e"
+name = "script-readers-12567d876520"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4782,6 +5088,7 @@ tests = [
   "build-parallelism-guard",
   "build-parallelism-guard-selftest",
   "capability-contract-gate-wiring",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -4819,6 +5126,7 @@ tests = [
   "gpu-recipe-catalog-selftest",
   "gpu-trace-overhead-acceptance-selftest",
   "gpu-trace-overhead-verifier-selftest",
+  "graphql-filtered-count-guard",
   "import-realtime-contract",
   "inspector-protocol-registry-check-selftest",
   "inspector-protocol-registry-complete",
@@ -4830,6 +5138,7 @@ tests = [
   "prepush-format-gate-wiring",
   "prepush-gate-output",
   "prepush-refresh-push",
+  "pulp-ui-clean-output-lint-negative-contract",
   "queue-batch-attribute-selftest",
   "read-audit-selftest",
   "reuse-policy-replay-selftest",
@@ -4851,6 +5160,7 @@ tests = [
   "vellum-watch-preflight-selftest",
   "version-at-land-selftest",
   "wide-non-native-selftest",
+  "windows-posix-shims-selftest",
 ]
 build_targets = [
   "pulp-cli",
@@ -4866,7 +5176,6 @@ risk_class = "low"
 name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5025,6 +5334,7 @@ paths = [
   "tools/scripts/test_coverage_diff_comment_extra.py",
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
+  "tools/scripts/test_cross_platform_check_concurrency.py",
   "tools/scripts/test_ctest_duplicate_registration.py",
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
@@ -5074,6 +5384,8 @@ paths = [
   "tools/scripts/test_git_safe_push.py",
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
+  "tools/scripts/test_gpu_audio_p2_campaign.py",
+  "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
   "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
   "tools/scripts/test_gpu_audio_provider_identity.py",
@@ -5217,6 +5529,7 @@ paths = [
   "tools/scripts/test_status_tone_signal_lint.py",
   "tools/scripts/test_summarize_daw_bench_results.py",
   "tools/scripts/test_tart_home_resolution.py",
+  "tools/scripts/test_text_encoding_lint.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
   "tools/scripts/test_tmp_leak_guard.py",
   "tools/scripts/test_tools_registry_check.py",
@@ -5229,6 +5542,7 @@ paths = [
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
   "tools/scripts/test_vellum_authority_workflows.py",
+  "tools/scripts/test_vellum_boundary_lint.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
@@ -5252,6 +5566,7 @@ paths = [
   "tools/scripts/test_windows_cli_compile_scope.py",
   "tools/scripts/test_windows_cli_compile_workflow.py",
   "tools/scripts/test_windows_cli_release_precheck.py",
+  "tools/scripts/test_windows_posix_shims.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
@@ -5292,6 +5607,7 @@ tests = [
   "canvas-path-flush-lint-selftest",
   "catch-discover-timeout-guard",
   "catch-discover-timeout-guard-selftest",
+  "changed-surface-policy-inventory",
   "changed-surface-script-families-drift",
   "checkout-location-guard-selftest",
   "claude-md-sync-hook",
@@ -5314,6 +5630,7 @@ tests = [
   "gpu-probe-acceptance-verifier-selftest",
   "gpu-probe-historical-v1-acceptance",
   "gpu-probe-terminal-recorder-selftest",
+  "graphql-filtered-count-guard",
   "inspector-protocol-registry-check-selftest",
   "inspector-protocol-registry-complete",
   "interchange-concepts-drift",
@@ -5324,6 +5641,8 @@ tests = [
   "minos-registry-absent-selftest",
   "msvc-string-literal-guard",
   "planning-gitlink-guard-selftest",
+  "pulp-ui-clean-output-lint",
+  "pulp-ui-clean-output-lint-negative-contract",
   "raw-this-async-check",
   "raw-this-async-selftest",
   "release-trailer-guard-selftest",
@@ -5353,6 +5672,8 @@ tests = [
   "trace-span-category-lint",
   "trace-span-category-lint-selftest",
   "unbounded-wait-lint-selftest",
+  "vellum-boundary-lint",
+  "vellum-boundary-lint-negative-contract",
 ]
 build_targets = [
   "pulp-cli",
@@ -5368,7 +5689,6 @@ risk_class = "low"
 name = "script-surface-environment-bound"
 paths = [
   ".agents/skills/*/SKILL.md",
-  "tools/scripts/a2t_structural_verification_ci.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5527,6 +5847,7 @@ paths = [
   "tools/scripts/test_coverage_diff_comment_extra.py",
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
+  "tools/scripts/test_cross_platform_check_concurrency.py",
   "tools/scripts/test_ctest_duplicate_registration.py",
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
@@ -5576,6 +5897,8 @@ paths = [
   "tools/scripts/test_git_safe_push.py",
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
+  "tools/scripts/test_gpu_audio_p2_campaign.py",
+  "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
   "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
   "tools/scripts/test_gpu_audio_provider_identity.py",
@@ -5719,6 +6042,7 @@ paths = [
   "tools/scripts/test_status_tone_signal_lint.py",
   "tools/scripts/test_summarize_daw_bench_results.py",
   "tools/scripts/test_tart_home_resolution.py",
+  "tools/scripts/test_text_encoding_lint.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
   "tools/scripts/test_tmp_leak_guard.py",
   "tools/scripts/test_tools_registry_check.py",
@@ -5731,6 +6055,7 @@ paths = [
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
   "tools/scripts/test_vellum_authority_workflows.py",
+  "tools/scripts/test_vellum_boundary_lint.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
@@ -5754,6 +6079,7 @@ paths = [
   "tools/scripts/test_windows_cli_compile_scope.py",
   "tools/scripts/test_windows_cli_compile_workflow.py",
   "tools/scripts/test_windows_cli_release_precheck.py",
+  "tools/scripts/test_windows_posix_shims.py",
   "tools/scripts/test_windows_runner_policy.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",

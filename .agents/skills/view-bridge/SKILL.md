@@ -1154,6 +1154,30 @@ returns `nullptr` by default, so a processor that declares nothing costs nothing
 the same name. Resolving across the two would bind a meter to the wrong signal
 and look like it worked.
 
+### ValueChannelSet lookup benchmark receipts
+
+The side-index optimization is a lookup microbenchmark, not a frame-time or
+audio-thread performance proof. When changing `ValueChannelSet` lookup code,
+compare a baseline and candidate built from the **same checkout and toolchain**
+and record both exact heads (plus the base head), host/architecture, channel
+count, query shape, loop count, warm-up policy, repeat count, and median
+nanoseconds per lookup. The useful receipt also includes hashes for the runner,
+binary/object, stdout, and stderr so a later run can verify what was measured.
+
+Keep the semantic controls beside the timing result:
+
+- an exact name-and-shape lookup must resolve the intended channel;
+- a wrong-shape query must miss; and
+- a near-name query must miss.
+
+For the current side-index shape, the reference workload is 64 channels,
+1,000,000 lookups per repeat, nine repeats, and a query for the last declared
+scalar. Use the median of the repeats for the reported speedup; do not report a
+single warm-cache sample. Run the focused `ValueChannelSet` tests and the
+governed source build alongside the benchmark. A large lookup speedup does not
+establish editor-frame, host-parameter, or audio-thread improvement, so keep
+those claims out of the receipt unless a separate runtime trace proves them.
+
 **Reference implementation: `pulp create --template gain`.** Its
 `processor.hpp.template` declares an `output` meter channel and publishes one
 peak/RMS `MeterFrame` per block; its `ui/main.js` binds it with
@@ -3388,3 +3412,12 @@ pointer (a settings panel's `add_section`), call `section.take_view()`; moving
 section with a view through `SettingsSection(title, std::unique_ptr<view::View>)`,
 which installs the deleter where View is complete.
 
+
+## Typed imported-editor bridge contracts
+
+The design-import bridge contract is generated from `tools/bridge/bridge.toml`
+into sorted C++/TypeScript/docs artifacts. Keep `EditorBridge::handlers()`
+ordered and deterministic, validate generated output with the bridge drift and
+missing-handler controls, and keep inbound commands distinct from outbound
+publications. This seed contract does not replace payload parsing or handler
+registration for existing plugins.

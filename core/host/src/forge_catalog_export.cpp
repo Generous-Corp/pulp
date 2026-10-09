@@ -1,9 +1,5 @@
 #include "forge_catalog_export_detail.hpp"
 
-#include <pulp/host/signal_graph.hpp>
-
-#include <stdexcept>
-
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -124,46 +120,7 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     forge_catalog_export_detail::append_pitch_sequencing(nodes);
     forge_catalog_export_detail::append_space_synthesis(nodes);
 
-    using forge_catalog_export_detail::add;
-    using forge_catalog_export_detail::realization;
-
-    SignalGraph region_registry;
-    if (!register_builtin_sample_region_types(region_registry))
-        throw std::logic_error("sample-region catalog registration failed");
-    static constexpr std::string_view region_keys[] = {
-        "sample_region_input_boundary",
-        "sample_region_output_boundary",
-        "sample_region_constant",
-        "sample_region_parameter",
-        "sample_region_add",
-        "sample_region_multiply",
-        "sample_region_unit_delay",
-    };
-    std::size_t region_index = 0;
-    for (const auto& row : kForgeSampleRegionV1) {
-        const auto* scalar = region_registry.sample_kernel_type(row.type_id, row.type_version);
-        const auto* block = region_registry.custom_node_type(row.type_id, row.type_version);
-        const auto config_kind =
-            row.config_kind == "BoundaryIndex"         ? SampleKernelConfigKind::BoundaryIndex
-            : row.config_kind == "FiniteConstant"      ? SampleKernelConfigKind::FiniteConstant
-            : row.config_kind == "PromotedParameterId" ? SampleKernelConfigKind::PromotedParameterId
-            : row.config_kind == "None"                ? SampleKernelConfigKind::None
-                                                       : SampleKernelConfigKind::Invalid;
-        if (!scalar || !block || scalar->version != row.sample_kernel_version ||
-            scalar->authored_config_kind != config_kind || scalar->num_input_ports != row.inputs ||
-            scalar->num_output_ports != row.outputs || scalar->state_size != row.state_bytes ||
-            scalar->state_alignment != row.state_alignment)
-            throw std::logic_error("sample-region catalog differs from registered exact kernel");
-        ForgeNodeDescriptor descriptor;
-        descriptor.key = region_keys[region_index++];
-        descriptor.label = row.label;
-        descriptor.description =
-            row.placement == "region_builder_only"
-                ? "Internal exact-version region boundary; created only by the region builder."
-                : "Exact-version block and scalar node for ordinary placement or a sample region.";
-        descriptor.realizations.emplace_back("default", row.type_id);
-        add(nodes, std::move(descriptor), {realization("default", *block)});
-    }
+    forge_catalog_export_detail::append_sample_region(nodes);
 
     return nodes;
 }

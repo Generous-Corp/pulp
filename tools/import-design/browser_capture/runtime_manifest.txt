@@ -16,3 +16,4 @@ security.mjs
 semantics.mjs
 settle.mjs
 tokens.mjs
+vendor_payload.mjs

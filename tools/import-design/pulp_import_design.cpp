@@ -19,6 +19,7 @@
 #include "figma_url.hpp"
 #include "browser_import_session.hpp"
 #include "browser_capture_limits.hpp"
+#include "node_runtime.hpp"
 #include "import_design_cli_help.hpp"
 #include "render_artifact_path.hpp"
 #include "sprite_skins.hpp"
@@ -65,12 +66,7 @@ using namespace pulp::state;
 
 namespace {
 
-enum class ArtifactEmit {
-    js,
-    ir_json,
-    cpp,
-    swiftui
-};
+enum class ArtifactEmit { js, ir_json, cpp, swiftui, materialized_runtime };
 
 enum class RuntimeMode {
     live,
@@ -89,7 +85,9 @@ const char* artifact_emit_name(ArtifactEmit emit) {
         case ArtifactEmit::ir_json: return "ir-json";
         case ArtifactEmit::cpp:     return "cpp";
         case ArtifactEmit::swiftui: return "swiftui";
-    }
+        case ArtifactEmit::materialized_runtime:
+            return "materialized-runtime";
+        }
     return "js";
 }
 
@@ -150,6 +148,8 @@ std::optional<ArtifactEmit> parse_artifact_emit_pref(const std::string& raw) {
     if (value == "ir-json") return ArtifactEmit::ir_json;
     if (value == "cpp") return ArtifactEmit::cpp;
     if (value == "swiftui") return ArtifactEmit::swiftui;
+    if (value == "materialized-runtime")
+        return ArtifactEmit::materialized_runtime;
     return std::nullopt;
 }
 
@@ -1478,6 +1478,121 @@ static bool write_file(const std::string& path, const std::string& content) {
     return write_files_atomically({{path, content}});
 }
 
+static fs::path resolve_materialized_source_emitter(const fs::path& importer) {
+#ifdef PULP_IMPORT_DESIGN_SRC_DIR
+    const fs::path source =
+        fs::path(PULP_IMPORT_DESIGN_SRC_DIR) / "jsx-runtime/materialized_source_emitter.mjs";
+    if (fs::is_regular_file(source))
+        return source;
+#endif
+    const fs::path sibling = importer.parent_path() / "jsx-runtime/materialized_source_emitter.mjs";
+    if (fs::is_regular_file(sibling))
+        return sibling;
+    fs::path current = fs::current_path();
+    for (int i = 0; i < 32; ++i) {
+        const fs::path candidate =
+            current / "tools/import-design/jsx-runtime/materialized_source_emitter.mjs";
+        if (fs::is_regular_file(candidate))
+            return candidate;
+        if (!current.has_parent_path() || current.parent_path() == current)
+            break;
+        current = current.parent_path();
+    }
+    return {};
+}
+
+static bool emit_materialized_runtime_source(pulp::import_design::BrowserImportSession& session,
+                                             const fs::path& document,
+                                             const fs::path& output_directory,
+                                             std::string_view ids_mode,
+                                             const fs::path& importer_executable, bool dry_run,
+                                             std::ostream& diagnostics) {
+    if (document.empty() || !fs::is_regular_file(document)) {
+        diagnostics << "Error: browser capture did not emit materialized-document.json; "
+                       "cannot emit materialized runtime source\n";
+        return false;
+    }
+    const auto script = resolve_materialized_source_emitter(importer_executable);
+    if (script.empty()) {
+        diagnostics << "Error: materialized source emitter is unavailable\n";
+        return false;
+    }
+    std::error_code ec;
+    auto status = fs::symlink_status(output_directory, ec);
+    if (!ec && fs::is_symlink(status)) {
+        diagnostics << "Error: --source-out must not be a symlink\n";
+        return false;
+    }
+    const auto node = pulp::import_design::browser_capture::resolve_node();
+    if (!node.executable) {
+        diagnostics << "Error: materialized source emission requires Node.js 22 or newer\n";
+        return false;
+    }
+    const fs::path temporary = document.parent_path() / "materialized-source-staging";
+    fs::remove_all(temporary, ec);
+    if (ec) {
+        diagnostics << "Error: could not clear materialized source staging directory: "
+                    << ec.message() << "\n";
+        return false;
+    }
+    ec.clear();
+    fs::create_directories(temporary, ec);
+    if (ec) {
+        diagnostics << "Error: could not create materialized source staging directory: "
+                    << ec.message() << "\n";
+        return false;
+    }
+    std::vector<std::string> args{script.string(),    "--in",  document.string(),    "--out",
+                                  temporary.string(), "--ids", std::string(ids_mode)};
+    const fs::path prior_map = output_directory / "ids.map.json";
+    if (ids_mode == "stable" && fs::is_regular_file(prior_map)) {
+        args.push_back("--ids-map");
+        args.push_back(prior_map.string());
+    }
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 120000;
+    options.max_output_bytes = 4 * 1024 * 1024;
+    const auto process =
+        pulp::platform::ChildProcess::run(node.executable->string(), args, options);
+    if (process.timed_out || process.exit_code != 0) {
+        diagnostics << "Error: materialized source emission failed";
+        if (!process.stderr_output.empty())
+            diagnostics << ": " << process.stderr_output;
+        diagnostics << "\n";
+        return false;
+    }
+    if (dry_run)
+        return true;
+    const std::vector<fs::path> files = {"src/MaterializedDocument.tsx", "styles/tokens.css",
+                                         "bindings/editor.bindings.json",
+                                         "runtime/materialized-document.json", "build.toml"};
+    for (const auto& relative : files) {
+        const fs::path generated = temporary / relative;
+        const std::string content = read_file(generated.string());
+        if (content.empty()) {
+            diagnostics << "Error: materialized source emitter omitted " << relative.string()
+                        << "\n";
+            return false;
+        }
+        const auto destination = output_directory / relative;
+        const auto staged = session.stage_primary_output(destination, diagnostics);
+        if (!staged || !write_file(staged->string(), content))
+            return false;
+    }
+    if (ids_mode == "stable") {
+        const fs::path relative = "ids.map.json";
+        const std::string content = read_file((temporary / relative).string());
+        if (content.empty()) {
+            diagnostics << "Error: materialized source emitter omitted ids.map.json\n";
+            return false;
+        }
+        const auto staged = session.stage_primary_output(output_directory / relative, diagnostics);
+        if (!staged || !write_file(staged->string(), content))
+            return false;
+    }
+    return true;
+}
+
 // ── CLI options ────────────────────────────────────────────────────────────
 // Every flag the CLI accepts, with the defaults the parse loop has always
 // applied. These were main()'s locals; the run's mutable outcome state
@@ -1501,6 +1616,9 @@ struct CliOptions {
     bool outline_mode = false;       // --outline: read-only page/frame inventory (fig lane)
     bool outline_json = false;       // --json: emit the outline as JSON
     std::string output_file = "ui.js";
+    std::string materialized_source_out;
+    std::string materialized_ids = "positional";
+    bool materialized_ids_explicit = false;
     std::string tokens_file = "tokens.json";
     std::string export_format = "w3c";
     std::string reference_image;     // --reference: PNG of source design for validation
@@ -1587,6 +1705,7 @@ struct CliOptions {
     /// way to be turned on before.
     bool native_panel_lowering = false;
     bool materialized_canvas_composition = false;
+    bool require_canvas_ink = false;
     std::string browser_path;
     std::string browser_interactions_path;
     bool fit_authored_frame = false, offline = false;
@@ -1625,6 +1744,23 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
         } else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             opt.output_file = argv[++i];
             opt.output_explicit = true;
+        } else if (std::strcmp(argv[i], "--source-out") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --source-out requires a directory\n";
+                return 2;
+            }
+            opt.materialized_source_out = argv[++i];
+        } else if (std::strcmp(argv[i], "--ids") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --ids requires stable or positional\n";
+                return 2;
+            }
+            opt.materialized_ids = argv[++i];
+            opt.materialized_ids_explicit = true;
+            if (opt.materialized_ids != "stable" && opt.materialized_ids != "positional") {
+                std::cerr << "Error: --ids expects stable or positional\n";
+                return 2;
+            }
         } else if (std::strcmp(argv[i], "--tokens") == 0 && i + 1 < argc) {
             opt.tokens_file = argv[++i];
             opt.tokens_file_explicit = true;
@@ -1791,7 +1927,8 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.classnames_output_explicit = true;
         } else if (std::strcmp(argv[i], "--emit") == 0) {
             if (i + 1 >= argc) {
-                std::cerr << "Error: --emit requires a value: js, ir-json, cpp, swiftui, or classnames\n";
+                std::cerr << "Error: --emit requires a value: js, ir-json, cpp, swiftui, "
+                             "materialized-runtime, or classnames\n";
                 return 2;
             }
             std::string what = argv[++i];
@@ -1807,11 +1944,15 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             } else if (what == "swiftui") {
                 opt.artifact_emit = ArtifactEmit::swiftui;
                 opt.artifact_emit_explicit = true;
+            } else if (what == "materialized-runtime") {
+                opt.artifact_emit = ArtifactEmit::materialized_runtime;
+                opt.artifact_emit_explicit = true;
             } else if (what == "classnames") {
                 opt.emit_classnames = true;
             } else {
                 std::cerr << "Error: unsupported --emit value '" << what
-                          << "' (expected js, ir-json, cpp, swiftui, or classnames)\n";
+                          << "' (expected js, ir-json, cpp, swiftui, materialized-runtime, or "
+                             "classnames)\n";
                 return 2;
             }
         } else if (std::strcmp(argv[i], "--mode") == 0) {
@@ -1863,6 +2004,8 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.native_panel_lowering = true;
         } else if (std::strcmp(argv[i], "--materialized-canvas-composition") == 0) {
             opt.materialized_canvas_composition = true;
+        } else if (std::strcmp(argv[i], "--require-canvas-ink") == 0) {
+            opt.require_canvas_ink = true;
         } else if (std::strcmp(argv[i], "--browser") == 0) {
             if (i + 1 >= argc) {
                 std::cerr << "Error: --browser requires an executable path\n";
@@ -1922,9 +2065,9 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
 
     if (auto code = pulp::import_design::validate_browser_import_cli_options(
             opt.fit_authored_frame, opt.render_size_explicit,
-            !opt.browser_interactions_path.empty(), opt.offline,
-            opt.export_tokens_mode, opt.detect_only, opt.native_panel_lowering,
-            opt.materialized_canvas_composition))
+            !opt.browser_interactions_path.empty(), opt.offline, opt.export_tokens_mode,
+            opt.detect_only, opt.native_panel_lowering, opt.materialized_canvas_composition,
+            opt.require_canvas_ink))
         return *code;
     return std::nullopt;
 }
@@ -2012,6 +2155,9 @@ int main(int argc, char* argv[]) {
     auto& outline_mode = cli.outline_mode;
     auto& outline_json = cli.outline_json;
     auto& output_file = cli.output_file;
+    auto& materialized_source_out = cli.materialized_source_out;
+    auto& materialized_ids = cli.materialized_ids;
+    auto& materialized_ids_explicit = cli.materialized_ids_explicit;
     auto& tokens_file = cli.tokens_file;
     auto& export_format = cli.export_format;
     auto& reference_image = cli.reference_image;
@@ -2115,6 +2261,19 @@ int main(int argc, char* argv[]) {
         output_file = "imported_ui.cpp";
     if (artifact_emit == ArtifactEmit::swiftui && !output_explicit)
         output_file = "ImportedPulpView.swift";
+    if (artifact_emit == ArtifactEmit::materialized_runtime) {
+        if (runtime_mode == RuntimeMode::baked) {
+            std::cerr << "Error: --emit materialized-runtime requires --mode live\n";
+            return 2;
+        }
+        if (materialized_source_out.empty()) {
+            std::cerr << "Error: --emit materialized-runtime requires --source-out <directory>\n";
+            return 2;
+        }
+    } else if (!materialized_source_out.empty() || materialized_ids_explicit) {
+        std::cerr << "Error: --source-out/--ids require --emit materialized-runtime\n";
+        return 2;
+    }
 
     // --format css-variables emits a CSS file, so its sidecar defaults to
     // theme.css rather than tokens.json (the W3C default). The leaf name also
@@ -2509,6 +2668,16 @@ int main(int argc, char* argv[]) {
         browser_reserved_outputs.push_back(paths.binding_manifest);
     } else if (artifact_emit == ArtifactEmit::js) {
         browser_reserved_outputs.emplace_back(output_file + ".meta.json");
+    } else if (artifact_emit == ArtifactEmit::materialized_runtime) {
+        const fs::path source_root = materialized_source_out;
+        for (const auto& relative :
+             {fs::path("src/MaterializedDocument.tsx"), fs::path("styles/tokens.css"),
+              fs::path("bindings/editor.bindings.json"),
+              fs::path("runtime/materialized-document.json"), fs::path("build.toml")}) {
+            browser_reserved_outputs.push_back(source_root / relative);
+        }
+        if (materialized_ids == "stable")
+            browser_reserved_outputs.push_back(source_root / "ids.map.json");
     }
     if (include_tokens) browser_reserved_outputs.emplace_back(tokens_file);
     for (const auto* path : {
@@ -2518,29 +2687,24 @@ int main(int argc, char* argv[]) {
             browser_reserved_outputs.emplace_back(*path);
     }
 
-    auto browser_import =
-        pulp::import_design::run_browser_import_session(
+    auto browser_import = pulp::import_design::run_browser_import_session(
         {.input_file = input_file,
          // Use the actual emitted artifact as the portability anchor. For
          // directory/extensionless C++ output, this is
          // <requested>/imported_ui.cpp rather than the raw CLI token.
          .output_file = std::move(browser_primary_output),
          .importer_executable = argv[0],
-         .browser_executable =
-             browser_path.empty()
-                 ? std::optional<fs::path>{}
-                 : std::optional<fs::path>{browser_path},
-         .browser_interactions =
-             browser_interactions_path.empty()
-                 ? std::optional<fs::path>{}
-                 : std::optional<fs::path>{browser_interactions_path},
+         .browser_executable = browser_path.empty() ? std::optional<fs::path>{}
+                                                    : std::optional<fs::path>{browser_path},
+         .browser_interactions = browser_interactions_path.empty()
+                                     ? std::optional<fs::path>{}
+                                     : std::optional<fs::path>{browser_interactions_path},
          .fit_authored_frame = cli.fit_authored_frame,
          .source = *source,
          // An explicit --render-size is the user's authored viewport, not a
          // seed the capture may silently replace during width correction.
-         .pinned_width = render_size_explicit
-             ? std::optional<int>{render_width}
-             : std::optional<int>{},
+         .pinned_width =
+             render_size_explicit ? std::optional<int>{render_width} : std::optional<int>{},
          .initial_width = render_size_explicit ? render_width : 1280,
          .initial_height = render_size_explicit ? render_height : 800,
          .reference_image = reference_image,
@@ -2551,10 +2715,10 @@ int main(int argc, char* argv[]) {
          .offline = offline,
          .allow_browser_network = allow_browser_network,
          .dry_run = dry_run,
-         .supports_faithful_capture =
-             artifact_emit != ArtifactEmit::swiftui,
+         .supports_faithful_capture = artifact_emit != ArtifactEmit::swiftui,
          .native_panel_lowering = cli.native_panel_lowering,
          .materialized_canvas_composition = cli.materialized_canvas_composition,
+         .require_canvas_ink = cli.require_canvas_ink,
          .validate = validate},
         content);
     if (const auto* failure =
@@ -2568,6 +2732,7 @@ int main(int argc, char* argv[]) {
     const auto import_preparation =
         browser_import_session.preparation_policy();
     std::optional<DesignIR> browser_capture_ir;
+    std::optional<fs::path> materialized_document;
     if (auto capture =
             browser_import_session.take_capture_adoption()) {
         render_width = capture->render_width;
@@ -2579,7 +2744,30 @@ int main(int argc, char* argv[]) {
         // second generated-JS validation pass would be redundant and divergent.
         validate = false;
         similarity_failed = capture->similarity_failed;
+        materialized_document = capture->materialized_document;
         browser_capture_ir = std::move(capture->design_ir);
+    }
+
+    if (artifact_emit == ArtifactEmit::materialized_runtime) {
+        if (!browser_import_session.has_capture() || !materialized_document) {
+            std::cerr << "Error: --emit materialized-runtime requires a browser capture "
+                         "that emitted materialized-document.json\n";
+            return 2;
+        }
+        if (!emit_materialized_runtime_source(browser_import_session, *materialized_document,
+                                              materialized_source_out, materialized_ids, argv[0],
+                                              dry_run, std::cerr))
+            return 1;
+        if (dry_run) {
+            std::cout << "Materialized runtime source ready (dry-run; no files written) → "
+                      << materialized_source_out << "\n";
+            return similarity_failed ? 5 : 0;
+        }
+        if (!browser_import_session.publish(std::cerr))
+            return 1;
+        std::cout << "Wrote materialized runtime source → " << materialized_source_out
+                  << " (ids=" << materialized_ids << ")\n";
+        return similarity_failed ? 5 : 0;
     }
 
     if (*source == DesignSource::jsx

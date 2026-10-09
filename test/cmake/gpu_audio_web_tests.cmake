@@ -69,7 +69,7 @@ build)
     # The first build downloads the emdawnwebgpu package into EM_CACHE.
     emcmake cmake -S "$PULP_ROOT/examples/web-demos/gpu-audio" -B "$WORK" \
         -DCMAKE_BUILD_TYPE=Release || exit 1
-    cmake --build "$WORK" -j "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" || exit 1
+    "$PULP_ROOT/tools/ci/governed-build.sh" cmake --build "$WORK" || exit 1
     [ -f "$WORK/pulp-gpu-dsp.js" ] || { echo "FAIL: no pulp-gpu-dsp.js emitted"; exit 1; }
     [ -f "$WORK/pulp-gpu-dsp.wasm" ] || { echo "FAIL: no pulp-gpu-dsp.wasm emitted"; exit 1; }
     ;;

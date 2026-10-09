@@ -31,6 +31,12 @@ enum class BrowserOrigin {
 
 std::string browser_origin_name(BrowserOrigin origin);
 
+/// Return the stable browser-family spelling used in capture provenance.
+/// Chrome command-line binaries identify as Google Chrome while CDP reports
+/// Chrome; these are one family. Unknown products remain unchanged so a
+/// browser-family swap cannot be hidden by normalization.
+std::string canonical_browser_product(std::string_view product);
+
 enum class BrowserMode {
     auto_select,
     managed,
@@ -72,6 +78,11 @@ struct BrowserProbeResult {
     // How Node.js resolved for this candidate. Populated by the real probe; a
     // caller-supplied probe leaves it at its not-yet-searched default.
     NodeResolution node;
+
+    // Identity returned by Browser.getVersion from the same executable that
+    // passed the command-line version probe.
+    std::string protocol_version;
+    std::string build_hash;
 };
 
 struct BrowserInstallation {
@@ -80,6 +91,8 @@ struct BrowserInstallation {
     std::string product;
     std::string version;
     int major_version = 0;
+    std::string protocol_version;
+    std::string build_hash;
 };
 
 struct Diagnostic {
@@ -197,6 +210,7 @@ struct CaptureArtifacts {
     fs::path semantic_report;
     fs::path token_report;
     fs::path dom_snapshot;
+    std::optional<fs::path> materialized_document;
     std::optional<fs::path> interaction_report;
 };
 

@@ -1417,6 +1417,31 @@ class TestRunnerInventoryScope(unittest.TestCase):
         "labels": ["self-hosted", "Linux", "X64", "pulp-auto-linux-x64"],
     }
 
+    def test_paginated_api_is_slurped_and_page_rows_are_flattened(self):
+        pages = [
+            {"total_count": 2, "runners": [self.ORG_RUNNER]},
+            {"total_count": 2, "runners": [{
+                "name": "pulp-auto-ephemeral-201", "status": "offline",
+                "labels": ["self-hosted", "Linux"],
+            }]},
+        ]
+        completed = subprocess.CompletedProcess(
+            ["gh", "api"], 0, json.dumps(pages), "")
+        with mock.patch.object(gate, "resolve_cli", return_value="gh"), \
+                mock.patch.object(gate.subprocess, "run", return_value=completed) as run:
+            payload = gate._api(["repos/Generous-Corp/pulp/actions/runners", "--paginate"])
+        self.assertEqual(gate.parse_runners(payload)[0].name,
+                         "pulp-auto-ephemeral-200")
+        self.assertIn("--slurp", run.call_args.args[0])
+
+    def test_slurped_variables_are_flattened(self):
+        payload = [
+            {"variables": [{"name": "PULP_A", "value": "a"}]},
+            {"variables": [{"name": "PULP_B", "value": "b"}]},
+        ]
+        self.assertEqual(gate.parse_variables(payload),
+                         {"PULP_A": "a", "PULP_B": "b"})
+
     def _api_returning(self, repo_payload, org_payload):
         def fake(args):
             payload = repo_payload if args[0].startswith("repos/") else org_payload

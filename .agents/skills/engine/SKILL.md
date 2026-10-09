@@ -161,6 +161,21 @@ every inline script of a few KB.
   timestamp or nonce baked into the document), not that the cache is off.
 - JSC and V8 inherit the default (`evaluate_script` → `evaluate`).
 
+## Bridge dispatch measurement
+
+`WidgetBridge::bridge_call_count()` is a per-bridge diagnostic counter for
+JS-to-native dispatches. It covers direct registered functions, host-object
+methods, and promise-backed functions; pure JavaScript evaluation and native
+callbacks that invoke JavaScript do not increment it. Reset the counter before
+an import or interaction when collecting deterministic work counts. The
+counter is instrumentation only and does not change engine selection or
+runtime behavior.
+
+Registered functions retain shared counter state until their engine releases
+them. Do not replace that capture with a pointer into `WidgetBridge`: a retained
+stateless function or queued Promise can run after the bridge is destroyed.
+Counter ownership does not extend the lifetime of the bridge or its widgets.
+
 ## Commands
 
 ### `status` — Show current engine configuration

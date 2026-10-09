@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261007-wp0-counter-lifetime-followup-watch",
+  "created_at": "2026-10-07T01:34:31Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Instrumentation-only WidgetBridge dispatch counting now retains shared counter state across bridge teardown, restores prior registration on failed construction, and avoids touching a dead engine; this changes only diagnostics and lifetime safety in the existing view bridge. No design-import, Chromium capture, rendering, packaging, or Vellum authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-widget-bridge",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

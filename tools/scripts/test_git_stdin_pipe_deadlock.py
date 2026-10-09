@@ -67,6 +67,7 @@ print("OK" if blobs == expected else "WRONG %d" % len(blobs))
 """.replace("COUNT", str(PATH_COUNT))
 
 
+@unittest.skipIf(sys.platform == "win32", "subprocess.communicate uses reader threads on Windows, not a selector; the selector degradation this test injects does not exist there")
 class HashObjectPipeDeadlockTest(unittest.TestCase):
     def run_probe(self, which: str) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -32,7 +32,8 @@ class ArgvForTests(unittest.TestCase):
         self.assertEqual(script_argv.argv_for(script, platform="posix"), [str(script)])
 
     def test_windows_runs_a_python_shebang_through_this_interpreter(self) -> None:
-        for line in (b"#!/usr/bin/env python3", b"#!/usr/bin/python3 -u", b"#!/usr/bin/env python"):
+        for line in (b"#!/usr/bin/env python3", b"#!/usr/bin/python3 -u", b"#!/usr/bin/env python",
+                     b"#!C:\\hostedtoolcache\\Python\\3.14.7\\x64\\python.exe"):
             script = self.write("fake.py", line + b"\nprint(1)\n")
             self.assertEqual(script_argv.argv_for(script, platform="nt"),
                              [sys.executable, str(script)], line)
@@ -42,6 +43,19 @@ class ArgvForTests(unittest.TestCase):
         with mock.patch.object(script_argv.shutil, "which", return_value="C:/Git/bin/bash.exe"):
             self.assertEqual(script_argv.argv_for(script, platform="nt"),
                              ["C:/Git/bin/bash.exe", str(script)])
+
+    def test_windows_finds_git_bash_beside_git_when_bash_is_not_on_path(self) -> None:
+        script = self.write("fake", b"#!/bin/sh\necho hi\n")
+        git_root = self.root / "Git"
+        (git_root / "cmd").mkdir(parents=True)
+        (git_root / "bin").mkdir()
+        (git_root / "cmd" / "git.exe").write_bytes(b"MZ")
+        bash = git_root / "bin" / "bash.exe"
+        bash.write_bytes(b"MZ")
+        which = {"bash": None, "git": str(git_root / "cmd" / "git.exe")}
+        with mock.patch.object(script_argv.shutil, "which", side_effect=which.get):
+            self.assertEqual(script_argv.argv_for(script, platform="nt"),
+                             [str(bash), str(script)])
 
     def test_windows_without_bash_leaves_a_shell_script_alone(self) -> None:
         script = self.write("fake", b"#!/bin/sh\necho hi\n")

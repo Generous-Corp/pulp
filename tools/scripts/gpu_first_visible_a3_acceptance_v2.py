@@ -911,7 +911,7 @@ def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, impleme
     ):
         raise V2AcceptanceError(f"{role_id} trace analyzer identity is invalid")
     completed = subprocess.run(
-        [str(analyzer), "trace", "gpu-startup", "--trace", str(trace_path), "--json"],
+        [*argv_for(analyzer), "trace", "gpu-startup", "--trace", str(trace_path), "--json"],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
     )
     try:

@@ -546,6 +546,12 @@ pulp_add_test_suite(pulp-test-modal-analysis GROUP pulp-test-group-app-audio-sup
 add_executable(pulp-test-latency-contract test_latency_contract.cpp)
 target_link_libraries(pulp-test-latency-contract PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-latency-contract)
+# DSPX-06 graph timing evaluator. This is a direct host contract proof, kept
+# separate from the measured audio latency fixture so its refusal vocabulary and
+# graph-state preservation are exercised through the public host API.
+add_executable(pulp-test-dspx06-graph-timing test_dspx06_graph_timing.cpp)
+target_link_libraries(pulp-test-dspx06-graph-timing PRIVATE pulp::host Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-dspx06-graph-timing)
 # Stream-start fidelity of the STFT/WOLA engine: the first samples after
 # prepare()/reset() must come back at full strength, delayed by the reported
 # latency. Rendered through RenderScenario, so it shares the audio test support.
@@ -704,6 +710,10 @@ pulp_add_test_suite(pulp-test-dspx01-descriptor-registry GROUP pulp-test-group-a
     SOURCES test_dspx01_descriptor_registry.cpp
     LIBRARIES pulp::host)
 
+pulp_add_test_suite(pulp-test-bounded-delay-descriptor GROUP pulp-test-group-app-host
+    SOURCES test_bounded_delay_descriptor.cpp
+    LIBRARIES pulp::host)
+
 pulp_add_test_suite(pulp-test-sample-kernel-registry GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)
 
@@ -746,10 +756,13 @@ set_tests_properties(cmake-sample-kernel-sdk-consumer PROPERTIES
 # runtime test binary.
 add_library(pulp-test-host-signal-graph-headers OBJECT
     header_compile/host_custom_node_type.cpp
+    header_compile/host_signal_graph_authoring.cpp
     header_compile/host_signal_graph_node.cpp
     header_compile/host_signal_graph_connection.cpp
     header_compile/host_signal_graph_runtime.cpp
+    header_compile/host_signal_graph_execution_snapshot.cpp
     header_compile/host_signal_graph_execution_status.cpp
+    header_compile/host_signal_graph_executor_routing.cpp
     header_compile/host_signal_graph_umbrella.cpp)
 target_link_libraries(pulp-test-host-signal-graph-headers PRIVATE pulp::host)
 

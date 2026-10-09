@@ -95,9 +95,8 @@ jobs:
 
       - name: Build
         run: |
-          cmake --build build-fuzz \
+          tools/ci/governed-build.sh cmake --build build-fuzz \
             --target pulp-test-timeline-document-fuzz pulp-test-control-protocol-fuzz \
-            -j"$(getconf _NPROCESSORS_ONLN)"
 
       - name: Replay
         env:
@@ -146,10 +145,9 @@ jobs:
 
       - name: Build
         run: |
-          cmake --build build-libfuzzer \
+          tools/ci/governed-build.sh cmake --build build-libfuzzer \
             --target pulp-fuzz-timeline-document pulp-fuzz-control-protocol \
-              pulp-generate-control-protocol-fuzz-corpus \
-            -j"$(getconf _NPROCESSORS_ONLN)"
+              pulp-generate-control-protocol-fuzz-corpus
 
       - name: Seed the corpus
         run: |

@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 73,
+  "manifest_revision": 72,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -12620,121 +12620,6 @@
               "process(SampleType* data, int num_samples)",
               "size()",
               "empty()"
-            ],
-            "enums": []
-          }
-        ],
-        "loudness_compensation.hpp": [
-          {
-            "class": "SpectrumCdf",
-            "qualified_name": "pulp::signal::SpectrumCdf",
-            "template": null,
-            "methods": [
-              "prepare(std::size_t bins)",
-              "assign(std::span<const double> power, double bin_hz)",
-              "weight(double lo_hz, double hi_hz)"
-            ],
-            "enums": []
-          },
-          {
-            "class": "MinimumPhaseResponse",
-            "qualified_name": "pulp::signal::MinimumPhaseResponse",
-            "template": null,
-            "methods": [
-              "prepare(int fft_size)",
-              "prepared()",
-              "compute(std::span<const double> magnitude, double floor, std::span<std::complex<double>> out)"
-            ],
-            "enums": []
-          },
-          {
-            "class": "SpectrumBands",
-            "qualified_name": "pulp::signal::SpectrumBands",
-            "template": null,
-            "methods": [
-              "band_of(double hz)",
-              "centre_hz(int band)"
-            ],
-            "enums": []
-          },
-          {
-            "class": "MaterialChangeDetector",
-            "qualified_name": "pulp::signal::MaterialChangeDetector",
-            "template": null,
-            "methods": [
-              "reset()",
-              "run()",
-              "level_drop_db()",
-              "last_was_drop()",
-              "observe(float fast_db, float slow_db, double frame_lufs = kNoLevel)",
-              "hold_off()"
-            ],
-            "enums": [
-              [
-                "Event",
-                [
-                  "none",
-                  "run_started",
-                  "run_broken",
-                  "confirmed"
-                ]
-              ]
-            ]
-          },
-          {
-            "class": "LongTermSpectrum",
-            "qualified_name": "pulp::signal::LongTermSpectrum",
-            "template": null,
-            "methods": [
-              "prepare(double sample_rate, int channels, const LoudnessCompensationConfig& config, std::span<const double> prior = {})",
-              "reset()",
-              "fft_size_for(double sample_rate, const LoudnessCompensationConfig& config)",
-              "bins_for(double sample_rate, const LoudnessCompensationConfig& config)",
-              "restart_grid()",
-              "begin_candidate()",
-              "cancel_candidate()",
-              "restart()",
-              "merge_with_previous()",
-              "settle_alternation()",
-              "has_arrived()",
-              "arrived_shape_legs()",
-              "has_previous()",
-              "alternating()"
-            ],
-            "enums": [
-              [
-                "Import",
-                [
-                  "prior",
-                  "warm"
-                ]
-              ]
-            ]
-          },
-          {
-            "class": "Estimate",
-            "qualified_name": "pulp::signal::Estimate",
-            "template": null,
-            "methods": [
-              "assign(std::size_t n)",
-              "clear()",
-              "copy_from(const Estimate& o)",
-              "scale(double k)",
-              "total()"
-            ],
-            "enums": []
-          },
-          {
-            "class": "MakeupTarget",
-            "qualified_name": "pulp::signal::MakeupTarget",
-            "template": null,
-            "methods": [
-              "reset()",
-              "primed()",
-              "value_db()",
-              "retarget(float db)",
-              "follow(float wanted_db, double seconds, double slew_db_per_second)",
-              "follow(float wanted_db, double seconds, double min_slew_db_per_second, double rate_per_second, double max_slew_db_per_second, double knee_db = 0.0)"
             ],
             "enums": []
           }

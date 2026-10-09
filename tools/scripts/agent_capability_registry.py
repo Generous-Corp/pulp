@@ -11,6 +11,7 @@ from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
+    "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
     "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
@@ -171,6 +172,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "Spectrum-weighted loudness compensation is a real-time DSP helper that "
             "plugins compose around their own gain policy; it is not an independently "
             "selected generator-facing capability in the installed contract."
+        ),
+    },
+    {
+        "include": "pulp/host/signal_graph_authoring.hpp",
+        "fingerprint": "sha256:0f505f35215b6fbcc7a9f742b76d0d9f62ccf331d0facfc93c782ec7f4203d02",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "A focused value contract for SignalGraph authoring lineage receipts. "
+            "It lets control and importer code validate graph identity/generation "
+            "without claiming an installed DSP capability or pulling in the runtime "
+            "implementation surface."
         ),
     },
     {

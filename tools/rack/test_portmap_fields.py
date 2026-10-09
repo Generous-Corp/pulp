@@ -41,8 +41,8 @@ UNREAD_BY_DESIGN = {
 
 def main():
     bad = 0
-    written = set(re.findall(r'\\"([a-zA-Z]+)\\"', open(CARTOG).read()))
-    read = set(re.findall(r'"([a-zA-Z]+)"', open(READER).read()))
+    written = set(re.findall(r'\\"([a-zA-Z]+)\\"', open(CARTOG, encoding="utf-8").read()))
+    read = set(re.findall(r'"([a-zA-Z]+)"', open(READER, encoding="utf-8").read()))
 
     if not written:
         print("  WRONG  no emitted field names found in CARTOG.cpp — this "
@@ -79,7 +79,7 @@ def main():
     for path in OTHER_READERS:
         if not os.path.exists(path):
             continue
-        text = open(path).read()
+        text = open(path, encoding="utf-8").read()
         # Only the region that parses the map, so unrelated dict keys in the
         # file are not mistaken for fields it reads.
         at = text.find("PORTMAP")

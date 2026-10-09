@@ -76,7 +76,7 @@
 // the recirculated tail, which is what makes turning the control down attenuate
 // the barberpole rather than disable it.
 
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <pulp/signal/chorus_family.hpp>
 #include <pulp/signal/frequency_shifter_ssb.hpp>

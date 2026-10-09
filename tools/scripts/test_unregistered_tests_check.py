@@ -51,6 +51,55 @@ class UnregisteredTestsCheckTest(unittest.TestCase):
         self.assertEqual(guard.uncovered(repo.root), ([], 4))
         self.assertEqual(guard.check(repo.root, min_covered=4), [])
 
+    def test_each_runner_form_collects_its_directory(self) -> None:
+        repo = self.repo()
+        for path in ("tools/p/test_a.py", "tools/q/sub/test_b.py", "tools/r/test_c.py",
+                     "tools/r/test_d.py", "tools/s/test_e.py"):
+            repo.write(path, "")
+        repo.write(".github/workflows/runners.yml", "\n".join([
+            "jobs:",
+            "  t:",
+            "    steps:",
+            "      - run: .venv/bin/pytest tools/p/ -v --tb=short",
+            "      - run: |",
+            "          python -m pytest -q \\",
+            "            tools/q",
+            "      - run: python3 -m unittest discover -s tools/s -p 'test_*.py'",
+        ]) + "\n")
+        repo.write("test/cmake/discover.cmake", "\n".join([
+            "add_test(NAME r COMMAND py -m unittest discover",
+            '    -s "${CMAKE_SOURCE_DIR}/tools/r" -p test_c.py)',
+        ]) + "\n")
+        missing, covered = guard.uncovered(repo.root)
+        self.assertEqual((missing, covered), (["tools/r/test_d.py"], 8))
+
+    def test_a_directory_mentioned_without_a_runner_does_not_count(self) -> None:
+        repo = self.repo()
+        repo.write("tools/scripts/test_quiet.py", "")
+        repo.write("test/cmake/cwd.cmake", "\n".join([
+            "add_test(NAME q COMMAND py ${S}/tools/x/test_cmake.py)",
+            "set_tests_properties(q PROPERTIES",
+            '    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")',
+        ]) + "\n")
+        repo.write(".github/workflows/mentions.yml", "\n".join([
+            "jobs:",
+            "  t:",
+            "    steps:",
+            "      - uses: actions/checkout@v4",
+            "        with:",
+            "          sparse-checkout: tools/scripts",
+            "      - run: npm ci --prefix tools/scripts --no-audit",
+            "      - run: python3 -m pytest tools/x/test_cmake.py; prefix=tools/scripts",
+            "      - run: python3 -c 'import sys; sys.path.insert(0, \"tools/scripts\")'",
+            "      - run: python3 tools/scripts/shell_portability_check.py tools/ci tools/scripts",
+            "      - run: python3 -m pytest build/mytools/scripts",
+            "      - run: python3 -m unittest discover -s $ROOT/mytools/ci",
+        ]) + "\n")
+        repo.write("tools/ci/test_quiet.py", "")
+        missing = guard.uncovered(repo.root)[0]
+        self.assertIn("tools/scripts/test_quiet.py", missing)
+        self.assertIn("tools/ci/test_quiet.py", missing)
+
     def test_a_new_unregistered_test_fails(self) -> None:
         repo = self.repo()
         repo.write("tools/x/test_orphan.py", "")

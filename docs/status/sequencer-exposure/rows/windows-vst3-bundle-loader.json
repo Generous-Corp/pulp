@@ -1,0 +1,51 @@
+{
+  "id": "windows-vst3-bundle-loader",
+  "title": "Windows VST3 bundles resolve their architecture module",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "d8a5c2aa-7e3c-4e45-9e85-1c4fb1f4b3b7",
+  "owned_paths": [
+    "core/host/src/plugin_slot_vst3.cpp",
+    "docs/status/sequencer-exposure/rows/windows-vst3-bundle-loader.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/src/plugin_slot_vst3.cpp",
+      "needles": [
+        "Contents",
+        "-win",
+        "resolve_vst3_binary"
+      ]
+    },
+    {
+      "path": "tools/cmake/PulpPluginFormats.cmake",
+      "needles": [
+        "portable bundle shape",
+        "_pulp_vst3_windows_contents",
+        "Assembling Windows VST3 bundle"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The loader change is internal host implementation used when loading a VST3 bundle; it does not add or change an installed SDK header or public symbol."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI verb, flag, or handler changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "This fixes host discovery of a packaged Windows VST3 module and adds no musician-facing control or operation."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No capability key or design-time manifest is added or changed."
+    }
+  }
+}

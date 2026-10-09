@@ -48,6 +48,15 @@ struct GpuConvolverRawManifest {
     std::uint32_t bootstrap_resamples = 0;
     bool paced = false;
 
+    // Immutable host context for each campaign. These values are supplied by
+    // the campaign wrapper; they are never inferred from worker timestamps.
+    std::string worker_scheduling;
+    std::string host_contention;
+    std::string host_thermal_state;
+    std::string power_state;
+    bool worker_workgroup_joined = false;
+    std::uint64_t worker_workgroup_join_failures = 0;
+
     std::uint32_t block_frames = 0;
     std::uint32_t sample_rate_hz = 0;
     std::uint32_t channels = 0;
@@ -307,6 +316,17 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
         if (!nonempty(value))
             return false;
     }
+    for (const auto value :
+         {std::string_view(manifest.worker_scheduling), std::string_view(manifest.host_contention),
+          std::string_view(manifest.host_thermal_state), std::string_view(manifest.power_state)}) {
+        if (!nonempty(value) || value.find_first_of("\r\n") != std::string_view::npos)
+            return false;
+    }
+    if (manifest.worker_scheduling != "ordinary_worker" &&
+        manifest.worker_scheduling != "audio_workgroup")
+        return false;
+    if (manifest.worker_scheduling == "audio_workgroup" && !manifest.worker_workgroup_joined)
+        return false;
     if (!hex_string(manifest.source_revision, 40) || !hex_string(manifest.provider_revision, 40) ||
         !hex_string(manifest.binary_sha256, 64) ||
         !hex_string(manifest.provider_asset_sha256, 64) || manifest.build_flags.empty() ||
@@ -723,6 +743,18 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
                   << R"(,"expected_blocks_per_trial":)" << manifest.expected_blocks_per_trial
                   << R"(,"bootstrap_seed":)" << manifest.bootstrap_seed
                   << R"(,"bootstrap_resamples":)" << manifest.bootstrap_resamples
+                  << R"(,"scheduling":{"worker":)";
+    raw_writer_detail::json_string(manifest_line, manifest.worker_scheduling);
+    manifest_line << R"(,"contention":)";
+    raw_writer_detail::json_string(manifest_line, manifest.host_contention);
+    manifest_line << R"(,"thermal_state":)";
+    raw_writer_detail::json_string(manifest_line, manifest.host_thermal_state);
+    manifest_line << R"(,"power_state":)";
+    raw_writer_detail::json_string(manifest_line, manifest.power_state);
+    manifest_line << R"(,"workgroup_joined":)"
+                  << (manifest.worker_workgroup_joined ? "true" : "false")
+                  << R"(,"workgroup_join_failures":)" << manifest.worker_workgroup_join_failures
+                  << R"(})"
                   << R"(,"row":{"block_frames":)" << manifest.block_frames
                   << R"(,"sample_rate_hz":)" << manifest.sample_rate_hz << R"(,"channels":)"
                   << manifest.channels << R"(,"ir_frames":)" << manifest.ir_frames

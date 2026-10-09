@@ -270,6 +270,11 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         cleanup = self.script[
             cleanup_start : self.script.index("trap 'cleanup; remove_runner_lease' EXIT")
         ]
+        fence = self.script[
+            self.script.index("jit_deregister_fence() {") : self.script.index(
+                "monitor_runner_heartbeat() {"
+            )
+        ]
         self.assertIn('systemd-run --quiet --collect', delegation)
         self.assertIn('--service-type=oneshot', delegation)
         self.assertIn('--property=User=root', delegation)
@@ -282,96 +287,159 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('--setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR"', delegation)
         self.assertIn('--deferred-cleanup "$VMID"', delegation)
         self.assertIn('runner is busy; delegated clone $VMID', delegation)
+        # A busy read and a busy refusal from GitHub both hand off to deferred cleanup.
         self.assertEqual(cleanup.count("delegate_deferred_cleanup || true"), 2)
-        self.assertIn('"${REGISTRATION_API}/actions/runners/${rid}/labels"', cleanup)
-        self.assertIn("-f 'labels[]=pulp-shutdown-fenced'", cleanup)
-        self.assertIn('cannot fence runner dispatch', cleanup)
-        self.assertIn(
-            'if [ "$runner_status" = online ] || [ "$runner_status" = offline ]; then',
-            cleanup,
-        )
-        self.assertIn('exact runner has invalid fenced busy state', cleanup)
-        self.assertIn('a routing label survived dispatch fence', cleanup)
-        self.assertIn('routing_label_survives "$runner_labels"', cleanup)
-        self.assertIn('shutdown label is missing after dispatch fence', cleanup)
-        self.assertIn("for fence_probe in 1 2; do", cleanup)
-        self.assertIn('fenced dispatch for idle runner id $rid', cleanup)
-        self.assertNotIn('online dispatch runner cannot be fenced', cleanup)
-        self.assertIn("shutdown_deadline=$((SECONDS + 120))", cleanup)
-        self.assertIn('timeout 20s qm stop "$VMID"', cleanup)
-        self.assertIn('fenced runner is busy during shutdown', cleanup)
-        self.assertIn('fenced runner stayed online before cleanup deadline', cleanup)
-        self.assertIn('runner deregistered itself during fenced shutdown', cleanup)
+        self.assertIn('jit_deregister_fence "$REGISTRATION_API" "$rid" "$RUNNER_NAME"', cleanup)
+        self.assertIn("3) delegate_deferred_cleanup || true; return ;;", cleanup)
+        self.assertIn("cannot prove the dispatch fence", cleanup)
+        # JIT labels are read-only, so no label rewrite may be part of teardown.
+        self.assertNotIn("/labels", cleanup)
+        self.assertNotIn("/labels", fence)
+        self.assertNotIn("routing_label_survives", self.script)
         self.assertLess(
-            cleanup.index('"${REGISTRATION_API}/actions/runners/${rid}/labels"'),
-            cleanup.index('"${REGISTRATION_API}/actions/runners/${rid}"'),
+            cleanup.index("jit_deregister_fence"), cleanup.index('qm stop "$VMID"')
         )
-        self.assertLess(
-            cleanup.index('"${REGISTRATION_API}/actions/runners/${rid}"'),
-            cleanup.index('qm stop "$VMID"'),
-        )
-        self.assertLess(
-            cleanup.index('qm stop "$VMID"'),
-            cleanup.rindex('[ "$runner_status" = offline ]'),
-        )
+        # Fence order: read, DELETE, then the 404 and the in-progress-job control.
+        self.assertLess(fence.index("--jq '[.id,.name,.busy] | @tsv'"), fence.index("--method DELETE"))
+        self.assertLess(fence.index("--method DELETE"), fence.index('*"HTTP 404"*'))
+        self.assertLess(fence.index('*"HTTP 404"*'), fence.index("actions/runs?status=in_progress"))
+        for step in ("1/4", "2/4", "3/4"):
+            self.assertIn(f"JIT fence {step}", fence)
+        self.assertIn('log "JIT fence 4/4: destroying clone $VMID"', cleanup)
 
-    def test_cleanup_fences_offline_runner_and_delegates_reconnect_race(self) -> None:
-        routing_helper = self.script[
-            self.script.index("routing_label_survives() {") : self.script.index(
+    def _fence_harness(
+        self,
+        tmp: pathlib.Path,
+        *,
+        busy: str = "false",
+        delete: str = "ok",
+        after: str = "404",
+        job_runner: str = "",
+        entry: str = "cleanup",
+    ) -> subprocess.CompletedProcess[str]:
+        """Run cleanup() or deferred_cleanup() with a stateful GitHub fake."""
+        fence = self.script[
+            self.script.index("jit_deregister_fence() {") : self.script.index(
                 "monitor_runner_heartbeat() {"
             )
         ]
-        helper = routing_helper + self.script[
-            self.script.index("delegate_deferred_cleanup() {") : self.script.index(
-                "trap 'cleanup; remove_runner_lease' EXIT"
-            )
-        ]
+        if entry == "cleanup":
+            body = self.script[
+                self.script.index("delegate_deferred_cleanup() {") : self.script.index(
+                    "trap 'cleanup; remove_runner_lease' EXIT"
+                )
+            ]
+            call = "cleanup"
+        else:
+            body = self.script[
+                self.script.index("deferred_cleanup() {") : self.script.index(
+                    'if [ "${1:-}" = "--deferred-cleanup" ]'
+                )
+            ]
+            call = "deferred_cleanup 200 pulp-pr-safe-ephemeral-200-test orgs/Generous-Corp"
+        ops = tmp / "ops"
+        harness = tmp / "harness.sh"
+        harness.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -u\n"
+            "log() { printf '%s\\n' \"$*\"; }\n"
+            "die() { printf '%s\\n' \"$*\"; exit 1; }\n"
+            "configure_github_auth() { :; }\n"
+            f"systemd-run() {{ printf '%s\\n' \"$*\" > '{tmp}/delegated'; }}\n"
+            f"qm() {{ echo \"qm $*\" >> '{ops}'; }}\n"
+            f"destroy_clone_and_firewall_policy() {{ echo destroyed >> '{ops}'; }}\n"
+            "github_api() {\n"
+            f"  echo \"gh $*\" >> '{ops}'\n"
+            "  local args=\"$*\"\n"
+            "  case \"$args\" in\n"
+            "    *'--method DELETE'*)\n"
+            f"      case '{delete}' in\n"
+            f"        ok) : > '{tmp}/deleted'; return 0 ;;\n"
+            "        busy) echo 'gh: Runner is still running a job (HTTP 422)' >&2; return 1 ;;\n"
+            "        *) echo 'gh: Server Error (HTTP 500)' >&2; return 1 ;;\n"
+            "      esac ;;\n"
+            "    *'runners?per_page=100'*)\n"
+            f"      [ -e '{tmp}/deleted' ] || printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\toffline\\n' ;;\n"
+            "    *'actions/runners/17'*)\n"
+            f"      if [ -e '{tmp}/deleted' ]; then\n"
+            f"        case '{after}' in\n"
+            "          404) echo 'gh: Not Found (HTTP 404)' >&2; return 1 ;;\n"
+            "          exists) printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\n' ;;\n"
+            "          *) echo 'gh: Bad Gateway (HTTP 502)' >&2; return 1 ;;\n"
+            "        esac\n"
+            "      else\n"
+            f"        printf '17\\tpulp-pr-safe-ephemeral-200-test\\t{busy}\\n'\n"
+            "      fi ;;\n"
+            "    *'runs?status=in_progress'*) echo 901 ;;\n"
+            f"    *'runs/901/jobs'*) [ -z '{job_runner}' ] || echo '{job_runner}' ;;\n"
+            "    *) return 2 ;;\n"
+            "  esac\n"
+            "}\n"
+            "CLONED=1\nKEEP=0\nGITHUB_API_READY=1\n"
+            "VMID=200\nRUNNER_NAME='pulp-pr-safe-ephemeral-200-test'\n"
+            "ORG='Generous-Corp'\nREPO='Generous-Corp/pulp'\n"
+            "LABELS='self-hosted,Linux,X64,pulp-pr-safe-linux-x64'\n"
+            "REGISTRATION_API='orgs/Generous-Corp'\n"
+            "GITHUB_AUTH_MODE='app-helper'\n"
+            f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
+            "GH_CLI='/usr/local/bin/ghapp'\n"
+            "CLONE_BASE=200\nCLONE_MAX=202\n"
+            "vmid_in_range() { [ \"$1\" -ge \"$CLONE_BASE\" ] && [ \"$1\" -le \"$CLONE_MAX\" ]; }\n"
+            f"FIREWALL_DIR='{tmp}'\nVMID_LOCK='{tmp}/vmid.lock'\n"
+            "sleep() { :; }\n"
+            + fence
+            + body
+            + f"\n{call}\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            ["/bin/bash", str(harness)], capture_output=True, text=True, timeout=10
+        )
+        result.ops = ops.read_text() if ops.exists() else ""  # type: ignore[attr-defined]
+        return result
+
+    def test_cleanup_deregisters_idle_jit_runner_then_destroys(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
-            tmp = pathlib.Path(raw_tmp)
-            delegated = tmp / "delegated"
-            qm_called = tmp / "qm-called"
-            harness = tmp / "harness.sh"
-            harness.write_text(
-                "#!/usr/bin/env bash\n"
-                "set -u\n"
-                "log() { printf '%s\\n' \"$*\"; }\n"
-                f"systemd-run() {{ printf '%s\\n' \"$*\" > '{delegated}'; }}\n"
-                f"qm() {{ : > '{qm_called}'; }}\n"
-                "github_api() {\n"
-                "  if [ \"${1:-}\" = --paginate ]; then\n"
-                "    printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\toffline\\n'\n"
-                "  elif [ \"${1:-}\" = --method ]; then\n"
-                "    :\n"
-                "  else\n"
-                "    printf 'pulp-pr-safe-ephemeral-200-test\\ttrue\\tonline\\tpulp-shutdown-fenced\\n'\n"
-                "  fi\n"
-                "}\n"
-                "CLONED=1\nKEEP=0\nGITHUB_API_READY=1\n"
-                "VMID=200\nRUNNER_NAME='pulp-pr-safe-ephemeral-200-test'\n"
-                "REPO='Generous-Corp/pulp'\n"
-                "LABELS='self-hosted,Linux,X64,pulp-pr-safe-linux-x64'\n"
-                "REGISTRATION_API='orgs/Generous-Corp'\n"
-                "GITHUB_AUTH_MODE='app-helper'\n"
-                "PAT_FILE='/root/.config/pulp/secrets/gh-runner-pat'\n"
-                "ORG_PAT_FILE='/root/.config/pulp/secrets/gh-org-runner-pat'\n"
-                "GH_CLI='/usr/local/bin/ghapp'\n"
-                "CLONE_BASE=200\nCLONE_MAX=202\n"
-                f"FIREWALL_DIR='{tmp}'\n"
-                + helper
-                + "\ncleanup\n",
-                encoding="utf-8",
+            result = self._fence_harness(pathlib.Path(raw_tmp))
+            ops = result.ops  # type: ignore[attr-defined]
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for step in ("1/4", "2/4", "3/4", "4/4"):
+                self.assertIn(f"JIT fence {step}", result.stdout)
+            self.assertNotIn("/labels", ops)
+            self.assertLess(ops.index("--method DELETE"), ops.index("destroyed"))
+            self.assertEqual(ops.count("--method DELETE"), 1, ops)
+
+    def test_cleanup_delegates_when_github_refuses_a_busy_runner(self) -> None:
+        for kwargs in ({"busy": "true"}, {"delete": "busy"}):
+            with self.subTest(**kwargs), tempfile.TemporaryDirectory() as raw_tmp:
+                tmp = pathlib.Path(raw_tmp)
+                result = self._fence_harness(tmp, **kwargs)
+                self.assertTrue((tmp / "delegated").exists(), result.stdout)
+                self.assertIn("--deferred-cleanup 200", (tmp / "delegated").read_text())
+                self.assertNotIn("destroyed", result.ops)  # type: ignore[attr-defined]
+
+    def test_cleanup_preserves_clone_when_the_fence_cannot_be_proved(self) -> None:
+        cases = (
+            ({"delete": "error"}, "JIT fence 2/4: cannot deregister"),
+            ({"after": "exists"}, "still exists after deregistration"),
+            ({"after": "502"}, "other than 404"),
+            ({"job_runner": "pulp-pr-safe-ephemeral-200-test"}, "names pulp-pr-safe-ephemeral-200-test"),
+        )
+        for kwargs, message in cases:
+            with self.subTest(**kwargs), tempfile.TemporaryDirectory() as raw_tmp:
+                result = self._fence_harness(pathlib.Path(raw_tmp), **kwargs)
+                self.assertIn(message, result.stdout)
+                self.assertIn("leaving clone 200 for safe recovery", result.stdout)
+                self.assertNotIn("destroyed", result.ops)  # type: ignore[attr-defined]
+
+    def test_deferred_cleanup_dies_without_destroying_when_the_fence_cannot_be_proved(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            result = self._fence_harness(
+                pathlib.Path(raw_tmp), entry="deferred", after="exists"
             )
-            result = subprocess.run(
-                ["/bin/bash", str(harness)],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue(delegated.exists())
-            self.assertIn("--deferred-cleanup 200", delegated.read_text())
-            self.assertIn("delegated clone 200", result.stdout)
-            self.assertFalse(qm_called.exists())
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("cannot prove the deferred-cleanup dispatch fence", result.stdout)
+            self.assertNotIn("qm ", result.ops)  # type: ignore[attr-defined]
 
     def test_deferred_cleanup_is_bounded_and_preserves_busy_work(self) -> None:
         helper = self.script[
@@ -384,14 +452,10 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn("deadline=$((SECONDS + 4500))", helper)
         self.assertIn('legacy_credential="${4:-}"', helper)
         self.assertIn("invalid legacy deferred-cleanup credential path", helper)
-        self.assertIn("labels[]=pulp-shutdown-fenced", helper)
-        self.assertIn(
-            'if [ "$status" = online ] || [ "$status" = offline ]; then', helper
-        )
-        self.assertIn("for fence_probe in 1 2; do", helper)
-        self.assertIn("deferred-cleanup runner became busy before dispatch fence", helper)
-        self.assertIn("shutdown label is missing after deferred-cleanup fence", helper)
-        self.assertIn('routing_label_survives "$labels"', helper)
+        self.assertIn('jit_deregister_fence "$registration_api" "$rid" "$runner_name"', helper)
+        self.assertIn("3) sleep 15; continue ;;", helper)
+        self.assertIn("cannot prove the deferred-cleanup dispatch fence", helper)
+        self.assertNotIn("/labels", helper)
         self.assertIn('exec 9>"$VMID_LOCK"', helper)
         self.assertIn('flock -w 300 9', helper)
         self.assertIn("description: pulp-runner-generation=", helper)
@@ -492,132 +556,6 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.assertIn("cannot inspect VM inventory", result.stdout)
             self.assertTrue(firewall.exists())
             self.assertFalse(destroyed.exists())
-
-    def test_deferred_cleanup_fences_offline_runner_before_reconnect_race(self) -> None:
-        routing_helper = self.script[
-            self.script.index("routing_label_survives() {") : self.script.index(
-                "monitor_runner_heartbeat() {"
-            )
-        ]
-        helper = routing_helper + self.script[
-            self.script.index("deferred_cleanup() {") : self.script.index(
-                'if [ "${1:-}" = "--deferred-cleanup" ]'
-            )
-        ]
-        with tempfile.TemporaryDirectory() as raw_tmp:
-            tmp = pathlib.Path(raw_tmp)
-            firewall = tmp / "200.fw"
-            firewall.write_text("protected", encoding="utf-8")
-            qm_called = tmp / "qm-called"
-            fake_qm = tmp / "qm"
-            fake_qm.write_text(
-                "#!/usr/bin/env bash\n"
-                f": > '{qm_called}'\n"
-                "exit 0\n",
-                encoding="utf-8",
-            )
-            fake_qm.chmod(0o755)
-            harness = tmp / "harness.sh"
-            harness.write_text(
-                "#!/usr/bin/env bash\n"
-                "set -u\n"
-                "die() { printf '%s\\n' \"$*\"; exit 1; }\n"
-                "configure_github_auth() { :; }\n"
-                "github_api() {\n"
-                "  if [ \"${1:-}\" = --paginate ]; then\n"
-                "    printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\toffline\\n'\n"
-                "  elif [ \"${1:-}\" = --method ]; then\n"
-                "    :\n"
-                "  else\n"
-                "    printf 'pulp-pr-safe-ephemeral-200-test\\ttrue\\tonline\\tpulp-shutdown-fenced\\n'\n"
-                "  fi\n"
-                "}\n"
-                f"ORG='Generous-Corp'\nREPO='Generous-Corp/pulp'\n"
-                "CLONE_BASE=200\nCLONE_MAX=202\n"
-                "vmid_in_range() { [ \"$1\" -ge \"$CLONE_BASE\" ] && [ \"$1\" -le \"$CLONE_MAX\" ]; }\n"
-                f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
-                "GITHUB_AUTH_MODE='token-file'\n"
-                f"FIREWALL_DIR='{tmp}'\n"
-                + helper
-                + "\ndeferred_cleanup 200 pulp-pr-safe-ephemeral-200-test orgs/Generous-Corp\n",
-                encoding="utf-8",
-            )
-            result = subprocess.run(
-                ["/bin/bash", str(harness)],
-                capture_output=True,
-                text=True,
-                env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
-                timeout=5,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn(
-                "deferred-cleanup runner became busy before dispatch fence",
-                result.stdout,
-            )
-            self.assertTrue(firewall.exists())
-            self.assertFalse(qm_called.exists())
-
-    def test_deferred_cleanup_preserves_clone_when_configured_routing_label_survives(self) -> None:
-        routing_helper = self.script[
-            self.script.index("routing_label_survives() {") : self.script.index(
-                "monitor_runner_heartbeat() {"
-            )
-        ]
-        helper = routing_helper + self.script[
-            self.script.index("deferred_cleanup() {") : self.script.index(
-                'if [ "${1:-}" = "--deferred-cleanup" ]'
-            )
-        ]
-        with tempfile.TemporaryDirectory() as raw_tmp:
-            tmp = pathlib.Path(raw_tmp)
-            firewall = tmp / "200.fw"
-            firewall.write_text("protected", encoding="utf-8")
-            qm_called = tmp / "qm-called"
-            fake_qm = tmp / "qm"
-            fake_qm.write_text(
-                "#!/usr/bin/env bash\n"
-                f": > '{qm_called}'\n"
-                "exit 0\n",
-                encoding="utf-8",
-            )
-            fake_qm.chmod(0o755)
-            harness = tmp / "harness.sh"
-            harness.write_text(
-                "#!/usr/bin/env bash\n"
-                "set -u\n"
-                "die() { printf '%s\\n' \"$*\"; exit 1; }\n"
-                "configure_github_auth() { :; }\n"
-                "github_api() {\n"
-                "  if [ \"${1:-}\" = --paginate ]; then\n"
-                "    printf '17\\tvellum-ephemeral-200-test\\tfalse\\toffline\\n'\n"
-                "  elif [ \"${1:-}\" = --method ]; then\n"
-                "    :\n"
-                "  else\n"
-                "    printf 'vellum-ephemeral-200-test\\tfalse\\toffline\\tpulp-shutdown-fenced,vellum-build-linux-x64\\n'\n"
-                "  fi\n"
-                "}\n"
-                "ORG='Generous-Corp'\nREPO='Generous-Corp/vellum'\n"
-                "LABELS='self-hosted,Linux,X64,vellum-build-linux-x64'\n"
-                "CLONE_BASE=200\nCLONE_MAX=202\n"
-                "vmid_in_range() { [ \"$1\" -ge \"$CLONE_BASE\" ] && [ \"$1\" -le \"$CLONE_MAX\" ]; }\n"
-                f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
-                "GITHUB_AUTH_MODE='token-file'\n"
-                f"FIREWALL_DIR='{tmp}'\n"
-                + helper
-                + "\ndeferred_cleanup 200 vellum-ephemeral-200-test orgs/Generous-Corp\n",
-                encoding="utf-8",
-            )
-            result = subprocess.run(
-                ["/bin/bash", str(harness)],
-                capture_output=True,
-                text=True,
-                env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
-                timeout=5,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("routing label survived deferred-cleanup fence", result.stdout)
-            self.assertTrue(firewall.exists())
-            self.assertFalse(qm_called.exists())
 
     def test_deferred_cleanup_rejects_insecure_credential_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
@@ -1025,6 +963,99 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             "referenced delegate(s) missing from the repository; they would exist "
             "only as unversioned host state: " + ", ".join(missing),
         )
+
+    def test_clone_size_and_lan_index_are_profile_settings_with_build_defaults(self) -> None:
+        self.assertIn('CORES="${TARTCI_PROXMOX_CORES:-4}"', self.script)
+        self.assertIn('MEM_MB="${TARTCI_PROXMOX_MEMORY_MB:-8192}"', self.script)
+        self.assertIn(
+            'GUEST_INDEX_BASE="${TARTCI_PROXMOX_GUEST_INDEX_BASE:-$CLONE_BASE}"', self.script
+        )
+        self.assertIn("SLOT_INDEX=$((VMID - GUEST_INDEX_BASE))", self.script)
+        self.assertIn("clone cores and memory must be positive integers", self.script)
+        self.assertIn("guest index base must be a VMID at or below the clone range", self.script)
+        self.assertIn("would derive a LAN address past", self.script)
+
+    def _lane_env(self, **overrides: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.update(overrides)
+        return subprocess.run(
+            ["/bin/bash", str(SCRIPT)],
+            capture_output=True, text=True, env=env, timeout=10,
+        )
+
+    def test_invalid_clone_size_or_index_base_is_refused_before_any_host_action(self) -> None:
+        for overrides, message in (
+            ({"TARTCI_PROXMOX_CORES": "0"}, "positive integers"),
+            ({"TARTCI_PROXMOX_MEMORY_MB": "2G"}, "positive integers"),
+            (
+                {"TARTCI_PROXMOX_CLONE_BASE": "203", "TARTCI_PROXMOX_CLONE_MAX": "203",
+                 "TARTCI_PROXMOX_GUEST_INDEX_BASE": "204"},
+                "guest index base",
+            ),
+        ):
+            with self.subTest(overrides=overrides):
+                result = self._lane_env(**overrides)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stdout + result.stderr)
+
+    def test_preamble_profile_is_a_tiny_disjoint_slot(self) -> None:
+        profile = (ROOT / "tools" / "ci" / "linux-runner-group-preamble.env").read_text(
+            encoding="utf-8"
+        )
+        values = dict(
+            line.split("=", 1) for line in profile.splitlines()
+            if line and not line.startswith("#")
+        )
+        labels = values["TARTCI_RUNNER_LABELS"].split(",")
+        self.assertEqual(labels, ["self-hosted", "Linux", "X64", "pulp-preamble-macpro"])
+        # No build label: a long Linux build must never land on the preamble slot.
+        self.assertNotIn("pulp-build-linux-x64", labels)
+        self.assertNotIn("pulp-host-macpro", labels)
+        self.assertEqual(values["PULP_LINUX_RUNNER_GROUP_ID"], "")
+        base, top = int(values["TARTCI_PROXMOX_CLONE_BASE"]), int(values["TARTCI_PROXMOX_CLONE_MAX"])
+        # Disjoint from the build slots' default 200..202, inside the reaper's 200..219.
+        self.assertGreater(base, 202)
+        self.assertLessEqual(top, 219)
+        index_base = int(values["TARTCI_PROXMOX_GUEST_INDEX_BASE"])
+        self.assertEqual(index_base, 200)
+        self.assertLessEqual(251 + top - index_base, 254)
+        self.assertEqual(values["TARTCI_PROXMOX_CORES"], "1")
+        self.assertLessEqual(int(values["TARTCI_PROXMOX_MEMORY_MB"]), 2048)
+
+    def test_clone_apt_timers_are_quiesced_before_a_job_is_assigned(self) -> None:
+        quiesce = self.script.index("sudo -n systemctl stop apt-daily.timer apt-daily-upgrade.timer")
+        self.assertLess(quiesce, self.script.index('log "minting JIT runner configuration"'))
+        block = self.script[quiesce : self.script.index('log "minting JIT runner configuration"')]
+        self.assertIn("systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service", block)
+        # The shutdown hook is always active; waiting on it would stall every clone.
+        self.assertNotIn("is-active --quiet unattended-upgrades", block)
+        # A running upgrade is waited for, never killed mid-dpkg.
+        self.assertNotIn("systemctl kill", block)
+        self.assertIn("cloud-init status --wait", block)
+        # A clone still running apt after the wait is discarded, never handed a job.
+        self.assertIn('|| die "apt maintenance in clone $VMID was still running', self.script)
+        self.assertNotIn("WARN: apt maintenance", self.script)
+
+    def _qm_set_sizing_argv(self) -> list[str]:
+        """The clone-sizing `qm set` invocation, continuation lines joined, as argv."""
+        import shlex
+        lines = self.script.splitlines()
+        start = next(i for i, line in enumerate(lines)
+                     if line.startswith('qm set "$VMID" --cores'))
+        command = []
+        for line in lines[start:]:
+            command.append(line.rstrip("\\").strip())
+            if not line.rstrip().endswith("\\"):
+                break
+        joined = " ".join(command).split(">/dev/null")[0]
+        return shlex.split(joined)
+
+    def test_clone_disables_cloud_init_first_boot_upgrade(self) -> None:
+        # The comment above the call mentions the flag too, so only the argv counts.
+        argv = self._qm_set_sizing_argv()
+        self.assertEqual(argv[:3], ["qm", "set", "$VMID"])
+        self.assertIn("--ciupgrade", argv)
+        self.assertEqual(argv[argv.index("--ciupgrade") + 1], "0")
 
     def test_engine_is_present_and_syntactically_valid(self) -> None:
         """The engine both wrappers exec must be committed, executable, and parse."""

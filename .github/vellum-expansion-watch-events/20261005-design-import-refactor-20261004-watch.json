@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261005-design-import-refactor-20261004-watch",
+  "created_at": "2026-10-05T17:27:20Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "design-import-refactor: browser CDP receipt validation strengthens visual-proof-harness import evidence; it adds a fail-closed verifier and roundtrip preflight without moving design-import, Chromium, rendering, packaging, or Vellum authority.",
+  "tests": [
+    "cd packages/pulp-react && npm test -- test/bridge-batch.test.ts",
+    "ctest --test-dir build -R pulp-test-cli-upgrade-install",
+    "ctest --test-dir build -R pulp-test-design-import-anchors",
+    "ctest --test-dir build -R keyed",
+    "ctest --test-dir build -R pulp-test-graph-runtime-plan",
+    "ctest --test-dir build -R pulp-test-graph-serializer",
+    "ctest --test-dir build -R pulp-test-host-signal-graph",
+    "ctest --test-dir build -R pulp-test-widget-bridge-canvas2d",
+    "node --test tools/import-design/browser_capture/vendor_payload.test.mjs",
+    "node --test tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+    "python3 tools/import-validation/test_verify_browser_fidelity_receipt.py",
+    "python3 tools/scripts/test_changed_surface_script_families.py",
+    "python3 tools/scripts/test_gates_script_inputs.py",
+    "python3 tools/scripts/test_vellum_boundary_lint.py",
+    "python3 tools/ui-build/lint/test_clean_output_lint.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -9,8 +9,10 @@ one of:
   * a configured ctest registration (an `entry` in test/ctest_script_inputs.json,
     which is generated from the configured test graph);
   * the source-selftest manifest (tools/ci/source_selftests.json);
-  * a workflow, or a CMake file, that names the file or a directory containing
-    it (comments excluded).
+  * a workflow, or a CMake file, that names the file, or hands a directory
+    containing it to a test runner (`pytest <dir>`, `unittest discover -s <dir>`);
+    comments are excluded, and a directory mentioned any other way (a working
+    directory, an npm prefix, a sparse checkout, a sys.path entry) runs nothing.
 
 Files that predate the guard and are not invoked are listed in
 tools/scripts/unregistered_tests_baseline.json. The baseline only shrinks: a new
@@ -23,6 +25,8 @@ registered or deleted (remove it). `--write-baseline` rewrites it.
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import functools
 import json
 import re
 import subprocess
@@ -34,6 +38,12 @@ BASELINE = "tools/scripts/unregistered_tests_baseline.json"
 SCRIPT_INPUTS = "test/ctest_script_inputs.json"
 SOURCE_SELFTESTS = "tools/ci/source_selftests.json"
 TEST_FILE = re.compile(r"^tools/.+/test_[^/]*\.py$")
+# A pytest or `unittest discover` invocation and its arguments, which may
+# continue onto following lines (a shell backslash, or an indented CMake
+# argument line).
+RUNNER = re.compile(r"(\bpytest|\bunittest\s+discover)\b"
+                    r"((?:\\\n|[^\n;&|)]|\n[ \t]+(?=[-\"'$]))*)")
+ARGUMENT = re.compile(r"""[^\s"'\\]+""")
 # The instrument is blind if it credits fewer files than this as invoked; the
 # real count is several hundred.
 MIN_COVERED = 300
@@ -72,16 +82,41 @@ def registered_entries(repo: Path) -> set[str]:
     return {spec.get("entry") for spec in data.get("tests", {}).values() if spec.get("entry")}
 
 
+def _repo_path(argument: str) -> str:
+    """`${CMAKE_SOURCE_DIR}/tools/x/` or `{repo}/tools/x` as `tools/x`."""
+    start = argument.find("tools/")
+    if start > 0 and argument[start - 1] != "/":
+        return ""
+    return argument[start:].rstrip("/") if start >= 0 else ""
+
+
+@functools.lru_cache(maxsize=4)
+def runner_directories(text: str) -> tuple[tuple[str, str], ...]:
+    """(directory, file pattern) for each directory a test runner collects."""
+    found = []
+    for runner, arguments in RUNNER.findall(text):
+        tokens = ARGUMENT.findall(arguments)
+        if runner == "pytest":
+            found += [(path, "test_*.py") for path in map(_repo_path, tokens)
+                      if path and not path.endswith(".py")]
+            continue
+        directory, pattern = "", "test*.py"
+        for flag, value in zip(tokens, tokens[1:]):
+            if flag in ("-s", "--start-directory"):
+                directory = _repo_path(value)
+            elif flag in ("-p", "--pattern"):
+                pattern = value
+        if directory:
+            found.append((directory, pattern))
+    return tuple(found)
+
+
 def invoked(path: str, entries: set[str], text: str) -> bool:
     if path in entries or path in text:
         return True
-    parts = path.split("/")
-    # A directory handed whole to a runner (pytest <dir>, discover -s <dir>).
-    for depth in range(len(parts) - 1, 1, -1):
-        directory = "/".join(parts[:depth])
-        if re.search(re.escape(directory) + r"/?(?=[\"'\s)]|$)", text, re.MULTILINE):
-            return True
-    return False
+    name = path.rsplit("/", 1)[-1]
+    return any(path.startswith(directory + "/") and fnmatch.fnmatch(name, pattern)
+               for directory, pattern in runner_directories(text))
 
 
 def uncovered(repo: Path) -> tuple[list[str], int]:

@@ -1,0 +1,39 @@
+{
+  "schema": "pulp.android.surface-runtime.b3.heapprofd-receipt.v2",
+  "status": "NON_REPRODUCED_ON_CURRENT_MAIN",
+  "issue": "https://github.com/Generous-Corp/pulp/issues/9550",
+  "source_commit": "b09ce24505ef2325554688d6740118e6771b2302",
+  "source_commit_url": "https://github.com/Generous-Corp/pulp/commit/b09ce24505ef2325554688d6740118e6771b2302",
+  "apk_sha256": "0d8de8c623a38ca28c66cf0081557c5506b6e0e1e9fbe53c154bbd58b5ba5f57",
+  "apk_bytes": 56529666,
+  "trace_sha256": "5353187004d5c1ae5704a89772879e39e54f32869439eb8d48e2e7ab9986a8e4",
+  "avd": "Pulp_Profile_API35",
+  "image": "system-images;android-35;google_apis;arm64-v8a",
+  "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys",
+  "properties": {
+    "ro.build.type": "userdebug",
+    "ro.debuggable": "1",
+    "heapprofd": "available",
+    "traced": "running",
+    "traced_probes": "running"
+  },
+  "profiler": {
+    "data_source": "android.heapprofd",
+    "sampling_interval_bytes": 4096,
+    "duration_ms": 30000,
+    "process_cmdline": "com.pulp.app"
+  },
+  "cycles": 5,
+  "native_heap_pss_kb": [
+    30498,
+    30530,
+    30530,
+    30530,
+    30514
+  ],
+  "unreachable_bytes": 40,
+  "allocation_analysis": "Trace processor found no positive net callsite allocation above 1 MiB. The five-cycle run has no monotonic growth and does not reproduce the prior 4,718,592-byte slope.",
+  "conclusion": "The API37 Google Play result is non-reproducible on current main with the shared Skia/Dawn pins and a profile-capable API35 Google APIs userdebug AVD. No Pulp/Skia/Dawn retention fix is justified. Close issue 9550 as non-reproduced; reopen only with a new failing receipt.",
+  "build": "OpenJDK 17; Gradle :app:assembleDebug; PULP_ENABLE_GPU=ON; arm64-v8a; Skia chrome/m153 and Dawn f91da75afe31d4d6f47a6da307e1fbabd1b1691a",
+  "trace_bytes": 229866
+}

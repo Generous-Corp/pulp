@@ -52,7 +52,7 @@
 // is not audio-rate-critical, so block granularity is the right, honest tradeoff —
 // unlike a filter cutoff sweep, which this catalog keeps per-sample.
 
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/delay_line.hpp>

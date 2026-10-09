@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
+import os
 import re
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -22,7 +26,8 @@ BUILD = "/b"
 
 
 def ctest(name: str, *command: str, labels: list[str] | None = None,
-          fixtures: list[str] | None = None, lock: list[str] | None = None) -> dict:
+          fixtures: list[str] | None = None, fixture_setup: list[str] | None = None,
+          lock: list[str] | None = None) -> dict:
     properties = [{"name": "WORKING_DIRECTORY", "value": "/repo"}]
     if lock:
         properties.append({"name": "RESOURCE_LOCK", "value": lock})
@@ -30,6 +35,8 @@ def ctest(name: str, *command: str, labels: list[str] | None = None,
         properties.append({"name": "LABELS", "value": labels})
     if fixtures:
         properties.append({"name": "FIXTURES_REQUIRED", "value": fixtures})
+    if fixture_setup:
+        properties.append({"name": "FIXTURES_SETUP", "value": fixture_setup})
     return {"name": name, "command": list(command or ["python3", "x.py"]), "properties": properties}
 
 
@@ -64,11 +71,12 @@ class FamilyFixture(unittest.TestCase):
 
     def script_test(self, name: str, entry: str, inputs: list[str] | None = None,
                     labels: list[str] | None = None, command: list[str] | None = None,
-                    fixtures: list[str] | None = None, lock: list[str] | None = None) -> None:
+                    fixtures: list[str] | None = None, fixture_setup: list[str] | None = None,
+                    lock: list[str] | None = None) -> None:
         self.declared[name] = {"entry": entry, "inputs": sorted(set((inputs or []) + [entry])),
                                "kind": "python"}
         self.tests.append(ctest(name, *(command or ["python3", entry]), labels=labels,
-                                fixtures=fixtures, lock=lock))
+                                fixtures=fixtures, fixture_setup=fixture_setup, lock=lock))
 
     def generate(self, *targets: tuple[str, str]) -> dict[str, dict]:
         self.write("test/ctest_script_inputs.json",
@@ -157,6 +165,45 @@ class GitBatchTransportTest(unittest.TestCase):
             output = families._git(root, "cat-file", "--batch", stdin=requests.encode("ascii"))
             self.assertEqual(output.count(f"{blob} blob {len(payload)}\n".encode("ascii")), 512)
             self.assertEqual(output.count(payload), 512)
+
+    def test_git_batch_request_uses_deadlock_safe_stdin(self) -> None:
+        """A cat-file-like producer may fill stdout before reading its request."""
+        fake_git = """#!/usr/bin/env python3
+import sys
+sys.stdout.write('x' * 4_000_000)
+sys.stdout.flush()
+request = sys.stdin.buffer.read()
+sys.stdout.write(str(len(request)))
+sys.stdout.flush()
+"""
+        probe = """import pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import changed_surface_script_families as families
+import subprocess
+original_run = families.subprocess.run
+def checked_run(*args, **kwargs):
+    if kwargs.get("stdin") is not None:
+        assert kwargs.get("stdout") is not subprocess.PIPE
+        assert "capture_output" not in kwargs
+    return original_run(*args, **kwargs)
+families.subprocess.run = checked_run
+request = (b"deadbeef\\n" * 20000)
+result = families._git(pathlib.Path('.'), 'cat-file', '--batch', stdin=request)
+print(result[-len(str(len(request))):].decode())
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake = root / "git"
+            fake.write_text(fake_git, encoding="utf-8")
+            fake.chmod(0o755)
+            env = dict(os.environ)
+            env["PATH"] = f"{root}{os.pathsep}{env.get('PATH', '')}"
+            completed = subprocess.run(
+                [sys.executable, "-c", probe, str(Path(__file__).resolve().parent)],
+                cwd=root, env=env, text=True, capture_output=True, timeout=10, encoding="utf-8"
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), str(len(b"deadbeef\n" * 20000)))
 
 
 class GeneratedFamiliesTest(FamilyFixture):
@@ -326,6 +373,31 @@ class GeneratedFamiliesTest(FamilyFixture):
         generated = self.generate()
         self.assertEqual(self.family_for(generated, "tools/scripts/test_fixture.py"), [])
 
+    def test_reader_with_a_registered_fixture_setup_is_mappable(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_setup.py", "")
+        self.write("tools/scripts/test_fixture.py", "")
+        self.script_test("fixture-setup", "tools/scripts/test_setup.py", fixture_setup=["setup"])
+        self.script_test("fixture-selftest", "tools/scripts/test_fixture.py", fixtures=["setup"])
+        generated = self.generate()
+        self.assertNotEqual(self.family_for(generated, "tools/scripts/test_fixture.py"), [])
+
+    def test_fixture_reader_builds_the_registered_setup_target(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_setup.py", "")
+        self.write("tools/scripts/test_fixture.py", "")
+        self.script_test("fixture-setup", "tools/scripts/test_setup.py",
+                         command=["/b/bin/setup"], fixture_setup=["setup"])
+        self.script_test("fixture-selftest", "tools/scripts/test_fixture.py",
+                         command=["/b/bin/reader"], fixtures=["setup"])
+        generated = self.generate(("fixture-setup", "/b/bin/setup"),
+                                  ("fixture-reader", "/b/bin/reader"))
+        owners = [name for name in self.family_for(generated, "tools/scripts/test_fixture.py")
+                  if name != "script-surface-whole-tree"]
+        self.assertEqual(len(owners), 1)
+        self.assertEqual(generated[owners[0]]["build_targets"],
+                         ["fixture-reader", "fixture-setup", "pulp-cli"])
+
     def test_reader_outside_the_authoritative_corpus_is_not_selected(self) -> None:
         self.add_whole_tree()
         self.write("tools/scripts/shared_util.py", "")
@@ -356,6 +428,40 @@ class GeneratedFamiliesTest(FamilyFixture):
     def test_the_families_file_is_what_the_gate_widening_treats_as_selection_only(self) -> None:
         self.assertEqual(str(families.FAMILIES_FILE), wide_non_native.SELECTOR_FAMILIES_FILE)
 
+    def test_optional_environment_tests_are_excluded_from_the_generated_family(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/optional_test.py", "")
+        self.script_test("optional-selftest", "tools/scripts/optional_test.py",
+                         labels=["browser-capture"])
+        # Real CTest JSON commonly exports this property as the string
+        # ``TRUE``.  Keep the native-bool form covered by the fixture helper's
+        # older contract in a separate test below.
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": "TRUE"})
+        self.write("tools/scripts/required_test.py", "")
+        self.script_test("required-selftest", "tools/scripts/required_test.py",
+                         labels=["browser-capture"])
+        generated = self.generate()
+        self.assertEqual(generated["script-surface-environment-bound"]["tests"],
+                         ["required-selftest"])
+
+    def test_optional_environment_normalization_keeps_false_required(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/optional_true.py", "")
+        self.script_test("optional-true", "tools/scripts/optional_true.py",
+                         labels=["browser-capture"])
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": " true "})
+        self.write("tools/scripts/optional_false.py", "")
+        self.script_test("optional-false", "tools/scripts/optional_false.py",
+                         labels=["browser-capture"])
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": "FALSE"})
+        self.write("tools/scripts/native_bool.py", "")
+        self.script_test("native-bool", "tools/scripts/native_bool.py",
+                         labels=["browser-capture"])
+        self.tests[-1]["properties"].append({"name": "PULP_OPTIONAL", "value": True})
+        generated = self.generate()
+        self.assertEqual(generated["script-surface-environment-bound"]["tests"],
+                         ["optional-false"])
+
     def test_no_whole_tree_test_refuses_to_bound_anything(self) -> None:
         self.write("tools/scripts/test_alone.py", "")
         self.script_test("alone-selftest", "tools/scripts/test_alone.py")
@@ -377,7 +483,8 @@ class GeneratedFamiliesTest(FamilyFixture):
 class DriftCheckTest(FamilyFixture):
     """`--check` blocks only a change a stale family could bound wrongly."""
 
-    def check(self, touched: list[str] | None, merge_group: bool = False) -> int:
+    def check(self, touched: list[str] | None, merge_group: bool = False,
+              build: str = "/b", mode: str = "--check") -> int:
         self.add_whole_tree()
         self.write("tools/scripts/test_a.py", "")
         self.script_test("a-selftest", "tools/scripts/test_a.py")
@@ -397,7 +504,7 @@ class DriftCheckTest(FamilyFixture):
         families.script_test_inputs.changed_files = lambda _root, _base: set(touched or [])
         families.script_test_inputs.advisory_here = lambda: merge_group
         try:
-            return families.main(["--repo-root", str(self.root), "--build-dir", "/b", "--check"])
+            return families.main(["--repo-root", str(self.root), "--build-dir", build, mode])
         finally:
             inventory.codemodel_reply_available = saved_reply
             (inventory.load_ctest_json, inventory.load_codemodel_targets,
@@ -411,6 +518,57 @@ class DriftCheckTest(FamilyFixture):
                      "tools/scripts/changed_surface_script_families.py"]:
             with self.subTest(path=path):
                 self.assertEqual(self.check([path]), 1)
+
+    def build_with_cache(self, **cache: str) -> str:
+        build = self.root / "build-profile"
+        build.mkdir(exist_ok=True)
+        (build / "CMakeCache.txt").write_text(
+            "".join(f"{key}:STRING={value}\n" for key, value in cache.items()), encoding="utf-8")
+        return str(build)
+
+    def test_a_gate_profile_build_still_blocks_drift(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="OFF")
+        self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build), 1)
+
+    def test_a_build_outside_the_gate_profile_skips_the_check(self) -> None:
+        """The proof option registers GPU probes the gate never does, so a
+        file written or judged on such a build disagrees with the gate's."""
+        for cache in ({"CMAKE_BUILD_TYPE": "Release", "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF": "ON"},
+                      {"CMAKE_BUILD_TYPE": "Debug"}):
+            with self.subTest(cache=cache):
+                build = self.build_with_cache(**cache)
+                self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build),
+                                 families.SKIP_EXIT)
+
+    def test_a_build_outside_the_gate_profile_refuses_to_write(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.check(["tools/scripts/test_a.py"], build=build, mode="--write")
+        self.assertEqual(rc, 2)
+        self.assertIn("refusing to write", err.getvalue())
+        self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", err.getvalue())
+        self.assertEqual((self.root / families.FAMILIES_FILE).read_text(encoding="utf-8"),
+                         "# stale\n")
+
+    def test_a_gate_profile_build_writes(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="OFF")
+        self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build, mode="--write"), 0)
+        written = (self.root / families.FAMILIES_FILE).read_text(encoding="utf-8")
+        self.assertIn('"a-selftest"', written)
+
+    def test_the_skip_names_why(self) -> None:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build),
+                             families.SKIP_EXIT)
+        self.assertIn("SKIP", out.getvalue())
+        self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", out.getvalue())
 
     def test_missing_codemodel_is_a_reported_skip(self) -> None:
         saved = inventory.codemodel_reply_available
@@ -511,7 +669,7 @@ class StaticCheckTest(FamilyFixture):
         self.write("tools/scripts/new_check.py", "")
         self.script_test("runner-selftest", "tools/scripts/runner.py", ["tools/scripts/new_check.py"])
         self.regenerate()
-        generated_paths = (self.root / families.FAMILIES_FILE).read_text()
+        generated_paths = (self.root / families.FAMILIES_FILE).read_text(encoding="utf-8")
         self.assertNotIn("tools/scripts/new_check.py", generated_paths)  # reached through runner.py
         self.commit("a script a shell script runs")
         self.assertEqual(self.static()[0], [])

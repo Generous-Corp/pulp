@@ -155,6 +155,9 @@ enum Command {
     /// workflows delegate to `pulp-cpp` when available.
     Design(PkgTailArgs),
 
+    /// Build or verify an imported UI source snapshot on the C++ delegate.
+    Ui(PkgTailArgs),
+
     /// Manage third-party tools (`list`, `install`, `uninstall`, `path`,
     /// `run`, `doctor`). Archive installation delegates to `pulp-cpp`.
     Tool(PkgTailArgs),
@@ -932,6 +935,14 @@ fn real_main() -> Result<(), ExitCode> {
             let cwd = read_cwd()?;
             let spawner = pulp_rs::proc::SystemSpawner;
             map_exit(cmd::design::run(&cwd, &parsed, &spawner, &mut out))
+        }
+        Command::Ui(args) => {
+            let mut argv = vec!["ui".to_owned()];
+            argv.extend(args.tail);
+            map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                &argv,
+                "pulp ui is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
+            ))
         }
         Command::Tool(args) => {
             let sub = cmd::tool::parse_sub(&args.tail).map_err(|e| match e {
