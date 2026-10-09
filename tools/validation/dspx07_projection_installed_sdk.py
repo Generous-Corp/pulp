@@ -76,13 +76,14 @@ def run(sdk: Path, output: Path) -> dict[str, object]:
              str(source), "-o", str(binary)],
             text=True,
             capture_output=True,
+            encoding="utf-8",
             check=False,
         )
         require(
             compile.returncode == 0,
             f"installed SDK consumer compile failed:\n{compile.stdout}{compile.stderr}",
         )
-        execute = subprocess.run([str(binary)], text=True, capture_output=True, check=False)
+        execute = subprocess.run([str(binary)], text=True, capture_output=True, encoding="utf-8", check=False)
         require(
             execute.returncode == 0,
             f"installed SDK consumer returned {execute.returncode}: {execute.stdout}{execute.stderr}",

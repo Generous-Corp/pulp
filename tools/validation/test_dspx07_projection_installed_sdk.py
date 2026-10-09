@@ -24,6 +24,7 @@ class InstalledProjectionValidatorTests(unittest.TestCase):
                 [sys.executable, str(SCRIPT), "--sdk", str(sdk), "--output", str(Path(temp) / "r.json")],
                 text=True,
                 capture_output=True,
+                encoding="utf-8",
                 check=False,
             )
             self.assertNotEqual(result.returncode, 0)
