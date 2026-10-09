@@ -11847,6 +11847,23 @@ fallback that answers None, and None must never mean "dead".
 
 The design-import refactor adds two cheap, source-only checks to `tools/scripts/gates.sh`: `vellum_boundary_lint.py` verifies that extractable importer packages use only declared public Pulp view interfaces, and `tools/ui-build/lint/clean_output_lint.py` checks a deterministic clean source fixture. Keep both checks in the gate whenever these package or importer paths change; their planted negative controls are registered in the quality CTest manifest.
 
+## A run that enters a concurrency group and then skips its job can still cancel a pending run
+
+A workflow-level `concurrency` group holds ONE pending run, and a new arrival
+cancels it, before any job `if` is evaluated. So a trigger whose job will skip
+(a `pull_request: dequeued` for an unrelated PR, a green `workflow_run`) still
+evicts a pending run that mattered. `version-at-land.yml` lost 10 pending push
+drains in 3.9 days this way. Give every run whose job skips a per-run group
+(`format('...-idle-{0}', github.run_id)`) and keep the shared group's condition
+in step with the job `if`; `WorkflowConcurrencyTest` in
+`tools/scripts/test_version_at_land.py` evaluates both expressions for every
+event shape so they cannot drift apart.
+
+Related GraphQL trap: `timelineItems(itemTypes:[...]){totalCount}` ignores
+`itemTypes` and counts every timeline item. Read the filtered `nodes` (check
+`__typename`) or `filteredCount`; `graphql-filtered-count-guard` fails the build
+on the bad shape.
+
 ## Python text I/O names its encoding: the text-encoding ratchet
 
 Without `encoding=`, Python reads and writes text in the locale code page:
