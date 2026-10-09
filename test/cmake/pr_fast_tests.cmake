@@ -58,7 +58,11 @@ add_test(NAME script-test-inputs-drift
 # Its compiled entries hold the gate's configure; on any other (examples ON,
 # a sanitizer, Debug) the check compares the script entries and then reports
 # the compiled half as skipped, with the reason, rather than passing.
-set_tests_properties(script-test-inputs-drift PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+# PULP_DIFF_SCOPED: it blocks only drift this change reaches, so its re-run on
+# a checkout of the base (an empty diff) passes by construction and says
+# nothing about the base (tools/ci/pr_head_affected_tests.py).
+set_tests_properties(script-test-inputs-drift PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
+    PULP_DIFF_SCOPED TRUE)
 add_test(NAME script-test-inputs-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_test_inputs.py")
