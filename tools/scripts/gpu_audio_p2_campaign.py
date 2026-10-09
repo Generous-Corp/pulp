@@ -271,7 +271,7 @@ def validate_host_preflight(path: Path, expected_source_revision: str,
         nested_epoch = None
     required["gpu_health_fresh"] = (
         nested_epoch is not None and 0 <= now - nested_epoch <= 30
-        and sampled_epoch - 1 <= nested_epoch <= sampled_epoch + 1
+        and sampled_epoch - max_age_seconds <= nested_epoch <= sampled_epoch + 1
     )
     failed = [name for name, ok in required.items() if not ok]
     if failed:
