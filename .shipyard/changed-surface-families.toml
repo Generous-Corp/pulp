@@ -5141,6 +5141,7 @@ tests = [
   "prepush-cannot-measure",
   "prepush-format-gate-wiring",
   "prepush-gate-output",
+  "prepush-queue-rebase-hint",
   "prepush-refresh-push",
   "pulp-ui-clean-output-lint-negative-contract",
   "queue-batch-attribute-selftest",

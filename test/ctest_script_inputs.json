@@ -6733,6 +6733,8 @@
   "prepush-queue-rebase-hint": {
    "entry": "tools/scripts/test_prepush_queue_rebase_hint.py",
    "inputs": [
+    ".githooks/lib",
+    ".githooks/pre-push",
     "tools/scripts/prepush_queue_rebase_hint.py",
     "tools/scripts/test_prepush_queue_rebase_hint.py"
    ],

@@ -22,9 +22,20 @@ pushed-ref records on stdin and, for each branch update other than `main`:
    reads null for a PR the queue already holds, so GraphQL is the source;
 3. prints a short hint when it is armed or queued.
 
-ALWAYS ADVISORY: exits 0. Any failure (no ``gh``, no auth, network, timeout,
-unexpected JSON, a Git error) is silent. ``PULP_ALLOW_QUEUE_REBASE=1`` silences
-the hint.
+The hint is ALWAYS ADVISORY: exits 0. Any failure (no ``gh``, no auth,
+network, timeout, unexpected JSON, a Git error) is silent.
+``PULP_ALLOW_QUEUE_REBASE=1`` silences the hint.
+
+``--refuse-queued`` is the blocking companion the hook runs first, before any
+gate and before the diff-coverage build. For every branch update whose open PR
+is IN the merge queue (``mergeQueueEntry`` set) it prints why and exits 1,
+whatever the push contains. A queued PR never needs a rebase or a merge of main:
+the queue builds it on top of current main. Moving its head while queued is the
+loop that rebuilt for minutes, had GitHub re-queue the new head, got rejected,
+and dequeued again. ``PULP_SKIP_PREPUSH`` does not bypass it; the explicit
+bypass is ``PULP_ALLOW_QUEUED_PUSH=1``. A lookup that cannot answer (no ``gh``,
+auth, network, timeout, bad JSON) fails OPEN with a one-line notice. Armed but
+not yet queued is left to the advisory hint.
 """
 
 from __future__ import annotations
@@ -130,11 +141,18 @@ def gh_binary() -> str | None:
     return shutil.which("ghapp") or shutil.which("gh")
 
 
-def armed_pr(owner: str, name: str, branch: str) -> dict | None:
-    """Return {"number", "state"} for an armed/queued open PR, else None (fail open)."""
+class LookupError_(Exception):
+    """The PR lookup could not answer; the caller fails open."""
+
+
+def lookup_pr(owner: str, name: str, branch: str) -> dict | None:
+    """Return the branch's open PR node, None when there is none.
+
+    Raises LookupError_ when the lookup itself cannot answer.
+    """
     binary = gh_binary()
     if not binary:
-        return None
+        raise LookupError_("neither ghapp nor gh is on PATH")
     try:
         timeout = float(os.environ.get("PULP_QUEUE_REBASE_TIMEOUT", DEFAULT_TIMEOUT_S))
     except ValueError:
@@ -146,20 +164,83 @@ def armed_pr(owner: str, name: str, branch: str) -> dict | None:
     ]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if res.returncode != 0:
-            return None
-        data = json.loads(res.stdout)
-        nodes = data["data"]["repository"]["pullRequests"]["nodes"]
+    except subprocess.TimeoutExpired:
+        raise LookupError_(f"GitHub lookup timed out after {timeout:g}s") from None
+    except OSError as exc:
+        raise LookupError_(f"could not run {binary}: {exc}") from None
+    if res.returncode != 0:
+        detail = (res.stderr.strip().splitlines() or ["no output"])[-1]
+        raise LookupError_(f"GitHub lookup failed: {detail[:160]}")
+    try:
+        nodes = json.loads(res.stdout)["data"]["repository"]["pullRequests"]["nodes"]
     except Exception:
+        raise LookupError_("GitHub lookup returned unexpected JSON") from None
+    return (nodes[0] or {}) if nodes else None
+
+
+def armed_pr(owner: str, name: str, branch: str) -> dict | None:
+    """Return {"number", "state"} for an armed/queued open PR, else None (fail open)."""
+    try:
+        pr = lookup_pr(owner, name, branch)
+    except LookupError_:
         return None
-    if not nodes:
+    if not pr:
         return None
-    pr = nodes[0] or {}
     if pr.get("mergeQueueEntry"):
         return {"number": pr.get("number"), "state": "in the merge queue"}
     if pr.get("autoMergeRequest"):
         return {"number": pr.get("number"), "state": "auto-merge armed"}
     return None
+
+
+def refuse_queued_message(branch: str, pr: dict) -> str:
+    return "\n".join(
+        [
+            "",
+            f"x pre-push: refusing to push {branch}: PR #{pr.get('number')} is in the merge queue.",
+            "   This PR is in the merge queue; a queued PR does not need a rebase, the queue merges it",
+            "   on top of current main. To change it anyway, dequeue deliberately first.",
+            "   PULP_SKIP_PREPUSH does not bypass this check. Bypass on purpose:",
+            "     PULP_ALLOW_QUEUED_PUSH=1 git push ...",
+            "",
+        ]
+    )
+
+
+def update_records(text: str):
+    """Yield (branch, local_sha, remote_sha) for each branch update other than main."""
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) != 4:
+            continue
+        _local_ref, local_sha, remote_ref, remote_sha = fields
+        if ZERO_SHA in (local_sha, remote_sha) or not remote_ref.startswith("refs/heads/"):
+            continue  # a deletion, or a new branch that cannot have a queued PR yet
+        branch = remote_ref[len("refs/heads/"):]
+        if branch == "main" or local_sha == remote_sha:
+            continue
+        yield branch, local_sha, remote_sha
+
+
+def refuse_queued(records: str, owner: str, name: str) -> int:
+    """Exit status for --refuse-queued: 1 when any pushed branch's PR is queued."""
+    if os.environ.get("PULP_ALLOW_QUEUED_PUSH") == "1":
+        return 0
+    rc = 0
+    for branch, _local_sha, _remote_sha in update_records(records):
+        try:
+            pr = lookup_pr(owner, name, branch)
+        except LookupError_ as exc:
+            print(
+                f"[pre-push] queued-PR check skipped for {branch}: {exc}. "
+                "Continuing; the push is not blocked.",
+                file=sys.stderr,
+            )
+            continue
+        if pr and pr.get("mergeQueueEntry"):
+            print(refuse_queued_message(branch, pr), file=sys.stderr)
+            rc = 1
+    return rc
 
 
 def hint(branch: str, pr: dict) -> None:
@@ -179,27 +260,27 @@ def hint(branch: str, pr: dict) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if os.environ.get("PULP_ALLOW_QUEUE_REBASE") == "1":
-        return 0
     import argparse
 
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     ap.add_argument("--remote-url", default="")
     ap.add_argument("--root", default=None)
+    ap.add_argument(
+        "--refuse-queued",
+        action="store_true",
+        help="exit 1 when a pushed branch's PR is in the merge queue (fails open)",
+    )
     args = ap.parse_args(argv)
-    root = Path(args.root) if args.root else Path.cwd()
     owner, name = parse_repo(args.remote_url)
+    records = sys.stdin.read()
 
-    for line in sys.stdin.read().splitlines():
-        fields = line.split()
-        if len(fields) != 4:
-            continue
-        _local_ref, local_sha, remote_ref, remote_sha = fields
-        if ZERO_SHA in (local_sha, remote_sha) or not remote_ref.startswith("refs/heads/"):
-            continue
-        branch = remote_ref[len("refs/heads/"):]
-        if branch == "main" or local_sha == remote_sha:
-            continue
+    if args.refuse_queued:
+        return refuse_queued(records, owner, name)
+
+    if os.environ.get("PULP_ALLOW_QUEUE_REBASE") == "1":
+        return 0
+    root = Path(args.root) if args.root else Path.cwd()
+    for branch, local_sha, remote_sha in update_records(records):
         if not content_neutral_refresh(root, remote_sha, local_sha):
             continue
         pr = armed_pr(owner, name, branch)
@@ -209,6 +290,14 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    if "--refuse-queued" in sys.argv[1:]:
+        try:
+            sys.exit(main(sys.argv[1:]))
+        except SystemExit:
+            raise
+        except Exception as exc:  # a bug here fails open, never blocks a push
+            print(f"[pre-push] queued-PR check skipped: internal error: {exc}", file=sys.stderr)
+            sys.exit(0)
     try:
         main(sys.argv[1:])
     except Exception:

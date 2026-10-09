@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixture-repo tests for the pre-push queue-rebase hint.
+"""Fixture-repo tests for the pre-push queue-rebase hint and queued-PR guard.
 
 Each case builds a real Git repository whose `origin/main` advanced after the
 feature branch forked and whose `origin/feature` is the PR's current head, then
@@ -10,12 +10,18 @@ assert that a content-changing push never reaches the network at all.
 Positive controls: the rebase-only and merge-only cases must PRINT the hint,
 so a hint that silently stopped classifying fails here rather than passing as
 "quiet".
+
+The queued-PR guard cases run the real `.githooks/pre-push` in the fixture
+with `PULP_SKIP_PREPUSH=1`, so reaching the "skipping gates" line proves the
+guard let the push through, and a refusal proves the skip knob does not bypass
+the guard.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -25,6 +31,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/scripts/prepush_queue_rebase_hint.py"
+HOOK = ROOT / ".githooks/pre-push"
+HOOK_LIB = ROOT / ".githooks/lib"
 
 FAKE_GH = r"""#!/usr/bin/env python3
 import json, os, sys, time
@@ -87,7 +95,9 @@ class Repo:
 
     def env(self, **extra: str) -> dict[str, str]:
         env = dict(os.environ)
-        for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "PULP_ALLOW_QUEUE_REBASE"):
+        for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "PULP_ALLOW_QUEUE_REBASE",
+                  "PULP_ALLOW_QUEUED_PUSH", "PULP_SKIP_PREPUSH", "PULP_DISABLE_PREPUSH_GATES",
+                  "PULP_QUEUE_REBASE_TIMEOUT", "PYTHON"):
             env.pop(k, None)
         env.update(
             GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t",
@@ -118,6 +128,21 @@ class Repo:
             [sys.executable, str(SCRIPT), "--root", str(self.dir),
              "--remote-url", "git@github.com:Generous-Corp/pulp.git"],
             input=record, capture_output=True, text=True, env=self.env(**env), timeout=20,
+        )
+
+    def run_hook(self, **env: str) -> subprocess.CompletedProcess:
+        # Mirror only what the hook needs before PULP_SKIP_PREPUSH; the guard
+        # and the hint share one script.
+        shutil.copytree(HOOK_LIB, self.dir / ".githooks/lib", dirs_exist_ok=True)
+        shutil.copy2(HOOK, self.dir / ".githooks/pre-push")
+        (self.dir / "tools" / "scripts").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SCRIPT, self.dir / "tools/scripts/prepush_queue_rebase_hint.py")
+        record = f"refs/heads/feature {self.rev('HEAD')} refs/heads/feature {self.old_head}\n"
+        return subprocess.run(
+            ["bash", str(self.dir / ".githooks/pre-push"), "origin",
+             "git@github.com:Generous-Corp/pulp.git"],
+            cwd=self.dir, input=record, capture_output=True, text=True, encoding="utf-8",
+            env=self.env(PYTHON=sys.executable, **env), timeout=60,
         )
 
     def lookups(self) -> int:
@@ -235,6 +260,85 @@ class QueueRebaseHintTests(unittest.TestCase):
             )
             self.assertQuiet(res)
         self.assertEqual(self.repo.lookups(), 0)
+
+
+class QueuedPrGuardHookTests(unittest.TestCase):
+    """The hook refuses a push to a queued PR before any gate runs."""
+
+    REFUSAL = "a queued PR does not need a rebase, the queue merges it"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Repo(Path(self._tmp.name))
+        # A content change on top of a rebase: the guard must not care what
+        # the push carries, only that the PR is queued.
+        self.repo.git("rebase", "-q", "origin/main")
+        self.repo.commit("feature.txt", "one\ntwo\n", "more feature work")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def assertProceeded(self, res: subprocess.CompletedProcess) -> None:
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("PULP_SKIP_PREPUSH=1", res.stderr)
+        self.assertIn("skipping gates", res.stderr)
+        self.assertNotIn(self.REFUSAL, res.stderr)
+
+    def test_queued_pr_refuses_the_push(self) -> None:
+        self.repo.set_pr(pr_fixture(queued=True))
+        res = self.repo.run_hook(PULP_SKIP_PREPUSH="1")
+        self.assertEqual(res.returncode, 1, res.stderr)
+        self.assertIn("PR #4242 is in the merge queue", res.stderr)
+        self.assertIn(self.REFUSAL, res.stderr)
+        self.assertIn("dequeue deliberately first", res.stderr)
+        self.assertIn("PULP_ALLOW_QUEUED_PUSH=1", res.stderr)
+        self.assertNotIn("skipping gates", res.stderr)
+
+    def test_not_queued_proceeds(self) -> None:
+        for fixture in (pr_fixture(), pr_fixture(armed=True), pr_fixture(present=False)):
+            with self.subTest(fixture=fixture):
+                self.repo.set_pr(fixture)
+                self.assertProceeded(self.repo.run_hook(PULP_SKIP_PREPUSH="1"))
+
+    def test_api_error_proceeds_with_a_notice(self) -> None:
+        self.repo.set_pr(pr_fixture(queued=True))
+        for mode in ("fail", "garbage"):
+            with self.subTest(mode=mode):
+                res = self.repo.run_hook(PULP_SKIP_PREPUSH="1", FAKE_GH_MODE=mode)
+                self.assertProceeded(res)
+                self.assertIn("queued-PR check skipped for feature", res.stderr)
+                self.assertIn("not blocked", res.stderr)
+
+    def test_hanging_lookup_proceeds_with_a_notice(self) -> None:
+        self.repo.set_pr(pr_fixture(queued=True))
+        res = self.repo.run_hook(
+            PULP_SKIP_PREPUSH="1", FAKE_GH_MODE="hang", PULP_QUEUE_REBASE_TIMEOUT="0.5")
+        self.assertProceeded(res)
+        self.assertIn("timed out", res.stderr)
+
+    def test_missing_gh_proceeds_with_a_notice(self) -> None:
+        self.repo.set_pr(pr_fixture(queued=True))
+        res = self.repo.run_hook(
+            PULP_SKIP_PREPUSH="1", PULP_QUEUE_REBASE_GH=str(self.repo.tmp / "missing-gh"))
+        self.assertProceeded(res)
+        self.assertIn("queued-PR check skipped", res.stderr)
+
+    def test_explicit_bypass_proceeds_without_a_lookup(self) -> None:
+        self.repo.set_pr(pr_fixture(queued=True))
+        res = self.repo.run_hook(
+            PULP_SKIP_PREPUSH="1", PULP_ALLOW_QUEUED_PUSH="1", PULP_ALLOW_QUEUE_REBASE="1")
+        self.assertProceeded(res)
+        self.assertEqual(self.repo.lookups(), 0)
+
+    def test_guard_runs_before_the_diff_cover_build(self) -> None:
+        text = HOOK.read_text(encoding="utf-8")
+        code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+        guard = next(i for i, ln in enumerate(code) if "--refuse-queued" in ln)
+        skip = next(i for i, ln in enumerate(code) if 'PULP_SKIP_PREPUSH:-0}" = "1" ]; then' in ln
+                    and "DISABLE" not in ln)
+        cover = next(i for i, ln in enumerate(code) if 'bash "$DIFF_COVER_SH"' in ln)
+        self.assertLess(guard, skip)
+        self.assertLess(guard, cover)
 
 
 if __name__ == "__main__":

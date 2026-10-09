@@ -15,6 +15,7 @@
 #   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/compat-aggregate/node-ABI/docs-noise/source-contract/hotspot-size/deps/vellum-watch)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
 #   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies)
+#   PULP_ALLOW_QUEUED_PUSH=1       # push to a PR that is in the merge queue
 #
 # Migration note (pulp #1144): the old `PULP_ENFORCE_PREPUSH=1` and
 # `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env vars used to *promote* advisory
@@ -74,6 +75,28 @@ if [ -z "${PULP_PYTHON:-}" ] || [ ! -x "${PULP_PYTHON}" ]; then
     echo "[pre-push] required Python interpreter is unavailable; checked PYTHON, PATH, and standard macOS locations." >&2
     echo "[pre-push] set PYTHON=/absolute/path/to/python3 and retry." >&2
     exit 2
+fi
+
+# ── Queued-PR guard (blocking, before every gate and the diff-cover build) ──
+# A PR in the merge queue never needs a rebase or a merge of main: the queue
+# builds it on top of current main. Pushing to it anyway ran the multi-minute
+# diff-coverage build below while GitHub re-queued the new head, the push was
+# rejected, and the agent dequeued to retry, in a loop. This asks GitHub
+# (GraphQL mergeQueueEntry, bounded by PULP_QUEUE_REBASE_TIMEOUT) and refuses
+# the push when the branch's PR is queued. A lookup that cannot answer fails
+# open with a notice. PULP_SKIP_PREPUSH does not bypass it, because a
+# post-rebase force-push is exactly the case; PULP_ALLOW_QUEUED_PUSH=1 does.
+QUEUED_PR_GUARD="$ROOT/tools/scripts/prepush_queue_rebase_hint.py"
+if [ -f "$QUEUED_PR_GUARD" ]; then
+    printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
+        "$PULP_PYTHON" "$QUEUED_PR_GUARD" --refuse-queued --root "$ROOT" --remote-url "${2:-}"
+    _queued_rc=$?
+    if [ "$_queued_rc" = "1" ]; then
+        exit 1
+    elif [ "$_queued_rc" != "0" ]; then
+        echo "[pre-push] queued-PR check could not run (exit $_queued_rc); continuing." >&2
+    fi
+    unset _queued_rc
 fi
 
 # ── Main-refresh push telemetry + policy ───────────────────────────────────
