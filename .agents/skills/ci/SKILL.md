@@ -6177,6 +6177,30 @@ ghapp api graphql -f query='mutation{dequeuePullRequest(input:{id:"PR_kwDO..."})
 Treat that as an authority action on someone's queued work, not a routine step —
 `ghapp` guards it deliberately.
 
+**A queued PR never needs a rebase, and main moving is never a reason to
+dequeue.** The queue builds every entry on top of current main and the entries
+ahead of it, so `BEHIND` on a queued PR means nothing. Rebasing or merging main
+into it means dequeuing it, and then the push, the pre-push build, the re-queue
+and a fresh gate all repeat; in October 2026, 34 of 46 dequeues were exactly
+this, one PR ten times over.
+
+- **Dequeue only to change the PR's content.** A real fix to the PR itself (a
+  failing check that is its own fault, a review change) is the one reason.
+  Main advancing, a conflict GitHub has not reported, or wanting a fresh gate
+  are not.
+- **To put a fix in front of the queue, jump it; never dequeue the PRs ahead.**
+  Run `shipyard base-health` to read the base-poison signal and print the jump
+  commands for the named fix PR (`enqueuePullRequest` with `jump: true`, see
+  "Main is red" above). `shipyard base-health --act` applies them when
+  `base_health.auto_jump` allows it. Dequeuing other people's entries to make
+  room throws away their in-flight merge-group runs and gains nothing the jump
+  does not.
+- **`GHAPP_ALLOW_QUEUE_REMOVAL=1` needs the user's explicit OK.** The `ghapp`
+  queue-removal guard exists because nearly every dequeue it saw was one of the
+  avoidable cases above. Setting the override is a decision for the user, made
+  for a named PR; it is never something an agent turns on to get past the
+  guard.
+
 ### Shipyard validated green but could NOT merge — the sanctioned fallback
 
 Shipyard can validate every target and still fail its own merge call: a
