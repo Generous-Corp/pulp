@@ -1794,6 +1794,36 @@ class DenseHostGainProcessor final : public pulp::format::Processor {
     }
 };
 
+class FixedLatencyProcessor final : public pulp::format::Processor {
+  public:
+    explicit FixedLatencyProcessor(int latency) : latency_(latency) {}
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor descriptor;
+        descriptor.name = "FixedLatencyProcessor";
+        descriptor.manufacturer = "Pulp";
+        descriptor.bundle_id = "dev.pulp.test.fixed-latency-processor";
+        descriptor.version = "1.0.0";
+        descriptor.category = pulp::format::PluginCategory::Effect;
+        descriptor.input_buses = {{"Main In", 1, false}};
+        descriptor.output_buses = {{"Main Out", 1, false}};
+        return descriptor;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        for (std::size_t frame = 0; frame < out.num_samples(); ++frame)
+            out.channel_ptr(0)[frame] = in.channel_ptr(0)[frame];
+    }
+    int latency_samples() const override {
+        return latency_;
+    }
+
+  private:
+    int latency_;
+};
+
 struct ProcessorLifecycleCounts {
     int prepares = 0;
     int releases = 0;
@@ -1840,6 +1870,24 @@ class LifecycleHostProcessor final : public pulp::format::Processor {
     std::shared_ptr<ProcessorLifecycleCounts> counts_;
 };
 } // namespace
+
+TEST_CASE("SignalGraph propagates ProcessorNode latency into PDC",
+          "[host][signal-graph][processor-node][latency]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    auto instance =
+        pulp::format::ProcessorNodeInstance::create(std::make_unique<FixedLatencyProcessor>(1024));
+    REQUIRE(instance);
+    const auto processor = graph.add_processor_node(instance);
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(processor != 0);
+    REQUIRE(graph.connect(input, 0, processor, 0));
+    REQUIRE(graph.connect(processor, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 256));
+    REQUIRE(graph.node_latency_samples(processor) == 0);
+    REQUIRE(graph.node_latency_samples(output) == 1024);
+    REQUIRE(graph.latency_samples() == 1024);
+}
 
 TEST_CASE("SignalGraph authors and prepares a dense Processor node",
           "[host][signal-graph][processor-node][audio-rate]") {

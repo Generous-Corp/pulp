@@ -40,7 +40,13 @@ permissions:
 jobs:
   drift-fast:
     name: drift-fast
-    runs-on: ubuntu-latest
+    # Hosted by default. PULP_DRIFT_FAST_RUNS_ON_JSON can route this required
+    # check elsewhere when GitHub cannot assign hosted runners; it is JSON and
+    # parsed, because an unparsed array becomes one literal label that no
+    # runner carries and the job queues forever. A self-hosted target must
+    # also list this workflow in its runner group's selected workflows
+    # (tools/ci/verify_linux_runner_group.py), or the job is never assigned.
+    runs-on: ${{ fromJSON(vars.PULP_DRIFT_FAST_RUNS_ON_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 20
     env:
       PULP_BUILD_DIR: build-linux

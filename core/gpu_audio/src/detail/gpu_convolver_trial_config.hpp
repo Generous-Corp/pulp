@@ -2,7 +2,10 @@
 
 #include "dawn_shared_io_provider.hpp"
 #include "shared_io_execution_contract.hpp"
+#include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
+
+#include <pulp/runtime/crypto.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -33,6 +36,54 @@ constexpr bool valid_gpu_convolver_thermal_state(GpuConvolverThermalState state)
            state == GpuConvolverThermalState::Throttled;
 }
 
+inline bool valid_provider_identity_component(const std::string& value) noexcept {
+    // Identity values are serialized into JSON by the private receipt writer.
+    // Reject control characters and quoting rather than risking an ambiguous
+    // or forged provenance projection.
+    for (const unsigned char c : value) {
+        if (c < 0x20 || c == '\"' || c == '\\')
+            return false;
+    }
+    return !value.empty();
+}
+
+inline std::string provider_receipt_digest(const SharedIoProviderIdentity& identity,
+                                           std::string_view native_runtime_revision) {
+    const auto receipt = std::string{"pulp.gpu-audio.provider.v1\n"} +
+                         "authenticated=" + (identity.authenticated ? "true\n" : "false\n") +
+                         "provider_revision=" + identity.provider_revision + "\n" +
+                         "adapter_name=" + identity.adapter_name + "\n" +
+                         "adapter_backend=" + identity.adapter_backend + "\n" +
+                         "adapter_vendor_id=" + std::to_string(identity.adapter_vendor_id) +
+                         "\nadapter_device_id=" + std::to_string(identity.adapter_device_id) +
+                         "\nnative_runtime_name=" + identity.native_runtime_name +
+                         "\nnative_runtime_backend=" + identity.native_runtime_backend +
+                         "\nnative_runtime_authenticated=" +
+                         (identity.native_runtime_authenticated ? "true\n" : "false\n") +
+                         "\nnative_runtime_revision=" + std::string(native_runtime_revision) + "\n";
+    return pulp::runtime::sha256_hex(receipt);
+}
+
+inline bool valid_provider_receipt_digest(const SharedIoProviderIdentity& identity,
+                                          std::string_view native_runtime_revision,
+                                          std::string_view immutable_receipt_digest) noexcept {
+    if (immutable_receipt_digest.size() != 64)
+        return false;
+    for (const auto c : immutable_receipt_digest) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            return false;
+    }
+    try {
+        return immutable_receipt_digest ==
+               provider_receipt_digest(identity, native_runtime_revision);
+    } catch (...) {
+        // Receipt validation is a fail-closed boundary. Canonicalization uses
+        // allocating std::string operations, so allocation or hashing failures
+        // must reject the receipt rather than escape into the trace writer.
+        return false;
+    }
+}
+
 struct GpuConvolverTrialContext {
     std::uint64_t trial_id = 0;
     std::uint64_t pair_id = 0;
@@ -53,9 +104,16 @@ struct GpuConvolverTrialContext {
     bool workgroup_requested = false;
     bool workgroup_joined = false;
     GpuConvolverThermalState thermal_state = GpuConvolverThermalState::Unavailable;
+    // Receipts require an authenticated provider identity; missing identity
+    // fails closed and cannot be interpreted as physical GPU evidence.
+    SharedIoProviderIdentity provider_identity;
+    // These receipt fields are private to the trial context. They must not be
+    // added to SharedIoProviderIdentity, which crosses an existing ABI seam.
+    std::string native_runtime_revision;
+    std::string immutable_receipt_digest;
 };
 
-constexpr bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
+inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
     return context.trial_id != 0 && context.pair_id != 0 && context.block_frames != 0 &&
            context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
            context.inflight_depth != 0 && context.queue_capacity > context.lead_blocks &&
@@ -63,7 +121,20 @@ constexpr bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext&
            context.max_inflight <= context.queue_capacity - context.lead_blocks &&
            context.lead_blocks != 0 && context.deadline_ns != 0 &&
            context.watchdog_ns > context.deadline_ns && context.transfer_counters_direct &&
-           context.timing_provenance_direct &&
+           context.timing_provenance_direct && context.provider_identity.authenticated &&
+           valid_provider_identity_component(context.provider_identity.provider_revision) &&
+           valid_provider_identity_component(context.provider_identity.adapter_name) &&
+           valid_provider_identity_component(context.provider_identity.adapter_backend) &&
+           context.provider_identity.adapter_vendor_id != 0 &&
+           context.provider_identity.adapter_device_id != 0 &&
+           // This value is projected verbatim into the private JSONL receipt;
+           // reject unsafe bytes before digest validation or serialization.
+           valid_provider_identity_component(context.native_runtime_revision) &&
+           valid_provider_receipt_digest(context.provider_identity, context.native_runtime_revision,
+                                         context.immutable_receipt_digest) &&
+           context.provider_identity.native_runtime_authenticated &&
+           valid_provider_identity_component(context.provider_identity.native_runtime_name) &&
+           valid_provider_identity_component(context.provider_identity.native_runtime_backend) &&
            valid_gpu_convolver_thermal_state(context.thermal_state) &&
            (!context.workgroup_requested || context.workgroup_joined);
 }
@@ -89,7 +160,25 @@ struct GpuConvolverTrialConfig {
     DawnSharedIoProvider::CompletionPolicy completion_policy =
         DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
     std::uint64_t completion_wait_ns = 0;
+    // Diagnostic campaign slot capacity. Zero preserves the production
+    // default. Non-zero values are accepted only by the private probe and are
+    // passed through to the prepared shared-I/O session; the public runtime
+    // ABI remains unchanged.
+    std::uint32_t slots = 0;
+    // Private diagnostic retention bound. A probe sets this to its complete
+    // callback census size; zero leaves the ordinary runtime queue behavior.
+    std::uint32_t retention_capacity = 0;
 };
+
+// Quiescent diagnostic drain for the complete admission census. This remains
+// private/default-off and is intentionally separate from terminal records so
+// consumers can prove admission/terminal/delivery identity multisets.
+bool drain_gpu_convolver_trial_admissions(GpuConvolver&,
+                                          std::vector<SharedIoTraceAdmission>&) noexcept;
+
+// Quiescent diagnostic identity accessor. Zero means the prepared trace did
+// not expose an authenticated engine identity and must fail closed.
+std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 
 // Must be called while the node is quiescent, before the next prepare(). The
 // normal staged path uses the authenticated asynchronous ledger; the explicit

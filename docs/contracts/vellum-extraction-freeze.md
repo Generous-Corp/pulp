@@ -75,3 +75,10 @@ If Vellum is abandoned, authority does not drift back silently. A reviewed
 ownership-reversal commit must update both repositories and state whether Pulp
 becomes an explicitly independent fork or the mapped implementation remains
 frozen for a defined support period.
+
+## Design-import refactor inheritance decision (2026-10-04)
+
+Per the owner decision recorded in the design-import refactor goal, generic
+design-import, UI compiler, bridge-contract, and SDK improvements land in Pulp;
+Vellum inherits them later through the package manifests and inheritance ledger.
+This decision does not transfer source authority or authorize edits to Vellum.

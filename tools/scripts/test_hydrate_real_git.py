@@ -367,6 +367,7 @@ print("OK" if present == set(revisions) else "WRONG %d" % len(present))
 """
 
 
+@unittest.skipIf(sys.platform == "win32", "subprocess.communicate uses reader threads on Windows, not a selector; the selector degradation this test injects does not exist there")
 class BatchCheckPipeDeadlockTest(unittest.TestCase):
     def test_a_git_that_answers_before_reading_cannot_wedge_the_probe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

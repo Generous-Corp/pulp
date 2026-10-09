@@ -151,6 +151,31 @@ fn locate_binaries_finds_pulp_only() {
 }
 
 #[test]
+fn locate_binaries_rejects_non_file_optional_sibling() {
+    let td = tempfile::tempdir().unwrap();
+    fs::write(td.path().join(pulp_basename()), b"pulp").unwrap();
+    fs::create_dir(td.path().join(cpp_basename())).unwrap();
+    let error = locate_binaries_in_archive(td.path()).unwrap_err();
+    assert!(error.to_string().contains("non-file pulp-cpp entry"));
+}
+
+#[test]
+fn locate_binaries_rejects_orphan_materialized_binding_contract() {
+    let td = tempfile::tempdir().unwrap();
+    fs::write(td.path().join(pulp_basename()), b"pulp").unwrap();
+    let contract = td
+        .path()
+        .join("jsx-runtime")
+        .join("materialized_binding_contract.mjs");
+    fs::create_dir_all(contract.parent().unwrap()).unwrap();
+    fs::write(contract, b"orphan").unwrap();
+    let error = locate_binaries_in_archive(td.path()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("without an import-design helper/runtime pair"));
+}
+
+#[test]
 fn locate_binaries_finds_pulp_cpp_mcp_and_control_broker() {
     let td = tempfile::tempdir().unwrap();
     fs::write(td.path().join(pulp_basename()), b"new-pulp").unwrap();
@@ -255,6 +280,97 @@ fn install_extracted_replaces_siblings_when_archive_has_them() {
     assert_eq!(fs::read(&pulp_dst).unwrap(), b"new-pulp");
     assert_eq!(fs::read(&cpp_dst).unwrap(), b"new-cpp");
     assert_eq!(fs::read(&mcp_dst).unwrap(), b"new-mcp");
+}
+
+#[test]
+fn install_extracted_rolls_back_every_payload_after_late_publish_failure() {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let cpp_dst = bin_dir.path().join(cpp_basename());
+    let mcp_dst = bin_dir.path().join(mcp_basename());
+    let runtime_dst = bin_dir.path().join(shared_runtime_basename());
+    let import_dst = bin_dir.path().join(import_design_basename());
+    let protocol_dst = bin_dir.path().join("browser_capture-v1");
+    let contract_dst = bin_dir
+        .path()
+        .join("jsx-runtime")
+        .join("materialized_binding_contract.mjs");
+    for (path, contents) in [
+        (&pulp_dst, b"old-pulp".as_slice()),
+        (&cpp_dst, b"old-cpp".as_slice()),
+        (&mcp_dst, b"old-mcp".as_slice()),
+        (&runtime_dst, b"old-runtime".as_slice()),
+        (&import_dst, b"old-import".as_slice()),
+    ] {
+        fs::write(path, contents).unwrap();
+    }
+    fs::create_dir_all(&protocol_dst).unwrap();
+    fs::write(protocol_dst.join("capture.mjs"), b"old-capture").unwrap();
+    fs::create_dir_all(contract_dst.parent().unwrap()).unwrap();
+    fs::write(&contract_dst, b"old-contract").unwrap();
+
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(arch_dir.path().join(cpp_basename()), b"new-cpp").unwrap();
+    fs::write(arch_dir.path().join(mcp_basename()), b"new-mcp").unwrap();
+    fs::write(
+        arch_dir.path().join(shared_runtime_basename()),
+        b"new-runtime",
+    )
+    .unwrap();
+    fs::write(
+        arch_dir.path().join(import_design_basename()),
+        b"new-import",
+    )
+    .unwrap();
+    let incoming_runtime = arch_dir.path().join("browser_capture");
+    fs::create_dir_all(&incoming_runtime).unwrap();
+    for filename in super::install_import_design::BROWSER_CAPTURE_RUNTIME_FILES {
+        fs::write(incoming_runtime.join(filename), filename.as_bytes()).unwrap();
+    }
+    let incoming_contract = arch_dir
+        .path()
+        .join("jsx-runtime")
+        .join("materialized_binding_contract.mjs");
+    fs::create_dir_all(incoming_contract.parent().unwrap()).unwrap();
+    fs::write(&incoming_contract, b"new-contract").unwrap();
+
+    let plan = InstallPlan {
+        version: "0.50.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst.clone(),
+        cpp_path: Some(cpp_dst.clone()),
+        mcp_path: Some(mcp_dst.clone()),
+        is_zip: false,
+    };
+    let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let error = install_extracted_with_observer(&plan, &archive, |path| {
+        if path.file_name().is_some_and(|name| name == pulp_basename()) {
+            Err(CliError::Other("injected late publish failure".into()))
+        } else {
+            Ok(())
+        }
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("injected late publish failure"));
+    assert_eq!(fs::read(&pulp_dst).unwrap(), b"old-pulp");
+    assert_eq!(fs::read(&cpp_dst).unwrap(), b"old-cpp");
+    assert_eq!(fs::read(&mcp_dst).unwrap(), b"old-mcp");
+    assert_eq!(fs::read(&runtime_dst).unwrap(), b"old-runtime");
+    assert_eq!(fs::read(&import_dst).unwrap(), b"old-import");
+    assert_eq!(
+        fs::read(protocol_dst.join("capture.mjs")).unwrap(),
+        b"old-capture"
+    );
+    assert_eq!(fs::read(&contract_dst).unwrap(), b"old-contract");
+    assert!(!bin_dir.path().read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".pulp-upgrade-install-")
+    }));
 }
 
 #[test]

@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.ui.package.v1",
+  "name": "@pulp/react",
+  "root": "packages/pulp-react",
+  "kind": "sdk",
+  "dependencies": [
+    "react",
+    "react-reconciler",
+    "pulp::view::WidgetBridge"
+  ],
+  "test_targets": [
+    "pulp-react-vitest"
+  ]
+}

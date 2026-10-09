@@ -55,7 +55,7 @@ jobs:
       - name: Configure and Build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release -j$(sysctl -n hw.ncpu)
+          tools/ci/governed-build.sh cmake --build build --config Release
 
       - name: Run Unit Tests
         run: ctest --test-dir build --output-on-failure -LE validation -j$(sysctl -n hw.ncpu)

@@ -72,6 +72,7 @@ class Repo:
         write(self.root, "tools/import/run.mjs", "import { f } from './lib/util.mjs';\nconst c = require('./config.json');\n")
         write(self.root, "tools/import/lib/util.mjs", "export const f = 1;\n")
         write(self.root, "tools/import/config.json", "{}\n")
+        write(self.root, "tools/scripts/tmp_leak_guard.py", "import alpha_lib\n")
         write(self.root, "tools/scripts/test_beta.sh", "#!/bin/bash\nsource \"$(dirname \"$0\")/lib.sh\"\n. tools/scripts/other.sh\n")
         write(self.root, "tools/scripts/lib.sh", "x=1\n")
         write(self.root, "tools/scripts/other.sh", "y=1\n")
@@ -86,6 +87,10 @@ class Repo:
             {"name": "alpha", "command": ["/usr/bin/python3", f"{r}/tools/scripts/test_alpha.py", f"{r}/test/fixtures/data.txt"],
              "properties": [{"name": "WORKING_DIRECTORY", "value": f"{r}/tools/scripts"}]},
             {"name": "node-run", "command": ["/opt/homebrew/bin/node", "--test", f"{r}/tools/import/run.mjs"], "properties": []},
+            {"name": "guarded-node-run",
+             "command": ["/usr/bin/python3", f"{r}/tools/scripts/tmp_leak_guard.py", "--ignore", "x-*", "--",
+                         "/opt/homebrew/bin/node", "--test", f"{r}/tools/import/run.mjs"],
+             "properties": []},
             {"name": "beta", "command": ["/bin/bash", f"{r}/tools/scripts/test_beta.sh"], "properties": []},
             {"name": "mod", "command": ["/usr/bin/python3", "-m", "test_mod"],
              "properties": [{"name": "WORKING_DIRECTORY", "value": f"{r}/tools/scripts"}]},
@@ -192,6 +197,16 @@ class BuildListTests(unittest.TestCase):
     def test_node_entry_follows_relative_imports_and_requires(self) -> None:
         n = self.lst["tests"]["node-run"]
         self.assertEqual(n["inputs"], ["tools/import/config.json", "tools/import/lib/util.mjs", "tools/import/run.mjs"])
+
+    def test_a_temp_leak_guarded_command_is_declared_as_what_it_wraps(self) -> None:
+        # Classified as the guard, the node test would lose its import walk and
+        # a change to its imports would no longer select it.
+        n = self.lst["tests"]["guarded-node-run"]
+        self.assertEqual(n["kind"], "node")
+        self.assertEqual(n["entry"], "tools/import/run.mjs")
+        self.assertEqual(n["inputs"], [
+            "docs/status/alpha.yaml", "tools/import/config.json", "tools/import/lib/util.mjs", "tools/import/run.mjs",
+            "tools/scripts/alpha_lib.py", "tools/scripts/tmp_leak_guard.py"])
 
     def test_shell_entry_follows_source_lines(self) -> None:
         b = self.lst["tests"]["beta"]
@@ -837,6 +852,28 @@ class CompiledDataTests(unittest.TestCase):
                 self.assertIn("missing compiled entry: pulp-test-d", proc.stdout)
                 self.assertEqual(proc.returncode, 1 if pr_adds_the_spawn else 0, proc.stdout)
 
+    def test_a_new_clean_executable_missing_from_the_scan_is_drift(self) -> None:
+        """A clean executable has no entry; only executables_scanned records it."""
+        for pr_adds_the_suite in (True, False):
+            with self.subTest(pr_adds_the_suite=pr_adds_the_suite), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp)); compiled_evidence(repo)
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                self.git_repo(repo)
+                write(repo.root, "test/test_e.cpp", "int y = 2;\n")
+                index = repo.build / "test" / "test-data" / "executables.json"
+                doc = json.loads(index.read_text(encoding="utf-8"))
+                doc["executables"]["pulp-test-e"] = {"sources": ["test/test_e.cpp"], "tree_defines": []}
+                index.write_text(json.dumps(doc), encoding="utf-8")
+                if pr_adds_the_suite:
+                    self.g("add", "-A"); self.g("commit", "-q", "-m", "pr adds a suite")
+                else:  # main added it; this change touches something else
+                    self.g("add", "-A"); self.g("commit", "-q", "-m", "main adds a suite")
+                    self.g("branch", "-f", "base-ref", "HEAD")
+                    write(repo.root, "README.md", "unrelated\n"); self.g("add", "-A"); self.g("commit", "-q", "-m", "pr")
+                proc = self.run_tool(repo, "--check", "--base", "base-ref")
+                self.assertIn("unscanned executable: pulp-test-e", proc.stdout)
+                self.assertEqual(proc.returncode, 1 if pr_adds_the_suite else 0, proc.stdout)
+
     def test_a_stale_compiled_entry_is_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)
@@ -857,7 +894,8 @@ class GateProfileTests(unittest.TestCase):
     def test_a_gate_shaped_build_compares_the_compiled_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)
-            self.cache(repo, PULP_BUILD_EXAMPLES="OFF", CMAKE_BUILD_TYPE="Release", PULP_SANITIZER="")
+            self.cache(repo, PULP_BUILD_EXAMPLES="OFF", CMAKE_BUILD_TYPE="Release", PULP_SANITIZER="",
+                       PULP_HAS_VST3="TRUE", PULP_HAS_AUSDK="TRUE")
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             compiled_evidence(repo, declare_b=True)
             proc = self.run_tool(repo, "--check", "--full")
@@ -867,7 +905,9 @@ class GateProfileTests(unittest.TestCase):
     def test_an_off_profile_build_skips_the_compiled_half_by_name(self) -> None:
         for values, reason in ((dict(PULP_BUILD_EXAMPLES="ON"), "PULP_BUILD_EXAMPLES=ON"),
                                (dict(PULP_SANITIZER="address", CMAKE_BUILD_TYPE="Debug"), "PULP_SANITIZER=address"),
-                               (dict(CMAKE_BUILD_TYPE="Debug"), "CMAKE_BUILD_TYPE=Debug")):
+                               (dict(CMAKE_BUILD_TYPE="Debug"), "CMAKE_BUILD_TYPE=Debug"),
+                               (dict(PULP_HAS_VST3="FALSE"), "PULP_HAS_VST3=FALSE"),
+                               (dict(PULP_HAS_AUSDK="FALSE"), "PULP_HAS_AUSDK=FALSE")):
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
                 repo = Repo(Path(tmp)); compiled_evidence(repo)
                 self.assertEqual(self.run_tool(repo, "--write").returncode, 0)   # no cache: the gate's

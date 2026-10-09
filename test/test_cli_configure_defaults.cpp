@@ -1,4 +1,5 @@
 #include "../tools/cli/configure_defaults.hpp"
+#include "support/unique_temp_dir.hpp"
 #include "test_cli_shellout_util.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -154,10 +155,7 @@ namespace fs = std::filesystem;
 struct TempDir {
     fs::path path;
     explicit TempDir(const std::string& prefix) {
-        path = fs::temp_directory_path()
-             / (prefix + "-"
-                + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir(prefix);
     }
     ~TempDir() {
         std::error_code ec;

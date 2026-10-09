@@ -5,12 +5,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    tomllib = None
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -24,6 +30,8 @@ IDENTITY = {"compiler_id": "AppleClang", "compiler_version": "21.0.0.21000111",
             "sdk_version": "26.4", "sdk_build": "25E236", "deployment_target": "13.4", "env": {"CC": "unset"}}
 TOOLCHAIN = {"os": "Darwin", "arch": "arm64", **{k: v for k, v in IDENTITY.items() if k != "target"}}
 EXE, OTHER, MOD = "test/pulp-test-a", "test/pulp-test-b", "test/plug.so"
+# The read audit observed both test executables (a clean audit's covered set).
+ALL_AUDITED = frozenset({"pulp-test-a", "pulp-test-b"})
 # Enough declared readers that the data scan proves it saw something.
 KNOWN_READERS = {f"pulp-test-k{i}": {"data": "declared", "inputs": [f"test/fixtures/k{i}"],
                                      "detected_sources": ["test/k.cpp"]}
@@ -87,13 +95,13 @@ class Fixture:
         for path, body in self.files.items():
             p = self.root / path
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(body)
+            p.write_text(body, encoding="utf-8")
         (self.root / ek.SCRIPT_INPUTS_PATH).parent.mkdir(parents=True, exist_ok=True)
-        (self.root / ek.SCRIPT_INPUTS_PATH).write_text(json.dumps(self.scan))
+        (self.root / ek.SCRIPT_INPUTS_PATH).write_text(json.dumps(self.scan), encoding="utf-8")
         git = ["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
         subprocess.run(git + ["add", "-A"], check=True)
         subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "c"], check=True)
-        return subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+        return subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
 
     def write_record(self) -> None:
         self.record.mkdir(exist_ok=True)
@@ -104,19 +112,20 @@ class Fixture:
                     "members": {"<build>/core/liba.a": {"liba.cpp.o": [obj("liba", "core/liba.cpp")],
                                                         "unpulled.cpp.o": [obj("liba", "core/unpulled.cpp")]}}}
         (self.record / "codemodel-x.json").write_text(json.dumps(
-            {"schema": V2, "generated_headers": "ninja-deps", "targets": self.base_targets}))
-        (self.record / "link-members-x.json").write_text(json.dumps(self.links))
-        (self.record / "object-deps-x.json").write_text(json.dumps(deps_doc))
+            {"schema": V2, "generated_headers": "ninja-deps", "targets": self.base_targets}), encoding="utf-8")
+        (self.record / "link-members-x.json").write_text(json.dumps(self.links), encoding="utf-8")
+        (self.record / "object-deps-x.json").write_text(json.dumps(deps_doc), encoding="utf-8")
         (self.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "img", "fields": self.record_fields},
-                                                          **self.job_extra}))
+                                                          **self.job_extra}), encoding="utf-8")
 
     def keys(self, head: str, record: bool = True, toolchain: dict | None = TOOLCHAIN,
-             key_blind: Path | None = None) -> dict:
+             key_blind: Path | None = None,
+             audited: frozenset | None = ALL_AUDITED) -> dict:
         self.write_record()
         rec = ek.load_record(self.record)[0] if record else None
         cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": self.head_targets}
         return ek.compute(self.root, self.base, head, rec, cm, self.ctest, self.build, toolchain,
-                          key_blind)["executables"]
+                          key_blind, audited=audited)["executables"]
 
 
 class KeyTests(unittest.TestCase):
@@ -338,7 +347,7 @@ class KeyTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("#!/bin/sh\n"
                                 f'case "$1" in -print-target-triple) echo arm64-apple-darwin99.0.0 ;; '
-                                f'*) echo "{line}" ;; esac\n')
+                                f'*) echo "{line}" ;; esac\n', encoding="utf-8")
                 path.chmod(0o755)
                 return path
             chosen = compiler(tmp / "toolchain" / "c++", "CMake-chosen clang 1.0")
@@ -347,8 +356,8 @@ class KeyTests(unittest.TestCase):
             (build / "CMakeFiles" / "3.30.0").mkdir(parents=True)
             (build / "CMakeFiles" / "3.30.0" / "CMakeCXXCompiler.cmake").write_text(
                 f'set(CMAKE_CXX_COMPILER "{chosen}")\nset(CMAKE_CXX_COMPILER_ID "AppleClang")\n'
-                'set(CMAKE_CXX_COMPILER_VERSION "1.0.0")\n')
-            (build / "CMakeCache.txt").write_text("CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n")
+                'set(CMAKE_CXX_COMPILER_VERSION "1.0.0")\n', encoding="utf-8")
+            (build / "CMakeCache.txt").write_text("CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n", encoding="utf-8")
             with mock.patch.dict(os.environ, {"PATH": f"{tmp / 'path'}:{os.environ.get('PATH', '')}"}):
                 key = ek.probe_toolchain(build)
             if key is None:
@@ -360,10 +369,10 @@ class KeyTests(unittest.TestCase):
         head = self.head(**{"docs/readme.md": "new\n"})
         listed = Path(self.tmp.name) / "key_blind.json"
         listed.write_text(json.dumps({"schema": ek.KEY_BLIND_SCHEMA, "executables": {
-            EXE: {"example": {"pr": 1, "group_run_id": "g"}, "explained": "linker stub order"}}}))
+            EXE: {"example": {"pr": 1, "group_run_id": "g"}, "explained": "linker stub order"}}}), encoding="utf-8")
         keys = self.fx.keys(head, key_blind=listed)
         self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"]), ("key_blind", None))
-        listed.write_text(json.dumps({"schema": "something-else", "executables": {}}))
+        listed.write_text(json.dumps({"schema": "something-else", "executables": {}}), encoding="utf-8")
         with self.assertRaises(ValueError):                 # an unreadable list is an error, not empty
             self.fx.keys(head, key_blind=listed)
 
@@ -384,6 +393,25 @@ class KeyTests(unittest.TestCase):
         keys = self.fx.keys(head)
         self.assertEqual({e["always_run"] for e in keys.values()}, {"base_unrecorded"})
 
+    def test_an_executable_the_read_audit_did_not_observe_always_runs(self):
+        head = self.head(**{"docs/readme.md": "new\n"})
+        keys = self.fx.keys(head, audited=frozenset({"pulp-test-b"}))  # a macOS-only test, say
+        self.assertTrue(self.equal(keys, EXE))
+        self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"], keys[MOD]["always_run"]),
+                         ("audit_uncovered", None, None))
+        # No clean audit handed in: no executable may be keyed on its data.
+        keys = self.fx.keys(head, audited=None)
+        self.assertEqual((keys[EXE]["always_run"], keys[OTHER]["always_run"]), ("audit_uncovered",) * 2)
+
+    def test_only_a_clean_audit_report_vouches_for_its_covered_set(self):
+        report = {"schema": ek.READ_AUDIT_SCHEMA, "stage0": {"verdict": "clean", "covered": ["pulp-test-a"]}}
+        self.assertEqual(ek.audit_covered(report), {"pulp-test-a"})
+        for bad in (None, {**report, "schema": "pulp-read-audit/v9"},
+                    {**report, "stage0": {"verdict": "findings", "covered": ["pulp-test-a"]}},
+                    {**report, "stage0": {"verdict": "incomplete", "covered": ["pulp-test-a"]}},
+                    {**report, "stage0": {"verdict": "clean"}}):
+            self.assertIsNone(ek.audit_covered(bad), bad)
+
     def test_the_checked_in_key_blind_list_is_readable(self):
         self.assertIsInstance(ek.load_key_blind(ek.KEY_BLIND_LIST), frozenset)
 
@@ -399,15 +427,30 @@ class ManifestTests(unittest.TestCase):
             head = fx.commit()
             fx.write_record()
             cm = Path(tmp) / "cm.json"
-            cm.write_text(json.dumps({"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}))
+            cm.write_text(json.dumps({"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}), encoding="utf-8")
             out = Path(tmp) / "keys.json"
             tc = Path(tmp) / "tc.json"
-            tc.write_text(json.dumps(TOOLCHAIN))
+            tc.write_text(json.dumps(TOOLCHAIN), encoding="utf-8")
+            audit = Path(tmp) / "read-audit.json"
+            audit.write_text(json.dumps({"schema": ek.READ_AUDIT_SCHEMA, "commit": "c0ffee",
+                                         "stage0": {"verdict": "clean", "covered": ["pulp-test-a", "pulp-test-b"]}}), encoding="utf-8")
             argv = ["x", "--source-root", str(fx.root), "--base-sha", fx.base, "--head-sha", head,
                     "--base-record", str(fx.record), "--base-record-run-id", "42", "--head-codemodel", str(cm),
-                    "--build-dir", str(fx.build), "--toolchain-json", str(tc), "--out", str(out)]
+                    "--build-dir", str(fx.build), "--toolchain-json", str(tc), "--audit-report", str(audit),
+                    "--out", str(out)]
+            # Without the audit report every executable is unvouched for.
+            self.assertEqual(ek.main([a for a in argv if a not in ("--audit-report", str(audit))]), 0)
+            absent = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual((absent["reasons"], absent["producer"]["audit_status"]),
+                             ({"audit_uncovered": 2, "keyed": 1}, "absent"))
+            unclean = Path(tmp) / "unclean.json"
+            unclean.write_text(json.dumps({"schema": ek.READ_AUDIT_SCHEMA, "stage0": {"verdict": "findings"}}), encoding="utf-8")
+            self.assertEqual(ek.main([str(unclean) if a == str(audit) else a for a in argv]), 0)
+            self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["producer"]["audit_status"], "not_clean")
             self.assertEqual(ek.main(argv), 0)
-            doc = json.loads(out.read_text())
+            doc = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual((doc["producer"]["audit_commit"], len(doc["producer"]["audit_report_sha256"]),
+                              doc["producer"]["audit_status"]), ("c0ffee", 64, "clean"))
             self.assertEqual(doc["schema"], ek.SCHEMA)
             producer = doc["producer"]
             self.assertEqual((producer["base_sha"], producer["head_sha"], producer["base_record_run_id"]),
@@ -416,11 +459,27 @@ class ManifestTests(unittest.TestCase):
             first = producer["base_record_sha256"]
             self.assertEqual(producer["toolchain"], TOOLCHAIN)
             self.assertEqual(doc["reasons"], {"keyed": 3})
-            (fx.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "other"}}))
+            (fx.record / "job.json").write_text(json.dumps({"runner_image": {"digest": "other"}}), encoding="utf-8")
             ek.main(argv)
-            doc = json.loads(out.read_text())
+            doc = json.loads(out.read_text(encoding="utf-8"))
             self.assertNotEqual(doc["producer"]["base_record_sha256"], first)
             self.assertEqual(doc["reasons"], {"toolchain_unknown": 3})
+
+    @unittest.skipIf(tomllib is None, "tomllib unavailable; cannot read .shipyard/config.toml")
+    def test_the_configured_rederive_command_parses_with_this_key_code(self):
+        # Shipyard re-derives with the base's command against the base's key
+        # code, so every flag the config passes must be one this copy accepts.
+        with (HERE.parents[1] / ".shipyard" / "config.toml").open("rb") as handle:
+            config = tomllib.load(handle)
+        command = config["targets"]["mac"]["changed_surface_selection"]["executable_reuse"]["rederive"][0]
+        self.assertEqual(command[:3], ["python3", "-I", "tools/ci/executable_keys.py"])
+        argv = ["x"] + [re.sub(r"\{[a-z_]+\}", "v", arg) for arg in command[3:]]
+        self.assertIn("--audit-report", argv)
+
+        class Parsed(Exception):
+            pass
+        with mock.patch.object(ek, "load_record", side_effect=Parsed), self.assertRaises(Parsed):
+            ek.main(argv)
 
     def test_registrations_match_the_build_dir_as_a_string(self):
         # The host re-deriving a manifest holds copies, not the build tree:
@@ -437,10 +496,11 @@ class ManifestTests(unittest.TestCase):
             fx.write_record()
             cm = {"schema": V2, "generated_headers": "ninja-deps", "targets": fx.head_targets}
             rec = ek.load_record(fx.record)[0]
-            keyed = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, fx.build, TOOLCHAIN)["executables"]
+            keyed = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, fx.build, TOOLCHAIN,
+                               audited=ALL_AUDITED)["executables"]
             self.assertIsNone(keyed[EXE]["always_run"])                        # control: same spelling keys
             other = ek.compute(fx.root, fx.base, head, rec, cm, fx.ctest, Path(tmp) / "elsewhere",
-                               TOOLCHAIN)["executables"]
+                               TOOLCHAIN, audited=ALL_AUDITED)["executables"]
             self.assertEqual({e["always_run"] for e in other.values()}, {"inventory_unmatched"})
             self.assertEqual({e["base_key"] for e in other.values()}, {None})
 
@@ -453,7 +513,7 @@ class ManifestTests(unittest.TestCase):
             root = Path(tmp)
             for rel, body in (("a/b", "slash\n"), ("a.b", "dot\n"), ("suites/x.xml", "<x/>\n")):
                 (root / rel).parent.mkdir(parents=True, exist_ok=True)
-                (root / rel).write_text(body)
+                (root / rel).write_text(body, encoding="utf-8")
             # The planner reimplements this; byte order puts a.b before a/b.
             self.assertTrue(ek.record_digest_bytes(root).startswith(b"a.b\0"))
             self.assertEqual(ek.load_record(root)[1],
@@ -494,6 +554,65 @@ class ManifestTests(unittest.TestCase):
     def test_every_key_code_path_exists(self):
         repo = HERE.parents[1]
         self.assertEqual([p for p in ek.KEY_CODE_PATHS if not (repo / p).is_file()], [])
+
+
+class KeyCodeClosureTests(unittest.TestCase):
+    """The digests that decide when a plan must select everything cover what
+    the key code reads, and nothing else: a file the key code does not import
+    makes every base that moved it look like a policy change."""
+
+    REPO = HERE.parents[1]
+    ENTRY_POINTS = ("tools/ci/executable_keys.py", "tools/ci/executable_selection.py")
+    # Named by the config but not imported by the key code: the adapter that
+    # runs the selection.
+    ADAPTER = ("tools/scripts/run_changed_surface_tests.py",)
+
+    def closure(self) -> set[str]:
+        """Repo-relative Python files the entry points import, transitively,
+        resolved as the scripts resolve them (tools/ci, then tools/scripts)."""
+        import ast
+        seen, todo = set(), list(self.ENTRY_POINTS)
+        while todo:
+            rel = todo.pop()
+            if rel in seen:
+                continue
+            seen.add(rel)
+            for node in ast.walk(ast.parse((self.REPO / rel).read_text(encoding="utf-8"))):
+                names = ([a.name for a in node.names] if isinstance(node, ast.Import) else
+                         [node.module] if isinstance(node, ast.ImportFrom) and node.module and not node.level else [])
+                for name in names:
+                    for root in (HERE, HERE.parent / "scripts"):
+                        candidate = root / f"{name.split('.')[0]}.py"
+                        if candidate.is_file():
+                            todo.append(candidate.relative_to(self.REPO).as_posix())
+                            break
+        return seen
+
+    def derivation_paths(self) -> list[str]:
+        import tomllib
+        config = tomllib.loads((self.REPO / ".shipyard" / "config.toml").read_text(encoding="utf-8"))
+        return config["targets"]["mac"]["changed_surface_selection"]["executable_reuse"]["derivation_paths"]
+
+    def test_the_closure_reaches_the_shared_name_pattern(self):
+        # Control: an empty or partial closure would pass every check below.
+        closure = self.closure()
+        self.assertIn("tools/ci/always_run_names.py", closure)
+        self.assertIn("tools/scripts/gate_common.py", closure)
+        self.assertGreaterEqual(len(closure), 10)
+
+    def test_the_derivation_paths_are_the_closure_plus_the_adapter(self):
+        python = sorted(p for p in self.derivation_paths() if p.endswith(".py"))
+        self.assertEqual(python, sorted(self.closure() | set(self.ADAPTER)))
+
+    def test_the_key_code_digest_names_only_files_the_key_code_reads(self):
+        closure = self.closure()
+        self.assertEqual([p for p in ek.KEY_CODE_PATHS if p.endswith(".py") and p not in closure], [])
+
+    def test_the_receipts_shadow_is_in_neither(self):
+        # Its edits moved the policy digest on bases that changed nothing the
+        # keys read; the keys use only the name pattern it shares.
+        self.assertNotIn("tools/ci/test_receipts_shadow.py", ek.KEY_CODE_PATHS)
+        self.assertNotIn("tools/ci/test_receipts_shadow.py", self.derivation_paths())
 
 
 if __name__ == "__main__":

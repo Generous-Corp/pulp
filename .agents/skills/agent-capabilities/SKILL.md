@@ -1589,3 +1589,25 @@ then re-run the rederive with `PULP_AGENT_CAPABILITY_BASE_REF=$(git rev-parse
 origin/main)`; it reports whether the counters themselves need to move (often
 they do not), and `agent_capability_manifest.py --check` plus
 `sequencer_exposure_check.py --base origin/main` confirm both ledgers.
+
+## A contract change reaches the history only on the following `--write`
+
+`updated_history_entries` appends the manifest that was on disk BEFORE the
+write (and only when it differs from the last entry), not the manifest being
+written. So the first `--write` of a contract change re-records the base state,
+appends nothing, and still reports writing `contract-history.json`; `--check`
+says `fresh`. Moving the MIDI routers to major 2 showed it: from a base history
+the first `--write` left 84 entries ending at major 1, and a second `--write`
+produced 85 ending at major 2. Until the tool records the current manifest
+itself, confirm `entries[-1].manifest.capabilities[<key>].contract_version`
+shows the new version and that the file differs from the base by exactly one
+entry before shipping.
+
+## SignalGraph authoring contract header
+
+`pulp/host/signal_graph_authoring.hpp` is a reviewed infrastructure header for
+`GraphAuthoringReceipt` and `GraphAuthoringReceiptStatus`. Keep it in the
+reviewed host tuple and minimal-target registry with an empty capability-key
+list; it describes lineage validation vocabulary and does not advertise a DSP
+capability. Refresh its byte fingerprint and the surface inventory when the
+contract changes.

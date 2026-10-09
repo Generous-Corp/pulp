@@ -4,7 +4,8 @@ import test from "node:test";
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
 
 test("captures nested Chromium boxes as parent-relative structural evidence", () => {
-  const strings = ["HTML", "BODY", "DIV", "BUTTON", "id", "root"];
+  const strings = ["HTML", "BODY", "DIV", "BUTTON", "id", "root",
+    "data-pulp-id", "panel-button"];
   const snapshot = {
     strings,
     documents: [{
@@ -12,7 +13,7 @@ test("captures nested Chromium boxes as parent-relative structural evidence", ()
         parentIndex: [-1, 0, 1, 2, 3],
         nodeType: [9, 1, 1, 1, 1],
         nodeName: [-1, 0, 1, 2, 3],
-        attributes: [[], [], [], [4, 5], []],
+        attributes: [[], [], [], [4, 5], [6, 7]],
       },
       layout: {
         nodeIndex: [2, 3, 4],
@@ -24,6 +25,7 @@ test("captures nested Chromium boxes as parent-relative structural evidence", ()
     index: 0,
     anchor: "#root",
     path: [{ tag: "button", index: 0 }],
+    pulp_id: "panel-button",
     box: { left: 640.5, top: 10, width: 44.5, height: 20 },
   }]);
 });

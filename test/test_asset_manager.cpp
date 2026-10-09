@@ -1,9 +1,9 @@
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/theme.hpp>
-#include <chrono>
-#include <fstream>
-#include <filesystem>
 #include <utility>
 #include <vector>
 
@@ -12,21 +12,15 @@ using namespace pulp::view;
 namespace {
 
 std::filesystem::path make_temp_theme_path(const char* stem) {
-    auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique + ".json");
+    return pulp::test::unique_temp_path(stem, ".json");
 }
 
 std::filesystem::path make_temp_asset_path(const char* stem, const char* suffix) {
-    auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique + suffix);
+    return pulp::test::unique_temp_path(stem, suffix);
 }
 
 std::string make_unique_asset_name(const char* stem) {
-    auto unique = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    return std::string(stem) + "-" + unique;
+    return pulp::test::unique_temp_path(stem).filename().string();
 }
 
 std::vector<uint8_t> make_png_header(uint32_t width, uint32_t height) {

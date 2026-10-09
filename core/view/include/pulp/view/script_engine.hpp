@@ -7,6 +7,8 @@
 #include <optional>
 #include <memory>
 #include <choc/javascript/choc_javascript.h>
+#include <atomic>
+#include <cstdint>
 
 namespace pulp::view {
 
@@ -54,6 +56,16 @@ public:
     void register_function(const std::string& name, NativeFunction fn);
     void register_function(const std::string& name, choc::javascript::Context::NativeFunction fn);
     void register_promise_function(const std::string& name, NativePromiseFunction fn);
+
+    // Internal WidgetBridge instrumentation seam. Registered functions retain
+    // this state because their engine may outlive the owning bridge.
+    void
+    set_bridge_call_counter(const std::shared_ptr<std::atomic<std::uint64_t>>& counter) noexcept {
+        bridge_call_counter_ = counter;
+    }
+    std::shared_ptr<std::atomic<std::uint64_t>> bridge_call_counter() const noexcept {
+        return bridge_call_counter_;
+    }
 
     // Register a native-backed global object with snapshot properties and
     // native methods.
@@ -109,6 +121,7 @@ public:
 private:
     std::unique_ptr<JsEngine> engine_;
     std::shared_ptr<const void> alive_ = std::make_shared<const char>('\0');
+    std::shared_ptr<std::atomic<std::uint64_t>> bridge_call_counter_;
 
     // For QuickJS backward compatibility: WidgetBridge uses CHOC's Context directly
     // for the stack size hack and pimpl access. We keep a reference to the CHOC

@@ -45,4 +45,15 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {
                                                  : GpuAudioProvider::Unknown;
 }
 
+SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode* node) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    auto* convolver = dynamic_cast<GpuConvolver*>(node);
+    if (convolver != nullptr)
+        return convolver->provider_identity_for_diagnostics();
+#else
+    (void)node;
+#endif
+    return {};
+}
+
 } // namespace pulp::gpu_audio::detail

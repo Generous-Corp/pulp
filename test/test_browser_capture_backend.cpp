@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_backend.hpp"
+#include "tools/import-design/browser_capture_provenance.hpp"
+
+#include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -21,13 +25,8 @@ namespace {
 class TempTree {
 public:
     explicit TempTree(std::string_view label) {
-        const auto nonce = std::chrono::steady_clock::now()
-                               .time_since_epoch()
-                               .count();
-        root_ = fs::temp_directory_path()
-            / (std::string("pulp-browser-capture-test-") + std::string(label)
-               + "-" + std::to_string(nonce));
-        fs::create_directories(root_);
+        root_ = pulp::test::make_unique_temp_dir(std::string("pulp-browser-capture-test-") +
+                                                 std::string(label));
     }
 
     ~TempTree() {
@@ -120,6 +119,8 @@ capture::BrowserInstallation fixture_browser() {
         "Fixture Chromium",
         "123.4.5.6",
         123,
+        "1.3",
+        "fixture",
     };
 }
 
@@ -141,7 +142,160 @@ capture::CaptureRequest fixture_request(
     return request;
 }
 
+std::string replace_once(std::string value, std::string_view from, std::string_view to) {
+    const auto position = value.find(from);
+    REQUIRE(position != std::string::npos);
+    value.replace(position, from.size(), to);
+    return value;
+}
+
+struct ProvenanceFixture {
+    fs::path source;
+    fs::path envelope;
+    fs::path materialized;
+    capture::BrowserInstallation browser{"fixture-chrome",
+                                         capture::BrowserOrigin::system,
+                                         "Fixture Chromium",
+                                         "123.4.5.6",
+                                         123,
+                                         "1.3",
+                                         "fixture"};
+};
+
+ProvenanceFixture write_provenance_fixture(const TempTree& tree) {
+    ProvenanceFixture fixture;
+    fixture.source = tree.write("editor.html", "<main>fixture</main>");
+    const auto materialized_json =
+        R"({"schema":"pulp-materialized-browser-document-v2","version":2,"html":"<html></html>","assets":[]})";
+    fixture.materialized = tree.write("materialized-document.json", materialized_json);
+    const auto source_hash = pulp::runtime::sha256_hex(read_file(fixture.source));
+    const auto materialized_hash = pulp::runtime::sha256_hex(read_file(fixture.materialized));
+    const auto envelope_json =
+        std::string(
+            R"({"schema":"pulp-browser-capture-v1","version":1,"provenance":{"capture_method":"chromium-cdp","browser":{"product":"Fixture Chromium","version":"123.4.5.6","protocol_version":"1.3","build_hash":"fixture","origin":"system"},"source":{"entry":"editor.html","sha256":")") +
+        source_hash +
+        std::string(
+            R"(","materialized_document":"materialized-document.json","materialized_document_sha256":")") +
+        materialized_hash +
+        R"(","materialized_asset_count":0},"viewport":{"initial":{"width":1280,"height":800},"resolved":{"width":1280,"height":800},"document":{"width":1280,"height":800},"device_scale_factor":2}},"reference":{"logical_width":1280,"logical_height":800,"device_scale_factor":2}})";
+    fixture.envelope = tree.write("capture.json", envelope_json);
+    return fixture;
+}
+
 }  // namespace
+
+TEST_CASE("browser capture provenance binds source browser viewport and materialized schema",
+          "[import-design][browser-capture][provenance]") {
+    TempTree tree("provenance-valid");
+    const auto fixture = write_provenance_fixture(tree);
+    const auto result = capture::validate_capture_provenance({
+        .envelope = fixture.envelope,
+        .source = fixture.source,
+        .materialized_document = fixture.materialized,
+        .browser = fixture.browser,
+        .initial_width = 1280,
+        .initial_height = 800,
+        .device_scale_factor = 2,
+    });
+    INFO(result.message);
+    REQUIRE(result);
+}
+
+TEST_CASE("browser capture provenance rejects source hash omission and mismatch",
+          "[import-design][browser-capture][provenance][negative]") {
+    TempTree tree("provenance-source-negative");
+    const auto fixture = write_provenance_fixture(tree);
+    auto envelope = read_file(fixture.envelope);
+    SECTION("omission") {
+        envelope = replace_once(
+            envelope, "\"sha256\":\"" + pulp::runtime::sha256_hex(read_file(fixture.source)) + "\"",
+            "\"sha256\":\"\"");
+    }
+    SECTION("mismatch") {
+        envelope = replace_once(envelope, pulp::runtime::sha256_hex(read_file(fixture.source)),
+                                std::string(64, '0'));
+    }
+    tree.write("capture.json", envelope);
+    const auto result = capture::validate_capture_provenance({
+        .envelope = tree.root() / "capture.json",
+        .source = fixture.source,
+        .materialized_document = fixture.materialized,
+        .browser = fixture.browser,
+        .initial_width = 1280,
+        .initial_height = 800,
+        .device_scale_factor = 2,
+    });
+    CHECK_FALSE(result);
+    CHECK(result.code == "browser-capture-provenance-invalid");
+}
+
+TEST_CASE("browser capture provenance rejects materialized schema hash browser and DPR drift",
+          "[import-design][browser-capture][provenance][negative]") {
+    TempTree tree("provenance-envelope-negative");
+    const auto fixture = write_provenance_fixture(tree);
+    const auto run = [&](std::string envelope, int dpr = 2) {
+        tree.write("capture.json", envelope);
+        return capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = dpr,
+        });
+    };
+    const auto base = read_file(fixture.envelope);
+    SECTION("materialized schema version") {
+        auto sidecar = read_file(fixture.materialized);
+        const auto old_hash = pulp::runtime::sha256_hex(sidecar);
+        sidecar = replace_once(sidecar, "-v2", "-v1");
+        tree.write("materialized-document.json", sidecar);
+        const auto updated = replace_once(base, old_hash, pulp::runtime::sha256_hex(sidecar));
+        const auto result = run(updated);
+        CHECK_FALSE(result);
+        CHECK(result.message.find("schema/version") != std::string::npos);
+    }
+    SECTION("materialized hash") {
+        CHECK_FALSE(
+            run(replace_once(base, pulp::runtime::sha256_hex(read_file(fixture.materialized)),
+                             std::string(64, '1'))));
+    }
+    SECTION("browser identity") {
+        CHECK_FALSE(run(replace_once(base, "123.4.5.6", "124.0.0.0")));
+    }
+    SECTION("Chrome product aliases are canonicalized") {
+        auto alias = replace_once(base, "Fixture Chromium", "Chrome");
+        auto request = fixture.browser;
+        request.product = "Google Chrome";
+        tree.write("capture.json", alias);
+        const auto result = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = request,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE(result);
+    }
+    SECTION("CDP protocol identity") {
+        CHECK_FALSE(run(
+            replace_once(base, "\"protocol_version\":\"1.3\"", "\"protocol_version\":\"1.4\"")));
+    }
+    SECTION("CDP build identity") {
+        CHECK_FALSE(run(
+            replace_once(base, "\"build_hash\":\"fixture\"", "\"build_hash\":\"other-build\"")));
+    }
+    SECTION("browser origin") {
+        CHECK_FALSE(run(replace_once(base, "\"origin\":\"system\"", "\"origin\":\"managed\"")));
+    }
+    SECTION("DPR") {
+        CHECK_FALSE(
+            run(replace_once(base, "\"device_scale_factor\":2", "\"device_scale_factor\":1")));
+    }
+}
 
 TEST_CASE("browser discovery honors explicit, environment, managed, then system",
           "[import-design][browser-capture]") {
@@ -389,6 +543,8 @@ TEST_CASE("browser discovery probes in order and never falls through an override
             result.product = "Chromium";
             result.version = "123.0.0.0";
             result.major_version = 123;
+            result.protocol_version = "1.3";
+            result.build_hash = "fixture";
             return result;
         });
     REQUIRE(discovery.ok());
@@ -504,6 +660,101 @@ TEST_CASE("a transient version read is retried instead of rejecting a browser",
     INFO(result.failure);
     CHECK(result.compatible);
     CHECK(result.major_version == 123);
+}
+
+TEST_CASE("a capability probe that times out names its deadline",
+          "[import-design][browser-capture]") {
+    // A slow probe and a browser that lacks a capability are different
+    // problems. The reason must lead the message: callers keep only its first
+    // few hundred characters, and the Checked list comes last.
+    TempTree tree("probe-timeout");
+    const auto browser =
+        tree.write("browser-wrapper", "#!/bin/sh\necho 'Google Chrome 151.0.0.0'\n");
+    fs::permissions(browser,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    const auto script = tree.write("probe-hangs.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    options.probe_timeout_ms = 100;
+    const auto discovery = capture::discover_browser(options);
+
+    REQUIRE_FALSE(discovery.ok());
+    REQUIRE(discovery.probes.size() == 1);
+    CHECK(discovery.probes[0].failure == "browser CDP capability probe timed out after 100 ms");
+    CHECK(discovery.diagnostic.code == "browser-capability-unavailable");
+    const auto first_line =
+        discovery.diagnostic.message.substr(0, discovery.diagnostic.message.find('\n'));
+    CHECK(first_line.find("timed out after 100 ms") != std::string::npos);
+}
+
+TEST_CASE("a capability probe that is refused names the refusal in the headline",
+          "[import-design][browser-capture]") {
+    TempTree tree("probe-refused");
+    const auto browser =
+        tree.write("browser-wrapper", "#!/bin/sh\necho 'Google Chrome 151.0.0.0'\n");
+    fs::permissions(browser,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    const auto script = tree.write("probe-refuses.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto discovery = capture::discover_browser(options);
+
+    REQUIRE_FALSE(discovery.ok());
+    CHECK(discovery.diagnostic.code == "browser-capability-unavailable");
+    const auto& message = discovery.diagnostic.message;
+    CHECK(message.find("Page.captureScreenshot is not supported") != std::string::npos);
+    CHECK(message.find("timed out") == std::string::npos);
+}
+
+TEST_CASE("capability probe rejects a browser-family swap",
+          "[import-design][browser-capture][negative]") {
+    TempTree tree("probe-product-family");
+    const auto browser =
+        tree.write("browser-wrapper",
+                   "#!/bin/sh\n"
+                   "echo 'Google Chrome 151.0.7922.72'\n"
+                   "# The launcher fixture reads this marker only for the CDP response.\n"
+                   "# Keep the version probe Chrome-shaped while returning Firefox from CDP.\n"
+                   "# pulp-capability-firefox\n");
+    fs::permissions(browser,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto discovery = capture::discover_browser(options);
+    REQUIRE_FALSE(discovery.ok());
+    REQUIRE(discovery.probes.size() == 1);
+    INFO(discovery.probes[0].failure);
+    CHECK(discovery.probes[0].failure.find("product family") != std::string::npos);
+}
+
+TEST_CASE("the probe deadline can be raised from the environment",
+          "[import-design][browser-capture]") {
+    const char* name = "PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS";
+    std::string saved;
+    const bool had = std::getenv(name) != nullptr;
+    if (had)
+        saved = std::getenv(name);
+    ::unsetenv(name);
+    CHECK(capture::probe_timeout_from_environment(15000) == 15000);
+    ::setenv(name, "60000", 1);
+    CHECK(capture::probe_timeout_from_environment(15000) == 60000);
+    for (const char* bad : {"", "0", "-5", "12x", "abc", "99999999999"}) {
+        ::setenv(name, bad, 1);
+        CHECK(capture::probe_timeout_from_environment(15000) == 15000);
+    }
+    if (had)
+        ::setenv(name, saved.c_str(), 1);
+    else
+        ::unsetenv(name);
 }
 
 TEST_CASE("an unreadable version is never reported as a version verdict",
@@ -1000,14 +1251,20 @@ TEST_CASE("capture clears known stale artifacts before validating fresh output",
     for (const auto name : {
              "capture.json",
              "browser.png",
+             "browser-static.png",
+             "browser-chrome.png",
+             "browser-canvas-composite.png",
              "semantic-report.json",
              "tokens.json",
              "dom-snapshot.json",
+             "platform-fonts.json",
+             "materialized-document.json",
              "interaction-report.json",
              "capture-error.json",
          }) {
         std::ofstream(request.output_directory / name) << "stale";
     }
+    std::ofstream(request.output_directory / "canvas-123.png") << "stale";
     std::ofstream(request.output_directory / "keep.me") << "unrelated";
 
     const auto result =
@@ -1016,6 +1273,12 @@ TEST_CASE("capture clears known stale artifacts before validating fresh output",
     CHECK(result.diagnostic.code == "browser-capture-incomplete");
     CHECK_FALSE(fs::exists(
         request.output_directory / "semantic-report.json"));
+    CHECK_FALSE(fs::exists(request.output_directory / "browser-static.png"));
+    CHECK_FALSE(fs::exists(request.output_directory / "browser-chrome.png"));
+    CHECK_FALSE(fs::exists(request.output_directory / "browser-canvas-composite.png"));
+    CHECK_FALSE(fs::exists(request.output_directory / "platform-fonts.json"));
+    CHECK_FALSE(fs::exists(request.output_directory / "materialized-document.json"));
+    CHECK_FALSE(fs::exists(request.output_directory / "canvas-123.png"));
     CHECK_FALSE(fs::exists(
         request.output_directory / "interaction-report.json"));
     CHECK(fs::exists(request.output_directory / "capture-error.json"));

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import importlib.util
 import json
 import subprocess
 import sys
@@ -189,6 +190,27 @@ def expect_result(name, result, expected_code, expected_text, errors):
     print(f"renderer_probe_contract_case={name}")
 
 
+def golden_scope_rule_errors(verifier_path):
+    """The macOS-scoped golden steps aside off macOS for a different backend,
+    and only there: on macOS, or for the scope's own backend, it judges."""
+    spec = importlib.util.spec_from_file_location("verify_renderer_probe", verifier_path)
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    entry = {"adapter_scope": "macos_default_metal", "adapter_backend_type": "Metal"}
+    vulkan = {"adapter_backend_type": "Vulkan", "adapter_name": "llvmpipe"}
+    errors = []
+    if not verifier.golden_not_applicable(entry, vulkan, "linux"):
+        errors.append("golden-scope-rule: a Vulkan adapter off macOS must not judge the Metal golden")
+    if verifier.golden_not_applicable(entry, vulkan, "darwin"):
+        errors.append("golden-scope-rule: on macOS a non-Metal adapter is drift, not a skip")
+    if verifier.golden_not_applicable(entry, {"adapter_backend_type": "Metal"}, "linux"):
+        errors.append("golden-scope-rule: the scope's own backend always judges")
+    if verifier.golden_not_applicable({"adapter_scope": "software_lavapipe", "adapter_backend_type": "Vulkan"},
+                                      {"adapter_backend_type": "Metal"}, "linux"):
+        errors.append("golden-scope-rule: only macOS-scoped goldens step aside")
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Verify Renderer3D probe verifier rejects malformed probe output.")
@@ -241,6 +263,18 @@ def main():
             1,
             "non_transparent_pixel_count: expected at least 1024, got 1",
         ),
+        # Another adapter's bytes cannot judge a macOS-scoped golden: off
+        # macOS the verifier says so and steps aside, on macOS it is drift.
+        (
+            "other-adapter-backend",
+            replace_line(PROBE_LINES,
+                         "adapter_backend_type",
+                         "adapter_backend_type=Vulkan"),
+            0 if sys.platform != "darwin" else 1,
+            "renderer_probe_golden_not_applicable=official_boxtextured_fixture"
+            if sys.platform != "darwin" else
+            "adapter_backend_type: expected 'Metal', got 'Vulkan'",
+        ),
     ]
     manifest_cases = [
         (
@@ -292,6 +326,9 @@ def main():
                           expected_code,
                           expected_text,
                           errors)
+
+    errors.extend(golden_scope_rule_errors(args.probe_verifier))
+    print("renderer_probe_contract_case=golden-scope-rule")
 
     if errors:
         for error in errors:

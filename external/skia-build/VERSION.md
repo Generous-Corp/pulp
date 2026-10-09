@@ -13,8 +13,8 @@ publishes iOS device, iOS simulator, visionOS device, visionOS simulator,
 mac-x86_64, and `Skia.xcframework` slices that upstream does not. While
 upstream stays on m144, this fork is the active dependency.
 
-The chrome/m153 release ships all platform slices, including `linux-arm64` and
-Windows x64. Its Skia branch tip is
+The chrome/m153 release ships all platform slices, including `linux-arm64`,
+Windows x64, and native Windows ARM64. Its Skia branch tip is
 `8b8c3872fbc03f025855db96ce683f34ec98a815` at the start of the publishing
 workflow (run `32126649056`).
 The bundled build reports Dawn SHA1
@@ -105,7 +105,7 @@ The **`wasm-gpu`** slice is the exception, and the difference is load-bearing:
 | Directory | Platform | Architectures | Notes |
 |-----------|----------|--------------|-------|
 | `mac-gpu/` | macOS | arm64, x86_64, universal | mac-x86_64 only in the fork |
-| `win-gpu/` | Windows | x64 | release asset consumed by the CLI/SDK release matrix |
+| `win-gpu/` | Windows | x64, arm64 | release assets consumed by the CLI/SDK release matrix |
 | `linux-gpu/` | Linux | x64, arm64 | both slices published on the chrome/m153 release |
 | `ios-gpu/` | iOS device + simulator | arm64, arm64+x86_64 | fork-only slices |
 | `visionos-gpu/` | visionOS device + simulator | arm64 | fork-only slices |
@@ -146,6 +146,7 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-mac-universal-gpu-release.zip` | `0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9` |
 | `skia-build-mac-x86_64-gpu-release.zip` | `0aeb3a4879d59bf42bb4a42a21cda292b6c5401fa24377b241623a600664471d` |
 | `skia-build-wasm-wasm32-gpu-release.zip` | `a5218b84266b0d79dd9c1ce514be6d06f8898085aaa9309a9830442f29ca4887` |
+| `skia-build-win-arm64-gpu-release.zip` | `8e6fb2012ad026d8261eadfe3a9f638a165e82cefa2b896f8596dbaece9c6bde` |
 | `skia-build-win-x64-gpu-release.zip` | `9480972c67f07d0762183e962ec3483210eb446ff10ca4e9ddf83ad188f0d11b` |
 
 The manifest's `mac-arm64` selector uses the universal archive, so its cache

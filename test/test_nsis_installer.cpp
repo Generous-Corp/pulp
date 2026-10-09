@@ -2,7 +2,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <pulp/ship/installer.hpp>
 
-#include <chrono>
+#include "support/unique_temp_dir.hpp"
 #include <filesystem>
 #include <fstream>
 
@@ -27,9 +27,7 @@ struct ScopedTempDir {
     fs::path path;
 
     ScopedTempDir() {
-        path = fs::temp_directory_path() / ("pulp-nsis-test-"
-            + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        fs::create_directories(path);
+        path = pulp::test::make_unique_temp_dir("pulp-nsis-test");
     }
 
     ~ScopedTempDir() {

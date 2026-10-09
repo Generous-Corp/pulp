@@ -29,6 +29,7 @@ target_sources(pulp-host PRIVATE
     src/node_pack.cpp
     src/forge_descriptor_audit.cpp
     src/forge_catalog_export.cpp
+    src/forge_catalog_export_sample_region.cpp
     src/forge_catalog_export_effects.cpp
     src/forge_catalog_export_eurorack_drums.cpp
     src/forge_catalog_export_dynamics.cpp
@@ -37,8 +38,10 @@ target_sources(pulp-host PRIVATE
     src/forge_catalog_export_lofi.cpp
     src/forge_catalog_export_pitch_sequencing.cpp
     src/forge_catalog_export_space_synthesis.cpp
+    src/forge_space_catalog.cpp
     src/forge_catalog_json.cpp
     src/signal_graph_executor_routing.cpp
+    src/graph_timing_contract.cpp
     src/baked_graph_processor.cpp
     src/baked_graph_param_injection.cpp
     src/baked_codec.cpp
@@ -59,6 +62,7 @@ target_sources(pulp-host PRIVATE
     src/sample_region_proof.cpp
     src/sample_region_parameters.cpp
     src/sample_region_runtime.cpp
+    src/bounded_delay_descriptor.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)

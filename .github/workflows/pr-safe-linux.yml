@@ -241,7 +241,7 @@ jobs:
 
       - name: Build
         shell: bash
-        run: cmake --build build-linux-pr-safe --config Release --parallel 4
+        run: tools/ci/governed-build.sh cmake --build build-linux-pr-safe --config Release
 
       - name: Test
         shell: bash

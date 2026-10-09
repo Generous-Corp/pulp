@@ -145,7 +145,7 @@ class OverrideStatus:
 
 
 def load_snapshot(path: Path) -> Snapshot:
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("schema") != SNAPSHOT_SCHEMA:
         raise ValueError(f"{path}: expected schema {SNAPSHOT_SCHEMA!r}")
     regs = []
@@ -182,7 +182,7 @@ def consuming_workflows(variable: str, workflows_dir: Path) -> list[tuple[str, s
     paths = sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml"))
     for path in paths:
         try:
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
         except OSError:
             continue
         if needle not in text:
@@ -201,7 +201,7 @@ def referenced_variables(workflows_dir: Path) -> set[str]:
         return names
     for path in list(workflows_dir.glob("*.yml")) + list(workflows_dir.glob("*.yaml")):
         try:
-            names.update(_SELECTOR_VARIABLE.findall(path.read_text()))
+            names.update(_SELECTOR_VARIABLE.findall(path.read_text(encoding="utf-8")))
         except OSError:
             continue
     return names

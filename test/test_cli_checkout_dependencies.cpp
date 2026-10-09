@@ -1,8 +1,10 @@
 #include "../tools/cli/cli_common.hpp"
 #include "../tools/cli/cli_sdk.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -10,9 +12,7 @@
 namespace {
 
 struct TempCheckout {
-    fs::path root = fs::temp_directory_path()
-        / ("pulp-checkout-deps-" + std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::path root = pulp::test::make_unique_temp_dir("pulp-checkout-deps");
 
     TempCheckout() {
         fs::create_directories(root / "tools/deps");
@@ -109,6 +109,85 @@ TEST_CASE("checkout dependency bootstrap has an explicit emergency bypass",
     ScopedEnv bypass("PULP_SKIP_DEPENDENCY_BOOTSTRAP", "1");
     REQUIRE(ensure_checkout_dependencies(fs::path("/definitely/not/a/pulp/checkout")) == 0);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("checkout SDK installation uses the governed bounded build command",
+          "[cli][dependencies][build-governance]") {
+    TempCheckout checkout;
+    write_text(checkout.root / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\n");
+
+    const auto home = checkout.root / "home with spaces";
+    const auto bin = checkout.root / "fake-bin";
+    const auto log = checkout.root / "cmake-argv.log";
+    fs::create_directories(bin);
+    write_text(bin / "cmake", "#!/bin/sh\n"
+                              "printf '%s\\n' \"$@\" >> \"$FAKE_CMAKE_LOG\"\n"
+                              "for arg in \"$@\"; do\n"
+                              "  case \"$arg\" in\n"
+                              "    -DCMAKE_INSTALL_PREFIX=*) prefix=\"${arg#*=}\" ;;\n"
+                              "  esac\n"
+                              "done\n"
+                              "if [ -n \"${prefix:-}\" ]; then\n"
+                              "  mkdir -p \"$prefix/lib/cmake/Pulp\"\n"
+                              "  : > \"$prefix/lib/cmake/Pulp/PulpConfig.cmake\"\n"
+                              "  printf '0.9.0\\n' > \"$prefix/version.txt\"\n"
+                              "fi\n"
+                              "exit 0\n");
+    fs::permissions(bin / "cmake", fs::perms::owner_all);
+
+    const auto old_path = std::getenv("PATH") ? std::getenv("PATH") : "";
+    const auto path = bin.string() + ":" + old_path;
+    ScopedEnv pulp_home("PULP_HOME", home.string().c_str());
+    ScopedEnv path_env("PATH", path.c_str());
+    ScopedEnv cmake_log("FAKE_CMAKE_LOG", log.string().c_str());
+    ScopedEnv skip_bootstrap("PULP_SKIP_DEPENDENCY_BOOTSTRAP", "1");
+    ScopedEnv leases_off("PULP_TARTCI_LEASES", "0");
+    ScopedEnv jobs("PULP_BUILD_JOBS", "3");
+    ScopedEnv lock_off("PULP_BUILD_DIR_LOCK", "0");
+
+    const auto tartci = bin / "tartci";
+    write_text(tartci,
+               "#!/bin/sh\n"
+               "case \"$1 $2\" in\n"
+               "  'host-profile ') printf 'PULP_BUILD_JOBS=3\\nTARTCI_GOVERNOR_SCHEMA=1\\n' ;;\n"
+               "  'leases acquire') exit 75 ;;\n"
+               "esac\n");
+    fs::permissions(tartci, fs::perms::owner_all);
+    ScopedEnv fake_tartci("PULP_TARTCI_BIN", tartci.string().c_str());
+    ScopedEnv no_parent_lease("PULP_TARTCI_LEASE_HELD", "0");
+    ScopedEnv interactive("PULP_BUILD_CLASS", "interactive");
+
+    SECTION("capacity denial prevents the install build") {
+        ScopedEnv leases_on("PULP_TARTCI_LEASES", "1");
+        REQUIRE(ensure_checkout_sdk(checkout.root, "0.9.0").empty());
+        std::ifstream input(log);
+        std::string line;
+        while (std::getline(input, line))
+            REQUIRE(line != "--build");
+        return;
+    }
+
+    SECTION("no lease uses the explicit local cap and preserves path arguments") {
+
+        const auto sdk = ensure_checkout_sdk(checkout.root, "0.9.0");
+        REQUIRE(sdk == home / "sdk-local" / detect_platform() / "0.9.0");
+
+        std::ifstream input(log);
+        REQUIRE(input.good());
+        std::vector<std::string> invocations;
+        std::string line;
+        while (std::getline(input, line))
+            invocations.push_back(line);
+        REQUIRE(std::find(invocations.begin(), invocations.end(), "--build") != invocations.end());
+        REQUIRE(std::find(invocations.begin(), invocations.end(), "--parallel") !=
+                invocations.end());
+        REQUIRE(std::find(invocations.begin(), invocations.end(), "3") != invocations.end());
+        REQUIRE(std::find(invocations.begin(), invocations.end(),
+                          (home / "sdk-build" / (detect_platform() + "-0.9.0")).string()) !=
+                invocations.end());
+    }
+}
+#endif
 
 TEST_CASE("opt-in Shipyard targets are read from the checkout config", "[cli][shipyard]") {
     TempCheckout checkout;

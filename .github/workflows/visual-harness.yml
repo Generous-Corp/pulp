@@ -214,7 +214,7 @@ jobs:
         run: cmake -S . -B build-visual -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
 
       - name: Build visual harness
-        run: cmake --build build-visual --config Release --target pulp-test-visual
+        run: tools/ci/governed-build.sh cmake --build build-visual --config Release --target pulp-test-visual
 
       - name: Verify Yoga layout goldens
         run: python3 tools/harness/verifier.py visual --verify --all --build-dir build-visual

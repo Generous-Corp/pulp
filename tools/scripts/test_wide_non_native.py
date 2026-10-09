@@ -415,10 +415,10 @@ class LiveTreeContractTests(unittest.TestCase):
             self.assertEqual(errors, [], entry["name"])
 
     def test_tier_step_is_wired_into_the_required_context(self) -> None:
-        text = (REPO / ".github/workflows/version-skill-check.yml").read_text()
+        text = (REPO / ".github/workflows/version-skill-check.yml").read_text(encoding="utf-8")
         self.assertIn("--manifest tools/ci/wide_non_native_checks.json", text)
         self.assertIn("vars.PULP_CLASSIFY_WIDE_NON_NATIVE == '1'", text)
-        build = (REPO / ".github/workflows/build.yml").read_text()
+        build = (REPO / ".github/workflows/build.yml").read_text(encoding="utf-8")
         self.assertIn("WIDE_NON_NATIVE: ${{ vars.PULP_CLASSIFY_WIDE_NON_NATIVE }}", build)
         self.assertIn('wide_args=(--wide-non-native)', build)
 
@@ -431,11 +431,11 @@ class LiveTreeContractTests(unittest.TestCase):
     def test_every_tools_walking_gate_scanner_is_accounted_for(self) -> None:
         lane = {
             e["argv"][0].replace("{repo}/", "")
-            for e in json.loads((REPO / wide.LANE_MANIFEST).read_text())["tests"]
+            for e in json.loads((REPO / wide.LANE_MANIFEST).read_text(encoding="utf-8"))["tests"]
         }
         tier = {
             e["argv"][0].replace("{repo}/", "")
-            for e in json.loads((REPO / wide.TIER_MANIFEST).read_text())["tests"]
+            for e in json.loads((REPO / wide.TIER_MANIFEST).read_text(encoding="utf-8"))["tests"]
         }
         unaccounted = []
         seen = set()

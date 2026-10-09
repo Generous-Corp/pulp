@@ -435,3 +435,10 @@ linked and misattributes a framework the build may not use at all. When the
 engine contract changes, update all three together; `python3 tools/deps/audit.py
 --strict` checks pins and notice coverage, not whether the prose matches the
 build.
+
+## Prebuilt platform slices
+
+When a prebuilt Skia release gains a Windows platform slice, keep the exact
+asset URL and SHA-256 in `tools/deps/manifest.json` and mirror the digest in
+`external/skia-build/VERSION.md`; a dependency inventory entry alone is not a
+complete platform publication.

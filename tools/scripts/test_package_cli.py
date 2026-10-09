@@ -621,6 +621,12 @@ class MainTests(unittest.TestCase):
             runtime = root / "browser_capture"
             pulp.write_text("rust", encoding="utf-8")
             importer.write_text("importer", encoding="utf-8")
+            contract = root / "materialized_binding_contract.mjs"
+            contract.write_text("export const fixtureContract = true;\n", encoding="utf-8")
+            emitter = root / "materialized_source_emitter.mjs"
+            emitter.write_text("export const fixtureEmitter = true;\n", encoding="utf-8")
+            ids_map = root / "materialized_ids_map.mjs"
+            ids_map.write_text("export const fixtureIds = true;\n", encoding="utf-8")
             node_runtime = root / "node"
             node_runtime.write_text("node", encoding="utf-8")
             node_license = root / "node.LICENSE"
@@ -654,6 +660,12 @@ class MainTests(unittest.TestCase):
                             str(importer),
                             "--import-design-runtime-dir",
                             str(runtime),
+                            "--import-design-contract",
+                            str(contract),
+                            "--import-design-source-emitter",
+                            str(emitter),
+                            "--import-design-ids-map",
+                            str(ids_map),
                             "--node-runtime",
                             str(node_runtime),
                             "--node-license",
@@ -680,6 +692,9 @@ class MainTests(unittest.TestCase):
                 "libwgpu_native.so",
                 "pulp",
                 "pulp-import-design",
+                "jsx-runtime/materialized_binding_contract.mjs",
+                "jsx-runtime/materialized_source_emitter.mjs",
+                "jsx-runtime/materialized_ids_map.mjs",
             ]
             self.assertEqual(names, sorted(expected))
             node = shutil.which("node")
@@ -700,6 +715,90 @@ class MainTests(unittest.TestCase):
                 )
                 self.assertNotEqual(probe.returncode, 0)
                 self.assertNotIn("ERR_MODULE_NOT_FOUND", probe.stderr)
+
+    def test_main_rejects_import_design_without_materialized_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp"
+            importer = root / "pulp-import-design"
+            runtime = root / "browser_capture"
+            for path in (pulp, importer):
+                path.write_text("fixture", encoding="utf-8")
+            runtime.mkdir()
+            err = io.StringIO()
+            with argv(
+                [
+                    "package_cli.py",
+                    "--binary", str(pulp),
+                    "--import-design-binary", str(importer),
+                    "--import-design-runtime-dir", str(runtime),
+                    "--build-dir", str(root / "build"),
+                    "--platform", "linux-x64",
+                    "--out", str(root / "pulp.tar.gz"),
+                ]
+            ), contextlib.redirect_stderr(err):
+                rc = pc.main()
+
+            self.assertEqual(rc, 2)
+            self.assertIn("materialized binding contract", err.getvalue())
+
+    def test_main_rejects_missing_materialized_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp"
+            importer = root / "pulp-import-design"
+            runtime = root / "browser_capture"
+            for path in (pulp, importer):
+                path.write_text("fixture", encoding="utf-8")
+            runtime.mkdir()
+            missing = root / "missing-materialized-binding-contract.mjs"
+            err = io.StringIO()
+            with argv(
+                [
+                    "package_cli.py",
+                    "--binary", str(pulp),
+                    "--import-design-binary", str(importer),
+                    "--import-design-runtime-dir", str(runtime),
+                    "--import-design-contract", str(missing),
+                    "--build-dir", str(root / "build"),
+                    "--platform", "linux-x64",
+                    "--out", str(root / "pulp.tar.gz"),
+                ]
+            ), contextlib.redirect_stderr(err):
+                rc = pc.main()
+
+            self.assertEqual(rc, 2)
+            self.assertIn("--import-design-contract not at", err.getvalue())
+
+    def test_main_rejects_missing_materialized_runtime_sibling(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp"
+            importer = root / "pulp-import-design"
+            runtime = root / "browser_capture"
+            contract = root / "materialized_binding_contract.mjs"
+            emitter = root / "materialized_source_emitter.mjs"
+            for path in (pulp, importer, contract, emitter):
+                path.write_text("fixture", encoding="utf-8")
+            runtime.mkdir()
+            err = io.StringIO()
+            with argv(
+                [
+                    "package_cli.py",
+                    "--binary", str(pulp),
+                    "--import-design-binary", str(importer),
+                    "--import-design-runtime-dir", str(runtime),
+                    "--import-design-contract", str(contract),
+                    "--import-design-source-emitter", str(emitter),
+                    "--build-dir", str(root / "build"),
+                    "--platform", "linux-x64",
+                    "--out", str(root / "pulp.tar.gz"),
+                ]
+            ), contextlib.redirect_stderr(err):
+                rc = pc.main()
+
+            self.assertEqual(rc, 2)
+            self.assertIn("all materialized JSX runtime siblings", err.getvalue())
 
     def test_main_rejects_bundled_node_without_importer(self) -> None:
         with tempfile.TemporaryDirectory() as td:

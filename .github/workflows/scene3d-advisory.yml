@@ -109,7 +109,7 @@ jobs:
         # tests Not Run -- rather than silently shrinking the selection.
         run: |
           set -euo pipefail
-          cmake --build "${BUILD_DIR}" -j"$(sysctl -n hw.ncpu)" \
+          tools/ci/governed-build.sh cmake --build "${BUILD_DIR}" \
             --target pulp-test-renderer3d \
                      pulp-test-scene3d \
                      pulp-test-scene3d-renderer-characterization \

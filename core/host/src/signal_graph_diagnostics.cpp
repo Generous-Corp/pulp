@@ -16,6 +16,21 @@ std::uint64_t SignalGraph::next_diagnostic_graph_identity_() noexcept {
     return 0; // Exhaustion fails closed instead of recycling an identity.
 }
 
+GraphAuthoringReceipt SignalGraph::authoring_receipt() const {
+    GraphMutationLock lock(*this);
+    return {diagnostic_graph_identity_, authoring_generation_};
+}
+
+GraphAuthoringReceiptStatus
+SignalGraph::validate_authoring_receipt(GraphAuthoringReceipt receipt) const {
+    GraphMutationLock lock(*this);
+    if (receipt.graph_identity != diagnostic_graph_identity_)
+        return GraphAuthoringReceiptStatus::WrongGraph;
+    if (receipt.generation != authoring_generation_)
+        return GraphAuthoringReceiptStatus::Stale;
+    return GraphAuthoringReceiptStatus::Current;
+}
+
 bool SignalGraph::register_custom_node_diagnostics(CustomNodeDiagnosticsDescriptor descriptor) {
     if (descriptor.type_id.empty() || descriptor.type_id.size() >= 128 ||
         descriptor.type_id.find('\0') != std::string::npos ||

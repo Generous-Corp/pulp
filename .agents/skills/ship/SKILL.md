@@ -1870,3 +1870,10 @@ against a real `codesign --force -s -` replacement. Archive-producing CMake
 helpers must clear their stage
 on every package invocation: persistent `POST_BUILD` copy directories retain
 resources that were removed from source.
+
+- Design-import release packages can have a helper runtime dependency outside
+  `bin/browser_capture-v1`: the capture script imports the shared materialized
+  binding contract from `bin/jsx-runtime`. Any release or SDK staging change
+  must include that sibling directory, hash it in provenance, and add a
+  missing-sibling negative control; a browser runtime-only smoke test is not
+  sufficient.

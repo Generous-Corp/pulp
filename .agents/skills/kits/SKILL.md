@@ -144,3 +144,10 @@ content-pack kind fails with `content-pack-wrong-lane` and points at
 packs install data for an already-installed plugin, and they must keep separate
 trust and confirmation paths. Do not "fix" that refusal by teaching `kit apply`
 to install content.
+
+## Design-import UI source snapshots stay out of kit installation
+
+The design-import `pulp ui build/check` command emits and verifies an owned UI
+source snapshot with a deterministic manifest. It is a source/build contract,
+not a kit package; keep its output validation and clean-output lint separate
+from kit installation and mutation.

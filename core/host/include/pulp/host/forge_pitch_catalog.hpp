@@ -93,7 +93,7 @@
 // load time, and the registry rows below quote them per mode.
 
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/detail/forge_realization_identity.hpp>
 
 #include <pulp/signal/pitch_shifter.hpp>

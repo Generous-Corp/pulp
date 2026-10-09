@@ -22,6 +22,21 @@ target_link_libraries(pulp-test-cli-design-binding PRIVATE Catch2::Catch2WithMai
 catch_discover_tests(pulp-test-cli-design-binding
     PROPERTIES LABELS "parser-import")
 
+# `pulp ui` keeps the user-facing help contract in the native dispatcher while
+# delegating implementation to the dependency-free Python emitter. Test both
+# the help path and the forwarding/exit-status boundary without launching a
+# subprocess or mutating a checkout.
+add_executable(pulp-test-cli-ui-command
+    test_cli_ui.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cmd_ui.cpp
+)
+target_include_directories(pulp-test-cli-ui-command PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/runtime/include)
+target_link_libraries(pulp-test-cli-ui-command PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-ui-command
+    PROPERTIES LABELS "cli;ui")
+
 # CLI create target selection tests
 add_executable(pulp-test-cli-create-targets test_cli_create_targets.cpp ${CMAKE_SOURCE_DIR}/tools/cli/create_build_commands.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/create_targets.cpp
@@ -98,7 +113,9 @@ add_executable(pulp-test-cli-import-emit
     ${CMAKE_SOURCE_DIR}/tools/cli/import_emit_scan.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/import_detect.cpp
 )
-target_include_directories(pulp-test-cli-import-emit PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(pulp-test-cli-import-emit PRIVATE ${CMAKE_SOURCE_DIR}
+    # Header-only pulp/runtime/safe_relative_path.hpp; no pulp::runtime link.
+    ${CMAKE_SOURCE_DIR}/core/runtime/include)
 target_link_libraries(pulp-test-cli-import-emit PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
@@ -356,8 +373,11 @@ target_include_directories(pulp-test-cli-tartci-lease PRIVATE
 target_link_libraries(pulp-test-cli-tartci-lease PRIVATE
     pulp::runtime
     Catch2::Catch2WithMain)
-# The build-dir lock cases drive the checkout's own tools/ci/build_dir_lock.py.
-pulp_test_data(pulp-test-cli-tartci-lease PATHS tools/ci/build_dir_lock.py)
+# The build-dir lock cases drive the checkout's own tools/ci/build_dir_lock.py,
+# which imports tools/scripts/process_liveness.py (and lists tools/scripts to find it).
+pulp_test_data(pulp-test-cli-tartci-lease PATHS
+    tools/ci/build_dir_lock.py
+    tools/scripts/process_liveness.py)
 catch_discover_tests(pulp-test-cli-tartci-lease)
 
 # Stale git lock detection behind the `pulp doctor` "git locks" check.
@@ -479,7 +499,8 @@ catch_discover_tests(pulp-test-cli-upgrade-url)
 # pulp-cpp before replacing the user-facing pulp binary.
 add_executable(pulp-test-cli-upgrade-install test_cli_upgrade_install.cpp)
 pulp_test_data(pulp-test-cli-upgrade-install NO_DEFINE
-    PATHS tools/import-design/browser_capture tools/cli/cmd_upgrade.cpp)
+    PATHS tools/import-design/browser_capture tools/cli/cmd_upgrade.cpp
+          tools/import-design/jsx-runtime/materialized_binding_contract.mjs)
 target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(pulp-test-cli-upgrade-install PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")

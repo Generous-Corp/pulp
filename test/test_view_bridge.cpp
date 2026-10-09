@@ -2,28 +2,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include "support/portable_env.hpp"
-#include <pulp/format/editor_idle_pump.hpp>
-#include <pulp/format/editor_prewarm.hpp>
-#include <pulp/format/editor_ui.hpp>
-#include <pulp/format/gpu_host_select.hpp>
-#include <pulp/format/detail/au_v2_editor_resize.hpp>
-#include <pulp/format/plugin_state_io.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/format/view_bridge.hpp>
-#include <pulp/state/store.hpp>
-#include <pulp/state/listener_token.hpp>
-#include <pulp/view/auto_ui.hpp>
-#include <pulp/view/design_frame_view.hpp>
-#include <pulp/view/host_param_surface.hpp>
-#include <pulp/view/parameter_binding.hpp>
-#include <pulp/view/scripted_ui.hpp>
-#include <pulp/view/scripted_ui_prewarm.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/view.hpp>
-#include <pulp/view/window_host.hpp>
-#include <pulp/view/widget_bridge.hpp>
-#include <pulp/view/widgets.hpp>
-#include <pulp/canvas/canvas.hpp>
+#include "support/unique_temp_dir.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -32,6 +11,28 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/format/detail/au_v2_editor_resize.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
+#include <pulp/format/editor_prewarm.hpp>
+#include <pulp/format/editor_ui.hpp>
+#include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/format/view_bridge.hpp>
+#include <pulp/state/listener_token.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/auto_ui.hpp>
+#include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/parameter_binding.hpp>
+#include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/scripted_ui_prewarm.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -505,10 +506,7 @@ public:
 };
 
 std::filesystem::path write_editor_script(const char* stem, const std::string& code) {
-    const auto dir = std::filesystem::temp_directory_path()
-        / (std::string(stem) + "-"
-           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::filesystem::create_directories(dir);
+    const auto dir = pulp::test::make_unique_temp_dir(stem);
     std::ofstream(dir / "main.js") << code;
     return dir / "main.js";
 }
@@ -1691,10 +1689,7 @@ TEST_CASE("ViewBridge rebuilds the open editor in place on reload", "[view_bridg
 
 TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
           "[view_bridge][reload][scripted-ui]") {
-    const auto temp_dir = std::filesystem::temp_directory_path()
-        / ("pulp-view-bridge-scripted-reload-"
-           + std::to_string(std::chrono::steady_clock::now()
-                                .time_since_epoch().count()));
+    const auto temp_dir = pulp::test::make_unique_temp_dir("pulp-view-bridge-scripted-reload");
     struct TempDirCleanup {
         std::filesystem::path path;
         ~TempDirCleanup() {
@@ -1702,7 +1697,7 @@ TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
             std::filesystem::remove_all(path, ignored);
         }
     } cleanup{temp_dir};
-    REQUIRE(std::filesystem::create_directories(temp_dir));
+    REQUIRE(std::filesystem::is_directory(temp_dir));
     const auto script_path = temp_dir / "ui.js";
     {
         std::ofstream script(script_path);

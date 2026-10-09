@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <pulp/format/processor.hpp>
@@ -19,6 +20,7 @@
 #include <pulp/runtime/log.hpp>
 #include <queue>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -45,27 +47,37 @@ bool custom_type_matches_node_shape(const CustomNodeType& type, const GraphNode&
 std::vector<NodeId> processing_order_for(const std::vector<GraphNode>& nodes,
                                          const std::vector<Connection>& connections) {
     std::unordered_map<NodeId, int> in_degree;
-    for (const auto& n : nodes)
+    std::unordered_map<NodeId, std::size_t> authoring_index;
+    authoring_index.reserve(nodes.size());
+    for (std::size_t index = 0; index < nodes.size(); ++index) {
+        const auto& n = nodes[index];
         in_degree[n.id] = 0;
+        authoring_index[n.id] = index;
+    }
     for (const auto& c : connections) {
         if (c.feedback)
             continue;
         in_degree[c.dest_node]++;
     }
-    std::queue<NodeId> queue;
-    for (auto& [id, deg] : in_degree)
+    // Keep the compiled runtime plan independent of unordered-map iteration
+    // and edge discovery order. Authoring position is the semantic tie-break
+    // for independent nodes; NodeId is an identity token and may outlive a
+    // node's position after removals or future ID allocation changes.
+    using ReadyNode = std::pair<std::size_t, NodeId>;
+    std::priority_queue<ReadyNode, std::vector<ReadyNode>, std::greater<ReadyNode>> queue;
+    for (const auto& [id, deg] : in_degree)
         if (deg == 0)
-            queue.push(id);
+            queue.push({authoring_index.at(id), id});
     std::vector<NodeId> order;
     while (!queue.empty()) {
-        auto current = queue.front();
+        const auto current = queue.top().second;
         queue.pop();
         order.push_back(current);
         for (const auto& c : connections) {
             if (c.feedback)
                 continue;
             if (c.source_node == current && --in_degree[c.dest_node] == 0)
-                queue.push(c.dest_node);
+                queue.push({authoring_index.at(c.dest_node), c.dest_node});
         }
     }
     return order;
@@ -750,6 +762,53 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
     }
 
+    // Keep the serial reference walk's ordinary main-bus audio fan-in in the
+    // same canonical endpoint order as the routed runtime plan. The reduction
+    // is floating-point and therefore order-sensitive; sorting the whole lane
+    // would change authored MIDI, automation, feedback, or sidechain order, so
+    // only ordinary (feedforward, non-sidechain) audio entries are replaced in
+    // their existing positions. The connection index is the deterministic
+    // tie-breaker for duplicate endpoint identities, matching the graph plan.
+    const auto ordinary_audio = [&](const NodeRuntime::EdgeRef& edge) {
+        const auto& connection = cg->connections[edge.connection_index];
+        return !connection.feedback && !connection.midi && !connection.automation &&
+               !connection.audio_rate_modulation && !connection.sidechain;
+    };
+    const auto connection_less = [&](const NodeRuntime::EdgeRef& lhs,
+                                     const NodeRuntime::EdgeRef& rhs) {
+        const auto& left = cg->connections[lhs.connection_index];
+        const auto& right = cg->connections[rhs.connection_index];
+        const auto left_key = std::tuple{
+            left.source_node,
+            left.source_port,
+            left.dest_node,
+            left.dest_port,
+        };
+        const auto right_key = std::tuple{
+            right.source_node,
+            right.source_port,
+            right.dest_node,
+            right.dest_port,
+        };
+        if (left_key != right_key)
+            return left_key < right_key;
+        return lhs.connection_index < rhs.connection_index;
+    };
+    for (auto& [_, rt] : cg->runtime) {
+        std::vector<NodeRuntime::EdgeRef> ordinary;
+        ordinary.reserve(rt.inbound_audio_edges.size());
+        for (const auto& edge : rt.inbound_audio_edges) {
+            if (ordinary_audio(edge))
+                ordinary.push_back(edge);
+        }
+        std::sort(ordinary.begin(), ordinary.end(), connection_less);
+        std::size_t ordinary_index = 0;
+        for (auto& edge : rt.inbound_audio_edges) {
+            if (ordinary_audio(edge))
+                edge = ordinary[ordinary_index++];
+        }
+    }
+
     cg->ordered_runtime.reserve(cg->order.size());
     for (NodeId id : cg->order) {
         auto rt_it = cg->runtime.find(id);
@@ -1377,6 +1436,13 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
             runtime::log_error("SignalGraph: failed to prepare Processor node '{}'", n.name);
             return false;
         }
+        // ProcessorNode deliberately reuses the Plugin topology kind. Cache
+        // its prepare-stable latency in the same metadata snapshot consumed by
+        // both the legacy walk and executor PDC pass; reading the live
+        // processor during compile would reintroduce the swap-time race this
+        // cache avoids.
+        prepared_plugin_meta_[n.id] = PreparedPluginMetadata{
+            {}, std::max(0, processor->second->instance->processor().latency_samples()), false};
     }
 
     // Create/prepare stateful custom-node instances on this UI thread before

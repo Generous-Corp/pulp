@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 123,
+  "inventory_version": 128,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 503,
-    "reviewed_headers": 224,
+    "public_headers": 504,
+    "reviewed_headers": 225,
     "legacy_unreviewed_headers": 279,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 44,
-      "infrastructure": 57,
+      "infrastructure": 58,
       "legacy_unreviewed": 279,
       "unsupported_capability": 2
     },
@@ -97,8 +97,8 @@
         "unsupported_headers": 0
       },
       "host": {
-        "public_headers": 8,
-        "reviewed_headers": 8,
+        "public_headers": 9,
+        "reviewed_headers": 9,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
@@ -1196,7 +1196,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph.hpp",
-      "fingerprint": "sha256:1a6063deb4e3316cb45ddef006e5a728fbd0eef6af8551a3c9fc68804a379bc0",
+      "fingerprint": "sha256:4f5173fdaf3fc38ba74e88ec35117c7d683aad6b1706a766f27fd9b549b15cc6",
       "include": "pulp/host/signal_graph.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1206,8 +1206,17 @@
     },
     {
       "domain": "host",
+      "source": "core/host/include/pulp/host/signal_graph_authoring.hpp",
+      "fingerprint": "sha256:0f505f35215b6fbcc7a9f742b76d0d9f62ccf331d0facfc93c782ec7f4203d02",
+      "include": "pulp/host/signal_graph_authoring.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "A focused value contract for SignalGraph authoring lineage receipts. It lets control and importer code validate graph identity/generation without claiming an installed DSP capability or pulling in the runtime implementation surface."
+    },
+    {
+      "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_prepared_topology_edit.hpp",
-      "fingerprint": "sha256:0022182b0e350a7aa975e8eab7ef47b1ca1e1c15bfaffd9b6ce13aa10370fb94",
+      "fingerprint": "sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577",
       "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1218,7 +1227,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:027bc469687908ad5abebc130f736925c37ea650b165dd95e58dd8a531cd585a",
+      "fingerprint": "sha256:451e1ec94d3e41c117f3c23e6cec6ba344566a86f40d051a297fd9312175d58c",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1552,7 +1561,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/routing_utility_kernels.hpp",
-      "fingerprint": "sha256:b37237cdb793ec5b300da4bb4c0850be8dab0c2bb24b243b45c554af6929a64a",
+      "fingerprint": "sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
       "include": "pulp/midi/routing_utility_kernels.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

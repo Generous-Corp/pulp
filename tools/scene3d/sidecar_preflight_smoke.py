@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from scene3d_launch import argv_for
 
 
 def run_command(command):
@@ -38,7 +39,7 @@ def main():
     args = parser.parse_args()
 
     sidecar_json = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "khronos-boxtextured",
         "--exported-at",
@@ -68,7 +69,7 @@ def main():
         sidecar_path = Path(temp_dir) / "BoxTextured.pulp3d.json"
         sidecar_path.write_text(sidecar_json, encoding="utf-8")
         preflight = run_command([
-            str(args.preflight_tool),
+            *argv_for(args.preflight_tool),
             "--require-runtime-evidence",
             str(sidecar_path),
         ])

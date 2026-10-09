@@ -65,6 +65,7 @@ using namespace Steinberg;
 // Resolve path to the actual loadable binary inside a .vst3 bundle.
 // macOS: <Name>.vst3/Contents/MacOS/<Name>
 // Linux: <Name>.vst3/Contents/x86_64-linux/<Name>.so  or <Name>.vst3 (flat)
+// Windows: <Name>.vst3/Contents/<arch>-win/<Name>.vst3
 std::string resolve_vst3_binary(const std::string& path) {
     fs::path p(path);
     std::error_code ec;
@@ -75,6 +76,26 @@ std::string resolve_vst3_binary(const std::string& path) {
 #elif defined(__linux__)
     auto inner = p / "Contents" / "x86_64-linux" / (stem + ".so");
     if (!fs::exists(inner, ec)) inner = p / "Contents" / "aarch64-linux" / (stem + ".so");
+#elif defined(_WIN32)
+    // CMake's BUNDLE property is ignored for Windows MODULE targets.  The
+    // Pulp format helper therefore assembles a standard VST3 bundle with an
+    // architecture-specific Windows directory.  Discover the directory
+    // instead of hard-coding x64 so the same host loads ARM64 and x86_64
+    // plugins (and remains tolerant of future Windows architectures).
+    auto contents = p / "Contents";
+    if (fs::is_directory(contents, ec)) {
+        for (const auto& entry : fs::directory_iterator(contents, ec)) {
+            if (ec || !entry.is_directory(ec))
+                continue;
+            const auto arch = entry.path().filename().string();
+            if (arch.size() < 4 || arch.substr(arch.size() - 4) != "-win")
+                continue;
+            auto candidate = entry.path() / (stem + ".vst3");
+            if (fs::exists(candidate, ec))
+                return candidate.string();
+        }
+    }
+    auto inner = p / (stem + ".dll");
 #else
     auto inner = p;
 #endif

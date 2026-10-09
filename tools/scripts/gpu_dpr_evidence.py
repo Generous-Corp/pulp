@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import gpu_first_visible_a3_acceptance as a3_acceptance
+from script_argv import argv_for
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 RECEIPT_SCHEMA = "pulp.gpu-dpr-cell-receipt.v1"
@@ -855,7 +856,7 @@ def analyze_trace(
     category_scope: dict[str, Any] | None = None
     for question in sorted(TRACE_QUESTIONS):
         completed = subprocess.run(
-            [str(analyzer), "trace", question, "--trace", str(trace_path.resolve()), "--json"],
+            [*argv_for(analyzer), "trace", question, "--trace", str(trace_path.resolve()), "--json"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120,
         )
         try:

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 import argparse
+import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from scene3d_launch import argv_for
 
 
 EXPORTED_AT = "2026-06-03T00:00:00Z"
@@ -50,7 +55,7 @@ def main():
     errors = []
 
     valid = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "khronos-boxtextured",
         "--exported-at",
@@ -73,7 +78,7 @@ def main():
     )
 
     missing_exported_at = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "khronos-boxtextured",
         str(args.fixture),
@@ -87,7 +92,7 @@ def main():
     )
 
     empty_exported_at = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "khronos-boxtextured",
         "--exported-at",
@@ -103,7 +108,7 @@ def main():
     )
 
     empty_exporter = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--exporter",
         "",
         "--exported-at",
@@ -119,7 +124,7 @@ def main():
     )
 
     empty_source_defaults = run_command([
-        str(args.sidecar_tool),
+        *argv_for(args.sidecar_tool),
         "--source",
         "",
         "--exported-at",
@@ -131,11 +136,38 @@ def main():
         empty_source_defaults,
         0,
         [
-            f'"source": "{args.fixture}"',
+            # The tool writes JSON, so the path appears JSON-escaped (every
+            # backslash doubled on Windows).
+            f'"source": {json.dumps(str(args.fixture))}',
             f'"exported_at": "{EXPORTED_AT}"',
         ],
         errors,
     )
+
+    # A source path containing a backslash, which the tool must JSON-escape.
+    # Every Windows path does; on POSIX a directory name can carry one, so
+    # the case runs on every platform.
+    if os.name != "nt":
+        with tempfile.TemporaryDirectory() as tmp:
+            escaped_dir = Path(tmp) / "back\\slash"
+            escaped_dir.mkdir()
+            escaped_fixture = escaped_dir / Path(args.fixture).name
+            shutil.copyfile(args.fixture, escaped_fixture)
+            escaped_source = run_command([
+                *argv_for(args.sidecar_tool),
+                "--source",
+                "",
+                "--exported-at",
+                EXPORTED_AT,
+                str(escaped_fixture),
+            ])
+            expect_case(
+                "escaped-source-path",
+                escaped_source,
+                0,
+                [f'"source": {json.dumps(str(escaped_fixture))}'],
+                errors,
+            )
 
     if errors:
         for error in errors:

@@ -1,20 +1,22 @@
 import { transformSync } from 'esbuild';
+import { trustedCapturedVendorPayload } from '../browser_capture/vendor_payload.mjs';
 
 function assetText(asset) {
-  if (!asset || asset.mime_type !== 'text/javascript' ||
+  if (!asset || !/^(?:text|application)\/javascript(?:\s*;|$)/i.test(asset.mime_type || '') ||
       typeof asset.data_base64 !== 'string') return '';
   return Buffer.from(asset.data_base64, 'base64').toString('utf8');
 }
-function nativeVendorKind(asset) {
-  const text = assetText(asset);
-  if (text.includes('@license React') && text.includes('react.development.js'))
-    return 'react';
-  if (text.includes('@license React') && text.includes('react-dom.development.js'))
-    return 'react-dom';
-  if (text.length > 1_000_000 && text.slice(0, 1000).includes('.Babel=') &&
-      text.includes('transform')) return 'babel';
-  return '';
+function nativeVendorKind(asset, payloadTrust) {
+  // Vendor classification is an explicit capture/schema fact. Content-only
+  // marker matching can delete authored assets that happen to contain a
+  // license string or Babel-like text. Capture and canonicalization both
+  // require the exact supported payload digest; the verifier parameter is a
+  // narrow test seam for synthetic shape fixtures.
+  const kind = asset?.vendor_kind;
+  return (kind === 'react' || kind === 'react-dom' || kind === 'babel') &&
+      payloadTrust(kind, assetText(asset)) ? kind : '';
 }
+
 
 function tagEnd(html, start) {
   let quote = '';
@@ -90,29 +92,57 @@ function rewriteScripts(html, rewrite) {
 // Runtime imports already install @pulp/react as React/ReactDOM. Compile the
 // captured JSX at build time, then remove browser-only development React and
 // Babel payloads rather than parsing several megabytes on every editor open.
-export function canonicalizeMaterializedRuntimeDocument(document) {
+export function canonicalizeMaterializedRuntimeDocument(document, options = {}) {
+  const payloadTrust = options.vendorPayloadTrust || trustedCapturedVendorPayload;
   const assets = Array.isArray(document.assets) ? document.assets : [];
+  // Asset ids are the only join key between the HTML reference and the
+  // payload table.  A malformed or adversarial document can repeat an id with
+  // different bytes; removing by id in that case would drop an authored asset
+  // merely because a trusted vendor happened to occupy the same key.  Keep
+  // every colliding id in the document and report it through the existing
+  // canonicalization metadata.  Capture-produced documents use unique ids, so
+  // this is a fail-closed guard with no cost on the normal path.
+  const assetIdCounts = new Map();
+  for (const asset of assets) {
+    const id = String(asset?.id ?? '');
+    assetIdCounts.set(id, (assetIdCounts.get(id) || 0) + 1);
+  }
+  const duplicateAssetIds = new Set(
+    [...assetIdCounts].filter(([, count]) => count > 1).map(([id]) => id));
   const removable = new Map();
   for (const asset of assets) {
-    const kind = nativeVendorKind(asset);
-    if (kind) removable.set(String(asset.id), kind);
+    const id = String(asset?.id ?? '');
+    if (duplicateAssetIds.has(id)) continue;
+    const kind = nativeVendorKind(asset, payloadTrust);
+    if (kind) removable.set(id, kind);
   }
 
   let babelCount = 0;
+  // Claude/agent exports commonly repeat the same inline Babel program in
+  // several script tags (for example once per preview frame).  JSX lowering
+  // is pure for the fixed options below, so retain compiled source within a
+  // document pass instead of paying esbuild's parser/codegen cost repeatedly.
+  // The cache is deliberately scoped to this call: it cannot retain source
+  // from an untrusted document or grow across imports.
+  const compiledJsx = new Map();
   let html = rewriteScripts(String(document.html || ''),
     ({ whole, openTag, source }) => {
       const typeAttribute = attribute(openTag, 'type');
       const type = typeAttribute?.value.toLowerCase();
       if (type !== 'text/babel' && type !== 'text/jsx')
         return whole;
-      const compiled = transformSync(source, {
-        loader: 'jsx',
-        target: 'es2020',
-        jsx: 'transform',
-        jsxFactory: 'React.createElement',
-        jsxFragment: 'React.Fragment',
-        legalComments: 'none',
-      }).code.replace(/<\/script/gi, '<\\/script');
+      let compiled = compiledJsx.get(source);
+      if (compiled === undefined) {
+        compiled = transformSync(source, {
+          loader: 'jsx',
+          target: 'es2020',
+          jsx: 'transform',
+          jsxFactory: 'React.createElement',
+          jsxFragment: 'React.Fragment',
+          legalComments: 'none',
+        }).code.replace(/<\/script/gi, '<\\/script');
+        compiledJsx.set(source, compiled);
+      }
       ++babelCount;
       const javascriptOpenTag = openTag.slice(0, typeAttribute.start) +
         openTag.slice(typeAttribute.end);
@@ -122,11 +152,46 @@ export function canonicalizeMaterializedRuntimeDocument(document) {
   // Babel is removable only after every JSX script has become ordinary JS.
   // React/ReactDOM are always redundant because the wrapper installs and
   // preserves the host reconciler before runtime import.
-  const removableIds = new Set([...removable].filter(([, kind]) =>
-    kind !== 'babel' || babelCount > 0).map(([id]) => id));
+  const references = new Map();
+  rewriteScripts(html, ({ whole, openTag, source }) => {
+    const src = attribute(openTag, 'src')?.value;
+    if (src !== undefined) {
+      const list = references.get(src) || [];
+      list.push(source.trim() === '');
+      references.set(src, list);
+    }
+    return whole;
+  });
+  const hasReferenceAfterRemovingEmptyScript = (id) =>
+    (() => {
+      const probe = rewriteScripts(html, ({ whole, openTag, source }) => {
+        const src = attribute(openTag, 'src')?.value;
+        // Remove only the exact candidate tag. Preserve every other script,
+        // including inline bodies that may dynamically load this asset.
+        return source.trim() === '' && src === id ? '' : whole;
+      });
+      // Match the complete asset token. A short id such as "react" must not
+      // be treated as a reference merely because another asset is named
+      // "react-dom". Quotes, CSS delimiters, and tag whitespace remain valid
+      // boundaries, while path/query characters remain part of the token.
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`(?:^|[^A-Za-z0-9_./?&:+%\\-])${escaped}` +
+        `(?=$|[^A-Za-z0-9_./?&:+%\\-])`).test(probe);
+    })();
+  const removableIds = new Set([...removable].filter(([id, kind]) =>
+    (kind !== 'babel' || babelCount > 0) &&
+    (references.get(id)?.length ?? 0) > 0 &&
+    references.get(id).every(Boolean) &&
+    // Any remaining occurrence (including an inline script body, unquoted
+    // attribute, CSS, srcset, comment, or text) is an external reference that
+    // must keep the asset alive.
+    !hasReferenceAfterRemovingEmptyScript(id)
+  ).map(([id]) => id));
   html = rewriteScripts(html, ({ whole, openTag, source }) => {
     const src = attribute(openTag, 'src')?.value;
-    return source === '' && src !== undefined && removableIds.has(src) ? '' : whole;
+    // Require every exact reference to be empty. Query strings, path variants,
+    // whitespace bodies, and authored script bodies are not vendor references.
+    return source.trim() === '' && src !== undefined && removableIds.has(src) ? '' : whole;
   });
 
   return {
@@ -136,6 +201,9 @@ export function canonicalizeMaterializedRuntimeDocument(document) {
     runtime_canonicalization: {
       jsx_scripts_compiled: babelCount,
       browser_vendor_assets_removed: removableIds.size,
+      ...(duplicateAssetIds.size > 0
+        ? { duplicate_asset_ids_preserved: duplicateAssetIds.size }
+        : {}),
     },
   };
 }

@@ -186,7 +186,8 @@ pulp_dsp_series_catalog_suite(pulp-test-forge-pitch-catalog  test_forge_pitch_ca
 pulp_dsp_series_catalog_suite(pulp-test-forge-synthesis-catalog
                               test_forge_synthesis_catalog_contracts.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-space-catalog  test_forge_space_catalog_convolution_ambience_topology.cpp
-    test_forge_space_catalog_ambience_runtime_speaker.cpp)
+    test_forge_space_catalog_ambience_runtime_speaker.cpp
+    test_forge_space_catalog_compatibility.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-sequencing-catalog
                               test_forge_sequencing_catalog_stage_cartesian_rungler.cpp
     test_forge_sequencing_catalog_quantizer_gates_contracts.cpp)

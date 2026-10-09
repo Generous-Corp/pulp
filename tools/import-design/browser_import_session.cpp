@@ -30,6 +30,9 @@ BrowserImportSession::take_capture_adoption() {
     adoption.render_height = capture_->render_height();
     adoption.reference_image = capture_->reference_image();
     adoption.similarity_failed = capture_->similarity_failed();
+    adoption.materialized_document = capture_->materialized_document();
+    // The path lives in the capture workspace, which remains owned by the
+    // session until publish or destruction.
     adoption.design_ir = capture_->take_design_ir();
     capture_adopted_ = true;
     return adoption;

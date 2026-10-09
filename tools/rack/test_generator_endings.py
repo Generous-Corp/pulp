@@ -55,7 +55,7 @@ def endings():
     """The literal prefix of every SystemExit message the generators raise."""
     out = {}
     for path in GENERATORS:
-        src = open(path).read()
+        src = open(path, encoding="utf-8").read()
         for m in re.finditer(r'SystemExit\(\s*f?"([^"{]{8,})', src):
             text = m.group(1).strip()
             # Cut at the first interpolation or escape; the prefix is what a
@@ -68,7 +68,7 @@ def endings():
 
 def rules():
     """Every substring build_monitor.cpp treats as an error or a refusal."""
-    src = open(MONITOR).read()
+    src = open(MONITOR, encoding="utf-8").read()
     return {m.lower() for m in re.findall(r'contains\(lower,\s*"([^"]+)"\)', src)}
 
 
@@ -114,7 +114,7 @@ def main():
     # exactly as badly as one it cannot see fail — the stage never resolves and
     # the artifact it just produced is never offered.
     success_rules = set()
-    mon = open(MONITOR).read()
+    mon = open(MONITOR, encoding="utf-8").read()
     block = mon[:mon.find("Kind::success")]
     for m in re.finditer(r'contains\(lower,\s*"([^"]+)"\)', block[-900:]):
         success_rules.add(m.group(1).lower())
@@ -190,7 +190,7 @@ def main():
     # ten endings; the other eight fell through to INCONCLUSIVE, which reads
     # as "the harness could not tell" when the generator had said exactly what
     # went wrong. Its list has to cover them too.
-    drv_src = open(os.path.join(HERE, "drive_app.py")).read()
+    drv_src = open(os.path.join(HERE, "drive_app.py"), encoding="utf-8").read()
     # To the closing paren on its OWN LINE. A non-greedy match to the first
     # ")" stops inside the marker "traceback (most recent call last)", sees two
     # markers, and reports the other eight as missing — nine invented failures

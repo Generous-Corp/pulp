@@ -1,0 +1,101 @@
+{
+  "id": "dspx07-native-web-projection",
+  "title": "Bounded baked Processor projection for native, web, and Audio Unit adapters",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "7c6e0b8a-2a54-4a12-9ef7-4f67b1d9c6a2",
+  "owned_paths": [
+    "core/format/src/projection_capability.hpp",
+    "core/format/include/pulp/format/clap_adapter.hpp",
+    "core/format/include/pulp/format/vst3_adapter.hpp",
+    "core/format/include/pulp/format/lv2_adapter.hpp",
+    "core/format/include/pulp/format/web/wam_adapter.hpp",
+    "core/format/include/pulp/format/web/wclap_adapter.hpp",
+    "test/test_dspx07_projection.cpp",
+    "test/test_dspx07_au_baked_projection.mm",
+    "test/cmake/core_audio_platform_format_tests.cmake",
+    "docs/guides/native-web-projection.md",
+    "docs/status/sequencer-exposure/rows/dspx07-native-web-projection.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/format/src/projection_capability.hpp",
+      "needles": [
+        "ProjectionSurface",
+        "ProjectionResult",
+        "projection_capability",
+        "graph-only descriptor",
+        "descriptor bounds"
+      ]
+    },
+    {
+      "path": "test/test_dspx07_projection.cpp",
+      "needles": [
+        "ProjectionSurface::clap",
+        "ProjectionSurface::wam",
+        "!projection_capability",
+        "ProjectionSurface::au"
+      ]
+    },
+    {
+      "path": "docs/guides/native-web-projection.md",
+      "needles": [
+        "DSPX-07",
+        "bounded baked",
+        "Dense modulation",
+        "Forge, Spectr, and GPU-NAM"
+      ]
+    },
+    {
+      "path": "test/test_dspx07_au_baked_projection.mm",
+      "needles": [
+        "ProjectionSurface::au",
+        "create_baked_au_processor",
+        "AU v2 render path",
+        "AU v3 render path"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "deferred",
+      "owner": "dspx07-native-web-projection",
+      "rationale": "The capability rule is implemented; packaged SDK identity proof is pending the adapter fixture.",
+      "dependencies": [
+        "dspx07-native-web-projection-adapter-fixture"
+      ]
+    },
+    "offline_timeline_cli": {
+      "disposition": "deferred",
+      "owner": "dspx07-native-web-projection",
+      "rationale": "No offline CLI projection command is added by this smallest slice.",
+      "dependencies": [
+        "dspx07-native-web-projection-adapter-fixture"
+      ]
+    },
+    "offline_timeline_mcp": {
+      "disposition": "deferred",
+      "owner": "dspx07-native-web-projection",
+      "rationale": "No offline MCP projection command is added by this smallest slice.",
+      "dependencies": [
+        "dspx07-native-web-projection-adapter-fixture"
+      ]
+    },
+    "live_product_control": {
+      "disposition": "deferred",
+      "owner": "dspx07-native-web-projection",
+      "rationale": "Adapter runtime/package proof remains a follow-up after focused capability proof.",
+      "dependencies": [
+        "dspx07-native-web-projection-adapter-fixture"
+      ]
+    },
+    "design_time_agent_manifest": {
+      "disposition": "deferred",
+      "owner": "dspx07-native-web-projection",
+      "rationale": "No design-time manifest generation is changed.",
+      "dependencies": [
+        "dspx07-native-web-projection-adapter-fixture"
+      ]
+    }
+  }
+}
