@@ -29,6 +29,8 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 THERMAL_SCHEMA = "pulp.gpu-audio.p2.thermal-observation.v1"
 THERMAL_STATES = frozenset({"nominal", "fair", "serious", "critical", "unknown"})
 THERMAL_MAX_AGE_SECONDS = 30.0
+GPU_HEALTH_MAX_AGE_SECONDS = 30.0
+GPU_HEALTH_SCHEMA = "pulp.gpu-health-result.v2"
 
 
 def _canonical(value: Any) -> bytes:
@@ -58,6 +60,23 @@ def _tool_provenance(name: str) -> dict[str, Any]:
         except OSError:
             resolved = None
     return {"name": name, "path": resolved, "sha256": digest}
+
+
+def _command_provenance(command: list[str]) -> dict[str, Any]:
+    """Hash the executable used for active GPU health evidence."""
+    raw = command[0] if command else ""
+    resolved = None
+    digest = None
+    try:
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            found = shutil.which(raw)
+            candidate = Path(found) if found else candidate
+        resolved = str(candidate.resolve(strict=True))
+        digest = _file_sha256(Path(resolved))
+    except OSError:
+        resolved = None
+    return {"argv0": raw, "path": resolved, "sha256": digest}
 
 
 def _git_head() -> str:
@@ -125,6 +144,77 @@ def _parse_gpu(raw: str) -> tuple[str, int | None]:
     return "unknown", sum(int(value) for value in busy)
 
 
+def _gpu_health_command() -> list[str]:
+    """Return the installed/source Pulp GPU doctor command.
+
+    The IORegistry ``busy`` counter is not an execution proof.  Admission
+    therefore uses the same bounded Dawn/WebGPU compute probe that Pulp uses
+    for authenticated GPU health.  Discovery is deliberately local and
+    fail-closed: a missing executable produces an unavailable observation.
+    """
+    # Do not silently use an installed CLI: it may be built from a different
+    # checkout (the CLI itself reports this mismatch).  P2 evidence must come
+    # from the exact source worktree whose revision is in the receipt.
+    candidates = [
+        REPO_ROOT / "build" / "pulp",
+        REPO_ROOT / "build" / "tools" / "cli" / "pulp-cpp",
+    ]
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and not candidate.is_symlink() and candidate.stat().st_mode & 0o111:
+                return [str(candidate), "doctor", "gpu", "--json"]
+        except OSError:
+            continue
+    return [str(REPO_ROOT / "build" / "pulp"), "doctor", "gpu", "--json"]
+
+
+def _parse_gpu_health(raw: str, *, now: datetime | None = None) -> tuple[str, dict[str, Any]]:
+    """Accept only a fresh, machine-produced authentic compute health result."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return "unknown", {"status": "invalid", "reason": "json_invalid"}
+    if not isinstance(value, dict) or value.get("schema") != GPU_HEALTH_SCHEMA:
+        return "unknown", {"status": "invalid", "reason": "schema_invalid"}
+    if value.get("verdict") != "pass" or value.get("health_state") != "healthy":
+        return "unknown", {"status": "invalid", "reason": "health_not_passing"}
+    sampled_at = value.get("measured_at_utc")
+    try:
+        sampled = datetime.fromisoformat(str(sampled_at).replace("Z", "+00:00"))
+        age = (now - sampled).total_seconds()
+    except (TypeError, ValueError):
+        return "unknown", {"status": "invalid", "reason": "measured_at_invalid"}
+    if age < -1.0 or age > GPU_HEALTH_MAX_AGE_SECONDS:
+        return "unknown", {"status": "invalid", "reason": "measurement_stale", "age_seconds": age}
+    probes = value.get("probes")
+    if not isinstance(probes, list):
+        return "unknown", {"status": "invalid", "reason": "probes_invalid"}
+    compute = next((probe for probe in probes
+                    if isinstance(probe, dict)
+                    and probe.get("probe_id") == "gpu-compute-magnitude"
+                    and probe.get("required") is True), None)
+    if not isinstance(compute, dict) or compute.get("verdict") != "pass":
+        return "unknown", {"status": "invalid", "reason": "compute_probe_missing"}
+    adapter = compute.get("adapter")
+    measurements = compute.get("measurements")
+    if (not isinstance(adapter, dict) or adapter.get("status") != "authentic"
+            or adapter.get("class") != "hardware"
+            or any(not isinstance(adapter.get(key), str) or not adapter[key]
+                   for key in ("name", "backend", "device"))
+            or not isinstance(measurements, dict)
+            or measurements.get("compute_initialized") is not True
+            or measurements.get("compute_oracle_passed") is not True
+            or measurements.get("device_lost") is not False):
+        return "unknown", {"status": "invalid", "reason": "compute_identity_or_proof_invalid"}
+    observation = {
+        "status": "valid", "schema": GPU_HEALTH_SCHEMA, "run_id": value.get("run_id"),
+        "measured_at_utc": sampled_at, "age_seconds": age,
+        "probe_id": compute.get("probe_id"), "adapter": adapter,
+    }
+    return "passed", {"status": "valid", "observation": observation}
+
+
 def _parse_thermal(raw: str, *, now: datetime | None = None) -> tuple[str, dict[str, Any]]:
     """Parse and freshness-check the Foundation thermal observation.
 
@@ -170,7 +260,9 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
         _run(["pmset", "-g", "therm"], runner),
         _run(["ioreg", "-r", "-c", "IOAccelerator", "-l"], runner),
         _run(["swift", str(THERMAL_HELPER)], runner),
+        _run(_gpu_health_command(), runner, timeout=30),
     ]
+    gpu_health_command = observations[5]["argv"]
     reasons: list[str] = []
     try:
         vitals = json.loads(observations[0]["stdout"])
@@ -215,10 +307,16 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
         reasons.append("thermal_observation_unknown")
     elif thermal_state != "nominal":
         reasons.append("thermal_state_not_nominal")
-    gpu_status, gpu_busy = _parse_gpu(observations[3]["stdout"])
-    if observations[3]["returncode"] != 0 or gpu_status != "passed":
+    # Keep IORegistry as a diagnostic observation, but admit only from the
+    # active Pulp GPU-health compute/readback proof.
+    _, gpu_busy = _parse_gpu(observations[3]["stdout"])
+    gpu_status, gpu_health_observation = _parse_gpu_health(
+        observations[5]["stdout"] if observations[5]["returncode"] == 0 else "")
+    if observations[5]["returncode"] != 0 or gpu_status != "passed":
         reasons.append("gpu_observation_unavailable")
-    elif gpu_busy != 0:
+    # A non-zero registry counter remains a conservative negative control.  It
+    # can block, but a zero value can never establish the positive proof.
+    if gpu_busy not in (None, 0):
         reasons.append("gpu_work_queues_busy")
     raw_hash = _sha256(_canonical(observations))
     sampled_at = datetime.now(timezone.utc).isoformat()
@@ -232,6 +330,8 @@ def collect(*, runner: Callable[..., subprocess.CompletedProcess] = subprocess.r
         "load1": load1, "ncpu": ncpu,
         "gpu_contention": "gpu_work_queues_busy" in reasons,
         "gpu_observation_status": gpu_status, "gpu_busy_work_queues": gpu_busy,
+        "gpu_health_observation": gpu_health_observation,
+        "gpu_health_source": _command_provenance(gpu_health_command),
         "ui_contention": "ui_contention_present" in reasons,
         "thermal_state": thermal_state, "thermal_observation": thermal_observation,
         "thermal_source": {

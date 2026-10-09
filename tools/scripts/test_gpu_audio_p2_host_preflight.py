@@ -35,6 +35,60 @@ class HostPreflightTests(unittest.TestCase):
             output = 'AGXAccelerator busy 0\n'
         return subprocess.CompletedProcess(command, 0, output, "")
 
+    @staticmethod
+    def passing_gpu_runner(command, **kwargs):
+        if command[0] == "pulp" or command[0].endswith("/pulp"):
+            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            return subprocess.CompletedProcess(command, 0, json.dumps({
+                "schema": "pulp.gpu-health-result.v2", "version": 2,
+                "run_id": "run-p2-fixture", "measured_at_utc": now,
+                "render_requested": True, "verdict": "pass", "health_state": "healthy",
+                "recommendations": [], "probes": [{
+                    "probe_id": "gpu-compute-magnitude", "required": True, "verdict": "pass",
+                    "adapter": {"status": "authentic", "class": "hardware",
+                                 "name": "Apple M5 Ultra", "backend": "Metal", "device": "apple-m5"},
+                    "measurements": {"compute_initialized": True, "compute_oracle_passed": True,
+                                      "device_lost": False},
+                }],
+            }), "")
+        return HostPreflightTests.runner(command, **kwargs)
+
+    def test_authenticated_gpu_health_compute_fixture_passes(self):
+        receipt = preflight.collect(runner=self.passing_gpu_runner, source_revision="0" * 40)
+        self.assertEqual(receipt["status"], "passed")
+        self.assertTrue(receipt["quiet_host"])
+        self.assertEqual(receipt["gpu_observation_status"], "passed")
+        self.assertEqual(receipt["gpu_health_observation"]["status"], "valid")
+        self.assertEqual(receipt["gpu_health_observation"]["observation"]["probe_id"], "gpu-compute-magnitude")
+        self.assertEqual(receipt["gpu_health_observation"]["observation"]["adapter"]["backend"], "Metal")
+
+    def test_stale_or_non_authentic_gpu_health_blocks(self):
+        def stale_runner(command, **kwargs):
+            result = self.passing_gpu_runner(command, **kwargs)
+            if command[0] == "pulp" or command[0].endswith("/pulp"):
+                value = json.loads(result.stdout)
+                value["measured_at_utc"] = "2020-01-01T00:00:00Z"
+                result.stdout = json.dumps(value)
+            return result
+
+        receipt = preflight.collect(runner=stale_runner, source_revision="3" * 40)
+        self.assertEqual(receipt["status"], "blocked")
+        self.assertIn("gpu_observation_unavailable", receipt["reasons"])
+        self.assertEqual(receipt["gpu_health_observation"]["reason"], "measurement_stale")
+
+        def identity_runner(command, **kwargs):
+            result = self.passing_gpu_runner(command, **kwargs)
+            if command[0] == "pulp" or command[0].endswith("/pulp"):
+                value = json.loads(result.stdout)
+                value["probes"][0]["adapter"]["status"] = "unverified"
+                result.stdout = json.dumps(value)
+            return result
+
+        receipt = preflight.collect(runner=identity_runner, source_revision="4" * 40)
+        self.assertEqual(receipt["status"], "blocked")
+        self.assertEqual(receipt["gpu_health_observation"]["reason"],
+                         "compute_identity_or_proof_invalid")
+
     def test_positive_receipt_contains_hashed_real_observations(self):
         receipt = preflight.collect(runner=self.runner, source_revision="a" * 40)
         # IORegistry ``busy`` is diagnostic bookkeeping, not authenticated
@@ -122,7 +176,8 @@ class HostPreflightTests(unittest.TestCase):
 
         receipt = preflight.collect(runner=missing_runner, source_revision="a" * 40)
         self.assertIn("thermal_observation_unknown", receipt["reasons"])
-        self.assertEqual(receipt["observations"][-1]["returncode"], 127)
+        swift = next(item for item in receipt["observations"] if item["argv"][0] == "swift")
+        self.assertEqual(swift["returncode"], 127)
 
         def timeout_runner(command, **kwargs):
             if command[0] == "swift":
@@ -131,7 +186,8 @@ class HostPreflightTests(unittest.TestCase):
 
         receipt = preflight.collect(runner=timeout_runner, source_revision="b" * 40)
         self.assertIn("thermal_observation_unknown", receipt["reasons"])
-        self.assertEqual(receipt["observations"][-1]["returncode"], 124)
+        swift = next(item for item in receipt["observations"] if item["argv"][0] == "swift")
+        self.assertEqual(swift["returncode"], 124)
 
     def test_source_revision_is_immutable(self):
         with patch.object(preflight, "_git_head", return_value="not-a-sha"):
