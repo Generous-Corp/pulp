@@ -2654,6 +2654,7 @@
   "pulp-test-live-dsp-telemetry-graph",
   "pulp-test-live-kernel-crossfade-null",
   "pulp-test-load-measurer",
+  "pulp-test-loudness-compensation",
   "pulp-test-lv2-adapter",
   "pulp-test-lv2-bundle-discovery-e2e",
   "pulp-test-lv2-host-discovery",
@@ -4397,12 +4398,12 @@
    "kind": "python"
   },
   "dspx07-projection-installed-sdk-selftest": {
-   "kind": "python",
    "entry": "tools/validation/test_dspx07_projection_installed_sdk.py",
    "inputs": [
     "core/format/include/pulp/format/projection_capability.hpp",
     "tools/validation/test_dspx07_projection_installed_sdk.py"
-   ]
+   ],
+   "kind": "python"
   },
   "ensure-signing-ready": {
    "entry": "tools/scripts/test_ensure_signing_ready.sh",
