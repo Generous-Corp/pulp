@@ -443,7 +443,8 @@ ahead of everything else:
 
 ```bash
 id=$(ghapp api repos/Generous-Corp/pulp/pulls/<fix-pr> --jq .node_id)
-GHAPP_ALLOW_QUEUE_REMOVAL=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
+GHAPP_ALLOW_QUEUE_REMOVAL=1 GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix \
+  ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
   dequeuePullRequest(input:{id:$id}){mergeQueueEntry{id}}}'
 GHAPP_ALLOW_REARM=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
   enqueuePullRequest(input:{pullRequestId:$id,jump:true}){mergeQueueEntry{position}}}'
@@ -455,6 +456,13 @@ title or body names the failing test or the change being reverted. If no fix PR
 exists, open the revert or the one-line fix and jump that. Record the PR, the
 failing test, and how long main was red. Jumping anything else, or switching on
 an automatic jump, is a maintainer decision.
+
+**The pre-approval is narrow.** `GHAPP_ALLOW_QUEUE_REMOVAL=1` is pre-approved
+only to dequeue the fix PR itself so it can be re-enqueued at the front, and only
+while main is red. Every such call carries
+`GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`, which the queue-removal guard
+logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
+queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
 
 ## Wait on a blocking waiter, not a poll loop
 
@@ -6195,11 +6203,12 @@ this, one PR ten times over.
   `base_health.auto_jump` allows it. Dequeuing other people's entries to make
   room throws away their in-flight merge-group runs and gains nothing the jump
   does not.
-- **`GHAPP_ALLOW_QUEUE_REMOVAL=1` needs the user's explicit OK.** The `ghapp`
+- **`GHAPP_ALLOW_QUEUE_REMOVAL=1` needs Daniel's explicit OK.** The `ghapp`
   queue-removal guard exists because nearly every dequeue it saw was one of the
-  avoidable cases above. Setting the override is a decision for the user, made
-  for a named PR; it is never something an agent turns on to get past the
-  guard.
+  avoidable cases above. The single standing exception is the main-red fix
+  reorder above, tagged `GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`.
+  Anything else is Daniel's decision, made for a named PR; it is never
+  something an agent turns on to get past the guard.
 
 ### Shipyard validated green but could NOT merge — the sanctioned fallback
 
