@@ -60,6 +60,13 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
 
+    # The installed-SDK projection validator is a source-only downstream
+    # consumer check. Keep it on the build-free required lane so a public
+    # header or validator regression cannot hide behind native build results.
+    add_test(NAME dspx07-projection-installed-sdk-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_dspx07_projection_installed_sdk.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
@@ -743,6 +750,12 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pr-head-affected-tests-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
         set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
+        # The diff-scoped drift checks must carry PULP_DIFF_SCOPED in this
+        # configure's inventory, or their base re-run is believed again.
+        add_test(NAME pr-head-diff-scoped-registrations COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/pr_head_affected_tests.py"
+            --build-dir "${CMAKE_BINARY_DIR}" --check-diff-scoped)
+        set_tests_properties(pr-head-diff-scoped-registrations PROPERTIES TIMEOUT 60)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
         # Shadow flake-exoneration verdict the merge-group macos job annotates
         # after a failed ctest (OCCURS_ON_OTHER_CLS from other heads' ctest-logs
@@ -1394,8 +1407,9 @@ if(Python3_Interpreter_FOUND)
             add_test(NAME changed-surface-script-families-drift COMMAND ${Python3_EXECUTABLE}
                 "${CMAKE_SOURCE_DIR}/tools/scripts/changed_surface_script_families.py"
                 --repo-root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}" --check)
+            # Diff-scoped like script-test-inputs-drift; see PULP_DIFF_SCOPED there.
             set_tests_properties(changed-surface-script-families-drift PROPERTIES
-                TIMEOUT 120 SKIP_RETURN_CODE 77)
+                TIMEOUT 120 SKIP_RETURN_CODE 77 PULP_DIFF_SCOPED TRUE)
             # A bounded run's base configure is FetchContent-disconnected, so a
             # marked dependency must download only through FetchContent. This
             # configured tree must hold its source, so an absent tree fails.

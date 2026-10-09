@@ -9,6 +9,47 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09370"></a>
+## [0.937.0] - 2026-10-09
+
+- release/version bump ([#9949](https://github.com/Generous-Corp/pulp/pull/9949))
+- codex/governed visual harness 20261009 ([#9948](https://github.com/Generous-Corp/pulp/pull/9948))
+- codex/signalgraph next slice 20261008 ([#9947](https://github.com/Generous-Corp/pulp/pull/9947))
+
+<a id="v09363"></a>
+## [0.936.3] - 2026-10-09
+
+- release/version bump ([#9946](https://github.com/Generous-Corp/pulp/pull/9946))
+- codex/governed root setup 20261008 ([#9943](https://github.com/Generous-Corp/pulp/pull/9943))
+
+<a id="v09362"></a>
+## [0.936.2] - 2026-10-08
+
+- release/version bump ([#9942](https://github.com/Generous-Corp/pulp/pull/9942))
+- codex/governed control shipping 20261008 ([#9939](https://github.com/Generous-Corp/pulp/pull/9939))
+- codex/forge sample region projection 20261008 ([#9941](https://github.com/Generous-Corp/pulp/pull/9941))
+
+<a id="v09361"></a>
+## [0.936.1] - 2026-10-08
+
+- release/version bump ([#9938](https://github.com/Generous-Corp/pulp/pull/9938))
+- codex/governed nightly build 20261008 ([#9937](https://github.com/Generous-Corp/pulp/pull/9937))
+- codex/forge metadata include boundary 20261008 ([#9936](https://github.com/Generous-Corp/pulp/pull/9936))
+- codex/dspx au projection 20261008 ([#9931](https://github.com/Generous-Corp/pulp/pull/9931))
+- fix/consumption census refresh 20261008 ([#9935](https://github.com/Generous-Corp/pulp/pull/9935))
+
+<a id="v09360"></a>
+## [0.936.0] - 2026-10-08
+
+- release/version bump ([#9933](https://github.com/Generous-Corp/pulp/pull/9933))
+- codex/governed setup bootstrap 20261008 ([#9932](https://github.com/Generous-Corp/pulp/pull/9932))
+- codex/processor node latency 20261008 ([#9934](https://github.com/Generous-Corp/pulp/pull/9934))
+- codex/governed release path gate 20261008 ([#9930](https://github.com/Generous-Corp/pulp/pull/9930))
+- fleet topology repair 20261008 ([#9927](https://github.com/Generous-Corp/pulp/pull/9927))
+- codex/wp3b liveness 20261008 r2 ([#9880](https://github.com/Generous-Corp/pulp/pull/9880))
+- codex/governed validate workflow 20261008 ([#9926](https://github.com/Generous-Corp/pulp/pull/9926))
+- codex/signalgraph tsan coverage 20261008 ([#9925](https://github.com/Generous-Corp/pulp/pull/9925))
+
 <a id="v09351"></a>
 ## [0.935.1] - 2026-10-08
 
@@ -10225,6 +10266,11 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.937.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.937.0
+[0.936.3]: https://github.com/Generous-Corp/pulp/releases/tag/v0.936.3
+[0.936.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.936.2
+[0.936.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.936.1
+[0.936.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.936.0
 [0.935.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.935.1
 [0.935.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.935.0
 [0.934.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.934.0

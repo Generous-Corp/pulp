@@ -32,6 +32,13 @@ pulp_add_test_suite(pulp-test-wav-metadata GROUP pulp-test-group-cap-audio
 pulp_add_test_suite(pulp-test-offline-processor-edges GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# DSPX-07 projection is a public SDK header contract. Keep this suite on the
+# ordinary format test lane so source builds exercise the same header installed
+# consumers include, with explicit native/browser positives and typed refusals.
+pulp_add_test_suite(pulp-test-dspx07-projection
+    SOURCES test_dspx07_projection.cpp
+    LIBRARIES pulp::format-core)
+
 # Offline-render DSP tracing (Perfetto, dev-only). Config-agnostic: OFF verifies
 # the no-op contract; ON byte-checks the flushed .pftrace for the dsp / dsp.node
 # offline span names. Links pulp::format + the PulpCompressor example header so

@@ -847,15 +847,15 @@ def download(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    common = argparse.ArgumentParser(add_help=False)
+    common = argparse.ArgumentParser(allow_abbrev=False, add_help=False)
     common.add_argument("--repo", type=Path, default=Path.cwd())
     common.add_argument("--repository", required=True)
     common.add_argument("--workflow", default="Build and Test")
     common.add_argument("--target", choices=("macos", "linux"), required=True)
 
-    create = subparsers.add_parser("issue", parents=[common])
+    create = subparsers.add_parser("issue", allow_abbrev=False, parents=[common])
     create.add_argument("--base-sha", required=True)
     create.add_argument("--head-sha", required=True)
     create.add_argument("--checkout-sha", required=True)
@@ -870,7 +870,7 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--ctest-junit", type=Path, required=True)
     create.add_argument("--output", type=Path, required=True)
 
-    verify = subparsers.add_parser("verify", parents=[common])
+    verify = subparsers.add_parser("verify", allow_abbrev=False, parents=[common])
     verify.add_argument("--group-sha", required=True)
     verify.add_argument(
         "--affected-slow-required", choices=("true", "false"),
@@ -879,7 +879,7 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--receipt", type=Path, required=True)
     verify.add_argument("--output", type=Path, required=True)
 
-    note = subparsers.add_parser("note", help="record one target's reuse decision")
+    note = subparsers.add_parser("note", allow_abbrev=False, help="record one target's reuse decision")
     note.add_argument("--target", choices=("macos", "linux"), required=True)
     note.add_argument("--verdict", choices=("reuse", "refuse"), required=True)
     note.add_argument("--reason", default="")
@@ -889,13 +889,13 @@ def _parser() -> argparse.ArgumentParser:
     note.add_argument("--output", type=Path, required=True)
 
     publish = subparsers.add_parser(
-        "publish-notes", help="print decision annotations and append a job-summary table")
+        "publish-notes", allow_abbrev=False, help="print decision annotations and append a job-summary table")
     publish.add_argument("notes", type=Path, nargs="*")
     publish.add_argument("--summary", type=Path, help="markdown file to append to")
     publish.add_argument("--no-decision-reason", default="",
                          help="why no target was evaluated, reported when there are no notes")
 
-    fetch = subparsers.add_parser("download", parents=[common])
+    fetch = subparsers.add_parser("download", allow_abbrev=False, parents=[common])
     fetch.add_argument("--api-url", default="https://api.github.com")
     fetch.add_argument("--token", required=True)
     fetch.add_argument("--artifact-name", required=True)
