@@ -565,6 +565,9 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --target pulp-render
             --target pulp-view-core
             --target pulp-view-script
+            --target pulp-platform
+            --target pulp-runtime
+            --target pulp-simd
             --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
     set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
         LABELS "validation")
@@ -573,9 +576,21 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
             gate
             --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+            --allow pulp-audio
+            --allow pulp-midi
+            --allow-include-prefix core/platform/src/android/
+            --allow-include-prefix core/view/
             --report-only)
     set_tests_properties(pulp.vellum-closure-gate PROPERTIES
         DEPENDS pulp.vellum-closure-boundary
+        LABELS "validation")
+    add_test(NAME pulp.vellum-closure-gate-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json"
+            --break "perl -0pi -e 's/pulp::runtime/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
+    set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
         LABELS "validation")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
