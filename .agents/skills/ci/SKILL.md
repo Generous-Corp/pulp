@@ -6159,6 +6159,21 @@ local check matches (3 s, `PULP_QUEUE_REBASE_TIMEOUT`), fails silently without
 `refresh_push_check.py` so the two never both print. `PULP_ALLOW_QUEUE_REBASE=1`
 silences it. Tests: `prepush-queue-rebase-hint` ctest.
 
+**A PR that is IN the merge queue is refused, not hinted.** The same script's
+`--refuse-queued` mode runs first in `.githooks/pre-push`, before every gate and
+the diff-coverage build. When GraphQL shows `mergeQueueEntry` on the branch's
+open PR it exits 1 with "a queued PR does not need a rebase, the queue merges it
+on top of current main; to change it anyway, dequeue deliberately first",
+whatever the push contains. It exists because agents rebased queued PRs, the
+pre-push build ran for minutes while GitHub re-queued the new head, the push was
+rejected, and the agent dequeued to retry; one PR looped ten times.
+There is **no override**, and `PULP_SKIP_PREPUSH=1` does not bypass it, because
+an override recreates the dequeue loop. The only ways forward are a new PR, or a
+dequeue through the guarded path with a stated reason
+(`GHAPP_QUEUE_REMOVAL_REASON=defect-fix`) followed by the push.
+A lookup that cannot answer fails open with a one-line `queued-PR check skipped`
+notice. Armed but not yet queued stays advisory.
+
 ### The arm is not armed until you read it back — `update-branch` disarms it silently
 
 An armed auto-merge is a backstop only if it is still armed. Two silent failures

@@ -164,6 +164,28 @@ PULP_SKIP_PREPUSH=1 git push                   # skip ALL gates (true emergencie
 
 The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env vars are accepted as silent no-ops — they used to *promote* advisory warnings to hard failures, which is now the default. Setting them just confirms what you already get.
 
+### A push to a queued PR is refused
+
+A PR in the merge queue never needs a rebase or a merge of main: the queue
+builds it on top of current main. GitHub also refuses pushes to a queued
+branch, so pushing one anyway only ran the multi-minute pre-push build before
+the rejection, and led agents to dequeue and retry in a loop. The hook
+therefore runs `tools/scripts/prepush_queue_rebase_hint.py --refuse-queued`
+first, before every gate and the diff-coverage build, and refuses the push when
+GraphQL shows the branch's open PR in the queue.
+
+| Setting | Effect |
+|---------|--------|
+| (default) | refuse a push to a queued PR; armed-but-not-queued only gets the advisory hint |
+| `PULP_QUEUE_REBASE_TIMEOUT` | lookup budget in seconds (default 3) |
+
+There is no override, and `PULP_SKIP_PREPUSH=1` does not bypass the refusal:
+an override recreates the dequeue loop. To change a queued PR, either open a new
+PR, or dequeue it through the guarded `ghapp` path with a stated reason
+(`GHAPP_QUEUE_REMOVAL_REASON=defect-fix`) and then push. A lookup that cannot answer
+(no `ghapp`/`gh`, auth, network, timeout, bad JSON) prints
+`queued-PR check skipped` and lets the push continue.
+
 ---
 
 ## CI workflow

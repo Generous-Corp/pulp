@@ -76,6 +76,29 @@ if [ -z "${PULP_PYTHON:-}" ] || [ ! -x "${PULP_PYTHON}" ]; then
     exit 2
 fi
 
+# ── Queued-PR guard (blocking, before every gate and the diff-cover build) ──
+# A PR in the merge queue never needs a rebase or a merge of main: the queue
+# builds it on top of current main. Pushing to it anyway ran the multi-minute
+# diff-coverage build below while GitHub re-queued the new head, the push was
+# rejected, and the agent dequeued to retry, in a loop. This asks GitHub
+# (GraphQL mergeQueueEntry, bounded by PULP_QUEUE_REBASE_TIMEOUT) and refuses
+# the push when the branch's PR is queued. A lookup that cannot answer fails
+# open with a notice. There is no override and PULP_SKIP_PREPUSH does not
+# bypass it: an override recreates the dequeue loop. Open a new PR, or dequeue
+# through the guarded path with a stated reason, then push.
+QUEUED_PR_GUARD="$ROOT/tools/scripts/prepush_queue_rebase_hint.py"
+if [ -f "$QUEUED_PR_GUARD" ]; then
+    printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
+        "$PULP_PYTHON" "$QUEUED_PR_GUARD" --refuse-queued --root "$ROOT" --remote-url "${2:-}"
+    _queued_rc=$?
+    if [ "$_queued_rc" = "1" ]; then
+        exit 1
+    elif [ "$_queued_rc" != "0" ]; then
+        echo "[pre-push] queued-PR check could not run (exit $_queued_rc); continuing." >&2
+    fi
+    unset _queued_rc
+fi
+
 # ── Main-refresh push telemetry + policy ───────────────────────────────────
 # A local `git merge origin/main && git push` moves the PR head, which cancels
 # the in-flight required `macos` gate, and it never reaches Shipyard's
