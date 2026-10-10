@@ -159,8 +159,8 @@ int main(int argc, char** argv) {
     // Enrollment ownership must retain the exact broker snapshot after the
     // host becomes ready; GPU and other optional runtime dependencies may be
     // loaded lazily from this directory later in the session.
-    if (!std::filesystem::is_regular_file(
-            std::filesystem::path(argv[0]).parent_path() / PULP_CONTROL_E2E_RUNTIME_DEPENDENCY))
+    if (!std::filesystem::is_regular_file(std::filesystem::path(argv[0]).parent_path() /
+                                          PULP_CONTROL_E2E_RUNTIME_DEPENDENCY))
         return 70;
 #endif
     std::ofstream(argv[1]) << installed->binding().registration_id << '\n'
