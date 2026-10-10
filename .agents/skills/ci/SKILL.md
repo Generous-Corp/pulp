@@ -31,6 +31,12 @@ on a real PR. Do them in order.
      without a committed `.github/vellum-expansion-watch-events/` event FAILS
      (exit 10) and prints the exact JSON; or run
      `python3 tools/scripts/vellum_watch_preflight.py --write-event --rationale "..."`.
+   - **foundation include lint** — `foundation_include_lint.py` fails when a
+     file under `core/platform`, `core/runtime` or `core/simd` includes an
+     upper-layer `pulp/<area>/` header or a quoted relative path that resolves
+     outside those roots (it resolves through the foundation include dirs, the
+     way the compiler does). Put the code in the owning subsystem instead of
+     allowlisting it; a stale allowlist entry also fails.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
