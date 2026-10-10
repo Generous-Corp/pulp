@@ -16,6 +16,14 @@ description: |
 - Building or routing nodes in `SignalGraph`.
 - Writing tests that need to load a real plug-in binary.
 
+When narrowing a public SignalGraph header, keep `signal_graph.hpp` as the
+compatibility umbrella and make each implementation file include the focused
+processor adapter header when it calls adapter methods. If a lifetime helper
+needs an incomplete adapter type, define its destructor out of line in the
+host implementation. Build both `pulp-host` and the focused header-compile
+target so the dependency reduction does not silently break existing umbrella
+consumers.
+
 ## Mental model
 
 `PluginSlot` is the uniform interface. Each format backend is a single

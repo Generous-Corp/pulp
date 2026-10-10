@@ -5,6 +5,17 @@ description: Maintain Pulp's installed design-time agent capability manifest and
 
 # Agent Capabilities
 
+## Public-header fingerprint refresh
+
+When a SignalGraph or other covered public header changes bytes while its
+consumer capability remains the same, refresh the reviewed SHA-256 in the
+catalog and surface ledger, increment `SURFACE_INVENTORY_VERSION`, and update
+any sequencer-exposure rows that name the old version. Run
+`python3 tools/scripts/agent_capability_manifest.py --check` and the sequencer
+exposure checker before pushing. This keeps focused-header refactors visible
+to installed-SDK consumers without turning an include-only change into a new
+capability contract.
+
 Maintain three related artifacts:
 
 - `agent-capabilities.json` is the installed consumer contract: curated keys,
