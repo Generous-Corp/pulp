@@ -48,45 +48,75 @@ def toml_value(value: object) -> str:
     return '"' + str(value) + '"'
 
 
-def block(data: dict, digest: str, platform: str) -> str:
-    if platform not in TARGETS:
-        raise ValueError(f"unsupported generation target: {platform}")
+def _section_bounds(lines: list[str], section: str) -> tuple[int, int]:
+    header = f"[{section}]"
+    begin = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+    if begin is None:
+        raise ValueError(f"missing [{section}] section")
+    end = len(lines)
+    for i in range(begin + 1, len(lines)):
+        if lines[i].startswith("[") and lines[i].rstrip().endswith("]"):
+            end = i
+            break
+    return begin, end
+
+
+def _set_owned_keys(lines: list[str], section: str, values: dict[str, object], keys: tuple[str, ...]) -> None:
+    begin, end = _section_bounds(lines, section)
+    for key in keys:
+        value = values.get(key)
+        if value is None or value == "absent":
+            continue
+        replacement = f"{key} = {toml_value(value)}"
+        found = False
+        for i in range(begin + 1, end):
+            if re.match(rf"^{re.escape(key)}\s*=", lines[i]):
+                lines[i] = replacement + "\n"
+                found = True
+                break
+        if not found:
+            lines.insert(begin + 1, replacement + "\n")
+            end += 1
+
+
+def _set_packages(lines: list[str], manager: str, packages: list[str]) -> None:
+    begin, end = _section_bounds(lines, manager)
+    start = next((i for i in range(begin + 1, end) if re.match(r"^packages\s*=\s*\[", lines[i])), None)
+    if start is None:
+        lines.insert(begin + 1, "packages = [\n" + "".join(f'  "{item}",\n' for item in packages) + "]\n")
+        return
+    finish = next((i for i in range(start + 1, end) if lines[i].strip() == "]"), None)
+    if finish is None:
+        raise ValueError(f"{manager}.packages is unterminated")
+    comments = [line for line in lines[start + 1 : finish] if line.lstrip().startswith("#")]
+    generated = ["packages = [\n"] + [f'  "{item}",\n' for item in packages] + comments + ["]\n"]
+    lines[start : finish + 1] = generated
+
+
+def update_file(path: Path, data: dict, digest: str, platform: str, check: bool) -> bool:
+    text = path.read_text(encoding="utf-8")
+    marker = re.compile(re.escape(BEGIN) + r"\n.*?" + re.escape(END) + r"\n", re.S)
+    if not marker.search(text):
+        raise ValueError(f"{path}: generated toolchain block is missing")
+    marker_text = f"{BEGIN}\n# source_sha256 = {digest}\n# generated_platform = {platform}\n{END}\n"
+    updated = marker.sub(marker_text, text, count=1)
+    lines = updated.splitlines(keepends=True)
     target = data.get("platform", {}).get(platform, {})
     common = data["toolchain"]
-    config = TARGETS[platform]
-
-    def value_for(key: str) -> object:
-        return target.get(key, common.get(key))
-
-    lines = [BEGIN, f"# source_sha256 = {digest}", f"# generated_platform = {platform}"]
-    for key in config["keys"]:
-        value = value_for(key)
-        if value is not None and value != "absent":
-            lines.append(f"{key} = {toml_value(value)}")
-    manager = config["manager"]
+    values = {key: target.get(key, common.get(key)) for key in TARGETS[platform]["keys"]}
+    _set_owned_keys(lines, "toolchain", values, TARGETS[platform]["keys"])
+    manager = TARGETS[platform]["manager"]
     if manager:
         packages = data.get("packages", {}).get(manager)
         if not isinstance(packages, list) or not packages:
             raise ValueError(f"packages.{manager} must be a non-empty list")
-        lines.extend(["", f"[{manager}]", "packages = ["])
-        lines.extend(f'  "{package}",' for package in packages)
-        lines.append("]")
-    lines.append(END)
-    return "\n".join(lines) + "\n"
-
-
-def replace_block(path: Path, generated: str, check: bool) -> bool:
-    text = path.read_text(encoding="utf-8")
-    pattern = re.compile(re.escape(BEGIN) + r"\n.*?" + re.escape(END) + r"\n", re.S)
-    if not pattern.search(text):
-        raise ValueError(f"{path}: generated toolchain block is missing")
-    updated = pattern.sub(generated, text, count=1)
-    if check and updated != text:
-        raise ValueError(f"{path}: generated toolchain block is stale or hand-edited")
+        _set_packages(lines, manager, packages)
+    result = "".join(lines)
+    if check and result != text:
+        raise ValueError(f"{path}: generated toolchain block or owned fields are stale")
     if not check:
-        path.write_text(updated, encoding="utf-8")
-    return updated != text
-
+        path.write_text(result, encoding="utf-8")
+    return result != text
 
 def generate(pulp_root: Path, tartci_root: Path | None, check: bool) -> list[Path]:
     data, digest = load(pulp_root / "tools/toolchain/manifest.toml")
@@ -103,7 +133,7 @@ def generate(pulp_root: Path, tartci_root: Path | None, check: bool) -> list[Pat
             ]
         )
     for path, platform in targets:
-        replace_block(path, block(data, digest, platform), check)
+        update_file(path, data, digest, platform, check)
     return [path for path, _ in targets]
 
 

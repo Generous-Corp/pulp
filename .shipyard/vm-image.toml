@@ -19,19 +19,15 @@ disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
 [toolchain]
-
-# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = aea1faa21cbdf7aa636523474d4613a760448b07080af190c3d324df15c7a6c1
-# generated_platform = macos
-xcode = "26.5"
-cmake = "homebrew"
-ninja = "homebrew"
-python = "3.12"
-node = "26.10.0"
-rust = "stable"
-rust_targets = ["x86_64-apple-darwin"]
-tart = "homebrew"
 clang_format = "required"
+tart = "homebrew"
+rust_targets = ["x86_64-apple-darwin"]
+rust = "stable"
+node = "26.10.0"
+python = "3.12"
+ninja = "homebrew"
+cmake = "homebrew"
+xcode = "26.5"
 
 [brew]
 packages = [
@@ -50,6 +46,13 @@ packages = [
   "rustup",
   "clang-format",
 ]
+# Homebrew's rustup is keg-only; the bake recipe runs rustup default stable
+# and exposes ~/.cargo/bin. clang-format is required because the CLI shell-out
+# test otherwise hangs until its timeout on the VM golden.
+
+# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
+# source_sha256 = aea1faa21cbdf7aa636523474d4613a760448b07080af190c3d324df15c7a6c1
+# generated_platform = macos
 # END GENERATED PULP TOOLCHAIN
 
 [pip]

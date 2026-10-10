@@ -20,6 +20,7 @@ class GenerateTests(unittest.TestCase):
             "header\n[toolchain]\n"
             "# handwritten sentinel survives generation\n"
             "handwritten = true\n\n"
+            "[brew]\npackages = [\n  \"old\",\n]\n\n"
             f"{generate.BEGIN}\nold\n{generate.END}\nfooter\n"
         )
         (root / ".shipyard/vm-image.toml").write_text(body, encoding="utf-8")
@@ -45,6 +46,30 @@ class GenerateTests(unittest.TestCase):
             self.assertIn("# handwritten sentinel survives generation", text)
             self.assertIn("handwritten = true", text)
             self.assertNotIn('xcode = "26.5"', text)
+
+    def test_platform_non_owned_fields_survive(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            tart = root / "tartci"
+            (tart / "manifests").mkdir(parents=True)
+            (tart / "manifests/pulp.macos.toml").write_text(
+                f"[toolchain]\n\n[brew]\npackages = [\n  \"old\",\n]\n\n{generate.BEGIN}\nold\n{generate.END}\n",
+                encoding="utf-8",
+            )
+            for platform, manager, extra in (("linux", "apt", "ninja = \"system\"\n"), ("windows", "choco", "msvc = \"14.44\"\nninja = \"system\"\n")):
+                path = tart / "manifests" / f"pulp.{platform}.toml"
+                path.write_text(
+                    f"[toolchain]\n{extra}\n[{manager}]\npackages = [\n  \"old\",\n]\n\n{generate.BEGIN}\nold\n{generate.END}\n",
+                    encoding="utf-8",
+                )
+            generate.generate(root, tart, False)
+            linux = (tart / "manifests/pulp.linux.toml").read_text(encoding="utf-8")
+            windows = (tart / "manifests/pulp.windows.toml").read_text(encoding="utf-8")
+            self.assertIn('ninja = "system"', linux)
+            self.assertIn('msvc = "14.44"', windows)
+            self.assertNotIn("rust_targets", linux)
+            self.assertNotIn("rust_targets", windows)
 
     def test_missing_authority_field_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:

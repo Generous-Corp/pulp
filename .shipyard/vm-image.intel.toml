@@ -28,12 +28,12 @@ auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 # that would trigger a multi-hour Xcode re-provision).
 
 [toolchain]
+rust_targets = ["x86_64-apple-darwin"]
+rust = true
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
 # source_sha256 = aea1faa21cbdf7aa636523474d4613a760448b07080af190c3d324df15c7a6c1
 # generated_platform = intel
-rust = true
-rust_targets = ["x86_64-apple-darwin"]
 # END GENERATED PULP TOOLCHAIN
 
 # Intel cross-build requires Rosetta in the ARM64 guest.
