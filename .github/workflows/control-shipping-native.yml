@@ -88,7 +88,7 @@ jobs:
     name: ${{ matrix.leg }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -360,7 +360,7 @@ jobs:
     runs-on: ubuntu-latest
     name: consolidated evidence
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
       - uses: actions/download-artifact@v7

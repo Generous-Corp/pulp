@@ -79,7 +79,7 @@ jobs:
 
       - name: Check out trusted base controls
         if: steps.pr.outputs.active == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           # Keep the privileged checkout literal. Even a SHA resolved from the
           # API is tainted data to Actions security analysis; checking out the
@@ -270,7 +270,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON || '"ubuntu-latest"') }}
     steps:
       - name: Check out trusted base controls
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.merge_group.base_sha }}
           fetch-depth: 0

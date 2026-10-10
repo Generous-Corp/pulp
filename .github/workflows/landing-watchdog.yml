@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # The fixture replay runs first and on every tick. It is the live proof
       # that the classifier still fires: if a change silences the detector,

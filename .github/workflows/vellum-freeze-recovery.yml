@@ -26,7 +26,7 @@ jobs:
       statuses: write
     steps:
       - name: Check out trusted protected main
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           # Keep this ref literal. The recovery workflow runs trusted controls
           # from protected main and treats the PR tree as data only.

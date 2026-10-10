@@ -72,7 +72,7 @@ jobs:
 
     steps:
       - name: Checkout PR head with full history
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # version_bump_check and skill_sync_check both diff against
           # origin/main — we need the real base to be reachable.

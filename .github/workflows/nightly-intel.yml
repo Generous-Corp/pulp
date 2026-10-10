@@ -65,7 +65,7 @@ jobs:
       BUILD_DIR: build-intel-native
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -220,7 +220,7 @@ jobs:
       BUILD_DIR: build-universal
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 

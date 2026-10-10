@@ -49,7 +49,7 @@ jobs:
     env:
       SECONDS_PER_REP: ${{ github.event.inputs.seconds || '2' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false

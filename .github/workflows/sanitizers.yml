@@ -79,7 +79,7 @@ jobs:
       ubsan_runs_on: ${{ steps.resolve.outputs.ubsan_runs_on }}
       rtsan_runs_on: ${{ steps.resolve.outputs.rtsan_runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
@@ -173,7 +173,7 @@ jobs:
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.asan_runs_on) }}
     name: AddressSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
@@ -321,7 +321,7 @@ jobs:
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.tsan_runs_on) }}
     name: ThreadSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
@@ -386,7 +386,7 @@ jobs:
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.ubsan_runs_on) }}
     name: UndefinedBehaviorSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
@@ -480,7 +480,7 @@ jobs:
     # the job runs on workflow_dispatch only so it doesn't block PRs.
     if: github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
