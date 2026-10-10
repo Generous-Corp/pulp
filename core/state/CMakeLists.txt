@@ -37,8 +37,9 @@ target_include_directories(pulp-state PRIVATE
 )
 
 # Configure a CTest that checks the concrete archive's direct link closure.
-# The generated script captures the target property at configure time and is
-# executed by CTest, so this remains an executable regression gate.
+# Compatibility consumers configure this subsystem without the repository test
+# tree; only the top-level Pulp test build has the template and registers it.
+if(EXISTS "${CMAKE_SOURCE_DIR}/test/cmake/pulp_state_link_closure.cmake.in")
 get_target_property(_pulp_state_direct_links pulp-state LINK_LIBRARIES)
 if(NOT _pulp_state_direct_links)
     set(_pulp_state_direct_links "")
@@ -49,3 +50,4 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/pulp_state_link_closure.cmake
     @ONLY
 )
+endif()
