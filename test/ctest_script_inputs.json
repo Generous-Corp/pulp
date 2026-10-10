@@ -3850,6 +3850,15 @@
    ],
    "kind": "python"
   },
+  "clean-worktree-planning-selftest": {
+   "entry": "tools/scripts/test_clean_worktree_planning.py",
+   "inputs": [
+    "tools/scripts",
+    "tools/scripts/clean_worktree_planning.py",
+    "tools/scripts/test_clean_worktree_planning.py"
+   ],
+   "kind": "python"
+  },
   "clean-worktrees-selftest": {
    "entry": "tools/scripts/test_clean_worktrees.py",
    "inputs": [
@@ -6070,6 +6079,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-ir-observe-interactions": {
+   "entry": "test/test_design_ir_observe_interactions.py",
+   "inputs": [
+    "test/test_design_ir_observe_interactions.py"
+   ],
+   "kind": "python"
+  },
   "import-fidelity-diff": {
    "entry": "test/test_import_fidelity_diff.py",
    "inputs": [
@@ -7067,6 +7083,16 @@
    "entry": "tools/scripts/test_pulp_uninstall.py",
    "inputs": [
     "tools/scripts/test_pulp_uninstall.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-worktree-creation-selftest": {
+   "entry": "tools/ci/test_pulp_worktree_creation.py",
+   "inputs": [
+    "tools/ci",
+    "tools/ci/checkout_location_guard.py",
+    "tools/ci/pulp-worktree.sh",
+    "tools/ci/test_pulp_worktree_creation.py"
    ],
    "kind": "python"
   },

@@ -128,6 +128,13 @@
       "timeout": 120.0
     },
     {
+      "name": "pulp-worktree-creation-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_pulp_worktree_creation.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "ci-python-selector-selftest",
       "argv": [
         "{repo}/tools/ci/test_find_python311.py"
@@ -165,6 +172,16 @@
       ],
       "cwd": "{repo}/tools/scripts",
       "timeout": 600.0
+    },
+    {
+      "name": "clean-worktree-planning-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_clean_worktree_planning"
+      ],
+      "timeout": 300.0,
+      "cwd": "{repo}/tools/scripts"
     },
     {
       "name": "clean-worktrees-selftest",
