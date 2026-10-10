@@ -18,19 +18,20 @@ base       = "ghcr.io/cirruslabs/macos-tahoe-base:latest"
 disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
-# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = 09bfe44e0d65d4187eb20203b5f6e833a4fd0f10e4dd252b56e7dc0e7cd99b4f
-# generated_platform = macos
 [toolchain]
+
+# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
+# source_sha256 = aea1faa21cbdf7aa636523474d4613a760448b07080af190c3d324df15c7a6c1
+# generated_platform = macos
 xcode = "26.5"
-cmake = "4.4.3"
+cmake = "homebrew"
 ninja = "homebrew"
 python = "3.12"
 node = "26.10.0"
-rust = "1.98.1"
-tart = "2.38.0"
-clang_format = "required"
+rust = "stable"
 rust_targets = ["x86_64-apple-darwin"]
+tart = "homebrew"
+clang_format = "required"
 
 [brew]
 packages = [

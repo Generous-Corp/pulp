@@ -22,37 +22,18 @@ base       = "pulp-build-runner:latest"
 disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
-# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = 09bfe44e0d65d4187eb20203b5f6e833a4fd0f10e4dd252b56e7dc0e7cd99b4f
-# generated_platform = macos
-[toolchain]
-xcode = "26.5"
-cmake = "4.4.3"
-ninja = "homebrew"
-python = "3.12"
-node = "26.10.0"
-rust = "1.98.1"
-tart = "2.38.0"
-clang_format = "required"
-rust_targets = ["x86_64-apple-darwin"]
+# The Rust CLI (`pulp`) is cross-built for Intel via
+# PULP_RUST_CLI_TARGET=x86_64-apple-darwin, so the golden needs rustup + that
+# target. Xcode is inherited from the base golden (do NOT re-declare it here —
+# that would trigger a multi-hour Xcode re-provision).
 
-[brew]
-packages = [
-  "git",
-  "git-lfs",
-  "gh",
-  "rsync",
-  "ccache",
-  "jq",
-  "coreutils",
-  "tailscale",
-  "cmake",
-  "ninja",
-  "node",
-  "python@3.12",
-  "rustup",
-  "clang-format",
-]
+[toolchain]
+
+# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
+# source_sha256 = aea1faa21cbdf7aa636523474d4613a760448b07080af190c3d324df15c7a6c1
+# generated_platform = intel
+rust = true
+rust_targets = ["x86_64-apple-darwin"]
 # END GENERATED PULP TOOLCHAIN
 
 # Intel cross-build requires Rosetta in the ARM64 guest.

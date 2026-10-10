@@ -3,14 +3,18 @@ schema = 1
 
 [toolchain]
 xcode = "26.5"
-cmake = "4.4.3"
+cmake = "homebrew" # Homebrew formula; observed version is receipt data, not an installer pin
 ninja = "homebrew"
 python = "3.12"
 node = "26.10.0"
-rust = "1.98.1"
+rust = "stable" # rustup channel; exact observed rustc is recorded in the golden receipt
 rust_targets = ["x86_64-apple-darwin"]
-tart = "2.38.0"
+tart = "homebrew" # Homebrew formula; observed version is receipt data, not an installer pin
 clang_format = "required"
+
+[platform.intel]
+rust = true
+rust_targets = ["x86_64-apple-darwin"]
 
 [platform.linux]
 cmake = "system"
