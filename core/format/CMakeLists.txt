@@ -44,8 +44,8 @@ endforeach()
 unset(_pulp_format_target)
 
 target_sources(pulp-format-core PRIVATE
-    # Emits the Processor vtable (create_view() is the key function), so this
-    # TU anchors the core half. See the comment at the top of format.cpp: the
+    # Emits the Processor vtable (Processor::~Processor() is the key function),
+    # so this TU anchors the core half. The vtable slots still reference
     # vtable's slots reference processor_f64.cpp and ara.cpp, which is why
     # those two must stay in this target as well.
     src/format.cpp
@@ -88,6 +88,7 @@ target_sources(pulp-format-core PRIVATE
 )
 
 target_sources(pulp-format-view PRIVATE
+    src/format_view.cpp
     src/view_bridge.cpp
     # The two Processor::SettingsSection members that need view::View complete
     # (adopting a view, take_view); create_view() does not, and stays in
@@ -99,24 +100,10 @@ target_sources(pulp-format-view PRIVATE
     src/app_updates_settings_view.cpp
 )
 
-# format.cpp needs view::View COMPLETE, and only for its compile: libstdc++
-# instantiates ~unique_ptr<View> in create_view()'s return path, so GCC rejects
-# a forward declaration there even though Apple Clang accepts it. See the
-# comment at the top of format.cpp.
-#
-# Headers only, and PRIVATE. This adds view's include directories to this
-# target's own sources and nothing else: no view archive joins the link
-# closure, and nothing propagates to pulp::dsl, pulp::sequence, or any other
-# consumer. That is the whole point of the split -- the Skia/Dawn archives stay
-# out -- and it is enforced by the core-only link proof
-# (pulp-test-format-core-only-consumer) plus the symbol checks, not by this
-# declaration alone.
-#
-# The narrow, honest statement of the rule: pulp-format-core LINKS without the
-# view layer; it does not COMPILE without view headers, in exactly this one
-# translation unit.
-target_include_directories(pulp-format-core PRIVATE
-    $<TARGET_PROPERTY:pulp-view-core,INTERFACE_INCLUDE_DIRECTORIES>)
+# The core half must compile without the view include path. The default
+# Processor::create_view() definition is in format_view.cpp, alongside the
+# view-coupled sources; format.cpp only anchors the core vtable via the
+# out-of-line Processor destructor.
 
 target_link_libraries(pulp-format-core
     PUBLIC

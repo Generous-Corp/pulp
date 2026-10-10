@@ -7,7 +7,7 @@
 //
 // A plugin that does not override Processor::create_view() or
 // create_ara_document_controller() still carries those slots in its vtable, so
-// the base definitions must be linked. The real definitions live in format.cpp
+// the base definitions must be linked. The real definitions live in format.cpp, format_view.cpp
 // and ara.cpp (the latter pulls the optional ARA SDK), neither of which belongs
 // in a headless DSP module. Both are compiled into pulp-format-core, which the
 // WASM lane does not link: PulpWclap.cmake and PulpWam.cmake compile the format
@@ -24,9 +24,8 @@
 //
 // On completeness, measured rather than assumed: DEFINING one of these methods
 // as `return nullptr;` does NOT require the type to be complete. The native
-// pulp-format-core builds `Processor::create_view()` in format.cpp against
-// nothing but processor.hpp's forward declaration, which is exactly what keeps
-// that target free of the view layer. What DOES require completeness is
+// Native pulp-format-view builds `Processor::create_view()` in format_view.cpp
+// against the complete view type. What DOES require completeness is
 // CALLING such a method, because the caller destroys the returned
 // unique_ptr and ~unique_ptr instantiates the deleter:
 //
@@ -45,6 +44,8 @@ namespace pulp::view { class View {}; }
 namespace pulp::format {
 
 class AraDocumentController {};
+
+Processor::~Processor() = default;
 
 std::unique_ptr<view::View> Processor::create_view() { return nullptr; }
 
