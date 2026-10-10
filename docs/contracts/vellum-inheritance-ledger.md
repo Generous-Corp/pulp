@@ -11,8 +11,12 @@ its immutable event id, exact slice, and destination obligation.
 
 ## Recording rule
 
-Append a row before rerunning the Vellum preflight whenever a change event is
-owed. The event's `rationale` starts exactly with:
+This file is frozen: its rows stay as recorded, and no row is added here. Record
+a new entry as one file per change event under
+[`vellum-inheritance-ledger/`](vellum-inheritance-ledger/README.md), written
+before rerunning the Vellum preflight. Separate files let concurrent pull
+requests record entries without conflicting. A change event owes an entry when
+its `rationale` starts exactly with:
 
 > design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)
 

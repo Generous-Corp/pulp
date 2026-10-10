@@ -91,9 +91,11 @@ exactly with:
 
 > design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)
 
-and adds a row to [`vellum-inheritance-ledger.md`](vellum-inheritance-ledger.md).
+and adds the entry `vellum-inheritance-ledger/<event_id>.json` (see
+[`vellum-inheritance-ledger/README.md`](vellum-inheritance-ledger/README.md);
+`tools/scripts/vellum_inheritance_ledger_check.py` enforces it).
 Here `pulp-only` means "landed in Pulp", not "Pulp-specific": the prefix and the
-ledger row are what distinguish an inherited generic change from Pulp-specific
+ledger entry are what distinguish an inherited generic change from Pulp-specific
 integration work.
 
 The exception ends per target, not globally: in the same Pulp change that
