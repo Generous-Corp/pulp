@@ -172,6 +172,11 @@ def _canonical_virtual_signature(raw_decl: str) -> tuple[str, str]:
     before_paren = decl[:open_paren].strip()
     params = decl[open_paren + 1:close_paren]
     after_paren = decl[close_paren + 1:].strip()
+    # An inline `= default` destructor and an out-of-line defaulted destructor
+    # have the same virtual ABI slot. The definition location is deliberately
+    # excluded from the frozen virtual-order comparison so incomplete view
+    # owners can move their destruction out of public headers.
+    after_paren = re.sub(r"^=\s*default\s*$", "", after_paren)
 
     name_match = re.search(r"([~A-Za-z_]\w*)\s*$", before_paren)
     if not name_match:

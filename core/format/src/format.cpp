@@ -10,6 +10,8 @@
 
 namespace pulp::format {
 
+Processor::~Processor() = default;
+
 std::unique_ptr<view::View> Processor::create_view() {
     return nullptr;
 }

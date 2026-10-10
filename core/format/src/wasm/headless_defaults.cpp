@@ -45,6 +45,8 @@ namespace pulp::format {
 
 class AraDocumentController {};
 
+Processor::~Processor() = default;
+
 std::unique_ptr<view::View> Processor::create_view() { return nullptr; }
 
 std::unique_ptr<AraDocumentController> Processor::create_ara_document_controller() {
