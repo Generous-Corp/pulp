@@ -35,6 +35,16 @@ tools:
   availability: always
   skill: view-bridge
   caveat: Reads back the host's own window with CGWindowListCreateImage, which must run in the logged-in GUI session (hence --gui-session over ssh) and has read back only the host backdrop on a macOS 27 host while the editor was demonstrably drawing; a run whose every image is host-empty proves the instrument blind, not the editor. It sees what is composited, not why — pair it with a trace from the plug-in process (~/.config/pulp/trace-autostart in a traced build).
+- name: host-lane-probe
+  path: tools/editor-open/host_lane_probe.sh
+  category: editor-open
+  use_when: You need host-side evidence that built plug-in bundles (CLAP, VST3, AU v2) load, open/resize/close/reopen their editors, keep audio byte-identical with the editor open, and coexist with another plug-in in one process — the data the Vellum parity host lane compares.
+  invocation: bash tools/editor-open/host_lane_probe.sh -- --plugin build/CLAP/SpectralLab.clap --plugin build/CLAP/SuperConvolver.clap --out /tmp/host-obs
+  inputs: Built bundle paths. AU v2 components are registered with the probe process only (AudioComponentRegister), so nothing is installed.
+  outputs: host-observation.json (per plug-in load facts, four audio renders with hashes, editor lifecycle events, read-back frame statistics, dyld census of plug-in and GPU-runtime images), raw .f32 renders and editor PNGs.
+  availability: always
+  skill: view-bridge
+  caveat: Records observations, never a verdict — the paired comparison and its negative controls live in Vellum tools/parity/host_lane.py. Read-back uses CGWindowListCreateImage on the probe's own off-screen window; a frame with read=false is a blind instrument, not an empty editor. Animated editors do not reproduce pixel for pixel across runs.
 - name: audio-quality-lab
   path: tools/audio/quality-lab
   category: audio
