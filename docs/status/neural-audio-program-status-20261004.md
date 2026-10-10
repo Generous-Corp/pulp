@@ -6,8 +6,8 @@
 > older receipt as current acceptance evidence.
 
 This receipt was originally audited against the historical protected snapshot
-[`9660876c9af59b6132491fbaaba71d0760195e7c`](https://github.com/Generous-Corp/pulp/commit/9660876c9af59b6132491fbaaba71d0760195e7c). The current protected snapshot for this follow-up is
-[`174fccfc0b004316a0cc588dec2dc3f0c12ed16a`](https://github.com/Generous-Corp/pulp/commit/174fccfc0b004316a0cc588dec2dc3f0c12ed16a); the older anchor is retained only as historical provenance. Claims remain fail-closed: synthetic, CPU-only, metadata-only, and unavailable-counter evidence does not establish provider execution or product performance.
+[`9660876c9af59b6132491fbaaba71d0760195e7c`](https://github.com/Generous-Corp/pulp/commit/9660876c9af59b6132491fbaaba71d0760195e7c). The later audit anchor
+[`174fccfc0b004316a0cc588dec2dc3f0c12ed16a`](https://github.com/Generous-Corp/pulp/commit/174fccfc0b004316a0cc588dec2dc3f0c12ed16a) is retained only as historical provenance. Claims remain fail-closed: synthetic, CPU-only, metadata-only, and unavailable-counter evidence does not establish provider execution or product performance.
 
 ## Fresh protected-head reconciliation
 
