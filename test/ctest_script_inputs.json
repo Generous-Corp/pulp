@@ -8606,6 +8606,35 @@
    ],
    "kind": "python"
   },
+  "render-upward-edge-check": {
+   "entry": "tools/scripts/render_upward_edge_check.py",
+   "inputs": [
+    "core/render",
+    "core/render/platform/android/gpu_surface_android.cpp",
+    "core/render/platform/android/gpu_surface_android_internal.hpp",
+    "core/render/platform/android/gpu_surface_android_jni.cpp",
+    "core/render/platform/android/synth_ui.js.h",
+    "tools/scripts/render_upward_edge_check.py"
+   ],
+   "kind": "python"
+  },
+  "render-upward-edge-check-rules": {
+   "entry": "tools/scripts/test_render_upward_edge_check.py",
+   "inputs": [
+    "core/render",
+    "core/render/platform/android/choreographer_android.cpp",
+    "core/render/platform/android/gpu_surface_android.cpp",
+    "core/render/platform/android/gpu_surface_android_internal.hpp",
+    "core/render/platform/android/gpu_surface_android_jni.cpp",
+    "core/render/platform/android/synth_ui.js.h",
+    "core/render/src/renderer3d.cpp",
+    "core/render/src/skia_surface.cpp",
+    "tools/cmake/PulpAndroid.cmake",
+    "tools/scripts/render_upward_edge_check.py",
+    "tools/scripts/test_render_upward_edge_check.py"
+   ],
+   "kind": "python"
+  },
   "repo-source-scan": {
    "entry": "tools/scripts/test_repo_source_scan.py",
    "inputs": [
