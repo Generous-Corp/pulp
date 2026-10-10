@@ -1,6 +1,6 @@
 /// @file test_motion_android_bridge.cpp
 /// Catch2 unit tests for the Android JNI bridge C ABI in
-/// `core/platform/src/android/jni_motion.cpp`. Mirrors
+/// `core/view/platform/android/jni_motion.cpp`. Mirrors
 /// `test_motion_swift_bridge.cpp` — exercises the publish channel
 /// shim, the ambient-provenance slot, and the geometry-trace
 /// register/update/detach lifecycle by calling the C symbols

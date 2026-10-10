@@ -645,7 +645,7 @@ allocation.
 - `core/platform/include/pulp/platform/android/motion_bridge.h` — C
   ABI declarations the JNI shims forward into (also pulled by the
   Catch2 host test).
-- `core/platform/src/android/jni_motion.cpp` — bridge implementation:
+- `core/view/platform/android/jni_motion.cpp` — bridge implementation:
   C ABI + `Java_com_pulp_motion_PulpMotionNative_*` JNI shims.
   Internal mutex-protected registry keeps the `TraceHandle`
   separate from the lambda-captured atomic rect so
@@ -728,7 +728,7 @@ discovery.
 - `apple/Sources/PulpSwift/PulpMotion.swift` — Swift facade + Trace DSL (Path G)
 - `apple/Sources/PulpSwift/PulpMotionProbe.swift` — SwiftUI / UIKit probe (Path G)
 - `core/platform/include/pulp/platform/android/motion_bridge.h` — Android C ABI (Path H)
-- `core/platform/src/android/jni_motion.cpp` — Android JNI bridge + C ABI (Path H)
+- `core/view/platform/android/jni_motion.cpp` — Android JNI bridge + C ABI (Path H)
 - `android/app/src/main/kotlin/com/pulp/motion/PulpMotion.kt` — Kotlin facade (Path H)
 - `android/app/src/main/kotlin/com/pulp/motion/PulpMotionBackend.kt` — closure-bag backend seam (Path H)
 - `android/app/src/main/kotlin/com/pulp/motion/PulpMotionNative.kt` — internal JNI declarations (Path H)
