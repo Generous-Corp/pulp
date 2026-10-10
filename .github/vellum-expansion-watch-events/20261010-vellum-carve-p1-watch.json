@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-vellum-carve-p1-watch",
+  "created_at": "2026-10-10T17:44:37Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "P1 removes dead visualizer and waveform exports from the Pulp widgets.hpp and view_all.hpp umbrellas, and names the direct visualizer dependencies in the implementation, settings panel, and visualizer tests. This is a zero-behavior-change include-boundary carve; public include paths and pulp::view, pulp::format, and pulp::render umbrella targets remain available. No design-import, Chromium, rendering, packaging, or Vellum source authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-visualization",
+    "ctest --test-dir build -R pulp-test-widgets",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
