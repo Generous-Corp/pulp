@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
     // host becomes ready; GPU and other optional runtime dependencies may be
     // loaded lazily from this directory later in the session.
     if (!std::filesystem::is_regular_file(
-            std::filesystem::path(argv[0]).parent_path() / "libwgpu_native.dylib"))
+            std::filesystem::path(argv[0]).parent_path() / PULP_CONTROL_E2E_RUNTIME_DEPENDENCY))
         return 70;
 #endif
     std::ofstream(argv[1]) << installed->binding().registration_id << '\n'
