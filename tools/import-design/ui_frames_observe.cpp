@@ -22,6 +22,7 @@
 
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/context_menu.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/frame_clock.hpp>
@@ -31,15 +32,14 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
-#include <pulp/view/context_menu.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <algorithm>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -61,7 +61,8 @@ constexpr const char* kScheduleSchema = "pulp-ui-frame-schedule-v1";
 
 std::string read_bytes(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
-    if (!input) return {};
+    if (!input)
+        return {};
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
@@ -86,14 +87,14 @@ std::optional<std::pair<view::KeyCode, std::uint16_t>> parse_key(std::string_vie
         text.remove_prefix(shift_prefix.size());
     }
     static const std::pair<std::string_view, KeyCode> named[] = {
-        {"tab", KeyCode::tab},     {"enter", KeyCode::enter},   {"escape", KeyCode::escape},
-        {"space", KeyCode::space}, {"left", KeyCode::left},     {"right", KeyCode::right},
-        {"up", KeyCode::up},       {"down", KeyCode::down},     {"home", KeyCode::home},
-        {"end", KeyCode::end_},    {"page_up", KeyCode::page_up},
-        {"page_down", KeyCode::page_down},
+        {"tab", KeyCode::tab},     {"enter", KeyCode::enter},     {"escape", KeyCode::escape},
+        {"space", KeyCode::space}, {"left", KeyCode::left},       {"right", KeyCode::right},
+        {"up", KeyCode::up},       {"down", KeyCode::down},       {"home", KeyCode::home},
+        {"end", KeyCode::end_},    {"page_up", KeyCode::page_up}, {"page_down", KeyCode::page_down},
     };
     for (const auto& [name, code] : named)
-        if (text == name) return std::pair{code, modifiers};
+        if (text == name)
+            return std::pair{code, modifiers};
     if (text.size() == 1 &&
         ((text[0] >= 'a' && text[0] <= 'z') || (text[0] >= '0' && text[0] <= '9')))
         return std::pair{static_cast<KeyCode>(text[0]), modifiers};
@@ -108,14 +109,17 @@ std::string label_of(const view::View& v) {
 
 std::string labelled_ancestor(const view::View* v) {
     for (; v; v = v->parent())
-        if (!label_of(*v).empty()) return label_of(*v);
+        if (!label_of(*v).empty())
+            return label_of(*v);
     return {};
 }
 
 view::View* find_focused(view::View& root) {
-    if (root.has_focus()) return &root;
+    if (root.has_focus())
+        return &root;
     for (std::size_t i = 0; i < root.child_count(); ++i)
-        if (auto* found = find_focused(*root.child_at(i))) return found;
+        if (auto* found = find_focused(*root.child_at(i)))
+            return found;
     return nullptr;
 }
 
@@ -123,7 +127,8 @@ view::View* find_focused(view::View& root) {
 
 state::ParamID param_id(const state::StateStore& store, std::string_view name) {
     for (const auto& info : store.all_params())
-        if (info.name == name) return info.id;
+        if (info.name == name)
+            return info.id;
     return 0;
 }
 
@@ -132,7 +137,7 @@ state::ParamID param_id(const state::StateStore& store, std::string_view name) {
 // frame. A control mid-gesture is left alone: the gesture wins.
 class StoreBinding final : public view::NativeImportBindingContext,
                            public view::NativeImportComboBoxBindingContext {
-public:
+  public:
     explicit StoreBinding(state::StateStore& store) : store_(store) {}
 
     void bind_knob(view::Knob& knob, const view::NativeImportBindingDescriptor& d) override {
@@ -144,7 +149,8 @@ public:
     void bind_combo_box(view::ComboBox& combo,
                         const view::NativeImportSegmentedBindingDescriptor& d) override {
         const auto id = resolve(d.param_key);
-        if (id == 0) return;
+        if (id == 0)
+            return;
         const int count = d.segment_count;
         combo.on_change = [this, id, count](int index) {
             store_.set_normalized(id, view::selector_segment_value(index, count));
@@ -157,24 +163,28 @@ public:
     }
 
     void sync() {
-        for (auto& f : sync_) f();
+        for (auto& f : sync_)
+            f();
     }
-    const std::vector<std::pair<std::string, bool>>& resolutions() const { return resolutions_; }
+    const std::vector<std::pair<std::string, bool>>& resolutions() const {
+        return resolutions_;
+    }
 
-private:
+  private:
     state::ParamID resolve(std::string_view key) {
         const auto id = param_id(store_, key);
         resolutions_.emplace_back(std::string(key), id != 0);
         return id;
     }
 
-    template <typename Control>
-    void attach_scalar(Control& control, std::string_view key) {
+    template <typename Control> void attach_scalar(Control& control, std::string_view key) {
         const auto id = resolve(key);
-        if (id == 0) return;
+        if (id == 0)
+            return;
         control.on_change = [this, id](float v) { store_.set_normalized(id, v); };
         sync_.push_back([this, &control, id] {
-            if (!control.is_gesture_active()) control.set_value(store_.get_normalized(id));
+            if (!control.is_gesture_active())
+                control.set_value(store_.get_normalized(id));
         });
     }
 
@@ -237,13 +247,14 @@ std::optional<Schedule> parse_schedule(const std::string& text, state::StateStor
                                        std::string& error);
 
 class Observer {
-public:
+  public:
     Observer(Options options, view::DesignIR ir)
         : options_(std::move(options)), ir_(std::move(ir)) {}
 
     bool load_schedule(const std::string& text, std::string& error) {
         auto parsed = parse_schedule(text, store_, error);
-        if (!parsed) return false;
+        if (!parsed)
+            return false;
         schedule_ = std::move(*parsed);
         return true;
     }
@@ -272,7 +283,8 @@ public:
             ov->session->set_document_loaded_callback(
                 [this, raw](bool loaded, const std::string& why) {
                     ++raw->loaded_callbacks;
-                    if (!raw->loaded_frame) raw->loaded_frame = current_frame_;
+                    if (!raw->loaded_frame)
+                        raw->loaded_frame = current_frame_;
                     raw->loaded_ok = loaded;
                     raw->loaded_error = why;
                 });
@@ -285,11 +297,12 @@ public:
             } else {
                 started = ov->session->load(&error);
             }
-            if (!started) return false;
+            if (!started)
+                return false;
         } else {
-            ov->root = view::build_native_view_tree(ir_, ir_.asset_manifest,
-                                                    {.asset_base_directory =
-                                                         options_.design_ir.parent_path()});
+            ov->root = view::build_native_view_tree(
+                ir_, ir_.asset_manifest,
+                {.asset_base_directory = options_.design_ir.parent_path()});
             if (!ov->root) {
                 error = "could not materialize DesignIR";
                 return false;
@@ -310,8 +323,8 @@ public:
         if (event.kind == "attach_view") {
             const bool ok = attach_view(current_frame_, error);
             record.addMember("attached", choc::value::createBool(ok));
-            record.addMember("new_view", choc::value::createInt64(
-                                             static_cast<std::int64_t>(views_.size()) - 1));
+            record.addMember(
+                "new_view", choc::value::createInt64(static_cast<std::int64_t>(views_.size()) - 1));
             return record;
         }
         if (event.kind == "set_param") {
@@ -321,8 +334,10 @@ public:
             record.addMember("name", choc::value::createString(name));
             record.addMember("resolved", choc::value::createBool(id != 0));
             if (id != 0)
-                store_.set_normalized(id, static_cast<float>(event.spec["value"].getWithDefault(0.0)));
-            for (auto& v : views_) v->dirty = true;
+                store_.set_normalized(id,
+                                      static_cast<float>(event.spec["value"].getWithDefault(0.0)));
+            for (auto& v : views_)
+                v->dirty = true;
             return record;
         }
         if (event.view < 0 || event.view >= static_cast<int>(views_.size()) ||
@@ -340,7 +355,8 @@ public:
         const view::View* target = nullptr;
         bool handled = false;
         if (event.kind == "detach_view") {
-            if (ov.session) ov.session->release_root();
+            if (ov.session)
+                ov.session->release_root();
             ov.session.reset();
             ov.binding.reset();
             ov.root.reset();
@@ -383,10 +399,13 @@ public:
             }
             auto* focused = find_focused(root);
             if (key->first == view::KeyCode::tab) {
-                auto* next = (key->second & view::kModShift) ? view::View::focus_prev(root, focused)
-                                                             : view::View::focus_next(root, focused);
-                if (next) next->on_focus_changed(true);
-                if (focused && focused != next) focused->on_focus_changed(false);
+                auto* next = (key->second & view::kModShift)
+                                 ? view::View::focus_prev(root, focused)
+                                 : view::View::focus_next(root, focused);
+                if (next)
+                    next->on_focus_changed(true);
+                if (focused && focused != next)
+                    focused->on_focus_changed(false);
                 handled = next != nullptr;
                 target = next;
             } else if (focused) {
@@ -417,29 +436,32 @@ public:
         record.addMember("view", choc::value::createInt64(ov.index));
         if (ov.session && !ov.session->poll(&ov.poll_error))
             record.addMember("poll_error", choc::value::createString(ov.poll_error));
-        if (ov.binding) ov.binding->sync();
+        if (ov.binding)
+            ov.binding->sync();
         ov.root->layout_children();
         // Repaint requests are how a host learns its tree changed (a bound
         // control picking up another editor's write, a script setter). With
         // no window host attached they only bump the process-wide damage
         // counter, so any movement since this view's last tick marks it
         // dirty. Over-approximate across views, never under.
-        const auto damage = view::View::damage_request_count() +
-                            view::View::unmarked_paint_mutation_count();
-        if (damage != ov.damage_seen) ov.dirty = true;
+        const auto damage =
+            view::View::damage_request_count() + view::View::unmarked_paint_mutation_count();
+        if (damage != ov.damage_seen)
+            ov.dirty = true;
         const bool idle_callback = ov.session != nullptr;
-        const bool dispatched = view::should_dispatch_host_frame(*ov.pump, ov.dirty,
-                                                                 ov.last_continuous, idle_callback);
+        const bool dispatched =
+            view::should_dispatch_host_frame(*ov.pump, ov.dirty, ov.last_continuous, idle_callback);
         record.addMember("dispatched", choc::value::createBool(dispatched));
         if (dispatched) {
-            const auto t = view::begin_host_frame(ov.root.get(), *ov.clock, *ov.pump, timestamp,
-                                                  ov.dirty);
-            if (t.should_render) view::advance_host_frame(ov.root.get(), *ov.clock, t.dt);
+            const auto t =
+                view::begin_host_frame(ov.root.get(), *ov.clock, *ov.pump, timestamp, ov.dirty);
+            if (t.should_render)
+                view::advance_host_frame(ov.root.get(), *ov.clock, t.dt);
             // The hosts ask again after advancing: an animation the advance
             // just started (or just finished) decides whether the NEXT vsync
             // is dispatched, so the value from the top of the frame is stale.
-            ov.last_continuous = ov.clock->has_active_subscribers() ||
-                                 view::needs_continuous_frames(ov.root.get());
+            ov.last_continuous =
+                ov.clock->has_active_subscribers() || view::needs_continuous_frames(ov.root.get());
             record.addMember("dt", choc::value::createFloat64(t.dt));
             record.addMember("resumed", choc::value::createBool(t.resumed));
             record.addMember("rendered", choc::value::createBool(t.should_render));
@@ -447,8 +469,8 @@ public:
             record.addMember("continuous_after", choc::value::createBool(ov.last_continuous));
         }
         ov.dirty = false;
-        ov.damage_seen = view::View::damage_request_count() +
-                         view::View::unmarked_paint_mutation_count();
+        ov.damage_seen =
+            view::View::damage_request_count() + view::View::unmarked_paint_mutation_count();
         record.addMember("clock_time", choc::value::createFloat64(ov.clock->time()));
         record.addMember("readiness", readiness(ov));
         const auto* focused = find_focused(*ov.root);
@@ -456,23 +478,22 @@ public:
         auto state = choc::value::createEmptyArray();
         collect_state(*ov.root, state);
         record.addMember("state", state);
-        record.addMember("layout_sha256", choc::value::createString(runtime::sha256_hex(
-                                              view::dump_layout_tree(
-                                                  *ov.root, {.surface = "ui-frames",
-                                                             .viewport_width = ov.width,
-                                                             .viewport_height = ov.height}))));
+        record.addMember("layout_sha256",
+                         choc::value::createString(runtime::sha256_hex(
+                             view::dump_layout_tree(*ov.root, {.surface = "ui-frames",
+                                                               .viewport_width = ov.width,
+                                                               .viewport_height = ov.height}))));
         std::uint32_t w = 0;
         std::uint32_t h = 0;
-        const auto pixels = view::render_to_rgba(*ov.root, static_cast<std::uint32_t>(ov.width),
-                                                 static_cast<std::uint32_t>(ov.height),
-                                                 options_.scale, &w, &h);
+        const auto pixels =
+            view::render_to_rgba(*ov.root, static_cast<std::uint32_t>(ov.width),
+                                 static_cast<std::uint32_t>(ov.height), options_.scale, &w, &h);
         record.addMember("pixels_sha256",
-                         choc::value::createString(pixels.empty() ? std::string{}
-                                                                  : runtime::sha256_hex(
-                                                                        pixels.data(),
-                                                                        pixels.size())));
-        record.addMember("pixel_size", choc::value::createString(std::to_string(w) + "x" +
-                                                                 std::to_string(h)));
+                         choc::value::createString(
+                             pixels.empty() ? std::string{}
+                                            : runtime::sha256_hex(pixels.data(), pixels.size())));
+        record.addMember("pixel_size",
+                         choc::value::createString(std::to_string(w) + "x" + std::to_string(h)));
         return record;
     }
 
@@ -549,7 +570,8 @@ public:
                 entry.addMember("animations", choc::value::createInt64(v.active_animation_count()));
             out.addArrayElement(entry);
         }
-        for (std::size_t i = 0; i < v.child_count(); ++i) collect_state(*v.child_at(i), out);
+        for (std::size_t i = 0; i < v.child_count(); ++i)
+            collect_state(*v.child_at(i), out);
     }
 
     int run(choc::value::Value& log) {
@@ -568,7 +590,8 @@ public:
             frame.addMember("timestamp", choc::value::createFloat64(schedule_.timestamps[f]));
             auto applied = choc::value::createEmptyArray();
             for (const auto& event : schedule_.events) {
-                if (event.frame != current_frame_) continue;
+                if (event.frame != current_frame_)
+                    continue;
                 applied.addArrayElement(apply(event, error));
                 if (!error.empty()) {
                     std::cerr << "Error: frame " << f << ": " << error << "\n";
@@ -578,7 +601,8 @@ public:
             frame.addMember("events", applied);
             auto view_records = choc::value::createEmptyArray();
             for (auto& ov : views_) {
-                if (!ov->attached) continue;
+                if (!ov->attached)
+                    continue;
                 view_records.addArrayElement(tick(*ov, schedule_.timestamps[f]));
                 if (std::find(schedule_.capture.begin(), schedule_.capture.end(), current_frame_) !=
                     schedule_.capture.end()) {
@@ -597,14 +621,16 @@ public:
             frame.addMember("views", view_records);
             auto params = choc::value::createObject("");
             for (const auto& info : store_.all_params())
-                params.addMember(info.name, choc::value::createFloat64(store_.get_normalized(info.id)));
+                params.addMember(info.name,
+                                 choc::value::createFloat64(store_.get_normalized(info.id)));
             frame.addMember("params", params);
             frames.addArrayElement(frame);
         }
         log.addMember("frames", frames);
         auto bindings = choc::value::createEmptyArray();
         for (const auto& ov : views_) {
-            if (!ov->binding) continue;
+            if (!ov->binding)
+                continue;
             for (const auto& [key, resolved] : ov->binding->resolutions()) {
                 auto b = choc::value::createObject("");
                 b.addMember("view", choc::value::createInt64(ov->index));
@@ -627,11 +653,12 @@ public:
         log.addMember("views", lifetimes);
         // Release scripted realms while their roots still exist.
         for (auto& ov : views_)
-            if (ov->session) ov->session->release_root();
+            if (ov->session)
+                ov->session->release_root();
         return 0;
     }
 
-private:
+  private:
     Options options_;
     Schedule schedule_;
     view::DesignIR ir_;
@@ -659,7 +686,8 @@ std::optional<Schedule> parse_schedule(const std::string& text, state::StateStor
         error = "schedule needs a non-empty timestamps array";
         return std::nullopt;
     }
-    for (uint32_t i = 0; i < stamps.size(); ++i) s.timestamps.push_back(stamps[i].getWithDefault(0.0));
+    for (uint32_t i = 0; i < stamps.size(); ++i)
+        s.timestamps.push_back(stamps[i].getWithDefault(0.0));
     if (doc.hasObjectMember("nominal_dt"))
         s.nominal_dt = static_cast<float>(doc["nominal_dt"].getWithDefault(0.0));
     if (doc.hasObjectMember("readiness"))
@@ -700,8 +728,10 @@ std::optional<Schedule> parse_schedule(const std::string& text, state::StateStor
             ev.view = static_cast<int>(e["view"].getWithDefault<int64_t>(0));
             ev.kind = e["kind"].getWithDefault<std::string>("");
             ev.spec = e;
-            if (ev.frame < 0 || ev.frame >= static_cast<int>(s.timestamps.size()) || ev.kind.empty()) {
-                error = "event " + std::to_string(i) + " needs a kind and a frame inside the schedule";
+            if (ev.frame < 0 || ev.frame >= static_cast<int>(s.timestamps.size()) ||
+                ev.kind.empty()) {
+                error =
+                    "event " + std::to_string(i) + " needs a kind and a frame inside the schedule";
                 return std::nullopt;
             }
             s.events.push_back(std::move(ev));
@@ -746,7 +776,7 @@ const char* arch_name() {
 #endif
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
     Options options;
@@ -757,14 +787,18 @@ int main(int argc, char** argv) {
             return 2;
         }
         const char* value = argv[++i];
-        if (arg == "--design-ir") options.design_ir = value;
-        else if (arg == "--script") options.script = value;
-        else if (arg == "--schedule") options.schedule = value;
-        else if (arg == "--out-dir") options.out_dir = value;
-        else if (arg == "--width" && parse_positive(value, options.width)) {}
-        else if (arg == "--height" && parse_positive(value, options.height)) {}
-        else if (arg == "--scale" && parse_positive(value, options.scale)) {}
-        else {
+        if (arg == "--design-ir")
+            options.design_ir = value;
+        else if (arg == "--script")
+            options.script = value;
+        else if (arg == "--schedule")
+            options.schedule = value;
+        else if (arg == "--out-dir")
+            options.out_dir = value;
+        else if (arg == "--width" && parse_positive(value, options.width)) {
+        } else if (arg == "--height" && parse_positive(value, options.height)) {
+        } else if (arg == "--scale" && parse_positive(value, options.scale)) {
+        } else {
             usage();
             return 2;
         }
@@ -792,7 +826,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     view::DesignIR ir;
-    if (!options.design_ir.empty()) ir = view::parse_design_ir_json(input_bytes);
+    if (!options.design_ir.empty())
+        ir = view::parse_design_ir_json(input_bytes);
 
     Observer observer(options, std::move(ir));
     std::string error;
@@ -811,13 +846,16 @@ int main(int argc, char** argv) {
     environment.addMember("height", choc::value::createFloat64(options.height));
     log.addMember("environment", environment);
     auto inputs = choc::value::createObject("");
-    inputs.addMember("mode", choc::value::createString(options.script.empty() ? "design-ir" : "script"));
+    inputs.addMember("mode",
+                     choc::value::createString(options.script.empty() ? "design-ir" : "script"));
     inputs.addMember("input", choc::value::createString(input_path.filename().string()));
     inputs.addMember("input_sha256", choc::value::createString(runtime::sha256_hex(input_bytes)));
-    inputs.addMember("schedule_sha256", choc::value::createString(runtime::sha256_hex(schedule_bytes)));
+    inputs.addMember("schedule_sha256",
+                     choc::value::createString(runtime::sha256_hex(schedule_bytes)));
     log.addMember("inputs", inputs);
     const int status = observer.run(log);
-    if (status != 0) return status;
+    if (status != 0)
+        return status;
     if (!write_text(options.out_dir / "frames.json", choc::json::toString(log, true))) {
         std::cerr << "Error: could not write frames.json\n";
         return 1;
