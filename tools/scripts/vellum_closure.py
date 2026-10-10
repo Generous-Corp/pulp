@@ -8,6 +8,7 @@ must land on a protected mirror ref and never rewrite Vellum main.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -220,12 +221,12 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
         if row:
             mode, kind, blob, name = row.split("\t", 1)[0].split(" ") + [row.split("\t", 1)[1]]
             if kind == "blob":
-                rows.append({"path": name, "blob": blob})
+                rows.append({"path": name, "mode": mode, "blob": blob})
     return rows
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    manifest = json.loads(Path(args.manifest).read_text())
+    manifests = [json.loads(Path(path).read_text()) for path in args.manifest]
     repo = Path(args.repo).resolve()
     out = Path(args.output).resolve()
     if out.exists() and any(out.iterdir()):
@@ -234,7 +235,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     filter_repo = shutil.which("git-filter-repo") or shutil.which("git-filter-repo.py")
     if not filter_repo:
         raise SystemExit("git-filter-repo is required for export; refusing fallback projection")
-    paths = [p for p in manifest["files"] if not p.startswith("@build/")]
+    paths = sorted({p for manifest in manifests for p in manifest["files"] if not p.startswith("@build/")})
     subprocess.run(["git", "clone", "--no-local", str(repo), str(out)], check=True, stdout=subprocess.DEVNULL)
     mirror_root = args.mirror_root.strip("/")
     if not mirror_root or mirror_root.startswith("@"):
@@ -246,34 +247,53 @@ def cmd_export(args: argparse.Namespace) -> int:
         if Path(mirror_path).is_absolute() or ".." in Path(mirror_path).parts:
             raise SystemExit(f"rename map escapes repository: {path} -> {mirror_path}")
         cmd.extend(["--path", path, "--path-rename", f"{path}:{mirror_root}/{mirror_path}"])
+    run("git", "-C", str(out), "update-ref", "refs/heads/export-source", args.pulp_sha)
+    cmd.extend(["--refs", "export-source"])
     subprocess.run(cmd, cwd=out, check=True)
-    mirror_sha = run("git", "-C", str(out), "rev-parse", "HEAD")
+    mirror_sha = run("git", "-C", str(out), "rev-parse", "refs/heads/export-source")
+    mirror_tree = run("git", "-C", str(out), "rev-parse", f"{mirror_sha}:mirror")
     rows = git_blob_rows(repo, args.pulp_sha, paths)
-    receipt_path = out / "provenance" / "mirror" / "export-receipt.json"
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
     by_path = {row["path"]: row["blob"] for row in rows}
-    records = [
-        {
-            "mirror_path": f"{mirror_root}/{rename_map.get(path, path)}",
-            "git_blob_sha": by_path[path],
-            "pulp_commit": args.pulp_sha,
-            "pulp_path": path,
-            "export_receipt": "provenance/mirror/export-receipt.json",
-        }
-        for path in paths if path in by_path
-    ]
+    export_id = f"{datetime.now(timezone.utc):%Y%m%d}-{args.pulp_sha[:12]}"
+    landing = Path(args.landing).resolve() if args.landing else out.parent / f"vellum-export-{export_id}"
+    closure_dir = landing / "provenance" / "mirror" / "closures" / export_id
+    closure_dir.mkdir(parents=True, exist_ok=True)
+    units = []
+    for index, manifest in enumerate(manifests):
+        unit_name = args.unit_name[index] if index < len(args.unit_name) else Path(args.manifest[index]).stem
+        normalized = dict(manifest)
+        normalized["source_root"] = None
+        normalized["build_dir"] = None
+        closure_path = closure_dir / f"{unit_name}.json"
+        closure_path.write_text(json.dumps(normalized, indent=2, sort_keys=True) + "\n")
+        units.append({"name": unit_name, "closure_manifest": f"provenance/mirror/closures/{export_id}/{unit_name}.json", "closure_sha256": sha256(closure_path), "oracle_class": "identity"})
+    files = sorted(({"mirror_path": f"{mirror_root}/{rename_map.get(path, path)}", "pulp_path": path, "mode": next(row["mode"] for row in rows if row["path"] == path), "blob": by_path[path]} for path in paths if path in by_path), key=lambda row: row["mirror_path"])
+    commit_map_src = out / ".git" / "filter-repo" / "commit-map"
+    commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
+    commit_map_path.parent.mkdir(parents=True, exist_ok=True)
+    commit_map_path.write_bytes(commit_map_src.read_bytes() if commit_map_src.is_file() else f"{args.pulp_sha} {mirror_sha}\n".encode())
+    tool_rows = git_blob_rows(repo, args.pulp_sha, ["tools/scripts/vellum_closure.py"])
+    receipt_rel = f"provenance/mirror/receipts/{export_id}.json"
     receipt = {
         "schema": "pulp.vellum.export-receipt.v2",
         "pulp_repository": "Generous-Corp/pulp",
-        "pulp_commit": args.pulp_sha,
-        "mirror_commit": mirror_sha,
-        "mirror_root": f"{mirror_root}/",
-        "rename_map": rename_map,
-        "records": records,
-        "generated_inputs": {p: sha256(repo / p) for p in manifest.get("generated_inputs", []) if not p.startswith("@build/") and (repo / p).is_file()},
+        "export_id": export_id,
+        "pulp_sha": args.pulp_sha,
+        "mirror_ref": "refs/heads/mirror/pulp-framework",
+        "mirror_sha": mirror_sha,
+        "mirror_tree": mirror_tree,
+        "rename": {"from_prefix": "", "to_prefix": "mirror/"},
+        "commit_map": {"path": f"provenance/mirror/commit-maps/{export_id}.txt", "sha256": sha256(commit_map_path)},
+        "units": units,
+        "files": files,
+        "generated_inputs": [],
+        "tool": {"path": "tools/scripts/vellum_closure.py", "pulp_blob": tool_rows[0]["blob"] if tool_rows else ""},
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
-    print(f"export_receipt={receipt_path} mirror_sha={mirror_sha} blobs={len(records)}")
+    print(f"export_receipt={receipt_path} mirror_sha={mirror_sha} blobs={len(files)}")
     return 0
 
 
@@ -281,11 +301,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
     receipt = json.loads(Path(args.receipt).read_text())
     repo = Path(args.mirror).resolve()
     head = run("git", "-C", str(repo), "rev-parse", "HEAD")
-    recorded_head = receipt.get("mirror_commit", receipt.get("mirror_sha"))
+    recorded_head = receipt.get("mirror_sha", receipt.get("mirror_commit"))
     if head != recorded_head:
         print(f"identity=FAIL\n  mirror HEAD {head} != receipt mirror commit {recorded_head}")
         return 1
-    expected = {row["mirror_path"]: row["git_blob_sha"] for row in receipt["records"]}
+    expected = {row["mirror_path"]: row["blob"] for row in receipt["files"]}
     actual = {row["path"]: row["blob"] for row in git_blob_rows(repo, head, expected)}
     bad = [path for path, blob in expected.items() if actual.get(path) != blob]
     if bad:
@@ -301,7 +321,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append", required=True); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
     p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
-    p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", required=True); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
+    p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
     args = parser.parse_args()
     return args.func(args)
