@@ -36,8 +36,19 @@ class WorktreeCreationGuardTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(scratch), "add", "README"], check=True)
             subprocess.run(["git", "-C", str(scratch), "commit", "-qm", "fixture"], check=True)
             worktrees = root / "worktrees"
-            env = dict(os.environ, PULP_WT_ROOT=str(worktrees), TMPDIR=str(root))
-            env.pop("PULP_ALLOW_TMP_CHECKOUT", None)
+            # Keep CI exemptions and host configuration out of this probe. In
+            # particular, GITHUB_ACTIONS=true intentionally bypasses the
+            # production guard and would let this test create a real fixture
+            # worktree instead of proving the refusal path.
+            env = {
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "HOME": str(root / "home"),
+                "LC_ALL": "C",
+                "PULP_WT_ROOT": str(worktrees),
+                "TMPDIR": str(root),
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+            }
             result = subprocess.run(
                 ["bash", str(scratch / "tools/ci/pulp-worktree.sh"), "new", "w6-guard-test"],
                 cwd=scratch, env=env, text=True, encoding="utf-8", capture_output=True, check=False,
