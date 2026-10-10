@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261010-p2-graph-editor-carve",
+  "kind": "change",
+  "created_at": "2026-10-10T19:00:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; P2 is a Pulp-only dependency carve that preserves the public GraphEditorView include path and umbrella targets while removing the host-to-view-core edge; no Vellum implementation or authority moves.",
+  "tests": [
+    "tools/scripts/gates.sh origin/main",
+    "pulp build --all",
+    "ctest --test-dir build --output-on-failure -R 'graph-editor|view-core|ios-hostapp|ios-auv3'",
+    "tools/scripts/confirm_failure.sh",
+    "Vellum freeze"
+  ],
+  "disposition": "pulp-only"
+}
