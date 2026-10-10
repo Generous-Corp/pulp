@@ -134,7 +134,7 @@ jobs:
       # Evaluate marker-era policy before the operator-selected source_ref is
       # checked out. Otherwise that ref could supply an older matrix that omits
       # sdk_provenance_floor and thereby disable its own guard.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # This first checkout is a trusted policy bootstrap. The source build
           # checkout below may use an operator-selected ref, but only after the
@@ -218,7 +218,7 @@ jobs:
           print("pre-marker repair: source_ref substitution remains permitted")
           PY
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           lfs: false
@@ -379,7 +379,7 @@ jobs:
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # lfs: false — release-cli fetches the Skia binaries explicitly via
           # fetch_skia_for_release.py (see "Fetch Skia prebuilt binaries" below;
@@ -1582,7 +1582,7 @@ jobs:
       # (custom root, no opt-in); that must be a warning, not a failed install.
       - name: Check out the installer and install-layout checker
         if: runner.os != 'Windows'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: installer-src
@@ -1866,7 +1866,7 @@ jobs:
       CCACHE_NODEPEND: "true"
       CCACHE_SLOPPINESS: time_macros
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
           ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref != '' && inputs.source_ref || inputs.version) || '' }}
@@ -1945,7 +1945,7 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # compose_release_notes.py walks tag-to-tag ranges, and
           # GitHub's generated-notes endpoint needs the release tag in

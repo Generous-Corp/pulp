@@ -564,5 +564,41 @@ class QuotedTrailerIsNotABypassTests(unittest.TestCase):
         self.assertIn("release-note", got)
 
 
+class DependabotUsesOnlyDiffTests(unittest.TestCase):
+    def check(self, patch: str, actor: str = "dependabot[bot]") -> bool:
+        result = subprocess.CompletedProcess(
+            args=["git"], returncode=0, stdout=patch, stderr=""
+        )
+        with mock.patch.object(gc.subprocess, "run", return_value=result):
+            return gc.dependabot_uses_only_diff("origin/main", actor=actor)
+
+    def test_uses_only_workflow_diff_passes(self) -> None:
+        self.assertTrue(self.check(
+            "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
+            "@@ -1 +1 @@\n"
+            "-      uses: actions/checkout@v5\n"
+            "+      uses: actions/checkout@v7\n"
+        ))
+
+    def test_non_dependabot_actor_does_not_bypass(self) -> None:
+        self.assertFalse(self.check(
+            "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
+            "@@ -1 +1 @@\n"
+            "-      uses: actions/checkout@v5\n"
+            "+      uses: actions/checkout@v7\n",
+            actor="danielraffel",
+        ))
+
+    def test_mixed_workflow_diff_does_not_bypass(self) -> None:
+        self.assertFalse(self.check(
+            "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
+            "@@ -1,2 +1,2 @@\n"
+            "-      uses: actions/checkout@v5\n"
+            "+      uses: actions/checkout@v7\n"
+            "-      run: old\n"
+            "+      run: changed\n"
+        ))
+
+
 if __name__ == "__main__":
     unittest.main()

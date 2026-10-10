@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -15,6 +16,24 @@ import skill_sync_check as ssc
 
 
 class SkillSyncCheckTests(unittest.TestCase):
+
+    def test_dependabot_bypass_is_only_applied_by_the_gate_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / ".agents/skills/ci").mkdir(parents=True)
+            (repo / "tools/scripts").mkdir(parents=True)
+            (repo / "tools/scripts/versioning.json").write_text(json.dumps({
+                "skills": {"skills_dir": ".agents/skills", "path_map": "tools/scripts/skill_path_map.json"},
+                "trailers": {"skill_update": "Skill-Update"},
+            }))
+            (repo / "tools/scripts/skill_path_map.json").write_text(json.dumps({
+                "skills": {"ci": {"paths": [".github/workflows/**"]}},
+            }))
+            with mock.patch.object(ssc, "git_diff_names", return_value=[".github/workflows/build.yml"]), \
+                 mock.patch.object(ssc, "git_range_trailers", return_value={}), \
+                 mock.patch.object(ssc, "dependabot_uses_only_diff", return_value=True), \
+                 mock.patch.object(ssc, "repo_root", return_value=repo):
+                self.assertEqual(ssc.main(["--config", str(repo / "tools/scripts/versioning.json"), "--repo-root", str(repo)]), 0)
 
     def test_load_config_resolves_repo_relative_paths_and_trailer_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

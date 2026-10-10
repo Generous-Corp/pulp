@@ -39,7 +39,7 @@ jobs:
       STREAK_START: '2026-10-04'
       TRACKING_TITLE: 'Read audit: a day passed with no run on main'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: tools/ci/read_audit_cadence.py
           sparse-checkout-cone-mode: false

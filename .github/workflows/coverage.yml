@@ -119,8 +119,8 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
       - name: Install PyYAML
@@ -150,7 +150,7 @@ jobs:
   changed-files:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
-    # dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4 in PR mode requires pull-requests:read; without
+    # dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3 in PR mode requires pull-requests:read; without
     # it the action silently returns no changed files, which would defeat
     # the iOS-relevant path filter that gates the slow Swift coverage leg.
     permissions:
@@ -162,7 +162,7 @@ jobs:
       #   - push / dispatch → forced to true (full coverage on canonical lanes)
       ios: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ios == 'true' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
@@ -171,7 +171,7 @@ jobs:
         # above forces `ios=true` for push + workflow_dispatch. We still
         # run the action on PR events where it diffs against the base ref.
         if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           # iOS-relevant surface — keep narrow but inclusive enough that
           # any CMake/toolchain/iOS-platform change triggers the slow
@@ -208,7 +208,7 @@ jobs:
       windows_runs_on: ${{ steps.resolve.outputs.windows_runs_on }}
       android_kotlin_runs_on: ${{ steps.resolve.outputs.android_kotlin_runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
@@ -304,7 +304,7 @@ jobs:
       # diff-mode so docs-only changes still skip the expensive native build.
       native_build_required: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.classify.outputs.native_build_required }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           lfs: false
@@ -416,7 +416,7 @@ jobs:
     # upload set. If Windows fits the cap, it still uploads its own current flag.
     continue-on-error: ${{ matrix.os == 'windows' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           # No current coverage input is stored as an LFS object. Keep this
@@ -1266,17 +1266,17 @@ jobs:
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.android_kotlin_runs_on) }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           packages: platform-tools
 
@@ -1379,7 +1379,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
@@ -1535,7 +1535,7 @@ jobs:
           echo "gate_ready=true" >> "$GITHUB_OUTPUT"
           echo "Native coverage required and coverage job succeeded — running diff-cover."
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: steps.gate_preconditions.outputs.gate_ready == 'true'
         with:
           # diff-cover compares HEAD against --compare-branch using real
