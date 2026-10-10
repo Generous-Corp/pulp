@@ -2,7 +2,7 @@
   "schema_version": 1,
   "event_id": "20261010-p2-graph-editor-carve",
   "kind": "change",
-  "created_at": "2026-10-10T17:26:26Z",
+  "created_at": "2026-10-10T17:25:00Z",
   "slices": [
     "retained-ui-kernel"
   ],
