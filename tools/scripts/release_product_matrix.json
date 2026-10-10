@@ -69,6 +69,7 @@
     "pulp-dawproject-import",
     "pulp-events",
     "pulp-format",
+    "pulp-format-clap-core",
     "pulp-format-core",
     "pulp-format-view",
     "pulp-gpu-audio",
