@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/visualizers.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widget_skin_derive.hpp>

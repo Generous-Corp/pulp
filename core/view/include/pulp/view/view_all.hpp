@@ -5,9 +5,6 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/widgets.hpp>
-#include <pulp/view/waveform_gpu_primitives.hpp>
-#include <pulp/view/waveform_gpu_render_controller.hpp>
-#include <pulp/view/waveform_headless_render_backend.hpp>
 // JS scripting layer (pulp::view-script). Gated on the PUBLIC PULP_ENABLE_JS
 // compile definition from pulp-view-core: in a native-only build (OFF) these
 // headers declare symbols that live in the EXCLUDE_FROM_ALL view-script archive

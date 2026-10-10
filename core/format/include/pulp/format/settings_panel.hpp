@@ -8,6 +8,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/visualizers.hpp>
 
 #include <atomic>
 #include <functional>
