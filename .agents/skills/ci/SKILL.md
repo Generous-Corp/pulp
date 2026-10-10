@@ -122,6 +122,11 @@ route the build through `tools/ci/governed-build.sh` without an explicit
 `--parallel` cap. The governor owns the worker share and build-directory lock;
 the emulator and fixture execution steps remain separate.
 
+The cross-platform software-GPU workflow also routes its Linux and Windows
+build steps through the governor. Keep each runner's existing build directory,
+Release configuration, log tee, and platform-specific test flow unchanged;
+the wrapper supplies bounded parallelism and the shared build-directory lock.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 ### Build commands emitted by diagnostics and remediations

@@ -76,6 +76,23 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_cross_platform_builds_use_governor(self) -> None:
+        source = read_source(".github/workflows/cross-platform-check.yml")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "governed-build.sh cmake --build" in line
+        ]
+        self.assertEqual(len(build_lines), 3)
+        for line in build_lines:
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+        self.assertNotRegex(
+            source,
+            r"(?m)^\s*(?:run:\s*)?cmake --build\s+\"\$PULP_BUILD_DIR\"",
+        )
+
     def test_macos_retarget_build_uses_governor_inside_untrusted_runner(self) -> None:
         source = read_source(".github/workflows/build-macos.yml")
         self.assertIn(
