@@ -19,7 +19,7 @@ disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = 5ad0999ed1dbbc45c11de55ec210ddd8ff46367152eaec6e01077557323708c2
+# source_sha256 = 1e55579437dd660f1d4b1012bf2e0ff2704aa1e22327311f827a255eeecee799
 # generated_platform = macos
 [toolchain]
 xcode = "26.5"
