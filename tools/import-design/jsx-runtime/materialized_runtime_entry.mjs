@@ -1185,8 +1185,12 @@ function driveRequestedCapturedState() {
 }
 if (requestedCapturedState) requestAnimationFrame(driveRequestedCapturedState);
 function resolveCapturedStateFromAtlas() {
-  const registeredCanvases = materializedDomRegistryValues().filter(node =>
-    String(node && node.tagName || '').toLowerCase() === 'canvas');
+  const usesCanvasAuthority = canvasAuthorityEnabled && capturedStates.some(
+    state => state.canvas_index !== null && state.canvas_index !== undefined);
+  const registeredCanvases = usesCanvasAuthority
+    ? materializedDomRegistryValues().filter(node =>
+      String(node && node.tagName || '').toLowerCase() === 'canvas')
+    : [];
   // Every semantic selector lookup is answered in one registry pass. Canvas
   // authority states carry the binding index validated by the transformer so
   // multiple captured canvases cannot accidentally resolve to the first one.
