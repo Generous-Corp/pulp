@@ -48,7 +48,7 @@ def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | Non
         return False
     result = subprocess.run(
         ["git", "diff", "--no-ext-diff", "--unified=0", f"{base}...{head}", "--", ".github/workflows"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     if result.returncode != 0:
         return False

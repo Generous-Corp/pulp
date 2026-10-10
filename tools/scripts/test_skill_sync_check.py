@@ -25,10 +25,10 @@ class SkillSyncCheckTests(unittest.TestCase):
             (repo / "tools/scripts/versioning.json").write_text(json.dumps({
                 "skills": {"skills_dir": ".agents/skills", "path_map": "tools/scripts/skill_path_map.json"},
                 "trailers": {"skill_update": "Skill-Update"},
-            }))
+            }), encoding="utf-8")
             (repo / "tools/scripts/skill_path_map.json").write_text(json.dumps({
                 "skills": {"ci": {"paths": [".github/workflows/**"]}},
-            }))
+            }), encoding="utf-8")
             with mock.patch.object(ssc, "git_diff_names", return_value=[".github/workflows/build.yml"]), \
                  mock.patch.object(ssc, "git_range_trailers", return_value={}), \
                  mock.patch.object(ssc, "dependabot_uses_only_diff", return_value=True), \
