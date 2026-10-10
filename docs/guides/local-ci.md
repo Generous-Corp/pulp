@@ -2,6 +2,11 @@
 
 Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before merging.
 
+The macOS retarget lane keeps the untrusted-runner boundary for contributor
+code and invokes `tools/ci/governed-build.sh` inside that namespace for its
+build. This preserves the lane's runner isolation while applying the same
+bounded worker and build-directory locking policy as the other build emitters.
+
 > Setting up a dedicated machine as a persistent CI runner? See
 > [self-hosted-runner.md](self-hosted-runner.md) for the walkthrough
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
@@ -294,8 +299,18 @@ makes the reinstall a single verified command:
   `unverified`), `ref_sha`, `drift.first_seen` and `drift.age_seconds`, each
   drifted file with its installed and expected blobs, failed slots, disk fill,
   the stage, and `reinstall_command`. It uses the same exit codes as the text
-  check. Fleet monitoring reads this over SSH to report drift that has lasted
-  more than an hour.
+  check.
+- The reaper unit runs the check as
+  `--json-out /run/pulp-ci-host/health.json`. That prints the text check to the
+  journal as before, and also writes the JSON to that file (mode 0644, replaced
+  by rename) on every outcome, including `unverified`. Fleet monitoring reads
+  the file over the existing root SSH alias and never runs the check itself.
+  `/run` is cleared at boot, so the file is absent until the first reaper pass
+  after a reboot. If the path cannot be written, the previous object stays
+  with its old `checked_at`. A reader therefore treats an absent or stale file
+  as unknown, never as healthy.
+  It reports drift older than an hour, any non-healthy state, and a
+  `checked_at` older than 30 minutes, since the reaper runs every 15 minutes.
 
 Create separate root-owned role environments; never share one:
 
@@ -1229,7 +1244,26 @@ without changing their inputs or bytes, so it is not keyed as their input.
 `link_members.shared_scope()` names those loaders, executables and modules
 alike. The key manifest marks them always_run `shared_link`, and the replay
 leaves them out of its link map. Loaders of system libraries only are not in
-scope, because the runner image names those. job.json counts the loaders as
+scope, because the runner image names those.
+
+A change to a pin file (`tools/deps/manifest.json`,
+`tools/cmake/PulpDependencies.cmake`, `tools/cmake/PulpFetchContent.cmake`, a
+FetchContent block of the root `CMakeLists.txt`, or a `*_SDK_REF` assignment in
+`setup.sh`, which pins the SDKs it clones outside the tree)
+marks always_run `dependency_pin` only the executables that build against a
+dependency it moved on this platform. `tools/ci/dependency_pins.py` names the
+moved dependencies: manifest entries by name (documentation fields and
+another platform's release asset do not count), and CMake blocks by the
+anchors in `tools/ci/dependency_pin_map.json`, compared after comments and
+the branches this platform does not take are dropped. An executable reaches a
+name through its codemodel dependency closure or an archive its recorded link
+pulled. Anything it cannot name moves every executable: a file that does not
+parse, a change outside any mapped block, any change to
+`PulpFetchContent.cmake` or to a root FetchContent block, a name the map
+lacks (the map's `unmapped` list names those on purpose, each with its
+reason, and a test fails on a linking dependency in neither), or a mapped
+name this build shows no target or archive for. The key manifest's producer records the
+verdict as `dependency_pins`. job.json counts the loaders as
 `/link_members/shared_loaders`. `object-deps-<sha>.json`
 (`tools/ci/object_deps.py`, `--object-deps`) holds, per object file, the
 in-tree headers Ninja recorded it including (`ninja -t deps`, as `<src>/` and

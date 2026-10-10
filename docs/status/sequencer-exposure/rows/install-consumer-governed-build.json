@@ -1,0 +1,50 @@
+{
+  "id": "install-consumer-governed-build",
+  "title": "Install consumer smoke builds use the governed build lease wrapper",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "install-consumer-governed-build-20261008",
+  "owned_paths": [
+    ".github/workflows/install-consumer-smoke.yml",
+    "tools/scripts/test_build_parallelism_guard.py",
+    "test/ctest_script_inputs.json",
+    "docs/status/sequencer-exposure/rows/install-consumer-governed-build.json"
+  ],
+  "evidence": [
+    {
+      "path": ".github/workflows/install-consumer-smoke.yml",
+      "needles": [
+        "tools/ci/governed-build.sh cmake --build build",
+        "tools/ci/governed-build.sh cmake --build \"$CONSUMER/build\""
+      ]
+    },
+    {
+      "path": "tools/scripts/test_build_parallelism_guard.py",
+      "needles": [
+        "test_install_consumer_smoke_builds_use_the_governor"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This CI build-governance regression changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "This CI build-governance regression changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "This CI build-governance regression changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "This CI build-governance regression changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "This CI build-governance regression changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    }
+  }
+}

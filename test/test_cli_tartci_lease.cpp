@@ -434,6 +434,9 @@ esac
     ScopedEnvVar leases_enabled("PULP_TARTCI_LEASES", "1");
     ScopedEnvVar no_nested("PULP_TARTCI_LEASE_HELD", std::nullopt);
     ScopedEnvVar no_user_cap("PULP_BUILD_JOBS", std::nullopt);
+    // A Shipyard validation lane runs ctest under PULP_BUILD_CLASS=background;
+    // a watch loop's class must come from the loop, not the caller's shell.
+    ScopedEnvVar interactive_class("PULP_BUILD_CLASS", std::nullopt);
 
     {
         TartciAgentLeaseRequest req{root, "pulp-dev", true};

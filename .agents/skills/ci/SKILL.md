@@ -443,7 +443,8 @@ ahead of everything else:
 
 ```bash
 id=$(ghapp api repos/Generous-Corp/pulp/pulls/<fix-pr> --jq .node_id)
-GHAPP_ALLOW_QUEUE_REMOVAL=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
+GHAPP_ALLOW_QUEUE_REMOVAL=1 GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix \
+  ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
   dequeuePullRequest(input:{id:$id}){mergeQueueEntry{id}}}'
 GHAPP_ALLOW_REARM=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
   enqueuePullRequest(input:{pullRequestId:$id,jump:true}){mergeQueueEntry{position}}}'
@@ -455,6 +456,13 @@ title or body names the failing test or the change being reverted. If no fix PR
 exists, open the revert or the one-line fix and jump that. Record the PR, the
 failing test, and how long main was red. Jumping anything else, or switching on
 an automatic jump, is a maintainer decision.
+
+**The pre-approval is narrow.** `GHAPP_ALLOW_QUEUE_REMOVAL=1` is pre-approved
+only to dequeue the fix PR itself so it can be re-enqueued at the front, and only
+while main is red. Every such call carries
+`GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`, which the queue-removal guard
+logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
+queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
 
 ## Wait on a blocking waiter, not a poll loop
 
@@ -658,6 +666,13 @@ time; they make every keyed run fail to derive or every re-derivation refuse:
   second refusal turns `PULP_REUSE_LIVE` off.
   `test_the_configured_rederive_command_parses_with_this_key_code` parses the
   configured command with the same copy's parser.
+
+A new third-party dependency needs an entry in `tools/ci/dependency_pin_map.json`
+(its FetchContent directory, or the archive paths of a prebuilt), or every
+change to its pin reruns every executable as `dependency_pin`. A header-only
+dependency has no target to reach, so it stays unmapped on purpose. Check a
+pin-file change with `dependency_pins.attribute` over the base and head copies
+before assuming what it rekeys.
 
 ## Performance lanes report; they never gate
 
@@ -2802,9 +2817,9 @@ amended before its first push was never on any remote ref.
 ## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
 
 `tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py`,
-`clock_only_temp_key_guard.py` and `check_skip_not_pass.py` before every push.
-All are whole-tree text scans of a few seconds at most, with no build tree and
-no configure. The required gate already runs them
+`catch_test_name_guard.py`, `clock_only_temp_key_guard.py` and `check_skip_not_pass.py`
+before every push. All are whole-tree text scans of a few seconds at most,
+with no build tree and no configure. The required gate already runs them
 as ctests, so this adds no coverage; it moves *when* you find out.
 
 That timing is the whole point. A batch is main plus every entry ahead of it, so
@@ -2829,6 +2844,16 @@ What each one refuses:
   `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
   since the skip marker evades the thing the guard exists to catch.
 
+- **A Catch2 test name that reads as a test-spec expression.** CTest runs each
+  case as `<binary> "<name>"` and Catch2 parses that as a spec;
+  `PulpCatchAddTests.cmake` escapes only `\ , [ ]`. A leading `~` (or
+  `exclude:`) makes the entry run every OTHER case in the binary and never its
+  own; a leading or trailing `*` pulls in sibling cases; a leading `-` is read
+  as an option. Two `~View()` names ran a whole group binary twice in parallel,
+  and a shared temp path in another case of that binary then reddened the
+  required gate. Rename the case ("View destructor ..."); the guard honours
+  `catch-test-name-guard: skip <reason>`. Test scratch files must also be
+  unique per process, since CTest can run two entries of one binary at once.
 - **A test temp path keyed on a clock reading alone.** CTest runs cases as
   concurrent processes, and two that read the same `steady_clock` tick share
   the directory and read or delete each other's files (a browser-capture case
@@ -6176,6 +6201,31 @@ ghapp api graphql -f query='mutation{dequeuePullRequest(input:{id:"PR_kwDO..."})
 
 Treat that as an authority action on someone's queued work, not a routine step —
 `ghapp` guards it deliberately.
+
+**A queued PR never needs a rebase, and main moving is never a reason to
+dequeue.** The queue builds every entry on top of current main and the entries
+ahead of it, so `BEHIND` on a queued PR means nothing. Rebasing or merging main
+into it means dequeuing it, and then the push, the pre-push build, the re-queue
+and a fresh gate all repeat; in October 2026, 34 of 46 dequeues were exactly
+this, one PR ten times over.
+
+- **Dequeue only to change the PR's content.** A real fix to the PR itself (a
+  failing check that is its own fault, a review change) is the one reason.
+  Main advancing, a conflict GitHub has not reported, or wanting a fresh gate
+  are not.
+- **To put a fix in front of the queue, jump it; never dequeue the PRs ahead.**
+  Run `shipyard base-health` to read the base-poison signal and print the jump
+  commands for the named fix PR (`enqueuePullRequest` with `jump: true`, see
+  "Main is red" above). `shipyard base-health --act` applies them when
+  `base_health.auto_jump` allows it. Dequeuing other people's entries to make
+  room throws away their in-flight merge-group runs and gains nothing the jump
+  does not.
+- **`GHAPP_ALLOW_QUEUE_REMOVAL=1` needs Daniel's explicit OK.** The `ghapp`
+  queue-removal guard exists because nearly every dequeue it saw was one of the
+  avoidable cases above. The single standing exception is the main-red fix
+  reorder above, tagged `GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`.
+  Anything else is Daniel's decision, made for a named PR; it is never
+  something an agent turns on to get past the guard.
 
 ### Shipyard validated green but could NOT merge — the sanctioned fallback
 
@@ -11796,6 +11846,23 @@ fallback that answers None, and None must never mean "dead".
 ## Design-import clean-output and Vellum boundary gates
 
 The design-import refactor adds two cheap, source-only checks to `tools/scripts/gates.sh`: `vellum_boundary_lint.py` verifies that extractable importer packages use only declared public Pulp view interfaces, and `tools/ui-build/lint/clean_output_lint.py` checks a deterministic clean source fixture. Keep both checks in the gate whenever these package or importer paths change; their planted negative controls are registered in the quality CTest manifest.
+
+## A run that enters a concurrency group and then skips its job can still cancel a pending run
+
+A workflow-level `concurrency` group holds ONE pending run, and a new arrival
+cancels it, before any job `if` is evaluated. So a trigger whose job will skip
+(a `pull_request: dequeued` for an unrelated PR, a green `workflow_run`) still
+evicts a pending run that mattered. `version-at-land.yml` lost 10 pending push
+drains in 3.9 days this way. Give every run whose job skips a per-run group
+(`format('...-idle-{0}', github.run_id)`) and keep the shared group's condition
+in step with the job `if`; `WorkflowConcurrencyTest` in
+`tools/scripts/test_version_at_land.py` evaluates both expressions for every
+event shape so they cannot drift apart.
+
+Related GraphQL trap: `timelineItems(itemTypes:[...]){totalCount}` ignores
+`itemTypes` and counts every timeline item. Read the filtered `nodes` (check
+`__typename`) or `filteredCount`; `graphql-filtered-count-guard` fails the build
+on the bad shape.
 
 ## Python text I/O names its encoding: the text-encoding ratchet
 

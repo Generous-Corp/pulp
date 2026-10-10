@@ -1,0 +1,1018 @@
+# PulpDependencies.cmake — third-party dependency setup for the Pulp
+# in-tree build.
+#
+# Owns FetchContent declarations, optional-SDK probing (VST3 / AU / CLAP /
+# LV2 / AAX / WebGPU / Skia), and CHOC inclusion.
+#
+# Called once from the root CMakeLists.txt after platform detection
+# and options are set; produces the cache variables and IMPORTED
+# targets the core subsystems depend on. Mutates PULP_HAS_* feature
+# flags so downstream subsystems can branch on availability.
+#
+# Configure output and the installed SDK manifest should remain byte-stable
+# when dependency setup moves between CMake modules.
+
+# ── Third-Party Dependencies ────────────────────────────────────────────────
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFetchContent.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpConfigureCheckCache.cmake)
+include(FetchContent)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
+
+# CHOC: header-only C++ utilities (ISC license)
+# Used for: JS engine abstraction, MIDI utilities, WebView (drag-and-drop)
+#
+# ⚠ INTERIM FORK PIN — temporarily pinned to a fork tag that adds WebView
+# file drag-and-drop (window.chocStartFileDrag([...]) + `chocfilesdropped`
+# event) — the PoC from upstream Tracktion/choc#64. The fork
+# is upstream f0f5cdf5a938 + 5 commits, 0 behind, so reverting is a one-line
+# repoint. WHEN choc#64 MERGES UPSTREAM, restore:
+#     GIT_REPOSITORY https://github.com/Tracktion/choc.git
+#     GIT_TAG        <upstream merge commit>   (was f0f5cdf5a938b8b779fea6c083571cce5ccab925)
+# and update tools/deps/manifest.json + DEPENDENCIES.md back to Tracktion/choc.
+pulp_register_fetchcontent_source(choc REF df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake" _pulp_choc_patch_key)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY "${_pulp_choc_patch_key}")
+unset(_pulp_choc_patch_key)
+FetchContent_Declare(
+    choc
+    GIT_REPOSITORY https://github.com/danielraffel/choc.git
+    GIT_TAG pulp-webview-dnd-poc1  # df148a41 — fork of Tracktion/choc#64 PoC
+)
+FetchContent_MakeAvailable(choc)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake)
+pulp_patch_choc_v8("${choc_SOURCE_DIR}")
+pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
+
+# WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
+# Uses eliemichel/WebGPU-distribution for CMake-friendly integration
+# On Android + iOS, Dawn is bundled in Skia's pre-built libs — skip
+# FetchContent. wgpu-native doesn't publish iOS prebuilds; pulp's
+# render path is Dawn-only whenever Skia is the backend
+# anyway (pulp::render::GpuSurface uses Dawn's C++ API under PULP_HAS_SKIA).
+#
+# PULP_WGPU_NATIVE_VERSION is the single CMake-side source of truth for the
+# wgpu-native runtime: the precompiled-source registration, the universal-dylib
+# lipo, and the runtime-pins record the SDK installs (PulpRuntimePins.cmake)
+# all read it.
+set(PULP_WGPU_NATIVE_VERSION v24.0.3.1)
+if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
+    pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
+    pulp_register_wgpu_native_precompiled_source(${PULP_WGPU_NATIVE_VERSION})
+    FetchContent_Declare(
+        webgpu
+        GIT_REPOSITORY https://github.com/eliemichel/WebGPU-distribution.git
+        GIT_TAG 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab
+    )
+    set(_pulp_restore_arch FALSE)
+    if(WIN32)
+        # Use the TARGET platform for wgpu arch selection, not the host
+        # processor. CMAKE_SYSTEM_PROCESSOR reports the HOST arch on
+        # Windows, which is wrong when cross-compiling via -A <platform>.
+        # An ARM64 host building with -A x64 needs x64 wgpu binaries,
+        # not ARM64 — otherwise the linker fails with
+        # "library machine type 'ARM64' conflicts with target 'x64'."
+        if(CMAKE_GENERATOR_PLATFORM)
+            string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" _pulp_webgpu_processor)
+        else()
+            string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_webgpu_processor)
+        endif()
+        if(_pulp_webgpu_processor STREQUAL "arm64" OR _pulp_webgpu_processor STREQUAL "aarch64")
+            if(DEFINED ARCH)
+                set(_pulp_saved_arch "${ARCH}")
+            endif()
+            set(ARCH "aarch64")
+            set(_pulp_restore_arch TRUE)
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to aarch64 for ARM64")
+        elseif(_pulp_webgpu_processor STREQUAL "x64" AND CMAKE_SYSTEM_PROCESSOR MATCHES "[Aa][Rr][Mm]64")
+            # Cross-compiling x64 on an ARM64 host. wgpu-native's
+            # detect_system_architecture() sees the HOST processor
+            # (ARM64) and fails with "Unknown architecture" because
+            # it doesn't map Windows ARM64 to a prebuilt arch string.
+            # Explicitly set ARCH=x86_64 so it downloads x64 binaries.
+            if(DEFINED ARCH)
+                set(_pulp_saved_arch "${ARCH}")
+            endif()
+            set(ARCH "x86_64")
+            set(_pulp_restore_arch TRUE)
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to x86_64 for x64 cross-compile on ARM64 host")
+        endif()
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES)
+        # Same target-vs-host arch hazard as Windows above, but on Apple.
+        # CMAKE_SYSTEM_PROCESSOR is the HOST arch, so wgpu-native's
+        # detect_system_architecture() would download the host slice even for
+        # an Intel-thin (-DCMAKE_OSX_ARCHITECTURES=x86_64) target on an Apple
+        # Silicon box, producing an arch-mismatch link failure. Force ARCH from
+        # the TARGET arch. A universal (arm64;x86_64) build leaves ARCH unset —
+        # the host slice downloads to create the `webgpu` target, then
+        # PulpWgpuUniversal.cmake lipos both pinned slices into a fat dylib and
+        # overrides IMPORTED_LOCATION (wgpu-native ships no universal dylib).
+        set(_pulp_osx_arm64 FALSE)
+        set(_pulp_osx_x86_64 FALSE)
+        if(CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+            set(_pulp_osx_arm64 TRUE)
+        endif()
+        if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+            set(_pulp_osx_x86_64 TRUE)
+        endif()
+        if(_pulp_osx_arm64 AND _pulp_osx_x86_64)
+            # universal — leave ARCH unset (see comment above)
+        elseif(_pulp_osx_x86_64)
+            if(DEFINED ARCH)
+                set(_pulp_saved_arch "${ARCH}")
+            endif()
+            set(ARCH "x86_64")
+            set(_pulp_restore_arch TRUE)
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to x86_64 for an Intel/x86_64 mac target")
+        elseif(_pulp_osx_arm64)
+            if(DEFINED ARCH)
+                set(_pulp_saved_arch "${ARCH}")
+            endif()
+            set(ARCH "aarch64")
+            set(_pulp_restore_arch TRUE)
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to aarch64 for an arm64 mac target")
+        endif()
+        unset(_pulp_osx_arm64)
+        unset(_pulp_osx_x86_64)
+    endif()
+    FetchContent_MakeAvailable(webgpu)
+    if(_pulp_restore_arch)
+        if(DEFINED _pulp_saved_arch)
+            set(ARCH "${_pulp_saved_arch}")
+        else()
+            unset(ARCH)
+        endif()
+        unset(_pulp_saved_arch)
+    endif()
+    unset(_pulp_restore_arch)
+    unset(_pulp_webgpu_processor)
+
+    # For a macOS universal (arm64;x86_64) build, wgpu-native has no universal
+    # dylib — the fetch above produced a thin (host-arch) slice. Replace the
+    # `webgpu` target's IMPORTED_LOCATION with a lipo'd + ad-hoc-re-signed fat
+    # dylib. No-op for thin targets and non-Apple platforms.
+    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWgpuUniversal.cmake)
+    pulp_make_wgpu_universal(${PULP_WGPU_NATIVE_VERSION})
+
+    set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+    message(STATUS "Pulp: WebGPU (Dawn) enabled")
+
+endif()
+
+# Skia Graphite — GPU-accelerated 2D rendering (BSD-3-Clause)
+# Pre-built via skia-builder (desktop) or build-skia-android.sh (Android)
+
+# Auto-provision Skia into a SHARED machine cache so every checkout/worktree
+# finds it without manual setup or a per-machine env var. Worktrees ship
+# headers-only Skia, so a fresh worktree (or a reconfigure that re-runs
+# detection) silently disables Skia and any render/install ships CG-only. When
+# GPU is requested, SKIA_DIR is unset, and the local external/skia-build has no
+# built libs, resolve the manifest-pinned immutable generation beneath
+# ~/.cache/pulp/skia/ (shared across all checkouts on this machine — one
+# download serves every worktree) and point SKIA_DIR at it. Idempotent: the
+# fetch script skips the download when the pinned asset is already unpacked.
+# `PULP_SKIA_CACHE_KEYING=0` restores the legacy mutable destination. Disable with
+# -DPULP_SKIA_AUTOFETCH=OFF (release/CI lanes that manage Skia explicitly, or
+# offline builds that intend a CG-only fallback). Desktop only (Android/iOS
+# Skia comes from their own build scripts / bundled libs).
+option(PULP_SKIA_AUTOFETCH "Auto-fetch pinned Skia into a shared cache when missing" ON)
+if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
+        AND NOT DEFINED ENV{SKIA_DIR} AND NOT ANDROID
+        AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS"))
+    # Select the Skia slice from the TARGET architecture, not the host arch.
+    # On Apple that is CMAKE_OSX_ARCHITECTURES (unset ⇒ host arch). skia-builder
+    # publishes THREE mac slices — arm64, x86_64, and universal — so the old
+    # hardcoded darwin-arm64 (with its "the only published mac asset" comment)
+    # was both false and wrong for an Intel/universal target.
+    #
+    # Each slice's libskia.a flattens to the SAME relative on-disk path. The
+    # fetcher therefore keys immutable generations by matrix platform plus the
+    # manifest asset SHA. The suffix below exists only for the explicit legacy
+    # mutable-cache rollback path.
+    set(_pulp_skia_plat "")
+    set(_pulp_skia_cache_suffix "")
+    if(APPLE)
+        set(_pulp_req_archs "${CMAKE_OSX_ARCHITECTURES}")
+        if(_pulp_req_archs STREQUAL "")
+            if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+                set(_pulp_req_archs "arm64")
+            else()
+                set(_pulp_req_archs "x86_64")
+            endif()
+        endif()
+        set(_pulp_has_arm64 FALSE)
+        set(_pulp_has_x86_64 FALSE)
+        if(_pulp_req_archs MATCHES "arm64")
+            set(_pulp_has_arm64 TRUE)
+        endif()
+        if(_pulp_req_archs MATCHES "x86_64")
+            set(_pulp_has_x86_64 TRUE)
+        endif()
+        if(_pulp_has_arm64 AND _pulp_has_x86_64)
+            set(_pulp_skia_plat "darwin-universal")
+            set(_pulp_skia_cache_suffix "-universal")
+        elseif(_pulp_has_x86_64)
+            set(_pulp_skia_plat "darwin-x64")
+            set(_pulp_skia_cache_suffix "-x64")
+        elseif(_pulp_has_arm64)
+            set(_pulp_skia_plat "darwin-arm64")
+        else()
+            message(FATAL_ERROR
+                "Pulp: cannot select a prebuilt Skia slice for "
+                "CMAKE_OSX_ARCHITECTURES='${CMAKE_OSX_ARCHITECTURES}'. "
+                "Supported values are 'arm64', 'x86_64', or 'arm64;x86_64' "
+                "(universal). Pass -DPULP_SKIA_AUTOFETCH=OFF and set SKIA_DIR "
+                "by hand to build against a slice Pulp does not auto-provision.")
+        endif()
+    elseif(EMSCRIPTEN)
+        # Emscripten also sets UNIX=1 — this arm must precede the UNIX arm or a
+        # wasm configure would provision (and then fail to find) a linux slice.
+        set(_pulp_skia_plat "wasm")
+        set(_pulp_skia_cache_suffix "-wasm")
+    elseif(WIN32)
+        # Select the Skia slice from the TARGET architecture. On Windows,
+        # CMAKE_SYSTEM_PROCESSOR can describe the host when cross-compiling,
+        # so prefer CMAKE_GENERATOR_PLATFORM (the -A target) when present.
+        if(CMAKE_GENERATOR_PLATFORM)
+            string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" _pulp_req_arch)
+        else()
+            string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_req_arch)
+        endif()
+        if(_pulp_req_arch STREQUAL "arm64" OR _pulp_req_arch STREQUAL "aarch64")
+            set(_pulp_skia_plat "windows-arm64")
+            set(_pulp_skia_cache_suffix "-arm64")
+        elseif(_pulp_req_arch STREQUAL "x64" OR _pulp_req_arch STREQUAL "amd64" OR _pulp_req_arch STREQUAL "x86_64")
+            set(_pulp_skia_plat "windows-x64")
+            set(_pulp_skia_cache_suffix "-x64")
+        else()
+            message(FATAL_ERROR
+                "Pulp: cannot select a prebuilt Windows Skia slice for "
+                "target architecture '${_pulp_req_arch}'. Supported values "
+                "are ARM64 and x64 (set -A ARM64 or -A x64 when cross-compiling).")
+        endif()
+        unset(_pulp_req_arch)
+    elseif(UNIX)
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(_pulp_skia_plat "linux-arm64")
+        else()
+            set(_pulp_skia_plat "linux-x64")
+        endif()
+    endif()
+
+    # A checkout that already carries a native slice must NOT satisfy a wasm
+    # configure (and vice versa) — probe for the slice this target needs.
+    if(EMSCRIPTEN)
+        set(_pulp_skia_slice_glob "wasm-gpu")
+    else()
+        set(_pulp_skia_slice_glob "*-gpu")
+    endif()
+
+    set(_pulp_skia_keying "$ENV{PULP_SKIA_CACHE_KEYING}")
+    if(_pulp_skia_keying STREQUAL "")
+        set(_pulp_skia_keying "1")
+    endif()
+    if(WIN32)
+        file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/skia.lib")
+    else()
+        file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/libskia.a")
+    endif()
+    # In keyed mode, accept a checkout-local bundle only when the canonical
+    # validator proves its exact manifest stamp plus materialized Skia/Dawn
+    # archives. This preserves explicit release-path fetches while excluding a
+    # stale retained worktree tree. Explicit SKIA_DIR remains authoritative;
+    # keying=0 restores the legacy existence-only preference.
+    if(_pulp_local_skia AND _pulp_skia_plat AND _pulp_skia_keying STREQUAL "1")
+        find_program(_pulp_local_skia_python NAMES python3 python)
+        if(_pulp_local_skia_python)
+            execute_process(
+                COMMAND ${_pulp_local_skia_python} tools/scripts/fetch_skia_for_release.py
+                        ${_pulp_skia_plat} --dest "${PULP_ROOT_DIR}/external/skia-build"
+                        --validate-only
+                WORKING_DIRECTORY ${PULP_ROOT_DIR}
+                RESULT_VARIABLE _pulp_local_skia_valid)
+        else()
+            set(_pulp_local_skia_valid 1)
+        endif()
+        if(NOT _pulp_local_skia_valid EQUAL 0)
+            set(_pulp_local_skia "")
+        endif()
+    endif()
+    if(NOT _pulp_local_skia AND _pulp_skia_plat)
+        include(${PULP_ROOT_DIR}/tools/cmake/PulpSkiaCache.cmake)
+        pulp_resolve_skia_cache(
+            "${_pulp_skia_plat}" "${_pulp_skia_cache_suffix}"
+            _pulp_skia_cache _pulp_skia_fetch_args)
+        if(_pulp_skia_keying STREQUAL "1" AND NOT _pulp_skia_cache)
+            message(FATAL_ERROR
+                "Skia: keyed cache resolution failed; refusing unvalidated "
+                "external/skia-build fallback")
+        endif()
+        set(_pulp_cache_skia "")
+        find_program(_pulp_python3 NAMES python3 python)
+        if(_pulp_skia_plat AND _pulp_python3 AND _pulp_skia_cache)
+            # The fetcher is also the complete-generation validator: a lone
+            # libskia.a is insufficient when its stamp or Dawn archive is
+            # absent, corrupt, empty, or an LFS pointer. A valid warm generation
+            # returns immediately without downloading.
+            message(STATUS "Skia: validating/provisioning ${_pulp_skia_plat} → ${_pulp_skia_cache} (PULP_SKIA_AUTOFETCH; shared)")
+            execute_process(
+                COMMAND ${_pulp_python3} tools/scripts/fetch_skia_for_release.py
+                        ${_pulp_skia_plat} ${_pulp_skia_fetch_args}
+                WORKING_DIRECTORY ${PULP_ROOT_DIR}
+                RESULT_VARIABLE _pulp_skia_fetch_result)
+            if(_pulp_skia_fetch_result EQUAL 0)
+                file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
+            else()
+                if(_pulp_skia_keying STREQUAL "1")
+                    message(FATAL_ERROR
+                        "Skia: pinned cache generation validation/provisioning "
+                        "failed; refusing unvalidated external/skia-build fallback")
+                else()
+                    message(WARNING
+                        "Skia: legacy cache validation/provisioning failed; "
+                        "continuing without shared Skia")
+                endif()
+            endif()
+        endif()
+        if(_pulp_cache_skia)
+            set(SKIA_DIR "${_pulp_skia_cache}")
+            message(STATUS "Skia: using shared cache ${SKIA_DIR}")
+        endif()
+    endif()
+endif()
+
+set(PULP_HAS_SKIA FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+if(PULP_ENABLE_GPU)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake)
+    if(SKIA_FOUND)
+        set(PULP_HAS_SKIA TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+        # On Android + iOS, Dawn is bundled in Skia's pre-built libs.
+        # Set PULP_HAS_WEBGPU so the render subsystem builds without
+        # needing the desktop wgpu-native FetchContent path. iOS in
+        # particular has no wgpu-native prebuild yet — Dawn is the only
+        # viable backend, which matches
+        # how pulp::render uses Dawn when PULP_HAS_SKIA is set.
+        if(ANDROID OR IOS)
+            set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+        endif()
+
+        # Text shaping via SkParagraph (HarfBuzz + ICU, bundled in Skia pre-built).
+        # The wasm slice ships libskparagraph/libskshaper/libskunicode_{core,icu}
+        # too, so text shaping stays available on Emscripten.
+        if(PULP_TEXT_SHAPING)
+            set(PULP_HAS_TEXT_SHAPING TRUE)
+            message(STATUS "Pulp: SkParagraph text shaping enabled (HarfBuzz/ICU via Skia)")
+        endif()
+
+        # ICU data file. Browsers have no host filesystem, so an Emscripten
+        # target must package icudtl.dat into its virtual FS (--preload-file or
+        # --embed-file). Export the resolved path for the web-UI link rules.
+        set(PULP_SKIA_ICUDTL_FILE "${SKIA_ICUDTL_FILE}"
+            CACHE INTERNAL "icudtl.dat shipped with the resolved Skia slice" FORCE)
+    else()
+        if(PULP_TEXT_SHAPING)
+            message(STATUS "Pulp: Text shaping disabled (Skia not found)")
+            set(PULP_TEXT_SHAPING OFF)
+        endif()
+    endif()
+endif()
+
+# LOUD perf-regression guard. PULP_ENABLE_GPU=ON
+# but no Skia found silently falls back to CoreGraphics CPU rendering.
+# That fallback is ~5-10× slower than Skia/Dawn for live JS-driven UIs
+# (Spectr's editor.js drag went from 7% CPU on Skia to 100% CPU on CG
+# fallback — 2026-05-13 regression). The fallback is the right
+# behavior for offline tooling and CI bot builds that don't render
+# windows, but for ANY local interactive developer session it produces
+# a UX that looks broken with no obvious build-output explanation.
+#
+# Print a screaming WARNING banner whenever GPU is requested but
+# Skia is not linked, with concrete instructions on how to recover.
+# The release path keeps the hard FATAL_ERROR below
+# (PULP_REQUIRE_GPU_FOR_SDK); local dev gets the loud warning instead
+# so an incremental rebuild without skia-build still works.
+if(PULP_ENABLE_GPU AND NOT PULP_HAS_SKIA)
+    message(WARNING
+        "\n"
+        "  ╔══════════════════════════════════════════════════════════════════════╗\n"
+        "  ║  PERF REGRESSION RISK — Skia is NOT linked into this build           ║\n"
+        "  ║                                                                      ║\n"
+        "  ║  PULP_ENABLE_GPU=ON but FindSkia.cmake could not locate libskia.a    ║\n"
+        "  ║  at the configured SKIA_DIR ('${SKIA_DIR}').                          \n"
+        "  ║                                                                      ║\n"
+        "  ║  Live windows (pulp-design-tool, pulp-ui-preview, pulp-screenshot    ║\n"
+        "  ║  with use_gpu=true) will silently fall back to CoreGraphics CPU      ║\n"
+        "  ║  rendering — ~5-10× slower for animated / JS-driven UIs.             ║\n"
+        "  ║                                                                      ║\n"
+        "  ║  Recover:                                                            ║\n"
+        "  ║    1. Run tools/build-skia.sh (or fetch the pinned tarball) to       ║\n"
+        "  ║       populate external/skia-build/build/<platform>-gpu/lib/Release/ ║\n"
+        "  ║    2. Or pass -DSKIA_DIR=/abs/path/to/external/skia-builder when     ║\n"
+        "  ║       the libs live at external/skia-builder/build/<plat>-gpu/...    ║\n"
+        "  ║    3. Or pass -DPULP_ENABLE_GPU=OFF if you genuinely want a          ║\n"
+        "  ║       CoreGraphics-only build (offline tooling, CI bots).            ║\n"
+        "  ╚══════════════════════════════════════════════════════════════════════╝")
+endif()
+
+# SDK-release safety net. The release workflow turns this option ON via
+# -DPULP_REQUIRE_GPU_FOR_SDK=ON so a missing Skia tarball is a hard
+# configure error instead of a silent CG-only build that ships downstream
+# to every SDK consumer.
+if(PULP_ENABLE_GPU AND PULP_REQUIRE_GPU_FOR_SDK AND NOT PULP_HAS_SKIA)
+    message(FATAL_ERROR
+        "PULP_REQUIRE_GPU_FOR_SDK=ON but Skia binaries were not found at "
+        "external/skia-build/build/<platform>-gpu/lib/Release/libskia.a. "
+        "The release tarball would ship without MacGpuWindowHost and "
+        "consumers passing use_gpu=true would silently fall back to "
+        "CoreGraphics CPU rendering. Either fetch the Skia binaries (see "
+        ".github/workflows/release-cli.yml 'Fetch Skia binaries' step, or "
+        "tools/scripts/fetch_skia_for_release.py for the manifest-driven "
+        "fetch) or set PULP_ENABLE_GPU=OFF if you intend a CG-only build.")
+endif()
+
+# `PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF` is a
+# misconfiguration: the consumer asked the release lane to enforce GPU but
+# then disabled it. Without this guard the configure succeeded, the
+# resulting tarball silently #ifdef'd out the GPU code path, and downstream
+# consumers got the same CG-only fallback the option exists to prevent —
+# defeating the whole purpose of the flag. Fail loudly at configure time.
+# hard-fail-on-CPU rule.
+if(PULP_REQUIRE_GPU_FOR_SDK AND NOT PULP_ENABLE_GPU)
+    message(FATAL_ERROR
+        "PULP_REQUIRE_GPU_FOR_SDK=ON but PULP_ENABLE_GPU=OFF — these "
+        "options contradict each other. PULP_REQUIRE_GPU_FOR_SDK exists to "
+        "guarantee the SDK release ships with the GPU code path linked, "
+        "and PULP_ENABLE_GPU=OFF #ifdef's that exact path out. Either set "
+        "PULP_ENABLE_GPU=ON (and let the existing FATAL_ERROR above catch "
+        "a missing Skia archive) or set PULP_REQUIRE_GPU_FOR_SDK=OFF for a "
+        "deliberate CG-only build.")
+endif()
+
+# Text shaping requires GPU/Skia — validate even when GPU is off
+if(PULP_TEXT_SHAPING AND NOT PULP_ENABLE_GPU)
+    message(WARNING "PULP_TEXT_SHAPING requires PULP_ENABLE_GPU — disabling text shaping")
+    set(PULP_TEXT_SHAPING OFF)
+endif()
+
+# SDL3 — cross-platform windowing, input, GPU context (zlib license)
+pulp_register_fetchcontent_source(SDL3 DIR sdl3 REF release-3.2.12)
+FetchContent_Declare(
+    SDL3
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG release-3.2.12
+    GIT_SHALLOW TRUE
+)
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST OFF CACHE BOOL "" FORCE)
+# SDL3 precompiles src/SDL_internal.h into every one of its ~400 objects. A
+# TU compiled against a PCH is uncacheable for ccache unless the cache runs
+# with pch_defines sloppiness, and the PCH itself embeds the build path, so
+# those objects never hit across worktrees or clean VM checkouts either way.
+# SDL3 is a fixed dependency whose sources never change between builds, which
+# is exactly the compile ccache is for: turn its PCH off so every SDL3 object
+# is a plain, cacheable compile. Scoped to this FetchContent only.
+set(_pulp_sdl3_saved_disable_pch "${CMAKE_DISABLE_PRECOMPILE_HEADERS}")
+set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
+# SDL3's ~180 configure checks are most of a fresh configure; replay them from
+# the results this machine recorded for the identical toolchain (Apple only).
+pulp_configure_check_cache_begin(SDL3 "${FETCHCONTENT_SOURCE_DIR_SDL3}")
+FetchContent_MakeAvailable(SDL3)
+pulp_configure_check_cache_end(SDL3)
+set(CMAKE_DISABLE_PRECOMPILE_HEADERS "${_pulp_sdl3_saved_disable_pch}")
+unset(_pulp_sdl3_saved_disable_pch)
+set(PULP_HAS_SDL3 TRUE)
+message(STATUS "Pulp: SDL3 enabled")
+
+# DRACO mesh compression decoder (Apache 2.0) — for glTF compressed geometry
+option(PULP_ENABLE_DRACO "Enable DRACO mesh decompression for glTF" OFF)
+if(PULP_ENABLE_DRACO)
+    FetchContent_Declare(
+        draco
+        GIT_REPOSITORY https://github.com/google/draco.git
+        GIT_TAG 1.5.7
+        GIT_SHALLOW TRUE
+    )
+    set(DRACO_TRANSCODER_SUPPORTED OFF CACHE BOOL "" FORCE)
+    set(DRACO_TESTS OFF CACHE BOOL "" FORCE)
+    set(DRACO_JS_GLUE OFF CACHE BOOL "" FORCE)
+    set(DRACO_WASM OFF CACHE BOOL "" FORCE)
+    set(DRACO_UNITY_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(DRACO_MAYA_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(draco)
+    set(PULP_HAS_DRACO TRUE)
+    message(STATUS "Pulp: DRACO mesh decompression enabled")
+endif()
+
+# fastgltf (MIT) + simdjson (Apache-2.0) — opt-in native no-JS glTF/GLB loader
+if(PULP_ENABLE_SCENE3D)
+    unset(SIMDJSON_BUILD_STATIC CACHE)
+    unset(SIMDJSON_JUST_LIBRARY CACHE)
+    set(SIMDJSON_DEVELOPER_MODE OFF CACHE BOOL "" FORCE)
+    set(SIMDJSON_BUILD_STATIC_LIB OFF CACHE BOOL "" FORCE)
+    set(SIMDJSON_ENABLE_THREADS OFF CACHE BOOL "" FORCE)
+    set(SIMDJSON_SINGLEHEADER OFF CACHE BOOL "" FORCE)
+    pulp_register_fetchcontent_source(simdjson REF v3.12.3)
+    FetchContent_Declare(
+        simdjson
+        GIT_REPOSITORY https://github.com/simdjson/simdjson.git
+        GIT_TAG v3.12.3
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(simdjson)
+    set(PULP_HAS_SIMDJSON TRUE)
+
+    set(FASTGLTF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    set(FASTGLTF_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(FASTGLTF_ENABLE_DOCS OFF CACHE BOOL "" FORCE)
+    set(FASTGLTF_ENABLE_GLTF_RS OFF CACHE BOOL "" FORCE)
+    set(FASTGLTF_ENABLE_ASSIMP OFF CACHE BOOL "" FORCE)
+    set(FASTGLTF_ENABLE_CPP_MODULES OFF CACHE BOOL "" FORCE)
+    set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "" FORCE)
+    pulp_register_fetchcontent_source(fastgltf REF v0.9.0)
+    FetchContent_Declare(
+        fastgltf
+        GIT_REPOSITORY https://github.com/spnda/fastgltf.git
+        GIT_TAG v0.9.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(fastgltf)
+    set(PULP_HAS_FASTGLTF TRUE)
+    message(STATUS "Pulp: fastgltf native glTF loader enabled")
+endif()
+
+# VST3 SDK (MIT license) — cloned into external/vst3sdk/
+set(VST3_SDK_DIR "${PULP_ROOT_DIR}/external/vst3sdk" CACHE INTERNAL "VST3 SDK dir (visible to embedding consumers)" FORCE)
+if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
+    set(PULP_HAS_VST3 TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+
+    # Build the minimal VST3 SDK base library
+    file(GLOB_RECURSE VST3_BASE_SOURCES
+        "${VST3_SDK_DIR}/base/source/*.cpp"
+        "${VST3_SDK_DIR}/base/thread/source/*.cpp"
+    )
+    file(GLOB_RECURSE VST3_PLUGIF_SOURCES
+        "${VST3_SDK_DIR}/pluginterfaces/base/*.cpp"
+    )
+    file(GLOB_RECURSE VST3_SDK_SOURCES
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstaudioeffect.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstbus.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstcomponent.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstcomponentbase.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstinitiids.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstparameters.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/pluginview.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/commoniids.cpp"
+        # Hosting helpers used by the VST3 plugin slot scanner.
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/eventlist.cpp"
+        # IHostApplication for hosted plug-ins: the IMessage / IAttributeList
+        # factory that connection-point traffic is built from, plus the
+        # IPlugInterfaceSupport a plug-in queries to discover host interfaces.
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/hostclasses.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp"
+        # hostclasses.cpp -> stringconvert.cpp -> commonstringconvert.cpp.
+        "${VST3_SDK_DIR}/public.sdk/source/vst/utility/stringconvert.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/commonstringconvert.cpp"
+    )
+
+    add_library(vst3-sdk STATIC
+        ${VST3_BASE_SOURCES}
+        ${VST3_PLUGIF_SOURCES}
+        ${VST3_SDK_SOURCES}
+    )
+    target_include_directories(vst3-sdk PUBLIC
+        $<BUILD_INTERFACE:${VST3_SDK_DIR}>
+        $<INSTALL_INTERFACE:external/vst3sdk>
+    )
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_definitions(vst3-sdk PUBLIC RELEASE=1)
+    else()
+        target_compile_definitions(vst3-sdk PUBLIC DEVELOPMENT=1)
+    endif()
+    # Suppress warnings in third-party code
+    target_compile_options(vst3-sdk PRIVATE -w)
+
+    message(STATUS "Pulp: VST3 SDK found at ${VST3_SDK_DIR}")
+else()
+    set(PULP_HAS_VST3 FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+    message(STATUS "Pulp: VST3 SDK not found — VST3 format disabled")
+endif()
+
+# CLAP (MIT license) — header-only plugin format
+pulp_register_fetchcontent_source(clap REF 1.2.9)
+FetchContent_Declare(
+    clap
+    GIT_REPOSITORY https://github.com/free-audio/clap.git
+    GIT_TAG 1.2.9
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(clap)
+target_include_directories(clap INTERFACE
+    $<BUILD_INTERFACE:${clap_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:external/clap/include>
+)
+set(PULP_HAS_CLAP TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+message(STATUS "Pulp: CLAP SDK available")
+
+# LV2 (ISC license) — header-only plugin format (Linux-first)
+pulp_register_fetchcontent_source(lv2 REF v1.18.10)
+FetchContent_Declare(
+    lv2
+    GIT_REPOSITORY https://github.com/lv2/lv2.git
+    GIT_TAG v1.18.10
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(lv2)
+# LV2 headers are in lv2/include/
+add_library(lv2-headers INTERFACE)
+target_include_directories(lv2-headers INTERFACE
+    $<BUILD_INTERFACE:${lv2_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:external/lv2/include>
+)
+set(PULP_HAS_LV2 TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+message(STATUS "Pulp: LV2 SDK available")
+
+# ODDSound MTS-ESP (0BSD) — optional session-wide microtuning client.
+set(PULP_HAS_MTS_ESP FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+set(PULP_MTS_ESP_SOURCE_DIR "" CACHE INTERNAL "MTS-ESP source directory" FORCE)
+if(PULP_ENABLE_MTS_ESP)
+    if(IOS OR ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        message(WARNING
+            "PULP_ENABLE_MTS_ESP=ON but MTS-ESP's client library is a desktop "
+            "runtime integration. Disabling for this target.")
+    else()
+        pulp_register_fetchcontent_source(mts_esp
+            REF f214739b8832e7f297cb9970d0c0efbf783f1462)
+        FetchContent_Declare(
+            mts_esp
+            GIT_REPOSITORY https://github.com/ODDSound/MTS-ESP.git
+            GIT_TAG f214739b8832e7f297cb9970d0c0efbf783f1462
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(mts_esp)
+        set(PULP_MTS_ESP_SOURCE_DIR "${mts_esp_SOURCE_DIR}" CACHE INTERNAL "MTS-ESP source directory" FORCE)
+        set(PULP_HAS_MTS_ESP TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+        message(STATUS "Pulp: MTS-ESP microtuning client enabled")
+    endif()
+endif()
+
+# Surge Synth Team tuning-library (MIT) — optional Scala .scl/.kbm parser.
+set(PULP_HAS_SCALA_TUNING FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+set(PULP_SST_TUNING_LIBRARY_SOURCE_DIR "" CACHE INTERNAL "Surge Synth Team tuning-library source directory" FORCE)
+if(PULP_ENABLE_SCALA_TUNING)
+    pulp_register_fetchcontent_source(sst_tuning_library
+        REF 64a939111891cb698f37d6ca9ecfc4b8c260053d)
+    FetchContent_Declare(
+        sst_tuning_library
+        GIT_REPOSITORY https://github.com/surge-synthesizer/tuning-library.git
+        GIT_TAG 64a939111891cb698f37d6ca9ecfc4b8c260053d
+        GIT_SHALLOW TRUE
+        SOURCE_SUBDIR cmake/pulp-source-only
+    )
+    FetchContent_MakeAvailable(sst_tuning_library)
+    set(PULP_SST_TUNING_LIBRARY_SOURCE_DIR "${sst_tuning_library_SOURCE_DIR}" CACHE INTERNAL "Surge Synth Team tuning-library source directory" FORCE)
+    set(PULP_HAS_SCALA_TUNING TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+    message(STATUS "Pulp: Scala .scl/.kbm tuning enabled (Surge Synth Team tuning-library)")
+endif()
+
+# Facebook Yoga (MIT license) — cross-platform CSS Flexbox/Grid layout engine
+pulp_register_fetchcontent_source(yoga REF v3.2.1)
+FetchContent_Declare(
+    yoga
+    GIT_REPOSITORY https://github.com/facebook/yoga.git
+    GIT_TAG v3.2.1
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR yoga
+)
+FetchContent_MakeAvailable(yoga)
+set(PULP_HAS_YOGA TRUE)
+message(STATUS "Pulp: Yoga layout engine enabled")
+
+# Re-enable RTTI for yogacore. Yoga's project-defaults.cmake compiles with
+# -fno-rtti, which forces Clang to emit a LOCAL, hidden std::exception typeinfo
+# in every TU for exception landing pads (it can't reference the external RTTI
+# with -fno-rtti). When yogacore is co-linked with code that throws a
+# std-derived exception caught as std::exception — e.g. choc::json::ParseError
+# caught in core/host/src/graph_serializer.cpp once pulp-host links pulp-format
+# — that local typeinfo shadows libc++'s. On Apple, std::type_info is compared
+# by address, so the thrown object's base chain (resolved via libc++) and the
+# catch clause (bound to yoga's local copy) disagree and the catch silently
+# misses, escaping as an unexpected exception. Re-enabling RTTI makes yogacore
+# reference libc++'s std::exception typeinfo instead of defining a private one.
+# -frtti is appended after yoga's directory-level -fno-rtti, so it wins.
+if(TARGET yogacore AND NOT MSVC)
+    target_compile_options(yogacore PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-frtti>)
+endif()
+
+# Google Highway (Apache 2.0) — portable SIMD abstraction (SSE/NEON/AVX)
+# Pinned to the exact SHA of the 1.2.0 release (verified via
+# `git ls-remote https://github.com/google/highway.git refs/tags/1.2.0`).
+# Pinning the SHA instead of the tag avoids intermittent
+# `fatal: invalid reference: 1.2.0` failures when GIT_SHALLOW combines
+# with tag-name resolution under load. SHA pins are also
+# more cache-friendly: FetchContent's UPDATE_DISCONNECTED check sees a
+# stable ref and skips the re-fetch on every reconfigure.
+set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+pulp_register_fetchcontent_source(highway REF 1.2.0)
+FetchContent_Declare(
+    highway
+    GIT_REPOSITORY https://github.com/google/highway.git
+    # 1.2.0 release commit
+    GIT_TAG 457c891775a7397bdb0376bb1031e6e027af1c48
+)
+FetchContent_MakeAvailable(highway)
+set(PULP_HAS_HIGHWAY TRUE)
+message(STATUS "Pulp: Highway SIMD library enabled")
+
+# Mbed TLS (Apache 2.0) — cryptographic primitives (SHA-256, RSA, AES)
+# Pinned to the exact SHA for v3.6.2. Keep this as a full clone: CMake's shallow
+# FetchContent path can fetch only the remote tip and then fail to checkout this
+# non-tip commit during fresh coverage configures.
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+pulp_register_fetchcontent_source(mbedtls REF 107ea89daaefb9867ea9121002fbbdf926780e98)
+FetchContent_Declare(
+    mbedtls
+    GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
+    GIT_TAG 107ea89daaefb9867ea9121002fbbdf926780e98
+)
+FetchContent_MakeAvailable(mbedtls)
+set(PULP_HAS_MBEDTLS TRUE)
+message(STATUS "Pulp: Mbed TLS crypto library enabled")
+
+# cpp-httplib (MIT) — header-only HTTP(S) client/server. Exposed as ONE
+# interface target so every translation unit that includes httplib.h sees the
+# IDENTICAL CPPHTTPLIB_MBEDTLS_SUPPORT macro.
+#
+# Why this matters: httplib.h is header-only with inline member functions, and
+# the macro gates the mbedTLS SSL members of httplib::ClientImpl/Server/detail::
+# helpers — i.e. it changes their layout. If one TU compiles the header with the
+# macro (pulp-runtime: http.cpp, model_download.cpp) and another without it
+# (the test fixtures that #include httplib.h directly), the inline functions are
+# ODR-folded by the linker to a SINGLE definition that need not match the layout
+# assumed at a given call site. The observed symptom was httplib's internal
+# request_mutex_ being corrupted so std::recursive_mutex::lock() returned EINVAL
+# ("recursive_mutex lock failed: Invalid argument"), failing every HTTP test.
+# Being an ODR violation, which definition wins is link-order dependent: it
+# stayed latent on GitHub-hosted macOS but reproduced deterministically on the
+# self-hosted runner, blocking the required macos check repo-wide. Linking this
+# target from every httplib consumer keeps the macro consistent and removes the
+# violation.
+add_library(pulp-cpp-httplib INTERFACE)
+target_include_directories(pulp-cpp-httplib INTERFACE
+    ${PULP_ROOT_DIR}/external/cpp-httplib)
+if(TARGET mbedcrypto)
+    target_compile_definitions(pulp-cpp-httplib INTERFACE CPPHTTPLIB_MBEDTLS_SUPPORT)
+    if(IOS OR PULP_IOS)
+        # cpp-httplib enables the macOS Keychain root-certificate loader by
+        # default on all Apple SDKs when a TLS backend is present. That path
+        # calls SecTrustCopyAnchorCertificates(), which is not available in the
+        # iOS Simulator SDK, so opt iOS out while keeping the macro set shared
+        # across every httplib consumer.
+        target_compile_definitions(pulp-cpp-httplib INTERFACE
+            CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES)
+    endif()
+    target_include_directories(pulp-cpp-httplib INTERFACE ${mbedtls_SOURCE_DIR}/include)
+    target_link_libraries(pulp-cpp-httplib INTERFACE mbedcrypto mbedx509 mbedtls)
+    if(APPLE AND NOT IOS AND NOT PULP_IOS)
+        # httplib's mbedTLS path loads system trust anchors from the macOS
+        # keychain via the Security framework. Carried here (not on individual
+        # consumers) so every TU that compiles the SSL-enabled header also
+        # resolves these symbols.
+        target_link_libraries(pulp-cpp-httplib INTERFACE
+            "-framework Security" "-framework CoreFoundation")
+    endif()
+endif()
+
+# SheenBidi (Apache-2.0) — Unicode Bidirectional Algorithm implementation.
+# Pulp-owned bidi engine independent of system ICU; consumed by
+# core/canvas::BidiAnalyzer to derive paragraph-level bidi runs for
+# Arabic / Hebrew shaping in non-Skia / non-ICU builds (iOS, headless,
+# minimal-toolchain hosts). The Skia-linked path in text_run_planner.cpp
+# continues to prefer SkShaper's ICU iterators when available; SheenBidi
+# is the canonical fallback and the always-available unit-test surface.
+pulp_register_fetchcontent_source(SheenBidi REF v3.0.0)
+set(SB_CONFIG_UNITY ON CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(BUILD_GENERATOR OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    SheenBidi
+    GIT_REPOSITORY https://github.com/Tehreer/SheenBidi.git
+    GIT_TAG c0aa79da5b5ff44bd2cbd9ce92963f81e4de6b1e  # v3.0.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(SheenBidi)
+set(PULP_HAS_SHEENBIDI TRUE)
+message(STATUS "Pulp: SheenBidi bidi engine enabled (v3.0.0)")
+
+# Brotli + Google's WOFF2 decoder (MIT licenses) — captured browser imports
+# commonly package their exact @font-face payloads as WOFF2. Native import must
+# decode those same bytes rather than silently substituting a system face.
+pulp_register_fetchcontent_source(brotli REF v1.2.0)
+FetchContent_Declare(
+    brotli
+    GIT_REPOSITORY https://github.com/google/brotli.git
+    GIT_TAG 028fb5a23661f123017c060daa546b55cf4bde29
+    # Only the c/ decoder sources are compiled; setup.sh primes this cache
+    # without submodules, and the network fallback must match it.
+    GIT_SUBMODULES ""
+    SOURCE_SUBDIR pulp-fetch-only
+)
+FetchContent_MakeAvailable(brotli)
+
+pulp_register_fetchcontent_source(woff2 REF fb9c3379f2605b10f3e8f1d9636664ab5576775c)
+FetchContent_Declare(
+    woff2
+    GIT_REPOSITORY https://github.com/google/woff2.git
+    GIT_TAG fb9c3379f2605b10f3e8f1d9636664ab5576775c
+    # woff2's brotli submodule is never compiled (the decoder builds from the
+    # brotli source above), and cloning it recursively pulls libdivsufsort from
+    # a third host at configure time.
+    GIT_SUBMODULES ""
+    SOURCE_SUBDIR pulp-fetch-only
+)
+FetchContent_MakeAvailable(woff2)
+set(PULP_WOFF2_SOURCE_DIR "${woff2_SOURCE_DIR}")
+set(PULP_BROTLI_SOURCE_DIR "${brotli_SOURCE_DIR}")
+set(PULP_HAS_WOFF2_DECODER TRUE)
+message(STATUS "Pulp: captured WOFF2 font decoder enabled")
+
+# yaml-cpp (MIT license) — YAML parser used by the DESIGN.md import pipeline
+# Note: yaml-cpp 0.8.0's CMakeLists declares cmake_minimum_required(3.4),
+# which CMake 4.x refuses. Set CMAKE_POLICY_VERSION_MINIMUM in the
+# subdirectory scope so the dependency configures cleanly.
+set(YAML_CPP_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS  OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_INSTALL      OFF CACHE BOOL "" FORCE)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+pulp_register_fetchcontent_source(yaml-cpp REF 0.8.0)
+FetchContent_Declare(
+    yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG 0.8.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(yaml-cpp)
+unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
+set(PULP_HAS_YAMLCPP TRUE)
+message(STATUS "Pulp: yaml-cpp 0.8.0 available (DESIGN.md import)")
+
+# three.js (MIT license) — native WebGPU bridge runtime, demos, and tests.
+# An explicit runtime directory lets release/install verification consume the
+# selected SDK payload without substituting a FetchContent source checkout.
+set(PULP_THREEJS_RUNTIME_MANIFEST
+    "${CMAKE_CURRENT_LIST_DIR}/threejs-runtime-manifest.json")
+if(NOT EXISTS "${PULP_THREEJS_RUNTIME_MANIFEST}")
+    message(FATAL_ERROR
+        "Pinned Three.js runtime manifest is missing: "
+        "${PULP_THREEJS_RUNTIME_MANIFEST}")
+endif()
+file(READ "${PULP_THREEJS_RUNTIME_MANIFEST}" _pulp_threejs_manifest_json)
+string(JSON PULP_THREEJS_REVISION GET
+    "${_pulp_threejs_manifest_json}" revision)
+set(PULP_THREEJS_RUNTIME_DIR "" CACHE PATH
+    "Path to a complete pinned Three.js runtime payload")
+if(PULP_ENABLE_THREEJS_RUNTIME)
+    if(PULP_THREEJS_RUNTIME_DIR)
+        get_filename_component(PULP_THREEJS_RUNTIME_DIR
+            "${PULP_THREEJS_RUNTIME_DIR}" ABSOLUTE)
+        set(threejs_SOURCE_DIR "${PULP_THREEJS_RUNTIME_DIR}")
+    else()
+        # Keep the literal registration visible to setup.sh's static cache-pin
+        # parity gate; the manifest comparison below remains the payload proof.
+        pulp_register_fetchcontent_source(threejs REF 077dd13c0e869d9f3dbe55875686f920367de457)
+        if(NOT PULP_THREEJS_REVISION STREQUAL
+                "077dd13c0e869d9f3dbe55875686f920367de457")
+            message(FATAL_ERROR
+                "Three.js cache registration and runtime manifest revisions differ")
+        endif()
+        # The digests below are upstream's own LF bytes. Git for Windows
+        # defaults core.autocrlf=true and would rewrite every LF to CRLF on
+        # checkout, so each file would hash to something no pin can describe.
+        # GIT_CONFIG scopes the override to this clone; setup.sh applies the
+        # same pin to the shared cache that usually satisfies this dependency.
+        FetchContent_Declare(
+            threejs
+            GIT_REPOSITORY https://github.com/mrdoob/three.js.git
+            GIT_TAG ${PULP_THREEJS_REVISION}
+            GIT_CONFIG core.autocrlf=false core.eol=lf
+        )
+        FetchContent_MakeAvailable(threejs)
+        set(PULP_THREEJS_RUNTIME_DIR "${threejs_SOURCE_DIR}")
+    endif()
+
+    string(JSON _pulp_threejs_file_count LENGTH
+        "${_pulp_threejs_manifest_json}" files)
+    math(EXPR _pulp_threejs_last_file "${_pulp_threejs_file_count} - 1")
+    set(PULP_THREEJS_RUNTIME_FILES "")
+    foreach(_pulp_threejs_index RANGE 0 ${_pulp_threejs_last_file})
+        string(JSON _pulp_threejs_file MEMBER
+            "${_pulp_threejs_manifest_json}" files ${_pulp_threejs_index})
+        list(APPEND PULP_THREEJS_RUNTIME_FILES "${_pulp_threejs_file}")
+        string(JSON _pulp_threejs_expected_sha GET
+            "${_pulp_threejs_manifest_json}" files "${_pulp_threejs_file}")
+        if(NOT EXISTS "${PULP_THREEJS_RUNTIME_DIR}/${_pulp_threejs_file}")
+            message(FATAL_ERROR
+                "PULP_ENABLE_THREEJS_RUNTIME requires ${_pulp_threejs_file} under "
+                "PULP_THREEJS_RUNTIME_DIR=${PULP_THREEJS_RUNTIME_DIR}")
+        endif()
+        file(SHA256 "${PULP_THREEJS_RUNTIME_DIR}/${_pulp_threejs_file}"
+            _pulp_threejs_actual_sha)
+        if(NOT "${_pulp_threejs_actual_sha}" STREQUAL
+                "${_pulp_threejs_expected_sha}")
+            message(FATAL_ERROR
+                "Three.js runtime file does not match pinned revision "
+                "${PULP_THREEJS_REVISION}: ${_pulp_threejs_file}")
+        endif()
+    endforeach()
+    unset(_pulp_threejs_actual_sha)
+    unset(_pulp_threejs_expected_sha)
+    unset(_pulp_threejs_file)
+    unset(_pulp_threejs_file_count)
+    unset(_pulp_threejs_index)
+    unset(_pulp_threejs_last_file)
+
+    set(threejs_SOURCE_DIR "${PULP_THREEJS_RUNTIME_DIR}")
+    set(PULP_HAS_THREEJS TRUE)
+    message(STATUS
+        "Pulp: pinned Three.js runtime available at ${PULP_THREEJS_RUNTIME_DIR}")
+endif()
+unset(_pulp_threejs_manifest_json)
+
+# Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support (macOS only, not iOS)
+set(AUSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/AudioUnitSDK")
+if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
+    set(PULP_HAS_AUSDK TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+
+    file(GLOB AUSDK_SOURCES "${AUSDK_DIR}/src/AudioUnitSDK/*.cpp")
+    add_library(ausdk STATIC ${AUSDK_SOURCES})
+    target_include_directories(ausdk PUBLIC
+        $<BUILD_INTERFACE:${AUSDK_DIR}/include>
+        $<INSTALL_INTERFACE:external/AudioUnitSDK/include>
+    )
+    target_link_libraries(ausdk PUBLIC
+        "-framework AudioToolbox"
+        "-framework CoreFoundation"
+        "-framework CoreAudio"
+    )
+    target_compile_options(ausdk PRIVATE -w)  # Suppress third-party warnings
+    # AudioUnitSDK 1.4's own .cpp files #include <expected> (C++23). Under
+    # CMake 3.24's policy, the root's CMAKE_CXX_STANDARD=20 is authoritative
+    # on every target and silently downgrades target_compile_features's
+    # minimum (cxx_std_23) to whatever the root says. The target property
+    # CXX_STANDARD bypasses that and forces C++23 for AU-SDK compilation.
+    # PUBLIC compile_features stays so downstream consumers inherit the
+    # minimum requirement if they rebuild with an older root standard.
+    set_target_properties(ausdk PROPERTIES
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON
+    )
+    target_compile_features(ausdk PUBLIC cxx_std_23)
+
+    message(STATUS "Pulp: AudioUnitSDK found — AU v2 support enabled")
+else()
+    set(PULP_HAS_AUSDK FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+    message(STATUS "Pulp: AudioUnitSDK not found — AU v2 format disabled")
+endif()
+
+# `pulp build` sets this for source-tree configures after running the checkout
+# dependency bootstrap. Keep the enforcement next to the feature detection so
+# a successful configure is proof that the expected formats are present, not
+# merely proof that CMake tolerated a missing symlink.
+if(PULP_MACOS)
+    set(_pulp_checkout_requires_ausdk TRUE)
+else()
+    set(_pulp_checkout_requires_ausdk FALSE)
+endif()
+set(PULP_CHECKOUT_REQUIRES_AUSDK ${_pulp_checkout_requires_ausdk} CACHE INTERNAL
+    "Whether this configured target requires AudioUnitSDK checkout dependencies" FORCE)
+unset(_pulp_checkout_requires_ausdk)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/tools/deps/shared-source-contract.txt"
+    _pulp_checkout_dependency_contract)
+string(STRIP "${_pulp_checkout_dependency_contract}" _pulp_checkout_dependency_contract)
+set(PULP_CHECKOUT_DEPENDENCY_CONTRACT "${_pulp_checkout_dependency_contract}" CACHE INTERNAL
+    "Pinned shared-source contract used for this configure" FORCE)
+unset(_pulp_checkout_dependency_contract)
+if(PULP_REQUIRE_CHECKOUT_DEPENDENCIES)
+    if(NOT PULP_HAS_VST3)
+        message(FATAL_ERROR
+            "PULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON but the pinned VST3 SDK was not found at "
+            "${VST3_SDK_DIR}. Run ./setup.sh --deps-only and reconfigure. An intentional reduced "
+            "direct-CMake build (not pulp build) may explicitly set PULP_REQUIRE_CHECKOUT_DEPENDENCIES=OFF.")
+    endif()
+    if(PULP_MACOS AND NOT PULP_HAS_AUSDK)
+        message(FATAL_ERROR
+            "PULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON but the pinned AudioUnitSDK was not found at "
+            "${AUSDK_DIR}. Run ./setup.sh --deps-only and reconfigure. An intentional reduced "
+            "direct-CMake build (not pulp build) may explicitly set PULP_REQUIRE_CHECKOUT_DEPENDENCIES=OFF.")
+    endif()
+endif()
