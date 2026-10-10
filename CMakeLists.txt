@@ -931,6 +931,16 @@ if(ANDROID)
         android
         log
     )
+    # The Android app shell: it owns the GPU surface, drives the view hierarchy
+    # and the widget bridge, and plays the demo synth, so it sits at the top of
+    # the closure with the JNI bridge rather than inside pulp-render.
+    if(TARGET pulp-render AND PULP_ENABLE_GPU)
+        target_sources(pulp-jni PRIVATE
+            core/render/platform/android/gpu_surface_android.cpp
+            core/render/platform/android/gpu_surface_android_jni.cpp
+        )
+        target_link_libraries(pulp-jni PRIVATE pulp::render)
+    endif()
     # Ensure all static library symbols are included (needed for JNI registration)
     # Ensure JNI exports from static libs are included in the shared lib.
     # Without --whole-archive, the linker strips "unused" JNI_OnLoad and
