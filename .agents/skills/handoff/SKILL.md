@@ -6,7 +6,7 @@ description: Coordinate a cross-session or cross-machine handoff — snapshot th
 # handoff
 
 When a handoff must remain live until a pull request settles, record
-`shipyard pr wait <PR> --until merged --timeout <seconds>` as the next action.
+`shipyard wait pr <PR> --state merged --timeout <seconds>` as the next action.
 It uses the shared Shipyard ledger; do not leave a polling loop in the handoff
 or ask the next agent to poll GitHub manually.
 
