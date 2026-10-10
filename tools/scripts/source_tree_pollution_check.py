@@ -73,6 +73,9 @@ ALLOWED_ROOT_PATHS = frozenset({
     ".gitmodules",
     ".iwyu-mappings.imp",
     ".mcp.json",
+    # Optional mise task profile; kept at the root because mise discovers
+    # project configuration by walking upward from the checkout.
+    ".mise.toml",
     ".shipyard",
     ".shipyard.local",
     ".status-ladder-waivers.txt",
