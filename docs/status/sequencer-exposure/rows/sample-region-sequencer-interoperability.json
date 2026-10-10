@@ -16,6 +16,7 @@
     {
       "path": "core/host/src/timeline_automation_delivery.cpp",
       "needles": [
+        "#include <pulp/format/processor_node_adapter.hpp>",
         "processor_node_parameters",
         "validate_timeline_automation_routes"
       ]
