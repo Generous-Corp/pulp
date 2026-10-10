@@ -33,6 +33,11 @@ add_test(NAME shipyard-target-defaults-selftest
         "${CMAKE_SOURCE_DIR}/tools/ci/test_shipyard_target_defaults.py")
 set_tests_properties(shipyard-target-defaults-selftest PROPERTIES TIMEOUT 60)
 
+add_test(NAME evidence-archive-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_evidence_archive.py")
+set_tests_properties(evidence-archive-selftest PROPERTIES TIMEOUT 60)
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")
