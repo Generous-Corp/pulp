@@ -21,19 +21,19 @@
 #if defined(__has_include) && __has_include(<pulp/host/signal_graph.hpp>)
 #define PULP_VIEW_HAS_GRAPH_EDITOR_VIEW 1
 
-#include <pulp/host/signal_graph.hpp>
-#include <pulp/view/view.hpp>
-#include <pulp/view/hosted_editor_attachment.hpp>
-#include <pulp/canvas/canvas.hpp>
 #include <functional>
 #include <memory>
-#include <unordered_map>
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/host/signal_graph.hpp>
+#include <pulp/view/hosted_editor_attachment.hpp>
+#include <pulp/view/view.hpp>
 #include <string>
+#include <unordered_map>
 
 namespace pulp::view::widgets {
 
 class GraphEditorView : public View {
-public:
+  public:
     explicit GraphEditorView(host::SignalGraph& graph) : graph_(graph) {
         auto_layout();
     }
@@ -64,7 +64,9 @@ public:
     // (which fires before the dispatch to legacy handlers) and consume
     // them in on_mouse_up to pick the connect variant.
     void on_mouse_event(const MouseEvent& ev) override;
-    bool wants_mouse_input() const override { return true; }
+    bool wants_mouse_input() const override {
+        return true;
+    }
 
     enum class EdgeKind { Audio, Midi, Automation, Feedback };
 
@@ -91,10 +93,12 @@ public:
         return open_editors_.find(id) != open_editors_.end();
     }
 
-private:
-    struct Pos { float x, y; };
+  private:
+    struct Pos {
+        float x, y;
+    };
 
-    static constexpr float kNodeWidth  = 160.0f;
+    static constexpr float kNodeWidth = 160.0f;
     static constexpr float kNodeHeight = 80.0f;
     static constexpr float kPortRadius = 6.0f;
     static constexpr float kPortSpacing = 18.0f;
@@ -138,6 +142,6 @@ private:
 
 } // namespace pulp::view::widgets
 
-#else  // !__has_include(<pulp/host/signal_graph.hpp>)
+#else // !__has_include(<pulp/host/signal_graph.hpp>)
 #define PULP_VIEW_HAS_GRAPH_EDITOR_VIEW 0
 #endif
