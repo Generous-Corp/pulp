@@ -8,9 +8,9 @@
   ],
   "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); the continuous-frame predicate no longer includes the audio EqCurveView header. The audio widget installs a runtime-kind registration hook for its existing hover/analyzer liveness check, while an unrelated generic view remains a negative control. This is a zero-behavior-change Pulp carve prerequisite: no Vellum source is consumed, no public include path changes, and no authority boundary moves.",
   "tests": [
-    "pulp-test-continuous-frames",
     "Vellum freeze",
-    "Vellum trusted freeze"
+    "Vellum trusted freeze",
+    "pulp-test-continuous-frames"
   ],
   "disposition": "pulp-only"
 }
