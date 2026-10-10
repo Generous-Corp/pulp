@@ -6051,6 +6051,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-ir-observe-interactions": {
+   "entry": "test/test_design_ir_observe_interactions.py",
+   "inputs": [
+    "test/test_design_ir_observe_interactions.py"
+   ],
+   "kind": "python"
+  },
   "import-fidelity-diff": {
    "entry": "test/test_import_fidelity_diff.py",
    "inputs": [
