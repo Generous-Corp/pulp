@@ -19,6 +19,9 @@ disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
 [toolchain]
+# Pin Xcode in-image so font/raster goldens are reproducible. Prefer copying a
+# host-installed Xcode (tart-provision PULP_HOST_XCODE_APP) over an in-guest
+# xcodes download (interactive 2FA).
 clang_format = "required"
 tart = "homebrew"
 rust_targets = ["x86_64-apple-darwin"]

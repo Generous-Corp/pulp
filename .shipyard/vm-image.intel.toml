@@ -26,6 +26,15 @@ auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 # PULP_RUST_CLI_TARGET=x86_64-apple-darwin, so the golden needs rustup + that
 # target. Xcode is inherited from the base golden (do NOT re-declare it here —
 # that would trigger a multi-hour Xcode re-provision).
+# Rosetta 2 so the cross-built x86_64 binary can be RUN in-guest for the smoke
+# (`arch -x86_64 build-x64/pulp help`).
+
+# NOTE on Skia: the base golden bakes ARM64 Skia. The cross-build recipe
+# (intel-vm-cross-build.sh) fetches the x86_64 Skia slice per build AND clears
+# external/skia-build/build first — setup.sh --ci prefetches arm64 Skia and the
+# flatten step won't clobber it, so an un-cleared tree fails x86_64 FindSkia.
+# We deliberately do NOT bake x86_64 Skia into the golden (keeps it lean; the
+# per-build fetch is fast and always matches the pinned manifest).
 
 [toolchain]
 rust_targets = ["x86_64-apple-darwin"]
