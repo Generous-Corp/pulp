@@ -4446,6 +4446,14 @@
    ],
    "kind": "shell"
   },
+  "evidence-archive-selftest": {
+   "entry": "tools/ci/test_evidence_archive.py",
+   "inputs": [
+    "tools/ci/evidence_archive.py",
+    "tools/ci/test_evidence_archive.py"
+   ],
+   "kind": "python"
+  },
   "example-validation-paths": {
    "entry": "tools/scripts/test_example_validation_paths.py",
    "inputs": [
@@ -6936,25 +6944,6 @@
     "test/test_pulp_installer_mcp_contract.sh"
    ],
    "kind": "shell"
-  },
-  "pulp-materialized-runtime-conformance": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
-   ],
-   "kind": "node"
-  },
-  "pulp-materialized-runtime-node-dependencies": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
-   ],
-   "kind": "node"
   },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
