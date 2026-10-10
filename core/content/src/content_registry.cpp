@@ -1,7 +1,7 @@
-#include <pulp/state/content_registry.hpp>
 #include <pulp/audio/sample_bank.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/system.hpp>
+#include <pulp/state/content_registry.hpp>
 
 #include <pulp/runtime/safe_relative_path.hpp>
 
@@ -27,7 +27,8 @@ namespace {
 
 std::string read_text(const fs::path& path) {
     std::ifstream f(path);
-    if (!f.is_open()) return {};
+    if (!f.is_open())
+        return {};
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
@@ -43,7 +44,8 @@ bool write_text(const fs::path& path, const std::string& body) {
     tmp += ".tmp";
     {
         std::ofstream f(tmp);
-        if (!f.is_open()) return false;
+        if (!f.is_open())
+            return false;
         f << body;
         f.flush();
         if (!f.good()) {
@@ -70,10 +72,12 @@ std::vector<std::string> string_array_member(const choc::value::ValueView& objec
                                              std::string_view name) {
     std::vector<std::string> out;
     auto value = object[name];
-    if (!value.isArray()) return out;
+    if (!value.isArray())
+        return out;
     for (uint32_t i = 0; i < value.size(); ++i) {
         auto item = value[i];
-        if (item.isString()) out.emplace_back(item.getString());
+        if (item.isString())
+            out.emplace_back(item.getString());
     }
     return out;
 }
@@ -84,7 +88,8 @@ bool contains(const std::vector<std::string>& values, std::string_view needle) {
 
 bool intersects(const std::vector<std::string>& a, const std::vector<std::string>& b) {
     for (const auto& value : a) {
-        if (contains(b, value)) return true;
+        if (contains(b, value))
+            return true;
     }
     return false;
 }
@@ -94,10 +99,11 @@ bool safe_rel_path(const fs::path& rel) {
 }
 
 bool safe_id_component(std::string_view value) {
-    if (value.empty() || value == "." || value == "..") return false;
+    if (value.empty() || value == "." || value == "..")
+        return false;
     for (const unsigned char c : value) {
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-            || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-')
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-')
             continue;
         return false;
     }
@@ -110,17 +116,18 @@ bool path_within(const fs::path& path, const fs::path& root) {
     auto pit = p.begin();
     auto rit = r.begin();
     for (; rit != r.end(); ++rit, ++pit) {
-        if (pit == p.end() || *pit != *rit) return false;
+        if (pit == p.end() || *pit != *rit)
+            return false;
     }
     return true;
 }
 
-bool all_in(const std::vector<std::string>& values,
-            const std::vector<std::string>& allowed,
+bool all_in(const std::vector<std::string>& values, const std::vector<std::string>& allowed,
             std::string* offending = nullptr) {
     for (const auto& value : values) {
         if (!contains(allowed, value)) {
-            if (offending) *offending = value;
+            if (offending)
+                *offending = value;
             return false;
         }
     }
@@ -131,12 +138,24 @@ std::string json_escape(std::string_view s) {
     std::string out;
     for (char c : s) {
         switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out += c; break;
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            out += c;
+            break;
         }
     }
     return out;
@@ -149,7 +168,8 @@ std::string json_string(std::string_view s) {
 std::string strings_json(const std::vector<std::string>& values) {
     std::string out = "[";
     for (std::size_t i = 0; i < values.size(); ++i) {
-        if (i) out += ",";
+        if (i)
+            out += ",";
         out += json_string(values[i]);
     }
     out += "]";
@@ -169,8 +189,7 @@ std::string now_string() {
     return buf;
 }
 
-void append_files_under(const fs::path& pack_root,
-                        const std::vector<std::string>& declared_paths,
+void append_files_under(const fs::path& pack_root, const std::vector<std::string>& declared_paths,
                         std::vector<fs::path>& out) {
     for (const auto& declared : declared_paths) {
         const auto path = pack_root / fs::path(declared);
@@ -179,10 +198,13 @@ void append_files_under(const fs::path& pack_root,
             out.push_back(path);
             continue;
         }
-        if (!fs::is_directory(path, ec)) continue;
+        if (!fs::is_directory(path, ec))
+            continue;
 
-        for (fs::recursive_directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
-            if (it->is_regular_file(ec)) out.push_back(it->path());
+        for (fs::recursive_directory_iterator it(path, ec), end; !ec && it != end;
+             it.increment(ec)) {
+            if (it->is_regular_file(ec))
+                out.push_back(it->path());
         }
     }
 
@@ -204,9 +226,8 @@ struct LocalContentManifest {
 
 std::vector<fs::path> preset_files(const std::vector<fs::path>& paths) {
     std::vector<fs::path> out;
-    std::copy_if(paths.begin(), paths.end(), std::back_inserter(out), [](const fs::path& path) {
-        return path.extension() == ".json";
-    });
+    std::copy_if(paths.begin(), paths.end(), std::back_inserter(out),
+                 [](const fs::path& path) { return path.extension() == ".json"; });
     return out;
 }
 
@@ -218,39 +239,38 @@ void validate_export_paths(const std::vector<std::string>& paths,
     }
 }
 
-void validate_export_paths_exist(const fs::path& root,
-                                 const std::vector<std::string>& paths,
+void validate_export_paths_exist(const fs::path& root, const std::vector<std::string>& paths,
                                  std::vector<std::string>& issues) {
     std::error_code ec;
     auto root_norm = fs::weakly_canonical(root, ec);
-    if (ec) root_norm = root.lexically_normal();
+    if (ec)
+        root_norm = root.lexically_normal();
     for (const auto& declared : paths) {
         const fs::path rel(declared);
         ec.clear();
         auto path = fs::weakly_canonical(root / rel, ec);
-        if (ec) path = (root / rel).lexically_normal();
+        if (ec)
+            path = (root / rel).lexically_normal();
         if (!safe_rel_path(rel) || !path_within(path, root_norm) || !fs::exists(path)) {
-            issues.push_back("missing-path: `" + rel.generic_string()
-                             + "` references missing or unsafe path `" + rel.generic_string() + "`");
+            issues.push_back("missing-path: `" + rel.generic_string() +
+                             "` references missing or unsafe path `" + rel.generic_string() + "`");
         }
     }
 }
 
-bool validate_sample_banks(const fs::path& root,
-                           const std::vector<std::string>& declared_paths,
+bool validate_sample_banks(const fs::path& root, const std::vector<std::string>& declared_paths,
                            std::vector<std::string>* copied_paths,
                            std::vector<std::string>& issues) {
-    const auto validation =
-        pulp::audio::validate_sample_bank_content(root, declared_paths);
+    const auto validation = pulp::audio::validate_sample_bank_content(root, declared_paths);
     for (const auto& issue : validation.issues) {
         issues.push_back("sample-bank: `" + issue.manifest_path + "` " +
-                         pulp::audio::sample_bank_status_name(issue.status) +
-                         " at " + issue.field_path);
+                         pulp::audio::sample_bank_status_name(issue.status) + " at " +
+                         issue.field_path);
     }
     if (copied_paths) {
         for (const auto& sample_path : validation.sample_paths) {
-            if (std::find(copied_paths->begin(), copied_paths->end(),
-                          sample_path) == copied_paths->end())
+            if (std::find(copied_paths->begin(), copied_paths->end(), sample_path) ==
+                copied_paths->end())
                 copied_paths->push_back(sample_path);
         }
     }
@@ -259,11 +279,9 @@ bool validate_sample_banks(const fs::path& root,
 
 fs::path temporary_content_validation_root() {
     static std::atomic<unsigned> sequence{0};
-    const auto ticks =
-        std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path() /
-           ("pulp-content-runtime-validate-" + std::to_string(ticks) + "-" +
-            std::to_string(sequence.fetch_add(1)));
+    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+    return fs::temp_directory_path() / ("pulp-content-runtime-validate-" + std::to_string(ticks) +
+                                        "-" + std::to_string(sequence.fetch_add(1)));
 }
 
 bool validate_directory_entries(const fs::path& root, std::vector<std::string>& issues) {
@@ -289,7 +307,8 @@ bool validate_directory_entries(const fs::path& root, std::vector<std::string>& 
 bool zip_read_file(mz_zip_archive& zip, const char* name, std::string& out) {
     size_t size = 0;
     void* data = mz_zip_reader_extract_file_to_heap(&zip, name, &size, 0);
-    if (!data) return false;
+    if (!data)
+        return false;
     out.assign(static_cast<const char*>(data), size);
     mz_free(data);
     return true;
@@ -298,15 +317,15 @@ bool zip_read_file(mz_zip_archive& zip, const char* name, std::string& out) {
 bool archive_contains_path(const std::vector<std::string>& archived_payloads,
                            const fs::path& declared_path) {
     const auto normalized = declared_path.lexically_normal().generic_string();
-    if (normalized.empty() || normalized == ".") return true;
+    if (normalized.empty() || normalized == ".")
+        return true;
     const auto prefix = normalized + "/";
     return std::any_of(archived_payloads.begin(), archived_payloads.end(), [&](const auto& file) {
         return file == normalized || file.rfind(prefix, 0) == 0;
     });
 }
 
-bool validate_archive_entries(const fs::path& archive,
-                              std::vector<std::string>& issues,
+bool validate_archive_entries(const fs::path& archive, std::vector<std::string>& issues,
                               const std::vector<std::string>* required_paths = nullptr) {
     mz_zip_archive zip{};
     if (!mz_zip_reader_init_file(&zip, archive.string().c_str(), 0)) {
@@ -337,8 +356,9 @@ bool validate_archive_entries(const fs::path& archive,
         for (const auto& required : *required_paths) {
             const fs::path rel(required);
             if (!safe_rel_path(rel) || !archive_contains_path(archived_payloads, rel)) {
-                issues.push_back("missing-path: `" + rel.generic_string()
-                                 + "` references missing or unsafe path `" + rel.generic_string() + "`");
+                issues.push_back("missing-path: `" + rel.generic_string() +
+                                 "` references missing or unsafe path `" + rel.generic_string() +
+                                 "`");
                 ok = false;
             }
         }
@@ -370,8 +390,8 @@ bool validate_archive_entries(const fs::path& archive,
                         ok = false;
                         continue;
                     }
-                    const auto hash = pulp::runtime::sha256_hex(
-                        static_cast<const unsigned char*>(data), size);
+                    const auto hash =
+                        pulp::runtime::sha256_hex(static_cast<const unsigned char*>(data), size);
                     mz_free(data);
                     if (std::string(value.getString()) != "sha256-" + hash) {
                         issues.push_back("sha256: digest mismatch for `" + name + "`");
@@ -379,7 +399,8 @@ bool validate_archive_entries(const fs::path& archive,
                     }
                 }
                 for (const auto& name : archived_payloads) {
-                    if (std::find(declared_files.begin(), declared_files.end(), name) == declared_files.end()) {
+                    if (std::find(declared_files.begin(), declared_files.end(), name) ==
+                        declared_files.end()) {
                         issues.push_back("sha256: unlisted archived file `" + name + "`");
                         ok = false;
                     }
@@ -397,8 +418,7 @@ bool validate_archive_entries(const fs::path& archive,
     return ok;
 }
 
-bool extract_archive_content(const fs::path& archive,
-                             const fs::path& dest_root,
+bool extract_archive_content(const fs::path& archive, const fs::path& dest_root,
                              std::string& error) {
     mz_zip_archive zip{};
     if (!mz_zip_reader_init_file(&zip, archive.string().c_str(), 0)) {
@@ -415,12 +435,15 @@ bool extract_archive_content(const fs::path& archive,
     }
 
     auto root_norm = fs::absolute(dest_root, ec).lexically_normal();
-    if (ec) root_norm = dest_root.lexically_normal();
+    if (ec)
+        root_norm = dest_root.lexically_normal();
     const auto count = mz_zip_reader_get_num_files(&zip);
     for (mz_uint i = 0; i < count; ++i) {
         mz_zip_archive_file_stat stat{};
-        if (!mz_zip_reader_file_stat(&zip, i, &stat)) continue;
-        if (mz_zip_reader_is_file_a_directory(&zip, i)) continue;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat))
+            continue;
+        if (mz_zip_reader_is_file_a_directory(&zip, i))
+            continue;
         const fs::path rel(stat.m_filename);
         if (!safe_rel_path(rel)) {
             mz_zip_reader_end(&zip);
@@ -428,7 +451,8 @@ bool extract_archive_content(const fs::path& archive,
             return false;
         }
         auto dest = fs::absolute(dest_root / rel, ec).lexically_normal();
-        if (ec) dest = (dest_root / rel).lexically_normal();
+        if (ec)
+            dest = (dest_root / rel).lexically_normal();
         if (!path_within(dest, root_norm)) {
             mz_zip_reader_end(&zip);
             error = "Refusing archive path outside install root `" + rel.generic_string() + "`";
@@ -445,19 +469,16 @@ bool extract_archive_content(const fs::path& archive,
     return true;
 }
 
-bool copy_declared_content(const fs::path& source_root,
-                           const fs::path& dest_root,
-                           const std::vector<std::string>& declared_paths,
-                           std::string& error) {
+bool copy_declared_content(const fs::path& source_root, const fs::path& dest_root,
+                           const std::vector<std::string>& declared_paths, std::string& error) {
     std::vector<std::pair<fs::path, fs::path>> files;
     auto add_file = [&](const fs::path& source, const fs::path& rel) -> bool {
         if (!safe_rel_path(rel)) {
             error = "Unsafe source path while installing content";
             return false;
         }
-        if (std::find_if(files.begin(), files.end(), [&](const auto& entry) {
-                return entry.second == rel;
-            }) == files.end()) {
+        if (std::find_if(files.begin(), files.end(),
+                         [&](const auto& entry) { return entry.second == rel; }) == files.end()) {
             files.push_back({source, rel});
         }
         return true;
@@ -479,18 +500,23 @@ bool copy_declared_content(const fs::path& source_root,
             return false;
         }
         if (fs::is_regular_file(source, ec)) {
-            if (!add_file(source, rel_root)) return false;
+            if (!add_file(source, rel_root))
+                return false;
             continue;
         }
-        if (!fs::is_directory(source, ec)) continue;
-        for (fs::recursive_directory_iterator it(source, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!fs::is_directory(source, ec))
+            continue;
+        for (fs::recursive_directory_iterator it(source, ec), end; !ec && it != end;
+             it.increment(ec)) {
             if (fs::is_symlink(it->symlink_status(ec))) {
                 error = "Symlinks are not allowed in content packs";
                 return false;
             }
-            if (!it->is_regular_file(ec)) continue;
+            if (!it->is_regular_file(ec))
+                continue;
             auto rel = fs::relative(it->path(), source_root, ec);
-            if (ec || !add_file(it->path(), rel)) return false;
+            if (ec || !add_file(it->path(), rel))
+                return false;
         }
         if (ec) {
             error = "Failed to scan content pack export: " + ec.message();
@@ -521,12 +547,14 @@ bool copy_declared_content(const fs::path& source_root,
 
 std::optional<ContentPackInfo> load_pack(const fs::path& root) {
     const auto manifest_text = read_text(root / "pulp.package.json");
-    if (manifest_text.empty()) return std::nullopt;
+    if (manifest_text.empty())
+        return std::nullopt;
 
     try {
         auto json = choc::json::parse(manifest_text);
         auto kinds = string_array_member(json, "kind");
-        if (!contains(kinds, "content-pack")) return std::nullopt;
+        if (!contains(kinds, "content-pack"))
+            return std::nullopt;
 
         ContentPackInfo pack;
         pack.id = string_member(json, "id");
@@ -549,7 +577,8 @@ std::optional<ContentPackInfo> load_pack(const fs::path& root) {
             validate_export_paths_exist(root, samples, issues);
             validate_export_paths_exist(root, sample_banks, issues);
             validate_export_paths_exist(root, wavetables, issues);
-            if (!issues.empty()) return std::nullopt;
+            if (!issues.empty())
+                return std::nullopt;
 
             append_files_under(root, presets, pack.presets);
             append_files_under(root, themes, pack.themes);
@@ -558,7 +587,8 @@ std::optional<ContentPackInfo> load_pack(const fs::path& root) {
             append_files_under(root, wavetables, pack.wavetables);
         }
 
-        if (pack.id.empty() || pack.version.empty()) return std::nullopt;
+        if (pack.id.empty() || pack.version.empty())
+            return std::nullopt;
         pack.presets = preset_files(pack.presets);
         return pack;
     } catch (...) {
@@ -568,11 +598,16 @@ std::optional<ContentPackInfo> load_pack(const fs::path& root) {
 
 std::vector<std::string> exported_kinds(const ContentPackInfo& pack) {
     std::vector<std::string> kinds;
-    if (!pack.presets.empty()) kinds.emplace_back("presets");
-    if (!pack.themes.empty()) kinds.emplace_back("themes");
-    if (!pack.samples.empty()) kinds.emplace_back("samples");
-    if (!pack.sample_banks.empty()) kinds.emplace_back("sample-banks");
-    if (!pack.wavetables.empty()) kinds.emplace_back("wavetables");
+    if (!pack.presets.empty())
+        kinds.emplace_back("presets");
+    if (!pack.themes.empty())
+        kinds.emplace_back("themes");
+    if (!pack.samples.empty())
+        kinds.emplace_back("samples");
+    if (!pack.sample_banks.empty())
+        kinds.emplace_back("sample-banks");
+    if (!pack.wavetables.empty())
+        kinds.emplace_back("wavetables");
     return kinds;
 }
 
@@ -585,10 +620,10 @@ std::vector<std::string> exported_kinds(const ContentPackInfo& pack) {
 /// for the whole installed library — and must not drop a pack from the index
 /// just because one of its samples was edited. Such callers pass
 /// validate_directory_sample_banks = false.
-std::optional<LocalContentManifest> load_local_content_manifest(
-    const fs::path& input, std::vector<std::string>& issues,
-    bool validate_archive_sample_banks = true,
-    bool validate_directory_sample_banks = true) {
+std::optional<LocalContentManifest>
+load_local_content_manifest(const fs::path& input, std::vector<std::string>& issues,
+                            bool validate_archive_sample_banks = true,
+                            bool validate_directory_sample_banks = true) {
     LocalContentManifest manifest;
     manifest.source = input;
 
@@ -632,8 +667,10 @@ std::optional<LocalContentManifest> load_local_content_manifest(
         manifest.pack.kinds = std::move(kinds);
         manifest.pack.capabilities = string_array_member(json, "capabilities");
 
-        if (manifest.pack.id.empty()) issues.push_back("missing-field: id");
-        if (manifest.pack.version.empty()) issues.push_back("missing-field: version");
+        if (manifest.pack.id.empty())
+            issues.push_back("missing-field: id");
+        if (manifest.pack.version.empty())
+            issues.push_back("missing-field: version");
         if (!manifest.pack.id.empty() && !safe_id_component(manifest.pack.id))
             issues.push_back("invalid-id: content pack id is not a safe path component");
         if (!manifest.pack.version.empty() && !safe_id_component(manifest.pack.version))
@@ -647,13 +684,19 @@ std::optional<LocalContentManifest> load_local_content_manifest(
             const auto sample_banks = string_array_member(exports, "sampleBanks");
             const auto wavetables = string_array_member(exports, "wavetables");
             const auto licenses = string_array_member(exports, "licenses");
-            manifest.exported_paths.insert(manifest.exported_paths.end(), presets.begin(), presets.end());
-            manifest.exported_paths.insert(manifest.exported_paths.end(), themes.begin(), themes.end());
-            manifest.exported_paths.insert(manifest.exported_paths.end(), samples.begin(), samples.end());
-            manifest.exported_paths.insert(manifest.exported_paths.end(), sample_banks.begin(), sample_banks.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), presets.begin(),
+                                           presets.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), themes.begin(),
+                                           themes.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), samples.begin(),
+                                           samples.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), sample_banks.begin(),
+                                           sample_banks.end());
             manifest.sample_bank_paths = sample_banks;
-            manifest.exported_paths.insert(manifest.exported_paths.end(), wavetables.begin(), wavetables.end());
-            manifest.exported_paths.insert(manifest.exported_paths.end(), licenses.begin(), licenses.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), wavetables.begin(),
+                                           wavetables.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), licenses.begin(),
+                                           licenses.end());
             validate_export_paths(presets, issues);
             validate_export_paths(themes, issues);
             validate_export_paths(samples, issues);
@@ -671,15 +714,20 @@ std::optional<LocalContentManifest> load_local_content_manifest(
             append_files_under(manifest.root, samples, manifest.pack.samples);
             append_files_under(manifest.root, sample_banks, manifest.pack.sample_banks);
             if (validate_directory_sample_banks)
-                validate_sample_banks(manifest.root, sample_banks,
-                                      &manifest.exported_paths, issues);
+                validate_sample_banks(manifest.root, sample_banks, &manifest.exported_paths,
+                                      issues);
             append_files_under(manifest.root, wavetables, manifest.pack.wavetables);
             manifest.pack.presets = preset_files(manifest.pack.presets);
-            if (!presets.empty()) manifest.exported_kind_names.emplace_back("presets");
-            if (!themes.empty()) manifest.exported_kind_names.emplace_back("themes");
-            if (!samples.empty()) manifest.exported_kind_names.emplace_back("samples");
-            if (!sample_banks.empty()) manifest.exported_kind_names.emplace_back("sample-banks");
-            if (!wavetables.empty()) manifest.exported_kind_names.emplace_back("wavetables");
+            if (!presets.empty())
+                manifest.exported_kind_names.emplace_back("presets");
+            if (!themes.empty())
+                manifest.exported_kind_names.emplace_back("themes");
+            if (!samples.empty())
+                manifest.exported_kind_names.emplace_back("samples");
+            if (!sample_banks.empty())
+                manifest.exported_kind_names.emplace_back("sample-banks");
+            if (!wavetables.empty())
+                manifest.exported_kind_names.emplace_back("wavetables");
         } else if (exports.isObject()) {
             const auto presets = string_array_member(exports, "presets");
             const auto themes = string_array_member(exports, "themes");
@@ -687,18 +735,29 @@ std::optional<LocalContentManifest> load_local_content_manifest(
             const auto sample_banks = string_array_member(exports, "sampleBanks");
             const auto wavetables = string_array_member(exports, "wavetables");
             const auto licenses = string_array_member(exports, "licenses");
-            manifest.exported_paths.insert(manifest.exported_paths.end(), presets.begin(), presets.end());
-            manifest.exported_paths.insert(manifest.exported_paths.end(), themes.begin(), themes.end());
-            manifest.exported_paths.insert(manifest.exported_paths.end(), samples.begin(), samples.end());
-            manifest.exported_paths.insert(manifest.exported_paths.end(), sample_banks.begin(), sample_banks.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), presets.begin(),
+                                           presets.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), themes.begin(),
+                                           themes.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), samples.begin(),
+                                           samples.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), sample_banks.begin(),
+                                           sample_banks.end());
             manifest.sample_bank_paths = sample_banks;
-            manifest.exported_paths.insert(manifest.exported_paths.end(), wavetables.begin(), wavetables.end());
-            manifest.exported_paths.insert(manifest.exported_paths.end(), licenses.begin(), licenses.end());
-            if (!presets.empty()) manifest.exported_kind_names.emplace_back("presets");
-            if (!themes.empty()) manifest.exported_kind_names.emplace_back("themes");
-            if (!samples.empty()) manifest.exported_kind_names.emplace_back("samples");
-            if (!sample_banks.empty()) manifest.exported_kind_names.emplace_back("sample-banks");
-            if (!wavetables.empty()) manifest.exported_kind_names.emplace_back("wavetables");
+            manifest.exported_paths.insert(manifest.exported_paths.end(), wavetables.begin(),
+                                           wavetables.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), licenses.begin(),
+                                           licenses.end());
+            if (!presets.empty())
+                manifest.exported_kind_names.emplace_back("presets");
+            if (!themes.empty())
+                manifest.exported_kind_names.emplace_back("themes");
+            if (!samples.empty())
+                manifest.exported_kind_names.emplace_back("samples");
+            if (!sample_banks.empty())
+                manifest.exported_kind_names.emplace_back("sample-banks");
+            if (!wavetables.empty())
+                manifest.exported_kind_names.emplace_back("wavetables");
             validate_export_paths(presets, issues);
             validate_export_paths(themes, issues);
             validate_export_paths(samples, issues);
@@ -716,10 +775,7 @@ std::optional<LocalContentManifest> load_local_content_manifest(
             if (!extract_archive_content(input, temporary_root, extract_error)) {
                 issues.push_back("sample-bank: " + extract_error);
             } else {
-                validate_sample_banks(temporary_root,
-                                      manifest.sample_bank_paths,
-                                      nullptr,
-                                      issues);
+                validate_sample_banks(temporary_root, manifest.sample_bank_paths, nullptr, issues);
             }
             std::error_code remove_error;
             fs::remove_all(temporary_root, remove_error);
@@ -732,13 +788,15 @@ std::optional<LocalContentManifest> load_local_content_manifest(
         return std::nullopt;
     }
 
-    if (!issues.empty()) return std::nullopt;
+    if (!issues.empty())
+        return std::nullopt;
     return manifest;
 }
 
 std::vector<ContentPackInfo> sorted_packs(std::vector<ContentPackInfo> packs) {
     std::sort(packs.begin(), packs.end(), [](const auto& a, const auto& b) {
-        if (a.id != b.id) return a.id < b.id;
+        if (a.id != b.id)
+            return a.id < b.id;
         return a.version < b.version;
     });
     return packs;
@@ -746,10 +804,12 @@ std::vector<ContentPackInfo> sorted_packs(std::vector<ContentPackInfo> packs) {
 
 bool matches_manifest(const ContentPackInfo& pack, const ContentCapabilityManifest& manifest) {
     if (!manifest.content_kinds.empty()) {
-        if (!intersects(exported_kinds(pack), manifest.content_kinds)) return false;
+        if (!intersects(exported_kinds(pack), manifest.content_kinds))
+            return false;
     }
 
-    if (manifest.capabilities.empty()) return true;
+    if (manifest.capabilities.empty())
+        return true;
     return intersects(pack.capabilities, manifest.capabilities);
 }
 
@@ -759,8 +819,10 @@ bool is_content_update_backup_dir(const fs::path& path) {
 
 ContentReloadPolicy reload_policy_for_kind(const ContentCapabilityManifest& manifest,
                                            const std::string& kind) {
-    if (contains(manifest.hot_reload_kinds, kind)) return ContentReloadPolicy::hot_reload;
-    if (contains(manifest.manual_rescan_kinds, kind)) return ContentReloadPolicy::manual_rescan;
+    if (contains(manifest.hot_reload_kinds, kind))
+        return ContentReloadPolicy::hot_reload;
+    if (contains(manifest.manual_rescan_kinds, kind))
+        return ContentReloadPolicy::manual_rescan;
     return ContentReloadPolicy::restart_required;
 }
 
@@ -768,15 +830,23 @@ std::vector<LocalContentManifest> installed_content(const fs::path& data_root) {
     std::vector<LocalContentManifest> entries;
     std::error_code ec;
     const auto root = ContentRegistry::content_root_for_data_root(data_root);
-    if (!fs::exists(root, ec)) return entries;
+    if (!fs::exists(root, ec))
+        return entries;
 
-    for (fs::directory_iterator plugins(root, ec), plugins_end; !ec && plugins != plugins_end; plugins.increment(ec)) {
-        if (!plugins->is_directory(ec)) continue;
-        for (fs::directory_iterator ids(plugins->path(), ec), ids_end; !ec && ids != ids_end; ids.increment(ec)) {
-            if (!ids->is_directory(ec)) continue;
-            for (fs::directory_iterator versions(ids->path(), ec), versions_end; !ec && versions != versions_end; versions.increment(ec)) {
-                if (!versions->is_directory(ec)) continue;
-                if (is_content_update_backup_dir(versions->path())) continue;
+    for (fs::directory_iterator plugins(root, ec), plugins_end; !ec && plugins != plugins_end;
+         plugins.increment(ec)) {
+        if (!plugins->is_directory(ec))
+            continue;
+        for (fs::directory_iterator ids(plugins->path(), ec), ids_end; !ec && ids != ids_end;
+             ids.increment(ec)) {
+            if (!ids->is_directory(ec))
+                continue;
+            for (fs::directory_iterator versions(ids->path(), ec), versions_end;
+                 !ec && versions != versions_end; versions.increment(ec)) {
+                if (!versions->is_directory(ec))
+                    continue;
+                if (is_content_update_backup_dir(versions->path()))
+                    continue;
                 std::vector<std::string> issues;
                 // Inventory only: never hash the installed library here, and
                 // never let a bank issue erase an installed pack's presets and
@@ -793,7 +863,8 @@ std::vector<LocalContentManifest> installed_content(const fs::path& data_root) {
     }
 
     std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-        if (a.pack.id != b.pack.id) return a.pack.id < b.pack.id;
+        if (a.pack.id != b.pack.id)
+            return a.pack.id < b.pack.id;
         return a.pack.version < b.pack.version;
     });
     return entries;
@@ -801,25 +872,25 @@ std::vector<LocalContentManifest> installed_content(const fs::path& data_root) {
 
 bool write_content_index(const fs::path& data_root) {
     const auto entries = installed_content(data_root);
-    std::string out = "{\n  \"version\": 1,\n  \"updated_at\": " + json_string(now_string())
-        + ",\n  \"content\": [";
+    std::string out = "{\n  \"version\": 1,\n  \"updated_at\": " + json_string(now_string()) +
+                      ",\n  \"content\": [";
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const auto& entry = entries[i];
         const auto rel = fs::relative(entry.root, data_root).generic_string();
         std::string plugin_id;
-        const auto rel_path = fs::relative(entry.root, ContentRegistry::content_root_for_data_root(data_root));
+        const auto rel_path =
+            fs::relative(entry.root, ContentRegistry::content_root_for_data_root(data_root));
         auto it = rel_path.begin();
-        if (it != rel_path.end()) plugin_id = it->string();
+        if (it != rel_path.end())
+            plugin_id = it->string();
 
         out += i == 0 ? "\n" : ",\n";
-        out += "    {\"id\":" + json_string(entry.pack.id)
-            + ",\"version\":" + json_string(entry.pack.version)
-            + ",\"plugin_id\":" + json_string(plugin_id)
-            + ",\"root\":" + json_string(rel)
-            + ",\"manifest_sha256\":" + json_string(entry.manifest_sha256)
-            + ",\"kind\":" + strings_json(entry.pack.kinds)
-            + ",\"capabilities\":" + strings_json(entry.pack.capabilities)
-            + "}";
+        out += "    {\"id\":" + json_string(entry.pack.id) +
+               ",\"version\":" + json_string(entry.pack.version) +
+               ",\"plugin_id\":" + json_string(plugin_id) + ",\"root\":" + json_string(rel) +
+               ",\"manifest_sha256\":" + json_string(entry.manifest_sha256) +
+               ",\"kind\":" + strings_json(entry.pack.kinds) +
+               ",\"capabilities\":" + strings_json(entry.pack.capabilities) + "}";
     }
     out += entries.empty() ? "\n  ]\n}\n" : "\n  ]\n}\n";
     return write_text(ContentRegistry::content_root_for_data_root(data_root) / "index.json", out);
@@ -827,16 +898,18 @@ bool write_content_index(const fs::path& data_root) {
 
 } // namespace
 
-std::optional<ContentCapabilityManifest>
-parse_content_capability_manifest(std::string_view text, std::string* error) {
+std::optional<ContentCapabilityManifest> parse_content_capability_manifest(std::string_view text,
+                                                                           std::string* error) {
     auto fail = [&](std::string message) -> std::optional<ContentCapabilityManifest> {
-        if (error) *error = std::move(message);
+        if (error)
+            *error = std::move(message);
         return std::nullopt;
     };
 
     try {
         auto json = choc::json::parse(std::string(text));
-        if (!json.isObject()) return fail("manifest root must be a JSON object");
+        if (!json.isObject())
+            return fail("manifest root must be a JSON object");
         const auto schema = string_member(json, "schema");
         if (schema != "pulp.plugin-runtime.v1")
             return fail("schema must be pulp.plugin-runtime.v1");
@@ -865,12 +938,15 @@ parse_content_capability_manifest(std::string_view text, std::string* error) {
 
             std::string unsupported;
             if (!all_in(manifest.hot_reload_kinds, manifest.content_kinds, &unsupported))
-                return fail("content.reload.hotReloadKinds contains unsupported kind: " + unsupported);
+                return fail("content.reload.hotReloadKinds contains unsupported kind: " +
+                            unsupported);
             if (!all_in(manifest.manual_rescan_kinds, manifest.content_kinds, &unsupported))
-                return fail("content.reload.manualRescanKinds contains unsupported kind: " + unsupported);
+                return fail("content.reload.manualRescanKinds contains unsupported kind: " +
+                            unsupported);
         }
 
-        if (error) error->clear();
+        if (error)
+            error->clear();
         return manifest;
     } catch (const std::exception& e) {
         return fail(std::string("invalid JSON: ") + e.what());
@@ -879,11 +955,12 @@ parse_content_capability_manifest(std::string_view text, std::string* error) {
     }
 }
 
-std::optional<ContentCapabilityManifest>
-load_content_capability_manifest(const fs::path& path, std::string* error) {
+std::optional<ContentCapabilityManifest> load_content_capability_manifest(const fs::path& path,
+                                                                          std::string* error) {
     auto text = read_text(path);
     if (text.empty()) {
-        if (error) *error = "manifest file is missing or empty";
+        if (error)
+            *error = "manifest file is missing or empty";
         return std::nullopt;
     }
     return parse_content_capability_manifest(text, error);
@@ -919,8 +996,7 @@ std::string content_capability_manifest_to_json(const ContentCapabilityManifest&
     return choc::json::toString(obj, true);
 }
 
-ContentRegistry::ContentRegistry(fs::path data_root)
-    : data_root_(std::move(data_root)) {}
+ContentRegistry::ContentRegistry(fs::path data_root) : data_root_(std::move(data_root)) {}
 
 fs::path ContentRegistry::platform_data_root() {
     if (auto override = runtime::get_env("PULP_USER_DATA_DIR"); override && !override->empty())
@@ -954,39 +1030,41 @@ std::vector<ContentPackInfo> ContentRegistry::packs_for_plugin(const std::string
     std::vector<ContentPackInfo> packs;
     const auto plugin_root = content_root() / plugin_id;
     std::error_code ec;
-    if (!fs::is_directory(plugin_root, ec)) return packs;
+    if (!fs::is_directory(plugin_root, ec))
+        return packs;
 
     for (fs::directory_iterator package_it(plugin_root, ec), package_end;
-         !ec && package_it != package_end;
-         package_it.increment(ec)) {
-        if (!package_it->is_directory(ec)) continue;
+         !ec && package_it != package_end; package_it.increment(ec)) {
+        if (!package_it->is_directory(ec))
+            continue;
         for (fs::directory_iterator version_it(package_it->path(), ec), version_end;
-             !ec && version_it != version_end;
-             version_it.increment(ec)) {
-            if (!version_it->is_directory(ec)) continue;
-            if (is_content_update_backup_dir(version_it->path())) continue;
-            if (auto pack = load_pack(version_it->path())) packs.push_back(std::move(*pack));
+             !ec && version_it != version_end; version_it.increment(ec)) {
+            if (!version_it->is_directory(ec))
+                continue;
+            if (is_content_update_backup_dir(version_it->path()))
+                continue;
+            if (auto pack = load_pack(version_it->path()))
+                packs.push_back(std::move(*pack));
         }
     }
 
     return sorted_packs(std::move(packs));
 }
 
-std::vector<ContentPackInfo> ContentRegistry::packs_for_plugin(
-    const ContentCapabilityManifest& manifest) const {
+std::vector<ContentPackInfo>
+ContentRegistry::packs_for_plugin(const ContentCapabilityManifest& manifest) const {
     auto packs = packs_for_plugin(manifest.plugin_id);
-    packs.erase(std::remove_if(packs.begin(), packs.end(), [&](const auto& pack) {
-                    return !matches_manifest(pack, manifest);
-                }),
+    packs.erase(std::remove_if(packs.begin(), packs.end(),
+                               [&](const auto& pack) { return !matches_manifest(pack, manifest); }),
                 packs.end());
     return packs;
 }
 
-std::vector<PresetInfo> ContentRegistry::presets_for_plugin(
-    const ContentCapabilityManifest& manifest) const {
+std::vector<PresetInfo>
+ContentRegistry::presets_for_plugin(const ContentCapabilityManifest& manifest) const {
     std::vector<PresetInfo> presets;
-    if (!contains(manifest.content_kinds, "presets")
-        || !contains(manifest.capabilities, "content.presets.v1")) {
+    if (!contains(manifest.content_kinds, "presets") ||
+        !contains(manifest.capabilities, "content.presets.v1")) {
         return presets;
     }
     for (const auto& pack : packs_for_plugin(manifest)) {
@@ -1002,7 +1080,8 @@ std::vector<PresetInfo> ContentRegistry::presets_for_plugin(
     }
 
     std::sort(presets.begin(), presets.end(), [](const auto& a, const auto& b) {
-        if (a.name != b.name) return a.name < b.name;
+        if (a.name != b.name)
+            return a.name < b.name;
         return a.path.string() < b.path.string();
     });
     return presets;
@@ -1010,9 +1089,12 @@ std::vector<PresetInfo> ContentRegistry::presets_for_plugin(
 
 const char* to_string(ContentReloadPolicy policy) {
     switch (policy) {
-        case ContentReloadPolicy::hot_reload: return "hot-reload";
-        case ContentReloadPolicy::manual_rescan: return "manual-rescan";
-        case ContentReloadPolicy::restart_required: return "restart-required";
+    case ContentReloadPolicy::hot_reload:
+        return "hot-reload";
+    case ContentReloadPolicy::manual_rescan:
+        return "manual-rescan";
+    case ContentReloadPolicy::restart_required:
+        return "restart-required";
     }
     return "restart-required";
 }
@@ -1036,23 +1118,27 @@ ContentInstallPreview preview_content_pack_install(const fs::path& input,
     }
 
     preview.pack = std::move(local->pack);
-    preview.install_root = ContentRegistry::content_root_for_data_root(data_root)
-        / plugin.plugin_id / preview.pack.id / preview.pack.version;
+    preview.install_root = ContentRegistry::content_root_for_data_root(data_root) /
+                           plugin.plugin_id / preview.pack.id / preview.pack.version;
 
     auto kinds = local->exported_kind_names;
-    if (kinds.empty()) kinds = exported_kinds(preview.pack);
+    if (kinds.empty())
+        kinds = exported_kinds(preview.pack);
     if (!intersects(kinds, plugin.content_kinds)) {
-        issues.push_back("content-kind-mismatch: pack exports " + strings_json(kinds)
-                         + " but plugin accepts " + strings_json(plugin.content_kinds));
+        issues.push_back("content-kind-mismatch: pack exports " + strings_json(kinds) +
+                         " but plugin accepts " + strings_json(plugin.content_kinds));
     }
-    if (!preview.pack.capabilities.empty()
-        && !intersects(preview.pack.capabilities, plugin.capabilities)) {
-        issues.push_back("capability-mismatch: pack capabilities do not match plugin runtime capabilities");
+    if (!preview.pack.capabilities.empty() &&
+        !intersects(preview.pack.capabilities, plugin.capabilities)) {
+        issues.push_back(
+            "capability-mismatch: pack capabilities do not match plugin runtime capabilities");
     }
 
     for (const auto& kind : kinds) {
-        if (!contains(plugin.content_kinds, kind)) continue;
-        preview.policies.push_back(ContentInstallPolicy{kind, reload_policy_for_kind(plugin, kind)});
+        if (!contains(plugin.content_kinds, kind))
+            continue;
+        preview.policies.push_back(
+            ContentInstallPolicy{kind, reload_policy_for_kind(plugin, kind)});
     }
 
     preview.issues = std::move(issues);
@@ -1062,12 +1148,12 @@ ContentInstallPreview preview_content_pack_install(const fs::path& input,
 
 ContentInstallResult install_content_pack(const fs::path& input,
                                           const ContentCapabilityManifest& plugin,
-                                          const fs::path& data_root,
-                                          bool approved) {
+                                          const fs::path& data_root, bool approved) {
     ContentInstallResult result;
     result.preview = preview_content_pack_install(input, plugin, data_root);
     result.issues = result.preview.issues;
-    if (!result.preview.ok) return result;
+    if (!result.preview.ok)
+        return result;
     if (!approved) {
         result.issues.push_back("approval-required: content install requires explicit approval");
         return result;
@@ -1082,22 +1168,23 @@ ContentInstallResult install_content_pack(const fs::path& input,
         return result;
     }
     if (local->manifest_file) {
-        result.issues.push_back(
-            "input-kind: content install requires a content-pack directory or .pulpcontent archive, not a bare manifest file");
+        result.issues.push_back("input-kind: content install requires a content-pack directory or "
+                                ".pulpcontent archive, not a bare manifest file");
         return result;
     }
 
     std::error_code ec;
     if (fs::exists(result.preview.install_root, ec)) {
-        result.issues.push_back(
-            "already-installed: content pack already installed; use an explicit update flow to replace it");
+        result.issues.push_back("already-installed: content pack already installed; use an "
+                                "explicit update flow to replace it");
         return result;
     }
     fs::remove_all(result.preview.install_root, ec);
     std::string error;
     const bool copied = local->archive
-        ? extract_archive_content(input, result.preview.install_root, error)
-        : copy_declared_content(local->root, result.preview.install_root, local->exported_paths, error);
+                            ? extract_archive_content(input, result.preview.install_root, error)
+                            : copy_declared_content(local->root, result.preview.install_root,
+                                                    local->exported_paths, error);
     if (!copied) {
         fs::remove_all(result.preview.install_root, ec);
         result.issues.push_back(error);

@@ -34,8 +34,7 @@ parse_content_capability_manifest(std::string_view json, std::string* error = nu
 
 /// Load and parse a plugin content capability manifest from disk.
 std::optional<ContentCapabilityManifest>
-load_content_capability_manifest(const std::filesystem::path& path,
-                                 std::string* error = nullptr);
+load_content_capability_manifest(const std::filesystem::path& path, std::string* error = nullptr);
 
 /// Serialize a capability manifest for embedding in plugin bundle resources.
 std::string content_capability_manifest_to_json(const ContentCapabilityManifest& manifest);
@@ -55,11 +54,7 @@ struct ContentPackInfo {
     std::vector<std::filesystem::path> wavetables;
 };
 
-enum class ContentReloadPolicy {
-    hot_reload,
-    manual_rescan,
-    restart_required
-};
+enum class ContentReloadPolicy { hot_reload, manual_rescan, restart_required };
 
 struct ContentInstallPolicy {
     std::string kind;
@@ -85,13 +80,15 @@ struct ContentInstallResult {
 /// Installed content lookup. Content packs are data-only and live under the
 /// same user-data root used by `pulp content install`.
 class ContentRegistry {
-public:
+  public:
     explicit ContentRegistry(std::filesystem::path data_root = platform_data_root());
 
     static std::filesystem::path platform_data_root();
     static std::filesystem::path content_root_for_data_root(const std::filesystem::path& data_root);
 
-    const std::filesystem::path& data_root() const { return data_root_; }
+    const std::filesystem::path& data_root() const {
+        return data_root_;
+    }
     std::filesystem::path content_root() const;
 
     /// Return all installed packs for a plugin id, without capability filtering.
@@ -103,7 +100,7 @@ public:
     /// Return content-pack presets as read-only factory/expansion presets.
     std::vector<PresetInfo> presets_for_plugin(const ContentCapabilityManifest& manifest) const;
 
-private:
+  private:
     std::filesystem::path data_root_;
 };
 
@@ -112,17 +109,15 @@ private:
 /// runtime-side backend for in-app "Install Content Pack..." and drag/drop
 /// review flows.
 ContentInstallPreview preview_content_pack_install(
-    const std::filesystem::path& input,
-    const ContentCapabilityManifest& plugin,
+    const std::filesystem::path& input, const ContentCapabilityManifest& plugin,
     const std::filesystem::path& data_root = ContentRegistry::platform_data_root());
 
 /// Install a previously previewable data-only content pack. `approved` must be
 /// true so UI code cannot accidentally turn preview/drop into mutation.
-ContentInstallResult install_content_pack(
-    const std::filesystem::path& input,
-    const ContentCapabilityManifest& plugin,
-    const std::filesystem::path& data_root = ContentRegistry::platform_data_root(),
-    bool approved = false);
+ContentInstallResult
+install_content_pack(const std::filesystem::path& input, const ContentCapabilityManifest& plugin,
+                     const std::filesystem::path& data_root = ContentRegistry::platform_data_root(),
+                     bool approved = false);
 
 const char* to_string(ContentReloadPolicy policy);
 
