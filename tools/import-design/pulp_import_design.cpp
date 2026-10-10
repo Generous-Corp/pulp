@@ -2,7 +2,7 @@
 #include <pulp/view/design_export.hpp>
 #include <pulp/view/design_tokens_w3c.hpp>
 #include <pulp/view/design_fidelity_ledger.hpp>
-#include <pulp/view/recognition_resolver.hpp>
+#include <pulp/view/recognition_audio_pack.hpp> // also RecognitionResolver
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -3011,7 +3011,7 @@ int main(int argc, char* argv[]) {
     // overridden). Unmatched-but-present component instances are surfaced as an
     // import diagnostic — never guessed into a wrong kind.
     if (*source == DesignSource::figma_plugin || *source == DesignSource::figma) {
-        auto resolver = pulp::view::RecognitionResolver::with_builtin_library();
+        auto resolver = pulp::view::recognition_resolver_with_builtin_library();
         if (!recognition_manifest_path.empty()) {
             const std::string manifest_json = read_file(recognition_manifest_path);
             if (manifest_json.empty()) {
