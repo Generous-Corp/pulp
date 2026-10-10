@@ -484,6 +484,11 @@ queued PR, reordering or dequeuing any other PR, or making room ahead of the fix
 
 ## Wait on a blocking waiter, not a poll loop
 
+For an unattended pull request, use `shipyard pr wait <PR> --until merged`
+with an explicit timeout. This uses Shipyard's single authoritative PR watch
+ledger and can run from any fleet host. Never wrap `gh pr view` or `gh pr
+checks` in a polling loop.
+
 A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|release`,
 `shipyard ship --pr <n>` (merges on green), or a background command that exits
 when the condition holds. A loop that reads the same state every few seconds
