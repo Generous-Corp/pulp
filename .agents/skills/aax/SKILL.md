@@ -193,6 +193,39 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
   `PluginViewHost` falls back to the no-op stub factory, `create()` returns
   null, and the plugin loads with no editor.
 
+### macOS host acceptance and poka-yoke
+
+The SDK-free tests and AAX validator do not prove that Pro Tools can create the
+custom editor or process a signal. A macOS acceptance run is closed only after
+all of these are recorded against the exact installed bundle:
+
+- Build the AAX target from the exact Pulp runtime/SDK input and record its
+  source provenance. Do not resolve an older sibling SDK from CMake's search
+  path.
+- Before installing, run the AAX validator's load/describe/parameter checks,
+  Apple deep-strict verification, and PACE verification. The validator's
+  `EffectGUI` warning means the strip lane was built; it is not custom-editor
+  proof.
+- Install one bundle only. Quit Pro Tools before replacing the bundle, install
+  through the machine's approved package wrapper, then verify the installed
+  executable hash equals the signed artifact. Clear/reload Pro Tools' plugin
+  cache when discovery disagrees with that hash.
+- The first editor transaction must be checked in Pro Tools: the preferred
+  width/height, aspect lock, and resize grip must be visible before any manual
+  drag. `AAX_Point` is `(vertical, horizontal)`. The adapter seeds the host and
+  bridge geometry after `SetViewSize` because Pro Tools may not emit an initial
+  native frame callback.
+- A real host run must separately prove mono and stereo discovery, editor
+  creation, proportional resize, audio-through, active-versus-bypass output,
+  bounce output, transport tempo, LFO animation, and automation write/read
+  playback. A DigiShell load or parameter enumeration is only a host-load
+  signal; it is not audio-through or bounce evidence.
+
+Keep Avid/PACE SDKs, customer identifiers, signing credentials, and signed
+artifacts outside the public repository. A private machine capsule may store
+restore scripts and Keychain-backed lookup instructions, but never passwords or
+customer numbers in argv, logs, chat, or tracked source.
+
 The SDK-free logic (gesture routing, sizing) lives in
 `core/format/include/pulp/format/aax_editor.hpp` on purpose, so it is testable
 with no Avid SDK: `pulp-test-aax-editor` runs everywhere.

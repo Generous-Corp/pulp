@@ -199,13 +199,39 @@ private:
                 return bridge_.get() == bridge_ptr && GetViewContainer() != nullptr;
             });
 
-        // Set after attach succeeds so a failed attach never installs a
-        // viewport transform on a host about to be destroyed.
+        // Install the design viewport before publishing the initial host size.
+        // Pro Tools may synchronously lay out and paint from SetViewSize; if
+        // the aspect lock is installed afterwards, that first transaction can
+        // use the host's stale frame and crop the editor (including its resize
+        // grip) until the user performs a second resize.
         if (plan.pin_viewport) {
             host_->set_design_viewport(static_cast<float>(plan.width),
                                        static_cast<float>(plan.height));
             host_->set_fixed_aspect_ratio(plan.aspect_ratio);
         }
+
+        // Publish the preferred size only after the host's viewport transform
+        // is ready.  AAX_Point's constructor is (vertical, horizontal);
+        // GetViewSize() below writes the named fields directly.  This makes
+        // the first frame, the native child, and the visible resize grip share
+        // one geometry instead of waiting for a user resize to reconcile them.
+        if (auto* view_container = GetViewContainer()) {
+            AAX_Point initial_size(static_cast<float>(plan.height),
+                                   static_cast<float>(plan.width));
+            if (view_container->SetViewSize(initial_size) != AAX_SUCCESS) {
+                runtime::log_error("AAX editor: initial SetViewSize rejected ({}x{})",
+                                   plan.width, plan.height);
+            }
+        }
+
+        // Pro Tools may accept SetViewSize without sending an NSView frame
+        // callback back through the embedded host. Seed both sides of the
+        // bridge from the exact size just published so the native child,
+        // viewport transform, and editor-owned resize grip all share one
+        // initial geometry. Later host-driven frame changes still arrive via
+        // the callback above and replace this seed.
+        host_->set_size(plan.width, plan.height);
+        bridge_->resize(plan.width, plan.height);
 
         bridge_->notify_attached();
         // Content-first: the first composited frame is the mounted document
