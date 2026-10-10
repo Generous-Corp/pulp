@@ -87,13 +87,20 @@ function(_pulp_build_info_wgpu_version out_var)
     set(${out_var} "${_version}" PARENT_SCOPE)
 endfunction()
 
-# File name of the wgpu-native runtime staged beside every module, or empty.
+# File name of the wgpu-native runtime staged beside every module, or empty
+# (empty whenever the renderer does not link it).
 # A source build records it in WEBGPU_RUNTIME_LIB; a find_package(Pulp)
 # consumer only has the imported `webgpu` target PulpWebGpuImportedTarget.cmake
 # recreated from the SDK's lib directory.
 function(_pulp_build_info_wgpu_runtime_file out_var)
     set(_file "")
-    if(WEBGPU_RUNTIME_LIB)
+    set(_wgpu_linked TRUE)
+    if(COMMAND pulp_wgpu_runtime_linked)
+        pulp_wgpu_runtime_linked(_wgpu_linked)
+    endif()
+    if(NOT _wgpu_linked)
+        # Nothing staged: Skia's Dawn is the WebGPU implementation.
+    elseif(WEBGPU_RUNTIME_LIB)
         get_filename_component(_file "${WEBGPU_RUNTIME_LIB}" NAME)
     elseif(TARGET webgpu)
         get_target_property(_type webgpu TYPE)

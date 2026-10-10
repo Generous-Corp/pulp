@@ -125,12 +125,41 @@ function(pulp_resolve_icudtl out_var)
     set(${out_var} "${_resolved}" PARENT_SCOPE)
 endfunction()
 
+# Whether the renderer links the wgpu-native runtime, read from the render
+# target's own link interface so staging can never disagree with the link:
+# `pulp-render` in a source build, the exported `pulp::render` in a
+# find_package(Pulp) consumer. When Skia's Dawn is the WebGPU implementation
+# the runtime is not linked, and staging it would only ship a dylib nothing
+# loads.
+function(pulp_wgpu_runtime_linked out_var)
+    set(_links "")
+    if(TARGET pulp-render)
+        get_target_property(_links pulp-render LINK_LIBRARIES)
+    elseif(TARGET pulp::render)
+        get_target_property(_aliased pulp::render ALIASED_TARGET)
+        if(_aliased)
+            get_target_property(_links ${_aliased} LINK_LIBRARIES)
+        else()
+            get_target_property(_links pulp::render INTERFACE_LINK_LIBRARIES)
+        endif()
+    endif()
+    if(NOT _links)
+        set(_links "")
+    endif()
+    if("webgpu" IN_LIST _links)
+        set(${out_var} TRUE PARENT_SCOPE)
+    else()
+        set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
 # The runtime files `target` must have beside it after a build, for the current
 # platform. Kept next to the staging function so the two cannot disagree about
 # the file set.
 function(pulp_expected_runtime_dependencies out_var)
     set(_expected "")
-    if(WEBGPU_RUNTIME_LIB AND EXISTS "${WEBGPU_RUNTIME_LIB}")
+    pulp_wgpu_runtime_linked(_wgpu_linked)
+    if(_wgpu_linked AND WEBGPU_RUNTIME_LIB AND EXISTS "${WEBGPU_RUNTIME_LIB}")
         get_filename_component(_name "${WEBGPU_RUNTIME_LIB}" NAME)
         list(APPEND _expected "${_name}")
     endif()
@@ -165,7 +194,10 @@ function(pulp_stage_runtime_dependencies target)
     # fails the link step it is appended to. When upstream has published the
     # path, issue the same copy with VERBATIM; otherwise (the installed SDK's
     # own helper, or a static runtime whose helper is a no-op) delegate.
-    if(DEFINED CACHE{WEBGPU_RUNTIME_LIB} AND EXISTS "${WEBGPU_RUNTIME_LIB}")
+    pulp_wgpu_runtime_linked(_wgpu_linked)
+    if(NOT _wgpu_linked)
+        # Skia's Dawn is the WebGPU implementation; nothing loads wgpu-native.
+    elseif(DEFINED CACHE{WEBGPU_RUNTIME_LIB} AND EXISTS "${WEBGPU_RUNTIME_LIB}")
         add_custom_command(
             TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
