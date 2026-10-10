@@ -478,12 +478,14 @@ targets:
 | You link | You get |
 |---|---|
 | `pulp::gpu-audio` | Layer 2 transport + Layer 3 ready-made processors (`GpuAudioTransport`, `GpuConvolver`, `GpuStft`, `GpuSpectralFreeze`/`Morph`) and their headers |
-| `pulp::render` | Layer 1 primitives (`GpuCompute`) — present only in a GPU-enabled SDK build |
+| `pulp::gpu-device` | Layer 1 primitives (`GpuCompute`, `GpuSurface`) without the Skia 2D renderer — present only in a GPU-enabled SDK build. `pulp::gpu-audio` links this, not `pulp::render` |
+| `pulp::render` | The Skia 2D renderer, which also carries the Layer 1 primitives — present only in a GPU-enabled SDK build |
 
 `pulp::gpu-audio` is always exported: it's GPU-agnostic and carries its own CPU
 fallback, so a non-GPU SDK still exposes the transport (it just runs the
-`signal::*` reference path). `pulp::render` exists only when the SDK was built
-`-DPULP_ENABLE_GPU=ON`, so gate any GPU-primitive code on it:
+`signal::*` reference path). `pulp::gpu-device` and `pulp::render` exist only
+when the SDK was built `-DPULP_ENABLE_GPU=ON`, so gate any GPU-primitive code on
+the device target:
 
 ```cmake
 find_package(Pulp CONFIG REQUIRED)
@@ -496,8 +498,8 @@ pulp_add_plugin(MyPlugin
 )
 
 target_link_libraries(MyPlugin_Core PUBLIC pulp::gpu-audio)
-if(TARGET pulp::render)
-    target_link_libraries(MyPlugin_Core PUBLIC pulp::render)  # Layer-1 GPU primitives
+if(TARGET pulp::gpu-device)
+    target_link_libraries(MyPlugin_Core PUBLIC pulp::gpu-device)  # Layer-1 GPU primitives
 endif()
 ```
 

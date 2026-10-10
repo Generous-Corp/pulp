@@ -205,7 +205,10 @@ modules:
       WebGPU compute pipeline for PMREM, PBR materials, and batch processing.
       DRACO mesh decoder (native C++, optional). KTX2 header parser and native-gap
       classifier; Basis Universal payload transcoding remains deferred. Binary
-      transfer optimization.
+      transfer optimization. The GPU device layer is split into its own
+      targets: pulp-gpu-device-api (Dawn-free device headers) and
+      pulp-gpu-device (Dawn surface and compute implementation), which
+      pulp-render links and GPU audio links without the 2D renderer.
     status: usable
     dependencies: [runtime, canvas]
     docs: reference/rendering.md#render
@@ -221,8 +224,9 @@ modules:
       (each op is upload → dispatch → blocking readback); the transport is the
       RT seam.
     status: experimental
-    # audio/runtime/signal link unconditionally; render is GPU-build-only
-    # (linked only under `if(TARGET pulp::render)`).
+    # audio/runtime/signal link unconditionally; render is GPU-build-only:
+    # the GPU path links the render module's device layer (pulp::gpu-device,
+    # linked only under `if(TARGET pulp::gpu-device)`), never the 2D renderer.
     dependencies: [audio, runtime, signal, render]
     docs: guides/gpu-audio-sdk.md
 
