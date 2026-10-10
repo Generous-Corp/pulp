@@ -104,6 +104,7 @@ set(_expected_engine_closure
     Pulp::playback
     Pulp::runtime
     Pulp::signal
+    Pulp::simd
     Pulp::state
     Pulp::timebase
     Pulp::timeline
