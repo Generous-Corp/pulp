@@ -37,11 +37,11 @@ def observe(out: Path, *steps: str, log: bool = True) -> subprocess.CompletedPro
     ]
     if log:
         argv += ["--interaction-log", str(out / "interaction.json")]
-    return subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", timeout=120)
 
 
 def load_log(out: Path) -> dict:
-    return json.loads((out / "interaction.json").read_text())
+    return json.loads((out / "interaction.json").read_text(encoding="utf-8"))
 
 
 def state_of(record: list, anchor: str) -> dict:
