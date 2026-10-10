@@ -1728,6 +1728,10 @@ tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
 integration file back into the unit aggregate or remove that install step: the
 former exhausts the aggregate deadline before later tests run, while the latter
 turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
+Before regenerating `test/ctest_script_inputs.json` or
+`.shipyard/changed-surface-families.toml`, run that same locked install and
+reconfigure from the gate profile so both materialized-runtime tests remain
+registered.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
