@@ -429,7 +429,7 @@ endif()
 if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
 endif()
-# After core/render so the GPU convolver node can link pulp::render when GPU is
+# After core/render so the GPU convolver node can link pulp::gpu-device when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
@@ -910,6 +910,7 @@ if(ANDROID)
         $<TARGET_FILE:pulp-platform>
         $<TARGET_FILE:pulp-audio>
         $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
+        $<$<TARGET_EXISTS:pulp-gpu-device>:$<TARGET_FILE:pulp-gpu-device>>
         -Wl,--no-whole-archive)
 
     # TalkBack accessibility JNI entry points live in pulp-view

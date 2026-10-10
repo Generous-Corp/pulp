@@ -90,16 +90,24 @@ if(TARGET pulp-host)
     list(APPEND PULP_SDK_TARGETS pulp-host)
 endif()
 
+# The GPU device layer is exported with the renderer that links it, and on its
+# own for pulp-gpu-audio, which links the device without the 2D renderer.
+if(TARGET pulp-gpu-device-api)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-device-api)
+endif()
+if(TARGET pulp-gpu-device)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-device)
+endif()
 if(TARGET pulp-render)
     list(APPEND PULP_SDK_TARGETS pulp-render)
 endif()
 
 # pulp-gpu-audio is the GPU-agnostic real-time audio transport plus the optional
 # GPU convolver/spectral nodes. The transport target is always built, but its
-# GPU nodes (and the PUBLIC link to pulp::render / pulp::signal) only compile
+# GPU nodes (and the PUBLIC link to pulp::gpu-device / pulp::signal) only compile
 # when GPU is enabled. Export it when configured so find_package(Pulp) consumers
 # — GPU plugins that drive a GpuAudioTransport — get pulp::gpu-audio. Its PUBLIC
-# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::render + pulp::signal)
+# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::gpu-device + pulp::signal)
 # are all already in the export set, so the export set stays self-consistent.
 if(TARGET pulp-gpu-audio)
     list(APPEND PULP_SDK_TARGETS pulp-gpu-audio)

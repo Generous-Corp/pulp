@@ -164,6 +164,11 @@ function(pulp_wire_android_sources)
             )
         endif()
         target_link_libraries(pulp-render PRIVATE android log)
+        # The Dawn surface/compute TUs live in pulp-gpu-device; give it the same
+        # NDK link it had while those TUs were part of pulp-render.
+        if(TARGET pulp-gpu-device)
+            target_link_libraries(pulp-gpu-device PRIVATE android log)
+        endif()
         # View headers needed for rendering the widget hierarchy on Android
         target_include_directories(pulp-render PRIVATE
             ${CMAKE_SOURCE_DIR}/core/view/include
