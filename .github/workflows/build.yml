@@ -2078,8 +2078,11 @@ jobs:
       # (PR heads and merge groups alike: artifacts are repository-wide, not
       # branch-scoped like the Actions cache) can find it. The Build step skips
       # the gate on a trusted receipt from this step; see ios_gate_digest.py.
+      # A lost marker only makes a later run build the iOS gate again, so an
+      # artifact-service stall here must not red a gate whose build passed.
       - name: Record iOS gate digest
         if: steps.build.outputs.ios_gate_digest != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}
@@ -2934,8 +2937,12 @@ jobs:
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's
       # PULP_BUILD_EXAMPLES=OFF gating) so there are no bundles to upload.
+      # A convenience download for people: no workflow, script or repository
+      # reads plugins-macos, and the bundles were already built and tested. An
+      # upload stall here after a green suite once ejected a merge batch.
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS' && github.event_name != 'pull_request'
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: plugins-${{ matrix.key }}
