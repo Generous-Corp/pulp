@@ -1,0 +1,41 @@
+{
+  "id": "p5-content-target-closure",
+  "title": "P5 content target closure keeps the sequencer consumer graph explicit",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "p5-content-target-closure-20261010",
+  "owned_paths": [
+    "examples/timeline-sdk-consumer/CMakeLists.txt"
+  ],
+  "evidence": [
+    {
+      "path": "examples/timeline-sdk-consumer/CMakeLists.txt",
+      "needles": [
+        "Audit the installed target graph, not a hand-maintained dependency list.",
+        "Pulp::content"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The consumer closure assertion checks existing installed targets and changes no SDK header, symbol, or install surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline timeline command or persisted projection changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or response shape changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The CMake closure check adds no runtime product control or grant."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No authoring capability or design-time manifest changes."
+    }
+  }
+}

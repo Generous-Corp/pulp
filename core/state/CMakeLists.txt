@@ -20,10 +20,6 @@ target_sources(pulp-state PRIVATE
 target_link_libraries(pulp-state PUBLIC pulp::runtime)
 target_link_libraries(pulp-state PRIVATE pulp::events)
 
-# Keep the concrete state archive closure narrow while preserving the historical
-# pulp::state consumer surface through the content implementation transitively.
-target_link_libraries(pulp-state INTERFACE pulp::content)
-
 # content_registry.hpp keeps its public pulp/state include path but now lives in
 # pulp-content; state sources still need that directory while compiling.
 target_include_directories(pulp-state PRIVATE
