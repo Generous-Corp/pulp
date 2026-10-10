@@ -9508,7 +9508,8 @@
    "entry": "tools/scripts/test_vellum_workflow_dispatch.py",
    "inputs": [
     "tools/ci/net-retry.sh",
-    "tools/scripts/test_vellum_workflow_dispatch.py"
+    "tools/scripts/test_vellum_workflow_dispatch.py",
+    "tools/scripts/vellum_trusted_merge.py"
    ],
    "kind": "python"
   },
