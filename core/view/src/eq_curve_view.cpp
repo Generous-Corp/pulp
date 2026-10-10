@@ -1,4 +1,5 @@
 #include <pulp/view/eq_curve_view.hpp>
+#include <pulp/view/continuous_frames.hpp>
 #include <pulp/view/theme_contrast.hpp>
 #include <pulp/signal/frequency_response.hpp>
 #include <array>
@@ -11,6 +12,11 @@
 namespace pulp::view {
 
 namespace {
+
+bool eq_curve_needs_continuous_frames(const View* view) {
+    const auto* eq = static_cast<const EqCurveView*>(view);
+    return eq->hover_animating() || eq->analyzer_animating();
+}
 
 // Number of points sampled along the curve. One per ~1px column at typical
 // widget widths; the curve is redrawn as a polyline through them.
@@ -114,6 +120,8 @@ signal::BiquadCoefficients design_band(const EqCurveView::Band& band, float samp
 
 EqCurveView::EqCurveView() {
     mark_runtime_view_kind(RuntimeViewKind::eq_curve);
+    register_continuous_frame_predicate(RuntimeViewKind::eq_curve,
+                                        &eq_curve_needs_continuous_frames);
     set_focusable(true);
 }
 

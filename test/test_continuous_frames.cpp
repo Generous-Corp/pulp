@@ -94,6 +94,21 @@ TEST_CASE("an EqCurveView mid hover-settle needs continuous frames",
     REQUIRE_FALSE(needs_continuous_frames(&eq));
 }
 
+TEST_CASE("continuous-frame registration is scoped to the owning kind",
+          "[view][continuous-frames][eq_curve]") {
+    EqCurveView eq;
+    View unrelated;
+
+    REQUIRE_FALSE(needs_continuous_frames(&unrelated));
+    REQUIRE_FALSE(needs_continuous_frames(&eq));
+
+    eq.set_analyzer_enabled(true);
+    const float spectrum[] = {-12.0f, -18.0f, -24.0f};
+    eq.set_spectrum(spectrum, 3);
+    CHECK(needs_continuous_frames(&eq));
+    CHECK_FALSE(needs_continuous_frames(&unrelated));
+}
+
 TEST_CASE("the predicate walks descendants", "[view][continuous-frames]") {
     View root;
     auto* leaf = [&]() -> View* {
