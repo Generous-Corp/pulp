@@ -46,14 +46,15 @@ export function canonicalizeCanvasAuthorityMatches(
   }
   return states.map((state, index) => {
     if (!state.match) {
-      return { ...state, match: { selector: 'canvas', ancestor: '' } };
+      return { ...state, canvas_index: state.canvas_index ?? 0,
+        match: { selector: 'canvas', ancestor: '' } };
     }
     if (state.match.selector !== 'canvas' ||
         (state.match.ancestor !== undefined && state.match.ancestor !== '')) {
       throw new Error(
         `canvas authority state ${index} must use the registered canvas selector`);
     }
-    return state;
+    return { ...state, canvas_index: state.canvas_index ?? 0 };
   });
 }
 
@@ -120,6 +121,12 @@ export function loadMaterializedStateAtlas(
       throw new Error(`state atlas entry ${id} has an invalid match contract`);
     }
 
+    const canvasIndex = state?.canvas_index;
+    if (canvasIndex !== undefined &&
+        (!Number.isInteger(canvasIndex) || canvasIndex < 0 || canvasIndex > 255)) {
+      throw new Error(`state atlas entry ${id} has an invalid canvas index`);
+    }
+
     const activate = state?.activate;
     if (activate !== undefined &&
         (!Array.isArray(activate) || activate.length === 0 ||
@@ -183,6 +190,7 @@ export function loadMaterializedStateAtlas(
     return {
       id,
       image: imagePath,
+      ...(canvasIndex === undefined ? {} : { canvas_index: canvasIndex }),
       match: match === undefined ? null : {
         selector: match.selector,
         ancestor: match.ancestor || '',

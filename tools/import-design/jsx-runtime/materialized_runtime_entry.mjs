@@ -1183,11 +1183,20 @@ function driveRequestedCapturedState() {
 }
 if (requestedCapturedState) requestAnimationFrame(driveRequestedCapturedState);
 function resolveCapturedStateFromAtlas() {
-  // Every state's lookup in one registry pass; the answer is the last state
-  // in atlas order whose selector matches, as before.
-  const matches = g.__pulpFindMaterializedElements__(capturedStates.map(
-    state => state.match ? { selector: state.match.selector,
-      ancestor: state.match.ancestor } : null));
+  const registeredCanvases = materializedDomRegistryValues().filter(node =>
+    String(node && node.tagName || '').toLowerCase() === 'canvas');
+  // Every semantic selector lookup is answered in one registry pass. Canvas
+  // authority states carry the binding index validated by the transformer so
+  // multiple captured canvases cannot accidentally resolve to the first one.
+  const semanticMatches = g.__pulpFindMaterializedElements__(capturedStates.map(
+    state => state.canvas_index !== null && state.canvas_index !== undefined
+      ? null
+      : state.match ? { selector: state.match.selector,
+        ancestor: state.match.ancestor } : null));
+  const matches = capturedStates.map((state, index) =>
+    state.canvas_index !== null && state.canvas_index !== undefined
+      ? registeredCanvases[state.canvas_index] || null
+      : semanticMatches[index]);
   for (let index = capturedStates.length - 1; index >= 0; --index) {
     if (matches[index]) return capturedStates[index].id;
   }

@@ -7487,4 +7487,5 @@ canonical match is the registered `canvas` element; broad DOM selectors such as
 `#root` can be absent from the materialized registry and leave the atlas
 inactive without an error. Keep this mode explicit and fail closed on missing
 or malformed `canvas_bindings`, multiple implicit states, or non-canvas match
-selectors; live canvas behavior remains a separate proof surface.
+selectors. The optional `canvas_index` preserves identity when a capture has
+multiple canvases; live canvas behavior remains a separate proof surface.
