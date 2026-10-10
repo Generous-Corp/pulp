@@ -1,11 +1,9 @@
 # Neural audio program status (2026-10-06, protected-head successor)
 
 > **Freshness correction (2026-10-08):** The protected-head SHA named below is
-> a historical audit anchor, not the current `origin/main`. The current
-> protected snapshot for this packet is
-> [`ca6e605d60e0f872765abe4b1a4769a17fdb1011`](https://github.com/Generous-Corp/pulp/commit/ca6e605d60e0f872765abe4b1a4769a17fdb1011).
-> Revalidate any head-sensitive claim before using this older receipt as
-> current acceptance evidence.
+> a historical audit anchor, not a durable claim about `origin/main`. Revalidate
+> any head-sensitive claim against the fetched protected head before using this
+> older receipt as current acceptance evidence.
 
 This receipt was originally audited against the historical protected snapshot
 [`9660876c9af59b6132491fbaaba71d0760195e7c`](https://github.com/Generous-Corp/pulp/commit/9660876c9af59b6132491fbaaba71d0760195e7c). The current protected snapshot for this follow-up is
