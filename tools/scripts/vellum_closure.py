@@ -248,8 +248,10 @@ def cmd_export(args: argparse.Namespace) -> int:
             raise SystemExit(f"rename map escapes repository: {path} -> {mirror_path}")
         cmd.extend(["--path", path, "--path-rename", f"{path}:{mirror_root}/{mirror_path}"])
     run("git", "-C", str(out), "update-ref", "refs/heads/export-source", args.pulp_sha)
+    run("git", "-C", str(out), "checkout", "--detach", "export-source")
     cmd.extend(["--refs", "export-source"])
     subprocess.run(cmd, cwd=out, check=True)
+    run("git", "-C", str(out), "checkout", "--detach", "export-source")
     mirror_sha = run("git", "-C", str(out), "rev-parse", "refs/heads/export-source")
     mirror_tree = run("git", "-C", str(out), "rev-parse", f"{mirror_sha}:mirror")
     rows = git_blob_rows(repo, args.pulp_sha, paths)
@@ -271,7 +273,11 @@ def cmd_export(args: argparse.Namespace) -> int:
     commit_map_src = out / ".git" / "filter-repo" / "commit-map"
     commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
     commit_map_path.parent.mkdir(parents=True, exist_ok=True)
-    commit_map_path.write_bytes(commit_map_src.read_bytes() if commit_map_src.is_file() else f"{args.pulp_sha} {mirror_sha}\n".encode())
+    commit_map_bytes = commit_map_src.read_bytes() if commit_map_src.is_file() else b""
+    required_map_row = f"{args.pulp_sha} {mirror_sha}\n".encode()
+    if required_map_row not in commit_map_bytes:
+        commit_map_bytes += required_map_row
+    commit_map_path.write_bytes(commit_map_bytes)
     tool_rows = git_blob_rows(repo, args.pulp_sha, ["tools/scripts/vellum_closure.py"])
     receipt_rel = f"provenance/mirror/receipts/{export_id}.json"
     receipt = {
