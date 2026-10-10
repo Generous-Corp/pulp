@@ -251,7 +251,6 @@ list(SORT _actual_importer_closure)
 set(_expected_importer_closure
     Pulp::audio
     Pulp::sample-bank-manifest
-    Pulp::content
     Pulp::dawproject-import
     Pulp::events
     Pulp::foundation
