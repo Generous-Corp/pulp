@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { after } from 'node:test';
 
-import { loadMaterializedStateAtlas } from './materialized_state_atlas.mjs';
+import {
+  canonicalizeCanvasAuthorityMatches,
+  loadMaterializedStateAtlas,
+} from './materialized_state_atlas.mjs';
 
 // Every fixture lives under one suite root that is removed when the suite
 // finishes, so a run leaves nothing behind in the shared temp directory.
@@ -38,6 +41,28 @@ function metadataFixture(atlas) {
     }));
   return result;
 }
+
+test('canonicalizes opt-in captured canvas authority to the registered canvas', () => {
+  const states = canonicalizeCanvasAuthorityMatches(
+    [{ id: 'home', image: 'home.png', match: null }],
+    [{ anchor: 'chromium:backend-node:111' }],
+    { enabled: true });
+  assert.deepEqual(states[0].match, { selector: 'canvas', ancestor: '' });
+  assert.deepEqual(canonicalizeCanvasAuthorityMatches(
+    [{ id: 'menu', match: { selector: '[aria-expanded="true"]' } }],
+    [{ anchor: 'chromium:backend-node:111' }],
+    { enabled: true })[0].match, { selector: '[aria-expanded="true"]' });
+});
+
+test('captured canvas authority fails closed without valid canvas metadata', () => {
+  assert.throws(() => canonicalizeCanvasAuthorityMatches(
+    [{ id: 'home' }], [], { enabled: true }), /one or more canvas bindings/);
+  assert.throws(() => canonicalizeCanvasAuthorityMatches(
+    [{ id: 'home' }], [{ anchor: '#root' }], { enabled: true }),
+  /canvas authority binding 0 is invalid/);
+  assert.deepEqual(canonicalizeCanvasAuthorityMatches(
+    [{ id: 'home' }], [], { enabled: false }), [{ id: 'home' }]);
+});
 
 test('normalizes a captured dropdown or modal state contract', () => {
   const { atlasPath, image } = fixture({

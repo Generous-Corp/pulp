@@ -21,6 +21,30 @@ function boundedSelector(value) {
     value.length <= maxSelectorLength;
 }
 
+// Captured canvas authority is opt-in because a state atlas may also describe
+// ordinary semantic overlays. When enabled, states without an explicit match
+// bind to the registered canvas element the runtime can resolve. Refuse
+// missing or malformed canvas metadata instead of leaving the image inactive.
+export function canonicalizeCanvasAuthorityMatches(
+  states, canvasBindings, { enabled = false } = {}) {
+  if (!enabled) return states;
+  if (!Array.isArray(states) || states.length === 0)
+    throw new Error('canvas authority requires at least one state');
+  if (!Array.isArray(canvasBindings) || canvasBindings.length === 0)
+    throw new Error('canvas authority requires one or more canvas bindings');
+  for (const [index, binding] of canvasBindings.entries()) {
+    if (!binding || typeof binding !== 'object' ||
+        typeof binding.anchor !== 'string' ||
+        !/^chromium:backend-node:\d+$/.test(binding.anchor)) {
+      throw new Error(`canvas authority binding ${index} is invalid`);
+    }
+  }
+  return states.map((state) => state.match ? state : {
+    ...state,
+    match: { selector: 'canvas', ancestor: '' },
+  });
+}
+
 export function loadMaterializedStateAtlas(
   atlasPath, { visualAuthority = 'reference', runtimeBase = '' } = {}) {
   if (!atlasPath) return [];
