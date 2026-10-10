@@ -18,7 +18,7 @@ Daniel's host-change commands, after review and explicit OK:
 
 ```bash
 mkdir -p /Volumes/Atelier/pulp-replay-evidence
-cp /ABSOLUTE/PATH/TO/pulp/launchd/com.generouscorp.pulp.evidence-archive.plist ~/Library/LaunchAgents/
+cp /ABSOLUTE/PATH/TO/pulp/tools/launchd/com.generouscorp.pulp.evidence-archive.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.generouscorp.pulp.evidence-archive.plist
 launchctl kickstart -k gui/$(id -u)/com.generouscorp.pulp.evidence-archive
 ```
