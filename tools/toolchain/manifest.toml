@@ -1,0 +1,35 @@
+# Pulp host and golden toolchain authority. Generated consumers carry this digest.
+schema = 1
+
+[toolchain]
+xcode = "26.5"
+cmake = "homebrew" # Homebrew formula; observed version is receipt data, not an installer pin
+ninja = "homebrew"
+python = "3.12"
+node = "26.10.0"
+rust = "stable" # rustup channel; exact observed rustc is recorded in the golden receipt
+rust_targets = ["x86_64-apple-darwin"]
+tart = "homebrew" # Homebrew formula; observed version is receipt data, not an installer pin
+clang_format = "required"
+
+[platform.intel]
+rust = true
+rust_targets = ["x86_64-apple-darwin"]
+
+[platform.linux]
+cmake = "system"
+python = "3.12"
+node = "26.10.0"
+rust = "absent"
+
+[platform.windows]
+cmake = "system"
+python = "3.12"
+node = "26.10.0"
+rust = "absent"
+
+
+[packages]
+brew = ["git", "git-lfs", "gh", "rsync", "ccache", "jq", "coreutils", "tailscale", "cmake", "ninja", "node", "python@3.12", "rustup", "clang-format"]
+apt = ["build-essential", "cmake", "ninja-build", "git", "pkg-config", "ccache", "python3", "python3-pip", "libicu-dev", "libegl1-mesa-dev", "libgbm-dev", "libdrm-dev", "libx11-dev", "libxext-dev", "libxrandr-dev", "libxcursor-dev", "libxi-dev", "libxinerama-dev", "libwayland-dev", "libxkbcommon-dev", "libasound2-dev", "libpulse-dev", "gcc-x86-64-linux-gnu", "g++-x86-64-linux-gnu", "binfmt-support", "libc6:amd64", "libstdc++6:amd64", "libgcc-s1:amd64", "zlib1g:amd64", "libtinfo6:amd64", "libxml2:amd64"]
+choco = ["git", "cmake", "ninja", "python3"]

@@ -1,0 +1,21 @@
+# Optional, locked task profile. No Shipyard, tartci, gate, or release lane uses mise.
+# Host-tool pins remain refused until a deterministic multi-platform mise.lock exists.
+[settings]
+auto_install = false
+locked = true
+
+[tasks.visual-deps]
+description = "Install Pulp's hash-pinned visual-analysis Python dependencies"
+run = "tools/ci/install_visual_python_deps.sh ${PULP_BUILD_DIR:-build}"
+
+[tasks.visual-check]
+description = "Verify the configured Python can run visual-analysis tests"
+run = "python3 tools/scripts/check_visual_python_deps.py"
+
+[tasks.visual-deps-windows]
+description = "Install the visual-analysis lock with the Windows Python command"
+run = "tools/ci/install_visual_python_deps.sh ${PULP_BUILD_DIR:-build}"
+
+[tasks.visual-check-windows]
+description = "Verify the visual-analysis dependencies with the Windows Python command"
+run = "python tools/scripts/check_visual_python_deps.py"
