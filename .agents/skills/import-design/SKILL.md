@@ -537,6 +537,21 @@ knowing before you touch that file:
   and anchors are not unique — the figma-plugin scene fixture gives three
   siblings one `stable_anchor_id` — so compare by `path`, not by anchor.
 
+- `pulp-ui-frames-observe` records an imported panel (`--design-ir`) or a
+  scripted UI (`--script`) frame by frame under a fixed host clock: a
+  `pulp-ui-frame-schedule-v1` file supplies the host timestamps, the
+  StateStore parameters, and timed hover/click/drag/key/context-press,
+  `set_param`, `resize` and editor `attach_view`/`detach_view` events
+  (`test/fixtures/ui-frames/`). It follows the host frame contract exactly,
+  including the SECOND continuity check after `advance_host_frame`: keeping
+  only `begin_host_frame`'s answer stalls an input-started animation (a knob's
+  hover glow froze at 0.37 for nine frames). Gotchas it makes visible: a
+  view-first scripted document's first mounted frame paints `bindWidgetToParam`
+  controls at 0, one frame before the binding service catches up; and JS
+  `setTimeout`/`setInterval` deadlines follow the wall clock, not the host
+  clock, so timer-driven readiness cannot be fixed by a schedule (drive it with
+  `requestAnimationFrame` instead).
+
 **The lane that works (Figma is the source of truth):**
 ```bash
 # 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).
