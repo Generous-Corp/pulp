@@ -18,7 +18,8 @@ class HostPreflightTests(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "import sys\n"
                 "sys.stdout.write('gpu-json\\n')\n"
-                "sys.stderr.write('gpu-log\\n')\n"
+                "sys.stderr.write('gpu-log\\n')\n",
+                encoding="utf-8",
             )
             helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
             result = preflight._run([str(helper), "doctor", "gpu"], timeout=5)
