@@ -27,10 +27,8 @@ int main() {
     pulp::render::GpuStartupReport report;
     pulp::render::GpuDiagnosticsStats stats;
 
-    const bool ok = !info.available
-        && report.graphite_ms < 0.0
-        && stats.emitted == 0
-        && pulp::render::kGpuRenderNanosecondsPerMillisecond == 1.0e6;
+    const bool ok = !info.available && report.graphite_ms < 0.0 && stats.emitted == 0 &&
+                    pulp::render::kGpuRenderNanosecondsPerMillisecond == 1.0e6;
     if (!ok) {
         std::fprintf(stderr, "gpu-device-api defaults changed unexpectedly\n");
         return 1;
