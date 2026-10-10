@@ -197,6 +197,15 @@ function(pulp_stage_runtime_dependencies target)
     pulp_wgpu_runtime_linked(_wgpu_linked)
     if(NOT _wgpu_linked)
         # Skia's Dawn is the WebGPU implementation; nothing loads wgpu-native.
+        # Staging is copy-only, so remove a copy an earlier configuration of
+        # this build dir left beside the target; a bundle must not ship it.
+        if(WEBGPU_RUNTIME_LIB)
+            get_filename_component(_wgpu_name "${WEBGPU_RUNTIME_LIB}" NAME)
+            add_custom_command(
+                TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${target}>/${_wgpu_name}"
+                VERBATIM)
+        endif()
     elseif(DEFINED CACHE{WEBGPU_RUNTIME_LIB} AND EXISTS "${WEBGPU_RUNTIME_LIB}")
         add_custom_command(
             TARGET ${target} POST_BUILD

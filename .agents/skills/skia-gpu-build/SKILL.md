@@ -436,10 +436,10 @@ nor loads `libwgpu_native.dylib`. That also removes a per-process hazard: dyld
 shares one `@rpath/libwgpu_native.dylib` by install name, so two Pulp plug-ins in
 one host used to run on whichever copy loaded first. The link-floor ctest
 `native-ui-link-floor-artifacts` asserts Dawn present and wgpu-native absent, with
-a positive control that really loads it. Gotcha: staging is copy-only, so a
-build dir that once staged the dylib keeps a stale `Contents/MacOS/libwgpu_native.dylib`
-in each bundle (nothing loads it, but `render-provider-floor-plugin-images` fails on it);
-delete the stale file or the bundle and rebuild. The rpath guidance below still applies
+a positive control that really loads it. Gotcha: a reused build dir that once
+staged the dylib still has it in each bundle until that target relinks;
+`pulp_stage_runtime_dependencies` removes it POST_BUILD, so rebuild the bundle
+rather than trusting an old one. The rpath guidance below still applies
 to a no-Skia (wgpu-native fallback) build and to any other bundled runtime dylib
 (V8).
 
