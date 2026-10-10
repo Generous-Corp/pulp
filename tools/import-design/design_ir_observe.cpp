@@ -295,7 +295,6 @@ pulp::view::View* find_by_anchor(pulp::view::View& root,
     return nullptr;
 }
 
-
 // How the render was produced. A parity lane compares renders from two
 // implementations, so it has to know which rasterizer each side actually ran:
 // Skia CPU and Skia Graphite on Dawn are different rasterizers, and a GPU
@@ -311,25 +310,42 @@ enum class Backend { skia, gpu };
 //   raster-fallback   render through Skia CPU and record that in the receipt
 //   raster-fallback-unreported
 //                     render through Skia CPU but record the GPU backend, the
-//                     silent fallback a lane must catch from the pixels alone
-enum class GpuFault { none, device_destroyed, no_frame, raster_fallback, raster_fallback_unreported };
+//                     silent fallback a lane must catch from evidence other
+//                     than the receipt (pixels, the GPU driver it never loaded)
+enum class GpuFault {
+    none,
+    device_destroyed,
+    no_frame,
+    raster_fallback,
+    raster_fallback_unreported
+};
 
 std::optional<GpuFault> parse_gpu_fault(std::string_view text) {
-    if (text == "none") return GpuFault::none;
-    if (text == "device-destroyed") return GpuFault::device_destroyed;
-    if (text == "no-frame") return GpuFault::no_frame;
-    if (text == "raster-fallback") return GpuFault::raster_fallback;
-    if (text == "raster-fallback-unreported") return GpuFault::raster_fallback_unreported;
+    if (text == "none")
+        return GpuFault::none;
+    if (text == "device-destroyed")
+        return GpuFault::device_destroyed;
+    if (text == "no-frame")
+        return GpuFault::no_frame;
+    if (text == "raster-fallback")
+        return GpuFault::raster_fallback;
+    if (text == "raster-fallback-unreported")
+        return GpuFault::raster_fallback_unreported;
     return std::nullopt;
 }
 
 const char* gpu_fault_name(GpuFault fault) {
     switch (fault) {
-        case GpuFault::none: return "none";
-        case GpuFault::device_destroyed: return "device-destroyed";
-        case GpuFault::no_frame: return "no-frame";
-        case GpuFault::raster_fallback: return "raster-fallback";
-        case GpuFault::raster_fallback_unreported: return "raster-fallback-unreported";
+    case GpuFault::none:
+        return "none";
+    case GpuFault::device_destroyed:
+        return "device-destroyed";
+    case GpuFault::no_frame:
+        return "no-frame";
+    case GpuFault::raster_fallback:
+        return "raster-fallback";
+    case GpuFault::raster_fallback_unreported:
+        return "raster-fallback-unreported";
     }
     return "none";
 }
@@ -356,10 +372,14 @@ struct RenderReport {
 const char* adapter_type_name(pulp::render::GpuSurface::AdapterType type) {
     using T = pulp::render::GpuSurface::AdapterType;
     switch (type) {
-        case T::integrated_gpu: return "integrated-gpu";
-        case T::discrete_gpu: return "discrete-gpu";
-        case T::cpu: return "cpu";
-        case T::unknown: return "unknown";
+    case T::integrated_gpu:
+        return "integrated-gpu";
+    case T::discrete_gpu:
+        return "discrete-gpu";
+    case T::cpu:
+        return "cpu";
+    case T::unknown:
+        return "unknown";
     }
     return "unknown";
 }
@@ -367,10 +387,14 @@ const char* adapter_type_name(pulp::render::GpuSurface::AdapterType type) {
 const char* frame_outcome_name(pulp::render::FrameOutcome outcome) {
     using F = pulp::render::FrameOutcome;
     switch (outcome) {
-        case F::presented: return "presented";
-        case F::offscreen: return "offscreen";
-        case F::recreate: return "recreate";
-        case F::failed: return "failed";
+    case F::presented:
+        return "presented";
+    case F::offscreen:
+        return "offscreen";
+    case F::recreate:
+        return "recreate";
+    case F::failed:
+        return "failed";
     }
     return "unknown";
 }
@@ -390,7 +414,8 @@ std::string dawn_version_hex() {
 bool device_lost(const pulp::render::GpuSurface& gpu) {
     auto* device = static_cast<wgpu::Device*>(gpu.dawn_device_handle());
     auto* instance = static_cast<wgpu::Instance*>(gpu.dawn_instance_handle());
-    if (!device || !*device || !instance || !*instance) return true;
+    if (!device || !*device || !instance || !*instance)
+        return true;
     wgpu::FutureWaitInfo wait{device->GetLostFuture()};
     return instance->WaitAny(1, &wait, 0) == wgpu::WaitStatus::Success && wait.completed;
 }
@@ -474,7 +499,8 @@ std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width
     }
     std::string encode_error;
     auto png = pulp::render::HeadlessSurface::encode_png(rgba, &encode_error);
-    if (png.empty()) report.error = "PNG encode failed: " + encode_error;
+    if (png.empty())
+        report.error = "PNG encode failed: " + encode_error;
     return png;
 }
 #endif
@@ -508,7 +534,8 @@ std::string render_receipt_json(const RenderReport& report) {
         auto adapter = choc::value::createObject("");
         adapter.addMember("available", choc::value::createBool(report.adapter.available));
         adapter.addMember("null_backend", choc::value::createBool(report.adapter.null_backend));
-        adapter.addMember("type", choc::value::createString(adapter_type_name(report.adapter.adapter_type)));
+        adapter.addMember(
+            "type", choc::value::createString(adapter_type_name(report.adapter.adapter_type)));
         adapter.addMember("backend", choc::value::createString(report.adapter.backend));
         adapter.addMember("backend_type", choc::value::createString(report.adapter.backend_type));
         adapter.addMember("name", choc::value::createString(report.adapter.name));
@@ -595,8 +622,10 @@ int main(int argc, char** argv) {
             render_receipt_path = value;
         else if (arg == "--backend") {
             const std::string_view name{value};
-            if (name == "skia") backend = Backend::skia;
-            else if (name == "gpu") backend = Backend::gpu;
+            if (name == "skia")
+                backend = Backend::skia;
+            else if (name == "gpu")
+                backend = Backend::gpu;
             else {
                 std::cerr << "Error: --backend expects skia or gpu\n";
                 return 2;
@@ -608,8 +637,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
             gpu_fault = *fault;
-        }
-        else {
+        } else {
             usage();
             return 2;
         }
@@ -705,7 +733,8 @@ int main(int argc, char** argv) {
         png = pulp::view::render_to_png(*root, pixel_w, pixel_h, scale,
                                         pulp::view::ScreenshotBackend::skia);
         report.used = gpu_fault == GpuFault::raster_fallback_unreported ? "gpu" : "skia";
-        if (png.empty()) report.error = "Skia raster render failed";
+        if (png.empty())
+            report.error = "Skia raster render failed";
     } else {
 #if defined(PULP_HAS_SKIA)
         png = render_gpu(*root, pixel_w, pixel_h, scale, gpu_fault, report);
