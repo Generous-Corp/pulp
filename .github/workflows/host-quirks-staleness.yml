@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Report stale host-quirk catalog entries
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Run staleness unit tests
         run: python3 tools/scripts/test_host_quirks_staleness.py

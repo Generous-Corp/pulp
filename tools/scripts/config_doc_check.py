@@ -41,6 +41,7 @@ from gate_common import (
     git_range_trailers,
     matches_any as _matches_any,
     strip_meta as _strip_meta,
+    dependabot_uses_only_diff,
 )
 
 
@@ -215,6 +216,8 @@ def main(argv: list[str]) -> int:
 
     trailers = git_range_trailers(args.base, args.head)
     bypass_reason = parse_config_doc_trailer(trailers, cfg_map.trailer_config_doc)
+    if dependabot_uses_only_diff(args.base, args.head):
+        bypass_reason = "Dependabot uses-only workflow diff"
 
     findings = compute_findings(changed, cfg_map)
 

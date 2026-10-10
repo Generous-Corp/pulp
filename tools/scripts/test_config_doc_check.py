@@ -26,9 +26,10 @@ sys.modules["config_doc_check"] = gate
 _spec.loader.exec_module(gate)
 
 
-def run(changed, trailers=None, mode="report"):
+def run(changed, trailers=None, mode="report", dependabot=False):
     with mock.patch.object(gate, "git_diff_names", return_value=changed), \
-         mock.patch.object(gate, "git_range_trailers", return_value=trailers or {}):
+         mock.patch.object(gate, "git_range_trailers", return_value=trailers or {}), \
+         mock.patch.object(gate, "dependabot_uses_only_diff", return_value=dependabot):
         # --repo-root avoids a git rev-parse call; the map path is resolved
         # relative to it, and the real map lives next to this test.
         return gate.main(
@@ -77,6 +78,14 @@ class ConfigDocCheckTest(unittest.TestCase):
     def test_unrelated_trailer_does_not_bypass(self):
         self.assertEqual(run([".shipyard/config.toml"],
                              {"version-bump": ["minor"]}), 1)
+
+    def test_dependabot_uses_only_diff_bypasses_workflow_doc(self):
+        self.assertEqual(
+            run([".github/workflows/build.yml"], dependabot=True), 0)
+
+    def test_dependabot_mixed_diff_does_not_bypass_workflow_doc(self):
+        self.assertEqual(
+            run([".github/workflows/build.yml"], dependabot=False), 1)
 
     # ── unmapped file → pass ───────────────────────────────────────────
     def test_unmapped_file_passes(self):

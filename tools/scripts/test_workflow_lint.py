@@ -166,7 +166,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.assertRegex(self.text, r"(?m)^\s{4}runs-on:\s*ubuntu-latest\s*$")
         self.assertIn("yamllint + actionlint + structural parse", self.text)
 
-        checkout = _find_uses_step(self.text, "actions/checkout@v5")
+        checkout = _find_uses_step(self.text, "actions/checkout@v7")
         self.assertRegex(checkout, r"(?m)^\s{10}fetch-depth:\s*1\s*$")
 
         setup_python = _find_step(self.text, "Set up Python")

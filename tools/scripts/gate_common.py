@@ -39,6 +39,36 @@ from pathlib import Path
 from typing import Iterable, Literal
 
 
+_USES_DIFF_LINE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*\S+(?:\s+#.*)?\s*$")
+
+
+def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | None = None) -> bool:
+    """Allow only a Dependabot workflow diff whose changed lines are ``uses:``."""
+    if (actor if actor is not None else os.environ.get("GITHUB_ACTOR", "")) != "dependabot[bot]":
+        return False
+    result = subprocess.run(
+        ["git", "diff", "--no-ext-diff", "--unified=0", f"{base}...{head}", "--", ".github/workflows"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return False
+    current_path: str | None = None
+    saw_changed_line = False
+    for line in result.stdout.splitlines():
+        if line.startswith("diff --git "):
+            parts = line.split()
+            current_path = parts[3][2:] if len(parts) >= 4 and parts[3].startswith("b/") else None
+            if current_path is None or not current_path.startswith(".github/workflows/"):
+                return False
+            continue
+        if line.startswith(("+++ ", "--- ")) or not line.startswith(("+", "-")):
+            continue
+        if not _USES_DIFF_LINE_RE.fullmatch(line[1:]):
+            return False
+        saw_changed_line = True
+    return saw_changed_line
+
+
 # ── Git helpers ─────────────────────────────────────────────────────────
 
 

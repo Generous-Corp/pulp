@@ -411,7 +411,7 @@ class HostGitMirrorSeed(unittest.TestCase):
 
     def test_the_seed_runs_before_checkout(self) -> None:
         names = [step.get("name") or step.get("uses") for step in _build_steps()]
-        self.assertLess(names.index(SEED_STEP), names.index("actions/checkout@v5"))
+        self.assertLess(names.index(SEED_STEP), names.index("actions/checkout@v7"))
 
 
 class ChromeArtifactCache(unittest.TestCase):

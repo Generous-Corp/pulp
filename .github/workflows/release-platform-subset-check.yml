@@ -53,7 +53,7 @@ jobs:
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # The streak is dated from the matrix file's git history.
           fetch-depth: 0

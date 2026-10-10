@@ -70,7 +70,7 @@ jobs:
     steps:
       # Only the resolver is needed; it owns the opt-in class-label rewrite so
       # the three release workflows share one tested implementation.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
           sparse-checkout: tools/scripts/resolve_release_runners.py
@@ -121,7 +121,7 @@ jobs:
     runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Release-path Skia artifacts are fetched explicitly below. Keep LFS
           # off to match release-cli.yml and avoid requiring git-lfs on the

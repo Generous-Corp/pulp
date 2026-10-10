@@ -45,6 +45,7 @@ from gate_common import (
     glob_match as _glob_match,
     matches_any as _matches_any,
     strip_meta as _strip_comments,
+    dependabot_uses_only_diff,
 )
 
 
@@ -298,6 +299,9 @@ def main(argv: list[str]) -> int:
 
     trailers = git_range_trailers(args.base, args.head)
     bypasses = parse_skill_update_trailer(trailers, cfg.trailer_skill_update)
+    if dependabot_uses_only_diff(args.base, args.head):
+        for skill in skill_map.skills:
+            bypasses.setdefault(skill, "Dependabot uses-only workflow diff")
 
     findings = compute_findings(
         changed=changed,
