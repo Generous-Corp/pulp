@@ -477,5 +477,21 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         TIMEOUT 120)
 endif()
 
+# pulp-design-ir-observe --backend gpu / --render-receipt: a GPU request renders
+# through Skia Graphite on Dawn or fails (never a CPU render under a GPU name),
+# and the receipt records the adapter, frame outcome and device loss a GPU
+# parity lane checks. Skips (77) only when the observer reports no native GPU
+# adapter on the machine.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-gpu
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_gpu.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-gpu PROPERTIES
+        LABELS "parser-import;import"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 120)
+endif()
+
 # pulp-svg-probe appears only in the import tool's expected output text.
 pulp_test_spawns(pulp-test-import-design-tool NOT_RUN pulp-svg-probe)
