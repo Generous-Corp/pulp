@@ -21,6 +21,22 @@ from collections.abc import Callable, Iterator, Sequence
 MANIFEST = pathlib.Path(__file__).with_name("linux_build_deps.json")
 PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]*$")
 MAX_ATTEMPTS = 3
+# A stalled mirror connection makes apt wait with no output and no exit, so the
+# retry loop never gets a failure to retry and the hang spends the whole job
+# budget instead. apt's own per-connection timeout turns a stalled fetch into an
+# error it retries itself, and the wall-clock bound turns anything else that
+# hangs into a failed attempt that this script retries. `timeout` runs under
+# sudo so it signals apt-get directly rather than the sudo parent. Normal runs
+# take seconds for update and a few minutes for install.
+APT_ACQUIRE_OPTIONS = (
+    "-o", "Acquire::http::Timeout=30",
+    "-o", "Acquire::https::Timeout=30",
+    "-o", "Acquire::Retries=3",
+)
+UPDATE_ATTEMPT_SECONDS = 240
+INSTALL_ATTEMPT_SECONDS = 600
+TIMEOUT_KILL_AFTER_SECONDS = 15
+TIMEOUT_EXIT_CODE = 124
 UNRELATED_THIRD_PARTY_APT_HOSTS = frozenset({"packages.microsoft.com"})
 APT_SOURCE_SUFFIXES = frozenset({".list", ".sources"})
 URL_RE = re.compile(r"https?://[^\s'\"]+")
@@ -136,6 +152,11 @@ def run_with_retry(
         output = result.stdout or ""
         if output:
             print(output.rstrip(), file=sys.stderr)
+        if result.returncode == TIMEOUT_EXIT_CODE:
+            print(
+                f"apt command exceeded its wall-clock bound (attempt {attempt}/{attempts})",
+                file=sys.stderr,
+            )
         if attempt == attempts or (retry_if is not None and not retry_if(result)):
             raise subprocess.CalledProcessError(
                 result.returncode,
@@ -308,9 +329,20 @@ def install(
     def runner(command: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess_runner(command, env=env, **kwargs)
 
+    def apt_get(seconds: int, *arguments: str) -> list[str]:
+        return [
+            *prefix,
+            "timeout",
+            f"--kill-after={TIMEOUT_KILL_AFTER_SECONDS}",
+            str(seconds),
+            "apt-get",
+            *APT_ACQUIRE_OPTIONS,
+            *arguments,
+        ]
+
     try:
         run_with_retry(
-            [*prefix, "apt-get", "update"],
+            apt_get(UPDATE_ATTEMPT_SECONDS, "update"),
             runner=runner,
             sleeper=sleeper,
             capture_output=True,
@@ -331,19 +363,19 @@ def install(
                 file=sys.stderr,
             )
             run_with_retry(
-                [*prefix, "apt-get", *apt_options, "update"],
+                apt_get(UPDATE_ATTEMPT_SECONDS, *apt_options, "update"),
                 runner=runner,
                 sleeper=sleeper,
                 capture_output=True,
             )
             run_with_retry(
-                [*prefix, "apt-get", *apt_options, "install", "-y", *packages],
+                apt_get(INSTALL_ATTEMPT_SECONDS, *apt_options, "install", "-y", *packages),
                 runner=runner,
                 sleeper=sleeper,
             )
             return
     run_with_retry(
-        [*prefix, "apt-get", "install", "-y", *packages],
+        apt_get(INSTALL_ATTEMPT_SECONDS, "install", "-y", *packages),
         runner=runner,
         sleeper=sleeper,
     )

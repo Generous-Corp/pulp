@@ -220,8 +220,27 @@ the PR head. So "the PR was green" never meant its tests passed.
 The queue lands with the MERGE method, so the commit on `main` IS the
 merge-group head: `ghapp api 'repos/Generous-Corp/pulp/actions/workflows/build.yml/runs?head_sha=<main-sha>&event=merge_group'`
 finds the run that tested main's exact commit. Read its `macos` **job**, never
-the run's conclusion: the run also folds in advisory hosted Linux, which fails
-routinely, so a run marked `failure` is often a green tip.
+the run's conclusion. In a merge group the Linux matrix leg is job-level
+`continue-on-error`, so a red Linux leg no longer turns the run's conclusion to
+`failure`; its own check run still shows red. A merge-group run marked
+`failure` therefore means a non-advisory job failed, but the run conclusion
+still does not tell `macos` from the other jobs, and pull-request and push runs
+keep folding the Linux leg into their conclusion. Over 2026-10-02 to 10-09, 343
+of 726 merge-group runs read `failure` with only the Linux leg red; the rule
+turns those to `success` and leaves all 48 runs with a red or cancelled `macos`
+non-green (`tools/ci/test_build_matrix_contract.py` pins both directions).
+
+**A cheap required check `cancelled` with no runner is starvation, not the PR.**
+`drift-fast`, `Vellum trusted freeze` and `Enforce version & skill sync` run on
+hosted `ubuntu-latest` unless their routing variable is set. On 2026-10-05 each
+was cancelled about 15 minutes after creation with `runner_name` empty and zero
+steps, and the queue ejected #9652, #9647 and #9662 for it. A required job that
+did get a runner can also be cancelled at its `timeout-minutes`: on 2026-10-07
+`drift-fast` spent 19.5 of its 20 minutes in a silent `apt-get update`, which
+ejected #9846. The shared apt installer now bounds every attempt (apt's 30 s
+connection timeout plus a wall-clock `timeout`) so a stalled mirror is retried
+instead of spending the job. Read the job's `runner_name`, step count and the
+step that was running before calling such a cancel a failure.
 
 A push-to-main run has no macOS leg at all (`resolve-provider` omits it; a
 static test in `tools/scripts/test_fork_pr_runner_routing.py` pins that no
