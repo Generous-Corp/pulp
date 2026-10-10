@@ -4,6 +4,9 @@ add_library(pulp::state ALIAS pulp-state)
 target_include_directories(pulp-state
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        # content_registry.hpp retains its historical pulp/state include path;
+        # expose the moved header directory without restoring a link edge.
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../content/include>
         $<INSTALL_INTERFACE:include>
 )
 
@@ -22,10 +25,6 @@ target_link_libraries(pulp-state PRIVATE pulp::events)
 
 # content_registry.hpp keeps its public pulp/state include path but now lives in
 # pulp-content; state sources still need that directory while compiling.
-target_include_directories(pulp-state PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../content/include
-)
-
 # CHOC headers (used by store.cpp for endianness utilities)
 target_include_directories(pulp-state PRIVATE
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>

@@ -128,7 +128,7 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # presents, written down so the gate polices the artifact that exists instead
 # of passing green on a bound the binary never honoured.
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
-    canvas events graph native-components sample_bank_manifest signal state view)
+    canvas content events graph native-components sample_bank_manifest signal state view)
 
 # The loadable editor proof plugin requires its document, editor, and piano-roll
 # modules as direct lower bounds. The tier includes the view and canvas rungs

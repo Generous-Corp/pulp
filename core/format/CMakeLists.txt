@@ -133,6 +133,11 @@ target_link_libraries(pulp-format-core
         pulp::runtime
         pulp::timebase
         pulp::native-components
+    PRIVATE
+        # validation_harness.cpp uses the public ContentRegistry API. Keep
+        # that dependency explicit here now that pulp-state no longer carries
+        # pulp-content transitively.
+        pulp::content
 )
 
 # PUBLIC, and required rather than merely tidy. Three things depend on it:
