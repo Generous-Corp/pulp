@@ -56,7 +56,7 @@ jobs:
       CCACHE_SLOPPINESS: time_macros
       PULP_OFFLINE_BUILD: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 

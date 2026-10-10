@@ -69,7 +69,7 @@ jobs:
       PULP_GH_CLI: gh
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # The snapshot freshness check parses TOML (tomllib, Python 3.11+); pin
       # rather than trust whatever the runner image ships.
