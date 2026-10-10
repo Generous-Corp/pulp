@@ -548,6 +548,35 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "For a stripped build set -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF.")
     endif()
     enable_testing()
+    # The file-api query is retained in the build tree so the Vellum closure
+    # receipt can be regenerated from the exact configured target graph.  The
+    # initial lane is report-only while P1-P10 carve PRs remove their allowlist
+    # edges; it becomes enforcing when the accepted boundary is complete.
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
+    file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME pulp.vellum-closure-boundary
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+            manifest
+            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --build-dir "${CMAKE_BINARY_DIR}"
+            --target pulp-canvas
+            --target pulp-render
+            --target pulp-view-core
+            --target pulp-view-script
+            --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+    set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+        LABELS "validation")
+    add_test(NAME pulp.vellum-closure-gate
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+            gate
+            --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+            --report-only)
+    set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+        DEPENDS pulp.vellum-closure-boundary
+        LABELS "validation")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
     FetchContent_Declare(
