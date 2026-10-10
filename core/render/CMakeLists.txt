@@ -7,8 +7,10 @@
 #                        WebGPU or Skia dependency and no Pulp module.
 #   pulp-gpu-device      The device implementation: the Dawn surface and
 #                        compute TUs, GPU diagnostics, the startup report and
-#                        the Apple Metal-layer helpers. It carries the
-#                        skia::dawn / webgpu link the device needs.
+#                        the Apple Metal-layer helpers. It carries the same
+#                        Skia/Dawn and webgpu links as pulp-render (native Dawn
+#                        is libdawn_combined inside skia::skia; FindSkia defines
+#                        no separate skia::dawn target).
 #
 # pulp-render links the API PUBLIC and the implementation PRIVATE, so every
 # existing pulp::render consumer keeps the same headers, definitions and

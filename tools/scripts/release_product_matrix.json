@@ -72,6 +72,7 @@
     "pulp-format-core",
     "pulp-format-view",
     "pulp-gpu-audio",
+    "pulp-gpu-device",
     "pulp-graph",
     "pulp-host",
     "pulp-inspect",

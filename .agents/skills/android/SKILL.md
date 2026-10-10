@@ -588,6 +588,19 @@ removed. Android BLE-MIDI peripheral/advertising mode is out of scope.
 
 These are hard-won lessons from the bringup. Violating any of these will cause crashes or subtle bugs.
 
+### The JNI `.so` whole-archives the GPU device archive too
+
+`pulp-jni` links `pulp-render` with `-Wl,--whole-archive` so the JNI entry
+points in its Android sources survive. The Dawn surface and compute TUs that
+`gpu_surface_android.cpp` calls into live in `pulp-gpu-device`, a separate
+archive below `pulp-render`; the root `CMakeLists.txt` whole-archives it next
+to `pulp-render` so the `.so` keeps exactly the objects it had when those TUs
+were part of `pulp-render`. `PulpAndroid.cmake` also gives `pulp-gpu-device`
+the same `android log` link. `gpu_surface_android*.cpp` stay in `pulp-render`
+because they include `pulp/view` and `pulp/canvas`; they cannot move into the
+device layer, which may include only the device API and `pulp/runtime`
+(enforced by the `gpu-device-link-closure` ctest).
+
 ### Platform Detection Order
 
 ```cpp
