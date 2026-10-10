@@ -17,12 +17,14 @@ class HostPreflightTests(unittest.TestCase):
             helper.write_text(
                 "#!/usr/bin/env python3\n"
                 "import sys\n"
+                "import subprocess\n"
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(1)'], close_fds=False)\n"
                 "sys.stdout.write('gpu-json\\n')\n"
                 "sys.stderr.write('gpu-log\\n')\n",
                 encoding="utf-8",
             )
             helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
-            result = preflight._run([str(helper), "doctor", "gpu"], timeout=5)
+            result = preflight._run([str(helper), "doctor", "gpu"], timeout=0.2)
         self.assertEqual(result["returncode"], 0)
         self.assertEqual(result["stdout"], "gpu-json\n")
         self.assertEqual(result["stderr"], "gpu-log\n")
