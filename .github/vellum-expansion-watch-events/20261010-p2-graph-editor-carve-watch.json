@@ -10,8 +10,8 @@
   ],
   "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; P2 is a Pulp-only dependency carve that preserves the public GraphEditorView include path and umbrella targets while removing the host-to-view-core edge; no Vellum implementation or authority moves.",
   "tests": [
-    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
-    "Vellum freeze"
+    "Vellum freeze",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>"
   ],
   "disposition": "watch-only-no-authority",
   "authority_effect": "none"

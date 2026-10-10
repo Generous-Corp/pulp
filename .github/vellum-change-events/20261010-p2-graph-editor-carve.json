@@ -8,11 +8,10 @@
   ],
   "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; P2 is a Pulp-only dependency carve that preserves the public GraphEditorView include path and umbrella targets while removing the host-to-view-core edge; no Vellum implementation or authority moves.",
   "tests": [
-    "tools/scripts/gates.sh origin/main",
-    "pulp build --all",
+    "Vellum freeze",
     "ctest --test-dir build --output-on-failure -R 'graph-editor|view-core|ios-hostapp|ios-auv3'",
-    "tools/scripts/confirm_failure.sh",
-    "Vellum freeze"
+    "pulp build --all",
+    "tools/scripts/gates.sh origin/main"
   ],
   "disposition": "pulp-only"
 }
