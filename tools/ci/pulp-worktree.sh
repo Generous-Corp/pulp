@@ -21,6 +21,9 @@
 # Env overrides: PULP_WT_ROOT (or legacy fleet spelling
 # PULP_WORKTREES_ROOT; default ../pulp-worktrees), PULP_CI_CACHE
 # (default ~/.cache/pulp-ci), PULP_CCACHE_MAX_SIZE (default 200G).
+# Planning is skipped by default because most worktrees never read the planning
+# submodule. Set PULP_WORKTREE_INIT_PLANNING=1 to initialize it with a shared
+# object reference, and optionally set PULP_PLANNING_REFERENCE.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -139,6 +142,10 @@ cmd_new() {
   [ "${1:-}" = "--base" ] && { base="$2"; shift 2; }
   [ -n "$branch" ] || die "usage: new <branch> [--base <ref>]"
   local wt="$WT_ROOT/$branch"
+  # This is the single production worktree-creation choke point. Refuse a
+  # temporary checkout before mkdir or git worktree add can create one.
+  python3 "$REPO_ROOT/tools/ci/checkout_location_guard.py" "$wt" \
+    --context "pulp-worktree new"
   mkdir -p "$WT_ROOT"
   git -C "$REPO_ROOT" fetch origin --quiet || true
   # A failed download/validation leaves the newly registered worktree intact
@@ -164,6 +171,15 @@ cmd_new() {
     ln -sfn "$skia_cache_dir" "$wt/external/skia-build" 2>/dev/null || true
   fi
   touch "$wt/build/.metadata_never_index" 2>/dev/null || { mkdir -p "$wt/build" && touch "$wt/build/.metadata_never_index"; }
+  if [ "${PULP_WORKTREE_INIT_PLANNING:-0}" = 1 ]; then
+    local planning_reference="${PULP_PLANNING_REFERENCE:-$REPO_ROOT/planning}"
+    [ -d "$planning_reference" ] || die "planning reference is not a directory: $planning_reference"
+    git -C "$wt" -c protocol.file.allow=always submodule update --init \
+      --reference "$planning_reference" planning || die "planning submodule initialization failed"
+    note "planning submodule initialized with reference: $planning_reference"
+  else
+    note "planning submodule skipped (set PULP_WORKTREE_INIT_PLANNING=1 when needed)"
+  fi
   cache_env "$wt" > "$wt/.pulp-ci-env"
   note "worktree ready: $wt"
   note "configure with:  cd '$wt' && source .pulp-ci-env && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release"
