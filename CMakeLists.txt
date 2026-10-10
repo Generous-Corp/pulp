@@ -579,6 +579,8 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --allow pulp-audio
             --allow pulp-midi
             --allow-include-prefix core/platform/src/android/
+            --allow-include-path core/platform/src/android/jni_motion.cpp
+            --allow-include-prefix core/render/platform/android/gpu_surface_android
             --allow-include-prefix core/view/
             --report-only)
     set_tests_properties(pulp.vellum-closure-gate PROPERTIES
