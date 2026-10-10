@@ -91,11 +91,7 @@ target_sources(pulp-view-core PRIVATE
     src/svg_path_widget.cpp
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp
-    src/visualization_bridge.cpp
     src/waveform_editor_primitives.cpp
-    src/waveform_gpu_primitives.cpp
-    src/waveform_gpu_render_controller.cpp
-    src/waveform_headless_render_backend.cpp
     src/frame_clock.cpp
     src/host_frame_pump.cpp
     src/gpu_acquire_diagnostics.cpp
@@ -104,8 +100,6 @@ target_sources(pulp-view-core PRIVATE
     src/motion_geometry.cpp
     src/motion_cost.cpp
     src/window_manager.cpp
-    src/eq_curve_view.cpp
-    src/graph_scale.cpp
     src/step_grid_view.cpp
     src/midi_keyboard.cpp
     src/musical_typing_keyboard.cpp
@@ -129,7 +123,6 @@ target_sources(pulp-view-core PRIVATE
     src/color_picker.cpp
     src/theme_editor.cpp
     src/file_drop_zone.cpp
-    src/sample_asset_drop_target.cpp
     src/drag_drop.cpp
     src/split_view.cpp
     src/property_list.cpp
@@ -149,12 +142,25 @@ target_sources(pulp-view-core PRIVATE
     src/splash_screen.cpp
     src/live_constant_editor.cpp
     src/inspector_window.cpp
-    src/audio_inspector_panel.cpp
-    src/audio_inspector_window.cpp
     src/command_registry.cpp
     src/key_mapping_editor.cpp
     src/window_classes.cpp
     src/bubble_message.cpp
+)
+
+# Audio-dependent retained widgets. Keep these out of pulp-view-core so its
+# public link closure remains independent of signal/audio/host/midi.
+target_sources(pulp-view-audio PRIVATE
+    audio/src/eq_curve_view.cpp
+    audio/src/graph_scale.cpp
+    audio/src/widgets/visualizers.cpp
+    audio/src/visualization_bridge.cpp
+    audio/src/waveform_gpu_primitives.cpp
+    audio/src/waveform_gpu_render_controller.cpp
+    audio/src/waveform_headless_render_backend.cpp
+    audio/src/sample_asset_drop_target.cpp
+    audio/src/audio_inspector_panel.cpp
+    audio/src/audio_inspector_window.cpp
 )
 
 # Scripted view and widget-bridge sources.

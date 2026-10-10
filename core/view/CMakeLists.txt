@@ -25,13 +25,13 @@ add_library(pulp::view-script ALIAS pulp-view-script)
 # the view headers. pulp::host is defined later (core/host), which the link
 # resolves at generate time.
 if(NOT PULP_IOS)
-    add_library(pulp-view-audio audio/src/graph_editor_view.cpp)
-    add_library(pulp::view-audio ALIAS pulp-view-audio)
-    target_include_directories(pulp-view-audio PUBLIC
+    add_library(pulp-view-graph-editor audio/src/graph_editor_view.cpp)
+    add_library(pulp::view-graph-editor ALIAS pulp-view-graph-editor)
+    target_include_directories(pulp-view-graph-editor PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>
         $<INSTALL_INTERFACE:include>
     )
-    target_link_libraries(pulp-view-audio PUBLIC pulp::view-core pulp::host)
+    target_link_libraries(pulp-view-graph-editor PUBLIC pulp::view-core pulp::host)
 endif()
 
 add_library(pulp-view src/placeholder.cpp)
@@ -91,6 +91,8 @@ endforeach()
 unset(_pulp_view_target)
 
 foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native)
+foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native pulp-view-audio)
+foreach(_pulp_view_target pulp-view pulp-view-native pulp-view-audio)
     target_include_directories(${_pulp_view_target}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>
@@ -237,13 +239,22 @@ endforeach()
 unset(_pulp_view_target)
 
 target_link_libraries(pulp-view-core PUBLIC
-    pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio
+    pulp::canvas pulp::events pulp::state pulp::platform
 )
+
+# Audio-dependent view widgets are isolated in their own target. The umbrella
+# pulp::view target links this target above, preserving the public consumer
+# surface while keeping pulp-view-core's direct PUBLIC closure audio-free.
+target_link_libraries(pulp-view-audio PUBLIC pulp::view-core)
+target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi)
 # Host-backed view facilities are implemented by pulp-host. Keeping that
 # integration out of both view targets is load-bearing: every plugin format
 # links pulp::view, so a view-to-host edge would make even a plugin that only
 # draws native controls acquire plugin hosting and playback transitively.
-target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
+# The scripting bridge instantiates audio widgets (Meter, WaveformView,
+# SpectrumView, etc.), so its static link closure must carry the audio view
+# target after those implementations leave pulp-view-core.
+target_link_libraries(pulp-view-script PUBLIC pulp::view-audio)
 # design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.
 # PUBLIC because the public header model_manager_view.hpp includes

@@ -58,3 +58,18 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/dspx04_control_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sample_region_sequencer_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pr_fast_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/source_selftest_lane_tests.cmake")
+
+# View-core must remain independent of product audio/host edges. The source
+# lint excludes core/view/audio, whose target owns the audio-dependent headers.
+if(TARGET pulp-view-core)
+    get_target_property(_pulp_view_core_links pulp-view-core LINK_LIBRARIES)
+    if(NOT _pulp_view_core_links)
+        set(_pulp_view_core_links "")
+    endif()
+    string(REPLACE ";" "|" _pulp_view_core_links_arg "${_pulp_view_core_links}")
+    add_test(NAME pulp-view-core-audio-free
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DPULP_VIEW_CORE_LINKS=${_pulp_view_core_links_arg}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_core_audio_free.cmake)
+endif()
