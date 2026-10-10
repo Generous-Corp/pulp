@@ -68,7 +68,8 @@ struct InteractionStep {
 
 std::optional<pulp::view::Point> parse_point(std::string_view text) {
     const auto comma = text.find(',');
-    if (comma == std::string_view::npos) return std::nullopt;
+    if (comma == std::string_view::npos)
+        return std::nullopt;
     try {
         const std::string xs{text.substr(0, comma)};
         const std::string ys{text.substr(comma + 1)};
@@ -76,7 +77,8 @@ std::optional<pulp::view::Point> parse_point(std::string_view text) {
         std::size_t yn = 0;
         const float x = std::stof(xs, &xn);
         const float y = std::stof(ys, &yn);
-        if (xn != xs.size() || yn != ys.size()) return std::nullopt;
+        if (xn != xs.size() || yn != ys.size())
+            return std::nullopt;
         return pulp::view::Point{x, y};
     } catch (...) {
         return std::nullopt;
@@ -85,8 +87,7 @@ std::optional<pulp::view::Point> parse_point(std::string_view text) {
 
 // Key names accepted by --key: an optional "shift+" prefix, then a named key
 // or a single lowercase letter or digit.
-std::optional<std::pair<pulp::view::KeyCode, std::uint16_t>> parse_key(
-    std::string_view text) {
+std::optional<std::pair<pulp::view::KeyCode, std::uint16_t>> parse_key(std::string_view text) {
     using pulp::view::KeyCode;
     std::uint16_t modifiers = 0;
     constexpr std::string_view shift_prefix = "shift+";
@@ -95,18 +96,26 @@ std::optional<std::pair<pulp::view::KeyCode, std::uint16_t>> parse_key(
         text.remove_prefix(shift_prefix.size());
     }
     static const std::pair<std::string_view, KeyCode> named[] = {
-        {"tab", KeyCode::tab},       {"enter", KeyCode::enter},
-        {"escape", KeyCode::escape}, {"space", KeyCode::space},
-        {"left", KeyCode::left},     {"right", KeyCode::right},
-        {"up", KeyCode::up},         {"down", KeyCode::down},
-        {"home", KeyCode::home},     {"end", KeyCode::end_},
-        {"page_up", KeyCode::page_up}, {"page_down", KeyCode::page_down},
-        {"backspace", KeyCode::backspace}, {"delete", KeyCode::delete_},
+        {"tab", KeyCode::tab},
+        {"enter", KeyCode::enter},
+        {"escape", KeyCode::escape},
+        {"space", KeyCode::space},
+        {"left", KeyCode::left},
+        {"right", KeyCode::right},
+        {"up", KeyCode::up},
+        {"down", KeyCode::down},
+        {"home", KeyCode::home},
+        {"end", KeyCode::end_},
+        {"page_up", KeyCode::page_up},
+        {"page_down", KeyCode::page_down},
+        {"backspace", KeyCode::backspace},
+        {"delete", KeyCode::delete_},
     };
     for (const auto& [name, code] : named)
-        if (text == name) return std::pair{code, modifiers};
-    if (text.size() == 1 && ((text[0] >= 'a' && text[0] <= 'z') ||
-                             (text[0] >= '0' && text[0] <= '9')))
+        if (text == name)
+            return std::pair{code, modifiers};
+    if (text.size() == 1 &&
+        ((text[0] >= 'a' && text[0] <= 'z') || (text[0] >= '0' && text[0] <= '9')))
         return std::pair{static_cast<KeyCode>(text[0]), modifiers};
     return std::nullopt;
 }
@@ -116,7 +125,8 @@ std::optional<std::pair<pulp::view::KeyCode, std::uint16_t>> parse_key(
 // the imported node itself.
 std::string anchor_of(const pulp::view::View* view) {
     for (; view; view = view->parent())
-        if (!view->anchor_id().empty()) return view->anchor_id();
+        if (!view->anchor_id().empty())
+            return view->anchor_id();
     return {};
 }
 
@@ -127,9 +137,9 @@ std::string path_of(const pulp::view::View* view) {
     for (; view && view->parent(); view = view->parent()) {
         const auto* parent = view->parent();
         for (std::size_t i = 0; i < parent->child_count(); ++i) {
-            if (parent->child_at(i) != view) continue;
-            path = path.empty() ? std::to_string(i)
-                                : std::to_string(i) + "/" + path;
+            if (parent->child_at(i) != view)
+                continue;
+            path = path.empty() ? std::to_string(i) : std::to_string(i) + "/" + path;
             break;
         }
     }
@@ -137,9 +147,11 @@ std::string path_of(const pulp::view::View* view) {
 }
 
 pulp::view::View* find_focused(pulp::view::View& root) {
-    if (root.has_focus()) return &root;
+    if (root.has_focus())
+        return &root;
     for (std::size_t i = 0; i < root.child_count(); ++i)
-        if (auto* found = find_focused(*root.child_at(i))) return found;
+        if (auto* found = find_focused(*root.child_at(i)))
+            return found;
     return nullptr;
 }
 
@@ -158,43 +170,38 @@ void collect_state(const pulp::view::View& view, choc::value::Value& out) {
         } else if (auto* fader = dynamic_cast<const pulp::view::Fader*>(&view)) {
             entry.addMember("kind", choc::value::createString("fader"));
             entry.addMember("value", choc::value::createFloat64(fader->value()));
-        } else if (auto* slider =
-                       dynamic_cast<const pulp::view::RangeSlider*>(&view)) {
+        } else if (auto* slider = dynamic_cast<const pulp::view::RangeSlider*>(&view)) {
             entry.addMember("kind", choc::value::createString("range_slider"));
             entry.addMember("value", choc::value::createFloat64(slider->value()));
-        } else if (auto* toggle =
-                       dynamic_cast<const pulp::view::Toggle*>(&view)) {
+        } else if (auto* toggle = dynamic_cast<const pulp::view::Toggle*>(&view)) {
             entry.addMember("kind", choc::value::createString("toggle"));
             entry.addMember("on", choc::value::createBool(toggle->is_on()));
-        } else if (auto* button =
-                       dynamic_cast<const pulp::view::ToggleButton*>(&view)) {
+        } else if (auto* button = dynamic_cast<const pulp::view::ToggleButton*>(&view)) {
             entry.addMember("kind", choc::value::createString("toggle_button"));
             entry.addMember("on", choc::value::createBool(button->is_on()));
-        } else if (auto* box =
-                       dynamic_cast<const pulp::view::Checkbox*>(&view)) {
+        } else if (auto* box = dynamic_cast<const pulp::view::Checkbox*>(&view)) {
             entry.addMember("kind", choc::value::createString("checkbox"));
             entry.addMember("checked", choc::value::createBool(box->is_checked()));
         } else {
             stateful = false;
         }
-        if (stateful) out.addArrayElement(entry);
+        if (stateful)
+            out.addArrayElement(entry);
     }
     for (std::size_t i = 0; i < view.child_count(); ++i)
         collect_state(*view.child_at(i), out);
 }
 
-choc::value::Value replay_step(pulp::view::View& root,
-                               const InteractionStep& step,
+choc::value::Value replay_step(pulp::view::View& root, const InteractionStep& step,
                                std::size_t index) {
     using Kind = InteractionStep::Kind;
     auto record = choc::value::createObject("");
-    record.addMember("index", choc::value::createInt64(
-                                  static_cast<std::int64_t>(index)));
+    record.addMember("index", choc::value::createInt64(static_cast<std::int64_t>(index)));
     bool handled = false;
     const pulp::view::View* target_view = nullptr;
     if (step.kind == Kind::click || step.kind == Kind::drag) {
-        record.addMember("kind", choc::value::createString(
-                                     step.kind == Kind::click ? "click" : "drag"));
+        record.addMember("kind",
+                         choc::value::createString(step.kind == Kind::click ? "click" : "drag"));
         record.addMember("x", choc::value::createFloat64(step.start.x));
         record.addMember("y", choc::value::createFloat64(step.start.y));
         target_view = root.hit_test(step.start);
@@ -216,8 +223,10 @@ choc::value::Value replay_step(pulp::view::View& root,
             auto* next = (step.modifiers & pulp::view::kModShift)
                              ? pulp::view::View::focus_prev(root, focused)
                              : pulp::view::View::focus_next(root, focused);
-            if (next) next->on_focus_changed(true);
-            if (focused && focused != next) focused->on_focus_changed(false);
+            if (next)
+                next->on_focus_changed(true);
+            if (focused && focused != next)
+                focused->on_focus_changed(false);
             handled = next != nullptr;
             target_view = next;
         } else if (focused) {
@@ -232,15 +241,14 @@ choc::value::Value replay_step(pulp::view::View& root,
         }
     }
     record.addMember("target", choc::value::createString(anchor_of(target_view)));
-    record.addMember("target_path",
-                     choc::value::createString(target_view ? path_of(target_view)
-                                                           : std::string{"-"}));
+    record.addMember("target_path", choc::value::createString(target_view ? path_of(target_view)
+                                                                          : std::string{"-"}));
     record.addMember("handled", choc::value::createBool(handled));
     const auto* focused_after = find_focused(root);
     record.addMember("focused", choc::value::createString(anchor_of(focused_after)));
-    record.addMember("focused_path",
-                     choc::value::createString(focused_after ? path_of(focused_after)
-                                                             : std::string{"-"}));
+    record.addMember(
+        "focused_path",
+        choc::value::createString(focused_after ? path_of(focused_after) : std::string{"-"}));
     auto state = choc::value::createEmptyArray();
     collect_state(root, state);
     record.addMember("state", state);
@@ -310,46 +318,37 @@ int main(int argc, char** argv) {
                 return 2;
             }
             value_overrides.push_back(std::move(*parsed));
-        }
-        else if (arg == "--click") {
+        } else if (arg == "--click") {
             auto point = parse_point(value);
             if (!point) {
                 std::cerr << "Error: --click expects <x>,<y>\n";
                 return 2;
             }
-            steps.push_back({.kind = InteractionStep::Kind::click,
-                             .start = *point});
-        }
-        else if (arg == "--drag") {
+            steps.push_back({.kind = InteractionStep::Kind::click, .start = *point});
+        } else if (arg == "--drag") {
             const std::string_view text{value};
             const auto colon = text.find(':');
-            auto from = colon == std::string_view::npos
-                            ? std::nullopt
-                            : parse_point(text.substr(0, colon));
-            auto to = colon == std::string_view::npos
-                          ? std::nullopt
-                          : parse_point(text.substr(colon + 1));
+            auto from =
+                colon == std::string_view::npos ? std::nullopt : parse_point(text.substr(0, colon));
+            auto to = colon == std::string_view::npos ? std::nullopt
+                                                      : parse_point(text.substr(colon + 1));
             if (!from || !to) {
                 std::cerr << "Error: --drag expects <x1>,<y1>:<x2>,<y2>\n";
                 return 2;
             }
-            steps.push_back({.kind = InteractionStep::Kind::drag,
-                             .start = *from,
-                             .end = *to});
-        }
-        else if (arg == "--key") {
+            steps.push_back({.kind = InteractionStep::Kind::drag, .start = *from, .end = *to});
+        } else if (arg == "--key") {
             auto key = parse_key(value);
             if (!key) {
-                std::cerr << "Error: --key does not name a supported key: "
-                          << value << "\n";
+                std::cerr << "Error: --key does not name a supported key: " << value << "\n";
                 return 2;
             }
             steps.push_back({.kind = InteractionStep::Kind::key,
                              .key_name = value,
                              .key = key->first,
                              .modifiers = key->second});
-        }
-        else if (arg == "--interaction-log") interaction_log_path = value;
+        } else if (arg == "--interaction-log")
+            interaction_log_path = value;
         else {
             usage();
             return 2;
@@ -405,10 +404,8 @@ int main(int argc, char** argv) {
     if (!interaction_log_path.empty()) {
         root->layout_children();
         auto log = choc::value::createObject("");
-        log.addMember("schema", choc::value::createString(
-                                    "pulp-design-ir-interaction-log-v1"));
-        log.addMember("fixture",
-                      choc::value::createString(input_path.filename().string()));
+        log.addMember("schema", choc::value::createString("pulp-design-ir-interaction-log-v1"));
+        log.addMember("fixture", choc::value::createString(input_path.filename().string()));
         auto initial = choc::value::createEmptyArray();
         collect_state(*root, initial);
         log.addMember("initial_state", initial);
