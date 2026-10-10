@@ -6954,6 +6954,16 @@ directory and use `--portable-state-assets`. This emits package-relative paths
 and rejects any paint that resolves outside the packaged runtime; absolute
 capture-host paths are validation evidence only and must not enter artifacts.
 
+**Explicit resolver activation is a supported state-selection contract.** A
+captured atlas entry with no `match` selector remains inactive unless the
+embedder installs `globalThis.__pulpMaterializedStateResolver__` and returns
+that entry's stable id (for example, `home`). The resolver path must still run
+the normal captured-state commit: select the entry, call `setImageSource` for
+its portable paint, and make the image authority visible. Keep a regression
+test for this sequence; a fixture that merely contains an atlas entry can pass
+while painting nothing. Selector matching and resolver-driven selection are
+separate contracts and should be validated independently.
+
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
 attributes failing pixels to nodes. Two traps are baked into the *metric*, not
 the code, and both were found by measuring rather than reasoning:
