@@ -12,7 +12,7 @@
 namespace pulp::test_fixtures {
 
 class NoEditorGain final : public format::Processor {
-public:
+  public:
     static constexpr state::ParamID kGain = 1;
 
     format::PluginDescriptor descriptor() const override {
@@ -28,16 +28,14 @@ public:
     }
 
     void define_parameters(state::StateStore& store) override {
-        store.add_parameter({.id = kGain, .name = "Gain", .unit = "dB",
-                             .range = {-60.0f, 12.0f, 0.0f}});
+        store.add_parameter(
+            {.id = kGain, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
     }
 
     void prepare(const format::PrepareContext&) override {}
 
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>& input,
-                 midi::MidiBuffer&, midi::MidiBuffer&,
-                 const format::ProcessContext&) override {
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {
         const float gain = std::pow(10.0f, state().get_value(kGain) / 20.0f);
         for (std::size_t c = 0; c < output.num_channels(); ++c) {
             for (std::size_t i = 0; i < output.num_samples(); ++i) {
@@ -51,4 +49,4 @@ inline std::unique_ptr<format::Processor> create_no_editor_gain() {
     return std::make_unique<NoEditorGain>();
 }
 
-}  // namespace pulp::test_fixtures
+} // namespace pulp::test_fixtures

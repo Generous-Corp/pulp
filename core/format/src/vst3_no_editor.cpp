@@ -11,4 +11,4 @@ Steinberg::IPlugView* make_plug_view(Processor&, state::StateStore&, runtime::Al
     return nullptr;
 }
 
-}  // namespace pulp::format::vst3
+} // namespace pulp::format::vst3
