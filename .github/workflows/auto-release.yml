@@ -53,7 +53,7 @@ jobs:
           # Need enough history to diff against the latest tag.
           fetch-depth: 0
           # Explicitly fetch tags — needed for the latest-tag diff logic
-          # below. actions/checkout@v7's default fetches tags along with
+          # below. actions/checkout@v5's default fetches tags along with
           # fetch-depth=0, but spell it out for clarity.
           fetch-tags: true
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}

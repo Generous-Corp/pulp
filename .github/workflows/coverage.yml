@@ -150,7 +150,7 @@ jobs:
   changed-files:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
-    # dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3 in PR mode requires pull-requests:read; without
+    # dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4 in PR mode requires pull-requests:read; without
     # it the action silently returns no changed files, which would defeat
     # the iOS-relevant path filter that gates the slow Swift coverage leg.
     permissions:
