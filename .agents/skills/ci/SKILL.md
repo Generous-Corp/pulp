@@ -261,6 +261,17 @@ Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the
 tell.
 
+## Diff-scoped gates on merge_group use the entry's own base
+
+`Enforce version & skill sync` diffs against `merge_group.base_sha` on a queued
+run, resolved by `tools/scripts/ci_diff_base.py`. It used to take
+merge-base(origin/main, HEAD), which spans every entry ahead in the queue: a
+`fix:` touching no versioned surface in one entry ejected the innocent entry
+behind it, and the offender passed on whatever sat ahead of it. If an enforce
+failure on a merge group names a commit that is not in the ejected PR, read the
+`diff base:` line in the job log before touching the PR. Any new diff-scoped
+gate added to a merge_group workflow should reuse the same resolver.
+
 ## A failed batch's branch name is not the culprit
 
 A merge_group batch is NAMED for one pull request but CONTAINS every entry

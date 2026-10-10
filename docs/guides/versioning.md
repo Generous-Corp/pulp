@@ -177,8 +177,19 @@ repository-scoped `PULP_LOCAL_LINUX_RUNS_ON_JSON` lane. Keeping those selectors
 distinct prevents automatic branch content from matching the less-isolated
 repository runner through GitHub's subset-based label selection.
 
-Every gate in this workflow compares HEAD against the **merge-base** of the
-base branch and HEAD, which the "Resolve diff base" step computes once. The
+Every gate in this workflow compares HEAD against one diff base, which the
+"Resolve diff base" step computes once through `tools/scripts/ci_diff_base.py`
+(tests: `tools/scripts/test_ci_diff_base.py`, run by the same workflow).
+
+- On `merge_group` the base is the queue entry's own
+  `github.event.merge_group.base_sha`. A merge-group commit is built on top of
+  every entry ahead of it, so a merge-base with `origin/main` would put those
+  entries' commits in this entry's range. A `fix:` touching no surface in an
+  entry ahead would then eject the innocent entry behind it while the offender
+  merged. A run with no `base_sha`, or one that is not an ancestor of HEAD,
+  fails closed instead of falling back.
+- On `pull_request` and manual dispatch the base is the **merge-base** of the
+  base branch and HEAD. The
 base tip is the wrong anchor for any gate that reads a file *at* the base
 (`node_abi_gate.py`'s virtual order, `skill_path_map_lint.py`'s co-claim map,
 `hotspot_size_guard.py`'s new-file list): a PR merely behind `main` would be
