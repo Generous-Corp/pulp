@@ -48,7 +48,7 @@
 
 #include <cstdint>
 
-#if defined(__x86_64__) || defined(_M_X64)
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(_M_ARM64EC)
 #define PULP_FLUSH_DENORMALS_X86 1
 #include <pmmintrin.h>  // DAZ (SSE3 intrinsics header; also pulls SSE)
 #include <xmmintrin.h>  // FTZ + MXCSR access

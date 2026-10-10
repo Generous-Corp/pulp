@@ -865,6 +865,10 @@ the header in `REVIEWED_HEADERS` — but declare it honestly:
 - Say in the rationale that the branch is a portability detail of the primitive
   rather than a change to the surface it presents, so a later reader is not left
   guessing whether the allocator's behavior moved.
+- On MSVC ARM64EC, `_M_X64` may also be defined. Guard x86-only intrinsics with
+  `!defined(_M_ARM64EC)` so an ARM64EC compile does not enter the SSE path; the
+  resulting scalar or no-op fallback remains infrastructure and needs the same
+  fingerprint refresh.
 - It is a byte-level fingerprint refresh, so revert the `contract-history.json`
   snapshot per the guidance above and keep the three-file change.
 

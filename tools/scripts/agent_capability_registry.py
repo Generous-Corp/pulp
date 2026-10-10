@@ -199,6 +199,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/scoped_flush_denormals.hpp",
+        "fingerprint": "sha256:eaaab035318fc54bc1d2d9dd617bffe890e747cd03c5d0799bfa98e061f826da",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The scoped floating-point numeric-mode guard is callback-boundary "
+            "infrastructure. It carries platform-specific implementation policy, "
+            "not a separately selected generator-facing capability."
+        ),
+    },
+    {
         "include": "pulp/audio/workgroup.hpp",
         "fingerprint": "sha256:e696902515507a5a444feb4aa94335fc92b896a894e2e548aa7466221e934f60",
         "disposition": "infrastructure",

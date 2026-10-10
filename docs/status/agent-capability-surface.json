@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 129,
+  "inventory_version": 130,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 505,
-    "reviewed_headers": 226,
-    "legacy_unreviewed_headers": 279,
+    "reviewed_headers": 227,
+    "legacy_unreviewed_headers": 278,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 44,
-      "infrastructure": 59,
-      "legacy_unreviewed": 279,
+      "infrastructure": 60,
+      "legacy_unreviewed": 278,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 272,
-        "reviewed_headers": 126,
-        "legacy_unreviewed_headers": 146,
+        "reviewed_headers": 127,
+        "legacy_unreviewed_headers": 145,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -4205,11 +4205,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/scoped_flush_denormals.hpp",
-      "fingerprint": "sha256:989e43be3e1f6f2f806f3896116b98f21e6959fda976530659ccf4f7d99c6e16",
+      "fingerprint": "sha256:eaaab035318fc54bc1d2d9dd617bffe890e747cd03c5d0799bfa98e061f826da",
       "include": "pulp/signal/scoped_flush_denormals.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "The scoped floating-point numeric-mode guard is callback-boundary infrastructure. It carries platform-specific implementation policy, not a separately selected generator-facing capability."
     },
     {
       "domain": "signal",
