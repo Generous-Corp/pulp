@@ -1,6 +1,6 @@
 # CI Validation
 
-Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before merging.
+Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) validation lanes before merging.
 
 The macOS retarget lane keeps the untrusted-runner boundary for contributor
 code and invokes `tools/ci/governed-build.sh` inside that namespace for its
