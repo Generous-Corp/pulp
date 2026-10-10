@@ -1128,9 +1128,9 @@ TEST_CASE("ScriptedUiSession: a deferred document's first frame shows bound para
         root.set_bounds({0, 0, 240, 160});
         StateStore store;
         make_store(store);
-        ScriptedUiSession session(root, store, {.script_path = script_path,
-                                                .enable_hot_reload = false,
-                                                .enable_theme_reload = false});
+        ScriptedUiSession session(
+            root, store,
+            {.script_path = script_path, .enable_hot_reload = false, .enable_theme_reload = false});
         std::optional<std::pair<float, float>> at_callback;
         session.set_document_loaded_callback([&](bool loaded, const std::string&) {
             REQUIRE(loaded);
@@ -1141,9 +1141,9 @@ TEST_CASE("ScriptedUiSession: a deferred document's first frame shows bound para
             REQUIRE(session.load_deferrable());
         }
         REQUIRE(session.document_load_pending());
-        REQUIRE(session.poll());  // the empty, correctly sized frame
+        REQUIRE(session.poll()); // the empty, correctly sized frame
         REQUIRE(session.document_load_pending());
-        REQUIRE(session.poll());  // evaluates the document: the mount frame
+        REQUIRE(session.poll()); // evaluates the document: the mount frame
         REQUIRE_FALSE(session.document_load_pending());
         REQUIRE_FALSE(session.settling());
 
@@ -1160,9 +1160,9 @@ TEST_CASE("ScriptedUiSession: a deferred document's first frame shows bound para
         root.set_bounds({0, 0, 240, 160});
         StateStore store;
         make_store(store);
-        ScriptedUiSession session(root, store, {.script_path = script_path,
-                                                .enable_hot_reload = false,
-                                                .enable_theme_reload = false});
+        ScriptedUiSession session(
+            root, store,
+            {.script_path = script_path, .enable_hot_reload = false, .enable_theme_reload = false});
         {
             ScopedDeferredDocumentLoad guard;
             REQUIRE(session.load_deferrable());
