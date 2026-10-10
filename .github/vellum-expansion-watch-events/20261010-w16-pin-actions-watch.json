@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-w16-pin-actions-watch",
+  "created_at": "2026-10-10T02:11:22Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Workflow-only supply-chain hardening pins third-party GitHub Actions, adds a commit-pin lint and Dependabot coverage, and updates no design-import, Chromium, rendering, or packaging authority.",
+  "tests": [
+    "python3 tools/scripts/test_action_pin_lint.py",
+    "python3 tools/scripts/test_workflow_lint.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

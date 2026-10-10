@@ -239,9 +239,20 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             step,
         )
 
+    def test_dependabot_tracks_github_actions(self) -> None:
+        config = REPO_ROOT / ".github" / "dependabot.yml"
+        self.assertTrue(config.exists(), f"missing Dependabot config: {config}")
+        value = yaml.safe_load(config.read_text(encoding="utf-8"))
+        self.assertEqual(value.get("version"), 2)
+        updates = value.get("updates", [])
+        self.assertIn(
+            {"package-ecosystem": "github-actions", "directory": "/"},
+            [{k: item.get(k) for k in ("package-ecosystem", "directory")} for item in updates],
+        )
+
     def test_actionlint_step_keeps_core_actionlint_enabled(self) -> None:
         step = _find_step(self.text, "actionlint")
-        self.assertIn("uses: raven-actions/actionlint@v2", step)
+        self.assertIn("uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0", step)
         self.assertRegex(step, r"(?m)^\s{10}matcher:\s*true\s*$")
         self.assertRegex(step, r"(?m)^\s{10}shellcheck:\s*false\s*$")
         self.assertRegex(step, r"(?m)^\s{10}pyflakes:\s*false\s*$")

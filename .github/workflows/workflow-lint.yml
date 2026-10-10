@@ -21,6 +21,8 @@ on:
     paths:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - 'tools/scripts/action_pin_lint.py'
+      - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
       - 'tools/scripts/schedule_backstop_check.py'
       - 'tools/scripts/test_schedule_backstop_check.py'
@@ -138,6 +140,8 @@ on:
     paths:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - 'tools/scripts/action_pin_lint.py'
+      - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
       - 'tools/scripts/schedule_backstop_check.py'
       - 'tools/scripts/test_schedule_backstop_check.py'
@@ -363,6 +367,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
+          python3 tools/scripts/test_action_pin_lint.py
+          python3 tools/scripts/action_pin_lint.py
           python3 tools/scripts/test_shell_portability_check.py
           python3 tools/scripts/shell_portability_check.py tools/ci scripts tools/scripts
           python3 tools/scripts/test_ios_gate_skip_contract.py
@@ -496,7 +502,7 @@ jobs:
         # `uses:` refs, missing required keys, and deprecated action
         # versions — which are the failure modes Layer 1 exists to catch.
         # Re-enable shellcheck after those existing findings are retired.
-        uses: raven-actions/actionlint@v2
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
         with:
           matcher: true
           shellcheck: false

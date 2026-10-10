@@ -6,6 +6,7 @@
 [[families]]
 name = "script-readers-f4b06d953891"
 paths = [
+  "tools/scripts/action_pin_lint.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -69,6 +70,7 @@ paths = [
   "tools/scripts/stale_run_reaper.py",
   "tools/scripts/summarize_daw_bench_results.py",
   "tools/scripts/test_a2t_structural_verification_ci.py",
+  "tools/scripts/test_action_pin_lint.py",
   "tools/scripts/test_add_component.py",
   "tools/scripts/test_android_aligned_buffer.py",
   "tools/scripts/test_android_premerge_probe.py",
@@ -5211,6 +5213,7 @@ risk_class = "low"
 name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
+  "tools/scripts/action_pin_lint.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5296,6 +5299,7 @@ paths = [
   "tools/scripts/status_tone_signal_lint.py",
   "tools/scripts/summarize_daw_bench_results.py",
   "tools/scripts/test_a2t_structural_verification_ci.py",
+  "tools/scripts/test_action_pin_lint.py",
   "tools/scripts/test_add_component.py",
   "tools/scripts/test_advisory_macos_runner_policy.py",
   "tools/scripts/test_affected_targets.py",
@@ -5729,6 +5733,7 @@ risk_class = "low"
 name = "script-surface-environment-bound"
 paths = [
   ".agents/skills/*/SKILL.md",
+  "tools/scripts/action_pin_lint.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5814,6 +5819,7 @@ paths = [
   "tools/scripts/status_tone_signal_lint.py",
   "tools/scripts/summarize_daw_bench_results.py",
   "tools/scripts/test_a2t_structural_verification_ci.py",
+  "tools/scripts/test_action_pin_lint.py",
   "tools/scripts/test_add_component.py",
   "tools/scripts/test_advisory_macos_runner_policy.py",
   "tools/scripts/test_affected_targets.py",

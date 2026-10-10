@@ -1482,7 +1482,7 @@ jobs:
       # and github-hosted runners (have actions/cache).
       - name: Namespace cache (brew + ccache + Pulp FetchContent)
         if: runner.os == 'macOS' && (contains(matrix.runs_on_json, 'namespace') || contains(matrix.runs_on_json, 'nscloud'))
-        uses: namespacelabs/nscloud-cache-action@v1
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: brew
           path: |
