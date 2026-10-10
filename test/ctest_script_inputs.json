@@ -4679,6 +4679,29 @@
    ],
    "kind": "shell"
   },
+  "foundation-include-lint": {
+   "entry": "tools/scripts/foundation_include_lint.py",
+   "inputs": [
+    "core/platform",
+    "core/platform/src/android/jni_motion.cpp",
+    "core/runtime",
+    "core/simd",
+    "tools/scripts/foundation_include_lint.py"
+   ],
+   "kind": "python"
+  },
+  "foundation-include-lint-negative-contract": {
+   "entry": "tools/scripts/test_foundation_include_lint.py",
+   "inputs": [
+    "core/audio/platform/android/demo_synth.hpp",
+    "core/platform/include/pulp/platform/platform.hpp",
+    "core/platform/src/android/jni_bridge.cpp",
+    "core/platform/src/android/jni_motion.cpp",
+    "core/platform/src/platform.cpp",
+    "tools/scripts/test_foundation_include_lint.py"
+   ],
+   "kind": "python"
+  },
   "framework-neutrality": {
    "entry": "tools/scripts/framework_neutrality_check.py",
    "inputs": [

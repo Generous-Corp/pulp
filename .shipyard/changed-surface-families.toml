@@ -2286,6 +2286,35 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-140d290c0230"
+paths = ["tools/scripts/test_foundation_include_lint.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "foundation-include-lint-negative-contract",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-6f809f246ecd"
 paths = ["tools/scripts/test_gallery_visual_diff.py"]
 tests = [
@@ -5637,6 +5666,7 @@ paths = [
   "tools/scripts/test_fleet_snapshot.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
+  "tools/scripts/test_foundation_include_lint.py",
   "tools/scripts/test_frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/test_frontend_ir_codegen_artifacts.py",
   "tools/scripts/test_frontend_ir_evidence_modules.py",
@@ -5908,6 +5938,8 @@ tests = [
   "fleet-remote-probe-selftest",
   "forced-restore-lint",
   "forced-restore-lint-selftest",
+  "foundation-include-lint",
+  "foundation-include-lint-negative-contract",
   "gpu-probe-acceptance-verifier-selftest",
   "gpu-probe-historical-v1-acceptance",
   "gpu-probe-terminal-recorder-selftest",
@@ -6161,6 +6193,7 @@ paths = [
   "tools/scripts/test_fleet_snapshot.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
+  "tools/scripts/test_foundation_include_lint.py",
   "tools/scripts/test_frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/test_frontend_ir_codegen_artifacts.py",
   "tools/scripts/test_frontend_ir_evidence_modules.py",
