@@ -6121,6 +6121,13 @@
    ],
    "kind": "python"
   },
+  "import-ui-frames-observe": {
+   "entry": "test/test_ui_frames_observe.py",
+   "inputs": [
+    "test/test_ui_frames_observe.py"
+   ],
+   "kind": "python"
+  },
   "import-validation-browser-fidelity-receipt-selftest": {
    "entry": "tools/import-validation/test_verify_browser_fidelity_receipt.py",
    "inputs": [
