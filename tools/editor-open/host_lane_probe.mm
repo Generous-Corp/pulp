@@ -69,7 +69,8 @@ struct Options {
 
 const auto g_start = std::chrono::steady_clock::now();
 double now_ms() {
-    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g_start).count();
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g_start)
+        .count();
 }
 void spin(double ms) {
     const double end = now_ms() + ms;
@@ -98,10 +99,15 @@ std::string sha256(const void* data, size_t n) {
 std::string quote(const std::string& s) {
     std::string o = "\"";
     for (char c : s) {
-        if (c == '"' || c == '\\') { o += '\\'; o += c; }
-        else if (c == '\n') o += "\\n";
-        else if (static_cast<unsigned char>(c) < 0x20) o += ' ';
-        else o += c;
+        if (c == '"' || c == '\\') {
+            o += '\\';
+            o += c;
+        } else if (c == '\n')
+            o += "\\n";
+        else if (static_cast<unsigned char>(c) < 0x20)
+            o += ' ';
+        else
+            o += c;
     }
     return o + "\"";
 }
@@ -118,7 +124,8 @@ std::vector<float> stimulus(int frames, double sr, int channel) {
         state = state * 1664525u + 1013904223u;
         const float noise = (float(state >> 8) / float(1u << 24)) * 2.0f - 1.0f;
         v[i] = 0.25f * float(std::sin(2.0 * M_PI * f * i / sr)) + 0.05f * noise;
-        if (i > frames / 2) v[i] *= 0.0f;  // silence tail exposes delay/reverb output
+        if (i > frames / 2)
+            v[i] *= 0.0f; // silence tail exposes delay/reverb output
     }
     return v;
 }
@@ -154,7 +161,8 @@ Render render(PluginSlot& slot, const Options& o, const std::string& raw_path) {
         inter[size_t(i) * 2] = out_l[i];
         inter[size_t(i) * 2 + 1] = out_r[i];
         for (float s : {out_l[i], out_r[i]}) {
-            if (!std::isfinite(s)) r.finite = false;
+            if (!std::isfinite(s))
+                r.finite = false;
             r.peak = std::max(r.peak, double(std::fabs(s)));
             sum += double(s) * s;
         }
@@ -162,15 +170,16 @@ Render render(PluginSlot& slot, const Options& o, const std::string& raw_path) {
     r.rms = std::sqrt(sum / (2.0 * frames));
     r.sha256 = sha256(inter.data(), inter.size() * sizeof(float));
     std::ofstream(raw_path, std::ios::binary)
-        .write(reinterpret_cast<const char*>(inter.data()), std::streamsize(inter.size() * sizeof(float)));
+        .write(reinterpret_cast<const char*>(inter.data()),
+               std::streamsize(inter.size() * sizeof(float)));
     return r;
 }
 
 std::string render_json(const Render& r, const std::string& file) {
     std::ostringstream s;
     s << "{\"sha256\":" << quote(r.sha256) << ",\"frames\":" << r.frames << ",\"channels\":2"
-      << ",\"peak\":" << r.peak << ",\"rms\":" << r.rms << ",\"finite\":" << (r.finite ? "true" : "false")
-      << ",\"file\":" << quote(file) << "}";
+      << ",\"peak\":" << r.peak << ",\"rms\":" << r.rms
+      << ",\"finite\":" << (r.finite ? "true" : "false") << ",\"file\":" << quote(file) << "}";
     return s.str();
 }
 
@@ -191,22 +200,27 @@ struct Frame {
 typedef CGImageRef (*WindowImageFn)(CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption);
 bool read_window(NSWindow* window, Frame& f) {
     static auto fn = (WindowImageFn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
-    if (!fn) return false;
-    CGImageRef image = fn(CGRectNull, kCGWindowListOptionIncludingWindow, (CGWindowID)window.windowNumber,
-                          kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
-    if (!image) return false;
+    if (!fn)
+        return false;
+    CGImageRef image =
+        fn(CGRectNull, kCGWindowListOptionIncludingWindow, (CGWindowID)window.windowNumber,
+           kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
+    if (!image)
+        return false;
     f.w = CGImageGetWidth(image);
     f.h = CGImageGetHeight(image);
     std::vector<uint8_t> rgba(f.w * f.h * 4);
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-    CGContextRef ctx = CGBitmapContextCreate(rgba.data(), f.w, f.h, 8, f.w * 4, cs, kCGImageAlphaPremultipliedLast);
+    CGContextRef ctx = CGBitmapContextCreate(rgba.data(), f.w, f.h, 8, f.w * 4, cs,
+                                             kCGImageAlphaPremultipliedLast);
     CGContextDrawImage(ctx, CGRectMake(0, 0, f.w, f.h), image);
     CGContextRelease(ctx);
     CGColorSpaceRelease(cs);
     CGImageRelease(image);
     f.rgb.resize(f.w * f.h * 3);
     for (size_t i = 0; i < f.w * f.h; ++i)
-        for (int c = 0; c < 3; ++c) f.rgb[i * 3 + c] = rgba[i * 4 + c];
+        for (int c = 0; c < 3; ++c)
+            f.rgb[i * 3 + c] = rgba[i * 4 + c];
     return true;
 }
 
@@ -214,34 +228,41 @@ void save_png(const Frame& f, const std::string& path) {
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CFDataRef data = CFDataCreate(nullptr, f.rgb.data(), CFIndex(f.rgb.size()));
     CGDataProviderRef provider = CGDataProviderCreateWithCFData(data);
-    CGImageRef image = CGImageCreate(f.w, f.h, 8, 24, f.w * 3, cs, (CGBitmapInfo)kCGImageAlphaNone, provider,
-                                     nullptr, false, kCGRenderingIntentDefault);
+    CGImageRef image = CGImageCreate(f.w, f.h, 8, 24, f.w * 3, cs, (CGBitmapInfo)kCGImageAlphaNone,
+                                     provider, nullptr, false, kCGRenderingIntentDefault);
     NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
-    CGImageDestinationRef dst = CGImageDestinationCreateWithURL((__bridge CFURLRef)url, CFSTR("public.png"), 1, nullptr);
+    CGImageDestinationRef dst =
+        CGImageDestinationCreateWithURL((__bridge CFURLRef)url, CFSTR("public.png"), 1, nullptr);
     if (dst && image) {
         CGImageDestinationAddImage(dst, image, nullptr);
         CGImageDestinationFinalize(dst);
     }
-    if (dst) CFRelease(dst);
-    if (image) CGImageRelease(image);
+    if (dst)
+        CFRelease(dst);
+    if (image)
+        CGImageRelease(image);
     CGDataProviderRelease(provider);
     CFRelease(data);
     CGColorSpaceRelease(cs);
 }
 
 std::string frame_json(bool read, const Frame& f, const std::string& png) {
-    if (!read) return "{\"read\":false}";
+    if (!read)
+        return "{\"read\":false}";
     size_t backdrop = 0;
     std::set<uint32_t> colours;
     for (size_t i = 0; i < f.w * f.h; ++i) {
         const uint8_t* p = &f.rgb[i * 3];
-        if (p[0] == kBackdrop[0] && p[1] == kBackdrop[1] && p[2] == kBackdrop[2]) ++backdrop;
-        if (colours.size() < 4096) colours.insert(uint32_t(p[0]) << 16 | uint32_t(p[1]) << 8 | p[2]);
+        if (p[0] == kBackdrop[0] && p[1] == kBackdrop[1] && p[2] == kBackdrop[2])
+            ++backdrop;
+        if (colours.size() < 4096)
+            colours.insert(uint32_t(p[0]) << 16 | uint32_t(p[1]) << 8 | p[2]);
     }
     std::ostringstream s;
-    s << "{\"read\":true,\"width\":" << f.w << ",\"height\":" << f.h << ",\"backdrop_pixels\":" << backdrop
-      << ",\"pixels\":" << f.w * f.h << ",\"unique_colors\":" << colours.size()
-      << ",\"png\":" << quote(png) << ",\"sha256\":" << quote(sha256(f.rgb.data(), f.rgb.size())) << "}";
+    s << "{\"read\":true,\"width\":" << f.w << ",\"height\":" << f.h
+      << ",\"backdrop_pixels\":" << backdrop << ",\"pixels\":" << f.w * f.h
+      << ",\"unique_colors\":" << colours.size() << ",\"png\":" << quote(png)
+      << ",\"sha256\":" << quote(sha256(f.rgb.data(), f.rgb.size())) << "}";
     return s.str();
 }
 
@@ -249,7 +270,8 @@ std::string frame_json(bool read, const Frame& f, const std::string& png) {
 
 OSType four_cc(NSString* s) {
     const char* c = s.UTF8String;
-    if (!c || std::strlen(c) != 4) return 0;
+    if (!c || std::strlen(c) != 4)
+        return 0;
     return OSType(c[0]) << 24 | OSType(c[1]) << 16 | OSType(c[2]) << 8 | OSType(c[3]);
 }
 
@@ -258,15 +280,26 @@ bool register_au(const std::filesystem::path& bundle, PluginInfo& info, std::str
     NSBundle* b = [NSBundle bundleWithPath:[NSString stringWithUTF8String:bundle.c_str()]];
     NSArray* comps = b.infoDictionary[@"AudioComponents"];
     NSDictionary* c = comps.count ? comps[0] : nil;
-    if (!c) { error = "no AudioComponents entry in Info.plist"; return false; }
-    if (![b load]) { error = "bundle executable did not load"; return false; }
+    if (!c) {
+        error = "no AudioComponents entry in Info.plist";
+        return false;
+    }
+    if (![b load]) {
+        error = "bundle executable did not load";
+        return false;
+    }
     NSString* factory = c[@"factoryFunction"];
     auto fn = (AudioComponentFactoryFunction)CFBundleGetFunctionPointerForName(
         CFBundleCreate(nullptr, (__bridge CFURLRef)b.bundleURL), (__bridge CFStringRef)factory);
-    if (!fn) { error = "factory function not found: " + std::string(factory.UTF8String); return false; }
-    AudioComponentDescription d{four_cc(c[@"type"]), four_cc(c[@"subtype"]), four_cc(c[@"manufacturer"]), 0, 0};
+    if (!fn) {
+        error = "factory function not found: " + std::string(factory.UTF8String);
+        return false;
+    }
+    AudioComponentDescription d{four_cc(c[@"type"]), four_cc(c[@"subtype"]),
+                                four_cc(c[@"manufacturer"]), 0, 0};
     NSString* name = c[@"name"] ? c[@"name"] : @"probe";
-    if (!AudioComponentRegister(&d, (__bridge CFStringRef)name, [c[@"version"] unsignedIntValue], fn)) {
+    if (!AudioComponentRegister(&d, (__bridge CFStringRef)name, [c[@"version"] unsignedIntValue],
+                                fn)) {
         error = "AudioComponentRegister refused the component";
         return false;
     }
@@ -278,38 +311,44 @@ bool register_au(const std::filesystem::path& bundle, PluginInfo& info, std::str
 struct Loaded {
     std::string path, format, error;
     std::shared_ptr<PluginSlot> slot;
-    std::vector<std::string> json;  // assembled member strings
+    std::vector<std::string> json; // assembled member strings
     NSWindow* window = nil;
     std::unique_ptr<PluginSlot::HostedEditor> editor;
 };
 
 std::shared_ptr<PluginSlot> load(const std::string& arg, Loaded& L) {
     std::filesystem::path p(arg);
-    if (p.filename().empty()) p = p.parent_path();
+    if (p.filename().empty())
+        p = p.parent_path();
     L.path = p.string();
     PluginInfo info;
     info.path = p.string();
     info.name = p.stem().string();
     const auto ext = p.extension().string();
-    if (ext == ".clap") info.format = PluginFormat::CLAP, L.format = "CLAP";
-    else if (ext == ".vst3") info.format = PluginFormat::VST3, L.format = "VST3";
+    if (ext == ".clap")
+        info.format = PluginFormat::CLAP, L.format = "CLAP";
+    else if (ext == ".vst3")
+        info.format = PluginFormat::VST3, L.format = "VST3";
     else if (ext == ".component") {
         info.format = PluginFormat::AudioUnit, L.format = "AU";
-        if (!register_au(p, info, L.error)) return nullptr;
+        if (!register_au(p, info, L.error))
+            return nullptr;
     } else {
         L.error = "unsupported bundle extension " + ext;
         return nullptr;
     }
     auto slot = std::shared_ptr<PluginSlot>(PluginSlot::load(info));
-    if (!slot) L.error = "PluginSlot::load returned null";
+    if (!slot)
+        L.error = "PluginSlot::load returned null";
     return slot;
 }
 
 NSWindow* make_window(int index, uint32_t w, uint32_t h) {
-    NSWindow* win = [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000 + index * 3000, -30000, w, h)
-                                                styleMask:NSWindowStyleMaskBorderless
-                                                  backing:NSBackingStoreBuffered
-                                                    defer:NO];
+    NSWindow* win =
+        [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000 + index * 3000, -30000, w, h)
+                                    styleMask:NSWindowStyleMaskBorderless
+                                      backing:NSBackingStoreBuffered
+                                        defer:NO];
     win.releasedWhenClosed = NO;
     win.animationBehavior = NSWindowAnimationBehaviorNone;
     win.backgroundColor = [NSColor colorWithSRGBRed:1 green:0 blue:1 alpha:1];
@@ -319,22 +358,25 @@ NSWindow* make_window(int index, uint32_t w, uint32_t h) {
 
 // Open every editor that has one, all at once (so several GPU editors are
 // alive in this process together), then read each back.
-void open_all(std::vector<Loaded>& all, const Options& o, int open_index, std::vector<std::string>& events) {
+void open_all(std::vector<Loaded>& all, const Options& o, int open_index,
+              std::vector<std::string>& events) {
     for (size_t i = 0; i < all.size(); ++i) {
         auto& L = all[i];
-        if (!L.slot || !L.slot->has_editor()) continue;
+        if (!L.slot || !L.slot->has_editor())
+            continue;
         L.window = make_window(int(i), 640, 480);
         const double t0 = now_ms();
         L.editor = L.slot->create_hosted_editor(o.null_parent ? nullptr : (__bridge void*)L.window);
         const double t1 = now_ms();
         std::ostringstream s;
-        s << "{\"plugin\":" << i << ",\"open\":" << open_index << ",\"event\":\"create\",\"attached\":"
-          << (L.editor ? "true" : "false");
+        s << "{\"plugin\":" << i << ",\"open\":" << open_index
+          << ",\"event\":\"create\",\"attached\":" << (L.editor ? "true" : "false");
         if (L.editor) {
             s << ",\"width\":" << L.editor->width << ",\"height\":" << L.editor->height
               << ",\"resizable\":" << (L.editor->resizable ? "true" : "false");
             [L.window setContentSize:NSMakeSize(L.editor->width, L.editor->height)];
-            pulp::host::resize_editor_container(L.editor->native_handle, L.editor->width, L.editor->height);
+            pulp::host::resize_editor_container(L.editor->native_handle, L.editor->width,
+                                                L.editor->height);
         }
         s << ",\"create_ms\":" << (t1 - t0) << "}";
         events.push_back(s.str());
@@ -342,12 +384,16 @@ void open_all(std::vector<Loaded>& all, const Options& o, int open_index, std::v
     spin(o.watch_ms);
     for (size_t i = 0; i < all.size(); ++i) {
         auto& L = all[i];
-        if (!L.window) continue;
+        if (!L.window)
+            continue;
         Frame f;
-        const std::string png = o.out + "/editor-" + std::to_string(i) + "-open" + std::to_string(open_index) + ".png";
+        const std::string png =
+            o.out + "/editor-" + std::to_string(i) + "-open" + std::to_string(open_index) + ".png";
         const bool read = read_window(L.window, f);
-        if (read) save_png(f, png);
-        events.push_back("{\"plugin\":" + std::to_string(i) + ",\"open\":" + std::to_string(open_index) +
+        if (read)
+            save_png(f, png);
+        events.push_back("{\"plugin\":" + std::to_string(i) +
+                         ",\"open\":" + std::to_string(open_index) +
                          ",\"event\":\"frame\",\"frame\":" + frame_json(read, f, png) + "}");
     }
 }
@@ -355,7 +401,8 @@ void open_all(std::vector<Loaded>& all, const Options& o, int open_index, std::v
 void resize_all(std::vector<Loaded>& all, const Options& o, std::vector<std::string>& events) {
     for (size_t i = 0; i < all.size(); ++i) {
         auto& L = all[i];
-        if (!L.editor) continue;
+        if (!L.editor)
+            continue;
         uint32_t w = L.editor->width + o.grow_w, h = L.editor->height + o.grow_h;
         const uint32_t req_w = w, req_h = h;
         const bool accepted = L.slot->set_hosted_editor_size(w, h);
@@ -365,32 +412,39 @@ void resize_all(std::vector<Loaded>& all, const Options& o, std::vector<std::str
         }
         std::ostringstream s;
         s << "{\"plugin\":" << i << ",\"event\":\"resize\",\"requested\":[" << req_w << "," << req_h
-          << "],\"accepted\":" << (accepted ? "true" : "false") << ",\"size\":[" << w << "," << h << "]}";
+          << "],\"accepted\":" << (accepted ? "true" : "false") << ",\"size\":[" << w << "," << h
+          << "]}";
         events.push_back(s.str());
     }
     spin(o.watch_ms);
     for (size_t i = 0; i < all.size(); ++i) {
         auto& L = all[i];
-        if (!L.editor) continue;
+        if (!L.editor)
+            continue;
         Frame f;
         const std::string png = o.out + "/editor-" + std::to_string(i) + "-resized.png";
         const bool read = read_window(L.window, f);
-        if (read) save_png(f, png);
-        events.push_back("{\"plugin\":" + std::to_string(i) + ",\"event\":\"resized-frame\",\"frame\":" +
-                         frame_json(read, f, png) + "}");
+        if (read)
+            save_png(f, png);
+        events.push_back("{\"plugin\":" + std::to_string(i) +
+                         ",\"event\":\"resized-frame\",\"frame\":" + frame_json(read, f, png) +
+                         "}");
     }
 }
 
 void close_all(std::vector<Loaded>& all, int open_index, std::vector<std::string>& events) {
     for (size_t i = 0; i < all.size(); ++i) {
         auto& L = all[i];
-        if (!L.window) continue;
+        if (!L.window)
+            continue;
         const bool had = bool(L.editor);
-        if (L.editor) L.slot->destroy_hosted_editor(std::move(L.editor));
+        if (L.editor)
+            L.slot->destroy_hosted_editor(std::move(L.editor));
         [L.window orderOut:nil];
         [L.window close];
         L.window = nil;
-        events.push_back("{\"plugin\":" + std::to_string(i) + ",\"open\":" + std::to_string(open_index) +
+        events.push_back("{\"plugin\":" + std::to_string(i) +
+                         ",\"open\":" + std::to_string(open_index) +
                          ",\"event\":\"close\",\"had_editor\":" + (had ? "true" : "false") + "}");
     }
     spin(100);
@@ -402,11 +456,13 @@ std::string dyld_census() {
     bool first = true;
     for (uint32_t i = 0; i < _dyld_image_count(); ++i) {
         const std::string path = _dyld_get_image_name(i);
-        const bool interesting = path.find(".clap/") != std::string::npos || path.find(".vst3/") != std::string::npos ||
-                                 path.find(".component/") != std::string::npos || path.find("wgpu") != std::string::npos ||
-                                 path.find("dawn") != std::string::npos || path.find("webgpu") != std::string::npos ||
-                                 path.find("skia") != std::string::npos;
-        if (!interesting) continue;
+        const bool interesting =
+            path.find(".clap/") != std::string::npos || path.find(".vst3/") != std::string::npos ||
+            path.find(".component/") != std::string::npos ||
+            path.find("wgpu") != std::string::npos || path.find("dawn") != std::string::npos ||
+            path.find("webgpu") != std::string::npos || path.find("skia") != std::string::npos;
+        if (!interesting)
+            continue;
         s << (first ? "" : ",") << quote(path);
         first = false;
     }
@@ -417,16 +473,28 @@ int parse(int argc, char** argv, Options& o) {
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&] { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
-        if (a == "--plugin") o.plugins.push_back(next());
-        else if (a == "--out") o.out = next();
-        else if (a == "--blocks") o.blocks = std::atoi(next().c_str());
-        else if (a == "--block-size") o.block_size = std::atoi(next().c_str());
-        else if (a == "--sample-rate") o.sample_rate = std::atof(next().c_str());
-        else if (a == "--opens") o.opens = std::atoi(next().c_str());
-        else if (a == "--watch-ms") o.watch_ms = std::atof(next().c_str());
-        else if (a == "--resize-by") std::sscanf(next().c_str(), "%ux%u", &o.grow_w, &o.grow_h);
-        else if (a == "--fault-null-parent") o.null_parent = true;
-        else { std::fprintf(stderr, "unknown argument: %s\n", a.c_str()); return 2; }
+        if (a == "--plugin")
+            o.plugins.push_back(next());
+        else if (a == "--out")
+            o.out = next();
+        else if (a == "--blocks")
+            o.blocks = std::atoi(next().c_str());
+        else if (a == "--block-size")
+            o.block_size = std::atoi(next().c_str());
+        else if (a == "--sample-rate")
+            o.sample_rate = std::atof(next().c_str());
+        else if (a == "--opens")
+            o.opens = std::atoi(next().c_str());
+        else if (a == "--watch-ms")
+            o.watch_ms = std::atof(next().c_str());
+        else if (a == "--resize-by")
+            std::sscanf(next().c_str(), "%ux%u", &o.grow_w, &o.grow_h);
+        else if (a == "--fault-null-parent")
+            o.null_parent = true;
+        else {
+            std::fprintf(stderr, "unknown argument: %s\n", a.c_str());
+            return 2;
+        }
     }
     if (o.plugins.empty() || o.out.empty() || o.blocks <= 0 || o.block_size <= 0 || o.opens <= 0) {
         std::fprintf(stderr, "usage: pulp-host-lane-probe --plugin BUNDLE [...] --out DIR\n");
@@ -435,11 +503,12 @@ int parse(int argc, char** argv, Options& o) {
     return 0;
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
     Options o;
-    if (int rc = parse(argc, argv, o)) return rc;
+    if (int rc = parse(argc, argv, o))
+        return rc;
     std::filesystem::create_directories(o.out);
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -450,7 +519,8 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < o.plugins.size(); ++i) {
             all[i].slot = load(o.plugins[i], all[i]);
             if (!all[i].slot) {
-                std::fprintf(stderr, "load %s failed: %s\n", o.plugins[i].c_str(), all[i].error.c_str());
+                std::fprintf(stderr, "load %s failed: %s\n", o.plugins[i].c_str(),
+                             all[i].error.c_str());
                 return 2;
             }
             if (!all[i].slot->prepare(o.sample_rate, o.block_size)) {
@@ -458,12 +528,14 @@ int main(int argc, char** argv) {
                 return 2;
             }
         }
-        spin(200);  // let asynchronous initialization land before the first render
+        spin(200); // let asynchronous initialization land before the first render
 
         std::vector<std::string> events;
         std::vector<Render> initial(all.size()), closed_before(all.size()), open_r(all.size()),
             closed_after(all.size());
-        auto raw = [&](size_t i, const char* tag) { return o.out + "/audio-" + std::to_string(i) + "-" + tag + ".f32"; };
+        auto raw = [&](size_t i, const char* tag) {
+            return o.out + "/audio-" + std::to_string(i) + "-" + tag + ".f32";
+        };
         // "initial" is the first render after instantiation. The other three
         // each follow a release + prepare, so they start from the same state
         // and differ only in whether editors were open.
@@ -496,25 +568,30 @@ int main(int argc, char** argv) {
 
         std::ostringstream doc;
         doc << "{\"schema\":" << quote(kSchema) << ",\"settings\":{\"blocks\":" << o.blocks
-            << ",\"block_size\":" << o.block_size << ",\"sample_rate\":" << o.sample_rate << ",\"opens\":" << o.opens
-            << ",\"watch_ms\":" << o.watch_ms << ",\"resize_by\":[" << o.grow_w << "," << o.grow_h
-            << "],\"fault_null_parent\":" << (o.null_parent ? "true" : "false") << "},\"plugins\":[";
+            << ",\"block_size\":" << o.block_size << ",\"sample_rate\":" << o.sample_rate
+            << ",\"opens\":" << o.opens << ",\"watch_ms\":" << o.watch_ms << ",\"resize_by\":["
+            << o.grow_w << "," << o.grow_h
+            << "],\"fault_null_parent\":" << (o.null_parent ? "true" : "false")
+            << "},\"plugins\":[";
         for (size_t i = 0; i < all.size(); ++i) {
             auto& s = *all[i].slot;
             doc << (i ? "," : "") << "{\"index\":" << i << ",\"path\":" << quote(all[i].path)
                 << ",\"format\":" << quote(all[i].format) << ",\"name\":" << quote(s.info().name)
                 << ",\"has_editor\":" << (s.has_editor() ? "true" : "false")
-                << ",\"latency_samples\":" << s.latency_samples() << ",\"parameters\":" << s.parameters().size()
+                << ",\"latency_samples\":" << s.latency_samples()
+                << ",\"parameters\":" << s.parameters().size()
                 << ",\"audio\":{\"initial\":" << render_json(initial[i], raw(i, "initial"))
                 << ",\"closed\":" << render_json(closed_before[i], raw(i, "closed"))
                 << ",\"open\":" << render_json(open_r[i], raw(i, "open"))
                 << ",\"reclosed\":" << render_json(closed_after[i], raw(i, "reclosed")) << "}}";
         }
         doc << "],\"events\":[";
-        for (size_t i = 0; i < events.size(); ++i) doc << (i ? "," : "") << events[i];
+        for (size_t i = 0; i < events.size(); ++i)
+            doc << (i ? "," : "") << events[i];
         doc << "],\"dyld_images\":" << dyld_census() << "}\n";
         std::ofstream(o.out + "/host-observation.json") << doc.str();
-        for (auto& L : all) L.slot->release();
+        for (auto& L : all)
+            L.slot->release();
     }
     std::printf("wrote %s/host-observation.json\n", o.out.c_str());
     return 0;
