@@ -103,6 +103,27 @@ if(NOT _configure_result EQUAL 0)
     message(FATAL_ERROR
         "could not configure control shipping matrix: ${_configure_output}${_configure_error}")
 endif()
+
+# The generated identity marker must stay exported under MSVC: a plain const
+# array there has internal linkage in effect and the linker drops it, so the
+# shipped artifact would carry no identity. Read what the configure generated,
+# not the helper's source text.
+file(GLOB_RECURSE _marker_sources "${_matrix_build}/*_control_shipping_marker.cpp")
+if(NOT _marker_sources)
+    message(FATAL_ERROR "the matrix configure generated no control-shipping marker source")
+endif()
+foreach(_marker_source IN LISTS _marker_sources)
+    file(READ "${_marker_source}" _marker_text)
+    string(REGEX MATCH "#if defined\\(_MSC_VER\\)\n#define PULP_SHIPPING_USED ([^\n]*)\n#else"
+        _msvc_branch "${_marker_text}")
+    if(NOT _msvc_branch)
+        message(FATAL_ERROR "${_marker_source}: no _MSC_VER branch for PULP_SHIPPING_USED")
+    endif()
+    if(NOT CMAKE_MATCH_1 STREQUAL "__declspec(dllexport)")
+        message(FATAL_ERROR
+            "${_marker_source}: MSVC marker is '${CMAKE_MATCH_1}', not __declspec(dllexport)")
+    endif()
+endforeach()
 execute_process(COMMAND "${CMAKE_COMMAND}" --build "${_matrix_build}" --config Release --parallel 4
     RESULT_VARIABLE _build_result OUTPUT_VARIABLE _build_output
     ERROR_VARIABLE _build_error)

@@ -165,6 +165,17 @@ std::size_t float_lanes() noexcept;
 
 /// Number of double lanes on the dispatched Highway target.
 std::size_t double_lanes() noexcept;
+#else
+// The scalar and Accelerate backends do not have a Highway dispatch target
+// whose lane width can be queried. Keep the backend-independent API callable
+// for those configurations; one lane is the scalar/reference width.
+inline constexpr std::size_t float_lanes() noexcept {
+    return 1;
+}
+
+inline constexpr std::size_t double_lanes() noexcept {
+    return 1;
+}
 #endif
 
 } // namespace pulp::simd

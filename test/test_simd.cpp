@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/runtime/simd.hpp>
+#include <pulp/simd/simd.hpp>
 #include <pulp/signal/simd_buffer.hpp>
 #include <algorithm>
 #include <cmath>
@@ -409,4 +410,9 @@ TEST_CASE("AlignedBuffer works with simd operations", "[simd][aligned_buffer]") 
     for (size_t i = 0; i < 256; ++i) {
         REQUIRE_THAT(dst[i], WithinAbs(static_cast<float>(i) + 1.0f, 1e-5));
     }
+}
+
+TEST_CASE("SIMD lane queries report at least one lane on every backend", "[simd]") {
+    CHECK(pulp::simd::float_lanes() >= 1);
+    CHECK(pulp::simd::double_lanes() >= 1);
 }
