@@ -13,6 +13,7 @@
 
 #include <pulp/format/aax_editor.hpp>
 #include <pulp/format/aax_model.hpp>
+#include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/view_bridge.hpp>
@@ -28,6 +29,7 @@
 
 #include <memory>
 #include <optional>
+#include <functional>
 #include <string>
 
 namespace pulp::format::aax {
@@ -131,7 +133,8 @@ private:
             return;
         }
         // Run editor automation, restore/reload, and scripted work per vsync.
-        host_->set_idle_callback(make_editor_idle_pump(*bridge_));
+        idle_pump_ = make_editor_idle_pump(*bridge_);
+        host_->set_idle_callback(idle_pump_);
 
         // Follow the host's GPU surface rather than sampling it once: on
         // Windows it does not exist until try_attach_to_parent() below. Also
@@ -156,16 +159,45 @@ private:
         host_->set_resize_callback([this, bridge_ptr](uint32_t w, uint32_t h) {
             bridge_ptr->resize(w, h);
             if (auto* view_container = GetViewContainer()) {
-                // AAX_Point's constructor follows the public field order:
-                // horizontal first, vertical second.  Passing the callback's
-                // height first made every plug-in-driven resize ask Pro Tools
-                // for a transposed frame, leaving the host window and the
-                // native surface with different dimensions (visible as a
-                // clipped/blank half in Pro Tools).
-                AAX_Point size(static_cast<float>(w), static_cast<float>(h));
+                // AAX_Point's constructor is (vertical, horizontal), despite
+                // the fields being named vert/horz.  Use the SDK's constructor
+                // order for every host resize transaction; GetViewSize below
+                // writes the named fields directly.
+                AAX_Point size(static_cast<float>(h), static_cast<float>(w));
                 view_container->SetViewSize(size);
             }
         });
+
+        // AAX does not call back into the editor when the user drags a resize
+        // affordance.  Register the editor-to-host transaction explicitly so
+        // Processor::request_editor_resize() has a live path to Pro Tools.
+        // The bridge updates its preferred size before SetViewSize because the
+        // host may synchronously query GetViewSize while applying the change.
+        processor->set_editor_resize_handler(
+            this,
+            [this, bridge_ptr](uint32_t w, uint32_t h) -> bool {
+                if (!bridge_ptr || bridge_.get() != bridge_ptr || !GetViewContainer()) {
+                    return false;
+                }
+                const bool accepted = detail::negotiate_preferred_size(
+                    *bridge_ptr, w, h,
+                    [this](uint32_t requested_width,
+                           uint32_t requested_height) -> bool {
+                        auto* container = GetViewContainer();
+                        if (!container) return false;
+                        AAX_Point size(
+                            static_cast<float>(requested_height),
+                            static_cast<float>(requested_width));
+                        return container->SetViewSize(size) == AAX_SUCCESS;
+                    });
+                if (!accepted || !host_) return false;
+                commit_editor_requested_viewport(
+                    *host_, bridge_ptr->size_hints(), w, h);
+                return true;
+            },
+            [this, bridge_ptr]() noexcept {
+                return bridge_.get() == bridge_ptr && GetViewContainer() != nullptr;
+            });
 
         // Set after attach succeeds so a failed attach never installs a
         // viewport transform on a host about to be destroyed.
@@ -231,6 +263,21 @@ private:
         return AAX_SUCCESS;
     }
 
+    /// Pro Tools drives AAX editor animation through this callback.  The
+    /// generic PluginViewHost display link is not guaranteed to run while the
+    /// host is busy or while the editor is hosted in a legacy AAX window, so
+    /// relying on it alone leaves host automation and the editor's published
+    /// modulation frame stranded in the store.  Run the same lightweight
+    /// main-thread pump used by the display-link path and invalidate the view;
+    /// the next host frame then advances the native editor's FrameClock and
+    /// paints the current modulation state.
+    AAX_Result TimerWakeup() override {
+        if (!bridge_) return AAX_SUCCESS;
+        if (idle_pump_) idle_pump_();
+        if (auto* view = bridge_->view()) view->request_repaint();
+        return AAX_SUCCESS;
+    }
+
     /// Pulp paints the editor through its own view host (Skia/Dawn or
     /// CoreGraphics), so AAX's draw pass has nothing to do.
     AAX_Result Draw(AAX_Rect* /*iDrawRect*/) override { return AAX_SUCCESS; }
@@ -273,6 +320,9 @@ private:
         // the host; the router outlives this editor, so it cannot notice.
         if (auto* model = host_model()) {
             model->release_editor_gestures();
+            if (auto* processor = model->editor_processor()) {
+                processor->set_editor_resize_handler(this, nullptr);
+            }
         }
         // Unsubscribe before the host publishes its teardown and before the
         // bridge that owns the scripted session dies.
@@ -283,6 +333,7 @@ private:
             host_->detach();
             host_.reset();
         }
+        idle_pump_ = {};
         if (bridge_) {
             bridge_->close();
             bridge_.reset();
@@ -291,6 +342,7 @@ private:
 
     std::unique_ptr<ViewBridge> bridge_;
     std::unique_ptr<view::PluginViewHost> host_;
+    std::function<void()> idle_pump_;
     view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding_;
 };
 
