@@ -80,6 +80,19 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
         PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
 
+    # The foundation layer (core/platform, core/runtime, core/simd) must not
+    # include audio, view, format or any other upper-layer header. Lexical and
+    # build-free; the self-test plants each crossing kind and must turn red.
+    add_test(NAME foundation-include-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/foundation_include_lint.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME foundation-include-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_foundation_include_lint.py")
+    set_tests_properties(foundation-include-lint foundation-include-lint-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 60)
+
     # Keep one checked-in, license-free source fixture on the same instrument
     # as the importer output gate. The companion unittest plants every lint
     # class and must turn red, so a vacuous clean fixture cannot make this gate

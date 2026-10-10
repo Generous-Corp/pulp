@@ -9,7 +9,7 @@
 //
 // AndroidManifest-level wiring lives in android/app/src/main/kotlin/
 // com/pulp/audio/PulpAudioFocus.kt, which forwards events over JNI
-// (core/platform/src/android/jni_bridge.cpp) into this registry.
+// (core/audio/platform/android/audio_jni.cpp) into this registry.
 //
 // Listeners subscribe with an RAII token. The publish path is lock-free
 // on the hot side (atomic snapshot); subscribe/unsubscribe take a mutex
