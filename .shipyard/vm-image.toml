@@ -18,18 +18,37 @@ base       = "ghcr.io/cirruslabs/macos-tahoe-base:latest"
 disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
+# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
+# source_sha256 = 5ad0999ed1dbbc45c11de55ec210ddd8ff46367152eaec6e01077557323708c2
+# generated_platform = macos
 [toolchain]
-# Pin Xcode in-image so font/raster goldens are reproducible. Prefer copying a
-# host-installed Xcode (tart-provision PULP_HOST_XCODE_APP) over an in-guest
-# xcodes download (interactive 2FA).
 xcode = "26.5"
+cmake = "4.4.3"
+ninja = "homebrew"
+python = "3.12"
+node = "26.10.0"
+rust = "1.98.1"
+tart = "2.38.0"
+clang_format = "required"
+rust_targets = ["x86_64-apple-darwin"]
 
 [brew]
-# Tier 0 universal CI tooling + Tier 2 Pulp build deps.
 packages = [
-  "git", "gh", "rsync", "ccache", "jq", "coreutils", "tailscale",  # tier 0
-  "cmake", "ninja", "python@3.12",                                  # tier 2
+  "git",
+  "gh",
+  "rsync",
+  "ccache",
+  "jq",
+  "coreutils",
+  "tailscale",
+  "cmake",
+  "ninja",
+  "node",
+  "python@3.12",
+  "rustup",
+  "clang-format",
 ]
+# END GENERATED PULP TOOLCHAIN
 
 [pip]
 # Visual-harness / screenshot tooling.

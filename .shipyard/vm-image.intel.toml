@@ -22,20 +22,37 @@ base       = "pulp-build-runner:latest"
 disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
+# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
+# source_sha256 = 5ad0999ed1dbbc45c11de55ec210ddd8ff46367152eaec6e01077557323708c2
+# generated_platform = macos
 [toolchain]
-# The Rust CLI (`pulp`) is cross-built for Intel via
-# PULP_RUST_CLI_TARGET=x86_64-apple-darwin, so the golden needs rustup + that
-# target. Xcode is inherited from the base golden (do NOT re-declare it here —
-# that would trigger a multi-hour Xcode re-provision).
-rust         = true
+xcode = "26.5"
+cmake = "4.4.3"
+ninja = "homebrew"
+python = "3.12"
+node = "26.10.0"
+rust = "1.98.1"
+tart = "2.38.0"
+clang_format = "required"
 rust_targets = ["x86_64-apple-darwin"]
-# Rosetta 2 so the cross-built x86_64 binary can be RUN in-guest for the smoke
-# (`arch -x86_64 build-x64/pulp help`).
-rosetta      = true
 
-# NOTE on Skia: the base golden bakes ARM64 Skia. The cross-build recipe
-# (intel-vm-cross-build.sh) fetches the x86_64 Skia slice per build AND clears
-# external/skia-build/build first — setup.sh --ci prefetches arm64 Skia and the
-# flatten step won't clobber it, so an un-cleared tree fails x86_64 FindSkia.
-# We deliberately do NOT bake x86_64 Skia into the golden (keeps it lean; the
-# per-build fetch is fast and always matches the pinned manifest).
+[brew]
+packages = [
+  "git",
+  "gh",
+  "rsync",
+  "ccache",
+  "jq",
+  "coreutils",
+  "tailscale",
+  "cmake",
+  "ninja",
+  "node",
+  "python@3.12",
+  "rustup",
+  "clang-format",
+]
+# END GENERATED PULP TOOLCHAIN
+
+# Intel cross-build requires Rosetta in the ARM64 guest.
+rosetta = true

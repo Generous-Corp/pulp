@@ -1,0 +1,31 @@
+# Pulp host and golden toolchain authority. Generated consumers carry this digest.
+schema = 1
+
+[toolchain]
+xcode = "26.5"
+cmake = "4.4.3"
+ninja = "homebrew"
+python = "3.12"
+node = "26.10.0"
+rust = "1.98.1"
+rust_targets = ["x86_64-apple-darwin"]
+tart = "2.38.0"
+clang_format = "required"
+
+[platform.linux]
+cmake = "system"
+python = "3.12"
+node = "26.10.0"
+rust = "absent"
+
+[platform.windows]
+cmake = "system"
+python = "3.12"
+node = "26.10.0"
+rust = "absent"
+
+
+[packages]
+brew = ["git", "gh", "rsync", "ccache", "jq", "coreutils", "tailscale", "cmake", "ninja", "node", "python@3.12", "rustup", "clang-format"]
+apt = ["build-essential", "cmake", "ninja-build", "git", "pkg-config", "ccache", "python3", "python3-pip"]
+choco = ["git", "cmake", "ninja", "python3"]
