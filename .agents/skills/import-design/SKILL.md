@@ -527,6 +527,16 @@ knowing before you touch that file:
   Production native promotion is disabled; `threshold_eligible` is advisory
   evidence only. See `docs/tools/importer-differential-lab.md`.
 
+- `pulp-design-ir-observe` replays input headlessly: ordered `--click x,y`,
+  `--drag x1,y1:x2,y2` and `--key <name>` (`tab`/`shift+tab` traverse focus
+  as the window hosts do; other keys go to the focused view) run after layout
+  and BEFORE the render, so the PNG shows the post-interaction state. Steps
+  require `--interaction-log <json>`; the log records per step the hit
+  target's anchor and child-index path, `handled`, focus, and tree-ordered
+  control state. Two gotchas: a bare click never moves a knob (drag does),
+  and anchors are not unique — the figma-plugin scene fixture gives three
+  siblings one `stable_anchor_id` — so compare by `path`, not by anchor.
+
 **The lane that works (Figma is the source of truth):**
 ```bash
 # 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).

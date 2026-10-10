@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-design-ir-observe-interactions-watch",
+  "created_at": "2026-10-10T18:00:53Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Adds headless pointer/keyboard replay (--click/--drag/--key plus a required --interaction-log) to the development-only pulp-design-ir-observe tool and a checked-in controls DesignIR test fixture. The observer only reads an existing DesignIR and records replay outcomes; no importer, DesignIR schema, Chromium capture, rendering, or packaging behavior changes, and no design-import, Chromium, rendering, or packaging authority moves. It supplies the Pulp-side observation used by the Vellum parity harness under the 2026-10-04 temporary Pulp exception.",
+  "tests": [
+    "python3 test/test_design_ir_observe_interactions.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
