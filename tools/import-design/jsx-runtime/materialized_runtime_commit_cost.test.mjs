@@ -13,9 +13,9 @@ import { buildMaterializedRuntimeEntry } from './materialized_runtime_entry.mjs'
 // would flake on a shared runner and could not say which cost regressed.
 
 // Native bridge functions the entry calls while mounting its behavior root.
-const BRIDGE_STUBS = ['createCol', 'setPosition', 'setLeft', 'setTop', 'setFlex',
+const BRIDGE_STUBS = ['createCol', 'createImage', 'setPosition', 'setLeft', 'setTop', 'setFlex',
   'setVisible', 'setOpacity', 'setPointerEvents', 'setZIndex',
-  'setTransformOrigin', 'setTransform'];
+  'setTransformOrigin', 'setTransform', 'setObjectFit', 'setImageSource'];
 
 // The entry is an ES module whose only imports are React and the native
 // renderer. Replacing those two lines with stubs lets the rest of the module
@@ -24,14 +24,15 @@ const BRIDGE_STUBS = ['createCol', 'setPosition', 'setLeft', 'setTop', 'setFlex'
 // is deliberate: a declaration placed in the wrong function body still parses.
 function evaluateEntry({ layoutBindings = [], registryNodes = [],
                          textBindings = [], paintBindings = [], stateAtlas = [],
-                         bridge = {} }) {
+                         bridge = {}, productPrelude = '',
+                         visualAuthority = null }) {
   const source = buildMaterializedRuntimeEntry({
     capturedCssVariables: {}, presentationTime: 0, requestedState: '',
     textBindings, layoutBindings, paintBindings,
-    runtimeDocumentAsset: null, sidecar: null, productPrelude: '',
+    runtimeDocumentAsset: null, sidecar: null, productPrelude,
     surfaceBackground: null, authoredLeft: 0, authoredTop: 0,
     authoredWidth: 100, authoredHeight: 100, authoredTransform: null,
-    visualAuthority: null, stateAtlas, visualWidth: 100, visualHeight: 100,
+    visualAuthority, stateAtlas, visualWidth: 100, visualHeight: 100,
     canvasBindings: [], behaviorCanvasAnchors: [],
     capturedPaintAuthorityAnchors: [],
   }).replace(/^import .*$/gm, '');
@@ -86,6 +87,27 @@ function flatLayoutBindings(count, registrySize) {
   }
   return bindings;
 }
+
+test('explicit state resolver selects and paints a captured reference state', () => {
+  const calls = [];
+  const sandbox = evaluateEntry({
+    visualAuthority: 'reference',
+    stateAtlas: [{ id: 'home', image: 'home.png', match: null, activate: [] }],
+    productPrelude: "globalThis.__pulpMaterializedStateResolver__ = () => 'home';",
+    bridge: {
+      setImageSource: (id, image) => calls.push(['image', id, image]),
+      setVisible: (id, visible) => calls.push(['visible', id, visible]),
+    },
+  });
+
+  assert.equal(sandbox.__pulpRefreshMaterializedState__(), 'home');
+  assert.deepEqual(calls, [
+    ['visible', '__pulp_materialized_behavior__', true],
+    ['visible', '__pulp_materialized_state_home', false],
+    ['image', '__pulp_materialized_state_home', 'home.png'],
+    ['visible', '__pulp_materialized_state_home', true],
+  ]);
+});
 
 // One application reads each registry node's parent once for the shared index,
 // plus once per resolved binding when translating that node's coordinate space.
