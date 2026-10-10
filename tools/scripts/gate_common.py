@@ -42,10 +42,8 @@ from typing import Iterable, Literal
 _USES_DIFF_LINE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*\S+(?:\s+#.*)?\s*$")
 
 
-def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | None = None) -> bool:
-    """Allow only a Dependabot workflow diff whose changed lines are ``uses:``."""
-    if (actor if actor is not None else os.environ.get("GITHUB_ACTOR", "")) != "dependabot[bot]":
-        return False
+def workflow_uses_only_diff(base: str, head: str = "HEAD") -> bool:
+    """Return true for a workflow-only patch whose changed lines are ``uses:``."""
     result = subprocess.run(
         ["git", "diff", "--no-ext-diff", "--unified=0", f"{base}...{head}", "--", ".github/workflows"],
         capture_output=True, text=True, encoding="utf-8",
@@ -67,6 +65,13 @@ def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | Non
             return False
         saw_changed_line = True
     return saw_changed_line
+
+
+def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | None = None) -> bool:
+    """Allow the workflow-only shape only when GitHub identifies Dependabot."""
+    if (actor if actor is not None else os.environ.get("GITHUB_ACTOR", "")) != "dependabot[bot]":
+        return False
+    return workflow_uses_only_diff(base, head)
 
 
 # ── Git helpers ─────────────────────────────────────────────────────────

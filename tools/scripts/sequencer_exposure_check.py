@@ -17,7 +17,7 @@ from gate_common import (
     git_comparison_receipt,
     read_git_path,
     resolve_git_comparison,
-    dependabot_uses_only_diff,
+    workflow_uses_only_diff,
 )
 
 
@@ -1932,8 +1932,8 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root, comparison_base, changed_paths,
                 comparison.resolved_head or "HEAD",
             )
-            if dependabot_uses_only_diff(args.base, comparison.resolved_head or "HEAD"):
-                # A Dependabot action bump has no sequencer semantic change,
+            if workflow_uses_only_diff(args.base, comparison.resolved_head or "HEAD"):
+                # An action-only workflow bump has no sequencer semantic change,
                 # even when a workflow filename contains timeline/playback.
                 changed_paths = []
                 trailer_ids, semantic_paths, mechanical_paths = [], set(), set()
