@@ -12,7 +12,8 @@ namespace pulp::view {
 namespace {
 
 constexpr size_t runtime_view_kind_count = 7;
-std::array<std::atomic<ContinuousFramePredicate>, runtime_view_kind_count> predicates{};
+std::array<std::atomic<ContinuousFramePredicate>, runtime_view_kind_count>
+    predicates{};
 
 size_t predicate_index(RuntimeViewKind kind) {
     return static_cast<size_t>(kind);
@@ -20,10 +21,10 @@ size_t predicate_index(RuntimeViewKind kind) {
 
 } // namespace
 
-void register_continuous_frame_predicate(RuntimeViewKind kind, ContinuousFramePredicate predicate) {
+void register_continuous_frame_predicate(RuntimeViewKind kind,
+                                          ContinuousFramePredicate predicate) {
     const auto index = predicate_index(kind);
-    if (index < predicates.size())
-        predicates[index].store(predicate);
+    if (index < predicates.size()) predicates[index].store(predicate);
 }
 
 bool needs_continuous_frames(const View* view) {
@@ -61,8 +62,7 @@ bool needs_continuous_frames(const View* view) {
         break;
     case RuntimeViewKind::eq_curve: {
         if (const auto predicate = predicates[predicate_index(RuntimeViewKind::eq_curve)].load();
-            predicate && predicate(view))
-            return true;
+            predicate && predicate(view)) return true;
         break;
     }
     default:
