@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4300,
+  "total": 4299,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
