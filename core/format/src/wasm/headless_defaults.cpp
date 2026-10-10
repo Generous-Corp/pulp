@@ -24,9 +24,8 @@
 //
 // On completeness, measured rather than assumed: DEFINING one of these methods
 // as `return nullptr;` does NOT require the type to be complete. The native
-// pulp-format-core builds `Processor::create_view()` in format.cpp against
-// nothing but processor.hpp's forward declaration, which is exactly what keeps
-// that target free of the view layer. What DOES require completeness is
+// Native pulp-format-core builds `Processor::create_view()` in format.cpp
+// without needing the complete view type. What DOES require completeness is
 // CALLING such a method, because the caller destroys the returned
 // unique_ptr and ~unique_ptr instantiates the deleter:
 //
