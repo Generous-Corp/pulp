@@ -247,6 +247,12 @@
       ]
     },
     {
+      "name": "dsp-capability-registry-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_dsp_capability_registry.py"
+      ]
+    },
+    {
       "name": "dsp-provenance-audit-selftest",
       "argv": [
         "{repo}/tools/scripts/test_dsp_provenance_audit.py"
@@ -817,6 +823,12 @@
       ]
     },
     {
+      "name": "rust-cli-build-edge-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_rust_cli_build_edge_check.py"
+      ]
+    },
+    {
       "name": "sample-region-compat-baseline-selftest",
       "argv": [
         "{repo}/tools/scripts/test_sample_region_compat_baseline.py"
@@ -941,6 +953,18 @@
       "name": "tmp-leak-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_tmp_leak_guard.py"
+      ]
+    },
+    {
+      "name": "toolchain-generate-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_generate.py"
+      ]
+    },
+    {
+      "name": "toolchain-mise-profile-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_mise_profile.py"
       ]
     },
     {

@@ -2850,7 +2850,6 @@
   "pulp-test-synthesiser",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
-  "pulp-test-threejs-bridge",
   "pulp-test-tilt-eq",
   "pulp-test-tilt-eq-no-exceptions",
   "pulp-test-timebase-groove-kernels",
@@ -4395,6 +4394,18 @@
     "tools/ci/drift_fast.py",
     "tools/ci/test_drift_fast.py",
     "tools/scripts/hydrate_gpu_provenance_commits.py"
+   ],
+   "kind": "python"
+  },
+  "dsp-capability-registry-selftest": {
+   "entry": "tools/scripts/test_dsp_capability_registry.py",
+   "inputs": [
+    "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
+    "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+    "core/host/src/forge_dynamics_catalog.cpp",
+    "docs/status/dsp-capabilities.json",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/test_dsp_capability_registry.py"
    ],
    "kind": "python"
   },
@@ -9399,6 +9410,24 @@
     "test/test_tool_registry_reminder_hook.sh"
    ],
    "kind": "shell"
+  },
+  "toolchain-generate-selftest": {
+   "entry": "tools/toolchain/test_generate.py",
+   "inputs": [
+    "tools/toolchain",
+    "tools/toolchain/generate.py",
+    "tools/toolchain/manifest.toml",
+    "tools/toolchain/test_generate.py"
+   ],
+   "kind": "python"
+  },
+  "toolchain-mise-profile-selftest": {
+   "entry": "tools/toolchain/test_mise_profile.py",
+   "inputs": [
+    "tools/ci",
+    "tools/toolchain/test_mise_profile.py"
+   ],
+   "kind": "python"
   },
   "tools-registry-check": {
    "entry": "tools/scripts/tools_registry_check.py",
