@@ -166,6 +166,12 @@ pulp_add_test_suite(pulp-test-state
     SOURCES test_state.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state pulp::events)
 
+add_test(
+    NAME pulp-state-link-closure
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/core/state/pulp_state_link_closure.cmake
+)
+set_tests_properties(pulp-state-link-closure PROPERTIES LABELS "validation;state;link-closure")
+
 # The one parameter payload (param_json) and the pin that keeps its wire field
 # set from drifting — the bridge and the inspector both serialize through it.
 pulp_add_test_suite(pulp-test-param-json GROUP pulp-test-group-cap-state

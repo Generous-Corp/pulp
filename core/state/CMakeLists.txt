@@ -49,8 +49,3 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/pulp_state_link_closure.cmake
     @ONLY
 )
-add_test(
-    NAME pulp-state-link-closure
-    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/pulp_state_link_closure.cmake
-)
-set_tests_properties(pulp-state-link-closure PROPERTIES LABELS "validation;state;link-closure")
