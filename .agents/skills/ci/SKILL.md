@@ -115,6 +115,13 @@ same rule. Keep their target lists and build directories unchanged, but route
 both `cmake --build` invocations through `tools/ci/governed-build.sh`; the
 governor owns the worker share on every runner.
 
+The Android fixture workflow follows the same rule for its cross-compiled
+headless runners. Keep the NDK toolchain, API floor, build directory, and
+`pulp-fixture-runner`/`pulp-android-fixture-runner` target list unchanged, but
+route the build through `tools/ci/governed-build.sh` without an explicit
+`--parallel` cap. The governor owns the worker share and build-directory lock;
+the emulator and fixture execution steps remain separate.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 ### Build commands emitted by diagnostics and remediations

@@ -60,6 +60,22 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_android_fixture_build_uses_governor(self) -> None:
+        source = read_source(".github/workflows/android.yml")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build-android-fixtures",
+            build_lines[0],
+        )
+        self.assertNotRegex(
+            build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
+
     def test_macos_retarget_build_uses_governor_inside_untrusted_runner(self) -> None:
         source = read_source(".github/workflows/build-macos.yml")
         self.assertIn(

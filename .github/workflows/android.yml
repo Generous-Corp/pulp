@@ -357,7 +357,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF
-          cmake --build build-android-fixtures --parallel 2 --target \
+          tools/ci/governed-build.sh cmake --build build-android-fixtures --target \
             pulp-fixture-runner pulp-android-fixture-runner
 
       - name: Create and boot x86_64 emulator
