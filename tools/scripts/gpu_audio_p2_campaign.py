@@ -25,6 +25,10 @@ LEADS = (1, 2, 4, 8)
 RUNS_PER_KIND = 5
 REQUIRED_MEASURED_BLOCKS = 100_000
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+UTC_MEASURED_RE = re.compile(
+    r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DRIVER_PATH = Path(__file__).resolve()
 DRIVER_RELATIVE_PATH = Path("tools/scripts/gpu_audio_p2_campaign.py")
@@ -149,6 +153,31 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _matches_sha256(path: Path | None, expected: Any) -> bool:
+    if path is None or not path.is_file() or path.is_symlink() \
+            or not isinstance(expected, str) or SHA256_RE.fullmatch(expected) is None:
+        return False
+    try:
+        return sha256(path) == expected
+    except OSError:
+        return False
+
+
+def _inside_repo_regular(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        resolved = path.resolve(strict=True)
+        root = REPO_ROOT.resolve(strict=True)
+        if root not in resolved.parents:
+            return None
+        return resolved
+    except OSError:
+        return None
+
+
 def validate_host_preflight(path: Path, expected_source_revision: str,
                             max_age_seconds: int = 900) -> dict[str, Any]:
     """Require a fresh, quiet, source-bound host admission receipt.
@@ -178,6 +207,56 @@ def validate_host_preflight(path: Path, expected_source_revision: str,
         "thermal": isinstance(receipt.get("thermal_state"), str)
         and bool(receipt["thermal_state"].strip()),
     }
+    gpu_observation = receipt.get("gpu_health_observation")
+    gpu_source = receipt.get("gpu_health_source")
+    observation = (gpu_observation.get("observation")
+                   if isinstance(gpu_observation, dict) else None)
+    adapter = observation.get("adapter") if isinstance(observation, dict) else None
+    source_path = Path(gpu_source.get("path")) if isinstance(gpu_source, dict) and isinstance(
+        gpu_source.get("path"), str) else None
+    manifest_path = Path(gpu_source.get("manifest_path")) if isinstance(gpu_source, dict) and isinstance(
+        gpu_source.get("manifest_path"), str) else None
+    source_resolved = _inside_repo_regular(source_path)
+    manifest_resolved = _inside_repo_regular(manifest_path)
+    manifest_source = None
+    build_root = None
+    if manifest_resolved is not None:
+        try:
+            manifest_text = manifest_resolved.read_text(encoding="utf-8")
+            match = re.search(r'kGitSha\s*=\s*"([0-9a-f]{40})"', manifest_text)
+            manifest_source = match.group(1) if match else None
+            # .../core/runtime/generated/Release/pulp/runtime/build_info.hpp
+            if len(manifest_resolved.parents) > 6:
+                build_root = manifest_resolved.parents[6]
+        except (OSError, UnicodeError):
+            manifest_source = None
+    required["gpu_health"] = (
+        isinstance(gpu_observation, dict) and gpu_observation.get("status") == "valid"
+        and isinstance(observation, dict)
+        and observation.get("status") == "valid"
+        and observation.get("schema") == "pulp.gpu-health-result.v2"
+        and isinstance(observation.get("run_id"), str) and bool(observation["run_id"].strip())
+        and observation.get("probe_id") == "gpu-compute-magnitude"
+        and isinstance(adapter, dict) and adapter.get("status") == "authentic"
+        and adapter.get("class") == "hardware"
+        and all(isinstance(adapter.get(key), str) and adapter[key]
+                for key in ("name", "backend", "device"))
+        and isinstance(observation.get("measured_at_utc"), str)
+        and UTC_MEASURED_RE.fullmatch(observation["measured_at_utc"]) is not None
+        and isinstance(observation.get("measurements"), dict)
+        and observation["measurements"].get("compute_initialized") is True
+        and observation["measurements"].get("compute_oracle_passed") is True
+        and observation["measurements"].get("device_lost") is False
+    )
+    required["gpu_build_identity"] = (
+        isinstance(gpu_source, dict) and gpu_source.get("status") == "valid"
+        and gpu_source.get("source_revision") == expected_source_revision
+        and source_resolved is not None and manifest_resolved is not None
+        and manifest_source == expected_source_revision
+        and build_root is not None and build_root in source_resolved.parents
+        and _matches_sha256(source_path, gpu_source.get("sha256"))
+        and _matches_sha256(manifest_path, gpu_source.get("manifest_sha256"))
+    )
     sampled_at = receipt.get("sampled_at")
     try:
         sampled_epoch = datetime.fromisoformat(sampled_at.replace("Z", "+00:00")).timestamp()
@@ -185,6 +264,15 @@ def validate_host_preflight(path: Path, expected_source_revision: str,
         raise RuntimeError("host preflight sampled_at must be an ISO-8601 timestamp") from exc
     now = time.time()
     required["fresh"] = 0 <= now - sampled_epoch <= max_age_seconds
+    nested_timestamp = observation.get("measured_at_utc") if isinstance(observation, dict) else None
+    try:
+        nested_epoch = datetime.fromisoformat(nested_timestamp.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        nested_epoch = None
+    required["gpu_health_fresh"] = (
+        nested_epoch is not None and 0 <= now - nested_epoch <= 30
+        and sampled_epoch - max_age_seconds <= nested_epoch <= sampled_epoch + 1
+    )
     failed = [name for name, ok in required.items() if not ok]
     if failed:
         raise RuntimeError(f"host preflight failed: {', '.join(failed)}")
