@@ -134,6 +134,7 @@ public:
     std::vector<AAX_CProcPtrID> proc_ids;
     std::vector<std::unique_ptr<FakeComponentDescriptor>> components_;
     std::vector<std::unique_ptr<FakePropertyMap>> maps_;
+    FakePropertyMap* effect_properties = nullptr;
 
     AAX_IComponentDescriptor* NewComponentDescriptor() override {
         components_.push_back(std::make_unique<FakeComponentDescriptor>());
@@ -152,7 +153,10 @@ public:
         maps_.push_back(std::make_unique<FakePropertyMap>());
         return maps_.back().get();
     }
-    AAX_Result SetProperties(AAX_IPropertyMap*) override { return AAX_SUCCESS; }
+    AAX_Result SetProperties(AAX_IPropertyMap* properties) override {
+        effect_properties = static_cast<FakePropertyMap*>(properties);
+        return AAX_SUCCESS;
+    }
     AAX_Result AddResourceInfo(AAX_EResourceType, const char*) override { return AAX_SUCCESS; }
     AAX_Result AddMeterDescription(AAX_CTypeID, const char*, AAX_IPropertyMap*) override { return AAX_SUCCESS; }
     AAX_Result AddControlMIDINode(AAX_CTypeID, AAX_EMIDINodeType, const char[], uint32_t) override {
@@ -246,6 +250,30 @@ TEST_CASE("AAX component properties identify the GUI lane and data-model placeme
     REQUIRE(property_value(gui_props, AAX_eProperty_UsesClientGUI) == 0);
     REQUIRE(property_value(gui_props, AAX_eProperty_Constraint_Location)
             == AAX_eConstraintLocationMask_DataModel);
+}
+
+TEST_CASE("AAX host-generated GUI request is only set for the strip lane", "[aax][entry]") {
+    FakeCollection strip;
+    REQUIRE(default_entry::GetEffectDescriptions(&strip) == AAX_SUCCESS);
+    REQUIRE(strip.descriptor.effect_properties != nullptr);
+    REQUIRE(strip.descriptor.effect_properties->properties.size() == 3);
+    const auto strip_gui = std::find_if(strip.descriptor.effect_properties->properties.begin(),
+                                        strip.descriptor.effect_properties->properties.end(),
+                                        [](const auto& item) {
+                                            return item.first == AAX_eProperty_UsesClientGUI;
+                                        });
+    REQUIRE(strip_gui != strip.descriptor.effect_properties->properties.end());
+    REQUIRE(strip_gui->second == 1);
+
+    FakeCollection gui;
+    REQUIRE(gui_entry::GetEffectDescriptions(&gui) == AAX_SUCCESS);
+    REQUIRE(gui.descriptor.effect_properties != nullptr);
+    const auto gui_host_request = std::find_if(gui.descriptor.effect_properties->properties.begin(),
+                                               gui.descriptor.effect_properties->properties.end(),
+                                               [](const auto& item) {
+                                                   return item.first == AAX_eProperty_UsesClientGUI;
+                                               });
+    REQUIRE(gui_host_request == gui.descriptor.effect_properties->properties.end());
 }
 
 TEST_CASE("the entry macros differ only in the editor proc", "[aax][entry]") {

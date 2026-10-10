@@ -1285,12 +1285,13 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
             return status;
         }
         // A no-GUI entry deliberately uses Pro Tools' host-generated
-        // parameter strip. Advertise that choice explicitly so Pro Tools does
-        // not create a client-widget batcher for a component that registered
-        // no AAX_EffectGUI proc (which otherwise leaves teardown in the host's
-        // GUI manager even though the plug-in is parameter-strip only).
+        // parameter strip. The property is a request for the host-generated
+        // GUI (despite its historical name), so it must be true when the
+        // custom EffectGUI proc is absent. A custom-editor entry leaves this
+        // effect-level property unset and advertises UsesClientGUI = 0 on its
+        // process property map below.
         if (!create_gui_proc) {
-            if (auto status = effect_properties->AddProperty(AAX_eProperty_UsesClientGUI, 0);
+            if (auto status = effect_properties->AddProperty(AAX_eProperty_UsesClientGUI, 1);
                 status != AAX_SUCCESS)
             {
                 return status;
