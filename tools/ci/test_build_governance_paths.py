@@ -316,6 +316,12 @@ class BuildGovernancePathTests(unittest.TestCase):
                 line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
             )
 
+    def test_sdk_consumer_sweep_build_uses_governor_and_job_cap(self) -> None:
+        source = read_source("tools/scripts/sdk_consumer_sweep.py")
+        self.assertIn('REPO / "tools" / "ci" / "governed-build.sh"', source)
+        self.assertIn('"PULP_BUILD_JOBS": str(jobs)', source)
+        self.assertNotIn('"-j", str(jobs)', source)
+
 
 if __name__ == "__main__":
     unittest.main()
