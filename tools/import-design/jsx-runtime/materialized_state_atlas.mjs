@@ -32,6 +32,11 @@ export function canonicalizeCanvasAuthorityMatches(
     throw new Error('canvas authority requires at least one state');
   if (!Array.isArray(canvasBindings) || canvasBindings.length === 0)
     throw new Error('canvas authority requires one or more canvas bindings');
+  const implicitStates = states.filter((state) => !state.match);
+  if (implicitStates.length > 1) {
+    throw new Error(
+      'canvas authority requires one implicit state or explicit canvas matches');
+  }
   for (const [index, binding] of canvasBindings.entries()) {
     if (!binding || typeof binding !== 'object' ||
         typeof binding.anchor !== 'string' ||
@@ -39,9 +44,16 @@ export function canonicalizeCanvasAuthorityMatches(
       throw new Error(`canvas authority binding ${index} is invalid`);
     }
   }
-  return states.map((state) => state.match ? state : {
-    ...state,
-    match: { selector: 'canvas', ancestor: '' },
+  return states.map((state, index) => {
+    if (!state.match) {
+      return { ...state, match: { selector: 'canvas', ancestor: '' } };
+    }
+    if (state.match.selector !== 'canvas' ||
+        (state.match.ancestor !== undefined && state.match.ancestor !== '')) {
+      throw new Error(
+        `canvas authority state ${index} must use the registered canvas selector`);
+    }
+    return state;
   });
 }
 

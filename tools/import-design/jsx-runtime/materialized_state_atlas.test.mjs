@@ -49,17 +49,25 @@ test('canonicalizes opt-in captured canvas authority to the registered canvas', 
     { enabled: true });
   assert.deepEqual(states[0].match, { selector: 'canvas', ancestor: '' });
   assert.deepEqual(canonicalizeCanvasAuthorityMatches(
-    [{ id: 'menu', match: { selector: '[aria-expanded="true"]' } }],
+    [{ id: 'menu', match: { selector: 'canvas' } }],
     [{ anchor: 'chromium:backend-node:111' }],
-    { enabled: true })[0].match, { selector: '[aria-expanded="true"]' });
+    { enabled: true })[0].match, { selector: 'canvas' });
 });
 
 test('captured canvas authority fails closed without valid canvas metadata', () => {
   assert.throws(() => canonicalizeCanvasAuthorityMatches(
     [{ id: 'home' }], [], { enabled: true }), /one or more canvas bindings/);
   assert.throws(() => canonicalizeCanvasAuthorityMatches(
+    [{ id: 'home' }, { id: 'other' }],
+    [{ anchor: 'chromium:backend-node:111' }], { enabled: true }),
+  /one implicit state or explicit canvas matches/);
+  assert.throws(() => canonicalizeCanvasAuthorityMatches(
     [{ id: 'home' }], [{ anchor: '#root' }], { enabled: true }),
   /canvas authority binding 0 is invalid/);
+  assert.throws(() => canonicalizeCanvasAuthorityMatches(
+    [{ id: 'home', match: { selector: '#root' } }],
+    [{ anchor: 'chromium:backend-node:111' }], { enabled: true }),
+  /must use the registered canvas selector/);
   assert.deepEqual(canonicalizeCanvasAuthorityMatches(
     [{ id: 'home' }], [], { enabled: false }), [{ id: 'home' }]);
 });
