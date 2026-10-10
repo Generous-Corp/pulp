@@ -18,6 +18,7 @@ pulp_add_plugin(<target>
     CATEGORY        <Effect|Instrument|MidiEffect>
     ACCEPTS_MIDI
     NATIVE_UI
+    NO_EDITOR
     PLUGIN_CODE     <4-char>
     MANUFACTURER_CODE <4-char>
     AAX_PRODUCT_CODE <4-char>
@@ -48,6 +49,7 @@ pulp_add_plugin(<target>
 | `CATEGORY` | No | `"Effect"` | Plugin category: `Effect`, `Instrument`, or `MidiEffect` |
 | `ACCEPTS_MIDI` | No | Off | Mirrors `PluginDescriptor::accepts_midi` for package metadata. AU v2/AUv3 effects that accept MIDI need this so Pulp emits a MIDI-routable component type (`aumf`) instead of an audio-only effect (`aufx`). MIDI output is controlled by `PluginDescriptor::produces_midi`; there is no `pulp_add_plugin(PRODUCES_MIDI)` flag. |
 | `NATIVE_UI` | No | Off | Link the native scripted Skia/Dawn view composition (`Pulp::view-native` and, for Standalone, `Pulp::standalone-native`) without WebView/WebKit. `ScriptedUiSession`, `WidgetBridge`, and `@pulp/react` remain available. Omit this for editors that instantiate `WebViewPanel`; the existing WebView-capable targets remain the default. |
+| `NO_EDITOR` | No | Off | Editor-less (audio-only) plug-in. VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core` (CLAP also `Pulp::format-clap-core`, the adapter without its GUI extension) instead of the format + view umbrella, so the image carries no view, canvas, render, Skia, Dawn or wgpu code and stages no GPU runtime. The plug-in exposes no editor (Pulp's generated AutoUI editor is not built in); hosts show their generic parameter UI. The processor must not override `create_view()`. Cannot be combined with `NATIVE_UI` or `UI_SCRIPT`. Standalone, AUv3 and AAX outputs keep the default view-linked path. |
 | `PLUGIN_CODE` | AU/AUv3 only | -- | 4-character AU plugin code |
 | `MANUFACTURER_CODE` | AU/AUv3/AAX only | -- | 4-character manufacturer code used by AU, AUv3, and AAX |
 | `AAX_PRODUCT_CODE` | AAX only | -- | 4-character stable AAX product identifier |

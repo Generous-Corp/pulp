@@ -54,6 +54,11 @@ list(APPEND PULP_SDK_TARGETS
 if(TARGET pulp-audio-analysis)
     list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)
 endif()
+# The view-free CLAP adapter behind pulp_add_plugin(NO_EDITOR); present only
+# when the CLAP SDK is.
+if(TARGET pulp-format-clap-core)
+    list(APPEND PULP_SDK_TARGETS pulp-format-clap-core)
+endif()
 
 # pulp-view-script (the JS scripting + web-compat layer) is EXCLUDE_FROM_ALL
 # when PULP_ENABLE_JS=OFF (native-only build), so it is never built. Exporting
@@ -918,6 +923,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_no_editor.cpp"
     DESTINATION src/pulp/format
 )
 

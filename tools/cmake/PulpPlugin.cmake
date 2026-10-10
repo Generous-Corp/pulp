@@ -53,7 +53,7 @@ endif()
 #
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;NATIVE_UI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
+        "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
@@ -91,6 +91,33 @@ function(pulp_add_plugin target)
         set(_plugin_accepts_midi "1")
     else()
         set(_plugin_accepts_midi "0")
+    endif()
+
+    # NO_EDITOR: an editor-less plug-in. Its VST3, CLAP, AU v2 and LV2 modules
+    # link pulp::format-core (and the view-free CLAP adapter) instead of the
+    # format + view umbrella, so the image carries no view, canvas, render,
+    # Skia, Dawn or wgpu code and stages no GPU runtime. The processor must not
+    # override create_view(); if it does, the link fails on the view symbols.
+    # Standalone, AUv3 and AAX still link the view stack: a standalone app and
+    # an app-extension host need a window, and the AAX GUI glue is not split.
+    if(PLUGIN_NO_EDITOR)
+        if(PLUGIN_NATIVE_UI OR PLUGIN_UI_SCRIPT)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): NO_EDITOR cannot be combined with NATIVE_UI or UI_SCRIPT")
+        endif()
+        if(NOT _PULP_FORMAT_CORE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target} NO_EDITOR): this Pulp SDK does not export Pulp::format-core")
+        endif()
+        if("CLAP" IN_LIST PLUGIN_FORMATS AND PULP_HAS_CLAP AND NOT _PULP_FORMAT_CLAP_CORE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target} NO_EDITOR): this Pulp SDK does not export Pulp::format-clap-core")
+        endif()
+        set(PULP_${target}_NO_EDITOR TRUE CACHE INTERNAL "")
+        set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
+    else()
+        set(PULP_${target}_NO_EDITOR FALSE CACHE INTERNAL "")
+        set(_pulp_core_format_target "${_PULP_FORMAT_TARGET}")
     endif()
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
@@ -221,12 +248,12 @@ function(pulp_add_plugin target)
     # For compiled processors, create OBJECT library.
     if(PLUGIN_SOURCES)
         add_library(${target}_Core OBJECT ${PLUGIN_SOURCES})
-        target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
+        target_link_libraries(${target}_Core PUBLIC ${_pulp_core_format_target})
         target_include_directories(${target}_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "${PULP_${target}_CORE_OBJECTS}")
     else()
         add_library(${target}_Core INTERFACE)
-        target_link_libraries(${target}_Core INTERFACE ${_PULP_FORMAT_TARGET})
+        target_link_libraries(${target}_Core INTERFACE ${_pulp_core_format_target})
         target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "")
     endif()
