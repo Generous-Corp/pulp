@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-vellum-p6-gpu-device-watch",
+  "created_at": "2026-10-10T17:30:48Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Vellum move carve P6 (planning vellum-move/DECISIONS.md D3/D4 accepted 2026-10-10; R5 section 2.3 row P6). Splits the GPU device layer out of pulp-render into two new CMake targets defined in core/render/CMakeLists.txt, which is the path that selects render-assets-and-backends: pulp-gpu-device-api (INTERFACE over the six Dawn-free device headers, no link dependencies) and pulp-gpu-device (gpu_surface_dawn.cpp, gpu_compute.cpp, gpu_diagnostics.cpp, gpu_startup_report.cpp, metal_surface_mac.mm/metal_surface_ios.mm, with the same webgpu/skia/skia::dawn links, scopes and PULP_HAS_* definitions pulp-render carries). pulp-render links the API PUBLIC and the implementation PRIVATE; pulp-gpu-audio links pulp::gpu-device instead of pulp::render. No source file, header, include path, shader, asset, Skia build wiring or renderer output changes; no file moves; the opt-in Vellum D15 provider block is byte-identical. Control, same selectors: the other eleven changed paths (root CMakeLists.txt, core/gpu_audio/CMakeLists.txt, tools/cmake/PulpInstallRules.cmake, tools/cmake/PulpAndroid.cmake, the clean-consumer exclusion policy, the two test manifests, the two test fixtures and the checker plus its unit test) select no family, so the crossing is the one render build file. No design-import, Chromium, rendering or packaging authority moves and no Vellum artifact changes.",
+  "tests": [
+    "python3 tools/scripts/test_gpu_device_link_closure_check.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
