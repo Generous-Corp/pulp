@@ -1902,7 +1902,9 @@ SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
   (`RecognitionResolver`) is the ONE place that combines recognition SOURCES
   into a merged `component_set_key → kind` (and `→ factory_id`) table. Sources,
   in precedence order (later wins on key collision):
-  1. built-in Pulp Figma Library (`RecognitionResolver::with_builtin_library()`,
+  1. built-in Pulp Figma Library (`recognition_resolver_with_builtin_library()`,
+     a Pulp-owned pack in `recognition_audio_pack.{hpp,cpp}` linked as
+     `pulp-design-import-audio-pack`, NOT part of the generic resolver;
      mirrored in code from `tools/figma-plugin/library-manifest.json` and pinned
      against the JSON by a drift-guard test),
   2. the user's `--recognition-manifest` (flat library-manifest shape),
