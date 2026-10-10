@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-p2-graph-editor-carve-watch",
+  "created_at": "2026-10-10T19:05:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; P2 is a Pulp-only dependency carve that preserves the public GraphEditorView include path and umbrella targets while removing the host-to-view-core edge; no Vellum implementation or authority moves.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "Vellum freeze"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
