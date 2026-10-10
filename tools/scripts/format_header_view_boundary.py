@@ -123,6 +123,9 @@ def build_walker(dirs: list[str]):
             if not match:
                 continue
             name = match.group(1)
+            if name.startswith(FORBIDDEN_PREFIXES):
+                forbidden.add(name)
+                continue
             if not name.startswith("pulp/"):
                 continue
             if name.startswith(VIEW_PREFIXES):

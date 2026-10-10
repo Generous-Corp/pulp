@@ -44,7 +44,7 @@ endforeach()
 unset(_pulp_format_target)
 
 target_sources(pulp-format-core PRIVATE
-    # Emits the Processor vtable (Processor::~Processor() is the key function),
+    # Emits the Processor vtable (Processor::create_view() is the key function),
     # so this TU anchors the core half. The vtable slots still reference
     # vtable's slots reference processor_f64.cpp and ara.cpp, which is why
     # those two must stay in this target as well.
@@ -88,7 +88,6 @@ target_sources(pulp-format-core PRIVATE
 )
 
 target_sources(pulp-format-view PRIVATE
-    src/format_view.cpp
     src/view_bridge.cpp
     # The two Processor::SettingsSection members that need view::View complete
     # (adopting a view, take_view); create_view() does not, and stays in
@@ -100,10 +99,9 @@ target_sources(pulp-format-view PRIVATE
     src/app_updates_settings_view.cpp
 )
 
-# The core half must compile without the view include path. The default
-# Processor::create_view() definition is in format_view.cpp, alongside the
-# view-coupled sources; format.cpp only anchors the core vtable via the
-# out-of-line Processor destructor.
+# The core half must compile without the view include path. Both the
+# nullptr default Processor::create_view() definition is kept in format.cpp;
+# it needs no complete View type.
 
 target_link_libraries(pulp-format-core
     PUBLIC
