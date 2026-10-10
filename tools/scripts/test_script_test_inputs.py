@@ -163,6 +163,16 @@ class ProfileIndependenceTests(unittest.TestCase):
                                    "properties": []}]}
         self.assertEqual(sti.outside_gate_profile_build(self.repo.build, python_only), [])
 
+    def test_cache_node_path_triggers_refusal_without_node_inventory_commands(self) -> None:
+        self._profile_cache(self.repo.build)
+        with (self.repo.build / "CMakeCache.txt").open("a", encoding="utf-8") as cache:
+            cache.write("_PULP_NODE_FOR_TESTS:FILEPATH=/usr/bin/node\n")
+        python_only = {"tests": [{"name": "python-only", "command": ["/usr/bin/python3", "check.py"],
+                                   "properties": []}]}
+        reasons = sti.outside_gate_profile_build(self.repo.build, python_only)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", reasons[0])
+
     def inventory_with_example(self, keep_root: Path | None = None) -> dict:
         r = str(self.repo.root)
         inv = self.repo.inventory()
