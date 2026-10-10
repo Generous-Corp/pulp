@@ -22,7 +22,6 @@
 #include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/value_source.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/view/visualizers.hpp> // SpectrogramView/MultiMeter/CorrelationMeter — include directly in new code
 #include <pulp/view/widget_painter.hpp>
 #include <string>
 #include <string_view>
