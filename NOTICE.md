@@ -1,6 +1,15 @@
 # Third-Party Notices
 
 Pulp includes or depends on the following third-party software.
+
+## mise (optional developer tooling)
+
+Pulp's repository includes an optional `.mise.toml` developer-tool profile.
+mise is used only to select host tools for local development and fleet-image
+experiments; it is not bundled in Pulp SDKs, plugins, applications, or release
+artifacts. The mise project is distributed under the MIT License:
+https://github.com/jdx/mise
+
 Entries are listed in alphabetical order (case-insensitive).
 
 This file covers code that Pulp **redistributes** (bundles, vendors, or fetches
