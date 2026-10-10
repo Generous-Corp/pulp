@@ -1,5 +1,7 @@
 import json
 import subprocess
+import stat
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +11,21 @@ import gpu_audio_p2_host_preflight as preflight
 
 
 class HostPreflightTests(unittest.TestCase):
+    def test_gpu_doctor_capture_uses_file_backed_streams(self):
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / "doctor-helper"
+            helper.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "sys.stdout.write('gpu-json\\n')\n"
+                "sys.stderr.write('gpu-log\\n')\n"
+            )
+            helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
+            result = preflight._run([str(helper), "doctor", "gpu"], timeout=5)
+        self.assertEqual(result["returncode"], 0)
+        self.assertEqual(result["stdout"], "gpu-json\n")
+        self.assertEqual(result["stderr"], "gpu-log\n")
+
     @staticmethod
     def collect_fixture(runner, source):
         identity = {
