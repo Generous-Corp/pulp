@@ -304,6 +304,7 @@ class BuildGovernancePathTests(unittest.TestCase):
 
     def test_local_release_builds_route_through_governor(self) -> None:
         source = read_source("tools/scripts/release-cli-local.sh")
+
         build_lines = [
             line
             for line in source.splitlines()
@@ -321,6 +322,21 @@ class BuildGovernancePathTests(unittest.TestCase):
         self.assertIn('REPO / "tools" / "ci" / "governed-build.sh"', source)
         self.assertIn('"PULP_BUILD_JOBS": str(jobs)', source)
         self.assertNotIn('"-j", str(jobs)', source)
+
+    def test_confirm_failure_build_routes_through_governor(self) -> None:
+        source = read_source("tools/scripts/confirm_failure.sh")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn('PULP_BUILD_JOBS="$JOBS"', source)
+        self.assertIn('bash "$GOVERNED_BUILD"', source)
+        self.assertIn('cmake --build "$BUILD_DIR" --target "$TARGET"', source)
+        self.assertNotRegex(
+            source, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
 
 
 if __name__ == "__main__":

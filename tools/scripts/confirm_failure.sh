@@ -89,6 +89,9 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GOVERNED_BUILD="$SCRIPT_DIR/../ci/governed-build.sh"
+
 FILE=""
 BREAK_CMD=""
 BUILD_DIR=""
@@ -324,7 +327,8 @@ build_and_verify_recompile() {
         fi
         return 0
     fi
-    if ! cmake --build "$BUILD_DIR" --target "$TARGET" -j "$JOBS" > "$BUILD_LOG" 2>&1; then
+    if ! PULP_BUILD_JOBS="$JOBS" bash "$GOVERNED_BUILD" \
+        cmake --build "$BUILD_DIR" --target "$TARGET" > "$BUILD_LOG" 2>&1; then
         if grep -qE '\berror:' "$BUILD_LOG"; then
             # A break that does not compile still proves the test depends on the
             # code, but it is not the same evidence, so say which one happened.
