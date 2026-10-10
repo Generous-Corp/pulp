@@ -7418,6 +7418,12 @@ tests did. The GPU-audio SDK upload is a contract downstream consumers rely
 on, so a failed first attempt is retried once after a 90-second pause with
 `overwrite: true` (the reset can land after the artifact record exists), and
 the job still fails if that retry fails.
+The `plugins-<key>` bundles on macOS and the `ios-gate-ok-<digest>` marker
+are also `continue-on-error`. Nothing reads the bundles; they are a download
+for people. A lost iOS marker only makes a later run build the iOS gate again.
+An "Upload progress stalled" on the plugin bundles once ejected a merge batch
+after every test passed. The protected-validation receipt and the A2T
+verification stay failing, because merge decisions read them.
 
 ### The GPU provenance hydration step is bounded
 

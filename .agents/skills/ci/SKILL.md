@@ -1947,6 +1947,10 @@ passed. The `ctest-logs-<key>` upload is now `continue-on-error` (a missing
 log artifact on a green run means the upload failed); the SDK upload retries
 once after 90 s with `overwrite: true` and only then fails the job, because a
 green job must imply the artifact exists.
+Before making any other upload non-gating, map its readers first. The macOS
+`plugins-<key>` bundles have none, and the `ios-gate-ok-<digest>` marker only
+saves a rebuild, so both are `continue-on-error`. Receipts and A2T evidence
+are read by merge decisions and must keep failing the job.
 
 **Configure should not clone.** `setup.sh` primes every dependency
 `PulpDependencies.cmake` fetches unconditionally into the shared FetchContent
