@@ -11,17 +11,17 @@
 /// The same data published here is accessible from JS via AudioBridge →
 /// widget_bridge.cpp bindings.
 
-#include <pulp/runtime/triple_buffer.hpp>
-#include <pulp/audio/planar_audio_ring_buffer.hpp>
-#include <pulp/signal/stft.hpp>
-#include <pulp/signal/multi_channel_meter.hpp>
-#include <pulp/signal/spectrogram.hpp>
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
-#include <algorithm>
-#include <vector>
 #include <cstdint>
+#include <pulp/audio/planar_audio_ring_buffer.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/signal/multi_channel_meter.hpp>
+#include <pulp/signal/spectrogram.hpp>
+#include <pulp/signal/stft.hpp>
+#include <vector>
 
 // The public view header must NOT include
 // pulp/render/bench/perf_counters.hpp — it leaks render include paths through
@@ -133,8 +133,7 @@ struct VisualizationConfig {
     // latest_window; in_order preserves every hop for consumers that need
     // continuous analysis history. Declared last so positional aggregate
     // initialization of the earlier fields keeps its meaning.
-    VisualizationBacklogPolicy backlog_policy =
-        VisualizationBacklogPolicy::in_order;
+    VisualizationBacklogPolicy backlog_policy = VisualizationBacklogPolicy::in_order;
 };
 
 /// Central visualization bridge: a fixed multichannel audio tap plus a
@@ -149,19 +148,20 @@ struct VisualizationConfig {
 /// configure() and reset() require full quiescence: neither process(), poll(),
 /// nor snapshot reads may be active while either lifecycle method runs.
 class VisualizationBridge {
-public:
+  public:
     VisualizationBridge() = default;
 
     /// Configure all visualization subsystems. Call only while fully quiescent,
     /// before the audio producer and poll/snapshot consumers start.
     void configure(const VisualizationConfig& config) {
         config_ = config;
-        config_.num_channels = std::clamp(
-            config.num_channels, 0, signal::kMaxMeterChannels);
-        config_.sample_rate = std::isfinite(config.sample_rate)
-            && config.sample_rate > 0.0f ? config.sample_rate : 44100.0f;
+        config_.num_channels = std::clamp(config.num_channels, 0, signal::kMaxMeterChannels);
+        config_.sample_rate = std::isfinite(config.sample_rate) && config.sample_rate > 0.0f
+                                  ? config.sample_rate
+                                  : 44100.0f;
         config_.spectrum_floor_db = std::isfinite(config.spectrum_floor_db)
-            ? std::clamp(config.spectrum_floor_db, -300.0f, 0.0f) : -120.0f;
+                                        ? std::clamp(config.spectrum_floor_db, -300.0f, 0.0f)
+                                        : -120.0f;
         config_.max_frames_per_poll = std::max(0, config.max_frames_per_poll);
         config_.max_callback_frames = std::max(1, config.max_callback_frames);
 
@@ -173,16 +173,14 @@ public:
         stft_cfg.window = config_.window;
         stft_cfg.window_param = config_.window_param;
         channel_stfts_.clear();
-        channel_stfts_.resize(static_cast<std::size_t>(
-            config_.num_channels));
-        for (auto& stft : channel_stfts_) stft.configure(stft_cfg);
+        channel_stfts_.resize(static_cast<std::size_t>(config_.num_channels));
+        for (auto& stft : channel_stfts_)
+            stft.configure(stft_cfg);
         spectrum_edge_scale_ = 1.0;
         spectrum_interior_scale_ = 1.0;
         if (!channel_stfts_.empty()) {
-            const double window_sum = static_cast<double>(
-                channel_stfts_.front().window_sum());
-            if (std::isfinite(window_sum)
-                && std::abs(window_sum) > 1.0e-12) {
+            const double window_sum = static_cast<double>(channel_stfts_.front().window_sum());
+            if (std::isfinite(window_sum) && std::abs(window_sum) > 1.0e-12) {
                 spectrum_edge_scale_ = 1.0 / window_sum;
                 spectrum_interior_scale_ = 2.0 / window_sum;
             }
@@ -193,30 +191,27 @@ public:
 
         // Waveform capture setup
         waveform_length_ = config_.capture_waveform
-            ? std::clamp(config_.waveform_length, 1,
-                         static_cast<int>(WaveformData::kMaxSamples))
-            : 0;
+                               ? std::clamp(config_.waveform_length, 1,
+                                            static_cast<int>(WaveformData::kMaxSamples))
+                               : 0;
         waveform_pos_ = 0;
 
         const int automatic_capacity = std::max(
-            {config_.fft_size * 4, std::max(1, waveform_length_),
-             config_.max_callback_frames});
-        const int requested_capacity = config_.capture_buffer_frames > 0
-            ? config_.capture_buffer_frames : automatic_capacity;
-        capture_capacity_frames_ = std::max(
-            {config_.fft_size, requested_capacity, config_.max_callback_frames});
-        capture_ready_ = capture_.prepare(
-            static_cast<std::uint32_t>(channel_stfts_.size()),
-            static_cast<std::uint64_t>(capture_capacity_frames_));
+            {config_.fft_size * 4, std::max(1, waveform_length_), config_.max_callback_frames});
+        const int requested_capacity =
+            config_.capture_buffer_frames > 0 ? config_.capture_buffer_frames : automatic_capacity;
+        capture_capacity_frames_ =
+            std::max({config_.fft_size, requested_capacity, config_.max_callback_frames});
+        capture_ready_ = capture_.prepare(static_cast<std::uint32_t>(channel_stfts_.size()),
+                                          static_cast<std::uint64_t>(capture_capacity_frames_));
 
         consumer_chunk_frames_ = std::min(capture_capacity_frames_, 4096);
         consumer_storage_.assign(
-            channel_stfts_.size() * static_cast<std::size_t>(consumer_chunk_frames_),
-            0.0f);
+            channel_stfts_.size() * static_cast<std::size_t>(consumer_chunk_frames_), 0.0f);
         consumer_channels_.resize(channel_stfts_.size());
         for (std::size_t ch = 0; ch < channel_stfts_.size(); ++ch) {
-            consumer_channels_[ch] = consumer_storage_.data()
-                + ch * static_cast<std::size_t>(consumer_chunk_frames_);
+            consumer_channels_[ch] =
+                consumer_storage_.data() + ch * static_cast<std::size_t>(consumer_chunk_frames_);
         }
 
         dropped_capture_frames_.store(0, std::memory_order_relaxed);
@@ -225,7 +220,8 @@ public:
         observed_discontinuity_ = 0;
         spectrum_sequence_ = 0;
         waveform_sequence_ = 0;
-        if (++epoch_ == 0) ++epoch_;
+        if (++epoch_ == 0)
+            ++epoch_;
         spectrum_buf_.write(SpectrumData{});
         waveform_buf_.write(WaveformData{});
     }
@@ -241,9 +237,7 @@ public:
     /// counter paths can dereference `render::bench::PerfCounters`
     /// fields without leaking the render include path through this
     /// public header.
-    void process(const float* const* channels,
-                 int num_channels,
-                 int num_samples) noexcept;
+    void process(const float* const* channels, int num_channels, int num_samples) noexcept;
 
 #ifdef PULP_BENCHMARK
     /// Install (or clear) the benchmark perf-counter sink. Call from the
@@ -263,38 +257,55 @@ public:
     bool poll();
 
     /// Cheap snapshot-only read. Never drains audio or performs FFT work.
-    const SpectrumData& peek_spectrum() { return spectrum_buf_.read(); }
+    const SpectrumData& peek_spectrum() {
+        return spectrum_buf_.read();
+    }
 
     /// Legacy snapshot-read name retained for compile compatibility. Because
     /// process() no longer performs FFT analysis or snapshot publication,
     /// callers must now schedule poll() explicitly on the sole UI owner first.
-    const SpectrumData& read_spectrum() { return peek_spectrum(); }
+    const SpectrumData& read_spectrum() {
+        return peek_spectrum();
+    }
 
     /// Read the latest multi-channel meter data.
-    const signal::MultiChannelMeterData& read_meter() { return meter_buf_.read(); }
+    const signal::MultiChannelMeterData& read_meter() {
+        return meter_buf_.read();
+    }
 
     /// Cheap snapshot-only waveform read. Never calls poll().
-    const WaveformData& peek_waveform() { return waveform_buf_.read(); }
+    const WaveformData& peek_waveform() {
+        return waveform_buf_.read();
+    }
 
     /// Legacy snapshot-read name retained for compile compatibility. Because
     /// process() no longer performs waveform assembly or snapshot publication,
     /// callers must now schedule poll() explicitly on the sole UI owner first.
-    const WaveformData& read_waveform() { return peek_waveform(); }
+    const WaveformData& read_waveform() {
+        return peek_waveform();
+    }
 
     // ── Accessors ───────────────────────────────────────────────────────────
 
-    int fft_size() const { return config_.fft_size; }
+    int fft_size() const {
+        return config_.fft_size;
+    }
     int num_bins() const {
         return channel_stfts_.empty() ? 0 : channel_stfts_.front().num_bins();
     }
-    int num_channels() const { return config_.num_channels; }
-    float sample_rate() const { return config_.sample_rate; }
+    int num_channels() const {
+        return config_.num_channels;
+    }
+    float sample_rate() const {
+        return config_.sample_rate;
+    }
 
     /// Reset all internal state after playback stops. Requires full quiescence:
     /// no concurrent process(), poll(), or snapshot read calls.
     void reset() {
         capture_.reset();
-        for (auto& stft : channel_stfts_) stft.reset();
+        for (auto& stft : channel_stfts_)
+            stft.reset();
         meter_.reset();
         waveform_pos_ = 0;
         std::fill(waveform_ring_.begin(), waveform_ring_.end(), 0.0f);
@@ -304,13 +315,14 @@ public:
         observed_discontinuity_ = 0;
         spectrum_sequence_ = 0;
         waveform_sequence_ = 0;
-        if (++epoch_ == 0) ++epoch_;
+        if (++epoch_ == 0)
+            ++epoch_;
         spectrum_buf_.write(SpectrumData{});
         meter_buf_.write(signal::MultiChannelMeterData{});
         waveform_buf_.write(WaveformData{});
     }
 
-private:
+  private:
     void reset_analysis_continuity();
 
     VisualizationConfig config_;

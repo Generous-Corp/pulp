@@ -62,20 +62,21 @@ struct WaveformHeadlessRenderFrame {
 /// generation-keyed publication shape, but live audio callbacks must never wait
 /// for GPU completion.
 class WaveformHeadlessRenderBackend {
-public:
+  public:
     explicit WaveformHeadlessRenderBackend(WaveformHeadlessRenderConfig config = {});
     ~WaveformHeadlessRenderBackend();
 
     bool prepare(WaveformHeadlessRenderConfig config);
-    [[nodiscard]] WaveformHeadlessRenderFrame render(
-        const pulp::audio::WaveformOverview& thumbnail,
-        const WaveformGpuLayerPlan& plan,
-        const WaveformGpuRenderContext& context = {});
+    [[nodiscard]] WaveformHeadlessRenderFrame render(const pulp::audio::WaveformOverview& thumbnail,
+                                                     const WaveformGpuLayerPlan& plan,
+                                                     const WaveformGpuRenderContext& context = {});
 
     void clear();
 
     [[nodiscard]] WaveformGpuResourceCacheStats stats() const noexcept;
-    [[nodiscard]] std::size_t resource_count() const noexcept { return resources_.size(); }
+    [[nodiscard]] std::size_t resource_count() const noexcept {
+        return resources_.size();
+    }
     [[nodiscard]] std::size_t released_resource_count() const noexcept {
         return released_resource_count_;
     }
@@ -86,7 +87,7 @@ public:
         return staging_vertices_.size();
     }
 
-private:
+  private:
     struct ResourcePayload {
         WaveformGpuUploadKey key{};
         std::uint64_t resource_id = 0;
@@ -94,13 +95,13 @@ private:
         std::vector<WaveformPeakVertex> vertices;
     };
 
-    [[nodiscard]] WaveformHeadlessRenderFrame make_noop_frame(
-        const WaveformGpuRenderDecision& decision) const noexcept;
-    [[nodiscard]] WaveformHeadlessRenderFrame make_cached_frame(
-        const WaveformGpuRenderDecision& decision,
-        WaveformHeadlessRenderStatus status) const noexcept;
-    [[nodiscard]] WaveformHeadlessRenderFrame upload_static_layer(
-        const WaveformGpuRenderDecision& decision);
+    [[nodiscard]] WaveformHeadlessRenderFrame
+    make_noop_frame(const WaveformGpuRenderDecision& decision) const noexcept;
+    [[nodiscard]] WaveformHeadlessRenderFrame
+    make_cached_frame(const WaveformGpuRenderDecision& decision,
+                      WaveformHeadlessRenderStatus status) const noexcept;
+    [[nodiscard]] WaveformHeadlessRenderFrame
+    upload_static_layer(const WaveformGpuRenderDecision& decision);
 
     const ResourcePayload* find_resource(const WaveformGpuResourceRecord& record) const noexcept;
     ResourcePayload* find_resource_by_id(std::uint64_t resource_id) noexcept;

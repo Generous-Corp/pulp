@@ -33,8 +33,7 @@ using ContinuousFramePredicate = bool (*)(const View*);
 /// Install the allocation-free predicate for a framework-owned runtime kind.
 /// The owning widget registers its predicate when constructed; the generic
 /// traversal only invokes the callback for that exact kind.
-void register_continuous_frame_predicate(RuntimeViewKind kind,
-                                          ContinuousFramePredicate predicate);
+void register_continuous_frame_predicate(RuntimeViewKind kind, ContinuousFramePredicate predicate);
 
 /// True if `view` (or any descendant) needs continuous per-frame repaints.
 /// Null-safe: a null pointer returns false. Read-only; does not advance any

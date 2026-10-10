@@ -13,7 +13,8 @@ namespace {
 
 /// Linear amplitude → dBFS, floored so -inf prints as a readable sentinel.
 std::string format_dbfs(float linear) {
-    if (linear <= 1.0e-6f) return "-inf";
+    if (linear <= 1.0e-6f)
+        return "-inf";
     float db = 20.0f * std::log10(linear);
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%.1f", db);
@@ -22,20 +23,28 @@ std::string format_dbfs(float linear) {
 
 const char* stage_name(audio::AudioProbeStage stage) {
     switch (stage) {
-        case audio::AudioProbeStage::kProcessorOutput:          return "Processor output";
-        case audio::AudioProbeStage::kStandaloneOutputBoundary: return "Standalone boundary";
-        case audio::AudioProbeStage::kMeterBridge:              return "Meter bridge";
-        case audio::AudioProbeStage::kDeviceCallback:           return "Device callback";
-        case audio::AudioProbeStage::kGraphNode:                return "Graph node";
-        case audio::AudioProbeStage::kUnknown:                  break;
+    case audio::AudioProbeStage::kProcessorOutput:
+        return "Processor output";
+    case audio::AudioProbeStage::kStandaloneOutputBoundary:
+        return "Standalone boundary";
+    case audio::AudioProbeStage::kMeterBridge:
+        return "Meter bridge";
+    case audio::AudioProbeStage::kDeviceCallback:
+        return "Device callback";
+    case audio::AudioProbeStage::kGraphNode:
+        return "Graph node";
+    case audio::AudioProbeStage::kUnknown:
+        break;
     }
     return "Unknown stage";
 }
 
 const char* mode_name(AudioInspectorMode mode) {
     switch (mode) {
-        case AudioInspectorMode::kSignal: return "Signal";
-        case AudioInspectorMode::kScope: return "Scope";
+    case AudioInspectorMode::kSignal:
+        return "Signal";
+    case AudioInspectorMode::kScope:
+        return "Scope";
     }
     return "Signal";
 }
@@ -48,13 +57,13 @@ std::string format_measurement(double value, const char* suffix, int precision =
     return out.str();
 }
 
-}  // namespace
+} // namespace
 
 float dbfs_meter_fill(float linear) {
-    if (linear <= 1.0e-6f) return 0.0f;
+    if (linear <= 1.0e-6f)
+        return 0.0f;
     const float db = 20.0f * std::log10(linear);
-    return std::clamp((db - kInspectorMeterFloorDb) / -kInspectorMeterFloorDb,
-                      0.0f, 1.0f);
+    return std::clamp((db - kInspectorMeterFloorDb) / -kInspectorMeterFloorDb, 0.0f, 1.0f);
 }
 
 // ── AudioWaveformView ───────────────────────────────────────────────────────
@@ -66,7 +75,8 @@ AudioWaveformView::AudioWaveformView() {
 
 void AudioWaveformView::set_samples(const float* samples, int count) {
     count_ = std::clamp(count, 0, kCapacity);
-    for (int i = 0; i < count_; ++i) data_[i] = samples[i];
+    for (int i = 0; i < count_; ++i)
+        data_[i] = samples[i];
     live_ = true;
     request_repaint();
 }
@@ -78,21 +88,25 @@ void AudioWaveformView::clear_samples() {
 }
 
 void AudioWaveformView::set_show_grid(bool show) {
-    if (show_grid_ == show) return;
+    if (show_grid_ == show)
+        return;
     show_grid_ = show;
     request_repaint();
 }
 
 void AudioWaveformView::set_trigger_mode(TriggerMode mode) {
-    if (trigger_mode_ == mode) return;
+    if (trigger_mode_ == mode)
+        return;
     trigger_mode_ = mode;
     request_repaint();
 }
 
 void AudioWaveformView::set_horizontal_scale(float scale) {
-    if (!std::isfinite(scale)) return;
+    if (!std::isfinite(scale))
+        return;
     const float clamped = std::clamp(scale, 1.0f, 16.0f);
-    if (horizontal_scale_ == clamped) return;
+    if (horizontal_scale_ == clamped)
+        return;
     horizontal_scale_ = clamped;
     request_repaint();
 }
@@ -106,31 +120,33 @@ int AudioWaveformView::find_rising_zero_crossing() const {
 }
 
 int AudioWaveformView::display_start_index() const {
-    if (!live_ || count_ < 2) return 0;
+    if (!live_ || count_ < 2)
+        return 0;
     switch (trigger_mode_) {
-        case TriggerMode::kRisingZero:
-        {
-            const int crossing = find_rising_zero_crossing();
-            return (crossing > 0 && count_ - crossing >= 2) ? crossing : 0;
-        }
-        case TriggerMode::kRaw:
-            break;
+    case TriggerMode::kRisingZero: {
+        const int crossing = find_rising_zero_crossing();
+        return (crossing > 0 && count_ - crossing >= 2) ? crossing : 0;
+    }
+    case TriggerMode::kRaw:
+        break;
     }
     return 0;
 }
 
 int AudioWaveformView::display_sample_count() const {
-    if (!live_ || count_ < 2) return 0;
+    if (!live_ || count_ < 2)
+        return 0;
     const int start = display_start_index();
     const int available = std::max(0, count_ - start);
-    const int scaled = std::max(2, static_cast<int>(
-        std::round(static_cast<float>(count_) / horizontal_scale_)));
+    const int scaled =
+        std::max(2, static_cast<int>(std::round(static_cast<float>(count_) / horizontal_scale_)));
     return std::min(available, scaled);
 }
 
 void AudioWaveformView::paint(canvas::Canvas& canvas) {
     const Rect b = local_bounds();
-    if (b.width <= 0 || b.height <= 0) return;
+    if (b.width <= 0 || b.height <= 0)
+        return;
 
     // Housing.
     canvas.set_fill_color(canvas::Color::rgba8(18, 18, 22, 255));
@@ -158,7 +174,8 @@ void AudioWaveformView::paint(canvas::Canvas& canvas) {
     canvas.set_line_width(1.0f);
     canvas.stroke_line(b.x, mid, b.x + b.width, mid);
 
-    if (!live_ || count_ < 2) return;  // honest: no trace when not live.
+    if (!live_ || count_ < 2)
+        return; // honest: no trace when not live.
 
     // Map each sample to a polyline point. Amplitude is clamped to the
     // housing; the trace is a single anti-aliased polyline.
@@ -166,12 +183,12 @@ void AudioWaveformView::paint(canvas::Canvas& canvas) {
     const float half = b.height * 0.5f;
     const int start = display_start_index();
     const int display_count = display_sample_count();
-    if (display_count < 2) return;
+    if (display_count < 2)
+        return;
     const float dx = b.width / static_cast<float>(display_count - 1);
     for (int i = 0; i < display_count; ++i) {
         float s = std::clamp(data_[start + i], -1.0f, 1.0f);
-        pts[static_cast<std::size_t>(i)] = {b.x + dx * static_cast<float>(i),
-                                            mid - s * half};
+        pts[static_cast<std::size_t>(i)] = {b.x + dx * static_cast<float>(i), mid - s * half};
     }
 
     canvas.set_stroke_color(canvas::Color::rgba8(90, 200, 140, 255));
@@ -196,8 +213,7 @@ void AudioInspectorPanel::build_ui() {
     flex().padding = 10;
     set_background_color(canvas::Color::rgba8(26, 26, 32, 255));
 
-    auto make_label = [](const std::string& text, float size, int weight,
-                         canvas::Color color) {
+    auto make_label = [](const std::string& text, float size, int weight, canvas::Color color) {
         auto l = std::make_unique<Label>(text);
         l->set_font_size(size);
         l->set_font_weight(weight);
@@ -324,10 +340,8 @@ void AudioInspectorPanel::build_ui() {
     }
 }
 
-void AudioInspectorPanel::update(Status status,
-                                 const audio::AudioProbeSnapshot& snap,
-                                 const audio::AudioStats& stats,
-                                 const float* waveform,
+void AudioInspectorPanel::update(Status status, const audio::AudioProbeSnapshot& snap,
+                                 const audio::AudioStats& stats, const float* waveform,
                                  int waveform_count) {
     status_ = status;
     stats_ = stats;
@@ -338,7 +352,8 @@ void AudioInspectorPanel::update(Status status,
         has_scope_result_ = false;
         lr_match_ = 0.0f;
         balance_ = 0.0f;
-        if (waveform_view_) waveform_view_->clear_samples();
+        if (waveform_view_)
+            waveform_view_->clear_samples();
         refresh_labels();
         return;
     }
@@ -362,7 +377,7 @@ void AudioInspectorPanel::update(Status status,
         const float r = snap.rms[1];
         const float sum = l + r;
         if (sum > 1.0e-9f) {
-            balance_ = (r - l) / sum;            // -1 = all left … +1 = all right
+            balance_ = (r - l) / sum; // -1 = all left … +1 = all right
             const float lo = std::min(l, r);
             const float hi = std::max(l, r);
             lr_match_ = (hi > 1.0e-9f) ? (lo / hi) : 0.0f;
@@ -393,15 +408,20 @@ void AudioInspectorPanel::update(Status status,
 
 void AudioInspectorPanel::set_mode(AudioInspectorMode mode) {
     if (mode_ == mode) {
-        if (signal_button_) signal_button_->set_on(mode == AudioInspectorMode::kSignal);
-        if (scope_button_) scope_button_->set_on(mode == AudioInspectorMode::kScope);
+        if (signal_button_)
+            signal_button_->set_on(mode == AudioInspectorMode::kSignal);
+        if (scope_button_)
+            scope_button_->set_on(mode == AudioInspectorMode::kScope);
         return;
     }
     mode_ = mode;
-    if (signal_button_) signal_button_->set_on(mode_ == AudioInspectorMode::kSignal);
-    if (scope_button_) scope_button_->set_on(mode_ == AudioInspectorMode::kScope);
+    if (signal_button_)
+        signal_button_->set_on(mode_ == AudioInspectorMode::kSignal);
+    if (scope_button_)
+        scope_button_->set_on(mode_ == AudioInspectorMode::kScope);
     refresh_labels();
-    if (on_mode_changed) on_mode_changed(mode_);
+    if (on_mode_changed)
+        on_mode_changed(mode_);
 }
 
 void AudioInspectorPanel::set_scope_result(const audio::AudioScopeResult& result) {
@@ -417,15 +437,18 @@ void AudioInspectorPanel::clear_scope_result() {
 }
 
 void AudioInspectorPanel::set_waveform_grid_visible(bool visible) {
-    if (waveform_view_) waveform_view_->set_show_grid(visible);
+    if (waveform_view_)
+        waveform_view_->set_show_grid(visible);
 }
 
 void AudioInspectorPanel::set_waveform_trigger_mode(AudioWaveformView::TriggerMode mode) {
-    if (waveform_view_) waveform_view_->set_trigger_mode(mode);
+    if (waveform_view_)
+        waveform_view_->set_trigger_mode(mode);
 }
 
 void AudioInspectorPanel::set_waveform_horizontal_scale(float scale) {
-    if (waveform_view_) waveform_view_->set_horizontal_scale(scale);
+    if (waveform_view_)
+        waveform_view_->set_horizontal_scale(scale);
 }
 
 float AudioInspectorPanel::peak_meter_display_peak() const {
@@ -444,18 +467,18 @@ void AudioInspectorPanel::refresh_labels() {
     if (status_label_) {
         std::string prefix = std::string("Audio Inspector - ") + mode_name(mode_);
         switch (status_) {
-            case Status::kNoProbe:
-                status_label_->set_text(prefix + " - no probe");
-                status_label_->set_text_color(canvas::Color::rgba8(200, 150, 90, 255));
-                break;
-            case Status::kStale:
-                status_label_->set_text(prefix + " - stale (probe idle)");
-                status_label_->set_text_color(canvas::Color::rgba8(200, 150, 90, 255));
-                break;
-            case Status::kLive:
-                status_label_->set_text(prefix + " - live");
-                status_label_->set_text_color(canvas::Color::rgba8(120, 200, 150, 255));
-                break;
+        case Status::kNoProbe:
+            status_label_->set_text(prefix + " - no probe");
+            status_label_->set_text_color(canvas::Color::rgba8(200, 150, 90, 255));
+            break;
+        case Status::kStale:
+            status_label_->set_text(prefix + " - stale (probe idle)");
+            status_label_->set_text_color(canvas::Color::rgba8(200, 150, 90, 255));
+            break;
+        case Status::kLive:
+            status_label_->set_text(prefix + " - live");
+            status_label_->set_text_color(canvas::Color::rgba8(120, 200, 150, 255));
+            break;
         }
     }
 
@@ -463,8 +486,7 @@ void AudioInspectorPanel::refresh_labels() {
         if (status_ == Status::kNoProbe) {
             stage_label_->set_text("Stage: —");
         } else {
-            stage_label_->set_text(std::string("Stage: ") +
-                                   stage_name(snapshot_.stage_id));
+            stage_label_->set_text(std::string("Stage: ") + stage_name(snapshot_.stage_id));
         }
     }
 
@@ -473,21 +495,15 @@ void AudioInspectorPanel::refresh_labels() {
             level_label_->set_text("Peak: —\nRMS: —");
         } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
             const auto& m = scope_result_.measurements;
-            std::string p2p = m.peak_to_peak_available
-                ? format_measurement(m.peak_to_peak, "", 3)
-                : "—";
-            std::string rms = m.rms_available
-                ? format_measurement(m.rms, "", 3)
-                : "—";
-            std::string freq = m.frequency_available
-                ? format_measurement(m.frequency_hz, " Hz", 1)
-                : "—";
-            level_label_->set_text("P-P: " + p2p + "\nRMS: " + rms +
-                                   "\nFreq: " + freq);
+            std::string p2p =
+                m.peak_to_peak_available ? format_measurement(m.peak_to_peak, "", 3) : "—";
+            std::string rms = m.rms_available ? format_measurement(m.rms, "", 3) : "—";
+            std::string freq =
+                m.frequency_available ? format_measurement(m.frequency_hz, " Hz", 1) : "—";
+            level_label_->set_text("P-P: " + p2p + "\nRMS: " + rms + "\nFreq: " + freq);
         } else {
-            level_label_->set_text(
-                "Peak: " + format_dbfs(snapshot_.peak_max) + " dBFS\n" +
-                "RMS: " + format_dbfs(snapshot_.rms_max) + " dBFS");
+            level_label_->set_text("Peak: " + format_dbfs(snapshot_.peak_max) + " dBFS\n" +
+                                   "RMS: " + format_dbfs(snapshot_.rms_max) + " dBFS");
         }
     }
 
@@ -496,20 +512,19 @@ void AudioInspectorPanel::refresh_labels() {
             content_label_->set_text("Clip: —   NaN/Inf: —\nSilence: —");
         } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
             const auto& a = scope_result_.acquisition;
-            const std::string trigger = scope_result_.trigger_mode ==
-                    audio::AudioScopeTriggerMode::kRisingZero
-                ? "rising-zero" : "off";
-            content_label_->set_text(
-                "Trigger: " + trigger +
-                (a.trigger_found ? " (locked)" : " (raw)") + "\n" +
-                "Window: " + std::to_string(a.window_samples) +
-                " / Ch " + std::to_string(a.selected_channel));
+            const std::string trigger =
+                scope_result_.trigger_mode == audio::AudioScopeTriggerMode::kRisingZero
+                    ? "rising-zero"
+                    : "off";
+            content_label_->set_text("Trigger: " + trigger +
+                                     (a.trigger_found ? " (locked)" : " (raw)") + "\n" +
+                                     "Window: " + std::to_string(a.window_samples) + " / Ch " +
+                                     std::to_string(a.selected_channel));
         } else {
             content_label_->set_text(
                 "Clip: " + std::to_string(snapshot_.clip_count) +
                 "   NaN/Inf: " + std::to_string(snapshot_.nan_inf_count) + "\n" +
-                "Silence run: " + std::to_string(snapshot_.silence_run_blocks) +
-                " blocks");
+                "Silence run: " + std::to_string(snapshot_.silence_run_blocks) + " blocks");
         }
     }
 
@@ -518,20 +533,17 @@ void AudioInspectorPanel::refresh_labels() {
             phase_label_->set_text("L/R match: —   Balance: —");
         } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
             const auto& m = scope_result_.measurements;
-            const std::string dc = m.dc_offset_available
-                ? format_measurement(m.dc_offset, "", 4)
-                : "—";
-            const std::string crest = m.crest_factor_available
-                ? format_measurement(m.crest_factor, "", 2)
-                : "—";
+            const std::string dc =
+                m.dc_offset_available ? format_measurement(m.dc_offset, "", 4) : "—";
+            const std::string crest =
+                m.crest_factor_available ? format_measurement(m.crest_factor, "", 2) : "—";
             phase_label_->set_text("DC: " + dc + "   Crest: " + crest);
         } else if (snapshot_.channel_count < 2) {
             phase_label_->set_text("L/R match: —   Balance: —");
         } else {
             char buf[64];
-            std::snprintf(buf, sizeof(buf),
-                          "L/R match: %+.2f   Balance: %+.2f",
-                          lr_match_, balance_);
+            std::snprintf(buf, sizeof(buf), "L/R match: %+.2f   Balance: %+.2f", lr_match_,
+                          balance_);
             phase_label_->set_text(buf);
         }
     }
@@ -542,18 +554,16 @@ void AudioInspectorPanel::refresh_labels() {
                                     "Callbacks: —   xruns: —   overloads: —");
         } else {
             char buf[160];
-            std::snprintf(
-                buf, sizeof(buf),
-                "Sample rate: %.0f Hz   Block: %u   Ch: %u\n"
-                "Callbacks: %llu   xruns: %llu   overloads: %llu",
-                snapshot_.sample_rate, snapshot_.block_size,
-                snapshot_.channel_count,
-                static_cast<unsigned long long>(snapshot_.callbacks),
-                static_cast<unsigned long long>(stats_.device_xruns),
-                static_cast<unsigned long long>(stats_.cpu_overloads));
+            std::snprintf(buf, sizeof(buf),
+                          "Sample rate: %.0f Hz   Block: %u   Ch: %u\n"
+                          "Callbacks: %llu   xruns: %llu   overloads: %llu",
+                          snapshot_.sample_rate, snapshot_.block_size, snapshot_.channel_count,
+                          static_cast<unsigned long long>(snapshot_.callbacks),
+                          static_cast<unsigned long long>(stats_.device_xruns),
+                          static_cast<unsigned long long>(stats_.cpu_overloads));
             device_label_->set_text(buf);
         }
     }
 }
 
-}  // namespace pulp::view
+} // namespace pulp::view

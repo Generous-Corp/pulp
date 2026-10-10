@@ -19,16 +19,15 @@
 
 namespace pulp::view {
 
-void VisualizationBridge::process(const float* const* channels,
-                                  int num_channels,
+void VisualizationBridge::process(const float* const* channels, int num_channels,
                                   int num_samples) noexcept {
     auto publish_meter = [this](const signal::MultiChannelMeterData& data) {
 #ifdef PULP_BENCHMARK
         const double t0 = render::bench::now_us();
         meter_buf_.write(data);
         if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(
-                render::bench::now_us() - t0, std::memory_order_relaxed);
+            bench_counters_->triplebuffer_publish_total_us.fetch_add(render::bench::now_us() - t0,
+                                                                     std::memory_order_relaxed);
         }
 #else
         meter_buf_.write(data);
@@ -54,7 +53,8 @@ void VisualizationBridge::process(const float* const* channels,
     meter_.process(channels, num_channels, num_samples);
     publish_meter(meter_.snapshot());
 
-    if (!capture_ready_) return;
+    if (!capture_ready_)
+        return;
 
     // Analyzer topology is invariant between quiescent configure() calls.
     // Meter mismatched host blocks above, but never splice them into one STFT
@@ -62,7 +62,8 @@ void VisualizationBridge::process(const float* const* channels,
     // stays suspended until poll() acknowledges the discontinuity, preventing
     // later valid audio from being joined to pre-mismatch history.
     const int captured_channels = static_cast<int>(channel_stfts_.size());
-    if (captured_channels <= 0) return;
+    if (captured_channels <= 0)
+        return;
     if (num_channels != captured_channels) {
         discontinuity_generation_.fetch_add(1, std::memory_order_release);
         return;
@@ -73,16 +74,16 @@ void VisualizationBridge::process(const float* const* channels,
             return;
         }
     }
-    if (discontinuity_generation_.load(std::memory_order_acquire)
-        != acknowledged_discontinuity_.load(std::memory_order_acquire)) {
-        dropped_capture_frames_.fetch_add(
-            static_cast<std::uint64_t>(num_samples), std::memory_order_relaxed);
+    if (discontinuity_generation_.load(std::memory_order_acquire) !=
+        acknowledged_discontinuity_.load(std::memory_order_acquire)) {
+        dropped_capture_frames_.fetch_add(static_cast<std::uint64_t>(num_samples),
+                                          std::memory_order_relaxed);
         return;
     }
 
-    const audio::BufferView<const float> block(
-        channels, static_cast<std::size_t>(captured_channels),
-        static_cast<std::size_t>(num_samples));
+    const audio::BufferView<const float> block(channels,
+                                               static_cast<std::size_t>(captured_channels),
+                                               static_cast<std::size_t>(num_samples));
     const auto requested_frames = static_cast<std::uint64_t>(num_samples);
     // Capture blocks are all-or-nothing. In SPSC use only the consumer can
     // increase free space after this acquire, so a block that fits here cannot
@@ -90,8 +91,7 @@ void VisualizationBridge::process(const float* const* channels,
     // published, then the existing generation handshake suspends capture until
     // poll() flushes and acknowledges the discontinuity.
     if (capture_.free_frames() < requested_frames) {
-        dropped_capture_frames_.fetch_add(requested_frames,
-                                          std::memory_order_relaxed);
+        dropped_capture_frames_.fetch_add(requested_frames, std::memory_order_relaxed);
         discontinuity_generation_.fetch_add(1, std::memory_order_release);
         return;
     }
@@ -101,17 +101,19 @@ void VisualizationBridge::process(const float* const* channels,
     (void)capture_.write(block, requested_frames);
 #ifdef PULP_BENCHMARK
     if (bench_counters_) {
-        bench_counters_->audio_copy_total_us.fetch_add(
-            render::bench::now_us() - copy_start, std::memory_order_relaxed);
+        bench_counters_->audio_copy_total_us.fetch_add(render::bench::now_us() - copy_start,
+                                                       std::memory_order_relaxed);
     }
 #endif
 }
 
 void VisualizationBridge::reset_analysis_continuity() {
-    for (auto& stft : channel_stfts_) stft.reset();
+    for (auto& stft : channel_stfts_)
+        stft.reset();
     waveform_pos_ = 0;
     std::fill(waveform_ring_.begin(), waveform_ring_.end(), 0.0f);
-    if (++epoch_ == 0) ++epoch_;
+    if (++epoch_ == 0)
+        ++epoch_;
 }
 
 bool VisualizationBridge::poll() {
@@ -122,14 +124,12 @@ bool VisualizationBridge::poll() {
     // producer suspends capture after signaling one, so this entry-bounded
     // flush cannot discard valid post-gap audio. Acknowledge only the observed
     // generation; a concurrent later discontinuity remains pending.
-    const auto discontinuity =
-        discontinuity_generation_.load(std::memory_order_acquire);
+    const auto discontinuity = discontinuity_generation_.load(std::memory_order_acquire);
     if (discontinuity != observed_discontinuity_) {
         const auto available_at_entry = capture_.available_frames();
         (void)capture_.drain(available_at_entry);
         observed_discontinuity_ = discontinuity;
-        acknowledged_discontinuity_.store(discontinuity,
-                                           std::memory_order_release);
+        acknowledged_discontinuity_.store(discontinuity, std::memory_order_release);
         reset_analysis_continuity();
         return false;
     }
@@ -137,11 +137,11 @@ bool VisualizationBridge::poll() {
     const auto available_at_entry = capture_.available_frames();
     const auto dropped = dropped_capture_frames_.load(std::memory_order_acquire);
 
-    auto entry_frames = config_.max_frames_per_poll > 0
-        ? std::min<std::uint64_t>(
-              available_at_entry,
-              static_cast<std::uint64_t>(config_.max_frames_per_poll))
-        : available_at_entry;
+    auto entry_frames =
+        config_.max_frames_per_poll > 0
+            ? std::min<std::uint64_t>(available_at_entry,
+                                      static_cast<std::uint64_t>(config_.max_frames_per_poll))
+            : available_at_entry;
 
     // Latest-window policy: a display wants the newest audio, not an old hop.
     // A backlog beyond one analysis window is stale, so discard it and restart
@@ -153,14 +153,14 @@ bool VisualizationBridge::poll() {
     // bound never lets the consumer fall further behind.
     std::uint64_t stft_skip_frames = 0;
     if (config_.backlog_policy == VisualizationBacklogPolicy::latest_window) {
-        const auto window_frames = static_cast<std::uint64_t>(
-            std::max(config_.fft_size, waveform_length_));
+        const auto window_frames =
+            static_cast<std::uint64_t>(std::max(config_.fft_size, waveform_length_));
         if (available_at_entry > window_frames) {
             (void)capture_.drain(available_at_entry - window_frames);
-            for (auto& stft : channel_stfts_) stft.reset();
+            for (auto& stft : channel_stfts_)
+                stft.reset();
             entry_frames = window_frames;
-            stft_skip_frames = window_frames
-                - static_cast<std::uint64_t>(config_.fft_size);
+            stft_skip_frames = window_frames - static_cast<std::uint64_t>(config_.fft_size);
         } else {
             entry_frames = available_at_entry;
         }
@@ -171,27 +171,26 @@ bool VisualizationBridge::poll() {
     std::uint64_t remaining_frames = entry_frames;
     while (remaining_frames > 0) {
         const auto chunk = static_cast<int>(std::min<std::uint64_t>(
-            remaining_frames,
-            static_cast<std::uint64_t>(consumer_chunk_frames_)));
-        audio::BufferView<float> destination(
-            consumer_channels_.data(), consumer_channels_.size(),
-            static_cast<std::size_t>(chunk));
+            remaining_frames, static_cast<std::uint64_t>(consumer_chunk_frames_)));
+        audio::BufferView<float> destination(consumer_channels_.data(), consumer_channels_.size(),
+                                             static_cast<std::size_t>(chunk));
         (void)capture_.read(destination, static_cast<std::uint64_t>(chunk));
         remaining_frames -= static_cast<std::uint64_t>(chunk);
 
-        const int stft_offset = static_cast<int>(std::min<std::uint64_t>(
-            stft_skip_frames, static_cast<std::uint64_t>(chunk)));
+        const int stft_offset = static_cast<int>(
+            std::min<std::uint64_t>(stft_skip_frames, static_cast<std::uint64_t>(chunk)));
         stft_skip_frames -= static_cast<std::uint64_t>(stft_offset);
         for (std::size_t ch = 0; ch < channel_stfts_.size(); ++ch) {
             float* samples = consumer_channels_[ch];
             for (int i = 0; i < chunk; ++i) {
-                if (!std::isfinite(samples[i])) samples[i] = 0.0f;
+                if (!std::isfinite(samples[i]))
+                    samples[i] = 0.0f;
                 samples[i] = std::clamp(samples[i], -1.0e6f, 1.0e6f);
             }
             if (stft_offset < chunk) {
-                spectrum_changed = channel_stfts_[ch].push_samples(
-                    samples + stft_offset, chunk - stft_offset)
-                    || spectrum_changed;
+                spectrum_changed =
+                    channel_stfts_[ch].push_samples(samples + stft_offset, chunk - stft_offset) ||
+                    spectrum_changed;
             }
         }
 
@@ -208,8 +207,8 @@ bool VisualizationBridge::poll() {
     const int source_channels = config_.num_channels;
 
     if (spectrum_changed) {
-        const int analysis_channels = std::clamp(
-            source_channels, 1, static_cast<int>(channel_stfts_.size()));
+        const int analysis_channels =
+            std::clamp(source_channels, 1, static_cast<int>(channel_stfts_.size()));
         SpectrumData spec;
         spec.num_bins = std::min(num_bins(), SpectrumData::kMaxBins);
         spec.epoch = epoch_;
@@ -217,35 +216,34 @@ bool VisualizationBridge::poll() {
         spec.dropped_frames = dropped;
         spec.source_channels = source_channels;
         spec.fft_size = config_.fft_size;
-        spec.sample_rate = std::isfinite(config_.sample_rate)
-            ? config_.sample_rate : 0.0f;
+        spec.sample_rate = std::isfinite(config_.sample_rate) ? config_.sample_rate : 0.0f;
         spec.floor_db = config_.spectrum_floor_db;
 
-        const double floor_power = std::pow(
-            10.0, static_cast<double>(config_.spectrum_floor_db) / 10.0);
-        const double finite_floor_power = std::isfinite(floor_power)
-            && floor_power > 0.0 ? floor_power : 1.0e-12;
+        const double floor_power =
+            std::pow(10.0, static_cast<double>(config_.spectrum_floor_db) / 10.0);
+        const double finite_floor_power =
+            std::isfinite(floor_power) && floor_power > 0.0 ? floor_power : 1.0e-12;
         for (int bin = 0; bin < spec.num_bins; ++bin) {
             // A real FFT has one copy of DC and Nyquist, but positive- and
             // negative-frequency copies for every interior bin. Remove the
             // analysis window's coherent gain and fold each interior pair so
             // the result is peak-amplitude dBFS rather than raw FFT-bin gain.
             const bool edge_bin = bin == 0 || bin == config_.fft_size / 2;
-            const double amplitude_scale = edge_bin
-                ? spectrum_edge_scale_ : spectrum_interior_scale_;
+            const double amplitude_scale =
+                edge_bin ? spectrum_edge_scale_ : spectrum_interior_scale_;
             double power = 0.0;
             for (int ch = 0; ch < analysis_channels; ++ch) {
                 const auto& stft = channel_stfts_[static_cast<std::size_t>(ch)];
                 const float magnitude = stft.latest_frame().magnitude[bin];
-                const double finite_magnitude = std::isfinite(magnitude)
-                    ? static_cast<double>(magnitude) : 0.0;
+                const double finite_magnitude =
+                    std::isfinite(magnitude) ? static_cast<double>(magnitude) : 0.0;
                 const double amplitude = finite_magnitude * amplitude_scale;
                 power += amplitude * amplitude;
             }
             power /= static_cast<double>(analysis_channels);
             const double db = 10.0 * std::log10(std::max(power, finite_floor_power));
-            spec.magnitude_db[bin] = std::isfinite(db)
-                ? static_cast<float>(db) : config_.spectrum_floor_db;
+            spec.magnitude_db[bin] =
+                std::isfinite(db) ? static_cast<float>(db) : config_.spectrum_floor_db;
         }
 #ifdef PULP_BENCHMARK
         const double publish_start = render::bench::now_us();

@@ -44,9 +44,9 @@ namespace pulp::view {
 /// (optional — without one it shows the honest "no probe" state), register its
 /// toggle command, and call `poll()` from the UI timer to refresh.
 class AudioInspectorWindow : private CommandHandler {
-public:
-    using HostFactory = std::function<std::unique_ptr<WindowHost>(
-        View& root, const WindowOptions& options)>;
+  public:
+    using HostFactory =
+        std::function<std::unique_ptr<WindowHost>(View& root, const WindowOptions& options)>;
 
     /// Command id for "Toggle Audio Inspector". Stable so apps can reference it
     /// from menus or a `KeyMappingEditor`. ASCII 'PLAI' — distinct from the
@@ -56,10 +56,8 @@ public:
     /// @param mgr          Optional WindowManager for registration.
     /// @param parent       Optional parent WindowHost (positions relative to it).
     /// @param host_factory Optional host creation override for tests / embedders.
-    explicit AudioInspectorWindow(WindowManager* mgr = nullptr,
-                                  WindowHost* parent = nullptr,
-                                  HostFactory host_factory = {},
-                                  std::string app_name = "Pulp");
+    explicit AudioInspectorWindow(WindowManager* mgr = nullptr, WindowHost* parent = nullptr,
+                                  HostFactory host_factory = {}, std::string app_name = "Pulp");
     ~AudioInspectorWindow();
 
     AudioInspectorWindow(const AudioInspectorWindow&) = delete;
@@ -70,7 +68,9 @@ public:
     /// outlive this window, or be cleared first. Resets stale tracking so the
     /// first `poll()` after a swap is judged fresh.
     void set_probe(audio::AudioProbe* probe);
-    audio::AudioProbe* probe() const { return probe_; }
+    audio::AudioProbe* probe() const {
+        return probe_;
+    }
 
     /// Mirror device/backend counters the probe must NOT shadow (xruns,
     /// overloads). The host owns these (see audio_stats.hpp); the window just
@@ -99,10 +99,14 @@ public:
     void register_command_handler(CommandRegistry& registry);
 
     /// Panel accessor — for headless state assertions.
-    const AudioInspectorPanel& panel() const { return *panel_; }
+    const AudioInspectorPanel& panel() const {
+        return *panel_;
+    }
 
     void set_mode(AudioInspectorMode mode);
-    AudioInspectorMode mode() const { return mode_; }
+    AudioInspectorMode mode() const {
+        return mode_;
+    }
 
     /// Optional test/embedding hook. Production windows use
     /// ApplicationProperties, but tests can inject an in-memory PropertiesFile
@@ -115,9 +119,11 @@ public:
     /// the same way the standalone host captures its main window. Ownership
     /// stays with this window — the caller must not retain the pointer past the
     /// window's lifetime.
-    WindowHost* window_host() const { return window_host_.get(); }
+    WindowHost* window_host() const {
+        return window_host_.get();
+    }
 
-private:
+  private:
     // CommandHandler (private base) — registry dispatch entry points.
     std::vector<CommandID> commands() const override;
     bool perform_command(CommandID id) override;
@@ -126,10 +132,8 @@ private:
     void load_mode_preference();
     void save_mode_preference();
     void apply_mode(AudioInspectorMode mode, bool persist);
-    audio::AudioScopeResult build_scope_result(
-        const audio::AudioProbeSnapshot& snap,
-        audio::Buffer<float>& capture,
-        int frames) const;
+    audio::AudioScopeResult build_scope_result(const audio::AudioProbeSnapshot& snap,
+                                               audio::Buffer<float>& capture, int frames) const;
 
     WindowManager* manager_ = nullptr;
     WindowHost* parent_host_ = nullptr;
@@ -160,4 +164,4 @@ private:
     WindowId window_id_ = 0;
 };
 
-}  // namespace pulp::view
+} // namespace pulp::view

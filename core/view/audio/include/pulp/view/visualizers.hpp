@@ -10,9 +10,9 @@
 // unchanged; new code that only needs a visualizer should include this header
 // directly.
 
-#include <pulp/view/view.hpp>
-#include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
+#include <pulp/signal/spectrogram.hpp>
+#include <pulp/view/view.hpp>
 
 namespace pulp::view {
 
@@ -21,7 +21,7 @@ namespace pulp::view {
 // colored pixels, scrolling left as new frames arrive.
 
 class SpectrogramView : public View {
-public:
+  public:
     SpectrogramView() = default;
 
     /// Push a new STFT frame (dB magnitudes) for display.
@@ -29,18 +29,27 @@ public:
 
     /// Configure display dimensions and color mapping.
     void configure(int history_columns, int freq_rows,
-                   signal::ColorRamp ramp = signal::ColorRamp::inferno,
-                   float min_db = -80.0f, float max_db = 0.0f);
+                   signal::ColorRamp ramp = signal::ColorRamp::inferno, float min_db = -80.0f,
+                   float max_db = 0.0f);
 
-    void set_color_ramp(signal::ColorRamp ramp) { mapper_.set_ramp(ramp); }
-    void set_range(float min_db, float max_db) { min_db_ = min_db; max_db_ = max_db; }
+    void set_color_ramp(signal::ColorRamp ramp) {
+        mapper_.set_ramp(ramp);
+    }
+    void set_range(float min_db, float max_db) {
+        min_db_ = min_db;
+        max_db_ = max_db;
+    }
 
-    int history_columns() const { return buffer_.width(); }
-    int freq_rows() const { return buffer_.height(); }
+    int history_columns() const {
+        return buffer_.width();
+    }
+    int freq_rows() const {
+        return buffer_.height();
+    }
 
     void paint(canvas::Canvas& canvas) override;
 
-private:
+  private:
     signal::SpectrogramBuffer buffer_;
     signal::ColorMapper mapper_{signal::ColorRamp::inferno};
     float min_db_ = -80.0f;
@@ -54,11 +63,13 @@ private:
 // for smooth display.
 
 class MultiMeter : public View {
-public:
+  public:
     enum class Layout { vertical, horizontal };
     enum class DisplayStyle { continuous, segmented };
 
-    MultiMeter() { set_access_role(AccessRole::meter); }
+    MultiMeter() {
+        set_access_role(AccessRole::meter);
+    }
 
     /// Update from multi-channel meter data. Call once per UI frame.
     ///
@@ -71,21 +82,33 @@ public:
     /// which knows what the meter is part of — owns the invalidation.
     [[nodiscard]] bool update(const signal::MultiChannelMeterData& data, float dt);
 
-    void set_layout(Layout l) { layout_ = l; }
-    Layout layout() const { return layout_; }
+    void set_layout(Layout l) {
+        layout_ = l;
+    }
+    Layout layout() const {
+        return layout_;
+    }
 
-    void set_display_style(DisplayStyle s) { display_style_ = s; }
-    DisplayStyle display_style() const { return display_style_; }
+    void set_display_style(DisplayStyle s) {
+        display_style_ = s;
+    }
+    DisplayStyle display_style() const {
+        return display_style_;
+    }
 
     void set_channel_count(int count);
-    int channel_count() const { return ballistics_.num_channels; }
+    int channel_count() const {
+        return ballistics_.num_channels;
+    }
 
     /// Access ballistics for testing.
-    const signal::MultiChannelBallistics& ballistics() const { return ballistics_; }
+    const signal::MultiChannelBallistics& ballistics() const {
+        return ballistics_;
+    }
 
     void paint(canvas::Canvas& canvas) override;
 
-private:
+  private:
     Layout layout_ = Layout::vertical;
     DisplayStyle display_style_ = DisplayStyle::continuous;
     signal::MultiChannelBallistics ballistics_;
@@ -96,8 +119,10 @@ private:
 // left and right channels.
 
 class CorrelationMeter : public View {
-public:
-    CorrelationMeter() { set_access_role(AccessRole::meter); }
+  public:
+    CorrelationMeter() {
+        set_access_role(AccessRole::meter);
+    }
 
     /// Update with new correlation value (-1 to +1). Call once per UI frame.
     ///
@@ -107,11 +132,13 @@ public:
     /// its target rather than toward zero — a floor test would never fire.
     [[nodiscard]] bool update(float correlation, float dt);
 
-    float display_correlation() const { return display_correlation_; }
+    float display_correlation() const {
+        return display_correlation_;
+    }
 
     void paint(canvas::Canvas& canvas) override;
 
-private:
+  private:
     float display_correlation_ = 0.0f;
     float smoothing_coeff_ = 0.1f; // Exponential smoothing
 };

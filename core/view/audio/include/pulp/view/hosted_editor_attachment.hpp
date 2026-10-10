@@ -63,18 +63,13 @@
 namespace pulp::view {
 
 class EditorAttachment {
-public:
+  public:
     EditorAttachment(const EditorAttachment&) = delete;
     EditorAttachment& operator=(const EditorAttachment&) = delete;
 
     EditorAttachment(EditorAttachment&& other) noexcept
-        : slot_(std::move(other.slot_)),
-          host_(other.host_),
-          editor_(std::move(other.editor_)),
-          x_(other.x_),
-          y_(other.y_),
-          width_(other.width_),
-          height_(other.height_),
+        : slot_(std::move(other.slot_)), host_(other.host_), editor_(std::move(other.editor_)),
+          x_(other.x_), y_(other.y_), width_(other.width_), height_(other.height_),
           attached_(other.attached_) {
         // slot_ was moved-from, so other.slot_ is already empty.
         other.host_ = nullptr;
@@ -103,7 +98,9 @@ public:
         return *this;
     }
 
-    ~EditorAttachment() { release(); }
+    ~EditorAttachment() {
+        release();
+    }
 
     /// Create an attachment by asking the slot for a HostedEditor and embedding
     /// its native_handle into the given WindowHost. Returns nullptr if the slot
@@ -111,19 +108,19 @@ public:
     /// no native-window seam on this platform (attach returns false), or the
     /// slot is null.
     static std::unique_ptr<EditorAttachment> create(std::shared_ptr<host::PluginSlot> slot,
-                                                    WindowHost* host,
-                                                    float x = 0.0f,
+                                                    WindowHost* host, float x = 0.0f,
                                                     float y = 0.0f) {
-        if (!slot || !host) return nullptr;
+        if (!slot || !host)
+            return nullptr;
         auto editor = slot->create_hosted_editor(host->native_window_handle());
         if (!editor || !editor->native_handle) {
-            if (editor) slot->destroy_hosted_editor(std::move(editor));
+            if (editor)
+                slot->destroy_hosted_editor(std::move(editor));
             return nullptr;
         }
         const float w = static_cast<float>(editor->width);
         const float h = static_cast<float>(editor->height);
-        const bool ok =
-            host->attach_native_child_view(editor->native_handle, x, y, w, h);
+        const bool ok = host->attach_native_child_view(editor->native_handle, x, y, w, h);
         if (!ok) {
             slot->destroy_hosted_editor(std::move(editor));
             return nullptr;
@@ -136,18 +133,23 @@ public:
     }
 
     /// Underlying typed editor. Never null while the attachment is live.
-    const host::PluginSlot::HostedEditor* editor() const { return editor_.get(); }
+    const host::PluginSlot::HostedEditor* editor() const {
+        return editor_.get();
+    }
 
     /// Whether the editor is currently attached. False after release().
-    bool is_attached() const { return attached_; }
+    bool is_attached() const {
+        return attached_;
+    }
 
     /// Reposition / resize the attached child view. Returns false if the
     /// underlying WindowHost rejects the bounds update (or if the attachment
     /// has already been released).
     bool set_bounds(float x, float y, float width, float height) {
-        if (!attached_ || !host_ || !editor_) return false;
-        const bool ok = host_->set_native_child_view_bounds(
-            editor_->native_handle, x, y, width, height);
+        if (!attached_ || !host_ || !editor_)
+            return false;
+        const bool ok =
+            host_->set_native_child_view_bounds(editor_->native_handle, x, y, width, height);
         if (ok) {
             x_ = x;
             y_ = y;
@@ -161,7 +163,8 @@ public:
     void release() {
         // The slot outlives this object (it is shared), so a handler capturing
         // `this` must come down before the object does.
-        if (slot_) slot_->set_editor_resize_request_handler(nullptr);
+        if (slot_)
+            slot_->set_editor_resize_request_handler(nullptr);
         if (!attached_) {
             // Even if we never managed to attach, we still own the editor and
             // owe the slot a destroy_hosted_editor() call.
@@ -183,25 +186,25 @@ public:
         host_ = nullptr;
     }
 
-    float x() const { return x_; }
-    float y() const { return y_; }
-    float width() const { return width_; }
-    float height() const { return height_; }
+    float x() const {
+        return x_;
+    }
+    float y() const {
+        return y_;
+    }
+    float width() const {
+        return width_;
+    }
+    float height() const {
+        return height_;
+    }
 
-private:
-    EditorAttachment(std::shared_ptr<host::PluginSlot> slot,
-                     WindowHost* host,
-                     std::unique_ptr<host::PluginSlot::HostedEditor> editor,
-                     float x,
-                     float y)
-        : slot_(std::move(slot)),
-          host_(host),
-          editor_(std::move(editor)),
-          x_(x),
-          y_(y),
+  private:
+    EditorAttachment(std::shared_ptr<host::PluginSlot> slot, WindowHost* host,
+                     std::unique_ptr<host::PluginSlot::HostedEditor> editor, float x, float y)
+        : slot_(std::move(slot)), host_(host), editor_(std::move(editor)), x_(x), y_(y),
           width_(static_cast<float>(editor_ ? editor_->width : 0)),
-          height_(static_cast<float>(editor_ ? editor_->height : 0)),
-          attached_(true) {}
+          height_(static_cast<float>(editor_ ? editor_->height : 0)), attached_(true) {}
 
     /// Take the slot's plugin-initiated resize requests and apply them to the
     /// window. Without this the slot resizes only the container it owns and the
@@ -209,12 +212,11 @@ private:
     /// sizes itself on open (VST3 does this from inside IPlugView::attached)
     /// ends up clipped by, or overflowing, the rect the host gave it.
     void install_resize_handler() {
-        if (!slot_) return;
-        slot_->set_editor_resize_request_handler(
-            [this](uint32_t width, uint32_t height) {
-                return set_bounds(x_, y_, static_cast<float>(width),
-                                  static_cast<float>(height));
-            });
+        if (!slot_)
+            return;
+        slot_->set_editor_resize_request_handler([this](uint32_t width, uint32_t height) {
+            return set_bounds(x_, y_, static_cast<float>(width), static_cast<float>(height));
+        });
     }
 
     std::shared_ptr<host::PluginSlot> slot_;
@@ -229,6 +231,6 @@ private:
 
 } // namespace pulp::view
 
-#else  // !__has_include(<pulp/host/plugin_slot.hpp>)
+#else // !__has_include(<pulp/host/plugin_slot.hpp>)
 #define PULP_VIEW_HAS_HOSTED_EDITOR_ATTACHMENT 0
 #endif

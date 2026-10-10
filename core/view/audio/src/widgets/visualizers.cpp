@@ -2,19 +2,18 @@
 // Visualizer widget implementations. Public declarations stay in
 // core/view/include/pulp/view/widgets.hpp.
 
-#include <pulp/view/widgets.hpp>
+#include <choc/text/choc_JSON.h>
+#include <pulp/audio/waveform_overview.hpp>
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/text_shaper.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/asset_manager.hpp>
+#include <pulp/view/capability_fallback.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
-#include <pulp/canvas/text_shaper.hpp>
-#include <pulp/canvas/canvas.hpp>
-#include <pulp/view/capability_fallback.hpp>
-#include <pulp/audio/waveform_overview.hpp>
-#include <pulp/audio/waveform_overview.hpp>
-#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <cctype>
@@ -39,8 +38,7 @@ void Meter::set_level(float rms, float peak) {
     // each level tick.
     const auto b = local_bounds();
     request_repaint(Rect{b.x - kMeterPeakOverscan, b.y - kMeterPeakOverscan,
-                         b.width + 2 * kMeterPeakOverscan,
-                         b.height + 2 * kMeterPeakOverscan});
+                         b.width + 2 * kMeterPeakOverscan, b.height + 2 * kMeterPeakOverscan});
 }
 
 void Meter::update(float raw_peak, float raw_rms, float dt) {
@@ -52,12 +50,12 @@ void Meter::update(float raw_peak, float raw_rms, float dt) {
     // contract MultiChannelBallistics answers) so a widget cannot get it subtly
     // wrong by snapshotting the wrong set of fields. Nothing moved, so ask for
     // nothing.
-    if (!ballistics_.update(raw_peak, raw_rms, dt)) return;
+    if (!ballistics_.update(raw_peak, raw_rms, dt))
+        return;
 
     const auto b = local_bounds();
     request_repaint(Rect{b.x - kMeterPeakOverscan, b.y - kMeterPeakOverscan,
-                         b.width + 2 * kMeterPeakOverscan,
-                         b.height + 2 * kMeterPeakOverscan});
+                         b.width + 2 * kMeterPeakOverscan, b.height + 2 * kMeterPeakOverscan});
 }
 
 void Meter::on_meter_frame(const MeterFrame& frame, float dt) {
@@ -71,10 +69,11 @@ void Meter::on_meter_frame(const MeterFrame& frame, float dt) {
     }
 }
 
-
 std::optional<canvas::Color> Meter::gradient_color_at(float t) const {
-    if (gradient_stops_.empty()) return std::nullopt;
-    if (gradient_stops_.size() == 1) return gradient_stops_.front();
+    if (gradient_stops_.empty())
+        return std::nullopt;
+    if (gradient_stops_.size() == 1)
+        return gradient_stops_.front();
     t = std::clamp(t, 0.0f, 1.0f);
     float scaled = t * static_cast<float>(gradient_stops_.size() - 1);
     int i = static_cast<int>(scaled);
@@ -96,8 +95,8 @@ void Meter::paint(canvas::Canvas& canvas) {
     // bottom up to display_rms. This is value-driven, not a static image.
     if (has_skin_gradient()) {
         auto bg = has_skin_background_
-            ? background_color_
-            : resolve_color("control.track", canvas::Color::rgba8(15, 18, 23));
+                      ? background_color_
+                      : resolve_color("control.track", canvas::Color::rgba8(15, 18, 23));
         canvas.set_fill_color(bg);
         canvas.fill_rounded_rect(0, 0, b.width, b.height, std::min(b.width, b.height) * 0.18f);
 
@@ -131,7 +130,8 @@ void Meter::paint(canvas::Canvas& canvas) {
                     // fill bottom (the meter base).
                     float pos = 1.0f - (static_cast<float>(y) + 0.5f - fill_top) / fill_span;
                     const auto row = gradient_color_at(pos);
-                    if (!row) continue;  // no stops, no colour, no paint
+                    if (!row)
+                        continue; // no stops, no colour, no paint
                     canvas.set_fill_color(*row);
                     canvas.fill_rect(h_inset, static_cast<float>(y), b.width - 2 * h_inset, 1);
                 }
@@ -140,7 +140,8 @@ void Meter::paint(canvas::Canvas& canvas) {
                 for (int x = 0; x < static_cast<int>(fill); ++x) {
                     float pos = (static_cast<float>(x) + 0.5f) / fill_span;
                     const auto column = gradient_color_at(pos);
-                    if (!column) continue;  // no stops, no colour, no paint
+                    if (!column)
+                        continue; // no stops, no colour, no paint
                     canvas.set_fill_color(*column);
                     canvas.fill_rect(static_cast<float>(x), v_inset, 1, b.height - 2 * v_inset);
                 }
@@ -183,8 +184,7 @@ void Meter::paint(canvas::Canvas& canvas) {
 
     float meter_length = vert ? b.height : b.width;
     auto level_to_pixels = [meter_length](float level) {
-        return std::clamp(std::round(std::clamp(level, 0.0f, 1.0f) * meter_length),
-                          0.0f,
+        return std::clamp(std::round(std::clamp(level, 0.0f, 1.0f) * meter_length), 0.0f,
                           meter_length);
     };
 
@@ -258,18 +258,19 @@ void Meter::paint(canvas::Canvas& canvas) {
 
 // ── XYPad ────────────────────────────────────────────────────────────────────
 
-
-size_t WaveformView::find_trigger_index(const float* samples, size_t count,
-                                         TriggerMode mode) {
-    if (mode == TriggerMode::free_run || count < 2) return 0;
+size_t WaveformView::find_trigger_index(const float* samples, size_t count, TriggerMode mode) {
+    if (mode == TriggerMode::free_run || count < 2)
+        return 0;
     const bool want_rising = (mode == TriggerMode::rising_zero);
     for (size_t i = 1; i < count; ++i) {
         float prev = samples[i - 1];
         float curr = samples[i];
         if (want_rising) {
-            if (prev <= 0.0f && curr > 0.0f) return i;
+            if (prev <= 0.0f && curr > 0.0f)
+                return i;
         } else {
-            if (prev >= 0.0f && curr < 0.0f) return i;
+            if (prev >= 0.0f && curr < 0.0f)
+                return i;
         }
     }
     return 0;
@@ -293,11 +294,12 @@ void WaveformView::set_preview_shape(std::string_view shape) {
 }
 
 void WaveformView::apply_trigger() {
-    if (trigger_mode_ == TriggerMode::free_run || samples_.size() < 2) return;
+    if (trigger_mode_ == TriggerMode::free_run || samples_.size() < 2)
+        return;
     size_t idx = find_trigger_index(samples_.data(), samples_.size(), trigger_mode_);
-    if (idx == 0) return;  // no crossing — leave as-is
-    std::rotate(samples_.begin(),
-                samples_.begin() + static_cast<std::ptrdiff_t>(idx),
+    if (idx == 0)
+        return; // no crossing — leave as-is
+    std::rotate(samples_.begin(), samples_.begin() + static_cast<std::ptrdiff_t>(idx),
                 samples_.end());
 }
 
@@ -305,7 +307,7 @@ void WaveformView::set_data(const float* samples, size_t count) {
     samples_.assign(samples, samples + count);
     apply_trigger();
     thumbnail_owner_.reset();
-    thumbnail_ = nullptr;  // raw samples win over any cached thumbnail
+    thumbnail_ = nullptr; // raw samples win over any cached thumbnail
 }
 
 void WaveformView::set_data(std::vector<float> samples) {
@@ -315,9 +317,8 @@ void WaveformView::set_data(std::vector<float> samples) {
     thumbnail_ = nullptr;
 }
 
-void WaveformView::set_thumbnail(
-    std::shared_ptr<const pulp::audio::WaveformOverview> thumb,
-    uint32_t channel) {
+void WaveformView::set_thumbnail(std::shared_ptr<const pulp::audio::WaveformOverview> thumb,
+                                 uint32_t channel) {
     thumbnail_owner_ = std::move(thumb);
     thumbnail_ = thumbnail_owner_.get();
     thumbnail_channel_ = channel;
@@ -326,8 +327,7 @@ void WaveformView::set_thumbnail(
     samples_.clear();
 }
 
-void WaveformView::set_thumbnail(const pulp::audio::WaveformOverview* thumb,
-                                 uint32_t channel) {
+void WaveformView::set_thumbnail(const pulp::audio::WaveformOverview* thumb, uint32_t channel) {
     set_thumbnail_borrowed(thumb, channel);
 }
 
@@ -355,7 +355,9 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
 
     auto wave_color = resolve_color("waveform.line", canvas::Color::rgba8(100, 180, 250));
-    auto fill_color = resolve_color("waveform.fill", canvas::Color::rgba(wave_color.r, wave_color.g, wave_color.b, 56.0f/255.0f));
+    auto fill_color =
+        resolve_color("waveform.fill", canvas::Color::rgba(wave_color.r, wave_color.g, wave_color.b,
+                                                           56.0f / 255.0f));
 
     // Thumbnail path: render decimated min/max peaks straight from the cached
     // thumbnail without re-decoding audio.
@@ -374,10 +376,9 @@ void WaveformView::paint(canvas::Canvas& canvas) {
             std::min<std::size_t>(static_cast<std::size_t>(std::max(1.0f, b.width)), 4096u);
         thumbnail_min_max_.assign(target_peaks * 2, 0.0f);
         const std::size_t produced = thumbnail_->render_min_max(
-            thumbnail_channel_,
-            static_cast<uint32_t>(target_peaks),
-            thumbnail_min_max_.data());
-        if (produced == 0) return;
+            thumbnail_channel_, static_cast<uint32_t>(target_peaks), thumbnail_min_max_.data());
+        if (produced == 0)
+            return;
 
         // Drive the GPU waveform shader with the per-column max so the
         // line/fill remain consistent with the live-sample path. We render
@@ -401,8 +402,8 @@ void WaveformView::paint(canvas::Canvas& canvas) {
         style.show_fill = true;
         style.fill_center = 0.5f;
 
-        canvas.draw_waveform(thumbnail_envelope_.data(), thumbnail_envelope_.size(),
-                              0, 0, b.width, b.height, style);
+        canvas.draw_waveform(thumbnail_envelope_.data(), thumbnail_envelope_.size(), 0, 0, b.width,
+                             b.height, style);
         return;
     }
 
@@ -417,49 +418,50 @@ void WaveformView::paint(canvas::Canvas& canvas) {
         canvas.set_line_width(1.2f);
         canvas.begin_path();
         switch (preview_shape_) {
-            case PreviewShape::saw:
-                canvas.move_to(0.0f, b.height * 0.8f);
-                canvas.line_to(b.width * 0.25f, b.height * 0.2f);
-                canvas.line_to(b.width * 0.25f, b.height * 0.8f);
-                canvas.line_to(b.width * 0.5f, b.height * 0.2f);
-                canvas.line_to(b.width * 0.5f, b.height * 0.8f);
-                canvas.line_to(b.width * 0.75f, b.height * 0.2f);
-                canvas.line_to(b.width * 0.75f, b.height * 0.8f);
-                canvas.line_to(b.width, b.height * 0.2f);
-                break;
-            case PreviewShape::sine:
-                canvas.move_to(0.0f, b.height * 0.5f);
-                canvas.quad_to(b.width * 0.12f, b.height * 0.1f, b.width * 0.25f, b.height * 0.5f);
-                canvas.quad_to(b.width * 0.38f, b.height * 0.9f, b.width * 0.5f, b.height * 0.5f);
-                canvas.quad_to(b.width * 0.62f, b.height * 0.1f, b.width * 0.75f, b.height * 0.5f);
-                canvas.quad_to(b.width * 0.88f, b.height * 0.9f, b.width, b.height * 0.5f);
-                break;
-            case PreviewShape::square:
-                canvas.move_to(0.0f, b.height * 0.2f);
-                canvas.line_to(b.width * 0.25f, b.height * 0.2f);
-                canvas.line_to(b.width * 0.25f, b.height * 0.8f);
-                canvas.line_to(b.width * 0.5f, b.height * 0.8f);
-                canvas.line_to(b.width * 0.5f, b.height * 0.2f);
-                canvas.line_to(b.width * 0.75f, b.height * 0.2f);
-                canvas.line_to(b.width * 0.75f, b.height * 0.8f);
-                canvas.line_to(b.width, b.height * 0.8f);
-                break;
-            case PreviewShape::triangle:
-                canvas.move_to(0.0f, b.height * 0.5f);
-                canvas.line_to(b.width * 0.125f, b.height * 0.15f);
-                canvas.line_to(b.width * 0.375f, b.height * 0.85f);
-                canvas.line_to(b.width * 0.625f, b.height * 0.15f);
-                canvas.line_to(b.width * 0.875f, b.height * 0.85f);
-                canvas.line_to(b.width, b.height * 0.5f);
-                break;
-            case PreviewShape::none:
-                break;
+        case PreviewShape::saw:
+            canvas.move_to(0.0f, b.height * 0.8f);
+            canvas.line_to(b.width * 0.25f, b.height * 0.2f);
+            canvas.line_to(b.width * 0.25f, b.height * 0.8f);
+            canvas.line_to(b.width * 0.5f, b.height * 0.2f);
+            canvas.line_to(b.width * 0.5f, b.height * 0.8f);
+            canvas.line_to(b.width * 0.75f, b.height * 0.2f);
+            canvas.line_to(b.width * 0.75f, b.height * 0.8f);
+            canvas.line_to(b.width, b.height * 0.2f);
+            break;
+        case PreviewShape::sine:
+            canvas.move_to(0.0f, b.height * 0.5f);
+            canvas.quad_to(b.width * 0.12f, b.height * 0.1f, b.width * 0.25f, b.height * 0.5f);
+            canvas.quad_to(b.width * 0.38f, b.height * 0.9f, b.width * 0.5f, b.height * 0.5f);
+            canvas.quad_to(b.width * 0.62f, b.height * 0.1f, b.width * 0.75f, b.height * 0.5f);
+            canvas.quad_to(b.width * 0.88f, b.height * 0.9f, b.width, b.height * 0.5f);
+            break;
+        case PreviewShape::square:
+            canvas.move_to(0.0f, b.height * 0.2f);
+            canvas.line_to(b.width * 0.25f, b.height * 0.2f);
+            canvas.line_to(b.width * 0.25f, b.height * 0.8f);
+            canvas.line_to(b.width * 0.5f, b.height * 0.8f);
+            canvas.line_to(b.width * 0.5f, b.height * 0.2f);
+            canvas.line_to(b.width * 0.75f, b.height * 0.2f);
+            canvas.line_to(b.width * 0.75f, b.height * 0.8f);
+            canvas.line_to(b.width, b.height * 0.8f);
+            break;
+        case PreviewShape::triangle:
+            canvas.move_to(0.0f, b.height * 0.5f);
+            canvas.line_to(b.width * 0.125f, b.height * 0.15f);
+            canvas.line_to(b.width * 0.375f, b.height * 0.85f);
+            canvas.line_to(b.width * 0.625f, b.height * 0.15f);
+            canvas.line_to(b.width * 0.875f, b.height * 0.85f);
+            canvas.line_to(b.width, b.height * 0.5f);
+            break;
+        case PreviewShape::none:
+            break;
         }
         canvas.stroke_current_path();
         return;
     }
 
-    if (samples_.empty()) return;
+    if (samples_.empty())
+        return;
 
     // Center line
     auto center_color = resolve_color("waveform.grid", canvas::Color::rgba8(50, 50, 60));
@@ -507,10 +509,12 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
 
-    if (bins_.empty()) return;
+    if (bins_.empty())
+        return;
 
     float db_range = max_db_ - min_db_;
-    if (db_range <= 0) return;
+    if (db_range <= 0)
+        return;
 
     auto spectrum_color = resolve_color("waveform.line", canvas::Color::rgba8(100, 180, 250));
 
@@ -528,11 +532,13 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
         // Line / filled style — drawn with raster primitives (vertical strips
         // for the area + a polyline on top) so the area fill renders on the CPU
         // CoreGraphics raster path, not only the GPU waveform shader.
-        auto fill = resolve_color("waveform.fill", canvas::Color::rgba(spectrum_color.r, spectrum_color.g, spectrum_color.b, 60.0f/255.0f));
+        auto fill =
+            resolve_color("waveform.fill", canvas::Color::rgba(spectrum_color.r, spectrum_color.g,
+                                                               spectrum_color.b, 60.0f / 255.0f));
         const size_t n = bins_.size();
         auto y_at = [&](size_t i) {
             float norm = std::clamp((bins_[i] - min_db_) / db_range, 0.0f, 1.0f);
-            return b.height - norm * b.height;  // 0 dB → top
+            return b.height - norm * b.height; // 0 dB → top
         };
         const float step = n > 1 ? b.width / static_cast<float>(n - 1) : b.width;
 
@@ -569,9 +575,8 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
 
 // ── Panel ────────────────────────────────────────────────────────────────────
 
-
-void SpectrogramView::configure(int history_columns, int freq_rows,
-                                 signal::ColorRamp ramp, float min_db, float max_db) {
+void SpectrogramView::configure(int history_columns, int freq_rows, signal::ColorRamp ramp,
+                                float min_db, float max_db) {
     buffer_.configure(history_columns, freq_rows);
     mapper_.set_ramp(ramp);
     min_db_ = min_db;
@@ -595,7 +600,8 @@ void SpectrogramView::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(bg);
     canvas.fill_rect(0, 0, b.width, b.height);
 
-    if (!configured_ || buffer_.frames_written() == 0) return;
+    if (!configured_ || buffer_.frames_written() == 0)
+        return;
 
     int buf_w = buffer_.width();
     int buf_h = buffer_.height();
@@ -631,13 +637,15 @@ bool MultiMeter::update(const signal::MultiChannelMeterData& data, float dt) {
 void MultiMeter::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     int num_ch = ballistics_.num_channels;
-    if (num_ch <= 0) return;
+    if (num_ch <= 0)
+        return;
 
     if (display_style_ == DisplayStyle::segmented && layout_ == Layout::horizontal) {
         constexpr float kMinDb = -60.0f;
         constexpr float kMaxDb = 6.0f;
         auto level_to_position = [&](float level) {
-            if (level <= 0.0f) return 0.0f;
+            if (level <= 0.0f)
+                return 0.0f;
             const float db = 20.0f * std::log10(std::max(level, 1.0e-6f));
             return std::clamp((db - kMinDb) / (kMaxDb - kMinDb), 0.0f, 1.0f);
         };
@@ -645,21 +653,30 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
             return kMinDb + std::clamp(position, 0.0f, 1.0f) * (kMaxDb - kMinDb);
         };
         auto active_color_for_db = [](float db) {
-            if (db >= 0.0f) return canvas::Color::rgba8(255, 48, 48);
-            if (db >= -6.0f) return canvas::Color::rgba8(246, 218, 61);
+            if (db >= 0.0f)
+                return canvas::Color::rgba8(255, 48, 48);
+            if (db >= -6.0f)
+                return canvas::Color::rgba8(246, 218, 61);
             return canvas::Color::rgba8(134, 232, 68);
         };
         auto inactive_color_for_db = [](float db) {
-            if (db >= 0.0f) return canvas::Color::rgba8(66, 16, 18);
-            if (db >= -6.0f) return canvas::Color::rgba8(62, 48, 17);
+            if (db >= 0.0f)
+                return canvas::Color::rgba8(66, 16, 18);
+            if (db >= -6.0f)
+                return canvas::Color::rgba8(62, 48, 17);
             return canvas::Color::rgba8(23, 43, 18);
         };
         auto label_for_channel = [](int ch) -> const char* {
-            if (ch == 0) return "L";
-            if (ch == 1) return "R";
-            if (ch == 2) return "C";
-            if (ch == 3) return "Ls";
-            if (ch == 4) return "Rs";
+            if (ch == 0)
+                return "L";
+            if (ch == 1)
+                return "R";
+            if (ch == 2)
+                return "C";
+            if (ch == 3)
+                return "Ls";
+            if (ch == 4)
+                return "Rs";
             return "";
         };
 
@@ -672,16 +689,14 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
         const float meter_x = label_w + pad;
         const float meter_w = std::max(1.0f, b.width - meter_x - pad);
         const float row_gap = 3.0f;
-        const float row_area_h = std::max(
-            1.0f,
-            b.height - pad * 2.0f - scale_h - row_gap * static_cast<float>(num_ch - 1));
+        const float row_area_h = std::max(1.0f, b.height - pad * 2.0f - scale_h -
+                                                    row_gap * static_cast<float>(num_ch - 1));
         const float row_h = std::max(3.0f, row_area_h / static_cast<float>(num_ch));
         const int segments = meter_w >= 180.0f ? 36 : 24;
         const float segment_gap = 2.0f;
-        const float segment_w = std::max(
-            2.0f,
-            (meter_w - segment_gap * static_cast<float>(segments - 1)) /
-                static_cast<float>(segments));
+        const float segment_w =
+            std::max(2.0f, (meter_w - segment_gap * static_cast<float>(segments - 1)) /
+                               static_cast<float>(segments));
 
         canvas.set_font("Inter", 9.0f);
         for (int ch = 0; ch < num_ch; ++ch) {
@@ -691,9 +706,11 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
             const float peak_pos = level_to_position(bc.display_peak);
             const float rms_pos = level_to_position(bc.display_rms);
 
-            canvas.set_fill_color(resolve_color("accent.success", canvas::Color::rgba8(134, 232, 68)));
+            canvas.set_fill_color(
+                resolve_color("accent.success", canvas::Color::rgba8(134, 232, 68)));
             const char* label = label_for_channel(ch);
-            if (label[0] != '\0') canvas.fill_text(label, pad, y_mid + 3.0f);
+            if (label[0] != '\0')
+                canvas.fill_text(label, pad, y_mid + 3.0f);
 
             for (int i = 0; i < segments; ++i) {
                 const float segment_pos =
@@ -701,7 +718,8 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
                 const float db = position_to_db(segment_pos);
                 const bool active = segment_pos <= peak_pos;
                 auto color = active ? active_color_for_db(db) : inactive_color_for_db(db);
-                if (active && segment_pos > rms_pos) color.a = 175;
+                if (active && segment_pos > rms_pos)
+                    color.a = 175;
                 canvas.set_fill_color(color);
                 const float x = meter_x + static_cast<float>(i) * (segment_w + segment_gap);
                 canvas.fill_rect(x, y0, segment_w, row_h);
@@ -709,36 +727,42 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
 
             const float held_pos = level_to_position(bc.held_peak);
             if (held_pos > 0.0f) {
-                canvas.set_stroke_color(bc.held_peak >= 1.0f
-                    ? resolve_color("accent.error", canvas::Color::rgba8(255, 48, 48))
-                    : canvas::Color::rgba8(255, 255, 255));
+                canvas.set_stroke_color(
+                    bc.held_peak >= 1.0f
+                        ? resolve_color("accent.error", canvas::Color::rgba8(255, 48, 48))
+                        : canvas::Color::rgba8(255, 255, 255));
                 canvas.set_line_width(1.0f);
                 const float x = meter_x + held_pos * meter_w;
                 canvas.stroke_line(x, y0 - 1.0f, x, y0 + row_h + 1.0f);
             }
 
             if (bc.clip_indicator) {
-                canvas.set_fill_color(resolve_color("accent.error", canvas::Color::rgba8(255, 48, 48)));
+                canvas.set_fill_color(
+                    resolve_color("accent.error", canvas::Color::rgba8(255, 48, 48)));
                 canvas.fill_rect(b.width - pad - 3.0f, y0, 3.0f, row_h);
             }
         }
 
         if (scale_h > 0.0f) {
-            struct Tick { float db; const char* label; };
+            struct Tick {
+                float db;
+                const char* label;
+            };
             constexpr Tick ticks[] = {
-                {-20.0f, "-20"}, {-15.0f, "-15"}, {-10.0f, "-10"},
-                { -6.0f,  "-6"}, { -3.0f,  "-3"}, {  0.0f,   "0"},
-                {  2.0f,  "+2"}, {  4.0f,  "+4"},
+                {-20.0f, "-20"}, {-15.0f, "-15"}, {-10.0f, "-10"}, {-6.0f, "-6"},
+                {-3.0f, "-3"},   {0.0f, "0"},     {2.0f, "+2"},    {4.0f, "+4"},
             };
             canvas.set_font("Inter", 8.0f);
-            canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(160, 166, 185)));
+            canvas.set_fill_color(
+                resolve_color("text.secondary", canvas::Color::rgba8(160, 166, 185)));
             for (const auto& tick : ticks) {
                 const float pos = std::clamp((tick.db - kMinDb) / (kMaxDb - kMinDb), 0.0f, 1.0f);
                 const float x = meter_x + pos * meter_w;
                 canvas.set_stroke_color(canvas::Color::rgba8(58, 64, 73));
                 canvas.set_line_width(1.0f);
                 canvas.stroke_line(x, pad, x, b.height - scale_h - 1.0f);
-                canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(160, 166, 185)));
+                canvas.set_fill_color(
+                    resolve_color("text.secondary", canvas::Color::rgba8(160, 166, 185)));
                 canvas.fill_text(tick.label, x - 6.0f, b.height - 3.0f);
             }
             canvas.fill_text("dB", meter_x - 14.0f, b.height - 3.0f);
@@ -812,8 +836,8 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
         float held = bc.held_peak;
         if (held > 0.01f) {
             auto held_color = held > 0.9f
-                ? resolve_color("accent.error", canvas::Color::rgba8(255, 50, 50))
-                : canvas::Color::rgba8(255, 100, 100);
+                                  ? resolve_color("accent.error", canvas::Color::rgba8(255, 50, 50))
+                                  : canvas::Color::rgba8(255, 100, 100);
             canvas.set_stroke_color(held_color);
             canvas.set_line_width(2.0f);
             float held_pos = held * meter_length;
@@ -841,9 +865,9 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
 bool CorrelationMeter::update(float correlation, float dt) {
     // A non-finite input would poison the display value and, because NaN
     // compares unequal to itself, report movement on every frame forever.
-    const float target =
-        std::isfinite(correlation) ? std::clamp(correlation, -1.0f, 1.0f) : 0.0f;
-    if (!std::isfinite(display_correlation_)) display_correlation_ = 0.0f;
+    const float target = std::isfinite(correlation) ? std::clamp(correlation, -1.0f, 1.0f) : 0.0f;
+    if (!std::isfinite(display_correlation_))
+        display_correlation_ = 0.0f;
 
     const float prev = display_correlation_;
     const float coeff = 1.0f - std::exp(-dt / 0.05f); // 50ms smoothing
@@ -897,23 +921,20 @@ void CorrelationMeter::paint(canvas::Canvas& canvas) {
     if (display_correlation_ > 0.0f) {
         // Green to yellow
         float t = display_correlation_;
-        indicator_color = canvas::Color::rgba8(
-            static_cast<uint8_t>(240 * (1.0f - t)),
-            static_cast<uint8_t>(200 + 55 * t),
-            static_cast<uint8_t>(60 * (1.0f - t)));
+        indicator_color = canvas::Color::rgba8(static_cast<uint8_t>(240 * (1.0f - t)),
+                                               static_cast<uint8_t>(200 + 55 * t),
+                                               static_cast<uint8_t>(60 * (1.0f - t)));
     } else {
         // Yellow to red
         float t = -display_correlation_;
-        indicator_color = canvas::Color::rgba8(
-            static_cast<uint8_t>(240),
-            static_cast<uint8_t>(200 * (1.0f - t)),
-            static_cast<uint8_t>(60 * (1.0f - t)));
+        indicator_color =
+            canvas::Color::rgba8(static_cast<uint8_t>(240), static_cast<uint8_t>(200 * (1.0f - t)),
+                                 static_cast<uint8_t>(60 * (1.0f - t)));
     }
 
     // Draw indicator bar
     canvas.set_fill_color(indicator_color);
-    canvas.fill_rounded_rect(indicator_x - bar_width * 0.5f, 1,
-                              bar_width, b.height - 2, 2.0f);
+    canvas.fill_rounded_rect(indicator_x - bar_width * 0.5f, 1, bar_width, b.height - 2, 2.0f);
 
     // Fill from center to indicator
     auto fill_color = indicator_color;
@@ -925,7 +946,5 @@ void CorrelationMeter::paint(canvas::Canvas& canvas) {
         canvas.fill_rect(indicator_x, 2, center_x - indicator_x, b.height - 4);
     }
 }
-
-
 
 } // namespace pulp::view

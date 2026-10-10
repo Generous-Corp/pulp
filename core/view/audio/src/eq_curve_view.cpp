@@ -1,13 +1,13 @@
-#include <pulp/view/eq_curve_view.hpp>
-#include <pulp/view/continuous_frames.hpp>
-#include <pulp/view/theme_contrast.hpp>
-#include <pulp/signal/frequency_response.hpp>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <pulp/signal/frequency_response.hpp>
+#include <pulp/view/continuous_frames.hpp>
+#include <pulp/view/eq_curve_view.hpp>
+#include <pulp/view/theme_contrast.hpp>
 #include <span>
 #include <string>
-#include <algorithm>
 
 namespace pulp::view {
 
@@ -51,21 +51,22 @@ bool band_is_shelf(EqCurveView::FilterType type) {
 // dot is at its gain. A shelf's corner frequency is the half-gain point of the
 // transition, so its dot rides the curve at gain/2. Gain-less bands ride 0 dB.
 float band_handle_db(const EqCurveView::Band& band) {
-    if (!band_has_gain(band.type)) return 0.0f;
+    if (!band_has_gain(band.type))
+        return 0.0f;
     return band_is_shelf(band.type) ? band.gain_db * 0.5f : band.gain_db;
 }
 
 // Default band palette — our own hues, spaced around the wheel so adjacent
 // bands stay distinct. Used when a Band leaves its color unset.
 constexpr std::array<Color, 8> kBandPalette = {{
-    Color::rgba8(235, 110, 120),  // rose
-    Color::rgba8(240, 165, 90),   // amber
-    Color::rgba8(200, 205, 105),  // lime
-    Color::rgba8(95, 200, 175),   // teal
-    Color::rgba8(100, 175, 235),  // sky
-    Color::rgba8(140, 140, 235),  // indigo
-    Color::rgba8(190, 130, 225),  // violet
-    Color::rgba8(225, 120, 190),  // magenta
+    Color::rgba8(235, 110, 120), // rose
+    Color::rgba8(240, 165, 90),  // amber
+    Color::rgba8(200, 205, 105), // lime
+    Color::rgba8(95, 200, 175),  // teal
+    Color::rgba8(100, 175, 235), // sky
+    Color::rgba8(140, 140, 235), // indigo
+    Color::rgba8(190, 130, 225), // violet
+    Color::rgba8(225, 120, 190), // magenta
 }};
 
 Color band_color(const EqCurveView::Band& band, size_t index) {
@@ -77,7 +78,8 @@ Color band_color(const EqCurveView::Band& band, size_t index) {
 std::string freq_label(float hz) {
     if (hz >= 1000.0f) {
         float k = hz / 1000.0f;
-        if (k == std::floor(k)) return std::to_string(static_cast<int>(k)) + "k";
+        if (k == std::floor(k))
+            return std::to_string(static_cast<int>(k)) + "k";
         char buf[16];
         std::snprintf(buf, sizeof(buf), "%.1fk", k);
         return buf;
@@ -90,13 +92,20 @@ signal::Biquad::Type biquad_type(EqCurveView::FilterType type) {
     using FT = EqCurveView::FilterType;
     using BT = signal::Biquad::Type;
     switch (type) {
-        case FT::low_pass:   return BT::lowpass;
-        case FT::high_pass:  return BT::highpass;
-        case FT::band_pass:  return BT::bandpass;
-        case FT::notch:      return BT::notch;
-        case FT::low_shelf:  return BT::low_shelf;
-        case FT::high_shelf: return BT::high_shelf;
-        case FT::peak:       break;
+    case FT::low_pass:
+        return BT::lowpass;
+    case FT::high_pass:
+        return BT::highpass;
+    case FT::band_pass:
+        return BT::bandpass;
+    case FT::notch:
+        return BT::notch;
+    case FT::low_shelf:
+        return BT::low_shelf;
+    case FT::high_shelf:
+        return BT::high_shelf;
+    case FT::peak:
+        break;
     }
     return BT::peaking;
 }
@@ -129,7 +138,8 @@ void EqCurveView::rebuild_coefficients() {
     coefficients_.clear();
     coefficients_.reserve(bands_.size());
     for (const auto& band : bands_) {
-        if (!band.enabled) continue;
+        if (!band.enabled)
+            continue;
         coefficients_.push_back(design_band(band, sample_rate_));
     }
 }
@@ -169,7 +179,8 @@ void EqCurveView::set_gain_range(float min_db, float max_db) {
 }
 
 void EqCurveView::set_sample_rate(float sample_rate) {
-    if (!(sample_rate > 0.0f)) return;
+    if (!(sample_rate > 0.0f))
+        return;
     sample_rate_ = sample_rate;
     rebuild_coefficients();
 }
@@ -201,8 +212,8 @@ void EqCurveView::set_spectrum(const float* magnitudes_db, size_t bin_count) {
     // frame per-bin — FAST attack (rise) so transients register, SLOW release
     // (fall) so the display flows and stops flickering. The paint path draws
     // from this smoothed buffer, not the raw frame. Reset on a bin-count change.
-    constexpr float kSpectrumAttack  = 0.5f;   // rise toward a louder bin
-    constexpr float kSpectrumRelease = 0.15f;  // fall toward a quieter bin
+    constexpr float kSpectrumAttack = 0.5f;   // rise toward a louder bin
+    constexpr float kSpectrumRelease = 0.15f; // fall toward a quieter bin
     if (spectrum_smoothed_.size() != bin_count) {
         spectrum_smoothed_.assign(magnitudes_db, magnitudes_db + bin_count);
         return;
@@ -220,7 +231,8 @@ void EqCurveView::clear_spectrum() {
 }
 
 void EqCurveView::set_analyzer_enabled(bool on) {
-    if (analyzer_enabled_ == on) return;
+    if (analyzer_enabled_ == on)
+        return;
     analyzer_enabled_ = on;
     // Do not clear the spectrum here — a caller may toggle the overlay off and
     // back on without re-feeding. The paint path gates on analyzer_enabled_, and
@@ -232,8 +244,8 @@ void EqCurveView::set_analyzer_enabled(bool on) {
 bool EqCurveView::point_in_analyzer_gutter(Point pos) const {
     const auto b = local_bounds();
     const float plot_top = b.y + std::min(content_top_pad_, b.height);
-    return pos.x >= b.x && pos.x <= b.x + kAnalyzerGutterWidth &&
-           pos.y >= plot_top && pos.y <= b.y + b.height;
+    return pos.x >= b.x && pos.x <= b.x + kAnalyzerGutterWidth && pos.y >= plot_top &&
+           pos.y <= b.y + b.height;
 }
 
 // ── Analyzer dBFS scale ─────────────────────────────────────────────────────
@@ -244,22 +256,25 @@ float EqCurveView::analyzer_db_to_y(float dbfs) const {
     const auto b = local_bounds();
     const float plot_top = b.y + std::min(content_top_pad_, b.height);
     const float plot_bottom = b.y + b.height;
-    const float span = analyzer_bottom_db_ - analyzer_top_db_;  // e.g. -60
+    const float span = analyzer_bottom_db_ - analyzer_top_db_; // e.g. -60
     const float t = span != 0.0f ? (dbfs - analyzer_top_db_) / span : 0.0f;
     return plot_top + std::clamp(t, 0.0f, 1.0f) * (plot_bottom - plot_top);
 }
 
 // ── StateStore binding ──────────────────────────────────────────────────────
 void EqCurveView::store_begin(state::ParamID id) {
-    if (store_ && id != 0) store_->begin_gesture(id);
+    if (store_ && id != 0)
+        store_->begin_gesture(id);
 }
 
 void EqCurveView::store_end(state::ParamID id) {
-    if (store_ && id != 0) store_->end_gesture(id);
+    if (store_ && id != 0)
+        store_->end_gesture(id);
 }
 
 void EqCurveView::store_set(state::ParamID id, float value) {
-    if (!store_ || id == 0) return;
+    if (!store_ || id == 0)
+        return;
     // Guard: a set_value fired inline (no host EventLoop) would re-enter our own
     // Direction-B listener; the flag makes that a no-op so we don't re-apply our
     // own edit. It is NOT the loop guard against host writes — the listener path
@@ -275,10 +290,14 @@ void EqCurveView::apply_param_from_host(state::ParamID id, float value) {
     // to the store, so a host-driven change cannot feed back into the record path.
     for (size_t bi = 0; bi < band_params_.size() && bi < bands_.size(); ++bi) {
         const BandParamIds& p = band_params_[bi];
-        if (id != 0 && id == p.freq)      bands_[bi].frequency = value;
-        else if (id != 0 && id == p.gain) bands_[bi].gain_db = value;
-        else if (id != 0 && id == p.q)    bands_[bi].q = value;
-        else continue;
+        if (id != 0 && id == p.freq)
+            bands_[bi].frequency = value;
+        else if (id != 0 && id == p.gain)
+            bands_[bi].gain_db = value;
+        else if (id != 0 && id == p.q)
+            bands_[bi].q = value;
+        else
+            continue;
         rebuild_coefficients();
         request_repaint();
         return;
@@ -294,7 +313,8 @@ void EqCurveView::bind_bands(state::StateStore& store, std::span<const BandParam
     // on the audio thread.
     param_listener_tokens_.push_back(store.add_listener(
         [this](state::ParamID id, float value) {
-            if (writing_to_store_) return;  // our own Direction-A echo
+            if (writing_to_store_)
+                return; // our own Direction-A echo
             apply_param_from_host(id, value);
         },
         state::ListenerThread::Main));
@@ -302,10 +322,18 @@ void EqCurveView::bind_bands(state::StateStore& store, std::span<const BandParam
 
 // The four axis conversions all defer to the shared scales, so anything
 // overlaid on this view (a spectrum, a crosshair) lands on the same pixels.
-float EqCurveView::freq_to_x(float freq) const { return frequency_scale().to_x(freq); }
-float EqCurveView::x_to_freq(float x) const { return frequency_scale().to_frequency(x); }
-float EqCurveView::db_to_y(float db) const { return gain_scale().to_y(db); }
-float EqCurveView::y_to_db(float y) const { return gain_scale().to_decibels(y); }
+float EqCurveView::freq_to_x(float freq) const {
+    return frequency_scale().to_x(freq);
+}
+float EqCurveView::x_to_freq(float x) const {
+    return frequency_scale().to_frequency(x);
+}
+float EqCurveView::db_to_y(float db) const {
+    return gain_scale().to_y(db);
+}
+float EqCurveView::y_to_db(float y) const {
+    return gain_scale().to_decibels(y);
+}
 
 int EqCurveView::hit_test_band(Point pos) const {
     constexpr float hit_radius = 10.0f;
@@ -364,27 +392,31 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         band_db_.resize(curve_resolution);
         for (size_t bi = 0; bi < bands_.size(); ++bi) {
             const auto& band = bands_[bi];
-            if (!band.enabled) continue;
+            if (!band.enabled)
+                continue;
             const signal::BiquadCoefficients c = design_band(band, sample_rate_);
-            signal::response_curve_db(std::span<const signal::BiquadCoefficients>(&c, 1),
-                                      min_freq_, max_freq_, sample_rate_, band_db_);
+            signal::response_curve_db(std::span<const signal::BiquadCoefficients>(&c, 1), min_freq_,
+                                      max_freq_, sample_rate_, band_db_);
             const Color col = band_color(band, bi);
 
             // The band's peak deviation from 0 dB — the anchor for the fill's
             // vertical gradient and how far its color reaches.
             float extreme_db = 0.0f;
             for (size_t i = 0; i < curve_resolution; ++i)
-                if (std::abs(band_db_[i]) > std::abs(extreme_db)) extreme_db = band_db_[i];
+                if (std::abs(band_db_[i]) > std::abs(extreme_db))
+                    extreme_db = band_db_[i];
 
             // Fill between the curve and the 0 dB line as one polygon.
             fill_poly_.clear();
             fill_poly_.reserve(curve_resolution + 2);
-            fill_poly_.push_back({freq_axis.to_x(freq_axis.frequency_at(0, curve_resolution)), center_y});
+            fill_poly_.push_back(
+                {freq_axis.to_x(freq_axis.frequency_at(0, curve_resolution)), center_y});
             for (size_t i = 0; i < curve_resolution; ++i)
                 fill_poly_.push_back({freq_axis.to_x(freq_axis.frequency_at(i, curve_resolution)),
                                       gain_axis.to_y(band_db_[i])});
-            fill_poly_.push_back({freq_axis.to_x(freq_axis.frequency_at(curve_resolution - 1, curve_resolution)),
-                                  center_y});
+            fill_poly_.push_back(
+                {freq_axis.to_x(freq_axis.frequency_at(curve_resolution - 1, curve_resolution)),
+                 center_y});
 
             // Vertical gradient: transparent at the 0 dB line, the band color at
             // its peak — the depth cue dsssp uses. Skip a flat band (nothing to
@@ -436,7 +468,8 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
             const int lo = std::max(0, static_cast<int>(i) - hw);
             const int hi = std::min(static_cast<int>(columns) - 1, static_cast<int>(i) + hw);
             float acc = 0.0f;
-            for (int k = lo; k <= hi; ++k) acc += band_db_[static_cast<size_t>(k)];
+            for (int k = lo; k <= hi; ++k)
+                acc += band_db_[static_cast<size_t>(k)];
             spectrum_db_[i] = acc / static_cast<float>(hi - lo + 1);
         }
 
@@ -449,7 +482,7 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         // Logic / Pro-Q instead of being crushed onto the gain axis.
         const Color spec = Color::rgba8(0x64, 0xaf, 0xeb);
         const float plot_top = b.y + std::min(content_top_pad_, b.height);
-        const float y_base = b.y + b.height;  // bottom of plot = analyzer floor
+        const float y_base = b.y + b.height; // bottom of plot = analyzer floor
 
         fill_poly_.clear();
         fill_poly_.push_back({b.x, y_base});
@@ -463,8 +496,7 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
 
         // Fill: vertical gradient, ~0x44 alpha at the top (loud) fading to ~0x06
         // at the bottom (quiet), across the full analyzer height.
-        const Color stops[2] = {with_alpha(spec, 0x44 / 255.0f),
-                                with_alpha(spec, 0x06 / 255.0f)};
+        const Color stops[2] = {with_alpha(spec, 0x44 / 255.0f), with_alpha(spec, 0x06 / 255.0f)};
         const float positions[2] = {0.0f, 1.0f};
         canvas.set_fill_gradient_linear(b.x, plot_top, b.x, y_base, stops, positions, 2);
         canvas.fill_path(fill_poly_.data(), fill_poly_.size());
@@ -490,8 +522,7 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
 
         // Bright, near-white so the summed response reads clearly over the
         // colored per-band curves — the one line that shows the actual output.
-        const Color composite_color =
-            show_band_curves_ ? Color::rgba8(238, 240, 248) : curve_color;
+        const Color composite_color = show_band_curves_ ? Color::rgba8(238, 240, 248) : curve_color;
         canvas.set_stroke_color(composite_color);
         canvas.set_line_width(2.0f);
         float prev_x = freq_axis.to_x(freq_axis.frequency_at(0, curve_resolution));
@@ -518,7 +549,8 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
                                       canvas::Canvas::TextAnchor::Baseline);
         }
         for (float f : freq_axis.ticks()) {
-            if (!LogFrequencyScale::is_major_tick(f)) continue;
+            if (!LogFrequencyScale::is_major_tick(f))
+                continue;
             const float x = freq_axis.to_x(f);
             canvas.fill_text_anchored(freq_label(f), x, b.y + b.height - 4.0f,
                                       canvas::Canvas::TextAnchor::GlyphCenter);
@@ -536,7 +568,7 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         const float gx = b.x + kAnalyzerGutterWidth - 3.0f;
         const float gcy = (plot_top + plot_bottom) * 0.5f;
         const float half = 14.0f;
-        const Color grip = Color::rgba8(0x64, 0xaf, 0xeb);  // analyzer accent
+        const Color grip = Color::rgba8(0x64, 0xaf, 0xeb); // analyzer accent
         const float a = (gutter_hover_ || analyzer_drag_active_) ? 0.55f : 0.20f;
         canvas.set_stroke_color(with_alpha(grip, a));
         canvas.set_line_width(2.0f);
@@ -562,7 +594,8 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         // hidden unless show_disabled_handles_ opts in, in which case it is
         // drawn dimmed and slightly smaller so it stays re-grabbable.
         const bool disabled = !band.enabled;
-        if (disabled && !show_disabled_handles_) continue;
+        if (disabled && !show_disabled_handles_)
+            continue;
 
         float hx = freq_to_x(band.frequency);
         const float handle_top = b.y + std::min(content_top_pad_, b.height);
@@ -580,8 +613,10 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
                 cur = target_radius;
             } else {
                 cur += (target_radius - cur) * 0.3f;
-                if (std::abs(cur - target_radius) < 0.06f) cur = target_radius;
-                else hover_animating_ = true;
+                if (std::abs(cur - target_radius) < 0.06f)
+                    cur = target_radius;
+                else
+                    hover_animating_ = true;
             }
             radius = cur;
         }
@@ -596,8 +631,7 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
 
     // Readout of the active band — the values you're actually setting. Pinned
     // top-left so it never chases the pointer or overlaps a curve.
-    if (show_readout_ && active_band >= 0 &&
-        active_band < static_cast<int>(bands_.size())) {
+    if (show_readout_ && active_band >= 0 && active_band < static_cast<int>(bands_.size())) {
         const auto& band = bands_[static_cast<size_t>(active_band)];
 
         // Fixed-width fields so the line never reflows as values change — each
@@ -613,7 +647,7 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         if (band_has_gain(band.type))
             std::snprintf(gbuf, sizeof(gbuf), "%+5.1f dB", band.gain_db);
         else
-            std::snprintf(gbuf, sizeof(gbuf), "        ");  // reserve the cell
+            std::snprintf(gbuf, sizeof(gbuf), "        "); // reserve the cell
         std::snprintf(qbuf, sizeof(qbuf), "Q %5.2f", band.q);
         const std::string text = std::string(fbuf) + "   " + gbuf + "   " + qbuf;
 
@@ -652,8 +686,7 @@ void EqCurveView::on_mouse_down(Point pos) {
         // Direction A: open a gesture for the param(s) this dot drag will change
         // — freq always, gain only for a band that has one — so the whole drag
         // is one grouped, host-recordable edit.
-        if (record_gestures_ && store_ &&
-            hit < static_cast<int>(band_params_.size())) {
+        if (record_gestures_ && store_ && hit < static_cast<int>(band_params_.size())) {
             const BandParamIds& p = band_params_[static_cast<size_t>(hit)];
             store_begin(p.freq);
             drag_freq_gesture_ = p.freq;
@@ -662,7 +695,8 @@ void EqCurveView::on_mouse_down(Point pos) {
                 drag_gain_gesture_ = p.gain;
             }
         }
-        if (on_band_selected) on_band_selected(static_cast<size_t>(hit));
+        if (on_band_selected)
+            on_band_selected(static_cast<size_t>(hit));
     }
 }
 
@@ -692,18 +726,20 @@ void EqCurveView::on_mouse_drag(Point pos) {
             // The handle rides the curve: for a shelf it sits at gain/2, so to
             // keep the dot under the pointer the gain moves at twice the rate.
             float target_db = y_to_db(pos.y);
-            if (band_is_shelf(band.type)) target_db *= 2.0f;
+            if (band_is_shelf(band.type))
+                target_db *= 2.0f;
             band.gain_db = std::clamp(target_db, min_db_, max_db_);
         }
         rebuild_coefficients();
         // Direction A: publish the changed value(s) inside the open gesture.
-        if (record_gestures_ && store_ &&
-            dragging_band_ < static_cast<int>(band_params_.size())) {
+        if (record_gestures_ && store_ && dragging_band_ < static_cast<int>(band_params_.size())) {
             const BandParamIds& p = band_params_[static_cast<size_t>(dragging_band_)];
             store_set(p.freq, band.frequency);
-            if (band_has_gain(band.type)) store_set(p.gain, band.gain_db);
+            if (band_has_gain(band.type))
+                store_set(p.gain, band.gain_db);
         }
-        if (on_band_changed) on_band_changed(static_cast<size_t>(dragging_band_), band);
+        if (on_band_changed)
+            on_band_changed(static_cast<size_t>(dragging_band_), band);
     }
 }
 
@@ -719,9 +755,8 @@ void EqCurveView::on_mouse_event(const MouseEvent& event) {
         const int band = hit_test_band(event.position);
         if (band >= 0) {
             auto& b = bands_[static_cast<size_t>(band)];
-            constexpr float kQWheelGain = 0.02f;  // exponent per delta unit
-            const float exponent =
-                std::clamp(event.scroll_delta_y * kQWheelGain, -0.3f, 0.3f);
+            constexpr float kQWheelGain = 0.02f; // exponent per delta unit
+            const float exponent = std::clamp(event.scroll_delta_y * kQWheelGain, -0.3f, 0.3f);
             const float factor = std::exp(-exponent);
             b.q = std::clamp(b.q * factor, 0.1f, 12.0f);
             rebuild_coefficients();
@@ -729,14 +764,14 @@ void EqCurveView::on_mouse_event(const MouseEvent& event) {
             hovered_band_ = band;
             // Direction A: a scroll adjusts Q — wrap the single write in a
             // begin/set/end so the host records it as one gesture.
-            if (record_gestures_ && store_ &&
-                band < static_cast<int>(band_params_.size())) {
+            if (record_gestures_ && store_ && band < static_cast<int>(band_params_.size())) {
                 const state::ParamID qid = band_params_[static_cast<size_t>(band)].q;
                 store_begin(qid);
                 store_set(qid, b.q);
                 store_end(qid);
             }
-            if (on_band_changed) on_band_changed(static_cast<size_t>(band), b);
+            if (on_band_changed)
+                on_band_changed(static_cast<size_t>(band), b);
         }
         return;
     }
@@ -755,8 +790,7 @@ void EqCurveView::on_mouse_event(const MouseEvent& event) {
             selected_band_ = band;
             suppress_next_down_ = true;
             // Direction A: the reset write is one gesture-bracketed edit.
-            if (record_gestures_ && store_ &&
-                band < static_cast<int>(band_params_.size())) {
+            if (record_gestures_ && store_ && band < static_cast<int>(band_params_.size())) {
                 const state::ParamID gid = band_params_[static_cast<size_t>(band)].gain;
                 store_begin(gid);
                 store_set(gid, 0.0f);
@@ -779,9 +813,11 @@ void EqCurveView::on_mouse_event(const MouseEvent& event) {
 void EqCurveView::on_gesture_event(const GestureEvent& event) {
     // Only the continuous (changed) phase carries a scale delta worth applying;
     // begin/end/cancel are boundaries.
-    if (event.phase != GesturePhase::changed) return;
+    if (event.phase != GesturePhase::changed)
+        return;
     int band = hovered_band_ >= 0 ? hovered_band_ : selected_band_;
-    if (band < 0 || band >= static_cast<int>(bands_.size())) return;
+    if (band < 0 || band >= static_cast<int>(bands_.size()))
+        return;
     auto& b = bands_[static_cast<size_t>(band)];
     // macOS reports pinch-OUT (fingers apart) as a POSITIVE magnification and
     // pinch-IN as NEGATIVE. Pinch-in should narrow (raise Q), pinch-out widen
@@ -795,23 +831,24 @@ void EqCurveView::on_gesture_event(const GestureEvent& event) {
     selected_band_ = band;
     hovered_band_ = band;
     // Direction A: a pinch adjusts Q — bracket the write as one gesture.
-    if (record_gestures_ && store_ &&
-        band < static_cast<int>(band_params_.size())) {
+    if (record_gestures_ && store_ && band < static_cast<int>(band_params_.size())) {
         const state::ParamID qid = band_params_[static_cast<size_t>(band)].q;
         store_begin(qid);
         store_set(qid, b.q);
         store_end(qid);
     }
-    if (on_band_changed) on_band_changed(static_cast<size_t>(band), b);
+    if (on_band_changed)
+        on_band_changed(static_cast<size_t>(band), b);
     request_repaint();
 }
 
 void EqCurveView::on_hover_move(Point local_pos) {
-    if (dragging_band_ < 0) hovered_band_ = hit_test_band(local_pos);
+    if (dragging_band_ < 0)
+        hovered_band_ = hit_test_band(local_pos);
     // Left dB-gutter affordance: an ns-resize cursor + a brighter grip when the
     // pointer is over the drag zone AND not over a dot (a dot's own gesture wins).
-    const bool in_gutter = analyzer_scale_draggable_ && analyzer_enabled_ &&
-                           hovered_band_ < 0 && point_in_analyzer_gutter(local_pos);
+    const bool in_gutter = analyzer_scale_draggable_ && analyzer_enabled_ && hovered_band_ < 0 &&
+                           point_in_analyzer_gutter(local_pos);
     if (in_gutter != gutter_hover_) {
         gutter_hover_ = in_gutter;
         request_repaint();
