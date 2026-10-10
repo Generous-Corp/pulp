@@ -36,6 +36,7 @@ target_sources(pulp-host PRIVATE
     src/forge_dynamics_catalog.cpp
     src/forge_catalog_export_modulation.cpp
     src/forge_catalog_export_lofi.cpp
+    src/forge_lofi_catalog.cpp
     src/forge_catalog_export_pitch_sequencing.cpp
     src/forge_catalog_export_space_synthesis.cpp
     src/forge_space_catalog.cpp
