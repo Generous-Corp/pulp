@@ -2024,7 +2024,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-56711f2c84fd"
+name = "script-readers-29b919dda0eb"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -2035,6 +2035,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "cli-dsp-capabilities-dynamics-regression",
+  "dsp-capability-registry-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5844,6 +5845,7 @@ tests = [
   "ctest-label-exclusion-guard",
   "ctest-label-exclusion-guard-selftest",
   "drift-fast-selftest",
+  "dsp-capability-registry-selftest",
   "fleet-remote-probe-selftest",
   "forced-restore-lint",
   "forced-restore-lint-selftest",

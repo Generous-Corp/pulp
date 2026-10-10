@@ -974,13 +974,13 @@
       ]
     },
     {
-      "name": "toolchain-generate-selftest",
+      "name": "toolchain-test_generate-selftest",
       "argv": [
         "{repo}/tools/toolchain/test_generate.py"
       ]
     },
     {
-      "name": "toolchain-mise-profile-selftest",
+      "name": "toolchain-mise_profile-selftest",
       "argv": [
         "{repo}/tools/toolchain/test_mise_profile.py"
       ]

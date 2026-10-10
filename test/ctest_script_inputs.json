@@ -9445,21 +9445,21 @@
    ],
    "kind": "shell"
   },
-  "toolchain-generate-selftest": {
+  "toolchain-mise_profile-selftest": {
+   "entry": "tools/toolchain/test_mise_profile.py",
+   "inputs": [
+    "tools/ci",
+    "tools/toolchain/test_mise_profile.py"
+   ],
+   "kind": "python"
+  },
+  "toolchain-test_generate-selftest": {
    "entry": "tools/toolchain/test_generate.py",
    "inputs": [
     "tools/toolchain",
     "tools/toolchain/generate.py",
     "tools/toolchain/manifest.toml",
     "tools/toolchain/test_generate.py"
-   ],
-   "kind": "python"
-  },
-  "toolchain-mise-profile-selftest": {
-   "entry": "tools/toolchain/test_mise_profile.py",
-   "inputs": [
-    "tools/ci",
-    "tools/toolchain/test_mise_profile.py"
    ],
    "kind": "python"
   },
