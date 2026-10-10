@@ -43,10 +43,10 @@ def record(kind: str, payload: dict[str, Any], source: str, collected_at: str, o
     return {"schema": SCHEMA, "record_id": hashlib.sha256(basis.encode()).hexdigest(), "kind": kind, "source": source, "collected_at": collected_at, "observed_at": observed_at or collected_at, "payload": clean}
 
 def read_json(path: Path) -> Any:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
-    with path.open() as fh:
+    with path.open(encoding="utf-8") as fh:
         for line in fh:
             try:
                 value = json.loads(line)
@@ -96,7 +96,7 @@ def within(record_: dict[str, Any], cutoff: datetime) -> bool:
 
 def append_records(root: Path, records: Iterable[dict[str, Any]], now: datetime) -> dict[str, int]:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "README.md").write_text(SCRATCH_README)
+    (root / "README.md").write_text(SCRATCH_README, encoding="utf-8")
     day = now.strftime("%Y-%m-%d")
     paths = {"ci_job": root / f"facts-{day}.jsonl", "pr_event": root / f"facts-{day}.jsonl", "host_event": root / f"facts-{day}.jsonl", "session_error": root / f"session-index-{day}.jsonl"}
     seen: set[str] = set()
@@ -111,7 +111,7 @@ def append_records(root: Path, records: Iterable[dict[str, Any]], now: datetime)
             cutoff = now - timedelta(days=SESSION_DAYS if kind == "session_error" else FACT_DAYS)
             if not within(item, cutoff): counts["skipped_retention"] += 1; continue
             if item["record_id"] in seen: counts["skipped_duplicate"] += 1; continue
-            seen.add(item["record_id"]); handles.setdefault(paths[kind], paths[kind].open("a")).write(json.dumps(item, sort_keys=True) + "\n"); counts[kind] += 1
+            seen.add(item["record_id"]); handles.setdefault(paths[kind], paths[kind].open("a", encoding="utf-8")).write(json.dumps(item, sort_keys=True) + "\n"); counts[kind] += 1
     finally:
         for fh in handles.values(): fh.close()
     prune(root, now)
@@ -122,13 +122,13 @@ def prune(root: Path, now: datetime) -> None:
         is_session = path.name.startswith("session-index-")
         cutoff = now - timedelta(days=SESSION_DAYS if is_session else FACT_DAYS)
         kept = [x for x in read_jsonl(path) if within(x, cutoff)]
-        if kept: path.write_text("".join(json.dumps(x, sort_keys=True) + "\n" for x in kept))
+        if kept: path.write_text("".join(json.dumps(x, sort_keys=True) + "\n" for x in kept), encoding="utf-8")
         else: path.unlink(missing_ok=True)
 
 def gh_fetch(repo: str, since_days: int) -> Any:
     since = (datetime.now(timezone.utc) - timedelta(days=since_days)).date().isoformat()
     cmd = ["ghapp", "api", "--method", "GET", f"repos/{repo}/actions/runs?per_page=100&created=>={since}"]
-    proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    proc = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     return json.loads(proc.stdout or "[]")
 
 SCRATCH_README = """# Replay evidence scratch cache\n\nThis is a clearly labelled scratch cache on Atelier, populated by the Pulp replay evidence collector. It is derived from GitHub, Shipyard, tartci, and redacted session metadata. It is **not a backup or source of truth**, is not maintained forever, and may be deleted with `rm -f facts-*.jsonl session-index-*.jsonl README.md`. Facts roll for 180 days; the session-error index rolls for 30 days. Every record includes `source`, `collected_at`, and `observed_at`.\n"""
