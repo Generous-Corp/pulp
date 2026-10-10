@@ -9,7 +9,9 @@ What must hold:
   instrument gets the arguments it documents;
 - an instrument that raises or exits non-zero is named in the summary and
   never fails the runner (exit 0 in every case);
-- the CLI prints one summary line naming every instrument's status.
+- the CLI prints one summary line naming every instrument's status, and a
+  timing line giving the wall seconds of every instrument that ran (and of no
+  instrument that was skipped).
 
 Run:
     python3 tools/ci/test_merge_group_shadows.py
@@ -97,6 +99,30 @@ class IsolationTests(unittest.TestCase):
         self.assertIn("flake-exoneration=rc=0", printed)
         self.assertIn("test-receipts=rc=0", printed)
 
+    def test_timing_names_each_instrument_that_ran_with_its_own_seconds(self) -> None:
+        ok = mock.MagicMock(); ok.main.return_value = 0
+        modules = {"binary_identity_shadow": ok, "affected_tests_shadow": ok,
+                   "flake_exoneration_shadow": ok, "test_receipts_shadow": ok}
+        # Two clock reads per instrument that runs: 0->2.5, 10->17.25, 20->20.5.
+        clock = iter([0.0, 2.5, 10.0, 17.25, 20.0, 20.5])
+        with mock.patch.object(mgs, "_first_parent", return_value="p1"), \
+                mock.patch.object(mgs, "load_module", side_effect=lambda name: modules[name]), \
+                mock.patch.object(mgs.time, "monotonic", side_effect=lambda: next(clock)), \
+                mock.patch("sys.stdout") as out:
+            rc = mgs.main(["merge_group_shadows", "run", "--build-dir", "/b", "--source-root", "/s",
+                           "--repository", "O/R", "--merge-sha", "m", "--token", "t", "--junit", "/j",
+                           "--selected-json", "/i", "--ctest-outcome", "success"])
+        self.assertEqual(rc, 0)
+        printed = "".join(c.args[0] for c in out.write.call_args_list if c.args)
+        timing = [line for line in printed.splitlines() if line.startswith("merge-group shadows timing: ")]
+        self.assertEqual(timing, ["merge-group shadows timing: binary-identity=2.5s "
+                                  "affected-tests=7.2s test-receipts=0.5s"])
+        self.assertIn("merge-group shadows: affected-tests took 7.2s", printed)
+        self.assertNotIn("flake-exoneration took", printed)
+        # The status summary keeps its exact shape for anything that reads it.
+        self.assertIn("merge-group shadows: binary-identity=rc=0 affected-tests=rc=0 "
+                      "flake-exoneration=skipped test-receipts=rc=0", printed)
+
     def test_cli_exits_0_even_when_every_instrument_lacks_its_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             proc = subprocess.run([sys.executable, str(HERE / "merge_group_shadows.py"), "run",
@@ -107,6 +133,7 @@ class IsolationTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr[-800:])
         self.assertIn("merge-group shadows: binary-identity=", proc.stdout)
         self.assertIn("flake-exoneration=", proc.stdout)
+        self.assertRegex(proc.stdout, r"merge-group shadows timing: binary-identity=\d+\.\ds")
 
 
 if __name__ == "__main__":

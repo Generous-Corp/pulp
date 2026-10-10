@@ -2272,6 +2272,14 @@ inherits. Do not enforce while `would_skip_failed` is ever nonzero or binary
 identity (`binary_identity_shadow.py report`) is below ~100%: an unreproducible
 binary only means zero hits, but a missed runtime input means a false skip.
 
+The shadow step sits on the required merge-group job's critical path (about
+3.2 min median). Only binary identity's hashes (`our-identity.json`) and the
+receipts' keys (`test-keys.json`) feed the reuse record; the affected-test and
+flake-exoneration instruments only annotate. Before moving or dropping any of
+them, read the `merge-group shadows timing:` line the runner prints after its
+summary (each instrument's wall seconds, also flushed as `<label> took <s>s`
+when it finishes), not the step total.
+
 ## Compiled tests declare runtime data with `pulp_test_data()`
 
 A compiled test that opens checkout files at run time (fixtures, schemas,
