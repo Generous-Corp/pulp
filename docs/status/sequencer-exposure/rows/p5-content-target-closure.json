@@ -12,7 +12,7 @@
       "path": "examples/timeline-sdk-consumer/CMakeLists.txt",
       "needles": [
         "Audit the installed target graph, not a hand-maintained dependency list.",
-        "Pulp::content"
+        "Pulp::timeline"
       ]
     }
   ],
