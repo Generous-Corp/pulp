@@ -44,8 +44,8 @@ int main() {
         return 1;
     }
     GpuStartupReport report;
-    if (format_gpu_startup_line(report).empty()
-        || format_gpu_adapter_line(GpuSurface::AdapterInfo{}).empty()) {
+    if (format_gpu_startup_line(report).empty() ||
+        format_gpu_adapter_line(GpuSurface::AdapterInfo{}).empty()) {
         std::fprintf(stderr, "startup report formatting returned nothing\n");
         return 1;
     }

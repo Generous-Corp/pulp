@@ -2528,6 +2528,8 @@
   "pulp-test-gpu-compute-async",
   "pulp-test-gpu-compute-kernel-override",
   "pulp-test-gpu-compute-pool",
+  "pulp-test-gpu-device-api-only-consumer",
+  "pulp-test-gpu-device-only-consumer",
   "pulp-test-gpu-diagnostics",
   "pulp-test-gpu-dpr-native-measurement",
   "pulp-test-gpu-health-provider",
@@ -4861,6 +4863,22 @@
     "docs/status/gpu-vellum-handoff.yaml",
     "tools/scripts/connected_git_history.py",
     "tools/scripts/test_connected_git_history.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-device-link-closure": {
+   "entry": "tools/scripts/gpu_device_link_closure_check.py",
+   "inputs": [
+    "core/render/include",
+    "tools/scripts/gpu_device_link_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-device-link-closure-rules": {
+   "entry": "tools/scripts/test_gpu_device_link_closure_check.py",
+   "inputs": [
+    "tools/scripts/gpu_device_link_closure_check.py",
+    "tools/scripts/test_gpu_device_link_closure_check.py"
    ],
    "kind": "python"
   },

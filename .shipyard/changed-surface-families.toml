@@ -2441,6 +2441,34 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-f034ca84bc30"
+paths = ["tools/scripts/test_gpu_device_link_closure_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-device-link-closure-rules",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-51af590fafca"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
@@ -5432,6 +5460,7 @@ paths = [
   "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
   "tools/scripts/test_gpu_audio_provider_identity.py",
   "tools/scripts/test_gpu_clean_agent_journey.py",
+  "tools/scripts/test_gpu_device_link_closure_check.py",
   "tools/scripts/test_gpu_dpr_calibration_failure_proof.py",
   "tools/scripts/test_gpu_dpr_experiment.py",
   "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
@@ -5952,6 +5981,7 @@ paths = [
   "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
   "tools/scripts/test_gpu_audio_provider_identity.py",
   "tools/scripts/test_gpu_clean_agent_journey.py",
+  "tools/scripts/test_gpu_device_link_closure_check.py",
   "tools/scripts/test_gpu_dpr_calibration_failure_proof.py",
   "tools/scripts/test_gpu_dpr_experiment.py",
   "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
