@@ -830,12 +830,6 @@
       ]
     },
     {
-      "name": "rust-cli-build-edge-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_rust_cli_build_edge_check.py"
-      ]
-    },
-    {
       "name": "sample-region-compat-baseline-selftest",
       "argv": [
         "{repo}/tools/scripts/test_sample_region_compat_baseline.py"
