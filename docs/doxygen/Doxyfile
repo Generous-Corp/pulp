@@ -25,6 +25,7 @@ OUTPUT_DIRECTORY       = ../../build/api-docs
 INPUT                  = ../../core/audio/include \
                          ../../core/authoring_capsule/include \
                          ../../core/canvas/include \
+                         ../../core/content/include \
                          ../../core/events/include \
                          ../../core/format/include \
                          ../../core/gpu_audio/include \

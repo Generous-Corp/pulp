@@ -95,6 +95,7 @@ set(_expected_engine_closure
     # Arrives transitively: playback -> audio -> sample-bank-manifest. pulp-audio
     # PUBLIC-links it, so every consumer of the engine closure links it too.
     Pulp::sample-bank-manifest
+    Pulp::content
     Pulp::audio
     Pulp::events
     Pulp::midi
@@ -247,6 +248,7 @@ list(SORT _actual_importer_closure)
 set(_expected_importer_closure
     Pulp::audio
     Pulp::sample-bank-manifest
+    Pulp::content
     Pulp::dawproject-import
     Pulp::events
     Pulp::foundation
