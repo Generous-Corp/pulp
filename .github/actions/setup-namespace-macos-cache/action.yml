@@ -4,7 +4,7 @@ runs:
   using: composite
   steps:
     - name: Set up Namespace cache
-      uses: namespacelabs/nscloud-cache-action@v1
+      uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
       with:
         cache: brew
         path: |

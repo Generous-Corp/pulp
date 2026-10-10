@@ -529,7 +529,10 @@ class TartMacosWorkflowPrerequisiteTests(unittest.TestCase):
 
     def test_gpu_audio_macos_installs_and_uses_discovered_chrome(self) -> None:
         macos = job(self.web_plugins, "gpu-audio-macos")
-        self.assertIn("uses: browser-actions/setup-chrome@v1", macos)
+        self.assertRegex(
+            macos,
+            r"uses: browser-actions/setup-chrome@[0-9a-f]{40} # v1\.7\.3",
+        )
         self.assertIn("id: chrome-macos", macos)
         self.assertEqual(
             macos.count(

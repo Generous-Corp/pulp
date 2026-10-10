@@ -40,7 +40,10 @@ def violations(paths: list[pathlib.Path]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    paths = [pathlib.Path(arg) for arg in argv] or sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))
+    paths = [pathlib.Path(arg) for arg in argv] or sorted(
+        list(pathlib.Path(".github/workflows").glob("*.y*ml"))
+        + list(pathlib.Path(".github/actions").glob("**/*.y*ml"))
+    )
     errors = violations(paths)
     if errors:
         print("third-party action pin lint: violations found:", file=sys.stderr)
