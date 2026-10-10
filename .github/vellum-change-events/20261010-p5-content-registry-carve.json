@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20261010-p5-content-registry-carve",
+  "kind": "change",
+  "created_at": "2026-10-10T18:30:00Z",
+  "slices": ["state/content-registry", "audio/sample-bank-manifest"],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)\n\nP5 is a Pulp-only Phase 2 carve prerequisite: content_registry implementation and its public header move into the new pulp-content target while preserving the pulp/state include path and the existing pulp::state consumer surface. The concrete pulp-state archive loses its sample-bank-manifest direct edge and retains only runtime plus events; pulp-content carries the sample-bank-manifest dependency transitively. This is a zero-behavior-change target decomposition, with no Vellum consumption, no deletion of a Pulp implementation, and no generic Vellum implementation claim.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-state-link-closure",
+    "pulp-test-state",
+    "tools/scripts/confirm_failure.sh"
+  ],
+  "disposition": "pulp-only"
+}
