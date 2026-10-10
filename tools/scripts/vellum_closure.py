@@ -25,7 +25,7 @@ RESOURCE_EXTS = {".sksl", ".glsl", ".frag", ".vert", ".ttf", ".otf", ".woff", ".
 
 
 def run(*cmd: str, cwd: Path | None = None) -> str:
-    return subprocess.check_output(cmd, cwd=cwd, text=True, stderr=subprocess.STDOUT).strip()
+    return subprocess.check_output(cmd, cwd=cwd, text=True, encoding="utf-8", stderr=subprocess.STDOUT).strip()
 
 
 def sha256(path: Path) -> str:
@@ -44,18 +44,18 @@ def find_reply(build: Path, prefix: str) -> Path:
 
 
 def codemodel(build: Path) -> tuple[dict, dict]:
-    index = json.loads(find_reply(build, "index-").read_text())
+    index = json.loads(find_reply(build, "index-").read_text(encoding="utf-8"))
     cm = next((x for x in index["reply"].values() if x.get("kind") == "codemodel"), None)
     if not cm:
         raise SystemExit("CMake file-api index has no codemodel reply")
-    model = json.loads((build / ".cmake/api/v1/reply" / cm["jsonFile"]).read_text())
+    model = json.loads((build / ".cmake/api/v1/reply" / cm["jsonFile"]).read_text(encoding="utf-8"))
     configurations = model.get("configurations", [])
     if not configurations:
         raise SystemExit("CMake codemodel has no configuration")
     config = configurations[0]
     targets: dict[str, dict] = {}
     for entry in config.get("targets", []):
-        data = json.loads((build / ".cmake/api/v1/reply" / entry["jsonFile"]).read_text())
+        data = json.loads((build / ".cmake/api/v1/reply" / entry["jsonFile"]).read_text(encoding="utf-8"))
         targets[data["id"]] = data
     return config, targets
 
@@ -175,7 +175,7 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
 
 def cmd_manifest(args: argparse.Namespace) -> int:
     result = target_manifest(Path(args.source_root).resolve(), Path(args.build_dir).resolve(), args.target)
-    Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"closure_manifest={args.output} files={len(result['files'])} missing={len(result['missing_targets'])}")
     return 0
 
@@ -183,7 +183,7 @@ def cmd_manifest(args: argparse.Namespace) -> int:
 def cmd_gate(args: argparse.Namespace) -> int:
     failed = False
     for raw in args.manifest:
-        data = json.loads(Path(raw).read_text())
+        data = json.loads(Path(raw).read_text(encoding="utf-8"))
         name = Path(raw).name
         violations: list[str] = []
         if data.get("missing_targets"):
@@ -226,7 +226,7 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    manifests = [json.loads(Path(path).read_text()) for path in args.manifest]
+    manifests = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.manifest]
     repo = Path(args.repo).resolve()
     out = Path(args.output).resolve()
     if out.exists() and any(out.iterdir()):
@@ -267,7 +267,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         normalized["source_root"] = None
         normalized["build_dir"] = None
         closure_path = closure_dir / f"{unit_name}.json"
-        closure_path.write_text(json.dumps(normalized, indent=2, sort_keys=True) + "\n")
+        closure_path.write_text(json.dumps(normalized, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         units.append({"name": unit_name, "closure_manifest": f"provenance/mirror/closures/{export_id}/{unit_name}.json", "closure_sha256": sha256(closure_path), "oracle_class": "identity"})
     files = sorted(({"mirror_path": f"{mirror_root}/{rename_map.get(path, path)}", "pulp_path": path, "mode": next(row["mode"] for row in rows if row["path"] == path), "blob": by_path[path]} for path in paths if path in by_path), key=lambda row: row["mirror_path"])
     commit_map_src = out / ".git" / "filter-repo" / "commit-map"
@@ -285,7 +285,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         "pulp_repository": "Generous-Corp/pulp",
         "export_id": export_id,
         "pulp_sha": args.pulp_sha,
-        "mirror_ref": "refs/heads/mirror/pulp-framework",
+        "mirror_ref": args.mirror_ref,
         "mirror_sha": mirror_sha,
         "mirror_tree": mirror_tree,
         "rename": {"from_prefix": "", "to_prefix": "mirror/"},
@@ -296,15 +296,17 @@ def cmd_export(args: argparse.Namespace) -> int:
         "tool": {"path": "tools/scripts/vellum_closure.py", "pulp_blob": tool_rows[0]["blob"] if tool_rows else ""},
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if args.dry_run:
+        receipt["dry_run"] = True
     receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"export_receipt={receipt_path} mirror_sha={mirror_sha} blobs={len(files)}")
     return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    receipt = json.loads(Path(args.receipt).read_text())
+    receipt = json.loads(Path(args.receipt).read_text(encoding="utf-8"))
     repo = Path(args.mirror).resolve()
     head = run("git", "-C", str(repo), "rev-parse", "HEAD")
     recorded_head = receipt.get("mirror_sha", receipt.get("mirror_commit"))
@@ -327,7 +329,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append", required=True); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
     p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
-    p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
+    p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
     args = parser.parse_args()
     return args.func(args)
