@@ -3,7 +3,7 @@ add_library(pulp::runtime ALIAS pulp-runtime)
 
 # ── pulp/runtime/build_info.hpp ────────────────────────────────────────────
 # Generated at configure time so the running binary can stamp itself with
-# the CMake build type, an ISO 8601 configure timestamp, and the short git
+# the CMake build type, an ISO 8601 configure timestamp, and the full git
 # SHA (plus a dirty-tree flag). A ready-to-display build label is the cheapest
 # way for editor, log, inspector, and About surfaces to show which binary is
 # running. Header lands under <build>/generated/pulp/runtime/build_info.hpp
@@ -22,7 +22,7 @@ string(TIMESTAMP PULP_BUILD_ISO8601 "%Y-%m-%dT%H:%M:%SZ" UTC)
 set(PULP_BUILD_TYPE "$<CONFIG>")
 set(PULP_VERSION "${PROJECT_VERSION}")
 
-# Best-effort git short SHA + tracked-change probe. Empty when the source
+# Best-effort git commit SHA + tracked-change probe. Empty when the source
 # tree isn't a git checkout (distribution tarball) — the generated
 # header documents that case. Untracked configure/build inputs do not
 # change the identity of an otherwise clean source commit.
@@ -31,10 +31,10 @@ set(PULP_GIT_DIRTY "false")
 find_package(Git QUIET)
 if(GIT_FOUND AND EXISTS "${PULP_ROOT_DIR}/.git")
     execute_process(
-        # A fixed length: a bare --short grows with the clone's object count
-        # (a shallow CI checkout stamps 7 characters, a full clone 10 or
-        # more for the same commit), which made one commit's binaries differ.
-        COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse --short=12 HEAD
+        # Keep the immutable identity complete. Admission and provenance
+        # receipts compare this value with an exact source revision; a short
+        # SHA cannot distinguish commits in every repository shape.
+        COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse HEAD
         OUTPUT_VARIABLE PULP_GIT_SHA
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET)
