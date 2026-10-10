@@ -856,6 +856,9 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_build_dir_lock.py")
         set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
             PROPERTIES TIMEOUT 120)
+        add_test(NAME pulp-worktree-creation-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_pulp_worktree_creation.py")
+        set_tests_properties(pulp-worktree-creation-selftest PROPERTIES TIMEOUT 120)
     endif()
 
     # Shadow-mode affected-test set the merge-group macos job annotates after
@@ -1585,6 +1588,11 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
         # Stages live processes and worktrees on the host it runs on.
         set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
+        add_test(NAME clean-worktree-planning-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_planning
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(clean-worktree-planning-selftest PROPERTIES TIMEOUT 300)
+        set_property(TEST clean-worktree-planning-selftest APPEND PROPERTY LABELS environment-bound)
 
         # clean_worktrees.sh removes whole worktrees, so its guard is the one
         # that must never be merely present: the suite stages a live process and
