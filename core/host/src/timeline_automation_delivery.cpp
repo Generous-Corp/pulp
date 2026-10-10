@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <pulp/format/processor_node_adapter.hpp>
 
 namespace pulp::host::detail {
 

@@ -18,7 +18,6 @@
 #include <pulp/audio/load_measurer.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
-#include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/host/anticipation_lane.hpp>
 #include <pulp/host/custom_node_diagnostics.hpp>
 #include <pulp/host/custom_node_type.hpp>
@@ -45,6 +44,11 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+namespace pulp::format {
+class Processor;
+class ProcessorNodeInstance;
+} // namespace pulp::format
 
 namespace pulp::host {
 
@@ -1004,13 +1008,9 @@ private:
     // final destruction releases only after both ownership domains are gone.
     struct ProcessorNodeLifetime {
         explicit ProcessorNodeLifetime(
-            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept
-            : instance(std::move(value)) {}
+            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept;
 
-        ~ProcessorNodeLifetime() {
-            if (instance)
-                (void)instance->release();
-        }
+        ~ProcessorNodeLifetime();
 
         std::shared_ptr<format::ProcessorNodeInstance> instance;
     };

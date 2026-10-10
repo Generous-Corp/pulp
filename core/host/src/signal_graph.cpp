@@ -33,6 +33,15 @@
 
 namespace pulp::host {
 
+SignalGraph::ProcessorNodeLifetime::ProcessorNodeLifetime(
+    std::shared_ptr<format::ProcessorNodeInstance> value) noexcept
+    : instance(std::move(value)) {}
+
+SignalGraph::ProcessorNodeLifetime::~ProcessorNodeLifetime() {
+    if (instance)
+        (void)instance->release();
+}
+
 bool SampleKernelDescriptor::is_valid_registration() const noexcept {
     const bool alignment_valid =
         state_alignment != 0 && (state_alignment & (state_alignment - 1)) == 0;
