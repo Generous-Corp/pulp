@@ -9,17 +9,17 @@
 // the pulp-audio archive. The exported symbol names are the JNI contract
 // with the Kotlin classes and must not change.
 
-#include <pulp/audio/audio_focus.hpp>
-#include <jni.h>
-#include <android/log.h>
-#include <stdexcept>
 #include "demo_synth.hpp"
+#include <android/log.h>
+#include <jni.h>
+#include <pulp/audio/audio_focus.hpp>
+#include <stdexcept>
 
 #define PULP_LOG_TAG "Pulp"
 #define PULP_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_LOG_TAG, __VA_ARGS__)
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_pulp_PulpActivity_nativeOnShutdown(JNIEnv* env, jobject thiz) {
+extern "C" JNIEXPORT void JNICALL Java_com_pulp_PulpActivity_nativeOnShutdown(JNIEnv* env,
+                                                                              jobject thiz) {
     try {
         PULP_LOGI("nativeOnShutdown — stopping synth");
         pulp::demo::synth_stop();
@@ -42,8 +42,7 @@ Java_com_pulp_PulpActivity_nativeOnShutdown(JNIEnv* env, jobject thiz) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusLost(JNIEnv*, jobject) {
     PULP_LOGI("Audio focus lost");
-    pulp::audio::AudioFocusRegistry::instance().publish(
-        pulp::audio::AudioFocusState::lost);
+    pulp::audio::AudioFocusRegistry::instance().publish(pulp::audio::AudioFocusState::lost);
 }
 
 // AUDIOFOCUS_LOSS_TRANSIENT has its own entry point so subscribers can
@@ -59,15 +58,13 @@ Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusLostTransient(JNIEnv*, jobj
 extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusDuck(JNIEnv*, jobject) {
     PULP_LOGI("Audio focus duck");
-    pulp::audio::AudioFocusRegistry::instance().publish(
-        pulp::audio::AudioFocusState::duck);
+    pulp::audio::AudioFocusRegistry::instance().publish(pulp::audio::AudioFocusState::duck);
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusGained(JNIEnv*, jobject) {
     PULP_LOGI("Audio focus gained");
-    pulp::audio::AudioFocusRegistry::instance().publish(
-        pulp::audio::AudioFocusState::gained);
+    pulp::audio::AudioFocusRegistry::instance().publish(pulp::audio::AudioFocusState::gained);
 }
 
 #endif // __ANDROID__
