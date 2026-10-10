@@ -99,10 +99,16 @@ target_sources(pulp-format-view PRIVATE
     src/app_updates_settings_view.cpp
 )
 
-# The core half must compile without the view include path. Both the
-# The out-of-line Processor destructor and nullptr default create_view()
-# definitions are kept in format.cpp; the core target still includes no view
-# headers or private view include path.
+# format.cpp needs view::View COMPLETE, and only for its compile: libstdc++
+# instantiates ~unique_ptr<View> in create_view()'s return path, so GCC rejects
+# a forward declaration there even though Apple Clang accepts it. See the
+# comment at the top of format.cpp.
+#
+# Headers only, and PRIVATE. This adds view's include directories to this
+# target's own sources and nothing else: no view archive joins the link
+# closure, and nothing propagates to consumers.
+target_include_directories(pulp-format-core PRIVATE
+    $<TARGET_PROPERTY:pulp-view-core,INTERFACE_INCLUDE_DIRECTORIES>)
 
 target_link_libraries(pulp-format-core
     PUBLIC

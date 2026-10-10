@@ -7,6 +7,7 @@
 // from processor.hpp, and keeping the symbol in core is required by core-only
 // consumers whose derived vtables retain the slot.
 #include <pulp/format/format.hpp>
+#include <pulp/view/view.hpp>
 
 namespace pulp::format {
 
