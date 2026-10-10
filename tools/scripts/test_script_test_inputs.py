@@ -96,6 +96,10 @@ class Repo:
              "properties": [{"name": "WORKING_DIRECTORY", "value": f"{r}/tools/scripts"}]},
             {"name": "cmake-nested", "command": ["/opt/homebrew/bin/cmake", "-P", f"{r}/test/x.cmake"], "properties": []},
             {"name": "no-command", "command": [], "properties": []},
+            # Registered names model the gate's materialized-runtime tests;
+            # empty commands keep this generic fixture's declared list stable.
+            {"name": "pulp-materialized-runtime-conformance", "command": [], "properties": []},
+            {"name": "pulp-materialized-runtime-node-dependencies", "command": [], "properties": []},
             {"name": "compiled", "command": [f"{self.build}/test/pulp-test-x", "case"], "properties": []},
         ]}
 
@@ -109,6 +113,47 @@ class ProfileIndependenceTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
         self.repo = Repo(self.tmp)
+
+    def _node_inventory(self, *, complete: bool) -> dict:
+        r = str(self.repo.root)
+        tests = [{"name": "node-unit", "command": ["/usr/bin/node", "unit.mjs"], "properties": []}]
+        if complete:
+            tests += [
+                {"name": "pulp-materialized-runtime-conformance", "command": ["/usr/bin/node", "conformance.mjs"], "properties": []},
+                {"name": "pulp-materialized-runtime-node-dependencies", "command": ["/usr/bin/node", "--test", "deps.mjs"], "properties": []},
+            ]
+        return {"tests": tests, "root": r}
+
+    def _profile_cache(self, build: Path) -> None:
+        write(build, "CMakeCache.txt", "CMAKE_BUILD_TYPE:STRING=Release\nPULP_BUILD_EXAMPLES:BOOL=OFF\nPULP_SANITIZER:STRING=\nPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF:BOOL=OFF\n")
+
+    def test_node_dependencies_missing_registration_refuses_profile(self) -> None:
+        self._profile_cache(self.repo.build)
+        reason = sti.outside_gate_profile_build(self.repo.build, self._node_inventory(complete=False))
+        self.assertEqual(len(reason), 1)
+        self.assertIn("jsx-runtime npm dependencies", reason[0])
+        self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", reason[0])
+
+    def test_gate_shaped_node_dependency_registration_is_accepted(self) -> None:
+        self._profile_cache(self.repo.build)
+        self.assertEqual(sti.outside_gate_profile_build(self.repo.build, self._node_inventory(complete=True)), [])
+
+    def test_cli_write_refuses_missing_node_dependency_registration_without_touching_list(self) -> None:
+        self._profile_cache(self.repo.build)
+        write(self.repo.build, "test/test-data/executables.json", json.dumps({"executables": {}}))
+        write(self.repo.build, "test/test-data/runtime-targets.json", json.dumps({"artifacts": {}}))
+        inv = self._node_inventory(complete=False)
+        inv_path = self.repo.build / "inv.json"
+        inv_path.write_text(json.dumps(inv), encoding="utf-8")
+        out = self.repo.build / "list.json"
+        out.write_bytes(b"sentinel\n")
+        proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(self.repo.root),
+                               "--build-dir", str(self.repo.build), "--inventory-json", str(inv_path),
+                               "--list", str(out), "--write"], capture_output=True, text=True,
+                              timeout=60, env=tool_env(event=None, strict=False))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", proc.stderr)
+        self.assertEqual(out.read_bytes(), b"sentinel\n")
 
     def inventory_with_example(self, keep_root: Path | None = None) -> dict:
         r = str(self.repo.root)
