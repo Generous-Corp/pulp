@@ -150,10 +150,18 @@ class ProfileIndependenceTests(unittest.TestCase):
         proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(self.repo.root),
                                "--build-dir", str(self.repo.build), "--inventory-json", str(inv_path),
                                "--list", str(out), "--write"], capture_output=True, text=True,
-                              timeout=60, env=tool_env(event=None, strict=False))
+                              timeout=60, env=tool_env(event=None, strict=False), encoding="utf-8")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", proc.stderr)
         self.assertEqual(out.read_bytes(), b"sentinel\n")
+
+    def test_nodejs_off_without_node_path_does_not_trigger_dependency_refusal(self) -> None:
+        self._profile_cache(self.repo.build)
+        with (self.repo.build / "CMakeCache.txt").open("a", encoding="utf-8") as cache:
+            cache.write("PULP_BUILD_NODEJS:BOOL=OFF\n")
+        python_only = {"tests": [{"name": "python-only", "command": ["/usr/bin/python3", "check.py"],
+                                   "properties": []}]}
+        self.assertEqual(sti.outside_gate_profile_build(self.repo.build, python_only), [])
 
     def inventory_with_example(self, keep_root: Path | None = None) -> dict:
         r = str(self.repo.root)

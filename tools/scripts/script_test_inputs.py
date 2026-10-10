@@ -148,19 +148,6 @@ def _cache_values(build_dir: Path) -> dict[str, str] | None:
     return out
 
 
-def _registered_ctest_names(build_dir: Path) -> set[str]:
-    """Read names from configure's recursive CTest files when no JSON is passed."""
-    names: set[str] = set()
-    for path in build_dir.rglob("CTestTestfile.cmake"):
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        names.update(re.findall(r"\badd_test\(NAME\s+([^\s\)]+)", text))
-        names.update(re.findall(r"\badd_test\(\s*([^\s\)]+)\s+\"", text))
-    return names
-
-
 def _jsx_runtime_registration_reason(build_dir: Path, cache: dict[str, str],
                                      inventory: dict | list[dict] | None) -> str | None:
     """Require both materialized-runtime tests when configure found Node."""
@@ -171,11 +158,9 @@ def _jsx_runtime_registration_reason(build_dir: Path, cache: dict[str, str],
         any(Path(str(arg)).name in ("node", "nodejs") for arg in (t.get("command") or []))
         for t in tests
     )
-    if inventory is None:
-        names = _registered_ctest_names(build_dir)
     if not node_found:
-        node_found = any("node" in key.lower() and value and not value.endswith("-NOTFOUND")
-                         for key, value in cache.items())
+        node_value = cache.get("_PULP_NODE_FOR_TESTS", "").strip()
+        node_found = bool(node_value) and not node_value.endswith("-NOTFOUND")
     if not node_found:
         return None
     required = {"pulp-materialized-runtime-conformance", "pulp-materialized-runtime-node-dependencies"}
