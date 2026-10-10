@@ -8,10 +8,9 @@ counter, or a model that merely produces plausible audio is insufficient.
 ## Current source boundary
 
 > **Freshness correction (2026-10-08):** The SHA in the historical source
-> snapshot below is retained for provenance. It is not the current protected
-> `origin/main`; the current snapshot for this packet is
-> [`ca6e605d60e0f872765abe4b1a4769a17fdb1011`](https://github.com/Generous-Corp/pulp/commit/ca6e605d60e0f872765abe4b1a4769a17fdb1011).
-> Revalidate head-sensitive claims before treating this older plan as current.
+> snapshot below is retained for provenance. It is not a durable claim about
+> protected `origin/main`; revalidate head-sensitive claims against the fetched
+> protected head before treating this older plan as current.
 
 The source snapshot for this plan was the historical protected `origin/main` at
 [`9660876c9af59b6132491fbaaba71d0760195e7c`](https://github.com/Generous-Corp/pulp/commit/9660876c9af59b6132491fbaaba71d0760195e7c). The follow-up was prepared from later audit anchor
