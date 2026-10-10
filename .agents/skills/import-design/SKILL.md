@@ -7478,3 +7478,14 @@ Import-validation round-trip harnesses must route Pulp target builds through
 build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`,
 `stitch`, `rn`, `designmd`, and `jsx`). Leave a separate external-project build
 (such as Spectr) on its own toolchain boundary.
+
+## Captured canvas authority
+
+Reference-paint state atlases must opt into `--canvas-authority` when a captured
+canvas image is intended to be the native visual authority. The transformer's
+canonical match is the registered `canvas` element; broad DOM selectors such as
+`#root` can be absent from the materialized registry and leave the atlas
+inactive without an error. Keep this mode explicit and fail closed on missing
+or malformed `canvas_bindings`, multiple implicit states, or non-canvas match
+selectors. The optional `canvas_index` preserves identity when a capture has
+multiple canvases; live canvas behavior remains a separate proof surface.

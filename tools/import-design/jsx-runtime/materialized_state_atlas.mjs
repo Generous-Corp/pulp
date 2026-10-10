@@ -21,6 +21,49 @@ function boundedSelector(value) {
     value.length <= maxSelectorLength;
 }
 
+// Captured canvas authority is opt-in because a state atlas may also describe
+// ordinary semantic overlays. When enabled, states without an explicit match
+// bind to the registered canvas element the runtime can resolve. Refuse
+// missing or malformed canvas metadata instead of leaving the image inactive.
+export function canonicalizeCanvasAuthorityMatches(
+  states, canvasBindings, { enabled = false } = {}) {
+  if (!enabled) return states;
+  if (!Array.isArray(states) || states.length === 0)
+    throw new Error('canvas authority requires at least one state');
+  if (!Array.isArray(canvasBindings) || canvasBindings.length === 0)
+    throw new Error('canvas authority requires one or more canvas bindings');
+  const implicitStates = states.filter((state) => !state.match);
+  if (implicitStates.length > 1) {
+    throw new Error(
+      'canvas authority requires one implicit state or explicit canvas matches');
+  }
+  for (const [index, binding] of canvasBindings.entries()) {
+    if (!binding || typeof binding !== 'object' ||
+        typeof binding.anchor !== 'string' ||
+        !/^chromium:backend-node:\d+$/.test(binding.anchor)) {
+      throw new Error(`canvas authority binding ${index} is invalid`);
+    }
+  }
+  return states.map((state, index) => {
+    if (state.canvas_index !== undefined &&
+        (!Number.isInteger(state.canvas_index) || state.canvas_index < 0 ||
+         state.canvas_index >= canvasBindings.length)) {
+      throw new Error(
+        `canvas authority state ${index} has an out-of-range canvas index`);
+    }
+    if (!state.match) {
+      return { ...state, canvas_index: state.canvas_index ?? 0,
+        match: { selector: 'canvas', ancestor: '' } };
+    }
+    if (state.match.selector !== 'canvas' ||
+        (state.match.ancestor !== undefined && state.match.ancestor !== '')) {
+      throw new Error(
+        `canvas authority state ${index} must use the registered canvas selector`);
+    }
+    return { ...state, canvas_index: state.canvas_index ?? 0 };
+  });
+}
+
 export function loadMaterializedStateAtlas(
   atlasPath, { visualAuthority = 'reference', runtimeBase = '' } = {}) {
   if (!atlasPath) return [];
@@ -82,6 +125,12 @@ export function loadMaterializedStateAtlas(
         (match.ancestor !== undefined &&
          !boundedSelector(match.ancestor)))) {
       throw new Error(`state atlas entry ${id} has an invalid match contract`);
+    }
+
+    const canvasIndex = state?.canvas_index;
+    if (canvasIndex !== undefined &&
+        (!Number.isInteger(canvasIndex) || canvasIndex < 0 || canvasIndex > 255)) {
+      throw new Error(`state atlas entry ${id} has an invalid canvas index`);
     }
 
     const activate = state?.activate;
@@ -147,6 +196,7 @@ export function loadMaterializedStateAtlas(
     return {
       id,
       image: imagePath,
+      ...(canvasIndex === undefined ? {} : { canvas_index: canvasIndex }),
       match: match === undefined ? null : {
         selector: match.selector,
         ancestor: match.ancestor || '',
