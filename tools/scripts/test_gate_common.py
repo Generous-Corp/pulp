@@ -573,12 +573,16 @@ class DependabotUsesOnlyDiffTests(unittest.TestCase):
             return gc.dependabot_uses_only_diff("origin/main", actor=actor)
 
     def test_uses_only_workflow_diff_passes(self) -> None:
-        self.assertTrue(self.check(
+        patch = (
             "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
             "@@ -1 +1 @@\n"
             "-      uses: actions/checkout@v5\n"
             "+      uses: actions/checkout@v7\n"
-        ))
+        )
+        self.assertTrue(self.check(patch))
+        result = subprocess.CompletedProcess(args=["git"], returncode=0, stdout=patch, stderr="")
+        with mock.patch.object(gc.subprocess, "run", return_value=result):
+            self.assertTrue(gc.workflow_uses_only_diff("origin/main"))
 
     def test_non_dependabot_actor_does_not_bypass(self) -> None:
         self.assertFalse(self.check(
