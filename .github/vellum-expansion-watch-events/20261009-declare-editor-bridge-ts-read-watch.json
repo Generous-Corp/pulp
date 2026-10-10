@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261009-declare-editor-bridge-ts-read-watch",
+  "created_at": "2026-10-09T05:48:57Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Declares one checkout read (tools/bridge/generated_editor_bridge.ts) for the editor-bridge test suite with pulp_test_data, and regenerates test/ctest_script_inputs.json so the read audit sees it as declared. Test metadata only; no design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

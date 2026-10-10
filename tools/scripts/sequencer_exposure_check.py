@@ -136,6 +136,13 @@ SHARED_REGISTRY_PATHS = {
     "docs/status/pulp-tooling-disposition.json",
     "tools/scripts/skill_path_map.json",
 }
+# The config-doc gate (tools/scripts/config_doc_check.py) makes every change to
+# a mapped CI/release config surface also edit one of the guides this map
+# names. A row that owns one of those guides is its only owner, so the whole
+# guide becomes a watched sequencer path and every such config change fails
+# this gate without a row of its own: two required gates demanding opposite
+# things. A row proves its lines in a mapped guide with an evidence needle.
+CONFIG_DOC_MAP_PATH = "tools/scripts/config_doc_map.json"
 # Files the version bot rewrites wholesale on every bump, mapped to the keys it
 # may rewrite. Excluding one WHOLE would drop real coverage, because the
 # semantic scan below only reaches core/state, core/view, core/midi and
@@ -500,9 +507,40 @@ def _validate_surface(
     return kinds
 
 
+def config_doc_targets(repo_root: Path) -> tuple[set[str], list[str]]:
+    """(every guide the config-doc gate maps, errors reading its map).
+
+    A checkout without the map (a fixture root) has no mapped guide; a map that
+    exists but cannot be read is an error, never an empty set.
+    """
+    path = repo_root / CONFIG_DOC_MAP_PATH
+    if not path.is_file():
+        return set(), []
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        docs = {doc for entry in document["entries"] for doc in entry["docs"]}
+    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError) as error:
+        return set(), [f"{CONFIG_DOC_MAP_PATH}: unreadable config-doc map: {error}"]
+    if not docs or not all(_is_nonempty_string(doc) for doc in docs):
+        return set(), [f"{CONFIG_DOC_MAP_PATH}: config-doc map names no guide"]
+    return docs, []
+
+
+def _refuse_config_doc_owner(path: str, where: str, config_docs: set[str],
+                             errors: list[str]) -> None:
+    if path in config_docs:
+        errors.append(
+            f"{where}: a guide the config-doc gate maps is edited by every change to its "
+            "config surface and cannot be exclusively owned; prove the row's lines in it "
+            f"with an evidence needle instead: {path}"
+        )
+
+
 def validate_document(document: Any, repo_root: Path) -> list[str]:
     """Return every ledger error. An empty list means the document is valid."""
     errors: list[str] = []
+    config_docs, config_doc_errors = config_doc_targets(repo_root)
+    errors.extend(config_doc_errors)
     writer_profiles, writer_refusal_codes, vocabulary_errors = _load_writer_profile_vocabulary(
         repo_root
     )
@@ -620,6 +658,9 @@ def validate_document(document: Any, repo_root: Path) -> list[str]:
                         "be exclusively owned; own the entry with an evidence needle "
                         f"instead: {path}"
                     )
+                _refuse_config_doc_owner(
+                    path, f"{where}.owned_paths[{path_index}]", config_docs, errors
+                )
         if row.get("classification") not in CLASSIFICATIONS:
             errors.append(f"{where}.classification: missing or invalid classification")
         release = row.get("release")
@@ -701,6 +742,9 @@ def validate_document(document: Any, repo_root: Path) -> list[str]:
                         "be exclusively owned; own the entry with an evidence needle "
                         f"instead: {path}"
                     )
+                _refuse_config_doc_owner(
+                    path, f"{where}.owned_paths[{path_index}]", config_docs, errors
+                )
         state = tombstone.get("delivery_state")
         removed_in_merge = tombstone.get("removed_in_merge")
         if state not in DELIVERY_STATES:

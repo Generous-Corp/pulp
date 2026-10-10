@@ -60,6 +60,17 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_macos_retarget_build_uses_governor_inside_untrusted_runner(self) -> None:
+        source = read_source(".github/workflows/build-macos.yml")
+        self.assertIn(
+            '"$PULP_UNTRUSTED_RUNNER" bash \\\n            "$PULP_UNTRUSTED_SOURCE/tools/ci/governed-build.sh" \\\n            cmake --build "$PULP_BUILD_DIR" --config Release',
+            source,
+        )
+        self.assertNotIn(
+            '"$PULP_UNTRUSTED_RUNNER" cmake --build',
+            source,
+        )
+
     def test_visual_harness_build_uses_governor(self) -> None:
         source = read_source(".github/workflows/visual-harness.yml")
         build_lines = [
@@ -290,6 +301,26 @@ class BuildGovernancePathTests(unittest.TestCase):
             self.assertNotRegex(
                 line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
             )
+
+    def test_local_release_builds_route_through_governor(self) -> None:
+        source = read_source("tools/scripts/release-cli-local.sh")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 4)
+        for line in build_lines:
+            self.assertIn("governed-build.sh", line)
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+
+    def test_sdk_consumer_sweep_build_uses_governor_and_job_cap(self) -> None:
+        source = read_source("tools/scripts/sdk_consumer_sweep.py")
+        self.assertIn('REPO / "tools" / "ci" / "governed-build.sh"', source)
+        self.assertIn('"PULP_BUILD_JOBS": str(jobs)', source)
+        self.assertNotIn('"-j", str(jobs)', source)
 
 
 if __name__ == "__main__":

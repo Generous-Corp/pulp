@@ -674,7 +674,13 @@ jobs:
 
       - name: Build
         run: |
-          "$PULP_UNTRUSTED_RUNNER" cmake --build "$PULP_BUILD_DIR" --config Release
+          # The build executes inside the untrusted runner namespace. Invoke
+          # the checkout's governor through that same boundary so the retarget
+          # lane gets bounded parallelism without exposing host leases or
+          # protected state to PR code.
+          "$PULP_UNTRUSTED_RUNNER" bash \
+            "$PULP_UNTRUSTED_SOURCE/tools/ci/governed-build.sh" \
+            cmake --build "$PULP_BUILD_DIR" --config Release
 
       - name: Test
         # Mirror build.yml's required macOS selection. Retarget is another

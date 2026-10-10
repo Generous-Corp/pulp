@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261007-canary-lane-reds-watch",
+  "created_at": "2026-10-07T15:51:45Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Test-only fixes for four canary-lane reds: a watch-loop lease test now clears the lane's PULP_BUILD_CLASS, the mac live-resize harness polls for the cover release (bounded, at least 64 ms) instead of a fixed 100 ms wait, and duplicate Catch2 case names in the web-demo and design-panel example tests are renamed. The only non-test edit lowers codesign verbosity in the clean-agent trust check, which reads the same identity fields. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-tartci-lease",
+    "ctest --test-dir build -R pulp-test-mac-platform-harness",
+    "ctest --test-dir build -R pulp-test-web-demos",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

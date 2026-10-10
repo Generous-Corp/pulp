@@ -96,7 +96,7 @@ jobs:
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF
-          cmake --build build --config Release --parallel 2
+          tools/ci/governed-build.sh cmake --build build --config Release
         shell: bash
 
       - name: Install Pulp to a temp prefix
@@ -199,8 +199,8 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DPulp_DIR="$PREFIX/lib/cmake/Pulp" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build "$CONSUMER/build" --config Release \
-            --target PulpHostHeaderProbe --parallel 2
+          tools/ci/governed-build.sh cmake --build "$CONSUMER/build" --config Release \
+            --target PulpHostHeaderProbe
         shell: bash
 
       - name: Verify CMake config files don't reach into Pulp's source tree

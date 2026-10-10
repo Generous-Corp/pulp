@@ -48,14 +48,18 @@ float peak = pulp::simd::max_abs(a, 256);
 pulp::simd::correlate(history, reversed_taps, result, 256, 64);
 ```
 
-Every kernel has up to three backends, all compiled into the library:
+Every kernel has up to three backends, compiled when the target supports them:
 `pulp::simd::backend::scalar` (sequential reference loops),
 `backend::highway` (Google Highway with run-time dispatch to SSE2 through
 AVX-512 on x86 and NEON on arm64) and `backend::accelerate` (vDSP, Apple only).
 The unqualified names alias the backend chosen by the `PULP_SIMD_BACKEND`
-CMake option: `auto` (default; Accelerate on Apple, Highway elsewhere),
-`accelerate`, `highway` or `scalar`. The alias is resolved at compile time, so
-a call carries no backend branch; `pulp::simd::active_backend_name` reports it.
+CMake option: `auto` (default; Accelerate on Apple, Highway elsewhere, scalar
+when Highway is unavailable), `accelerate`, `highway` or `scalar`. The alias is
+resolved at compile time, so a call carries no backend branch;
+`pulp::simd::active_backend_name` reports it. MSVC ARM64EC targets use the
+scalar fallback because Highway 1.2.0 rejects the compiler's combined ARM64
+and x64 architecture macros; selecting `highway` for such a target fails at
+configure time with an actionable error.
 
 Backends agree to rounding, not to the bit: reductions accumulate in each
 backend's own order, and Accelerate changes with the OS. Compare against the

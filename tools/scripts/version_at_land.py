@@ -720,8 +720,12 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
     `"progressing"` — armed for auto-merge, never ejected from the merge queue,
                       and no required check on its head has failed: its checks
                       are pending or green, so it will enqueue on its own.
-    `"dead"`        — it cannot land: ejected from the merge queue, not armed,
-                      or a required check failed. `reason` says which.
+    `"red"`         — it cannot land: a required check on its head failed (the
+                      newest run concluded failure, cancelled, timed out, ...).
+                      Reported ahead of an ejection or a missing arm, so a
+                      caller can tell a red head from any other dead end.
+    `"dead"`        — it cannot land: ejected from the merge queue or not
+                      armed. `reason` says which.
     `None`          — unknown (query failed or the answer was incomplete);
                       never read as replaceable.
 
@@ -747,6 +751,15 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
         return "queued", "the bump PR is in the merge queue"
     if pr.get("isDraft") is not False or pr.get("isInMergeQueue") is not False:
         return None, "the bump PR draft/queue state is unknown"
+    nodes = (pr.get("commits") or {}).get("nodes") or []
+    rollup = ((nodes[0].get("commit") or {}).get("statusCheckRollup")
+              if nodes and isinstance(nodes[0], dict) else None)
+    contexts = (rollup or {}).get("contexts") or {}
+    complete = (contexts.get("pageInfo") or {}).get("hasNextPage") is False
+    failed = (_failed_required_check(contexts.get("nodes") or [])
+              if rollup is not None and complete else None)
+    if failed:
+        return "red", f"on the bump PR {failed}"
     # Count the returned event nodes, never `totalCount`: GitHub's connection
     # `totalCount` ignores `itemTypes` and counts EVERY timeline item, so a PR
     # that was never queued would read as ejected. Each node's `__typename` is
@@ -762,30 +775,27 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
         return "dead", "the bump PR was ejected from the merge queue"
     if pr.get("autoMergeRequest") is None:
         return "dead", "the bump PR is not armed for auto-merge"
-    nodes = (pr.get("commits") or {}).get("nodes") or []
-    rollup = ((nodes[0].get("commit") or {}).get("statusCheckRollup")
-              if nodes and isinstance(nodes[0], dict) else None)
     if rollup is None:
         # No check has reported on the head yet: the checks are still starting.
         return "progressing", "the bump PR checks have not reported yet"
-    contexts = rollup.get("contexts") or {}
-    if (contexts.get("pageInfo") or {}).get("hasNextPage") is not False:
+    if not complete:
         return None, "the bump PR check list is incomplete"
-    failed = _failed_required_check(contexts.get("nodes") or [])
-    if failed:
-        return "dead", f"on the bump PR {failed}"
     return "progressing", "the bump PR is armed with its required checks pending or green"
 
 
-def _close_stale_bump_pr(repo: Path, number: str, head: str, reason: str) -> bool:
-    """Close a bump PR that is stale (cut before `head`) and a dead end, so this
-    drain can cut a fresh bump covering the whole range. Only the PR is closed;
+def _close_stale_bump_pr(repo: Path, number: str, head: str, reason: str,
+                         *, covers: bool = False) -> bool:
+    """Close a bump PR that is a dead end, so this drain can cut a fresh bump
+    covering the whole range: one that is stale (cut before `head`), or one
+    that covers `head` but whose required check failed. Only the PR is closed;
     the branch is reclaimed by the normal confirmed-no-PR `--force-with-lease`
     path. Returns success."""
+    cut = (f"It already covers {head[:12]} but" if covers
+           else f"It was cut before {head[:12]} and")
     comment = (
-        "version-at-land: closing this bump PR. It was cut before "
-        f"{head[:12]} and cannot land as it stands: {reason}. A fresh bump PR "
-        "covering the full range replaces it.")
+        f"version-at-land: closing this bump PR. {cut} cannot land as it "
+        f"stands: {reason}. A fresh bump PR covering the full range replaces "
+        "it.")
     res = _gh(repo, "pr", "close", number, "--comment", comment, check=False)
     if res.returncode != 0:
         sys.stderr.write(f"version-at-land: closing stale bump PR #{number} "
@@ -901,7 +911,9 @@ def apply_via_pr(
                      dead end (ejected from the merge queue, unarmed, or a
                      required check failed) with the heal off. The run fails.
                      With `heal_stale`, a confirmed-stale dead end is closed
-                     and a fresh bump PR covering the whole range is opened.
+                     and a fresh bump PR covering the whole range is opened;
+                     so is a covering PR whose required check failed, which
+                     would otherwise be re-armed and wait for nothing.
 
     Safety:
       * Regression — `_strictly_increasing` drops any assignment not exceeding
@@ -944,21 +956,34 @@ def apply_via_pr(
         # drain, which assesses every merge after its cut point. Unknown
         # coverage is treated as NOT covering.
         covers = _bump_pr_covers(repo, existing, head)
-        if covers is True:
+        if covers is True and not heal_stale:
             return ("pending" if _arm_auto_merge(repo, existing)
                     else "arm-failed"), plan
         state, reason = _bump_pr_liveness(repo, existing)
         if report is not None:
             report.update(pr=existing, reason=reason)
-        if covers is False and state in ("queued", "progressing"):
-            return "stale-wait", plan
-        # A dead end never lands, so waiting for it wedges the drain until a
-        # human closes it. A stale generated bump is always regenerable, so
-        # replace it. Only on CONFIRMED stale + CONFIRMED dead: a draft is a
-        # release hold, and an unknown state is never read as replaceable.
-        if not (heal_stale and covers is False and state == "dead"
-                and _close_stale_bump_pr(repo, existing, head, reason)):
-            return "stale-defer", plan
+        if covers is True:
+            # A covering PR whose required check failed never enqueues, so
+            # re-arming it waits for nothing until main moves and stales it (a
+            # median 17 minutes and up to 124 from red check to close). With
+            # the heal on it is replaced at once. Only a CONFIRMED red head
+            # qualifies: queued, draft, or unknown states are re-armed.
+            if not (state == "red" and _close_stale_bump_pr(
+                    repo, existing, head, reason, covers=True)):
+                return ("pending" if _arm_auto_merge(repo, existing)
+                        else "arm-failed"), plan
+        else:
+            if covers is False and state in ("queued", "progressing"):
+                return "stale-wait", plan
+            # A dead end never lands, so waiting for it wedges the drain until
+            # a human closes it. A stale generated bump is always regenerable,
+            # so replace it. Only on CONFIRMED stale + CONFIRMED dead: a draft
+            # is a release hold, and an unknown state is never read as
+            # replaceable.
+            if not (heal_stale and covers is False
+                    and state in ("dead", "red")
+                    and _close_stale_bump_pr(repo, existing, head, reason)):
+                return "stale-defer", plan
 
     edited = _write_plan(repo, config, plan)
     if not edited:

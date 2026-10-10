@@ -725,17 +725,13 @@ def main(argv: list[str]) -> int:
 
 def outside_gate_profile(build_dir: Path) -> list[str]:
     """Why this build registers a different test set from the required gate's
-    configure: script_test_inputs' gate-profile switches, another platform,
-    and the GPU-audio exact-provider proof, which registers its probes only
-    when ON (the gate leaves it OFF). Empty for a gate-profile build."""
+    configure: script_test_inputs' gate-profile switches (the one rule both
+    generated manifests share) and another platform. Empty for a gate-profile
+    build."""
     reasons = script_test_inputs.outside_gate_profile_build(build_dir)
     platform = script_test_inputs.outside_gate_platform(build_dir)
     if platform:
         reasons.append(platform)
-    cache = script_test_inputs._cache_values(build_dir) or {}
-    proof = cache.get("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF", "OFF")
-    if proof.upper() not in ("", "OFF", "FALSE", "0", "NO", "N"):
-        reasons.append(f"PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF={proof} (the gate configures OFF)")
     return reasons
 
 
