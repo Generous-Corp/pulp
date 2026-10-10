@@ -45,6 +45,28 @@ ctest --test-dir C:\pulp-build --output-on-failure -C Release
 On Windows on ARM, use `-A ARM64` instead. If you have both Visual Studio Community and Build Tools installed, you can force the full IDE instance with `-DCMAKE_GENERATOR_INSTANCE="C:/Program Files/Microsoft Visual Studio/2022/Community"`.
 If you bypass `setup.ps1`, keep your checkout/build paths short. Nested FetchContent paths under `_deps/` can otherwise exceed the classic 260-character limit during MSBuild configure steps.
 
+### Reusable VM build tree
+
+For a long-lived Windows VM, use the warm-tree wrapper instead of invoking a
+full `Rebuild` on every iteration:
+
+```powershell
+.\tools\ci\windows-warm-build.ps1 -Source C:\pulp-source -Build C:\pulp-build\warm -Platform ARM64EC
+```
+
+The wrapper configures only when the source fingerprint or build options
+change, then performs an incremental Release build with four MSBuild workers.
+It enables `CMAKE_SUPPRESS_REGENERATION` only in that fingerprinted warm tree;
+the normal CI configure path remains unchanged. A source edit, staged change,
+Visual Studio environment change, or `-Reconfigure` causes CMake to run again
+before building.
+Use `-Install -InstallPrefix C:\pulp-arm64ec-sdk` when producing a reusable
+SDK. Keep the build and source paths short and on the VM's fast volume.
+
+The default ARM64EC platform is required when the consumer is an ARM64X host
+such as ARM64EC REAPER. Pure ARM64 and x64 artifacts are separate targets and
+will not substitute for an ARM64EC plugin scan.
+
 ### Visual Studio IDE
 
 ```bash
