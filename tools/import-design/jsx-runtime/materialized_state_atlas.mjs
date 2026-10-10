@@ -45,6 +45,12 @@ export function canonicalizeCanvasAuthorityMatches(
     }
   }
   return states.map((state, index) => {
+    if (state.canvas_index !== undefined &&
+        (!Number.isInteger(state.canvas_index) || state.canvas_index < 0 ||
+         state.canvas_index >= canvasBindings.length)) {
+      throw new Error(
+        `canvas authority state ${index} has an out-of-range canvas index`);
+    }
     if (!state.match) {
       return { ...state, canvas_index: state.canvas_index ?? 0,
         match: { selector: 'canvas', ancestor: '' } };

@@ -36,6 +36,7 @@ export function buildMaterializedRuntimeEntry({
   visualWidth,
   visualHeight,
   canvasBindings,
+  canvasAuthority,
   behaviorCanvasAnchors,
   capturedPaintAuthorityAnchors,
 }) {
@@ -1115,6 +1116,7 @@ activeNativeRoot = new NativeRoot();
 activeNativeRoot.render(capturedRootElement);
 if (typeof g.__pulpRuntimeSettle__ === 'function') g.__pulpRuntimeSettle__(8);
 const capturedStates = ${JSON.stringify(stateAtlas)};
+const canvasAuthorityEnabled = ${JSON.stringify(Boolean(canvasAuthority))};
 for (const state of capturedStates) {
   if (state.match) {
     recordMaterializedSelectorAttributes(state.match.selector);
@@ -1189,12 +1191,14 @@ function resolveCapturedStateFromAtlas() {
   // authority states carry the binding index validated by the transformer so
   // multiple captured canvases cannot accidentally resolve to the first one.
   const semanticMatches = g.__pulpFindMaterializedElements__(capturedStates.map(
-    state => state.canvas_index !== null && state.canvas_index !== undefined
+    state => canvasAuthorityEnabled &&
+      state.canvas_index !== null && state.canvas_index !== undefined
       ? null
       : state.match ? { selector: state.match.selector,
         ancestor: state.match.ancestor } : null));
   const matches = capturedStates.map((state, index) =>
-    state.canvas_index !== null && state.canvas_index !== undefined
+    canvasAuthorityEnabled && state.canvas_index !== null &&
+      state.canvas_index !== undefined
       ? registeredCanvases[state.canvas_index] || null
       : semanticMatches[index]);
   for (let index = capturedStates.length - 1; index >= 0; --index) {

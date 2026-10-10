@@ -51,7 +51,8 @@ test('canonicalizes opt-in captured canvas authority to the registered canvas', 
   assert.equal(states[0].canvas_index, 0);
   assert.deepEqual(canonicalizeCanvasAuthorityMatches(
     [{ id: 'menu', canvas_index: 1, match: { selector: 'canvas' } }],
-    [{ anchor: 'chromium:backend-node:111' }],
+    [{ anchor: 'chromium:backend-node:111' },
+      { anchor: 'chromium:backend-node:222' }],
     { enabled: true })[0].canvas_index, 1);
 });
 
@@ -69,6 +70,10 @@ test('captured canvas authority fails closed without valid canvas metadata', () 
     [{ id: 'home', match: { selector: '#root' } }],
     [{ anchor: 'chromium:backend-node:111' }], { enabled: true }),
   /must use the registered canvas selector/);
+  assert.throws(() => canonicalizeCanvasAuthorityMatches(
+    [{ id: 'home', canvas_index: 1, match: { selector: 'canvas' } }],
+    [{ anchor: 'chromium:backend-node:111' }], { enabled: true }),
+  /out-of-range canvas index/);
   assert.deepEqual(canonicalizeCanvasAuthorityMatches(
     [{ id: 'home' }], [], { enabled: false }), [{ id: 'home' }]);
 });

@@ -225,6 +225,7 @@ const entry = buildMaterializedRuntimeEntry({
   visualWidth,
   visualHeight,
   canvasBindings,
+  canvasAuthority,
   behaviorCanvasAnchors,
   capturedPaintAuthorityAnchors,
 });
