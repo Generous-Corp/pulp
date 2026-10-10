@@ -259,6 +259,13 @@
       ]
     },
     {
+      "name": "evidence-archive-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_evidence_archive.py"
+      ],
+      "timeout": 60.0
+    },
+    {
       "name": "fleet-remote-probe-selftest",
       "argv": [
         "{repo}/tools/fleet/test_probe_remote.py"
