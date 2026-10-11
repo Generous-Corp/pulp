@@ -2310,6 +2310,7 @@
   "pulp-project-package-publish-helper",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
+  "pulp-render-provider-floor-wgpu-control",
   "pulp-sampler-cli-sidecar-probe",
   "pulp-sampler-heritage-render-wav",
   "pulp-sampler-render-wav",
@@ -3177,6 +3178,13 @@
     "tools/scripts/android_smoke.sh"
    ],
    "kind": "shell"
+  },
+  "apple-bundle-signing-check": {
+   "entry": "tools/scripts/test_check_apple_bundle_signing.py",
+   "inputs": [
+    "tools/scripts/test_check_apple_bundle_signing.py"
+   ],
+   "kind": "python"
   },
   "archive-symbol-closure-selftest": {
    "entry": "tools/scripts/test_archive_symbol_closure_check.py",
