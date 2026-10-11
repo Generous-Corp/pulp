@@ -205,6 +205,37 @@ function(pulp_wgpu_runtime_file out_var)
     set(${out_var} "${_file}" PARENT_SCOPE)
 endfunction()
 
+# Resolve the wgpu-native sidecar name even when the renderer does not link it.
+# Installed SDK consumers intentionally have no WEBGPU_RUNTIME_LIB cache entry,
+# but PulpWebGpuImportedTarget.cmake still exposes the imported runtime target.
+# Reused consumer build directories need this name to remove a copy left by a
+# prior wgpu-native configuration after switching to Skia's Dawn provider.
+function(pulp_wgpu_runtime_name out_var)
+    set(_name "")
+    if(NOT WEBGPU_RUNTIME_LIB AND NOT TARGET webgpu AND NOT PULP_HAS_WEBGPU)
+        set(${out_var} "" PARENT_SCOPE)
+        return()
+    endif()
+    if(WEBGPU_RUNTIME_LIB)
+        get_filename_component(_name "${WEBGPU_RUNTIME_LIB}" NAME)
+    elseif(TARGET webgpu)
+        get_target_property(_imported webgpu IMPORTED)
+        if(_imported)
+            foreach(_property IMPORTED_LOCATION_RELEASE IMPORTED_LOCATION)
+                get_target_property(_location webgpu ${_property})
+                if(_location)
+                    get_filename_component(_name "${_location}" NAME)
+                    break()
+                endif()
+            endforeach()
+        endif()
+    endif()
+    if(NOT _name)
+        set(_name "${CMAKE_SHARED_LIBRARY_PREFIX}wgpu_native${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    endif()
+    set(${out_var} "${_name}" PARENT_SCOPE)
+endfunction()
+
 # The runtime files `target` must have beside it after a build, for the current
 # platform. Kept next to the staging function so the two cannot disagree about
 # the file set.
@@ -251,8 +282,8 @@ function(pulp_stage_runtime_dependencies target)
         # Skia's Dawn is the WebGPU implementation; nothing loads wgpu-native.
         # Staging is copy-only, so remove a copy an earlier configuration of
         # this build dir left beside the target; a bundle must not ship it.
-        if(WEBGPU_RUNTIME_LIB)
-            get_filename_component(_wgpu_name "${WEBGPU_RUNTIME_LIB}" NAME)
+        pulp_wgpu_runtime_name(_wgpu_name)
+        if(_wgpu_name)
             add_custom_command(
                 TARGET ${target} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${target}>/${_wgpu_name}"
