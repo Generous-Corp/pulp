@@ -6984,7 +6984,6 @@
     "tools/import-design/browser_capture/materialized_coordinate_space.test.mjs",
     "tools/import-design/browser_capture/materialized_layout_bindings.test.mjs",
     "tools/import-design/browser_capture/materialized_paint_bindings.test.mjs",
-    "tools/import-design/browser_capture/materialized_pseudo_bindings.test.mjs",
     "tools/import-design/browser_capture/materialized_text_bindings.test.mjs",
     "tools/import-design/browser_capture/native_text_diagnostics.test.mjs",
     "tools/import-design/browser_capture/network_dependencies.test.mjs",
