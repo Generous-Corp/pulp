@@ -592,7 +592,8 @@ int cmd_pr(const std::vector<std::string>& args) {
                 const int rc = exec_shipyard_pr(shipyard, forward);
                 // Shipyard owns arming; invoke the Pulp-side hook only after a
                 // successful arm/ship path. `--no-arm` is deliberately quiet.
-                if (rc == 0 && !root.empty() && !has_flag(forward, "--no-arm")) {
+                if (rc == 0 && !root.empty() && !has_flag(forward, "--no-arm")
+                    && !has_flag(forward, "--help") && !has_flag(forward, "-h")) {
                     return dispatch_advisory_lanes(root) == 0 ? 0 : 1;
                 }
                 return rc;
