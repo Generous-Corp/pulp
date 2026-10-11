@@ -3173,6 +3173,35 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-13fbfbc1d05b"
+paths = ["tools/scripts/test_include_boundary.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "pulp-view-core-include-boundary-negative-contract",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-80436f18961a"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
@@ -5917,6 +5946,7 @@ paths = [
   "tools/scripts/test_hotspot_size_guard.py",
   "tools/scripts/test_hydrate_gpu_provenance_commits.py",
   "tools/scripts/test_hydrate_real_git.py",
+  "tools/scripts/test_include_boundary.py",
   "tools/scripts/test_inspector_truth_check.py",
   "tools/scripts/test_install_sha256sums.py",
   "tools/scripts/test_install_shipyard_queue_repair.py",
@@ -6456,6 +6486,7 @@ paths = [
   "tools/scripts/test_hotspot_size_guard.py",
   "tools/scripts/test_hydrate_gpu_provenance_commits.py",
   "tools/scripts/test_hydrate_real_git.py",
+  "tools/scripts/test_include_boundary.py",
   "tools/scripts/test_inspector_truth_check.py",
   "tools/scripts/test_install_sha256sums.py",
   "tools/scripts/test_install_shipyard_queue_repair.py",
