@@ -345,7 +345,7 @@ def case_hook_wiring(fx: Fixture) -> None:
 
 def case_script_failure_is_not_masked_by_not_checked(fx: Fixture) -> None:
     script = fx.tmp / "failing.py"
-    script.write_text("print('NOT CHECKED locally: compiled inventory'); raise SystemExit(1)\n")
+    script.write_text("print('NOT CHECKED locally: compiled inventory'); raise SystemExit(1)\n", encoding="utf-8")
     assert merge_tree_state._run([sys.executable, str(script)], fx.tmp, os.environ.copy()) == 1
 
 
@@ -353,9 +353,9 @@ def case_ledger_checker_selected_from_merge_tree(fx: Fixture) -> None:
     fx.setup()
     checker = fx.repo / "tools/scripts/vellum_inheritance_ledger_check.py"
     checker.parent.mkdir(parents=True, exist_ok=True)
-    checker.write_text("from pathlib import Path; raise SystemExit(1 if Path('ledger.drift').exists() else 0)\n")
+    checker.write_text("from pathlib import Path; raise SystemExit(1 if Path('ledger.drift').exists() else 0)\n", encoding="utf-8")
     checker.chmod(checker.stat().st_mode | stat.S_IXUSR)
-    (fx.repo / "ledger.drift").write_text("drift\n")
+    (fx.repo / "ledger.drift").write_text("drift\n", encoding="utf-8")
     fx.git("add", "tools/scripts/vellum_inheritance_ledger_check.py", "ledger.drift")
     fx.git("commit", "-qm", "ledger drift")
     result = subprocess.run(
