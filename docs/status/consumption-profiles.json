@@ -6929,7 +6929,7 @@
           "target": "pulp-view-audio",
           "exported_as": "Pulp::view-audio",
           "type": "STATIC_LIBRARY",
-          "source_dir": "core/view",
+          "source_dir": "core/view/audio",
           "closure": {
             "node_count": 88,
             "pulp_targets": [

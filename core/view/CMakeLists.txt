@@ -17,22 +17,9 @@ target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_EN
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 
-# Audio-UI widgets (GraphEditorView) that bind to the plug-in host graph. The
-# view umbrellas do not link this target: a consumer that draws a host graph
-# links pulp::view-audio, so an ordinary view or plug-in UI never pulls in the
-# plug-in host stack. The host is not built on iOS (no third-party plug-in
-# hosting there), so neither is this target; its header still installs with
-# the view headers. pulp::host is defined later (core/host), which the link
-# resolves at generate time.
-if(NOT PULP_IOS)
-    add_library(pulp-view-audio audio/src/graph_editor_view.cpp)
-    add_library(pulp::view-audio ALIAS pulp-view-audio)
-    target_include_directories(pulp-view-audio PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>
-        $<INSTALL_INTERFACE:include>
-    )
-    target_link_libraries(pulp-view-audio PUBLIC pulp::view-core pulp::host)
-endif()
+# Audio-UI widgets (GraphEditorView): a separate target the view umbrellas do
+# not link, defined in its own directory so its host edge stays its own.
+add_subdirectory(audio)
 
 add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)

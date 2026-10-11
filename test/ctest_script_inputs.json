@@ -4357,6 +4357,7 @@
    "inputs": [
     "core/runtime/CMakeLists.txt",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view/audio/include",
     "inspect/include",
     "inspect/include/pulp",
     "inspect/include/pulp/inspect",
@@ -4379,6 +4380,7 @@
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
     "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
     "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+    "core/view/audio/include",
     "inspect/include",
     "inspect/include/pulp",
     "inspect/include/pulp/inspect",
