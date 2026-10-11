@@ -224,7 +224,8 @@ fi
 # the authority — a local refusal can only stop what CI would also refuse.
 # `--inventories` also runs the freeze job's inventory verifiers (cut manifest,
 # ownership projection, tooling disposition) and prints the regenerate command
-# for a stale one (exit 11). It also runs the job's change-event checker,
+# for a stale one (exit 11), or names the interpreter when a verifier cannot
+# run at all, e.g. without PyYAML (exit 13). It also runs the job's change-event checker,
 # `vellum_freeze_check.py`: a touched path in a transferred slice of
 # `.github/vellum-ownership.json` owes a `.github/vellum-change-events/` event,
 # and the script prints that JSON (or writes it with `--write-change-event
@@ -234,7 +235,8 @@ if [ -f "$VELLUM_HINT" ]; then
     echo "▸ vellum watch-event coverage (merge-base $BASE..HEAD)" >&2
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
-    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
+    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ] ||
+       [ "$vellum_rc" -eq 13 ]; then
         fail=1
     fi
 fi

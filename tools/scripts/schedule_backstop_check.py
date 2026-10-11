@@ -44,7 +44,9 @@ import sys
 try:
     import yaml
 except ImportError:
-    print("schedule_backstop_check: PyYAML not available", file=sys.stderr)
+    print(f"schedule_backstop_check: PyYAML is not installed for {sys.executable}; install it "
+          f"({sys.executable} -m pip install pyyaml) or put a python3 with PyYAML "
+          "first on PATH (the workflows were not checked)", file=sys.stderr)
     sys.exit(2)
 
 MANIFEST = ".github/schedule-backstop.json"

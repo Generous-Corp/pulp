@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,43 +23,39 @@ class ToolingDispositionTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         (self.root / "core").mkdir()
-        (self.root / "CMakeLists.txt").write_text("project(Fixture)\n")
+        (self.root / "CMakeLists.txt").write_text("project(Fixture)\n", encoding="utf-8")
         (self.root / "tools/cli").mkdir(parents=True)
         (self.root / "tools/cli/pulp_cli.cpp").write_text(
-            'static const Command commands[] = {\n  {"build", "Build", cmd_build},\n};\n'
-        )
+            'static const Command commands[] = {\n  {"build", "Build", cmd_build},\n};\n', encoding="utf-8")
         (self.root / "docs/status").mkdir(parents=True)
         (self.root / "docs/status/cli-commands.yaml").write_text(
             "commands:\n"
             "  - name: build\n"
             "    args:\n"
             "      - name: --release\n"
-            "        kind: flag\n"
-        )
+            "        kind: flag\n", encoding="utf-8")
         (self.root / ".claude/commands").mkdir(parents=True)
-        (self.root / ".claude/commands/build.md").write_text("Build.\n")
+        (self.root / ".claude/commands/build.md").write_text("Build.\n", encoding="utf-8")
         (self.root / ".agents/skills/build").mkdir(parents=True)
         (self.root / ".agents/skills/build/SKILL.md").write_text(
-            "---\nname: build\ndescription: Build fixture.\n---\n"
-        )
+            "---\nname: build\ndescription: Build fixture.\n---\n", encoding="utf-8")
         (self.root / "tools/mcp").mkdir(parents=True)
         (self.root / "tools/mcp/pulp_mcp.cpp").write_text(
-            'const char* tools = R"({"name":"pulp_build"})";\n'
-        )
+            'const char* tools = R"({"name":"pulp_build"})";\n', encoding="utf-8")
         (self.root / ".claude-plugin").mkdir(parents=True)
         (self.root / ".claude-plugin/plugin.json").write_text(json.dumps({
             "name": "pulp", "version": "1.0.0",
             "commands": "./.claude/commands", "skills": "./.agents/skills",
-        }))
+        }), encoding="utf-8")
         (self.root / ".claude-plugin/marketplace.json").write_text(json.dumps({
             "plugins": [{
                 "name": "pulp", "version": "1.0.0", "source": "./",
                 "min_cli_version": "1.0.0",
             }]
-        }))
+        }), encoding="utf-8")
         (self.root / ".mcp.json").write_text(json.dumps({
             "mcpServers": {"pulp": {"command": "./pulp-mcp", "env": {}}}
-        }))
+        }), encoding="utf-8")
         self.map_path = self.root / "map.json"
         inventory, issues = tooling.collect_inventory(self.root)
         self.assertEqual([], issues)
@@ -65,7 +63,7 @@ class ToolingDispositionTest(unittest.TestCase):
         for rows in document["entries"].values():
             for row in rows:
                 row["disposition"] = "pulp-owned"
-        self.map_path.write_text(json.dumps(document, indent=2) + "\n")
+        self.map_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -76,43 +74,61 @@ class ToolingDispositionTest(unittest.TestCase):
         issues = tooling.validate_map(self.root, self.map_path)
         self.assertTrue(any("inventory is stale" in issue for issue in issues), issues)
 
+    def test_missing_pyyaml_names_the_interpreter_and_is_never_called_stale(self) -> None:
+        # sys.modules["yaml"] = None makes `import yaml` raise ImportError, which
+        # is what an interpreter without PyYAML does.
+        probe = (
+            "import sys, runpy\n"
+            "sys.modules['yaml'] = None\n"
+            f"sys.argv = ['pulp_tooling_disposition.py', '--root', {str(self.root)!r},"
+            f" '--map', {str(self.map_path)!r}]\n"
+            f"runpy.run_path({str(MODULE_PATH)!r}, run_name='__main__')\n"
+        )
+        done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(done.returncode, tooling.MISSING_DEPENDENCY, done.stderr)
+        self.assertIn(f"PyYAML is not installed for {sys.executable}", done.stderr)
+        self.assertIn("first on PATH", done.stderr)
+        self.assertNotIn("stale", done.stderr)
+
     def test_new_cli_command_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / "tools/cli/pulp_cli.cpp"
-            path.write_text(path.read_text().replace(
+            path.write_text(path.read_text(encoding="utf-8").replace(
                 '  {"build", "Build", cmd_build},',
                 '  {"build", "Build", cmd_build},\n  {"run", "Run", cmd_run},',
-            ))
+            ), encoding="utf-8")
         self.assert_stale_after(mutate)
 
     def test_new_cli_flag_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / "docs/status/cli-commands.yaml"
-            path.write_text(path.read_text() + "      - name: --debug\n        kind: flag\n")
+            path.write_text(path.read_text(encoding="utf-8") + "      - name: --debug\n        kind: flag\n",
+                            encoding="utf-8")
         self.assert_stale_after(mutate)
 
     def test_new_claude_command_is_detected(self) -> None:
         self.assert_stale_after(
-            lambda: (self.root / ".claude/commands/run.md").write_text("Run.\n")
+            lambda: (self.root / ".claude/commands/run.md").write_text("Run.\n", encoding="utf-8")
         )
 
     def test_new_agent_skill_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / ".agents/skills/run/SKILL.md"
             path.parent.mkdir(parents=True)
-            path.write_text("---\nname: run\ndescription: Run fixture.\n---\n")
+            path.write_text("---\nname: run\ndescription: Run fixture.\n---\n", encoding="utf-8")
         self.assert_stale_after(mutate)
 
     def test_new_mcp_tool_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / "tools/mcp/pulp_mcp.cpp"
-            path.write_text(path.read_text() + 'const char* more = R"({"name":"pulp_run"})";\n')
+            path.write_text(path.read_text(encoding="utf-8") + 'const char* more = R"({"name":"pulp_run"})";\n',
+                            encoding="utf-8")
         self.assert_stale_after(mutate)
 
     def test_new_surface_cannot_be_silently_classified(self) -> None:
         inventory, _ = tooling.collect_inventory(self.root)
         inventory["mcp_tools"].append({"name": "pulp_future"})
-        document = tooling.render_map(inventory, json.loads(self.map_path.read_text()))
+        document = tooling.render_map(inventory, json.loads(self.map_path.read_text(encoding="utf-8")))
         future = next(row for row in document["entries"]["mcp_tools"] if row["name"] == "pulp_future")
         self.assertEqual("UNCLASSIFIED", future["disposition"])
 
@@ -123,53 +139,53 @@ class ToolingDispositionTest(unittest.TestCase):
         )
 
     def test_cli_argument_provenance_is_enforced(self) -> None:
-        document = json.loads(self.map_path.read_text())
+        document = json.loads(self.map_path.read_text(encoding="utf-8"))
         document["cli_argument_provenance"]["limitation"] = "claims parser parity"
-        self.map_path.write_text(json.dumps(document, indent=2) + "\n")
+        self.map_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         issues = tooling.validate_map(self.root, self.map_path)
         self.assertTrue(any("inventory is stale" in issue for issue in issues), issues)
 
     def test_new_plugin_registration_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / ".mcp.json"
-            document = json.loads(path.read_text())
+            document = json.loads(path.read_text(encoding="utf-8"))
             document["mcpServers"]["future"] = {
                 "command": "./future-mcp", "env": {"MODE": "test"}
             }
-            path.write_text(json.dumps(document))
+            path.write_text(json.dumps(document), encoding="utf-8")
         self.assert_stale_after(mutate)
 
     def test_plugin_manifest_registration_change_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / ".claude-plugin/plugin.json"
-            document = json.loads(path.read_text())
+            document = json.loads(path.read_text(encoding="utf-8"))
             document["commands"] = "./commands-v2"
-            path.write_text(json.dumps(document))
+            path.write_text(json.dumps(document), encoding="utf-8")
         self.assert_stale_after(mutate)
 
     def test_plugin_manifest_new_affordance_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / ".claude-plugin/plugin.json"
-            document = json.loads(path.read_text())
+            document = json.loads(path.read_text(encoding="utf-8"))
             document["hooks"] = "./hooks/hooks.json"
-            path.write_text(json.dumps(document))
+            path.write_text(json.dumps(document), encoding="utf-8")
         self.assert_stale_after(mutate)
 
     def test_marketplace_registration_change_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / ".claude-plugin/marketplace.json"
-            document = json.loads(path.read_text())
+            document = json.loads(path.read_text(encoding="utf-8"))
             document["version"] = "1.0.1"
             document["plugins"][0]["version"] = "1.0.1"
-            path.write_text(json.dumps(document))
+            path.write_text(json.dumps(document), encoding="utf-8")
         self.assert_stale_after(mutate)
 
     def test_mcp_registration_configuration_change_is_detected(self) -> None:
         def mutate() -> None:
             path = self.root / ".mcp.json"
-            document = json.loads(path.read_text())
+            document = json.loads(path.read_text(encoding="utf-8"))
             document["mcpServers"]["pulp"]["args"] = ["--stdio"]
-            path.write_text(json.dumps(document))
+            path.write_text(json.dumps(document), encoding="utf-8")
         self.assert_stale_after(mutate)
 
 
