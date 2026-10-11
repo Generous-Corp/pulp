@@ -4716,8 +4716,14 @@
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
     "core/platform",
+    "core/platform/include",
     "core/runtime",
+    "core/runtime/include",
     "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
     "tools/scripts/foundation_include_lint.py"
    ],
    "kind": "python"
@@ -7202,6 +7208,30 @@
    "entry": "tools/scripts/test_pulp_uninstall.py",
    "inputs": [
     "tools/scripts/test_pulp_uninstall.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-core-include-boundary": {
+   "entry": "tools/scripts/include_boundary.py",
+   "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-core-include-boundary-negative-contract": {
+   "entry": "tools/scripts/test_include_boundary.py",
+   "inputs": [
+    "core/audio/include/pulp/audio/buffer.hpp",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/src/view.cpp"
    ],
    "kind": "python"
   },

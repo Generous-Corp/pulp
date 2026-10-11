@@ -628,6 +628,21 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio)
     set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "view;gate")
 endif()
 
+# The include half of the same boundary: no core/view source outside
+# core/view/audio may reach an audio, signal, host, midi or format header, or an
+# audio widget's header, in any spelling (angle, quoted, #import, relative).
+# The self-test plants each spelling and must turn red.
+add_test(NAME pulp-view-core-include-boundary
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/include_boundary.py"
+        --boundary view-core --root "${CMAKE_SOURCE_DIR}")
+add_test(NAME pulp-view-core-include-boundary-negative-contract
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_include_boundary.py")
+set_tests_properties(pulp-view-core-include-boundary
+    pulp-view-core-include-boundary-negative-contract
+    PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+
 # pulp-host-lane-probe (tools/editor-open/host_lane_probe.mm) must refuse to
 # run without plug-ins and must report an unloadable bundle as a setup error
 # (exit 2), never as written observations. The functional lane needs built
