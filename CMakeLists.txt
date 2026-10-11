@@ -582,6 +582,8 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --allow pulp-content
             --allow-include-prefix core/view/include/pulp/view/
             --allow-include-prefix core/view/src/
+            --allow-include-prefix core/audio/include/pulp/audio/
+            --allow-include-prefix core/signal/include/pulp/signal/
             --allow-include-path core/platform/src/android/jni_motion.cpp
             --allow-include-prefix core/render/platform/android/gpu_surface_android
             --allow-root-prefix core/audio/
