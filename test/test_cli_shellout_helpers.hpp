@@ -209,14 +209,16 @@ inline void prepend_to_path(const fs::path& dir) {
 inline std::string pinned_shipyard_version_for_test() {
 #if defined(PULP_CLI_BINARY)
     {
-        auto candidate = fs::path(PULP_CLI_BINARY).parent_path().parent_path().parent_path()
-                       .parent_path() / "tools" / "shipyard.toml";
+        auto candidate =
+            fs::path(PULP_CLI_BINARY).parent_path().parent_path().parent_path().parent_path() /
+            "tools" / "shipyard.toml";
         if (fs::is_regular_file(candidate)) {
             auto toml = read_file(candidate);
             std::istringstream lines(toml);
             std::string line;
             while (std::getline(lines, line)) {
-                if (line.rfind("version", 0) != 0) continue;
+                if (line.rfind("version", 0) != 0)
+                    continue;
                 auto eq = line.find('=');
                 auto first = line.find('"', eq);
                 auto last = line.find_last_of('"');
@@ -234,9 +236,11 @@ inline std::string pinned_shipyard_version_for_test() {
             toml = candidate;
             break;
         }
-        if (cursor == cursor.parent_path()) break;
+        if (cursor == cursor.parent_path())
+            break;
     }
-    if (toml.empty()) return "v0.56.2";
+    if (toml.empty())
+        return "v0.56.2";
     std::istringstream lines(toml);
     std::string line;
     while (std::getline(lines, line)) {
