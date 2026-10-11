@@ -86,4 +86,9 @@ target_compile_options(pulp-perfetto PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/bigobj;/Zc:__cplusplus;/Zc:preprocessor;/permissive->)
 
 target_link_libraries(pulp-tracing INTERFACE pulp-perfetto)
+# Consumers include the Perfetto amalgamation through trace.hpp. Keep MSVC's
+# conforming preprocessor enabled for those consumers as well as the library
+# itself; otherwise leaked compatibility macros can rewrite generated enums.
+target_compile_options(pulp-tracing INTERFACE
+    $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 target_compile_definitions(pulp-tracing INTERFACE PULP_TRACING_ENABLED=1)
