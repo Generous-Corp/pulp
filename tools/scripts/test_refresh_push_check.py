@@ -30,6 +30,8 @@ SCRIPT = ROOT / "tools/scripts/refresh_push_check.py"
 HOOK = ROOT / ".githooks/pre-push"
 HOOK_LIB = ROOT / ".githooks/lib"
 MERGE_TREE_STATE = ROOT / "tools/scripts/merge_tree_script_state.py"
+sys.path.insert(0, str(ROOT / "tools/scripts"))
+import merge_tree_script_state as merge_tree_state  # noqa: E402
 
 FAKE_GH = r"""#!/usr/bin/env python3
 import json, os, sys, time
@@ -339,6 +341,31 @@ def case_hook_wiring(fx: Fixture) -> None:
     assert res.returncode == 0 and "demoted to advisory" in res.stderr, res.stderr
     decisions = [e["decision"] for e in fx.entries()]
     assert decisions == ["warned", "refused", "refused"], decisions
+
+
+def case_script_failure_is_not_masked_by_not_checked(fx: Fixture) -> None:
+    script = fx.tmp / "failing.py"
+    script.write_text("print('NOT CHECKED locally: compiled inventory'); raise SystemExit(1)\n")
+    assert merge_tree_state._run([sys.executable, str(script)], fx.tmp, os.environ.copy()) == 1
+
+
+def case_ledger_checker_selected_from_merge_tree(fx: Fixture) -> None:
+    fx.setup()
+    checker = fx.repo / "tools/scripts/vellum_inheritance_ledger_check.py"
+    checker.parent.mkdir(parents=True, exist_ok=True)
+    checker.write_text("from pathlib import Path; raise SystemExit(1 if Path('ledger.drift').exists() else 0)\n")
+    checker.chmod(checker.stat().st_mode | stat.S_IXUSR)
+    (fx.repo / "ledger.drift").write_text("drift\n")
+    fx.git("add", "tools/scripts/vellum_inheritance_ledger_check.py", "ledger.drift")
+    fx.git("commit", "-qm", "ledger drift")
+    result = subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == 1, (result.returncode, result.stderr)
+    assert "vellum-inheritance-ledger" in result.stderr, result.stderr
+    assert "consumption-census-schema" not in result.stderr, result.stderr
 
 
 def case_merge_tree_conflict_refuses(fx: Fixture) -> None:

@@ -81,8 +81,6 @@ def main(argv: list[str] | None = None) -> int:
         env = os.environ.copy()
         env["PULP_GATES_NO_CONFIGURE"] = "1"
         checks: list[tuple[str, list[str]]] = [
-            ("script-test-inputs-drift", [sys.executable, str(tmp / "tools/scripts/gates_script_inputs.py"),
-                                            "--base", base_sha, "--repo-root", str(tmp)]),
             ("changed-surface-script-families-drift", [sys.executable, str(tmp / "tools/scripts/changed_surface_script_families.py"),
                                                         "--repo-root", str(tmp), "--static", "--base", base_sha,
                                                         "--head", synthetic]),
@@ -90,6 +88,18 @@ def main(argv: list[str] | None = None) -> int:
             ("unregistered-tests", [sys.executable, str(tmp / "tools/scripts/unregistered_tests_check.py"),
                                     "--repo-root", str(tmp)]),
         ]
+        # The ctest script-input inventory is compiled/build-owned and has no
+        # build-free equivalent. Run it only when a configured build is
+        # explicitly supplied; never substitute its schema-only validator.
+        configured = os.environ.get("PULP_GATES_BUILD_DIR", "")
+        if configured and (Path(configured).expanduser() / "CMakeCache.txt").exists():
+            checks.insert(0, ("script-test-inputs-drift", [sys.executable,
+                            str(tmp / "tools/scripts/gates_script_inputs.py"),
+                            "--base", base_sha, "--repo-root", str(tmp),
+                            "--build-dir", configured]))
+        else:
+            print("merge-tree script-state: script-test-inputs-drift (no build-free variant; skipped)", file=sys.stderr)
+
         ledger = tmp / "tools/scripts/vellum_inheritance_ledger_check.py"
         if ledger.exists():
             checks.append(("vellum-inheritance-ledger", [sys.executable, str(ledger),
