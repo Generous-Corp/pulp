@@ -172,19 +172,23 @@ if(WIN32)
     target_link_libraries(pulp-render PRIVATE dwmapi)
 endif()
 
-# Link WebGPU if available
-# On Android, Dawn is bundled in Skia — no separate webgpu target needed
-# The Windows Skia archive includes Dawn and the Windows renderer uses
-# dawn::native::* symbols that wgpu_native.dll does not export. Linking both
-# implementations also defines every wgpu* C entry point twice. Prefer Skia's
-# co-built static Dawn on Windows whenever that archive is present.
+# Link wgpu-native only when it is the renderer's WebGPU implementation.
+# When the Skia prebuilt carries Dawn, every WebGPU call the renderer, the
+# GPU-compute layer, gpu_audio and the JS WebGPU bridge make is Dawn's C++ API
+# and binds inside the image to that static Dawn; wgpu-native would add a
+# second implementation of every wgpu* C entry point that nothing calls. As a
+# load command it still costs: every plug-in bundle would ship and load its own
+# libwgpu_native.dylib, and dyld shares one copy per process by install name,
+# so a second Pulp plug-in in a host binds to whichever copy loaded first.
+# Without a Skia Dawn archive (no Skia, or a slice without Dawn), wgpu-native
+# backs the fallback GpuSurface in gpu_surface_dawn.cpp. Android bundles Dawn
+# in Skia and has no webgpu target.
 #
 # pulp-gpu-device receives the same provider link, scope and definitions as
 # pulp-render, so a consumer of either sees an identical Dawn/WebGPU surface.
 foreach(_pulp_gpu_target IN ITEMS pulp-gpu-device pulp-render)
     if(PULP_HAS_WEBGPU AND TARGET webgpu
-       AND NOT (WIN32 AND PULP_HAS_SKIA
-               AND NOT DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND"))
+       AND NOT (PULP_HAS_SKIA AND NOT DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND"))
         target_link_libraries(${_pulp_gpu_target} PUBLIC webgpu)
     endif()
     if(PULP_HAS_WEBGPU)

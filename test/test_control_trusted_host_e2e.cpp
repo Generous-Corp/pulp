@@ -271,8 +271,8 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
     const fs::path fixture = PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE;
     const auto executable = directory.root / "source" / "installed-host";
     fs::copy_file(fixture, executable);
-    const auto runtime_dependency = directory.root / "source" / "libwgpu_native.dylib";
-    fs::copy_file(fixture.parent_path() / "libwgpu_native.dylib", runtime_dependency);
+    const auto runtime_dependency = directory.root / "source" / PULP_CONTROL_E2E_RUNTIME_DEPENDENCY;
+    fs::copy_file(fixture.parent_path() / PULP_CONTROL_E2E_RUNTIME_DEPENDENCY, runtime_dependency);
     ::chmod(executable.c_str(), 0700);
     ::chmod(runtime_dependency.c_str(), 0700);
     {
@@ -329,7 +329,7 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         const auto policy = pin_control_trusted_host_preparation_policy(intent);
         REQUIRE(policy);
         REQUIRE(policy->runtime_dependencies.size() == 1);
-        CHECK(policy->runtime_dependencies.front().filename == "libwgpu_native.dylib");
+        CHECK(policy->runtime_dependencies.front().filename == PULP_CONTROL_E2E_RUNTIME_DEPENDENCY);
         const auto prepared = inventory.prepare(intent, *policy);
         REQUIRE(prepared.ticket);
         ControlTrustedHostLauncher launcher(inventory, enrollments,

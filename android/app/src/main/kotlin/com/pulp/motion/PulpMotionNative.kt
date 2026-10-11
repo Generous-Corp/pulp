@@ -4,7 +4,7 @@ package com.pulp.motion
  * Internal JNI surface for `pulp::view::motion` on Android.
  *
  * Every method here maps 1:1 to a `pulp_motion_*` C ABI entry point in
- * `core/platform/src/android/jni_motion.cpp` (declared in
+ * `core/view/platform/android/jni_motion.cpp` (declared in
  * `core/platform/include/pulp/platform/android/motion_bridge.h`). The
  * JNI shim names follow the standard mangling
  * (`Java_com_pulp_motion_PulpMotionNative_nativeFoo`).

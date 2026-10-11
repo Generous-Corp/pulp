@@ -2310,6 +2310,7 @@
   "pulp-project-package-publish-helper",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
+  "pulp-render-provider-floor-wgpu-control",
   "pulp-sampler-cli-sidecar-probe",
   "pulp-sampler-heritage-render-wav",
   "pulp-sampler-render-wav",
@@ -3173,6 +3174,13 @@
     "tools/scripts/android_smoke.sh"
    ],
    "kind": "shell"
+  },
+  "apple-bundle-signing-check": {
+   "entry": "tools/scripts/test_check_apple_bundle_signing.py",
+   "inputs": [
+    "tools/scripts/test_check_apple_bundle_signing.py"
+   ],
+   "kind": "python"
   },
   "archive-symbol-closure-selftest": {
    "entry": "tools/scripts/test_archive_symbol_closure_check.py",
@@ -4706,7 +4714,6 @@
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
     "core/platform",
-    "core/platform/src/android/jni_motion.cpp",
     "core/runtime",
     "core/simd",
     "tools/scripts/foundation_include_lint.py"
@@ -4719,7 +4726,6 @@
     "core/audio/platform/android/demo_synth.hpp",
     "core/platform/include/pulp/platform/platform.hpp",
     "core/platform/src/android/jni_bridge.cpp",
-    "core/platform/src/android/jni_motion.cpp",
     "core/platform/src/platform.cpp",
     "tools/scripts/test_foundation_include_lint.py"
    ],
@@ -6155,6 +6161,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-ir-observe-asset-escape": {
+   "entry": "test/test_design_ir_observe_asset_escape.py",
+   "inputs": [
+    "test/test_design_ir_observe_asset_escape.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-gpu": {
    "entry": "test/test_design_ir_observe_gpu.py",
    "inputs": [
@@ -6166,6 +6179,13 @@
    "entry": "test/test_design_ir_observe_interactions.py",
    "inputs": [
     "test/test_design_ir_observe_interactions.py"
+   ],
+   "kind": "python"
+  },
+  "import-design-ir-observe-malformed": {
+   "entry": "test/test_design_ir_observe_malformed.py",
+   "inputs": [
+    "test/test_design_ir_observe_malformed.py"
    ],
    "kind": "python"
   },
@@ -7196,6 +7216,14 @@
   "pulp.vellum-closure-boundary": {
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
     "tools/scripts/vellum_closure.py"
    ],
    "kind": "python"
@@ -7203,6 +7231,14 @@
   "pulp.vellum-closure-gate": {
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
     "tools/scripts/vellum_closure.py"
    ],
    "kind": "python"
@@ -7218,6 +7254,14 @@
   "pulp.vellum-closure-policy-selftest": {
    "entry": "tools/scripts/test_vellum_closure.py",
    "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
     "tools/scripts/test_vellum_closure.py",
     "tools/scripts/vellum_closure.py"
    ],

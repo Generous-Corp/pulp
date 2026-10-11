@@ -125,13 +125,82 @@ function(pulp_resolve_icudtl out_var)
     set(${out_var} "${_resolved}" PARENT_SCOPE)
 endfunction()
 
+# Whether the renderer links the wgpu-native runtime, read from the render
+# target's own link interface so staging can never disagree with the link:
+# `pulp-render` in a source build, the exported `Pulp::render` (or its
+# `pulp::render` alias) in a find_package(Pulp) consumer. An IMPORTED target
+# carries only INTERFACE_LINK_LIBRARIES, so that is what an installed
+# consumer reads; a source target's LINK_LIBRARIES already includes its
+# PUBLIC links. When Skia's Dawn is the WebGPU implementation the runtime is
+# not linked, and staging it would only ship a dylib nothing loads.
+function(pulp_wgpu_runtime_linked out_var)
+    set(_render "")
+    foreach(_candidate pulp-render Pulp::render pulp::render)
+        if(TARGET ${_candidate})
+            set(_render ${_candidate})
+            break()
+        endif()
+    endforeach()
+    set(_linked FALSE)
+    if(_render)
+        get_target_property(_aliased ${_render} ALIASED_TARGET)
+        if(_aliased)
+            set(_render ${_aliased})
+        endif()
+        get_target_property(_imported ${_render} IMPORTED)
+        if(_imported)
+            get_target_property(_links ${_render} INTERFACE_LINK_LIBRARIES)
+        else()
+            get_target_property(_links ${_render} LINK_LIBRARIES)
+        endif()
+        if(NOT _links)
+            set(_links "")
+        endif()
+        foreach(_link IN LISTS _links)
+            string(REGEX REPLACE "^\\$<LINK_ONLY:(.*)>$" "\\1" _link "${_link}")
+            if(_link STREQUAL "webgpu")
+                set(_linked TRUE)
+                break()
+            endif()
+        endforeach()
+    endif()
+    set(${out_var} ${_linked} PARENT_SCOPE)
+endfunction()
+
+# The wgpu-native runtime file the renderer loads, or empty: the source
+# build's WEBGPU_RUNTIME_LIB, else the imported `webgpu` target an installed
+# SDK recreates (PulpWebGpuImportedTarget.cmake). Empty whenever the renderer
+# does not link it.
+function(pulp_wgpu_runtime_file out_var)
+    set(_file "")
+    pulp_wgpu_runtime_linked(_linked)
+    if(_linked)
+        if(WEBGPU_RUNTIME_LIB AND EXISTS "${WEBGPU_RUNTIME_LIB}")
+            set(_file "${WEBGPU_RUNTIME_LIB}")
+        elseif(TARGET webgpu)
+            get_target_property(_imported webgpu IMPORTED)
+            if(_imported)
+                foreach(_property IMPORTED_LOCATION_RELEASE IMPORTED_LOCATION)
+                    get_target_property(_location webgpu ${_property})
+                    if(_location AND EXISTS "${_location}")
+                        set(_file "${_location}")
+                        break()
+                    endif()
+                endforeach()
+            endif()
+        endif()
+    endif()
+    set(${out_var} "${_file}" PARENT_SCOPE)
+endfunction()
+
 # The runtime files `target` must have beside it after a build, for the current
 # platform. Kept next to the staging function so the two cannot disagree about
 # the file set.
 function(pulp_expected_runtime_dependencies out_var)
     set(_expected "")
-    if(WEBGPU_RUNTIME_LIB AND EXISTS "${WEBGPU_RUNTIME_LIB}")
-        get_filename_component(_name "${WEBGPU_RUNTIME_LIB}" NAME)
+    pulp_wgpu_runtime_file(_wgpu_runtime)
+    if(_wgpu_runtime)
+        get_filename_component(_name "${_wgpu_runtime}" NAME)
         list(APPEND _expected "${_name}")
     endif()
     if(WIN32 AND SKIA_FOUND)
@@ -165,7 +234,19 @@ function(pulp_stage_runtime_dependencies target)
     # fails the link step it is appended to. When upstream has published the
     # path, issue the same copy with VERBATIM; otherwise (the installed SDK's
     # own helper, or a static runtime whose helper is a no-op) delegate.
-    if(DEFINED CACHE{WEBGPU_RUNTIME_LIB} AND EXISTS "${WEBGPU_RUNTIME_LIB}")
+    pulp_wgpu_runtime_linked(_wgpu_linked)
+    if(NOT _wgpu_linked)
+        # Skia's Dawn is the WebGPU implementation; nothing loads wgpu-native.
+        # Staging is copy-only, so remove a copy an earlier configuration of
+        # this build dir left beside the target; a bundle must not ship it.
+        if(WEBGPU_RUNTIME_LIB)
+            get_filename_component(_wgpu_name "${WEBGPU_RUNTIME_LIB}" NAME)
+            add_custom_command(
+                TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${target}>/${_wgpu_name}"
+                VERBATIM)
+        endif()
+    elseif(DEFINED CACHE{WEBGPU_RUNTIME_LIB} AND EXISTS "${WEBGPU_RUNTIME_LIB}")
         add_custom_command(
             TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

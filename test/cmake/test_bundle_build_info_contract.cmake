@@ -25,7 +25,7 @@ function(_expect label actual expected)
 endfunction()
 
 function(_finalize out_json)
-    cmake_parse_arguments(F "NO_GIT_HINT" "GIT_DIR;GIT_SHA;GIT_DIRTY;EMBED;EXPECT_FAIL" "" ${ARGN})
+    cmake_parse_arguments(F "NO_GIT_HINT" "GIT_DIR;GIT_SHA;GIT_DIRTY;EMBED;EXPECT_FAIL;RETIRE_DIR" "" ${ARGN})
     set(_out "${WORK_DIR}/out.json")
     file(REMOVE "${_out}")
     find_program(_git git)
@@ -44,6 +44,7 @@ function(_finalize out_json)
             "-DPULP_BUILD_INFO_GIT_DIRTY=${F_GIT_DIRTY}"
             "-DPULP_BUILD_INFO_EMBED=${F_EMBED}"
             "-DPULP_BUILD_INFO_GIT=${_git}"
+            "-DPULP_BUILD_INFO_RETIRE_DIR=${F_RETIRE_DIR}"
             -P "${_finalize}"
         RESULT_VARIABLE _result
         OUTPUT_VARIABLE _stdout
@@ -162,5 +163,42 @@ string(JSON _rendered_mac GET "${_min_os}" macos-arm64 floor)
 _expect("macos-arm64 floor" "${_rendered_mac}" "${_expected_mac}")
 string(JSON _rendered_linux_arm_type TYPE "${_min_os}" linux-arm64 floor)
 _expect("unmeasured floor stays null" "${_rendered_linux_arm_type}" "NULL")
+
+# 9. Placement inside an Apple bundle: macOS (deep) bundles keep the file in
+#    Contents/Resources; a shallow iOS-family bundle keeps it at the root,
+#    because a top-level Resources/ directory makes the bundle unsignable.
+include("${PULP_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake")
+foreach(_case "Darwin=Resources" "=Resources" "iOS=" "tvOS=" "watchOS=" "visionOS=")
+    string(REPLACE "=" ";" _pair "${_case}")
+    list(GET _pair 0 _system)
+    list(LENGTH _pair _pair_length)
+    set(_expected "")
+    if(_pair_length GREATER 1)
+        list(GET _pair 1 _expected)
+    endif()
+    _pulp_build_info_apple_resource_subdir("${_system}" _subdir)
+    _expect("bundle resource subdir for '${_system}'" "${_subdir}" "${_expected}")
+endforeach()
+
+# 10. Retiring an earlier layout's Resources/ in a shallow bundle: Pulp's own
+#     records are deleted, the directory goes once that leaves it empty, and
+#     anything else the bundle put there is kept.
+set(_retire "${WORK_DIR}/retire/Resources")
+file(MAKE_DIRECTORY "${_retire}")
+file(WRITE "${_retire}/pulp-build-info.json" "{}")
+file(WRITE "${_retire}/pulp.plugin-runtime.json" "{}")
+_finalize(_json GIT_SHA "0123abcd" GIT_DIRTY FALSE RETIRE_DIR "${_retire}")
+if(EXISTS "${_retire}")
+    message(FATAL_ERROR "retire: an emptied Resources/ directory was left behind")
+endif()
+message(STATUS "ok: retire removes Pulp's records and the emptied directory")
+file(MAKE_DIRECTORY "${_retire}")
+file(WRITE "${_retire}/pulp-build-info.json" "{}")
+file(WRITE "${_retire}/user-asset.txt" "keep")
+_finalize(_json GIT_SHA "0123abcd" GIT_DIRTY FALSE RETIRE_DIR "${_retire}")
+if(EXISTS "${_retire}/pulp-build-info.json" OR NOT EXISTS "${_retire}/user-asset.txt")
+    message(FATAL_ERROR "retire: must delete only Pulp's records and keep other files")
+endif()
+message(STATUS "ok: retire keeps files it does not own")
 
 message(STATUS "bundle_build_info_contract_verified=true")
