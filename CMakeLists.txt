@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.945.0
+    VERSION 0.945.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -710,6 +710,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/bundle_name_quoting)
     add_subdirectory(test/fixtures/render_provider_floor)
     add_subdirectory(test/fixtures/native_ui_link_floor)
+    add_subdirectory(test/fixtures/no_editor_link_floor)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────

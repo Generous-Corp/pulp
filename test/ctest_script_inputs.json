@@ -6146,6 +6146,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-ir-observe-gpu": {
+   "entry": "test/test_design_ir_observe_gpu.py",
+   "inputs": [
+    "test/test_design_ir_observe_gpu.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-interactions": {
    "entry": "test/test_design_ir_observe_interactions.py",
    "inputs": [
