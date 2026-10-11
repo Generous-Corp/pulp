@@ -6455,6 +6455,10 @@ the failure surfaces on the first unrelated PR that tries to land on it (looks
 like the PR's fault; it is not). Fix by reconciling the gate config to the
 branch's real state **in the landing PR**: raise the hotspot ceiling to the file's
 current LOC, and add the missing codecov flag+component (`paths: core/<new>/**`).
+A new `core/<module>/` needs TWO entries even on a short-lived branch: the
+`codecov.yml` component, and the component's name in a producer's set in
+`ci/coverage-surfaces.yaml` (or an explicit `not_applicable` disposition) —
+`test_coverage_surface_contract.py` rejects a component no producer claims.
 Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
 are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
 config you didn't author trips skill-sync/version-bump (config maps to the `ci`
