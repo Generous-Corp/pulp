@@ -64,7 +64,26 @@ foreach(_fmt IN LISTS _no_editor_formats)
     endif()
 endforeach()
 
-set(_no_editor_scan_args "-DCONTROL=$<TARGET_FILE:PulpNoEditorLinkFloorControl_CLAP>")
+# What the control's editor stack contains in this configuration. View and
+# canvas always; the GPU layers only when the build has them.
+set(_no_editor_control_families view canvas)
+set(_no_editor_control_gpu OFF)
+if(PULP_ENABLE_GPU AND TARGET pulp-render AND (PULP_HAS_SKIA OR PULP_HAS_WEBGPU))
+    list(APPEND _no_editor_control_families render wgpu)
+    set(_no_editor_control_gpu ON)
+    if(PULP_HAS_SKIA)
+        list(APPEND _no_editor_control_families skia)
+        # Skia's own Dawn archive (the same test core/render uses).
+        if(DAWN_LIBRARY AND NOT DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND")
+            list(APPEND _no_editor_control_families dawn)
+        endif()
+    endif()
+endif()
+string(REPLACE ";" "|" _no_editor_control_families "${_no_editor_control_families}")
+set(_no_editor_scan_args
+    "-DCONTROL=$<TARGET_FILE:PulpNoEditorLinkFloorControl_CLAP>"
+    "-DCONTROL_FAMILIES=${_no_editor_control_families}"
+    "-DCONTROL_GPU_RUNTIME=${_no_editor_control_gpu}")
 foreach(_fmt IN LISTS _no_editor_formats)
     list(APPEND _no_editor_scan_args "-D${_fmt}=$<TARGET_FILE:PulpNoEditorLinkFloor_${_fmt}>")
 endforeach()

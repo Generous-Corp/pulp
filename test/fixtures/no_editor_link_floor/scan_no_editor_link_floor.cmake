@@ -56,16 +56,32 @@ function(_count out symbols regex)
     set(${out} ${_n} PARENT_SCOPE)
 endfunction()
 
-# Positive control first: every family and the runtime dependency must be seen.
+# Positive control first. The build says which families its editor stack has
+# (CONTROL_FAMILIES) and whether that stack carries a GPU runtime
+# (CONTROL_GPU_RUNTIME): a build with PULP_ENABLE_GPU=OFF links view and canvas
+# but no render, Skia, Dawn or wgpu code, so its control cannot show those. Every
+# family the build has must be seen in the control; the editor-less modules are
+# still checked against every family and the runtime pattern below.
+if(NOT DEFINED CONTROL_FAMILIES OR NOT DEFINED CONTROL_GPU_RUNTIME)
+    message(FATAL_ERROR "no-editor link floor: CONTROL_FAMILIES and CONTROL_GPU_RUNTIME are required")
+endif()
+string(REPLACE "|" ";" CONTROL_FAMILIES "${CONTROL_FAMILIES}")
 _scan("${CONTROL}" _control_deps _control_symbols)
-if(NOT _control_deps MATCHES "${_runtime_deps}")
+if(CONTROL_GPU_RUNTIME AND NOT _control_deps MATCHES "${_runtime_deps}")
     message(FATAL_ERROR
         "control module has no GPU-runtime dependency; the dependency check is blind:\n${_control_deps}")
+endif()
+if(NOT CONTROL_GPU_RUNTIME)
+    message(STATUS "control GPU runtime: not built (PULP_ENABLE_GPU=OFF); dependency control skipped")
 endif()
 foreach(_family IN LISTS _families)
     string(REPLACE "=" ";" _pair "${_family}")
     list(GET _pair 0 _name)
     list(GET _pair 1 _regex)
+    if(NOT _name IN_LIST CONTROL_FAMILIES)
+        message(STATUS "control ${_name}: not built in this configuration")
+        continue()
+    endif()
     _count(_n "${_control_symbols}" "${_regex}")
     if(_n EQUAL 0)
         message(FATAL_ERROR
