@@ -2999,9 +2999,13 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   loads only if its resolved file is in the cache and matches the hash. A refusal logs `asset '…' refused — … resolves
   outside the document directory` and reads as unresolved. It is decided
   before any lookup on purpose: refusing only files that exist would tell a
-  crafted manifest which outside files are present. An external local file the
-  importer records by absolute path will not load later; copy it into the
-  document's `assets/` instead.
+  crafted manifest which outside files are present. `collect_design_ir_assets`
+  records an external local file by absolute path, so a document that keeps
+  that path will not load the asset. Every `pulp import-design` lane that
+  writes a document (js, ir-json, cpp, browser import) runs
+  `localize_ir_assets`, which copies it to `assets/<sha256><ext>` first; a
+  library caller that serializes DesignIR itself must do the same.
+  `import-design-external-asset-localized` pins the CLI behaviour end to end.
 - **Pencil stroke lives in an attribute.** Shape stroke can arrive as
   `attributes["stroke_color"]` (+ `stroke_width`/`stroke-width`), NOT
   `style.border_color`. `synthesize_primitive_paths` consumes both, else a
