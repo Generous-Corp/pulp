@@ -65,6 +65,18 @@ void walk_anchors(const IRNode& node, const std::string& path,
 
 }  // namespace
 
+void append_document_version_diagnostic(const DesignIR& ir,
+                                        std::vector<ImportDiagnostic>& out) {
+    if (ir.version <= kDesignIrNewestKnownVersion) return;
+    runtime::log_warn(
+        "design-import: unsupported DesignIR version {} (this build knows versions up to {}); "
+        "its fields are read as version {} defines them",
+        ir.version, kDesignIrNewestKnownVersion, kDesignIrNewestKnownVersion);
+    out.push_back(warning("document-version-unsupported", "$",
+                          "unsupported DesignIR version " + std::to_string(ir.version),
+                          ir.root, ImportDiagnosticKind::unknown));
+}
+
 void append_unknown_node_type_diagnostic(const IRNode& node,
                                          std::string_view path,
                                          std::vector<ImportDiagnostic>& out) {

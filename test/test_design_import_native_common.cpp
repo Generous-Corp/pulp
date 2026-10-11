@@ -1,6 +1,7 @@
 #include "../core/view/src/design_import_internal.hpp"
 #include "../core/view/src/design_import_native_common.hpp"
 #include "../core/view/src/design_ir_helpers.hpp"
+#include "../core/view/src/design_import_document_checks.hpp"
 #include "support/unique_temp_dir.hpp"
 
 #include <pulp/canvas/image_probe.hpp>
@@ -1293,4 +1294,21 @@ TEST_CASE("native materializer names an image asset the renderer cannot decode",
     flipped[43] = static_cast<char>(flipped[43] ^ 0x01);  // IDAT byte; CRC no longer matches
     CHECK(has_code(materialize(flipped), "asset-undecodable"));
     CHECK(has_code(materialize("GIF89a this is not an image\n"), "asset-undecodable"));
+}
+
+TEST_CASE("native resolver warns on a DesignIR envelope newer than it knows",
+          "[design-import][native][fail-closed]") {
+    const auto version_warnings = [](int version) {
+        DesignIR ir;
+        ir.version = version;
+        ir.root.type = "frame";
+        std::vector<std::string> out;
+        for (const auto& d : resolve_design_ir_native(ir, {}).diagnostics)
+            if (d.code == "document-version-unsupported") out.push_back(d.message);
+        return out;
+    };
+    CHECK(version_warnings(kDesignIrNewestKnownVersion).empty());
+    const auto newer = version_warnings(99);
+    REQUIRE(newer.size() == 1);
+    CHECK(newer[0] == "unsupported DesignIR version 99");
 }

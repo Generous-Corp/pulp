@@ -11,6 +11,16 @@
 
 namespace pulp::view {
 
+/// The newest DesignIR envelope version this build was written against. The
+/// reader keeps and round-trips a newer one; materializing it warns.
+inline constexpr int kDesignIrNewestKnownVersion = 1;
+
+/// One `document-version-unsupported` warning when @p ir declares an envelope
+/// version newer than kDesignIrNewestKnownVersion. Its fields are read as if
+/// they meant what they mean in the known version, which may be wrong.
+void append_document_version_diagnostic(const DesignIR& ir,
+                                        std::vector<ImportDiagnostic>& out);
+
 /// One `node-type-unknown` warning, for the caller to raise on a node whose
 /// `type` it does not recognize. The node still imports through whatever its
 /// audio role or name resolves to, or as a plain View, so the render does not

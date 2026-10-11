@@ -3028,6 +3028,7 @@ ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
                                             const IRAssetManifest& manifest) {
     const auto& effective_manifest = manifest.assets.empty() ? ir.asset_manifest : manifest;
     auto resolved = resolve_node(ir.root, "$", index_assets(effective_manifest));
+    append_document_version_diagnostic(ir, resolved.diagnostics);
     append_duplicate_anchor_diagnostics(ir.root, resolved.diagnostics);
     resolved.diagnostics.insert(resolved.diagnostics.end(),
                                 ir.diagnostics.begin(),
