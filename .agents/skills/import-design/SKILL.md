@@ -551,6 +551,21 @@ knowing before you touch that file:
   validation errors and a Tint internal compiler error. `--gpu-fault` seeds
   failures for parity-lane calibration only.
 
+- `pulp-ui-frames-observe` records an imported panel (`--design-ir`) or a
+  scripted UI (`--script`) frame by frame under a fixed host clock: a
+  `pulp-ui-frame-schedule-v1` file supplies the host timestamps, the
+  StateStore parameters, and timed hover/click/drag/key/context-press,
+  `set_param`, `resize` and editor `attach_view`/`detach_view` events
+  (`test/fixtures/ui-frames/`). It follows the host frame contract exactly,
+  including the SECOND continuity check after `advance_host_frame`: keeping
+  only `begin_host_frame`'s answer stalls an input-started animation (a knob's
+  hover glow froze at 0.37 for nine frames). Gotchas it makes visible: a
+  view-first scripted document's first mounted frame paints `bindWidgetToParam`
+  controls at 0, one frame before the binding service catches up; and JS
+  `setTimeout`/`setInterval` deadlines follow the wall clock, not the host
+  clock, so timer-driven readiness cannot be fixed by a schedule (drive it with
+  `requestAnimationFrame` instead).
+
 **The lane that works (Figma is the source of truth):**
 ```bash
 # 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).
@@ -1926,7 +1941,9 @@ SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
   (`RecognitionResolver`) is the ONE place that combines recognition SOURCES
   into a merged `component_set_key → kind` (and `→ factory_id`) table. Sources,
   in precedence order (later wins on key collision):
-  1. built-in Pulp Figma Library (`RecognitionResolver::with_builtin_library()`,
+  1. built-in Pulp Figma Library (`recognition_resolver_with_builtin_library()`,
+     a Pulp-owned pack in `recognition_audio_pack.{hpp,cpp}` linked as
+     `pulp-design-import-audio-pack`, NOT part of the generic resolver;
      mirrored in code from `tools/figma-plugin/library-manifest.json` and pinned
      against the JSON by a drift-guard test),
   2. the user's `--recognition-manifest` (flat library-manifest shape),

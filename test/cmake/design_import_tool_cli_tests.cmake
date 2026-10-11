@@ -493,5 +493,21 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         TIMEOUT 120)
 endif()
 
+# pulp-ui-frames-observe: a fixed host clock drives a materialized DesignIR or
+# a scripted UI through scheduled hover, drag, key, menu, parameter, resize and
+# editor attach/detach events, recording every frame. Skia-gated because each
+# frame is rasterized. PROJECT_IS_TOP_LEVEL, not if(TARGET): tools/import-design
+# is added after test/, and $<TARGET_FILE:> resolves at generate time.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-ui-frames-observe
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_frames_observe.py
+                --observer $<TARGET_FILE:pulp-ui-frames-observe>)
+    set_tests_properties(import-ui-frames-observe PROPERTIES
+        LABELS "parser-import;import"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 120)
+endif()
+
 # pulp-svg-probe appears only in the import tool's expected output text.
 pulp_test_spawns(pulp-test-import-design-tool NOT_RUN pulp-svg-probe)

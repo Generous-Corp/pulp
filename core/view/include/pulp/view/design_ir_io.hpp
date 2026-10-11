@@ -1,0 +1,56 @@
+#pragma once
+
+/// @file design_ir_io.hpp
+/// Importer operations over the DesignIR value model: canonical JSON
+/// serialize/parse, asset-manifest collection, CSS box-shadow round-trip, and
+/// interactive-frame promotion. Part of `pulp-design-import`; the value types
+/// they operate on live in design_ir.hpp (`pulp-design-ir`).
+
+#include <pulp/view/design_ir.hpp>
+
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace pulp::view {
+
+/// Inspect one IR node for interactive-frame promotion signals.
+WidgetPromotionSignal classify_interactive_signal(const IRNode& node);
+
+/// Promote parsed `frame` nodes carrying click/ARIA/cursor signals to
+/// `button`. Runs automatically from the parse APIs; exposed for tests and
+/// callers that construct IR manually.
+std::size_t promote_interactive_frames(IRNode& root);
+
+/// Parse a CSS `box-shadow` value into ordered layers. Splits on top-level
+/// commas only (commas inside `rgb()`/`rgba()` are preserved), then parses
+/// each layer's offsets/blur/spread/color/inset. Numeric lengths accept an
+/// optional `px` suffix. Empty / "none" input yields an empty vector. Each
+/// layer keeps its trimmed original text in `raw` for lossless round-trip.
+std::vector<IRBoxShadow> parse_css_box_shadow(const std::string& css);
+
+/// Serialize ordered box-shadow layers back to a CSS `box-shadow` string,
+/// preferring each layer's `raw` text when present (lossless) and otherwise
+/// reconstructing from the parsed fields. Empty input yields an empty string.
+std::string box_shadow_to_css(const std::vector<IRBoxShadow>& shadows);
+
+/// Serialize a DesignIR as a deterministic, versioned canonical JSON
+/// envelope. The reader remains permissive; this writer emits only the
+/// canonical nested form.
+std::string serialize_design_ir(const DesignIR& ir, const DesignIrJsonOptions& options = {});
+
+/// Parse either the v1 canonical envelope or a legacy bare-node IR JSON
+/// document. Legacy source adapters keep their JSON-first compatibility by
+/// routing through this reader.
+DesignIR parse_design_ir_json(const std::string& json);
+
+/// Collect all external resources referenced by the IR into a manifest.
+/// Network fetches require explicit opt-in through options.
+IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
+                                         const DesignIrAssetOptions& options = {});
+
+/// Refresh ir.asset_manifest from the current tree while preserving embedded
+/// manifest entries whose stable asset_id may already be referenced by nodes.
+void refresh_design_ir_asset_manifest(DesignIR& ir, const DesignIrAssetOptions& options = {});
+
+} // namespace pulp::view
