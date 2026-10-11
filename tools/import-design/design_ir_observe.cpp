@@ -370,7 +370,13 @@ int main(int argc, char** argv) {
         std::cerr << "Error: could not read DesignIR input\n";
         return 1;
     }
-    auto ir = pulp::view::parse_design_ir_json(serialized);
+    pulp::view::DesignIR ir;
+    try {
+        ir = pulp::view::parse_design_ir_json(serialized);
+    } catch (const pulp::view::DesignIrParseError& error) {
+        std::cerr << "Error: invalid DesignIR: " << error.what() << "\n";
+        return 1;
+    }
     // The document's own directory is the search root for its manifest assets:
     // relative local_paths resolve against it, and a local_path that no longer
     // points at its bytes is recovered by content hash from the asset folders

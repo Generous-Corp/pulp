@@ -27,6 +27,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -2455,8 +2456,80 @@ std::string serialize_design_ir(const DesignIR& ir,
     return out.str();
 }
 
+namespace {
+
+bool is_hex_digit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+// The pinned CHOC JSON parser checks for end of input only after a backslash
+// inside a string, so an unterminated string, or a backslash-u escape cut
+// short, makes it read past the end of the buffer; it also recurses once per
+// nesting level. This bounded scan proves every string and escape terminates inside
+// the buffer, that brackets balance within kMaxDesignIrJsonDepth, and that no
+// NUL byte is embedded, before the parser runs. Upstream Tracktion/choc has
+// since added the unescaped end-of-input check; this guard stays because it
+// also covers nesting depth and short backslash-u escapes.
+void check_json_bounds(std::string_view text) {
+    std::vector<char> stack;
+    bool in_string = false;
+    std::size_t string_start = 0;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (c == '\0')
+            throw DesignIrParseError("embedded NUL byte", i);
+        if (in_string) {
+            if (c == '"') {
+                in_string = false;
+            } else if (c == '\\') {
+                if (i + 1 >= text.size())
+                    throw DesignIrParseError("unterminated escape in string", i);
+                if (text[i + 1] == 'u') {
+                    if (i + 5 >= text.size())
+                        throw DesignIrParseError("truncated \\u escape in string", i);
+                    for (std::size_t k = i + 2; k < i + 6; ++k)
+                        if (!is_hex_digit(text[k]))
+                            throw DesignIrParseError("invalid \\u escape in string", i);
+                    i += 5;
+                } else {
+                    ++i;
+                }
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+            string_start = i;
+        } else if (c == '{' || c == '[') {
+            if (stack.size() >= kMaxDesignIrJsonDepth)
+                throw DesignIrParseError("nesting deeper than " +
+                                             std::to_string(kMaxDesignIrJsonDepth) + " levels", i);
+            stack.push_back(c == '{' ? '}' : ']');
+        } else if (c == '}' || c == ']') {
+            if (stack.empty() || stack.back() != c)
+                throw DesignIrParseError(std::string("unbalanced '") + c + "'", i);
+            stack.pop_back();
+        }
+    }
+    if (in_string)
+        throw DesignIrParseError("unterminated string (document is truncated)", string_start);
+    if (!stack.empty())
+        throw DesignIrParseError("unterminated object or array (document is truncated)", text.size());
+}
+
+} // namespace
+
 DesignIR parse_design_ir_json(const std::string& json) {
-    auto parsed = choc::json::parse(json);
+    check_json_bounds(json);
+    choc::value::Value parsed;
+    try {
+        parsed = choc::json::parse(json);
+    } catch (const choc::json::ParseError& error) {
+        throw DesignIrParseError(std::string("invalid JSON at line ") +
+                                     std::to_string(error.lineAndColumn.line) + ", column " +
+                                     std::to_string(error.lineAndColumn.column) + ": " + error.what(),
+                                 std::string::npos);
+    }
     DesignIR ir;
 
     if (parsed.isObject() && parsed.hasObjectMember("version") && parsed.hasObjectMember("root")) {
