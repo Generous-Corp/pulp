@@ -1810,6 +1810,28 @@ def main() -> int:
             f"a mechanical version rewrite still demanded a ledger row: {green}"
         )
 
+    # A uses-only change in a sequencer-owned workflow is mechanical per path,
+    # while a run change in the same file still requires transition coverage.
+    sequencer_workflow = ".github/workflows/timeline-fuzz.yml"
+    workflow_green = validate_transition(
+        mech_base_doc, mech_current, [sequencer_workflow],
+        mechanical_version_paths={sequencer_workflow},
+    )
+    if any(sequencer_workflow in error for error in workflow_green):
+        raise AssertionError(
+            f"a uses-only sequencer workflow still demanded a ledger row: {workflow_green}"
+        )
+    workflow_red = validate_transition(
+        mech_base_doc, mech_current, [sequencer_workflow],
+        mechanical_version_paths=set(),
+    )
+    if not any(sequencer_workflow in error for error in workflow_red):
+        raise AssertionError(
+            "control: a run change in a sequencer workflow was not exposed"
+        )
+    _CHECK_TALLY["clean"] += 1
+    _CHECK_TALLY["calibrated"] += 1
+
     print(
         "sequencer exposure checker selftest: OK "
         f"({_CHECK_TALLY['clean']} clean checks, "

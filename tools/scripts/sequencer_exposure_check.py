@@ -1315,12 +1315,12 @@ def validate_transition(
     sequencer_changes = sorted(
         path for path in changed
         if not is_ledger_path(path) and path not in E0_INFRASTRUCTURE_PATHS and
+        path not in (mechanical_version_paths or set()) and
         (
             is_sequencer_owned_path(path) or
             path in (semantic_added_paths or set()) or
             (
                 path in watched
-                and path not in (mechanical_version_paths or set())
             )
         )
     )
