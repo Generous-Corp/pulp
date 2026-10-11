@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261011-design-ir-asset-path-lexical-watch",
+  "created_at": "2026-10-11T05:20:27Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "resolve_asset_file now refuses a document-loaded asset path that leaves the document directory by text, before any filesystem lookup (.. folded, backslashes as separators, absolute, drive-letter and UNC roots), keeping the resolved-path symlink check as a second layer and the declared-sha256 exception; the refusal no longer reveals whether an outside file exists. Generic DesignIR asset-resolution hardening landed in Pulp per the 2026-10-04 temporary ownership exception; Vellum inherits it. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-native-common",
+    "python3 test/test_design_ir_observe_asset_escape.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
