@@ -835,3 +835,30 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
   ]));
   assert.ok(sandbox);
 });
+
+test('state switches reconcile pseudo planes and hide stale bindings', () => {
+  const calls = [];
+  const sandbox = evaluateEntry({
+    productPrelude: "globalThis.__wantState__ = ''; globalThis.__pulpMaterializedStateResolver__ = () => globalThis.__wantState__;",
+    stateAtlas: [{ id: 'alt', image: '', match: null, activate: [], metadata: {
+      layout_bindings: [], text_bindings: [], paint_bindings: [],
+      pseudo_bindings: [{ index: 0, anchor: 'body', path: [], pseudo: 'before',
+        box: { left: 0, top: 0, width: 10, height: 10 },
+        background_gradient: 'linear-gradient(#fff, transparent)',
+        opacity: 1, z_index: 0, pointer_events: 'none' }],
+    } }],
+    bridge: {
+      createCol: (id, parent) => calls.push(['create', id, parent]),
+      setVisible: (id, value) => calls.push(['visible', id, value]),
+      setBackground: (id, value) => calls.push(['background', id, value]),
+      setBackgroundGradient: (id, value) => calls.push(['gradient', id, value]),
+    },
+  });
+  sandbox.__wantState__ = 'alt';
+  assert.equal(sandbox.__pulpRefreshMaterializedState__(), 'alt');
+  sandbox.__wantState__ = '';
+  assert.equal(sandbox.__pulpRefreshMaterializedState__(), '');
+  const id = '__pulp_materialized_pseudo_0';
+  assert.ok(calls.some(call => call[0] === 'create' && call[1] === id));
+  assert.ok(calls.some(call => call[0] === 'visible' && call[1] === id && call[2] === false));
+});

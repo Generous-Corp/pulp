@@ -331,7 +331,50 @@ g.__pulpReconcileMaterializedPaint__ = function (id, changes) {
 // that is not the per-commit hook -- bootstrap, and a captured-state change --
 // deliberately passes nothing: a state flip replaces the whole binding table,
 // so nothing about the previous commit's dirty set describes it.
+const materializedPseudoPlanes = new Map();
+function applyMaterializedPseudoBindings(metadata) {
+  const bindings = Array.isArray(metadata && metadata.pseudo_bindings)
+    ? metadata.pseudo_bindings : [];
+  const live = new Set();
+  for (const binding of bindings) {
+    const id = "__pulp_materialized_pseudo_" + binding.index;
+    live.add(id);
+    if (!materializedPseudoPlanes.has(id)) {
+      createCol(id, behaviorRootId);
+      materializedPseudoPlanes.set(id, { gradient: false });
+    }
+    setPosition(id, 'absolute');
+    setLeft(id, Number(binding.box.left) - Number(${JSON.stringify(authoredLeft)}));
+    setTop(id, Number(binding.box.top) - Number(${JSON.stringify(authoredTop)}));
+    setFlex(id, 'width', binding.box.width);
+    setFlex(id, 'height', binding.box.height);
+    // CSS background layers paint from color into image; clear stale layers
+    // before applying the current state so state switches are deterministic.
+    setBackground(id, binding.background_color || '');
+    const plane = materializedPseudoPlanes.get(id);
+    if (typeof setBackgroundGradient === 'function') {
+      if (binding.background_gradient)
+        setBackgroundGradient(id, binding.background_gradient);
+      else if (plane && plane.gradient)
+        setBackgroundGradient(id, '');
+    }
+    if (plane) plane.gradient = Boolean(binding.background_gradient);
+    setOpacity(id, binding.opacity);
+    setPointerEvents(id, 'none');
+    setZIndex(id, ${MATERIALIZED_BEHAVIOR_Z - 1000} +
+      Math.max(-999, Math.min(999, binding.z_index)));
+    setVisible(id, true);
+  }
+  for (const id of materializedPseudoPlanes.keys()) {
+    if (live.has(id)) continue;
+    setVisible(id, false);
+    setBackground(id, '');
+    if (typeof setBackgroundGradient === 'function') setBackgroundGradient(id, '');
+  }
+}
+
 function applyMaterializedImportMetadata(metadata, scopeIds) {
+  applyMaterializedPseudoBindings(metadata);
   const scopeSet = materializedScopeSet(scopeIds);
   const values = materializedDomRegistryValues();
   const pathIndex = materializedPathIndex(values);
@@ -1105,28 +1148,7 @@ setOpacity(behaviorRootId, ${visualAuthority === 'native' ? '1' : '0'});
 // in native mode those children also paint the complete UI.
 setPointerEvents(behaviorRootId, 'box-none');
 setZIndex(behaviorRootId, ${MATERIALIZED_BEHAVIOR_Z});
-// Pseudo-elements are not authored React nodes. Reify supported captured
-// gradients as inert native planes under the behavior root, preserving their
-// absolute Chromium box while keeping generated content and hit testing out of
-// the executable tree. Unsupported pseudo paint is retained as diagnostics in
-// the sidecar and never guessed here.
-for (const binding of capturedPseudoBindings) {
-  const id = "__pulp_materialized_pseudo_" + binding.index;
-  createCol(id, behaviorRootId);
-  setPosition(id, 'absolute');
-  setLeft(id, Number(binding.box.left) - Number(${JSON.stringify(authoredLeft)}));
-  setTop(id, Number(binding.box.top) - Number(${JSON.stringify(authoredTop)}));
-  setFlex(id, 'width', binding.box.width);
-  setFlex(id, 'height', binding.box.height);
-  // CSS background layers paint from the color layer into the image layer;
-  // preserve that order when both were captured.
-  if (binding.background_color) setBackground(id, binding.background_color);
-  if (binding.background_gradient && typeof setBackgroundGradient === 'function')
-    setBackgroundGradient(id, binding.background_gradient);
-  setOpacity(id, binding.opacity);
-  setPointerEvents(id, 'none');
-  setZIndex(id, ${MATERIALIZED_BEHAVIOR_Z - 1000} + Math.max(-999, Math.min(999, binding.z_index)));
-}
+applyMaterializedPseudoBindings(capturedHomeMetadata);
 // Commit exactly the element supplied by the captured document's own
 // ReactDOM.createRoot(...).render(...) call. A declaration-only export may
 // omit that call, so retain one bounded compatibility fallback to App, but

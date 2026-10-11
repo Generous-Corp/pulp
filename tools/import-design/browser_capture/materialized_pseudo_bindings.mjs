@@ -71,11 +71,14 @@ export function buildMaterializedPseudoBindings(snapshot, coordinateSpace = null
     const hostIdentity = host >= 0
       ? materializedStructuralPath(nodes, strings, elementChildren, host) : null;
     const hostTag = materializedStringAt(strings, nodes.nodeName?.[host]).toLowerCase();
+    const hostId = materializedAttributeValue(nodes, strings, host, 'id');
     // Body is the document anchor and has no authored path. The runtime places
     // its plane in the capture surface using the absolute captured box.
     const identity = hostTag === 'body'
       ? { anchor: 'body', path: [], pulp_id: materializedAttributeValue(nodes, strings, host, 'data-pulp-id') }
-      : hostIdentity;
+      : hostId === 'root'
+        ? { anchor: '#root', path: [], pulp_id: materializedAttributeValue(nodes, strings, host, 'data-pulp-id') }
+        : hostIdentity;
     const captured = materializedFiniteRect(layout.bounds[layoutIndex]);
     const box = captured ? materializedRectToAuthored(captured, coordinateSpace) : null;
     if (!identity || !box) { addDiagnostic(node, 'missing-host-or-box'); continue; }
