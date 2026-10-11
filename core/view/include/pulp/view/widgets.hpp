@@ -2335,7 +2335,7 @@ private:
 // Audio level meter with peak hold
 
 class Meter : public View, public AccessibilityValueInterface, public InspectorFacts {
-public:
+  public:
     enum class Orientation { vertical, horizontal };
 
     Meter() { set_access_role(AccessRole::meter); }
@@ -2364,7 +2364,9 @@ public:
     float display_rms() const { return ballistics_.display_rms; }
     float display_peak() const { return ballistics_.display_peak; }
 
-    std::string_view inspector_type_name() const override { return "Meter"; }
+    std::string_view inspector_type_name() const override {
+        return "Meter";
+    }
     void inspector_facts(std::vector<InspectorFacts::Fact>& out) const override;
     float held_peak() const { return ballistics_.held_peak; }
 
@@ -2551,7 +2553,7 @@ namespace pulp::audio { class WaveformOverview; }
 namespace pulp::view {
 
 class WaveformView : public View, public InspectorFacts {
-public:
+  public:
     // Triggering mode for periodic signal display.
     // free_run:     no triggering — caller is responsible for continuity
     // rising_zero:  align to the first rising-edge zero crossing
@@ -2594,7 +2596,9 @@ public:
 
     size_t sample_count() const { return samples_.size(); }
 
-    std::string_view inspector_type_name() const override { return "WaveformView"; }
+    std::string_view inspector_type_name() const override {
+        return "WaveformView";
+    }
     void inspector_facts(std::vector<InspectorFacts::Fact>& out) const override;
 
     // Static oscillator-preview lane for imported synth-style designs.
@@ -2631,7 +2635,7 @@ private:
 // Displays frequency spectrum (magnitude data from FFT)
 
 class SpectrumView : public View, public InspectorFacts {
-public:
+  public:
     enum class Style { bars, line, filled };
 
     SpectrumView() = default;
@@ -2642,7 +2646,9 @@ public:
 
     size_t bin_count() const { return bins_.size(); }
 
-    std::string_view inspector_type_name() const override { return "SpectrumView"; }
+    std::string_view inspector_type_name() const override {
+        return "SpectrumView";
+    }
     void inspector_facts(std::vector<InspectorFacts::Fact>& out) const override;
 
     void set_style(Style s) { style_ = s; }

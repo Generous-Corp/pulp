@@ -11,12 +11,12 @@ namespace pulp::view {
 /// implements this, so view-core's inspector can show it while linking none of
 /// that widget's code.
 class InspectorFacts {
-public:
+  public:
     struct Fact {
-        std::string key;         ///< JSON member name in ViewInspector::to_json
-        std::string label;       ///< row label in ViewInspector::view_properties
+        std::string key;   ///< JSON member name in ViewInspector::to_json
+        std::string label; ///< row label in ViewInspector::view_properties
         double value = 0.0;
-        bool integral = false;   ///< serialized as an integer
+        bool integral = false; ///< serialized as an integer
         bool show_in_properties = false;
     };
 

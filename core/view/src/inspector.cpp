@@ -45,10 +45,9 @@ static choc::value::Value view_to_value(const View& view) {
         std::vector<InspectorFacts::Fact> facts;
         described->inspector_facts(facts);
         for (const auto& fact : facts) {
-            obj.addMember(fact.key,
-                          fact.integral
-                              ? choc::value::createInt64(static_cast<int64_t>(fact.value))
-                              : choc::value::createFloat64(fact.value));
+            obj.addMember(fact.key, fact.integral
+                                        ? choc::value::createInt64(static_cast<int64_t>(fact.value))
+                                        : choc::value::createFloat64(fact.value));
         }
     }
 
@@ -166,8 +165,8 @@ std::vector<PropertyList::Property> ViewInspector::view_properties(const View& v
         described->inspector_facts(facts);
         for (const auto& fact : facts) {
             if (fact.show_in_properties)
-                props.push_back({fact.key, fact.label, PV{static_cast<float>(fact.value)}, true,
-                                 "Widget"});
+                props.push_back(
+                    {fact.key, fact.label, PV{static_cast<float>(fact.value)}, true, "Widget"});
         }
     }
 
