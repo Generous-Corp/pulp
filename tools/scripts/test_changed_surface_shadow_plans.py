@@ -98,9 +98,9 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(re.findall(r"(?m)^  (\w+):", triggers), ["pull_request"])
 
     def test_it_plans_the_exact_head_and_never_fails_the_job(self) -> None:
-        self.assertEqual(self.value("actions/checkout@v5", "ref"),
+        self.assertEqual(self.value("actions/checkout@v7", "ref"),
                          "${{ github.event.pull_request.head.sha }}")
-        self.assertEqual(self.value("actions/checkout@v5", "fetch-depth"), "0")
+        self.assertEqual(self.value("actions/checkout@v7", "fetch-depth"), "0")
         for name in ("Install pinned Shipyard", "Record shadow plan"):
             self.assertEqual(self.value(name, "continue-on-error"), "true", name)
         self.assertIn("--record", self.steps["Record shadow plan"])

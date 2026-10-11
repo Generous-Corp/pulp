@@ -1488,6 +1488,35 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b81ac549c92a"
+paths = ["tools/scripts/test_check_apple_bundle_signing.py"]
+tests = [
+  "apple-bundle-signing-check",
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-5d023dbea308"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
@@ -5759,6 +5788,7 @@ paths = [
   "tools/scripts/test_changed_surface_registration_projection.py",
   "tools/scripts/test_changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_shadow_plans.py",
+  "tools/scripts/test_check_apple_bundle_signing.py",
   "tools/scripts/test_check_au_component_preflight.py",
   "tools/scripts/test_check_bundle_architectures.py",
   "tools/scripts/test_check_canvas_path_flush.py",
@@ -6298,6 +6328,7 @@ paths = [
   "tools/scripts/test_changed_surface_registration_projection.py",
   "tools/scripts/test_changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_shadow_plans.py",
+  "tools/scripts/test_check_apple_bundle_signing.py",
   "tools/scripts/test_check_au_component_preflight.py",
   "tools/scripts/test_check_bundle_architectures.py",
   "tools/scripts/test_check_canvas_path_flush.py",

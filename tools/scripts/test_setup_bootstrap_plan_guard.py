@@ -10,6 +10,7 @@ mutants prove nothing.
 from __future__ import annotations
 
 import shutil
+import os
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,29 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
 
     def test_examples_on_by_default_is_rejected(self) -> None:
         self._assert_rejects("BUILD_EXAMPLES=OFF\n", "BUILD_EXAMPLES=ON\n", "default examples setting")
+
+    def test_full_setup_refuses_gate_host_through_real_entry_point(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pulp-setup-gate-guard-") as directory:
+            root = Path(directory)
+            bind = root / "bin"; bind.mkdir()
+            shutil.copy2(SETUP, root / "setup.sh")
+            tartci = bind / "tartci"
+            tartci.write_text("#!/bin/sh\nif [ \"$1\" = host-profile ]; then printf '%s\\n' '{\"reserved_gate_cores\": 14}'; exit 0; fi\nexit 1\n", encoding="utf-8")
+            tartci.chmod(0o755)
+            env = os.environ.copy()
+            path_value = env["PATH"]
+            env["PATH"] = f"{bind}:{path_value}"
+            env.pop("PULP_SETUP_ALLOW_FULL", None)
+            dry_run = subprocess.run(["bash", str(root / "setup.sh"), "--non-interactive", "--dry-run"], cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", timeout=20)
+            self.assertNotEqual(dry_run.returncode, 75, dry_run.stderr)
+            plan = subprocess.run(["bash", str(root / "setup.sh"), "--print-plan"], cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", timeout=20)
+            self.assertEqual(plan.returncode, 0, plan.stderr)
+            refused = subprocess.run(["bash", str(root / "setup.sh"), "--non-interactive"], cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", timeout=20)
+            self.assertEqual(refused.returncode, 75)
+            self.assertIn("--deps-only", refused.stderr)
+            self.assertIn("pulp build", refused.stderr)
+            allowed = subprocess.run(["bash", str(root / "setup.sh"), "--deps-only", "--print-plan"], cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", timeout=20)
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
     def test_configure_dropping_examples_flag_is_rejected(self) -> None:
         """The printed plan and the real configure can drift; both are checked."""

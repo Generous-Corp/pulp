@@ -46,7 +46,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_DEBUG_O0_MACOS_RUNS_ON_JSON || '["macos-15"]') }}
     timeout-minutes: 330
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false

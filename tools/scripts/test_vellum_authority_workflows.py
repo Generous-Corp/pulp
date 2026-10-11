@@ -14,11 +14,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 PINNED_TOKEN_ACTION = (
     "actions/create-github-app-token@"
-    "fee1f7d63c2ff003460e3d139729b119787bc349"
+    "bcd2ba49218906704ab6c1aa796996da409d3eb1"
 )
 PINNED_CHECKOUT_ACTION = (
     "actions/checkout@"
-    "11d5960a326750d5838078e36cf38b85af677262"
+    "3d3c42e5aac5ba805825da76410c181273ba90b1"
 )
 RUNNER_EXPRESSION = (
     "${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON "

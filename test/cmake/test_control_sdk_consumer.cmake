@@ -736,12 +736,32 @@ if(APPLE)
     string(STRIP "${_author_host_version}" _author_host_version)
     set(_author_host_directory "${_author_host_directory}/${_author_host_version}")
     foreach(_author_file IN ITEMS host host.inspector-capabilities.json
-                                  libwgpu_native.dylib runtime-closure.sha256)
+                                  runtime-closure.sha256)
         if(NOT EXISTS "${_author_host_directory}/${_author_file}")
             message(FATAL_ERROR
                 "Installed author Standalone catalog entry is missing ${_author_file}")
         endif()
     endforeach()
+    # The wgpu-native runtime belongs in the catalog entry exactly when the
+    # host loads it: a Skia-on SDK renders on Skia's static Dawn and its host
+    # has no libwgpu_native load command, so the entry must not carry one.
+    execute_process(COMMAND /usr/bin/otool -L "${_author_host_directory}/host"
+        RESULT_VARIABLE _author_otool_result
+        OUTPUT_VARIABLE _author_host_deps)
+    if(NOT _author_otool_result EQUAL 0)
+        message(FATAL_ERROR "otool failed on the installed author host")
+    endif()
+    set(_author_runtime_files "")
+    if(_author_host_deps MATCHES "libwgpu_native")
+        list(APPEND _author_runtime_files libwgpu_native.dylib)
+        if(NOT EXISTS "${_author_host_directory}/libwgpu_native.dylib")
+            message(FATAL_ERROR
+                "Installed author host loads libwgpu_native but its catalog entry lacks it")
+        endif()
+    elseif(EXISTS "${_author_host_directory}/libwgpu_native.dylib")
+        message(FATAL_ERROR
+            "Installed author catalog entry ships libwgpu_native.dylib that its host does not load")
+    endif()
     execute_process(COMMAND /usr/bin/stat -f %Lp "${_author_host_directory}"
         OUTPUT_VARIABLE _author_dir_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(COMMAND /usr/bin/stat -f %Lp "${_author_host_directory}/host"
@@ -749,9 +769,15 @@ if(APPLE)
     execute_process(COMMAND /usr/bin/stat -f %Lp
         "${_author_host_directory}/host.inspector-capabilities.json"
         OUTPUT_VARIABLE _author_manifest_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
-    execute_process(COMMAND /usr/bin/stat -f %Lp
-        "${_author_host_directory}/libwgpu_native.dylib"
-        OUTPUT_VARIABLE _author_runtime_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(_author_runtime_mode "700")
+    foreach(_runtime_file IN LISTS _author_runtime_files)
+        execute_process(COMMAND /usr/bin/stat -f %Lp
+            "${_author_host_directory}/${_runtime_file}"
+            OUTPUT_VARIABLE _author_runtime_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT _author_runtime_mode STREQUAL "700")
+            break()
+        endif()
+    endforeach()
     if(NOT _author_dir_mode STREQUAL "700" OR
        NOT _author_host_mode STREQUAL "700" OR
        NOT _author_manifest_mode STREQUAL "600" OR
@@ -770,11 +796,15 @@ if(APPLE)
     if(NOT _destdir_install_result EQUAL 0 OR
        NOT EXISTS "${_destdir}${_author_host_directory}/host" OR
        NOT EXISTS "${_destdir}${_author_host_directory}/host.inspector-capabilities.json" OR
-       NOT EXISTS "${_destdir}${_author_host_directory}/libwgpu_native.dylib" OR
        NOT EXISTS "${_destdir}${_author_host_directory}/runtime-closure.sha256")
         message(FATAL_ERROR
             "DESTDIR author catalog staging failed (${_destdir_install_result})\n${_destdir_install_output}\n${_destdir_install_error}")
     endif()
+    foreach(_runtime_file IN LISTS _author_runtime_files)
+        if(NOT EXISTS "${_destdir}${_author_host_directory}/${_runtime_file}")
+            message(FATAL_ERROR "DESTDIR author catalog staging lost ${_runtime_file}")
+        endif()
+    endforeach()
     set(_daemon_test "${PULP_BUILD_DIR}/test/pulp-test-control-broker-daemon")
     if(NOT EXISTS "${_daemon_test}")
         message(FATAL_ERROR "Author catalog E2E test binary is missing: ${_daemon_test}")
@@ -803,7 +833,7 @@ if(APPLE)
     # outputs that parallel CTest workers may be executing or rebuilding.
     # Keep the isolated clients one level below the staged SDK prefix so their
     # installed @executable_path/../lib RPATH still resolves the staged runtime
-    # closure (notably libwgpu_native.dylib).
+    # closure.
     set(_author_parity_directory "${_prefix}/installed-author-parity")
     file(MAKE_DIRECTORY "${_author_parity_directory}")
     file(CHMOD "${_author_parity_directory}"
