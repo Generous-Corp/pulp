@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09490"></a>
+## [0.949.0] - 2026-10-11
+
+- release/version bump ([#10090](https://github.com/Generous-Corp/pulp/pull/10090))
+- docs/aax gui acceptance poka yoke 20261009 ([#9974](https://github.com/Generous-Corp/pulp/pull/9974))
+- docs/vellum carve migration notes ([#10080](https://github.com/Generous-Corp/pulp/pull/10080))
+- feature/vellum carve P8 ([#10029](https://github.com/Generous-Corp/pulp/pull/10029))
+- fix/p16 migration note version fields ([#10081](https://github.com/Generous-Corp/pulp/pull/10081))
+
 <a id="v09480"></a>
 ## [0.948.0] - 2026-10-11
 
@@ -10425,6 +10434,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.949.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.949.0
 [0.948.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.948.0
 [0.947.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.947.0
 [0.946.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.946.0
