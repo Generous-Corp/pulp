@@ -532,10 +532,10 @@ jobs:
             git fetch --no-tags --depth=1 origin \
               "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
           else
-            # workflow_dispatch checkouts are depth-1; deepen only this branch
-            # so merge-base can resolve without fetching every repository ref.
-            git fetch --no-tags --deepen=32 origin \
-              "+$GITHUB_REF_NAME:refs/remotes/origin/$GITHUB_REF_NAME"
+            # workflow_dispatch checkouts are depth-1; fetch this exact head
+            # with bounded history so merge-base can resolve without fetching
+            # every repository ref.
+            git fetch --no-tags --depth=32 origin "$GITHUB_SHA"
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
             protected_base="$(git merge-base HEAD origin/main)"
             git update-ref refs/remotes/origin/main "$protected_base"
