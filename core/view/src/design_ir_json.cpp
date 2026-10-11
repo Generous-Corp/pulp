@@ -2502,8 +2502,8 @@ void check_json_bounds(std::string_view text) {
             string_start = i;
         } else if (c == '{' || c == '[') {
             if (stack.size() >= kMaxDesignIrJsonDepth)
-                throw DesignIrParseError("nesting deeper than " +
-                                             std::to_string(kMaxDesignIrJsonDepth) + " levels", i);
+                throw DesignIrParseError(
+                    "nesting deeper than " + std::to_string(kMaxDesignIrJsonDepth) + " levels", i);
             stack.push_back(c == '{' ? '}' : ']');
         } else if (c == '}' || c == ']') {
             if (stack.empty() || stack.back() != c)
@@ -2514,7 +2514,8 @@ void check_json_bounds(std::string_view text) {
     if (in_string)
         throw DesignIrParseError("unterminated string (document is truncated)", string_start);
     if (!stack.empty())
-        throw DesignIrParseError("unterminated object or array (document is truncated)", text.size());
+        throw DesignIrParseError("unterminated object or array (document is truncated)",
+                                 text.size());
 }
 
 } // namespace
@@ -2525,10 +2526,10 @@ DesignIR parse_design_ir_json(const std::string& json) {
     try {
         parsed = choc::json::parse(json);
     } catch (const choc::json::ParseError& error) {
-        throw DesignIrParseError(std::string("invalid JSON at line ") +
-                                     std::to_string(error.lineAndColumn.line) + ", column " +
-                                     std::to_string(error.lineAndColumn.column) + ": " + error.what(),
-                                 std::string::npos);
+        throw DesignIrParseError(
+            std::string("invalid JSON at line ") + std::to_string(error.lineAndColumn.line) +
+                ", column " + std::to_string(error.lineAndColumn.column) + ": " + error.what(),
+            std::string::npos);
     }
     DesignIR ir;
 
