@@ -2529,6 +2529,8 @@
   "pulp-test-gpu-compute-async",
   "pulp-test-gpu-compute-kernel-override",
   "pulp-test-gpu-compute-pool",
+  "pulp-test-gpu-device-api-only-consumer",
+  "pulp-test-gpu-device-only-consumer",
   "pulp-test-gpu-diagnostics",
   "pulp-test-gpu-dpr-native-measurement",
   "pulp-test-gpu-health-provider",
@@ -2851,7 +2853,6 @@
   "pulp-test-synthesiser",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
-  "pulp-test-threejs-bridge",
   "pulp-test-tilt-eq",
   "pulp-test-tilt-eq-no-exceptions",
   "pulp-test-timebase-groove-kernels",
@@ -4423,6 +4424,18 @@
    ],
    "kind": "python"
   },
+  "dsp-capability-registry-selftest": {
+   "entry": "tools/scripts/test_dsp_capability_registry.py",
+   "inputs": [
+    "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
+    "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+    "core/host/src/forge_dynamics_catalog.cpp",
+    "docs/status/dsp-capabilities.json",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/test_dsp_capability_registry.py"
+   ],
+   "kind": "python"
+  },
   "dsp-provenance-audit": {
    "entry": "tools/scripts/dsp_provenance_audit.py",
    "inputs": [
@@ -4680,6 +4693,29 @@
    ],
    "kind": "shell"
   },
+  "foundation-include-lint": {
+   "entry": "tools/scripts/foundation_include_lint.py",
+   "inputs": [
+    "core/platform",
+    "core/platform/src/android/jni_motion.cpp",
+    "core/runtime",
+    "core/simd",
+    "tools/scripts/foundation_include_lint.py"
+   ],
+   "kind": "python"
+  },
+  "foundation-include-lint-negative-contract": {
+   "entry": "tools/scripts/test_foundation_include_lint.py",
+   "inputs": [
+    "core/audio/platform/android/demo_synth.hpp",
+    "core/platform/include/pulp/platform/platform.hpp",
+    "core/platform/src/android/jni_bridge.cpp",
+    "core/platform/src/android/jni_motion.cpp",
+    "core/platform/src/platform.cpp",
+    "tools/scripts/test_foundation_include_lint.py"
+   ],
+   "kind": "python"
+  },
   "framework-neutrality": {
    "entry": "tools/scripts/framework_neutrality_check.py",
    "inputs": [
@@ -4894,6 +4930,22 @@
     "docs/status/gpu-vellum-handoff.yaml",
     "tools/scripts/connected_git_history.py",
     "tools/scripts/test_connected_git_history.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-device-link-closure": {
+   "entry": "tools/scripts/gpu_device_link_closure_check.py",
+   "inputs": [
+    "core/render/include",
+    "tools/scripts/gpu_device_link_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-device-link-closure-rules": {
+   "entry": "tools/scripts/test_gpu_device_link_closure_check.py",
+   "inputs": [
+    "tools/scripts/gpu_device_link_closure_check.py",
+    "tools/scripts/test_gpu_device_link_closure_check.py"
    ],
    "kind": "python"
   },
@@ -6070,6 +6122,16 @@
    ],
    "kind": "python"
   },
+  "host-lane-probe-requires-plugins": {
+   "entry": "${CMAKE_BINARY_DIR}/test/\"$1\" >/dev/null 2>&1; test $? -eq 2",
+   "inputs": [],
+   "kind": "shell"
+  },
+  "host-lane-probe-unloadable-bundle-is-setup-error": {
+   "entry": "${CMAKE_BINARY_DIR}/test/out=$(\"$1\" --plugin /nonexistent/Missing.clap --out \"$2\" 2>&1); rc=$?; test $rc -eq 2 && printf '%s' \"$out\" | grep -q 'load /nonexistent/Missing.clap failed' && test ! -e \"$2/host-observation.json\"",
+   "inputs": [],
+   "kind": "shell"
+  },
   "host-quirks-catalog-parity": {
    "entry": "tools/scripts/test_host_quirks_catalog_parity.py",
    "inputs": [
@@ -6984,25 +7046,6 @@
    ],
    "kind": "shell"
   },
-  "pulp-materialized-runtime-conformance": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
-   ],
-   "kind": "node"
-  },
-  "pulp-materialized-runtime-node-dependencies": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
-   ],
-   "kind": "node"
-  },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
    "inputs": [
@@ -7105,6 +7148,20 @@
     "tools/ci/checkout_location_guard.py",
     "tools/ci/pulp-worktree.sh",
     "tools/ci/test_pulp_worktree_creation.py"
+   ],
+   "kind": "python"
+  },
+  "pulp.vellum-closure-boundary": {
+   "entry": "tools/scripts/vellum_closure.py",
+   "inputs": [
+    "tools/scripts/vellum_closure.py"
+   ],
+   "kind": "python"
+  },
+  "pulp.vellum-closure-gate": {
+   "entry": "tools/scripts/vellum_closure.py",
+   "inputs": [
+    "tools/scripts/vellum_closure.py"
    ],
    "kind": "python"
   },
@@ -9456,6 +9513,24 @@
     "test/test_tool_registry_reminder_hook.sh"
    ],
    "kind": "shell"
+  },
+  "toolchain-mise_profile-selftest": {
+   "entry": "tools/toolchain/test_mise_profile.py",
+   "inputs": [
+    "tools/ci",
+    "tools/toolchain/test_mise_profile.py"
+   ],
+   "kind": "python"
+  },
+  "toolchain-test_generate-selftest": {
+   "entry": "tools/toolchain/test_generate.py",
+   "inputs": [
+    "tools/toolchain",
+    "tools/toolchain/generate.py",
+    "tools/toolchain/manifest.toml",
+    "tools/toolchain/test_generate.py"
+   ],
+   "kind": "python"
   },
   "tools-registry-check": {
    "entry": "tools/scripts/tools_registry_check.py",

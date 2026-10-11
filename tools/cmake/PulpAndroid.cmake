@@ -129,6 +129,9 @@ function(pulp_wire_android_sources)
     # root CMakeLists.txt). pulp-platform does not link against
     # pulp::view, so adding jni_motion.cpp here would unresolved-link
     # `pulp::view::motion::*`. pulp-jni links the full target closure.
+    # The audio-dependent JNI exports live in
+    # core/audio/platform/android/audio_jni.cpp, also compiled only into
+    # pulp-jni, so nothing under core/platform includes an audio header.
     if(TARGET pulp-platform)
         set(_android_plat_dir "${CMAKE_SOURCE_DIR}/core/platform/src/android")
         file(GLOB _android_plat_sources "${_android_plat_dir}/*.cpp")
@@ -164,6 +167,11 @@ function(pulp_wire_android_sources)
             )
         endif()
         target_link_libraries(pulp-render PRIVATE android log)
+        # The Dawn surface/compute TUs live in pulp-gpu-device; give it the same
+        # NDK link it had while those TUs were part of pulp-render.
+        if(TARGET pulp-gpu-device)
+            target_link_libraries(pulp-gpu-device PRIVATE android log)
+        endif()
         # View headers needed for rendering the widget hierarchy on Android
         target_include_directories(pulp-render PRIVATE
             ${CMAKE_SOURCE_DIR}/core/view/include

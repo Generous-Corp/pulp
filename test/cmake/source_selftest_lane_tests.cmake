@@ -38,6 +38,17 @@ add_test(NAME evidence-archive-selftest
         "${CMAKE_SOURCE_DIR}/tools/ci/test_evidence_archive.py")
 set_tests_properties(evidence-archive-selftest PROPERTIES TIMEOUT 60)
 
+# W17 toolchain tests are source-only and belong to the same required lane.
+add_test(NAME toolchain-test_generate-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/toolchain/test_generate.py")
+add_test(NAME toolchain-mise_profile-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/toolchain/test_mise_profile.py")
+add_test(NAME dsp-capability-registry-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_dsp_capability_registry.py")
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")
