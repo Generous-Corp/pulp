@@ -902,11 +902,10 @@ static std::optional<std::vector<uint8_t>> resolve_local_asset(
             ImportDiagnosticKind::unresolved_asset));
         return std::nullopt;
     }
-    // A packaged DesignIR is relocated by loading its document directory as
-    // the asset base. Keep paths inside that boundary portable. An external
-    // file keeps its absolute path here; the loader refuses any path outside
-    // the document, so whoever writes the document must copy the file in
-    // first (see collect_design_ir_assets).
+    // A packaged DesignIR loads its document directory as the asset base, so
+    // keep paths inside it portable. An external file keeps its absolute path;
+    // the loader refuses paths outside the document, so whoever writes the
+    // document must copy the file in first (see collect_design_ir_assets).
     if (!base_directory.empty()) {
         const auto canonical_base = fs::weakly_canonical(base_directory, ec);
         const auto canonical_path = fs::weakly_canonical(path, ec);
