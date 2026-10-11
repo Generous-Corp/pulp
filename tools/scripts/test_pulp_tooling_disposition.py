@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,6 +77,22 @@ class ToolingDispositionTest(unittest.TestCase):
         mutate()
         issues = tooling.validate_map(self.root, self.map_path)
         self.assertTrue(any("inventory is stale" in issue for issue in issues), issues)
+
+    def test_missing_pyyaml_names_the_interpreter_and_is_never_called_stale(self) -> None:
+        # sys.modules["yaml"] = None makes `import yaml` raise ImportError, which
+        # is what an interpreter without PyYAML does.
+        probe = (
+            "import sys, runpy\n"
+            "sys.modules['yaml'] = None\n"
+            f"sys.argv = ['pulp_tooling_disposition.py', '--root', {str(self.root)!r},"
+            f" '--map', {str(self.map_path)!r}]\n"
+            f"runpy.run_path({str(MODULE_PATH)!r}, run_name='__main__')\n"
+        )
+        done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        self.assertEqual(done.returncode, tooling.MISSING_DEPENDENCY, done.stderr)
+        self.assertIn(f"PyYAML is not installed for {sys.executable}", done.stderr)
+        self.assertIn("first on PATH", done.stderr)
+        self.assertNotIn("stale", done.stderr)
 
     def test_new_cli_command_is_detected(self) -> None:
         def mutate() -> None:

@@ -1569,6 +1569,14 @@ CLI flag or command is enough to stale `docs/status/pulp-tooling-disposition.jso
 the regenerate command (`python3 tools/scripts/pulp_tooling_disposition.py
 --write`, and so on) for whichever is stale.
 
+**"Could not be verified" is not "stale".** `pulp_tooling_disposition.py`
+reads `cli-commands.yaml` and needs PyYAML. Without it, the generator exits 3,
+naming the interpreter, and the gate prints "could not be verified" (exit 13)
+instead of a regenerate command. Regenerating would change nothing. Put a
+python3 that has PyYAML first on `PATH`, or set `PYTHON=`, and push again.
+Before this change the same failure printed "is stale", and three agents in
+one day went to regenerate a file that was current.
+
 **Reading that step's log:** the line `vellum-ownership-projection: error:
 ownership projection is stale` used to be printed by a *passing* negative
 control in `test_generate_vellum_ownership_projection.py`, so it appeared in
