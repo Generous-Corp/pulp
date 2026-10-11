@@ -17,8 +17,8 @@ target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_EN
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 
-# Audio-UI widgets (GraphEditorView): a separate target the view umbrellas do
-# not link, defined in its own directory so its host edge stays its own.
+# Audio-UI widgets. GraphEditorView is pulp-view-graph-editor, a target the view
+# umbrellas do not link because it depends on pulp::host (see audio/).
 add_subdirectory(audio)
 
 add_library(pulp-view src/placeholder.cpp)

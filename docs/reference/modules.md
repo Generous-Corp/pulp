@@ -2484,6 +2484,15 @@ that composition for every requested format and uses
 `pulp::standalone-native` for Standalone. Baked UI code that constructs `View`
 trees directly and does not evaluate JS can link `pulp::view-core`.
 
+`GraphEditorView` (`<pulp/view/widgets/graph_editor_view.hpp>`), which draws and
+edits a host `SignalGraph`, is the one view widget that depends on
+`pulp::host`. It lives in its own target, `pulp::view-graph-editor`, which none
+of the view umbrellas link, so an ordinary view or plug-in UI never pulls in
+the plug-in host stack. Link `pulp::view-graph-editor` to use it. It is not
+built on iOS, where `pulp::host` is absent. An installed-SDK consumer that
+previously reached `GraphEditorView` through `Pulp::host` now links
+`Pulp::view-graph-editor` instead.
+
 ### Creating a UI
 
 ```cpp

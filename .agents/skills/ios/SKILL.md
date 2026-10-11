@@ -670,7 +670,7 @@ on iOS:
    so transitive consumers on iOS get a clean "feature absent" macro
    rather than a "file not found" error. Affected headers today:
    `core/view/audio/include/pulp/view/widgets/graph_editor_view.hpp`
-   (its `pulp-view-audio` target is not created on iOS, where `pulp-host`
+   (its `pulp-view-graph-editor` target is not created on iOS, where `pulp-host`
    is absent; the header still installs and stays include-guarded),
    `core/view/include/pulp/view/plugin_manager_panel.hpp`,
    `core/view/include/pulp/view/hosted_editor_attachment.hpp`. Each

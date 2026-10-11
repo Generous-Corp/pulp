@@ -194,21 +194,21 @@ pulp_add_test_suite(pulp-test-ui-components GROUP pulp-test-group-design-import-
     LIBRARIES pulp::view)
 
 # GraphEditorView is deliberately absent from the view umbrellas, so its suites
-# share an executable that links pulp::view-audio explicitly. Keep that link
+# share an executable that links pulp::view-graph-editor explicitly. Keep that link
 # direct so dropping the umbrella's audio-UI edge cannot be masked by another
 # target's transitive links.
-pulp_add_test_group(pulp-test-group-graph-editor LIBRARIES pulp::view pulp::view-audio)
+pulp_add_test_group(pulp-test-group-graph-editor LIBRARIES pulp::view pulp::view-graph-editor)
 
 # GraphEditorView tests
 pulp_add_test_suite(pulp-test-graph-editor-view GROUP pulp-test-group-graph-editor
-    LIBRARIES pulp::view pulp::view-audio)
+    LIBRARIES pulp::view pulp::view-graph-editor)
 # GraphEditorView opening a node's plugin editor (first EditorAttachment consumer)
 pulp_add_test_suite(pulp-test-graph-editor-open GROUP pulp-test-group-graph-editor
-    LIBRARIES pulp::view pulp::view-audio)
+    LIBRARIES pulp::view pulp::view-graph-editor)
 
 get_target_property(_pulp_graph_editor_links
     pulp-test-group-graph-editor LINK_LIBRARIES)
-foreach(_pulp_graph_editor_dependency IN ITEMS pulp::view pulp::view-audio)
+foreach(_pulp_graph_editor_dependency IN ITEMS pulp::view pulp::view-graph-editor)
     list(FIND _pulp_graph_editor_links
         ${_pulp_graph_editor_dependency} _pulp_graph_editor_link_index)
     if(_pulp_graph_editor_link_index EQUAL -1)
