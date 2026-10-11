@@ -260,6 +260,23 @@ class ShellPortabilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Bash-only PIPESTATUS", result.stdout)
 
+    def test_gate_host_build_guard_runs_through_real_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tartci = root / "tartci"
+            tartci.write_text("#!/bin/sh\nprintf '%s\\n' '{\"reserved_gate_cores\": 14}'\n")
+            tartci.chmod(0o755)
+            hook = Path(__file__).parents[2] / "hooks/scripts/shell-portability-hint.sh"
+            env = os.environ.copy()
+            env["PATH"] = f"{root}:{env["PATH"]}"
+            env["TOOL_INPUT"] = json.dumps({"command": "cmake --build build"})
+            refused = subprocess.run(["bash", str(hook)], cwd=Path(__file__).parents[2], env=env, capture_output=True, text=True)
+            self.assertEqual(refused.returncode, 75)
+            self.assertIn("governed-build.sh", refused.stderr)
+            env["TOOL_INPUT"] = json.dumps({"command": "tools/ci/governed-build.sh cmake --build build"})
+            allowed = subprocess.run(["bash", str(hook)], cwd=Path(__file__).parents[2], env=env, capture_output=True, text=True)
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
     def test_manifest_is_valid(self) -> None:
         import json
         manifest = json.loads((Path(__file__).with_name("shell_portability_rules.json")).read_text())

@@ -39,6 +39,13 @@ except Exception:
 ' 2>/dev/null)"
 [ -n "${COMMAND}" ] || exit 0
 
+BUILD_GUARD="${ROOT}/tools/scripts/agent_build_guard.py"
+if [ -x "${BUILD_GUARD}" ]; then
+    "${PYTHON}" "${BUILD_GUARD}" --command "${COMMAND}"
+    BUILD_STATUS=$?
+    [ "${BUILD_STATUS}" -eq 0 ] || exit "${BUILD_STATUS}"
+fi
+
 SHELL_NAME="${PULP_AGENT_SHELL:-${SHELL##*/}}"
 case "${SHELL_NAME}" in
     zsh|bash) ;;

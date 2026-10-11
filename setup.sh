@@ -1011,6 +1011,27 @@ if [ -n "${PULP_SETUP_LIB_ONLY:-}" ]; then
     return 0 2>/dev/null || exit 0
 fi
 
+# A dedicated-builder host reserves capacity for required gate VMs. Full setup
+# configures and builds the whole checkout, so starting it there can starve the
+# gate. Dependency bootstrap remains safe; an explicit override is required
+# for a deliberate full setup on that host.
+refuse_full_setup_on_gate_host() {
+    $DEPS_ONLY && return 0
+    [ "${PULP_SETUP_ALLOW_FULL:-0}" = 1 ] && return 0
+    local tartci_bin profile reserved
+    tartci_bin="$(command -v tartci 2>/dev/null || true)"
+    [ -n "$tartci_bin" ] || return 0
+    profile="$($tartci_bin host-profile --json 2>/dev/null || true)"
+    reserved="$(printf '%s\n' "$profile" | sed -n 's/.*"reserved_gate_cores"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | sed -n 1p)"
+    case "$reserved" in
+        ''|0) return 0 ;;
+    esac
+    echo "setup.sh: refusing full setup on a gate host (reserved_gate_cores=$reserved). Use ./setup.sh --deps-only, then pulp build. Set PULP_SETUP_ALLOW_FULL=1 only for an explicit exception." >&2
+    exit 75
+}
+
+refuse_full_setup_on_gate_host
+
 # ── Platform detection ───────────────────────────────────────────────────────
 
 step "Detecting platform"
