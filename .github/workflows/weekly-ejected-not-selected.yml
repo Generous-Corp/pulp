@@ -1,0 +1,39 @@
+name: Weekly ejected-but-not-selected report
+
+on:
+  schedule:
+    - cron: '15 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      selection_file:
+        description: JSON PR-head selector receipt produced by the weekly selector job
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+      - name: Download merge-group history and render report
+        env:
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+          SELECTION_FILE: ${{ inputs.selection_file }}
+        run: |
+          set -euo pipefail
+          test -n "$SELECTION_FILE" || {
+            echo 'A selector receipt is required; refusing to claim an empty selection.' >&2
+            exit 2
+          }
+          python3 tools/scripts/queue_batch_attribute.py \
+            --history --since 7d --format json \
+            --ejected-not-selected --selection-file "$SELECTION_FILE" \
+            > "$RUNNER_TEMP/ejected-not-selected.json"
+          cat "$RUNNER_TEMP/ejected-not-selected.json" >> "$GITHUB_STEP_SUMMARY"

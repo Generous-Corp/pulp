@@ -35,6 +35,7 @@ NAMES = {
     "wide-non-native-selftest": set(), "other": set(),
     "pulp-gpu-host-mapped-pointer-probe": set(), "pulp-gpu-audio-provider-identity": set(),
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
+    "cmake-ios-auv3-control-shipping": set(),
 }
 
 
@@ -70,7 +71,9 @@ class SelectionTests(unittest.TestCase):
 
     def test_tools_cmake_reaches_the_cmake_fixtures(self) -> None:
         plan = self.plan(["tools/cmake/PulpPlugin.cmake"], selection("all", []))
-        self.assertEqual(sorted(plan["tests"]), ["cmake-install-layout", "cmake-sdk-smoke"])
+        self.assertEqual(sorted(plan["tests"]), ["cmake-install-layout",
+                                                   "cmake-ios-auv3-control-shipping",
+                                                   "cmake-sdk-smoke"])
 
     def test_the_tier_manifest_classifier_and_registrations_reach_wide_non_native(self) -> None:
         for path in ("tools/ci/wide_non_native_checks.json", "tools/scripts/classify_changes.py",
@@ -91,6 +94,18 @@ class SelectionTests(unittest.TestCase):
     def test_control_other_gpu_audio_code_does_not_reach_the_provider_probes(self) -> None:
         plan = self.plan(["core/gpu_audio/src/other.cpp"], selection("focused", []))
         self.assertEqual(plan["tests"], [])
+
+    def test_ios_control_shipping_fixture_reaches_its_cmake_probe(self) -> None:
+        for path in ("test/cmake/test_ios_auv3_control_shipping.cmake",
+                     "test/cmake/cmake_smoke_tests.cmake"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("all", []))
+                self.assertIn("cmake-ios-auv3-control-shipping", plan["tests"])
+
+    def test_no_editor_fixture_reaches_its_artifact_probe(self) -> None:
+        plan = self.plan(["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
+                         selection("all", []))
+        self.assertIn("no-editor-link-floor", plan["families"])
 
     def test_script_tests_are_added_even_for_a_docs_only_diff(self) -> None:
         # A census test parses docs/status: the declared inputs apply where the

@@ -72,4 +72,4 @@ add_test(NAME no-editor-plugin-link-floor-artifacts
     COMMAND "${CMAKE_COMMAND}" ${_no_editor_scan_args}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scan_no_editor_link_floor.cmake")
 set_tests_properties(no-editor-plugin-link-floor-artifacts PROPERTIES
-    LABELS "format;link-contract;artifact" TIMEOUT 120)
+    LABELS "format;link-contract;artifact;pr-fast" TIMEOUT 120)

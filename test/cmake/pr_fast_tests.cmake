@@ -108,6 +108,7 @@ endif()
 set(PULP_PR_FAST_TESTS
     pr-fast-tier-contract
     pr-fast-tier-selftest
+    unregistered-tests-check
     ctest-unique-names
     ctest-unique-names-selftest
 

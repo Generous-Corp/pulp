@@ -86,6 +86,16 @@ PATH_FAMILIES = (
                 r"|tools/scripts/gpu_audio_provider_identity\.py|tools/deps/manifest\.json"
                 r"|test/cmake/verify_gpu_audio_provider\w*\.cmake)$"),
      re.compile(r"^pulp-gpu-(audio-provider-identity|host-mapped-pointer-|dawn-shared-io-provider-)")),
+    # The iOS control-shipping probe is a cmake-driven fixture, so its source
+    # files are invisible to the Python input inventory. Keep edits to the
+    # fixture and its registration connected to the test on PR heads.
+    ("ios-auv3-control-shipping",
+     re.compile(r"^(test/cmake/(cmake_smoke_tests\.cmake|test_ios_auv3_control_shipping\.cmake)|"
+                r"test/fixtures/ios-auv3-control-shipping/.*)$"),
+     re.compile(r"^cmake-ios-auv3-control-shipping$")),
+    ("no-editor-link-floor",
+     re.compile(r"^test/fixtures/no_editor_link_floor/"),
+     re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
 )
 
 

@@ -22,6 +22,11 @@ DRIFT = 1
 HARNESS_FAILURE = 2
 SDK_RECEIPT = "installed-sdk-0.837.0.json"
 SDK_RECEIPT_SHA256 = "a32cb189965e0150cb473cacdb0568f9bf686667dc7be49e293f0b73d0bb62ed"
+# Runtime inputs of the compatibility probe. These literals are consumed by
+# script_test_inputs.py and keep fixture and public ABI edits on the selector.
+COMPAT_FIXTURES = "test/fixtures/sample-region-compat"
+PROCESSOR_HEADER = "core/format/include/pulp/format/processor.hpp"
+PLUGIN_SLOT_HEADER = "core/host/include/pulp/host/plugin_slot.hpp"
 
 
 def run(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:

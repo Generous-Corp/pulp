@@ -6807,7 +6807,9 @@
     "test/CMakeLists.txt",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
+    "test/cmake/test_ios_auv3_control_shipping.cmake",
     "test/fixtures",
+    "test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake",
     "test/support",
     "tools/ci",
     "tools/ci/build_dir_lock.py",
@@ -8965,6 +8967,7 @@
     ".github/workflows",
     "core/format/include/pulp/format/processor.hpp",
     "core/host/include/pulp/host/plugin_slot.hpp",
+    "test/fixtures/sample-region-compat",
     "tools/scripts/gate_common.py",
     "tools/scripts/node_abi_gate.py",
     "tools/scripts/sample_region_compat_baseline.py"
@@ -8977,6 +8980,7 @@
     ".github/workflows",
     "core/format/include/pulp/format/processor.hpp",
     "core/host/include/pulp/host/plugin_slot.hpp",
+    "test/fixtures/sample-region-compat",
     "tools/scripts/gate_common.py",
     "tools/scripts/node_abi_gate.py",
     "tools/scripts/sample_region_compat_baseline.py",
@@ -9942,6 +9946,7 @@
     "tools/ci/wide_non_native_reviewed_scanners.json",
     "tools/cli/cmd_pr.cpp",
     "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts",
     "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/test_wide_non_native.py"
    ],
