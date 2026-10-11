@@ -347,24 +347,24 @@ def case_merge_tree_conflict_refuses(fx: Fixture) -> None:
     repo.mkdir()
     def g(*args: str) -> str:
         return subprocess.run(["git", *args], cwd=repo, check=True,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding="utf-8").stdout.strip()
     g("init", "-q", "-b", "main")
     g("config", "user.email", "test@example.invalid")
     g("config", "user.name", "test")
-    (repo / "marker.txt").write_text("base\n")
+    (repo / "marker.txt").write_text("base\n", encoding="utf-8")
     g("add", "."); g("commit", "-qm", "base")
     g("branch", "feature")
-    (repo / "marker.txt").write_text("main\n")
+    (repo / "marker.txt").write_text("main\n", encoding="utf-8")
     g("commit", "-qam", "main change")
     g("checkout", "-q", "feature")
-    (repo / "marker.txt").write_text("feature\n")
+    (repo / "marker.txt").write_text("feature\n", encoding="utf-8")
     g("commit", "-qam", "feature change")
     base = g("rev-parse", "main")
     env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
            "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
     res = subprocess.run([sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(repo),
                           "--base", base, "--head", "HEAD"], cwd=repo, env=env,
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, encoding="utf-8")
     assert res.returncode == 1, (res.returncode, res.stdout, res.stderr)
     assert "your branch is stale against main; merge origin/main and regenerate" in res.stderr
 

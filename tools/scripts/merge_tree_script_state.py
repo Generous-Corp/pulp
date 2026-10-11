@@ -21,13 +21,13 @@ STALE = "your branch is stale against main; merge origin/main and regenerate"
 
 
 def git(root: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", "-C", str(root), *args], text=True,
+    return subprocess.run(["git", "-C", str(root), *args], text=True, encoding="utf-8",
                           capture_output=True, check=check)
 
 
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: int = 20) -> int:
     try:
-        proc = subprocess.run(cmd, cwd=cwd, env=env, text=True,
+        proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
                               timeout=timeout, capture_output=True)
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc}", file=sys.stderr)
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     tree = merged.stdout.strip().splitlines()[0]
     commit = subprocess.run(
         ["git", "-C", str(root), "commit-tree", tree, "-p", base_sha, "-p", head_sha],
-        input="merge-tree script-state\n", text=True, capture_output=True,
+        input="merge-tree script-state\n", text=True, encoding="utf-8", capture_output=True,
         env={**os.environ, "GIT_AUTHOR_NAME": "pulp-gates", "GIT_AUTHOR_EMAIL": "gates@localhost",
              "GIT_COMMITTER_NAME": "pulp-gates", "GIT_COMMITTER_EMAIL": "gates@localhost"},
         check=False,
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     tmp = Path(tempfile.mkdtemp(prefix="pulp-merge-tree-", dir=root.parent))
     try:
         added = subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach", str(tmp), synthetic],
-                               text=True, capture_output=True)
+                               text=True, encoding="utf-8", capture_output=True)
         if added.returncode:
             print(added.stderr, file=sys.stderr)
             return 2
