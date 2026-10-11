@@ -215,7 +215,8 @@ int dispatch_advisory_lanes(const fs::path& root) {
         std::cerr << "pulp pr: could not resolve the approved head for advisory dispatch\n";
         return 1;
     }
-    return run_passthrough("bash", {(root / "tools/scripts/dispatch_advisory_lanes.sh").string(), head}, root);
+    return run_passthrough(
+        "bash", {(root / "tools/scripts/dispatch_advisory_lanes.sh").string(), head}, root);
 }
 
 // ── Subcommand steps ────────────────────────────────────────────────────
