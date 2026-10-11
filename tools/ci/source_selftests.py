@@ -208,11 +208,15 @@ def ctest_verdict(entry: dict[str, Any], returncode: int, output: str) -> int:
     """The exit status ctest would record, given the test's properties.
 
     PASS_REGULAR_EXPRESSION decides pass/fail by output alone, a
-    SKIP_RETURN_CODE exit is a skip (reported as a pass, marked in the
-    output), and WILL_FAIL inverts the result, all as ctest does.
+    SKIP_RETURN_CODE exit or SKIP_REGULAR_EXPRESSION match is a skip (reported
+    as a pass, marked in the output), and WILL_FAIL inverts the result, all as
+    ctest does.
     """
     skip = entry.get("skip_return_code")
     if skip is not None and returncode == int(skip):
+        return 0
+    # A CMake regex `.` also matches a newline.
+    if any(re.search(p, output or "", re.DOTALL) for p in entry.get("skip_regex") or []):
         return 0
     patterns = entry.get("pass_regex") or []
     if patterns:
@@ -557,6 +561,9 @@ def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
         entry["pass_regex"] = value if isinstance(value, list) else str(value).split(";")
     if props.get("SKIP_RETURN_CODE") not in (None, ""):
         entry["skip_return_code"] = int(props["SKIP_RETURN_CODE"])
+    if props.get("SKIP_REGULAR_EXPRESSION"):
+        value = props["SKIP_REGULAR_EXPRESSION"]
+        entry["skip_regex"] = value if isinstance(value, list) else str(value).split(";")
     if str(props.get("WILL_FAIL", "")).upper() in ("1", "ON", "TRUE", "YES"):
         entry["will_fail"] = True
     if props.get("ENVIRONMENT"):
@@ -757,17 +764,24 @@ def _cmake_calls(source: str, command: str) -> list[list[str]]:
     """Argument lists of every ``command(...)`` call, parentheses balanced."""
     calls = []
     for match in re.finditer(r"(?im)^\s*" + command + r"\s*\(", source):
-        depth, index = 1, match.end()
+        # A line comment inside the call is not an argument: its words would
+        # shift every later PROPERTIES key/value pair.
+        depth, index, quoted, kept = 1, match.end(), False, []
         while index < len(source) and depth:
             char = source[index]
-            if char == "#" and (index == 0 or source[index - 1] != "\\"):
+            if char == '"' and source[index - 1] != "\\":
+                quoted = not quoted
+            elif not quoted and char == "#":
                 index = source.find("\n", index)
                 if index < 0:
                     break
                 continue
-            depth += {"(": 1, ")": -1}.get(char, 0)
+            elif not quoted:
+                depth += {"(": 1, ")": -1}.get(char, 0)
+            if depth:
+                kept.append(char)
             index += 1
-        calls.append(_cmake_args(source[match.end():index - 1]))
+        calls.append(_cmake_args("".join(kept)))
     return calls
 
 
