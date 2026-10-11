@@ -19,7 +19,7 @@ add_library(pulp::view-script ALIAS pulp-view-script)
 
 # Audio-UI widgets (GraphEditorView) that bind to the plug-in host graph. The
 # view umbrellas do not link this target: a consumer that draws a host graph
-# links pulp::view-audio, so an ordinary view or plug-in UI never pulls in the
+# links pulp::view-graph-editor, so an ordinary view or plug-in UI never pulls in the
 # plug-in host stack. The host is not built on iOS (no third-party plug-in
 # hosting there), so neither is this target; its header still installs with
 # the view headers. pulp::host is defined later (core/host), which the link
@@ -33,6 +33,12 @@ if(NOT PULP_IOS)
     )
     target_link_libraries(pulp-view-graph-editor PUBLIC pulp::view-core pulp::host)
 endif()
+
+# Audio-dependent view widgets remain a separate, host-free target. The graph
+# editor above is intentionally independent: it is the only view slice that
+# links pulp::host and is never pulled in by the view umbrellas.
+add_library(pulp-view-audio)
+add_library(pulp::view-audio ALIAS pulp-view-audio)
 
 add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)
@@ -90,9 +96,7 @@ foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-na
 endforeach()
 unset(_pulp_view_target)
 
-foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native)
-foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native pulp-view-audio)
-foreach(_pulp_view_target pulp-view pulp-view-native pulp-view-audio)
+foreach(_pulp_view_target pulp-view pulp-view-native pulp-view-audio pulp-view-graph-editor)
     target_include_directories(${_pulp_view_target}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>

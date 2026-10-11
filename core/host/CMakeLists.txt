@@ -67,7 +67,7 @@ target_sources(pulp-host PRIVATE
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
 # GraphEditorView, the audio-UI consumer of the host graph, lives in
-# pulp-view-audio (core/view), so the host does not depend on view-core.
+# pulp-view-graph-editor (core/view), so the host does not depend on view-core.
 target_link_libraries(pulp-host PRIVATE pulp::platform)
 
 # The GPU convolution realization is an explicit opt-in.  Keeping this edge
