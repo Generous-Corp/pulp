@@ -7207,6 +7207,22 @@
    ],
    "kind": "python"
   },
+  "pulp.vellum-closure-gate-negative": {
+   "entry": "tools/scripts/confirm_failure.sh",
+   "inputs": [
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/vellum_closure_gate_fixture.json"
+   ],
+   "kind": "shell"
+  },
+  "pulp.vellum-closure-policy-selftest": {
+   "entry": "tools/scripts/test_vellum_closure.py",
+   "inputs": [
+    "tools/scripts/test_vellum_closure.py",
+    "tools/scripts/vellum_closure.py"
+   ],
+   "kind": "python"
+  },
   "pulp_bundle_threejs_for_jsc_offline": {
    "entry": "tools/scripts/test_bundle_threejs_offline.mjs",
    "inputs": [
