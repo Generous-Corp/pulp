@@ -9,6 +9,10 @@
 # project before core/format so that target can make the same composition
 # decision during a clean configure.
 
+# DesignIR value types (header-only); configured in cmake/PulpDesignUnits.cmake.
+add_library(pulp-design-ir INTERFACE)
+add_library(pulp::design-ir ALIAS pulp-design-ir)
+
 add_library(pulp-view-core)
 add_library(pulp::view-core ALIAS pulp-view-core)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
@@ -240,16 +244,10 @@ target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
 target_link_libraries(pulp-view-core PUBLIC pulp::runtime)
 target_link_libraries(pulp-view-script PRIVATE pulp::runtime)
 
-# yaml-cpp (MIT) — DESIGN.md frontmatter parsing. Public Pulp headers expose no
-# YAML types, but pulp-view-core is static: its parser object retains YAML
-# symbols that the final consumer link must resolve. Keep yaml-cpp private in
-# the API while preserving that static link closure in installed SDKs.
-if(PULP_ENABLE_DESIGN_IMPORT)
-    target_link_libraries(pulp-view-core PRIVATE
-        $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>
-        $<INSTALL_INTERFACE:Pulp::yaml-cpp>
-    )
-endif()
+# Design units (DesignIR value types below view-core; the importer and its
+# Pulp-owned audio-control recognition pack above it). Directory scope: the
+# targets it declares belong to this directory, like the ones above.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PulpDesignUnits.cmake")
 
 if(PULP_HAS_JSC_ACTUAL)  # auto/quickjs must never leak JSC into link interfaces
     target_link_libraries(pulp-view-script PRIVATE "-framework JavaScriptCore")

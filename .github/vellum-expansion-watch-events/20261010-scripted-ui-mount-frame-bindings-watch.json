@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-scripted-ui-mount-frame-bindings-watch",
+  "created_at": "2026-10-10T22:15:43Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "ScriptedUiSession::load_now() now runs one WidgetBridge::service_param_bindings() pass after a successful mount, so a deferred (view-first or content-first) scripted document's mount frame shows bindWidgetToParam controls at their parameter values instead of their construction defaults; the frame pump already ran the same service one poll later. Adds a Catch2 regression in test/test_scripted_ui.cpp. Generic scripted-UI runtime behavior that Vellum's JS UI runtime unit inherits (vellum-move ledger F-firstframe); no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-scripted-ui",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

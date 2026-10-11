@@ -113,7 +113,7 @@ add_executable(pulp-test-design-swift-codegen test_design_swift_codegen.cpp)
 pulp_test_data(pulp-test-design-swift-codegen NO_DEFINE
     PATHS apple/Sources/PulpSwift)
 target_link_libraries(pulp-test-design-swift-codegen
-    PRIVATE pulp::view-core pulp::platform Catch2::Catch2WithMain)
+    PRIVATE pulp::view-core pulp::design-import pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-swift-codegen PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     PULP_TEST_SWIFTC="${PULP_SWIFTC}")

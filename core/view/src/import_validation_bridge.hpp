@@ -11,7 +11,7 @@
 
 #include <choc/containers/choc_Value.h>
 
-#include <pulp/view/design_sources.hpp>  // ClaudeRuntimeOptions
+#include <pulp/view/design_source_types.hpp> // ClaudeRuntimeOptions
 #include <pulp/view/view.hpp>            // View
 
 namespace pulp::view {
