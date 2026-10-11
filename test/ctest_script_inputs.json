@@ -3174,6 +3174,14 @@
    ],
    "kind": "shell"
   },
+  "archive-symbol-closure-selftest": {
+   "entry": "tools/scripts/test_archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/test_archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
   "audio-glitch-trace-selftest": {
    "entry": "tools/audio/test_glitch_trace.py",
    "inputs": [
@@ -3636,6 +3644,7 @@
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
     "test/fixtures",
@@ -7129,6 +7138,13 @@
    ],
    "kind": "python"
   },
+  "pulp-state-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
   "pulp-test-data-cmake-selftest": {
    "entry": "tools/scripts/test_pulp_test_data_cmake.py",
    "inputs": [
@@ -8657,6 +8673,35 @@
    ],
    "kind": "python"
   },
+  "render-upward-edge-check": {
+   "entry": "tools/scripts/render_upward_edge_check.py",
+   "inputs": [
+    "core/render",
+    "core/render/platform/android/gpu_surface_android.cpp",
+    "core/render/platform/android/gpu_surface_android_internal.hpp",
+    "core/render/platform/android/gpu_surface_android_jni.cpp",
+    "core/render/platform/android/synth_ui.js.h",
+    "tools/scripts/render_upward_edge_check.py"
+   ],
+   "kind": "python"
+  },
+  "render-upward-edge-check-rules": {
+   "entry": "tools/scripts/test_render_upward_edge_check.py",
+   "inputs": [
+    "core/render",
+    "core/render/platform/android/choreographer_android.cpp",
+    "core/render/platform/android/gpu_surface_android.cpp",
+    "core/render/platform/android/gpu_surface_android_internal.hpp",
+    "core/render/platform/android/gpu_surface_android_jni.cpp",
+    "core/render/platform/android/synth_ui.js.h",
+    "core/render/src/renderer3d.cpp",
+    "core/render/src/skia_surface.cpp",
+    "tools/cmake/PulpAndroid.cmake",
+    "tools/scripts/render_upward_edge_check.py",
+    "tools/scripts/test_render_upward_edge_check.py"
+   ],
+   "kind": "python"
+  },
   "repo-source-scan": {
    "entry": "tools/scripts/test_repo_source_scan.py",
    "inputs": [
@@ -8711,6 +8756,7 @@
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
     "test/fixtures",

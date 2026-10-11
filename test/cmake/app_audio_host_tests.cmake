@@ -16,11 +16,11 @@
 # and design-debugging guides name, and suites whose library set no sibling
 # shares.
 pulp_add_test_group(pulp-test-group-app-view
-    LIBRARIES pulp::view pulp::state pulp::platform)
+    LIBRARIES pulp::view pulp::state pulp::content pulp::platform)
 pulp_add_test_group(pulp-test-group-app-audio LIBRARIES pulp::audio)
 pulp_add_test_group(pulp-test-group-app-signal LIBRARIES pulp::signal)
 pulp_add_test_group(pulp-test-group-app-midi LIBRARIES pulp::midi)
-pulp_add_test_group(pulp-test-group-app-state LIBRARIES pulp::state)
+pulp_add_test_group(pulp-test-group-app-state LIBRARIES pulp::state pulp::content)
 pulp_add_test_group(pulp-test-group-app-host LIBRARIES pulp::host pulp::signal)
 
 # WAMv2 Processor->WASM bridge: native coverage of the -fno-exceptions bridge TU (compiled directly; links real pulp libs; PulpWam.cmake's lib target can replace this later).

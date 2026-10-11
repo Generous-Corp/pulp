@@ -69,6 +69,10 @@ void PresetManager::set_content_data_root(std::filesystem::path data_root) {
 
 void PresetManager::set_content_manifest(const ContentCapabilityManifest&) {}
 
+void PresetManager::set_content_preset_source(ContentPresetSource source) {
+    content_source_ = std::move(source);
+}
+
 void PresetManager::refresh() {
     cached_presets_.clear();
     cache_valid_ = true;

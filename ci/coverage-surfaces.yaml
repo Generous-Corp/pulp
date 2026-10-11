@@ -16,6 +16,7 @@ component_sets:
     - audio
     - authoring_capsule
     - canvas
+    - content
     - dawproject
     - dsl
     - events

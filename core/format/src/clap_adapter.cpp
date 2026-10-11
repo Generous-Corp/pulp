@@ -7,6 +7,9 @@
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
+#if !defined(PULP_WASM)
+#include <pulp/state/content_registry.hpp>
+#endif
 #include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/quirk_apply.hpp>
@@ -314,6 +317,16 @@ bool clap_init(const clap_plugin_t* plugin) {
     auto desc = self->processor->descriptor();
     self->preset_manager = std::make_unique<state::PresetManager>(
         self->store, desc.manufacturer, desc.name);
+#if !defined(PULP_WASM)
+    // Installed content-pack presets come from pulp-content; pulp-state's
+    // PresetManager carries no content-pack reader of its own. The WebCLAP
+    // build links the filesystem-free PresetManager stub
+    // (core/state/src/wasm/preset_manager_wasm.cpp), whose content_presets()
+    // always returns empty, and its source list (tools/cmake/PulpWclap.cmake)
+    // has never compiled the content registry; the WAM lane builds no
+    // PresetManager at all. Skipping the source there changes nothing.
+    self->preset_manager->set_content_preset_source(state::content_registry_preset_source());
+#endif
 
     const auto caps = desc.effective_capabilities();
 
