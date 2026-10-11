@@ -349,6 +349,15 @@ bool ScriptedUiSession::load_now(std::string* error) {
         });
     }
 
+    // Bound controls show their parameters from the frame the document mounts
+    // in. The per-frame binding service otherwise first runs on the NEXT
+    // poll(), and a deferred mount is presented before that poll: by poll()
+    // itself, and by a content-first open straight after
+    // complete_pending_load(). That frame painted every bindWidgetToParam
+    // control at its construction default, then jumped to the parameter.
+    if (bridge_)
+        bridge_->service_param_bindings();
+
     last_theme_exists_ = std::filesystem::exists(theme_path_);
     last_theme_write_time_ = last_theme_exists_ ? safe_last_write_time(theme_path_) : std::nullopt;
     root_.request_repaint();

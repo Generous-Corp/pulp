@@ -1323,7 +1323,7 @@
     "test/test_design_import_parity.cpp"
    ],
    "inputs": [
-    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/cmake/PulpDesignUnits.cmake",
     "core/view/include/pulp/view/design_ir.hpp",
     "core/view/src"
    ],
@@ -3851,6 +3851,15 @@
    ],
    "kind": "python"
   },
+  "clean-worktree-planning-selftest": {
+   "entry": "tools/scripts/test_clean_worktree_planning.py",
+   "inputs": [
+    "tools/scripts",
+    "tools/scripts/clean_worktree_planning.py",
+    "tools/scripts/test_clean_worktree_planning.py"
+   ],
+   "kind": "python"
+  },
   "clean-worktrees-selftest": {
    "entry": "tools/scripts/test_clean_worktrees.py",
    "inputs": [
@@ -4320,6 +4329,21 @@
    ],
    "kind": "python"
   },
+  "design-unit-boundary": {
+   "entry": "tools/scripts/design_unit_boundary_check.py",
+   "inputs": [
+    "tools/scripts/design_unit_boundary_check.py"
+   ],
+   "kind": "python"
+  },
+  "design-unit-boundary-selftest": {
+   "entry": "tools/scripts/test_design_unit_boundary_check.py",
+   "inputs": [
+    "tools/scripts/design_unit_boundary_check.py",
+    "tools/scripts/test_design_unit_boundary_check.py"
+   ],
+   "kind": "python"
+  },
   "diff-cover-targets-selftest": {
    "entry": "tools/scripts/test_diff_cover_targets.py",
    "inputs": [
@@ -4445,6 +4469,14 @@
     "tools/scripts/test_ensure_signing_ready.sh"
    ],
    "kind": "shell"
+  },
+  "evidence-archive-selftest": {
+   "entry": "tools/ci/test_evidence_archive.py",
+   "inputs": [
+    "tools/ci/evidence_archive.py",
+    "tools/ci/test_evidence_archive.py"
+   ],
+   "kind": "python"
   },
   "example-validation-paths": {
    "entry": "tools/scripts/test_example_validation_paths.py",
@@ -6051,6 +6083,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-ir-observe-interactions": {
+   "entry": "test/test_design_ir_observe_interactions.py",
+   "inputs": [
+    "test/test_design_ir_observe_interactions.py"
+   ],
+   "kind": "python"
+  },
   "import-fidelity-diff": {
    "entry": "test/test_import_fidelity_diff.py",
    "inputs": [
@@ -6094,6 +6133,13 @@
    "inputs": [
     "tools/import-design/realtime_contract.py",
     "tools/import-design/test_realtime_contract.py"
+   ],
+   "kind": "python"
+  },
+  "import-ui-frames-observe": {
+   "entry": "test/test_ui_frames_observe.py",
+   "inputs": [
+    "test/test_ui_frames_observe.py"
    ],
    "kind": "python"
   },
@@ -7048,6 +7094,16 @@
    "entry": "tools/scripts/test_pulp_uninstall.py",
    "inputs": [
     "tools/scripts/test_pulp_uninstall.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-worktree-creation-selftest": {
+   "entry": "tools/ci/test_pulp_worktree_creation.py",
+   "inputs": [
+    "tools/ci",
+    "tools/ci/checkout_location_guard.py",
+    "tools/ci/pulp-worktree.sh",
+    "tools/ci/test_pulp_worktree_creation.py"
    ],
    "kind": "python"
   },

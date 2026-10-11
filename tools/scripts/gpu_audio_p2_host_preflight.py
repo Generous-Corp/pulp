@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Any, Callable
 
 SCHEMA = "pulp.gpu-audio.p2.host-preflight.v1"
@@ -121,8 +122,25 @@ def _git_head() -> str:
 def _run(command: list[str], runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
          timeout: int = 10) -> dict[str, Any]:
     try:
-        result = runner(command, capture_output=True, text=True, check=False,
-                        encoding="utf-8", timeout=timeout)
+        # Dawn/Metal can leave a child-side pipe open while tearing down the
+        # device. A pipe-backed capture then waits until the admission timeout
+        # even though the same doctor command completes immediately when its
+        # output is file-backed. Keep this workaround local to the real GPU
+        # observation so test doubles retain their simple CompletedProcess API.
+        file_backed_gpu = (runner is subprocess.run and len(command) >= 3
+                           and command[1:3] == ["doctor", "gpu"])
+        if file_backed_gpu:
+            with (tempfile.TemporaryFile() as stdout_file,
+                  tempfile.TemporaryFile() as stderr_file):
+                result = runner(command, stdout=stdout_file, stderr=stderr_file,
+                                check=False, timeout=timeout)
+                stdout_file.seek(0)
+                stderr_file.seek(0)
+                result.stdout = stdout_file.read().decode("utf-8", errors="replace")
+                result.stderr = stderr_file.read().decode("utf-8", errors="replace")
+        else:
+            result = runner(command, capture_output=True, text=True, check=False,
+                            encoding="utf-8", timeout=timeout)
     except (FileNotFoundError, OSError) as exc:
         # A missing observation tool is an admission failure, not a producer
         # crash. Preserve the command and error so the receipt remains

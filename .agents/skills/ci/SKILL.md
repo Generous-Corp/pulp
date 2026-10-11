@@ -508,6 +508,11 @@ queued PR, reordering or dequeuing any other PR, or making room ahead of the fix
 
 ## Wait on a blocking waiter, not a poll loop
 
+For an unattended pull request, use `shipyard wait pr <PR> --state merged`
+with an explicit timeout. This uses Shipyard's single authoritative PR watch
+ledger and can run from any fleet host. Never wrap `gh pr view` or `gh pr
+checks` in a polling loop.
+
 A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|release`,
 `shipyard ship --pr <n>` (merges on green), or a background command that exits
 when the condition holds. A loop that reads the same state every few seconds
@@ -1723,6 +1728,10 @@ tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
 integration file back into the unit aggregate or remove that install step: the
 former exhausts the aggregate deadline before later tests run, while the latter
 turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
+Before regenerating `test/ctest_script_inputs.json` or
+`.shipyard/changed-surface-families.toml`, run that same locked install and
+reconfigure from the gate profile so both materialized-runtime tests remain
+registered.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
