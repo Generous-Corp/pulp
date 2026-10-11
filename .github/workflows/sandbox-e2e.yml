@@ -51,7 +51,7 @@ jobs:
     outputs:
       macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           lfs: false
       - id: resolve
@@ -80,7 +80,7 @@ jobs:
           - os: ubuntu-latest
             runs_on_json: '"ubuntu-latest"'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Python
         uses: actions/setup-python@v6

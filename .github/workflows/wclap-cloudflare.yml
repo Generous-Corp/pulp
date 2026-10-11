@@ -68,7 +68,7 @@ jobs:
       # Owner-gated deploy switch (a step `if:` cannot read `secrets` directly).
       HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve WebCLAP relevance
         id: relevance
@@ -233,12 +233,12 @@ jobs:
       # assemble-gallery.mjs with "missing wasm for example-plugins/mono-synth". The
       # skip is quiet; the assemble is not. Without these two checkouts this workflow
       # cannot deploy the gallery at all, which is exactly how it broke.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.relevance.outputs.run == 'true'
         with:
           repository: danielraffel/pulp-example-plugins
           path: _ext/pulp-example-plugins
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.relevance.outputs.run == 'true'
         with:
           repository: danielraffel/pulp-classic-effects

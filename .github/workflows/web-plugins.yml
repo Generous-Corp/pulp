@@ -73,7 +73,7 @@ jobs:
     name: Timeline fixture corpus (WASM)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Same pin as the job below, for the same reason: emsdk `latest` floats
       # and has landed breaking changes on PRs that touched nothing.
@@ -89,7 +89,7 @@ jobs:
     name: WAMv2 + WebCLAP (Linux, headless Chrome)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -457,7 +457,7 @@ jobs:
       enabled: ${{ steps.resolve.outputs.enabled }}
       selector_json: ${{ steps.resolve.outputs.selector_json }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - id: resolve
         shell: bash
         env:
@@ -474,7 +474,7 @@ jobs:
     if: needs.resolve-gpu-advisory-macos.outputs.enabled == 'true'
     runs-on: ${{ fromJSON(needs.resolve-gpu-advisory-macos.outputs.selector_json) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -558,11 +558,11 @@ jobs:
       # The gallery's other 23 plugins live in two separate public repos, and
       # assemble-gallery.mjs hard-fails on the first missing wasm — so the page cannot be
       # assembled without them, even though this job only cares about SuperConvolver.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: danielraffel/pulp-example-plugins
           path: _ext/pulp-example-plugins
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: danielraffel/pulp-classic-effects
           path: _ext/pulp-classic-effects

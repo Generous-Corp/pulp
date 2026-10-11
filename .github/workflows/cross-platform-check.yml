@@ -61,7 +61,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-linux
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -186,7 +186,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-linux-arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -291,7 +291,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-windows
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -414,7 +414,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
 

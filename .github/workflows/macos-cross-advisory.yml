@@ -65,7 +65,7 @@ jobs:
     name: Cross-lane scaffold check (advisory)
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Confirm CMake toolchain file is present
         run: |

@@ -42,7 +42,7 @@ jobs:
     steps:
       # Only the resolver is needed; it owns the opt-in class-label rewrite so
       # the three release workflows share one tested implementation.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Resolver policy comes from the default branch, like release-cli.yml.
           ref: ${{ github.event.repository.default_branch }}
@@ -126,7 +126,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # CI COVERAGE-GAP FIX: this release job once ran on macos-14, whose default
       # Xcode 15.4 Apple clang lacked C++20 P0960 (parenthesized aggregate init).
