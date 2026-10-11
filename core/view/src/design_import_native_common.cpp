@@ -2,6 +2,7 @@
 #include "design_ir_helpers.hpp"
 
 #include "design_binding_metadata.hpp"
+#include "design_import_document_checks.hpp"
 
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
@@ -782,6 +783,10 @@ ResolvedNativeNode resolve_node(const IRNode& node,
                                 std::string_view path,
                                 const AssetIndex& assets) {
     ResolvedNativeNode out;
+    std::vector<ImportDiagnostic> type_scratch;
+    if (!node.type.empty() && !kind_from_type(node, path, type_scratch) &&
+        !is_vector_kind(lower_copy(node.type)))
+        append_unknown_node_type_diagnostic(node, path, out.diagnostics);
     // Browser capture carries both the live parameter role (audio_widget) and
     // the authored presentation (type). A select is collapsed; a tab remains
     // segmented. Respect the more specific presentation before the generic
@@ -2485,6 +2490,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             auto uri = resolved_asset_uri(*asset, options.asset_base_directory);
             if (uri.empty())
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
+            append_undecodable_image_diagnostic(node, path, *asset, uri, diagnostics);
             auto image = std::make_unique<ImageView>();
             image->set_image_source(uri);
             // Forward the importer-sampled per-shape gradient. Storing it is
@@ -3022,6 +3028,8 @@ ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
                                             const IRAssetManifest& manifest) {
     const auto& effective_manifest = manifest.assets.empty() ? ir.asset_manifest : manifest;
     auto resolved = resolve_node(ir.root, "$", index_assets(effective_manifest));
+    append_document_version_diagnostic(ir, resolved.diagnostics);
+    append_duplicate_anchor_diagnostics(ir.root, resolved.diagnostics);
     resolved.diagnostics.insert(resolved.diagnostics.end(),
                                 ir.diagnostics.begin(),
                                 ir.diagnostics.end());
