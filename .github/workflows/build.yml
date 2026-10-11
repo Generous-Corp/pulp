@@ -142,7 +142,7 @@ jobs:
       linux_event_authorized_selector_json: ${{ steps.resolve.outputs.linux_event_authorized_selector_json }}
       macos_runs_on_json: ${{ steps.resolve.outputs.macos_runs_on_json }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Shared resolver lives in the repo at tools/scripts/resolve_runs_on.py.
           # We only need the script; no LFS or submodules required.
@@ -878,7 +878,7 @@ jobs:
       a2t_receipt_attestation_required: ${{ steps.classify.outputs.issue }}
       a2t_evidence_head: ${{ steps.classify.outputs.head }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Classification needs two immutable trees, not Pulp's entire
           # history. Full history made a traveling runner fetch into a 70 GiB
@@ -1088,7 +1088,7 @@ jobs:
       build_required: ${{ steps.reuse.outputs.build_required }}
       macos_reused: ${{ steps.reuse.outputs.macos_reused }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
           lfs: false
@@ -1247,7 +1247,7 @@ jobs:
     # macOS (it refuses any other RUNNER_OS), git and python3.
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
           lfs: false
@@ -1397,7 +1397,7 @@ jobs:
             exit 0
           fi
           echo "gate-git-seed: alternates=$mirror/objects mirror_main=$head"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
           # GPU provenance self-tests use HEAD^ and exact historical receipts.
@@ -3010,7 +3010,7 @@ jobs:
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: true
 
@@ -3089,7 +3089,7 @@ jobs:
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: true
 
@@ -3154,7 +3154,7 @@ jobs:
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: true
 
@@ -3243,7 +3243,7 @@ jobs:
         if: ${{ !cancelled() }}
         id: reuse_record_checkout
         continue-on-error: true
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           sparse-checkout: |
@@ -3309,7 +3309,7 @@ jobs:
       # The whole tree at depth 1, like the classify job: when classify was
       # never given a runner, the verdict classifies the group here.
       - name: Check out the bootstrap verdict and classifier
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           lfs: false
@@ -3338,7 +3338,7 @@ jobs:
         if: ${{ !cancelled() }}
         id: reuse_record_checkout
         continue-on-error: true
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           sparse-checkout: |

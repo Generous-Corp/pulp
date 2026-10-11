@@ -8,6 +8,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+from unittest import mock
 from pathlib import Path
 
 from sequencer_exposure_check import (
@@ -24,6 +25,7 @@ from sequencer_exposure_check import (
     _load_sequencer_trailers,
     _read_ledger_at_anchor,
     _mechanical_version_paths,
+    _mechanical_workflow_paths,
     _semantic_added_paths,
     assemble_ledger,
     config_doc_targets,
@@ -38,7 +40,9 @@ from sequencer_exposure_check import (
     validate_schema_contract,
     validate_tombstone_provenance,
     validate_transition,
+    sequencer_paths_after_dependabot_exemption,
 )
+import sequencer_exposure_check
 
 
 SHA_A = "1" * 40
@@ -328,6 +332,19 @@ def initialize_history(root: Path) -> tuple[str, str, str, str]:
 
 
 def main() -> int:
+    mixed_paths = [".github/workflows/timeline-fuzz.yml", "core/timeline/x.cpp"]
+    with mock.patch.object(
+        sequencer_exposure_check, "dependabot_uses_only_diff", return_value=False
+    ):
+        retained = sequencer_paths_after_dependabot_exemption(
+            "origin/main", "HEAD", mixed_paths
+        )
+    if retained != mixed_paths:
+        raise AssertionError(
+            "mixed workflow plus core/timeline diff was incorrectly exempted"
+        )
+    _CHECK_TALLY["clean"] += 1
+
     negative = _ancestry_problem(
         subprocess.CompletedProcess([], 1, stdout="", stderr=""),
         "not ancestor", "history unavailable",
@@ -1345,6 +1362,7 @@ def main() -> int:
         if not any(fixture_guide in error and "owned_paths" in error for error in planted):
             raise AssertionError(f"a row owning a mapped guide was accepted: {planted}")
         _CHECK_TALLY["calibrated"] += 1
+
         owning_guide_tombstone = copy.deepcopy(valid)
         owning_guide_tombstone["tombstones"] = [
             {
@@ -1719,6 +1737,38 @@ def main() -> int:
             )
         _CHECK_TALLY["calibrated"] += 1
 
+        # Workflow action refs are mechanical per path, regardless of author.
+        workflow_path = ".github/workflows/timeline-fuzz.yml"
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "seed workflow")
+        workflow_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v5\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "workflow action bump")
+        action_paths, action_errors = _mechanical_workflow_paths(
+            mech_root, workflow_base, [workflow_path], "HEAD"
+        )
+        if action_errors or workflow_path not in action_paths:
+            raise AssertionError(
+                f"uses-only sequencer workflow was not mechanical: {action_paths}, {action_errors}"
+            )
+        _CHECK_TALLY["clean"] += 1
+
+        # CONTROL: a run change in the same workflow remains sequencer-owned.
+        run_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - run: ctest\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "workflow run change")
+        run_paths, run_errors = _mechanical_workflow_paths(
+            mech_root, run_base, [workflow_path], "HEAD"
+        )
+        if run_errors or workflow_path in run_paths:
+            raise AssertionError(
+                f"control: run change was treated as mechanical: {run_paths}, {run_errors}"
+            )
+        _CHECK_TALLY["calibrated"] += 1
+
         # 3. CONTROL: an undeclared path is never mechanical, however it changes.
         other = "docs/status/some-other-artifact.json"
         other_base = git(mech_root, "rev-parse", "HEAD").strip()
@@ -1759,6 +1809,28 @@ def main() -> int:
         raise AssertionError(
             f"a mechanical version rewrite still demanded a ledger row: {green}"
         )
+
+    # A uses-only change in a sequencer-owned workflow is mechanical per path,
+    # while a run change in the same file still requires transition coverage.
+    sequencer_workflow = ".github/workflows/timeline-fuzz.yml"
+    workflow_green = validate_transition(
+        mech_base_doc, mech_current, [sequencer_workflow],
+        mechanical_version_paths={sequencer_workflow},
+    )
+    if any(sequencer_workflow in error for error in workflow_green):
+        raise AssertionError(
+            f"a uses-only sequencer workflow still demanded a ledger row: {workflow_green}"
+        )
+    workflow_red = validate_transition(
+        mech_base_doc, mech_current, [sequencer_workflow],
+        mechanical_version_paths=set(),
+    )
+    if not any(sequencer_workflow in error for error in workflow_red):
+        raise AssertionError(
+            "control: a run change in a sequencer workflow was not exposed"
+        )
+    _CHECK_TALLY["clean"] += 1
+    _CHECK_TALLY["calibrated"] += 1
 
     print(
         "sequencer exposure checker selftest: OK "

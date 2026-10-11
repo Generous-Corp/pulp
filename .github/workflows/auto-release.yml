@@ -48,7 +48,7 @@ jobs:
 
     steps:
       - name: Checkout with range context
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # Need enough history to diff against the latest tag.
           fetch-depth: 0
