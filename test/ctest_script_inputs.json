@@ -7218,6 +7218,7 @@
   "pulp.vellum-closure-policy-selftest": {
    "entry": "tools/scripts/test_vellum_closure.py",
    "inputs": [
+    "core/platform/src/android/jni_motion.cpp",
     "tools/scripts/test_vellum_closure.py",
     "tools/scripts/vellum_closure.py"
    ],

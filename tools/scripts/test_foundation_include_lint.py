@@ -66,6 +66,15 @@ class FoundationIncludeLintTests(unittest.TestCase):
                     '#include "../../audio/platform/android/demo_synth.hpp"\n')
         self.assertEqual(self._run(), 1)
 
+    def test_angle_relative_include_reaching_audio_fails(self):
+        # Angle includes can also carry relative paths; ignoring them leaves
+        # the same escape available through the compiler's include search.
+        self._write("core/audio/platform/android/demo_synth.hpp", "#pragma once\n")
+        self._write("core/platform/include/pulp/platform/platform.hpp", "#pragma once\n")
+        self._write("core/platform/src/android/jni_bridge.cpp",
+                    '#include <../../audio/platform/android/demo_synth.hpp>\n')
+        self.assertEqual(self._run(), 1)
+
     def test_relative_include_between_foundation_roots_passes(self):
         self._write("core/platform/src/b.cpp", '#include "../../runtime/src/log.cpp"\n')
         self.assertEqual(self._run(), 0)

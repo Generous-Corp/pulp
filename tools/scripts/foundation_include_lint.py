@@ -67,7 +67,7 @@ def scan_file(path: pathlib.Path, rel: str, root: pathlib.Path) -> list[tuple[st
             if parts[1] not in FOUNDATION_AREAS:
                 found.append((rel, n, target))
             continue
-        if delim == '"' and (target.startswith("../") or "/../" in target):
+        if target.startswith("../") or "/../" in target:
             # Mirror the compiler: the including file's directory first, then
             # the foundation include directories. An include that resolves
             # nowhere cannot be proven to stay inside, so it counts as a crossing.
