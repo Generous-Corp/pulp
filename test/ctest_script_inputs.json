@@ -7208,6 +7208,14 @@
   "pulp.vellum-closure-boundary": {
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
     "tools/scripts/vellum_closure.py"
    ],
    "kind": "python"
@@ -7215,6 +7223,14 @@
   "pulp.vellum-closure-gate": {
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
     "tools/scripts/vellum_closure.py"
    ],
    "kind": "python"
@@ -7230,6 +7246,14 @@
   "pulp.vellum-closure-policy-selftest": {
    "entry": "tools/scripts/test_vellum_closure.py",
    "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
     "tools/scripts/test_vellum_closure.py",
     "tools/scripts/vellum_closure.py"
    ],
