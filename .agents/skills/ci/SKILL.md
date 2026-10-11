@@ -11975,3 +11975,14 @@ that prints non-ASCII marks, reconfigure its own stdout at its entry point
 (`sys.stdout.reconfigure(encoding="utf-8", errors="replace")`); a Windows pipe
 defaults to the ANSI code page. `PYTHONIOENCODING=cp1252` reproduces that pipe
 on macOS.
+
+## Hosted macOS advisory cadence
+
+Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
+native matrix are scheduled nightly and dispatched by Shipyard at arm time on
+the approved PR head. They intentionally have no `pull_request` trigger, so a
+PR push does not consume hosted macOS capacity for advisory work. ASan and UBSan
+remain on non-draft `core/**` pull requests (opened, synchronize, and
+ready-for-review events); TSan runs nightly or by dispatch. Coverage and
+sanitizer orchestration declare `max-parallel: 2`. These changes preserve the
+required Vellum lanes on their existing runners.

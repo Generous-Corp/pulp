@@ -31,12 +31,6 @@ permissions:
 on:
   push:
     branches: [main]
-  # The workflow contains a PR-only macOS matrix, changed-surface classifier,
-  # fork-safe upload policy, and diff-coverage report. Without this trigger all
-  # of those paths are unreachable and Codecov can never publish PR coverage.
-  # This workflow is advisory and is not a protected-main required check, so it
-  # runs beside the merge critical path instead of delaying it.
-  pull_request:
   schedule:
     # Supersession-immune main-dashboard refresh. Push-triggered coverage on a
     # high-churn main gets superseded while QUEUED (cancel-in-progress:false +
@@ -401,6 +395,7 @@ jobs:
       # Linux/Windows coverage on PRs is provided by the nightly
       # cross-platform-check.yml lane.
       fail-fast: false
+      max-parallel: 2
       matrix: ${{ fromJSON(needs.matrix-config.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     # Windows coverage is best-effort and MUST NOT block a successful main

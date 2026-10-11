@@ -27,18 +27,8 @@ permissions:
 # never did.
 
 on:
-  pull_request:
-    branches: [main, develop]
-    paths:
-      - 'core/scene/**'
-      - 'core/render/**'
-      - 'tools/scene3d/**'
-      - 'test/test_scene3d*'
-      - 'test/test_renderer3d*'
-      - 'test/cmake/scene3d*'
-      - 'test/cmake/renderer3d*'
-      - 'test/fixtures/scene3d/**'
-      - '.github/workflows/scene3d-advisory.yml'
+  schedule:
+    - cron: '47 3 * * *'
   workflow_dispatch:
 
 concurrency:

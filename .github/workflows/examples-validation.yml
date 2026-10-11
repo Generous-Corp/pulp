@@ -21,7 +21,8 @@
 name: Example validation
 
 on:
-  pull_request:
+  schedule:
+    - cron: '53 3 * * *'
   # Deliberately NOT run on `merge_group` — see header-self-contained.yml for the
   # full rationale. Neither `Validate examples (macOS)` nor `example-validation`
   # is a required context, and the macOS leg claimed a self-hosted runner on

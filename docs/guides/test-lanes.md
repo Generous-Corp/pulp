@@ -561,3 +561,14 @@ has a positive pattern, and the `[#<stem>]` term is one, so a member whose own
 changed-surface selector all keep working, since they address tests by name.
 The one visible difference is `--target`: build the group
 (`pulp-test-group-view-widgets`), not the old per-suite target.
+
+### Hosted macOS advisory lanes and arm-time dispatch
+
+Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
+native matrix are advisory hosted-macOS lanes. They run from the nightly
+`schedule` on `main` and from `workflow_dispatch` when Shipyard arms a PR head;
+they do not start on every `pull_request` push. The sanitizer workflow keeps
+ASan and UBSan on non-draft PRs that touch `core/**`, while TSan is nightly or
+explicitly dispatched. Coverage and sanitizer orchestration cap matrix fan-out
+at two concurrent legs. These lanes remain advisory and do not replace the
+required Vellum checks.

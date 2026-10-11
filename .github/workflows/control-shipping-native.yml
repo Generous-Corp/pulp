@@ -23,23 +23,8 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/validation/sdk-smoke/**'
-  pull_request:
-    paths:
-      - '.github/workflows/control-shipping-native.yml'
-      - 'CMakeLists.txt'
-      - 'core/events/**'
-      - 'core/format/**'
-      - 'core/platform/**'
-      - 'core/runtime/**'
-      - 'core/state/**'
-      - 'inspect/**'
-      - 'tools/cli/**'
-      - 'tools/cmake/**'
-      - 'tools/mcp/**'
-      - 'tools/scripts/verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_control_shipping_native_workflow.py'
-      - 'tools/validation/sdk-smoke/**'
+  schedule:
+    - cron: '59 3 * * *'
   workflow_dispatch: {}
 
 permissions:

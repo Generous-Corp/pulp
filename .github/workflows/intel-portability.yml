@@ -24,20 +24,8 @@ permissions:
 # coverage is the Tier-2 nightly's native-Intel job.
 
 on:
-  pull_request:
-    branches: [main, develop]
-    # Only run when the touched code can plausibly differ across arch. Mirrors
-    # the sanitizers.yml paths-filter style, scoped to the arch-sensitive set.
-    paths:
-      - 'core/runtime/**'
-      - 'core/signal/**'
-      - 'core/platform/**'
-      - 'tools/cmake/**'
-      - 'tools/deps/manifest.json'
-      - 'tools/deps/min_os.json'
-      - 'tools/scripts/fetch_*'
-      - 'ship/**'
-      - '.github/workflows/intel-portability.yml'
+  schedule:
+    - cron: '41 3 * * *'
   workflow_dispatch:
 
 concurrency:
