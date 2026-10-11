@@ -67,11 +67,14 @@ def norm_path(raw: str, source: Path, build: Path) -> str:
         # explicitly rooted.  Resolving against cwd made the manifest depend
         # on where the script was launched.
         p = source / p
+    # Build directories normally live below the source checkout.  Check the
+    # build root first or generated/FetchContent files would be mislabeled as
+    # repository paths and become export members.
     try:
-        return p.resolve().relative_to(source.resolve()).as_posix()
+        return "@build/" + p.resolve().relative_to(build.resolve()).as_posix()
     except ValueError:
         try:
-            return "@build/" + p.resolve().relative_to(build.resolve()).as_posix()
+            return p.resolve().relative_to(source.resolve()).as_posix()
         except ValueError:
             return str(p.resolve())
 
@@ -103,6 +106,67 @@ def collect_headers(files: set[Path], include_dirs: list[Path], source: Path) ->
     return seen
 
 
+def fetchcontent_pins(source: Path) -> dict[str, dict[str, str]]:
+    """Return repository and immutable pin metadata keyed by dependency name."""
+    manifest = source / "tools" / "deps" / "manifest.json"
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        rows = payload.get("dependencies", []) if isinstance(payload, dict) else payload
+    except (OSError, json.JSONDecodeError):
+        return {}
+    pins: dict[str, dict[str, str]] = {}
+    setup_text = ""
+    try:
+        setup_text = (source / "setup.sh").read_text(encoding="utf-8")
+    except OSError:
+        pass
+    for row in rows:
+        if row.get("source_kind") != "fetchcontent":
+            continue
+        name = str(row.get("name", "")).lower()
+        repository = row.get("repository")
+        version = str(row.get("version", ""))
+        match = re.search(r"\b[0-9a-f]{40}\b", version)
+        pin = match.group(0) if match else str(row.get("upstream", {}).get("ref", ""))
+        # setup.sh seeds the shared FetchContent cache with the immutable
+        # commit. Prefer that full cache hash over a display tag or short hash
+        # in tools/deps/manifest.json.
+        setup_match = re.search(
+            rf'ensure_shared_git_source_with_retry\s+"{re.escape(name)}"[^\n]*\n\s+"([0-9a-f]{{40}})"',
+            setup_text,
+            re.IGNORECASE,
+        )
+        if setup_match:
+            pin = setup_match.group(1)
+        if name and repository and pin:
+            pins[name] = {"source": str(repository), "pin": pin}
+    return pins
+
+
+def build_external_input(rel: str, pins: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Describe a FetchContent source copied into the build tree.
+
+    These files are build-machine inputs, never exportable Pulp files.  Keep
+    the path for auditability and bind it to the dependency's source and
+    immutable cache pin so a Vellum consumer can provision the same input.
+    """
+    path = rel.removeprefix("@build/")
+    match = re.search(r"(?:^|/)_deps/(?:pulp-mutable-)?(?P<name>[^/]+?)(?:-(?:src|build))(?:/|$)", path)
+    name = match.group("name").lower() if match else ""
+    if not name:
+        lowered = path.lower()
+        compact = re.sub(r"[^a-z0-9]", "", lowered)
+        name = next(
+            (candidate for candidate in pins
+             if re.sub(r"[^a-z0-9]", "", candidate) in compact),
+            "",
+        )
+    metadata = pins.get(name)
+    if metadata is None:
+        return {"path": rel, "source": "build-tree", "pin": "unresolved"}
+    return {"path": rel, **metadata}
+
+
 def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
     config, targets = codemodel(build)
     by_name = {data.get("name"): data for data in targets.values()}
@@ -114,7 +178,7 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
     links: set[str] = set()
     generated: set[str] = set()
     resources: set[str] = set()
-    external: set[str] = set()
+    external_paths: set[str] = set()
     for name in names:
         data = by_name.get(name)
         if not data:
@@ -162,15 +226,18 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
             if dep_name:
                 links.add(dep_name)
                 deps.append(dep_name)
-        selected.append({"name": name, "type": data.get("type"), "sources": sorted(norm_path(str(p), source, build) for p in target_files), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps))})
+        selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if not rel.startswith(("@build/", "/"))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps))})
     all_files = collect_headers(all_files, sorted(all_include_dirs), source)
     normalized = [norm_path(str(p), source, build) for p in all_files]
-    external.update(p for p in normalized if not p.startswith(("@build/",)) and p.startswith("/"))
-    files = sorted(p for p in normalized if p not in external)
+    external_paths.update(p for p in normalized if p.startswith("@build/_deps/"))
+    external_paths.update(p for p in normalized if p.startswith("/") and not p.startswith(str(source.resolve())))
+    pins = fetchcontent_pins(source)
+    external = [build_external_input(p, pins) for p in sorted(external_paths)]
+    files = sorted(p for p in normalized if p not in external_paths and not p.startswith("/"))
     for rel in files:
         if Path(rel).suffix.lower() in RESOURCE_EXTS:
             resources.add(rel)
-    return {"schema": "pulp.vellum.closure.v1", "source_root": str(source), "build_dir": str(build), "configuration": config.get("name", ""), "targets": selected, "missing_targets": missing, "files": files, "external_inputs": sorted(external), "public_include_dirs": sorted(str(p) for p in all_include_dirs), "compile_definitions": sorted(all_defines), "transitive_link_targets": sorted(links), "resources": sorted(resources), "generated_inputs": sorted(generated)}
+    return {"schema": "pulp.vellum.closure.v1", "source_root": str(source), "build_dir": str(build), "configuration": config.get("name", ""), "targets": selected, "missing_targets": missing, "files": files, "external_inputs": external, "public_include_dirs": sorted(str(p) for p in all_include_dirs), "compile_definitions": sorted(all_defines), "transitive_link_targets": sorted(links), "resources": sorted(resources), "generated_inputs": sorted(generated - external_paths)}
 
 
 def cmd_manifest(args: argparse.Namespace) -> int:
