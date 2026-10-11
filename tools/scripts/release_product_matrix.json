@@ -114,6 +114,7 @@
     "pulp-timeline-editor",
     "pulp-tool-gpu-health-model",
     "pulp-view",
+    "pulp-view-audio",
     "pulp-view-graph-editor",
     "pulp-view-core",
     "pulp-view-native",

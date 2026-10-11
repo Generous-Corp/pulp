@@ -12,11 +12,11 @@
 ///
 /// One-way (UI → MIDI). UI-thread only.
 
-#include <pulp/midi/midi_control_bus.hpp>
-#include <pulp/view/widgets.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <pulp/midi/midi_control_bus.hpp>
+#include <pulp/view/widgets.hpp>
 
 namespace pulp::view {
 
@@ -42,41 +42,43 @@ inline void bind_midi_cc(Fader& fader, midi::MidiControlBus& bus, uint8_t channe
 }
 
 /// Range slider → MIDI CC.
-inline void bind_midi_cc(RangeSlider& slider, midi::MidiControlBus& bus, uint8_t channel, uint8_t cc) {
+inline void bind_midi_cc(RangeSlider& slider, midi::MidiControlBus& bus, uint8_t channel,
+                         uint8_t cc) {
     slider.on_change = [&bus, channel, cc](float v) {
         bus.send_cc(channel, cc, detail::to_cc_value(v));
     };
 }
 
 /// Toggle button → MIDI CC (0 / 127).
-inline void bind_midi_cc(ToggleButton& button, midi::MidiControlBus& bus, uint8_t channel, uint8_t cc) {
-    button.on_toggle = [&bus, channel, cc](bool on) {
-        bus.send_cc(channel, cc, on ? 127 : 0);
-    };
+inline void bind_midi_cc(ToggleButton& button, midi::MidiControlBus& bus, uint8_t channel,
+                         uint8_t cc) {
+    button.on_toggle = [&bus, channel, cc](bool on) { bus.send_cc(channel, cc, on ? 127 : 0); };
 }
 
 /// Toggle → MIDI CC (0 / 127).
 inline void bind_midi_cc(Toggle& toggle, midi::MidiControlBus& bus, uint8_t channel, uint8_t cc) {
-    toggle.on_toggle = [&bus, channel, cc](bool on) {
-        bus.send_cc(channel, cc, on ? 127 : 0);
-    };
+    toggle.on_toggle = [&bus, channel, cc](bool on) { bus.send_cc(channel, cc, on ? 127 : 0); };
 }
 
 /// Toggle button → MIDI note: note-on while on, note-off when off.
-inline void bind_midi_note(ToggleButton& button, midi::MidiControlBus& bus,
-                           uint8_t channel, uint8_t note, uint8_t velocity = 100) {
+inline void bind_midi_note(ToggleButton& button, midi::MidiControlBus& bus, uint8_t channel,
+                           uint8_t note, uint8_t velocity = 100) {
     button.on_toggle = [&bus, channel, note, velocity](bool on) {
-        if (on) bus.send_note_on(channel, note, velocity);
-        else bus.send_note_off(channel, note);
+        if (on)
+            bus.send_note_on(channel, note, velocity);
+        else
+            bus.send_note_off(channel, note);
     };
 }
 
 /// Toggle → MIDI note: note-on while on, note-off when off.
-inline void bind_midi_note(Toggle& toggle, midi::MidiControlBus& bus,
-                           uint8_t channel, uint8_t note, uint8_t velocity = 100) {
+inline void bind_midi_note(Toggle& toggle, midi::MidiControlBus& bus, uint8_t channel, uint8_t note,
+                           uint8_t velocity = 100) {
     toggle.on_toggle = [&bus, channel, note, velocity](bool on) {
-        if (on) bus.send_note_on(channel, note, velocity);
-        else bus.send_note_off(channel, note);
+        if (on)
+            bus.send_note_on(channel, note, velocity);
+        else
+            bus.send_note_off(channel, note);
     };
 }
 

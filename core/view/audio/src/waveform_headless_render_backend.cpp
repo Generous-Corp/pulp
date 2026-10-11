@@ -5,8 +5,7 @@
 
 namespace pulp::view {
 
-WaveformHeadlessRenderBackend::WaveformHeadlessRenderBackend(
-    WaveformHeadlessRenderConfig config)
+WaveformHeadlessRenderBackend::WaveformHeadlessRenderBackend(WaveformHeadlessRenderConfig config)
     : controller_(config.cache_capacity) {
     prepare(config);
 }
@@ -25,48 +24,48 @@ bool WaveformHeadlessRenderBackend::prepare(WaveformHeadlessRenderConfig config)
     }
 
     std::vector<WaveformGpuResourceRecord> evicted_records;
-    if (!controller_.prepare(config.cache_capacity, &evicted_records)) return false;
+    if (!controller_.prepare(config.cache_capacity, &evicted_records))
+        return false;
 
     staging_vertices_.swap(prepared_staging);
-    for (const auto& record : evicted_records) release_record(record);
+    for (const auto& record : evicted_records)
+        release_record(record);
     return true;
 }
 
-WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::render(
-    const pulp::audio::WaveformOverview& thumbnail,
-    const WaveformGpuLayerPlan& plan,
-    const WaveformGpuRenderContext& context) {
+WaveformHeadlessRenderFrame
+WaveformHeadlessRenderBackend::render(const pulp::audio::WaveformOverview& thumbnail,
+                                      const WaveformGpuLayerPlan& plan,
+                                      const WaveformGpuRenderContext& context) {
     const auto decision = controller_.plan_render(
-        thumbnail,
-        plan,
-        context,
+        thumbnail, plan, context,
         std::span<WaveformPeakVertex>(staging_vertices_.data(), staging_vertices_.size()));
 
     switch (decision.action) {
-        case WaveformGpuRenderActionKind::CpuFallbackReady: {
-            WaveformHeadlessRenderFrame frame;
-            frame.status = WaveformHeadlessRenderStatus::CpuFallbackReady;
-            frame.decision = decision;
-            frame.playhead = decision.playhead;
-            frame.static_vertices = std::span<const WaveformPeakVertex>(
-                staging_vertices_.data(),
-                decision.vertices_written);
-            return frame;
-        }
-        case WaveformGpuRenderActionKind::UploadStaticLayerReady:
-            return upload_static_layer(decision);
-        case WaveformGpuRenderActionKind::DrawCachedStaticLayer:
-            return make_cached_frame(decision, WaveformHeadlessRenderStatus::DrawCachedStaticLayer);
-        case WaveformGpuRenderActionKind::PlayheadOnlyRedraw:
-            return make_cached_frame(decision, WaveformHeadlessRenderStatus::PlayheadOnlyRedraw);
-        default:
-            return make_noop_frame(decision);
+    case WaveformGpuRenderActionKind::CpuFallbackReady: {
+        WaveformHeadlessRenderFrame frame;
+        frame.status = WaveformHeadlessRenderStatus::CpuFallbackReady;
+        frame.decision = decision;
+        frame.playhead = decision.playhead;
+        frame.static_vertices = std::span<const WaveformPeakVertex>(staging_vertices_.data(),
+                                                                    decision.vertices_written);
+        return frame;
+    }
+    case WaveformGpuRenderActionKind::UploadStaticLayerReady:
+        return upload_static_layer(decision);
+    case WaveformGpuRenderActionKind::DrawCachedStaticLayer:
+        return make_cached_frame(decision, WaveformHeadlessRenderStatus::DrawCachedStaticLayer);
+    case WaveformGpuRenderActionKind::PlayheadOnlyRedraw:
+        return make_cached_frame(decision, WaveformHeadlessRenderStatus::PlayheadOnlyRedraw);
+    default:
+        return make_noop_frame(decision);
     }
 }
 
 void WaveformHeadlessRenderBackend::clear() {
     const auto records = controller_.clear_and_return_records();
-    for (const auto& record : records) release_record(record);
+    for (const auto& record : records)
+        release_record(record);
     release_all_resources();
 }
 
@@ -84,8 +83,7 @@ WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::make_noop_frame(
 }
 
 WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::make_cached_frame(
-    const WaveformGpuRenderDecision& decision,
-    WaveformHeadlessRenderStatus status) const noexcept {
+    const WaveformGpuRenderDecision& decision, WaveformHeadlessRenderStatus status) const noexcept {
     WaveformHeadlessRenderFrame frame;
     frame.status = status;
     frame.decision = decision;
@@ -101,14 +99,13 @@ WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::make_cached_frame(
         return frame;
     }
 
-    frame.static_vertices = std::span<const WaveformPeakVertex>(
-        resource->vertices.data(),
-        resource->vertices.size());
+    frame.static_vertices =
+        std::span<const WaveformPeakVertex>(resource->vertices.data(), resource->vertices.size());
     return frame;
 }
 
-WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::upload_static_layer(
-    const WaveformGpuRenderDecision& decision) {
+WaveformHeadlessRenderFrame
+WaveformHeadlessRenderBackend::upload_static_layer(const WaveformGpuRenderDecision& decision) {
     WaveformHeadlessRenderFrame frame;
     frame.status = WaveformHeadlessRenderStatus::UploadedStaticLayer;
     frame.decision = decision;
@@ -120,9 +117,9 @@ WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::upload_static_layer(
     payload.backend_generation = decision.backend_generation;
 
     try {
-        payload.vertices.assign(
-            staging_vertices_.begin(),
-            staging_vertices_.begin() + static_cast<std::ptrdiff_t>(decision.vertices_written));
+        payload.vertices.assign(staging_vertices_.begin(),
+                                staging_vertices_.begin() +
+                                    static_cast<std::ptrdiff_t>(decision.vertices_written));
         resources_.push_back(std::move(payload));
     } catch (...) {
         frame.status = WaveformHeadlessRenderStatus::ResourceAllocationFailed;
@@ -130,10 +127,8 @@ WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::upload_static_layer(
     }
 
     const auto resource_id = resources_.back().resource_id;
-    const auto commit = controller_.commit_uploaded_resource(
-        decision,
-        resource_id,
-        decision.backend_generation);
+    const auto commit =
+        controller_.commit_uploaded_resource(decision, resource_id, decision.backend_generation);
     if (!commit.ok) {
         release_resource_by_id(resource_id);
         frame.status = WaveformHeadlessRenderStatus::ResourceCommitRejected;
@@ -151,14 +146,12 @@ WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::upload_static_layer(
     }
 
     frame.resource_id = resource_id;
-    frame.static_vertices = std::span<const WaveformPeakVertex>(
-        resource->vertices.data(),
-        resource->vertices.size());
+    frame.static_vertices =
+        std::span<const WaveformPeakVertex>(resource->vertices.data(), resource->vertices.size());
     return frame;
 }
 
-const WaveformHeadlessRenderBackend::ResourcePayload*
-WaveformHeadlessRenderBackend::find_resource(
+const WaveformHeadlessRenderBackend::ResourcePayload* WaveformHeadlessRenderBackend::find_resource(
     const WaveformGpuResourceRecord& record) const noexcept {
     const auto it = std::find_if(resources_.begin(), resources_.end(), [&](const auto& resource) {
         return resource.resource_id == record.resource_id &&
@@ -182,11 +175,13 @@ bool WaveformHeadlessRenderBackend::release_record(
 }
 
 bool WaveformHeadlessRenderBackend::release_resource_by_id(std::uint64_t resource_id) noexcept {
-    if (resource_id == 0) return false;
+    if (resource_id == 0)
+        return false;
     const auto it = std::find_if(resources_.begin(), resources_.end(), [&](const auto& resource) {
         return resource.resource_id == resource_id;
     });
-    if (it == resources_.end()) return false;
+    if (it == resources_.end())
+        return false;
     last_released_resource_id_ = it->resource_id;
     ++released_resource_count_;
     resources_.erase(it);
@@ -203,8 +198,10 @@ void WaveformHeadlessRenderBackend::release_all_resources() noexcept {
 
 void WaveformHeadlessRenderBackend::release_commit_records(
     const WaveformGpuResourcePutResult& result) noexcept {
-    if (result.replaced) release_record(result.replaced_record);
-    if (result.evicted) release_record(result.evicted_record);
+    if (result.replaced)
+        release_record(result.replaced_record);
+    if (result.evicted)
+        release_record(result.evicted_record);
 }
 
 } // namespace pulp::view

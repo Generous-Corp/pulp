@@ -4,9 +4,8 @@
 
 namespace pulp::view {
 
-SampleAssetDropPlan classify_sample_asset_file_drop(
-    const std::vector<std::string>& paths,
-    const audio::SampleAssetPolicy& policy) {
+SampleAssetDropPlan classify_sample_asset_file_drop(const std::vector<std::string>& paths,
+                                                    const audio::SampleAssetPolicy& policy) {
     SampleAssetDropPlan plan;
     plan.items = audio::classify_sample_asset_drop(paths, policy);
     plan.probe_audio_paths.reserve(plan.items.size());
@@ -45,7 +44,8 @@ bool SampleAssetDropTarget::on_drag_enter(const DropData& data, Point position) 
     auto plan = classify_sample_asset_file_drop(data.file_paths, policy_);
     const bool accepted = plan.accepted();
     last_plan_ = plan;
-    if (on_drag_classified) on_drag_classified(plan, position);
+    if (on_drag_classified)
+        on_drag_classified(plan, position);
     return accepted;
 }
 
@@ -64,7 +64,8 @@ bool SampleAssetDropTarget::on_drop(const DropData& data, Point position) {
     const bool needs_audio_probe = plan.needs_audio_probe();
     last_plan_ = plan;
 
-    if (on_drop_classified) on_drop_classified(plan, position);
+    if (on_drop_classified)
+        on_drop_classified(plan, position);
     if (accepted && needs_audio_probe && on_audio_probe_dispatch_requested) {
         on_audio_probe_dispatch_requested(plan, position);
     }

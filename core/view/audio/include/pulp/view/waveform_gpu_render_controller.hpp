@@ -64,39 +64,38 @@ struct WaveformGpuRenderDecision {
 /// generation-keyed summaries and must never require live audio threads to wait
 /// on GPU completion.
 class WaveformGpuRenderController {
-public:
+  public:
     explicit WaveformGpuRenderController(std::size_t cache_capacity = 8);
 
     bool prepare(std::size_t cache_capacity,
                  std::vector<WaveformGpuResourceRecord>* evicted_records = nullptr);
 
-    [[nodiscard]] WaveformGpuRenderDecision plan_render(
-        const pulp::audio::WaveformOverview& thumbnail,
-        const WaveformGpuLayerPlan& plan,
-        const WaveformGpuRenderContext& context,
-        std::span<WaveformPeakVertex> staging_vertices) noexcept;
+    [[nodiscard]] WaveformGpuRenderDecision
+    plan_render(const pulp::audio::WaveformOverview& thumbnail, const WaveformGpuLayerPlan& plan,
+                const WaveformGpuRenderContext& context,
+                std::span<WaveformPeakVertex> staging_vertices) noexcept;
 
-    [[nodiscard]] WaveformGpuResourcePutResult commit_uploaded_resource(
-        const WaveformGpuUploadKey& key,
-        std::uint64_t resource_id,
-        std::size_t bytes,
-        std::uint64_t backend_generation = 1);
+    [[nodiscard]] WaveformGpuResourcePutResult
+    commit_uploaded_resource(const WaveformGpuUploadKey& key, std::uint64_t resource_id,
+                             std::size_t bytes, std::uint64_t backend_generation = 1);
 
-    [[nodiscard]] WaveformGpuResourcePutResult commit_uploaded_resource(
-        const WaveformGpuRenderDecision& decision,
-        std::uint64_t resource_id,
-        std::uint64_t current_backend_generation);
+    [[nodiscard]] WaveformGpuResourcePutResult
+    commit_uploaded_resource(const WaveformGpuRenderDecision& decision, std::uint64_t resource_id,
+                             std::uint64_t current_backend_generation);
 
-    bool erase(const WaveformGpuUploadKey& key,
-               WaveformGpuResourceRecord& removed_record) noexcept;
+    bool erase(const WaveformGpuUploadKey& key, WaveformGpuResourceRecord& removed_record) noexcept;
 
     [[nodiscard]] std::vector<WaveformGpuResourceRecord> clear_and_return_records();
 
     [[nodiscard]] WaveformGpuResourceCacheStats stats() const noexcept;
-    [[nodiscard]] std::size_t capacity() const noexcept { return cache_.capacity(); }
-    [[nodiscard]] std::size_t size() const noexcept { return cache_.size(); }
+    [[nodiscard]] std::size_t capacity() const noexcept {
+        return cache_.capacity();
+    }
+    [[nodiscard]] std::size_t size() const noexcept {
+        return cache_.size();
+    }
 
-private:
+  private:
     WaveformGpuResourceCache cache_;
 };
 

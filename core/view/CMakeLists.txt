@@ -21,9 +21,14 @@ target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_EN
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 
-# Audio-UI widgets. GraphEditorView is pulp-view-graph-editor, a target the view
-# umbrellas do not link because it depends on pulp::host (see audio/).
+# GraphEditorView is pulp-view-graph-editor (see audio/), the one view target
+# that depends on pulp::host; the view umbrellas do not link it.
 add_subdirectory(audio)
+
+# The audio-dependent widgets (meters, waveform, spectrum, ...) are a separate
+# target that links signal/audio but never pulp::host; the view umbrellas link it.
+add_library(pulp-view-audio)
+add_library(pulp::view-audio ALIAS pulp-view-audio)
 
 add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)
@@ -55,6 +60,10 @@ else()
             "PULP_ENABLE_JS=OFF path in core/view/CMakeLists.txt.")
     endif()
 endif()
+# The umbrellas carry the audio widgets on both paths, so a JS-free consumer of
+# pulp::view keeps Meter/WaveformView/SpectrumView without naming view-audio.
+target_link_libraries(pulp-view PUBLIC pulp::view-audio)
+target_link_libraries(pulp-view-native PUBLIC pulp::view-audio)
 
 # ── pulp-view-reload-exports (live-swap M2b) ─────────────────────────────────
 # A tiny static lib whose single keep-alive TU references the editor ABI surface
@@ -81,7 +90,7 @@ foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-na
 endforeach()
 unset(_pulp_view_target)
 
-foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native)
+foreach(_pulp_view_target pulp-view pulp-view-native pulp-view-audio)
     target_include_directories(${_pulp_view_target}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>
@@ -228,13 +237,22 @@ endforeach()
 unset(_pulp_view_target)
 
 target_link_libraries(pulp-view-core PUBLIC
-    pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio
+    pulp::canvas pulp::events pulp::state pulp::platform
 )
+
+# Audio-dependent view widgets are isolated in their own target. The pulp::view
+# and pulp::view-native umbrellas link it (above), preserving the public consumer
+# surface while keeping pulp-view-core's direct PUBLIC closure audio-free.
+target_link_libraries(pulp-view-audio PUBLIC pulp::view-core)
+target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi)
 # Host-backed view facilities are implemented by pulp-host. Keeping that
 # integration out of both view targets is load-bearing: every plugin format
 # links pulp::view, so a view-to-host edge would make even a plugin that only
 # draws native controls acquire plugin hosting and playback transitively.
-target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
+# The scripting bridge instantiates audio widgets (Meter, WaveformView,
+# SpectrumView, etc.), so its static link closure must carry the audio view
+# target after those implementations leave pulp-view-core.
+target_link_libraries(pulp-view-script PUBLIC pulp::view-audio)
 # design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.
 # PUBLIC because the public header model_manager_view.hpp includes

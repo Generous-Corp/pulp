@@ -76,25 +76,23 @@ struct WaveformGpuLayerPlan {
     bool playhead_only_redraw = false;
 };
 
-[[nodiscard]] WaveformGpuStaticLayerPlan build_waveform_gpu_static_layer_plan(
-    const pulp::audio::WaveformOverview& thumbnail,
-    const WaveformViewport& viewport,
-    const WaveformGpuLayerConfig& config = {});
+[[nodiscard]] WaveformGpuStaticLayerPlan
+build_waveform_gpu_static_layer_plan(const pulp::audio::WaveformOverview& thumbnail,
+                                     const WaveformViewport& viewport,
+                                     const WaveformGpuLayerConfig& config = {});
 
-[[nodiscard]] WaveformGpuLayerPlan build_waveform_gpu_layer_plan(
-    const pulp::audio::WaveformOverview& thumbnail,
-    const WaveformViewport& viewport,
-    int64_t playhead_sample,
-    const WaveformGpuLayerConfig& config = {},
-    const WaveformGpuUploadKey* previous_static_key = nullptr);
+[[nodiscard]] WaveformGpuLayerPlan
+build_waveform_gpu_layer_plan(const pulp::audio::WaveformOverview& thumbnail,
+                              const WaveformViewport& viewport, int64_t playhead_sample,
+                              const WaveformGpuLayerConfig& config = {},
+                              const WaveformGpuUploadKey* previous_static_key = nullptr);
 
 /// Fill caller-owned vertices for CPU fallback or GPU upload staging. Returns
 /// the number of vertices written, capped by dst.size(). This function performs
 /// no allocation and does not touch backend GPU resources.
-std::size_t fill_waveform_peak_vertices(
-    const pulp::audio::WaveformOverview& thumbnail,
-    const WaveformGpuStaticLayerPlan& plan,
-    std::span<WaveformPeakVertex> dst) noexcept;
+std::size_t fill_waveform_peak_vertices(const pulp::audio::WaveformOverview& thumbnail,
+                                        const WaveformGpuStaticLayerPlan& plan,
+                                        std::span<WaveformPeakVertex> dst) noexcept;
 
 struct WaveformGpuResourceRecord {
     WaveformGpuUploadKey key{};
@@ -130,7 +128,7 @@ struct WaveformGpuResourcePutResult {
 /// Not thread-safe; async backend completions should marshal cache updates back
 /// to the owning render/control thread or use external synchronization.
 class WaveformGpuResourceCache {
-public:
+  public:
     explicit WaveformGpuResourceCache(std::size_t capacity = 8);
 
     bool prepare(std::size_t capacity,
@@ -138,20 +136,22 @@ public:
     [[nodiscard]] std::vector<WaveformGpuResourceRecord> clear_and_return_records();
 
     [[nodiscard]] WaveformGpuResourcePutResult put(const WaveformGpuUploadKey& key,
-                                                   std::uint64_t resource_id,
-                                                   std::size_t bytes,
+                                                   std::uint64_t resource_id, std::size_t bytes,
                                                    std::uint64_t backend_generation = 1);
     const WaveformGpuResourceRecord* find(const WaveformGpuUploadKey& key) noexcept;
     const WaveformGpuResourceRecord* find(const WaveformGpuUploadKey& key,
                                           std::uint64_t backend_generation) noexcept;
-    bool erase(const WaveformGpuUploadKey& key,
-               WaveformGpuResourceRecord& removed_record) noexcept;
+    bool erase(const WaveformGpuUploadKey& key, WaveformGpuResourceRecord& removed_record) noexcept;
 
     [[nodiscard]] WaveformGpuResourceCacheStats stats() const noexcept;
-    [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
-    [[nodiscard]] std::size_t size() const noexcept { return records_.size(); }
+    [[nodiscard]] std::size_t capacity() const noexcept {
+        return capacity_;
+    }
+    [[nodiscard]] std::size_t size() const noexcept {
+        return records_.size();
+    }
 
-private:
+  private:
     std::vector<WaveformGpuResourceRecord> records_;
     std::size_t capacity_ = 0;
     std::uint64_t clock_ = 0;

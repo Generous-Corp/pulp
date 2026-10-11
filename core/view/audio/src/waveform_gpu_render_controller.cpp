@@ -16,10 +16,8 @@ WaveformGpuRenderDecision make_base_decision(const WaveformGpuLayerPlan& plan,
 }
 
 WaveformGpuRenderDecision fill_vertices_for_action(
-    const pulp::audio::WaveformOverview& thumbnail,
-    const WaveformGpuLayerPlan& plan,
-    std::span<WaveformPeakVertex> staging_vertices,
-    std::uint64_t backend_generation,
+    const pulp::audio::WaveformOverview& thumbnail, const WaveformGpuLayerPlan& plan,
+    std::span<WaveformPeakVertex> staging_vertices, std::uint64_t backend_generation,
     WaveformGpuRenderActionKind ready_action) noexcept {
     auto decision = make_base_decision(plan, backend_generation);
     if (!plan.static_layer.cpu_fallback_available &&
@@ -33,9 +31,7 @@ WaveformGpuRenderDecision fill_vertices_for_action(
     }
 
     decision.vertices_written = fill_waveform_peak_vertices(
-        thumbnail,
-        plan.static_layer,
-        staging_vertices.first(decision.required_vertices));
+        thumbnail, plan.static_layer, staging_vertices.first(decision.required_vertices));
     if (decision.vertices_written != decision.required_vertices) {
         decision.action = WaveformGpuRenderActionKind::NoOpVertexFillFailed;
         return decision;
@@ -51,28 +47,24 @@ WaveformGpuRenderDecision fill_vertices_for_action(
 WaveformGpuRenderController::WaveformGpuRenderController(std::size_t cache_capacity)
     : cache_(cache_capacity) {}
 
-bool WaveformGpuRenderController::prepare(
-    std::size_t cache_capacity,
-    std::vector<WaveformGpuResourceRecord>* evicted_records) {
+bool WaveformGpuRenderController::prepare(std::size_t cache_capacity,
+                                          std::vector<WaveformGpuResourceRecord>* evicted_records) {
     return cache_.prepare(cache_capacity, evicted_records);
 }
 
-WaveformGpuRenderDecision WaveformGpuRenderController::plan_render(
-    const pulp::audio::WaveformOverview& thumbnail,
-    const WaveformGpuLayerPlan& plan,
-    const WaveformGpuRenderContext& context,
-    std::span<WaveformPeakVertex> staging_vertices) noexcept {
+WaveformGpuRenderDecision
+WaveformGpuRenderController::plan_render(const pulp::audio::WaveformOverview& thumbnail,
+                                         const WaveformGpuLayerPlan& plan,
+                                         const WaveformGpuRenderContext& context,
+                                         std::span<WaveformPeakVertex> staging_vertices) noexcept {
     if (!plan.static_layer.valid || !plan.static_layer.upload_key.valid()) {
         return {};
     }
 
     if (!plan.static_layer.prefer_gpu) {
-        return fill_vertices_for_action(
-            thumbnail,
-            plan,
-            staging_vertices,
-            context.backend_generation,
-            WaveformGpuRenderActionKind::CpuFallbackReady);
+        return fill_vertices_for_action(thumbnail, plan, staging_vertices,
+                                        context.backend_generation,
+                                        WaveformGpuRenderActionKind::CpuFallbackReady);
     }
 
     if (!context.backend_available || context.backend_generation == 0) {
@@ -81,17 +73,15 @@ WaveformGpuRenderDecision WaveformGpuRenderController::plan_render(
             decision.action = WaveformGpuRenderActionKind::NoOpBackendUnavailable;
             return decision;
         }
-        return fill_vertices_for_action(
-            thumbnail,
-            plan,
-            staging_vertices,
-            context.backend_generation,
-            WaveformGpuRenderActionKind::CpuFallbackReady);
+        return fill_vertices_for_action(thumbnail, plan, staging_vertices,
+                                        context.backend_generation,
+                                        WaveformGpuRenderActionKind::CpuFallbackReady);
     }
 
     auto decision = make_base_decision(plan, context.backend_generation);
     decision.used_gpu_path = true;
-    if (const auto* cached = cache_.find(plan.static_layer.upload_key, context.backend_generation)) {
+    if (const auto* cached =
+            cache_.find(plan.static_layer.upload_key, context.backend_generation)) {
         decision.cache_hit = true;
         decision.cached_resource = *cached;
         decision.action = plan.playhead_only_redraw && plan.playhead.visible
@@ -100,42 +90,33 @@ WaveformGpuRenderDecision WaveformGpuRenderController::plan_render(
         return decision;
     }
 
-    return fill_vertices_for_action(
-        thumbnail,
-        plan,
-        staging_vertices,
-        context.backend_generation,
-        WaveformGpuRenderActionKind::UploadStaticLayerReady);
+    return fill_vertices_for_action(thumbnail, plan, staging_vertices, context.backend_generation,
+                                    WaveformGpuRenderActionKind::UploadStaticLayerReady);
 }
 
-WaveformGpuResourcePutResult WaveformGpuRenderController::commit_uploaded_resource(
-    const WaveformGpuUploadKey& key,
-    std::uint64_t resource_id,
-    std::size_t bytes,
-    std::uint64_t backend_generation) {
+WaveformGpuResourcePutResult
+WaveformGpuRenderController::commit_uploaded_resource(const WaveformGpuUploadKey& key,
+                                                      std::uint64_t resource_id, std::size_t bytes,
+                                                      std::uint64_t backend_generation) {
     return cache_.put(key, resource_id, bytes, backend_generation);
 }
 
-WaveformGpuResourcePutResult WaveformGpuRenderController::commit_uploaded_resource(
-    const WaveformGpuRenderDecision& decision,
-    std::uint64_t resource_id,
-    std::uint64_t current_backend_generation) {
+WaveformGpuResourcePutResult
+WaveformGpuRenderController::commit_uploaded_resource(const WaveformGpuRenderDecision& decision,
+                                                      std::uint64_t resource_id,
+                                                      std::uint64_t current_backend_generation) {
     if (decision.action != WaveformGpuRenderActionKind::UploadStaticLayerReady ||
         !decision.upload_key.valid() || decision.upload_bytes == 0 ||
         decision.backend_generation == 0 ||
         decision.backend_generation != current_backend_generation) {
         return {};
     }
-    return cache_.put(
-        decision.upload_key,
-        resource_id,
-        decision.upload_bytes,
-        decision.backend_generation);
+    return cache_.put(decision.upload_key, resource_id, decision.upload_bytes,
+                      decision.backend_generation);
 }
 
-bool WaveformGpuRenderController::erase(
-    const WaveformGpuUploadKey& key,
-    WaveformGpuResourceRecord& removed_record) noexcept {
+bool WaveformGpuRenderController::erase(const WaveformGpuUploadKey& key,
+                                        WaveformGpuResourceRecord& removed_record) noexcept {
     return cache_.erase(key, removed_record);
 }
 

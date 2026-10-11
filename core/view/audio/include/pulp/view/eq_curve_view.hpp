@@ -1,13 +1,13 @@
 #pragma once
 
-#include <pulp/view/view.hpp>
-#include <pulp/view/animation.hpp>
-#include <pulp/view/graph_scale.hpp>
+#include <functional>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/state/store.hpp>
-#include <vector>
-#include <functional>
+#include <pulp/view/animation.hpp>
+#include <pulp/view/graph_scale.hpp>
+#include <pulp/view/view.hpp>
 #include <span>
+#include <vector>
 
 namespace pulp::view {
 
@@ -22,13 +22,13 @@ namespace pulp::view {
 // null, a shelf plateaus.
 
 class EqCurveView : public View {
-public:
+  public:
     enum class FilterType { low_pass, high_pass, band_pass, notch, peak, low_shelf, high_shelf };
 
     struct Band {
-        float frequency = 1000.0f;  // Hz
-        float gain_db = 0.0f;       // dB (-24 to +24)
-        float q = 1.0f;             // Q factor (0.1 to 30)
+        float frequency = 1000.0f; // Hz
+        float gain_db = 0.0f;      // dB (-24 to +24)
+        float q = 1.0f;            // Q factor (0.1 to 30)
         FilterType type = FilterType::peak;
         bool enabled = true;
         // Per-band color. Left fully transparent by default as the "unset"
@@ -42,26 +42,40 @@ public:
 
     // Band management
     void set_bands(std::vector<Band> bands);
-    const std::vector<Band>& bands() const { return bands_; }
+    const std::vector<Band>& bands() const {
+        return bands_;
+    }
     void set_band(size_t index, const Band& band);
     void add_band(Band band);
     void remove_band(size_t index);
-    size_t band_count() const { return bands_.size(); }
+    size_t band_count() const {
+        return bands_.size();
+    }
 
     // Display range
     void set_frequency_range(float min_hz, float max_hz);
     void set_gain_range(float min_db, float max_db);
-    float min_frequency() const { return min_freq_; }
-    float max_frequency() const { return max_freq_; }
-    float min_gain() const { return min_db_; }
-    float max_gain() const { return max_db_; }
+    float min_frequency() const {
+        return min_freq_;
+    }
+    float max_frequency() const {
+        return max_freq_;
+    }
+    float min_gain() const {
+        return min_db_;
+    }
+    float max_gain() const {
+        return max_db_;
+    }
 
     // Sample rate the bands are designed against. A digital filter's response
     // depends on it — the same 8 kHz shelf is a gentle tilt at 96 kHz and a
     // near-cliff at 44.1 kHz — so a curve drawn at the wrong rate is the wrong
     // curve. Set it from Processor::prepare().
     void set_sample_rate(float sample_rate);
-    float sample_rate() const { return sample_rate_; }
+    float sample_rate() const {
+        return sample_rate_;
+    }
 
     // Magnitude of the combined band cascade at a frequency, in dB. The value
     // the curve is drawn from; exposed so callers can label a readout or probe
@@ -75,29 +89,49 @@ public:
     DecibelScale gain_scale() const;
 
     // Grid lines
-    void set_show_grid(bool show) { show_grid_ = show; }
-    bool show_grid() const { return show_grid_; }
+    void set_show_grid(bool show) {
+        show_grid_ = show;
+    }
+    bool show_grid() const {
+        return show_grid_;
+    }
 
     // Per-band curves + translucent fills, each in the band's color, drawn under
     // the composite so every handle sits on its own curve. On by default.
-    void set_show_band_curves(bool show) { show_band_curves_ = show; }
-    bool show_band_curves() const { return show_band_curves_; }
+    void set_show_band_curves(bool show) {
+        show_band_curves_ = show;
+    }
+    bool show_band_curves() const {
+        return show_band_curves_;
+    }
 
     // Draw handles for DISABLED (bypassed) bands as dimmed dots instead of
     // hiding them. Off by default so existing callers are unaffected; a host
     // that models bypass (the composite already excludes a disabled band) turns
     // this on so a bypassed band still shows a faded, re-grabbable handle.
-    void set_show_disabled_handles(bool show) { show_disabled_handles_ = show; }
-    bool show_disabled_handles() const { return show_disabled_handles_; }
+    void set_show_disabled_handles(bool show) {
+        show_disabled_handles_ = show;
+    }
+    bool show_disabled_handles() const {
+        return show_disabled_handles_;
+    }
 
     // dB (vertical) and frequency (horizontal) axis labels. On by default.
-    void set_show_labels(bool show) { show_labels_ = show; }
-    bool show_labels() const { return show_labels_; }
+    void set_show_labels(bool show) {
+        show_labels_ = show;
+    }
+    bool show_labels() const {
+        return show_labels_;
+    }
 
     // Live readout (frequency / gain / Q) of the band under the pointer or being
     // dragged. On by default.
-    void set_show_readout(bool show) { show_readout_ = show; }
-    bool show_readout() const { return show_readout_; }
+    void set_show_readout(bool show) {
+        show_readout_ = show;
+    }
+    bool show_readout() const {
+        return show_readout_;
+    }
 
     // Reserve empty space at the TOP of the plotting area (pixels). The grid,
     // curve, handles, and the top dB axis label are all pushed down by this
@@ -106,25 +140,37 @@ public:
     // clipping the "+12" label against the window edge. Off (0) by default so
     // existing callers are unaffected. The bottom axis (frequency labels) does
     // not move.
-    void set_content_top_padding(float px) { content_top_pad_ = px > 0.0f ? px : 0.0f; }
-    float content_top_padding() const { return content_top_pad_; }
+    void set_content_top_padding(float px) {
+        content_top_pad_ = px > 0.0f ? px : 0.0f;
+    }
+    float content_top_padding() const {
+        return content_top_pad_;
+    }
 
     // Index of the band handle at a local point, or -1. Exposes the handle
     // hit-test so a host that layers its own gestures on the dots (e.g.
     // ⌥-click to bypass) can reuse the exact handle geometry instead of
     // duplicating it. Additive; existing callers are unaffected.
-    int hit_test_handle(Point pos) const { return hit_test_band(pos); }
+    int hit_test_handle(Point pos) const {
+        return hit_test_band(pos);
+    }
 
     // Ease each handle's radius toward its target (resting vs. hovered/active)
     // instead of snapping, so a hover reads as a small settle rather than a pop.
     // Off by default (existing callers snap as before). A host that turns this
     // on should keep the render loop alive while hover_animating() is true — the
     // shared needs_continuous_frames() predicate already consults it.
-    void set_hover_animation(bool on) { hover_animation_ = on; }
-    bool hover_animation() const { return hover_animation_; }
+    void set_hover_animation(bool on) {
+        hover_animation_ = on;
+    }
+    bool hover_animation() const {
+        return hover_animation_;
+    }
 
     // True while any handle radius is mid-transition (drives continuous frames).
-    bool hover_animating() const { return hover_animating_; }
+    bool hover_animating() const {
+        return hover_animating_;
+    }
 
     // Default color assigned to band i when its Band::color is unset, from a
     // built-in palette. Exposed so callers can match handles or legends to it.
@@ -140,7 +186,9 @@ public:
     // simply draws nothing (and does not spin frames). When off, no overlay is
     // drawn even if stale smoothed data remains. A plugin can turn it off.
     void set_analyzer_enabled(bool on);
-    bool analyzer_enabled() const { return analyzer_enabled_; }
+    bool analyzer_enabled() const {
+        return analyzer_enabled_;
+    }
 
     // True only while the analyzer should drive per-vsync repaints: enabled AND
     // spectrum data present. `needs_continuous_frames()` consults this, so a
@@ -156,8 +204,12 @@ public:
     // over the dB labels so it never conflicts with band-dot dragging (a dot hit
     // always wins). On by default (active whenever the analyzer is used); a plugin
     // can disable it. The range is clamped to top ≤ +20, bottom ≥ −100, span ≥ 20.
-    void set_analyzer_scale_draggable(bool on) { analyzer_scale_draggable_ = on; }
-    bool analyzer_scale_draggable() const { return analyzer_scale_draggable_; }
+    void set_analyzer_scale_draggable(bool on) {
+        analyzer_scale_draggable_ = on;
+    }
+    bool analyzer_scale_draggable() const {
+        return analyzer_scale_draggable_;
+    }
 
     // ── Analyzer dBFS scale ─────────────────────────────────────────────────
     // The spectrum overlay is drawn on its OWN dBFS scale spanning the FULL
@@ -170,8 +222,12 @@ public:
         analyzer_top_db_ = top_db;
         analyzer_bottom_db_ = bottom_db;
     }
-    float analyzer_top_db() const { return analyzer_top_db_; }
-    float analyzer_bottom_db() const { return analyzer_bottom_db_; }
+    float analyzer_top_db() const {
+        return analyzer_top_db_;
+    }
+    float analyzer_bottom_db() const {
+        return analyzer_bottom_db_;
+    }
     // Map a dBFS value to a plot-space y via the analyzer scale (top_db → top of
     // plot, bottom_db → bottom). Clamped to the plot. Independent of the gain
     // axis; the spectrum overlay and any analyzer tick labels use this.
@@ -208,20 +264,30 @@ public:
     // (relative / group moves, numeric scrubbing) and drives the store itself
     // turns this OFF so the view does not double-write, while STILL receiving
     // host-playback updates through the bind_bands listener (Direction B).
-    void set_record_gestures(bool on) { record_gestures_ = on; }
-    bool record_gestures() const { return record_gestures_; }
+    void set_record_gestures(bool on) {
+        record_gestures_ = on;
+    }
+    bool record_gestures() const {
+        return record_gestures_;
+    }
 
     // Interaction callbacks
     std::function<void(size_t band_index, Band band)> on_band_changed;
     std::function<void(size_t band_index)> on_band_selected;
 
     // Selected band
-    int selected_band() const { return selected_band_; }
-    void set_selected_band(int index) { selected_band_ = index; }
+    int selected_band() const {
+        return selected_band_;
+    }
+    void set_selected_band(int index) {
+        selected_band_ = index;
+    }
 
     // Band currently under the pointer (-1 if none). Drives the hover highlight
     // and readout; exposed so hosts/tests can observe hover state.
-    int hovered_band() const { return hovered_band_; }
+    int hovered_band() const {
+        return hovered_band_;
+    }
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
@@ -237,9 +303,11 @@ public:
     // on_mouse_event — so the hover highlight + readout must track it here.
     void on_hover_move(Point local_pos) override;
     void on_mouse_leave() override;
-    bool wants_mouse_input() const override { return true; }
+    bool wants_mouse_input() const override {
+        return true;
+    }
 
-private:
+  private:
     std::vector<Band> bands_;
     float min_freq_ = 20.0f;
     float max_freq_ = 20000.0f;
@@ -251,10 +319,10 @@ private:
     bool show_disabled_handles_ = false;
     bool show_labels_ = true;
     bool show_readout_ = true;
-    float content_top_pad_ = 0.0f;  // empty space reserved at the top (px)
-    bool hover_animation_ = false;  // ease handle radius toward target (opt-in)
-    bool hover_animating_ = false;  // any handle mid-transition this frame
-    std::vector<float> handle_radius_;  // per-band eased radius (-1 = uninit)
+    float content_top_pad_ = 0.0f;     // empty space reserved at the top (px)
+    bool hover_animation_ = false;     // ease handle radius toward target (opt-in)
+    bool hover_animating_ = false;     // any handle mid-transition this frame
+    std::vector<float> handle_radius_; // per-band eased radius (-1 = uninit)
     std::vector<float> spectrum_;
     // Persistent temporally-smoothed spectrum (fast attack / slow release),
     // updated per frame in set_spectrum() and drawn from in paint() so the
@@ -287,7 +355,7 @@ private:
     bool analyzer_enabled_ = true;
     bool analyzer_scale_draggable_ = true;
     // Left dB-gutter drag-to-zoom transient state.
-    bool gutter_hover_ = false;        // pointer over the gutter (affordance)
+    bool gutter_hover_ = false; // pointer over the gutter (affordance)
     bool analyzer_drag_active_ = false;
     float analyzer_drag_start_y_ = 0.0f;
     float analyzer_drag_start_top_ = 0.0f;
