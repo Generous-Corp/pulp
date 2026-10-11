@@ -42,11 +42,7 @@ SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl",
 INCLUDE_RE = re.compile(r'^\s*#\s*(?:include|import)\s*([<"])([^>"]+)[>"]')
 
 # (file, include) -> reason. Every entry must still match, see module doc.
-ALLOWED: dict[tuple[str, str], str] = {
-    ("core/platform/src/android/jni_motion.cpp", "pulp/view/motion.hpp"):
-        "Android motion JNI shim; compiled into pulp-jni, not pulp-platform. "
-        "Moves next to the view sources with the view-core carve.",
-}
+ALLOWED: dict[tuple[str, str], str] = {}
 
 
 def scan_file(path: pathlib.Path, rel: str, root: pathlib.Path) -> list[tuple[str, int, str]]:

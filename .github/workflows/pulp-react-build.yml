@@ -33,7 +33,7 @@ jobs:
     name: Build and test @pulp/react
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -109,7 +109,7 @@ jobs:
     name: Build and test @pulp/import-ir
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
         # No `cache: npm` here — the package has no lockfile, and

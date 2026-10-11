@@ -166,12 +166,27 @@ gpu_leg() {
         --target PulpGpuSmoke_AUv3 --target PulpGpuSmoke_HostApp_Embed \
         -- -sdk "$gpu_sdk" CODE_SIGNING_ALLOWED=NO || return
 
-    if ! find "$gpu_build_dir" -type d -name "PulpGpuSmoke.appex" -print -quit \
-        | grep -q .; then
+    local gpu_appex gpu_host_app
+    gpu_appex=$(find "$gpu_build_dir" -type d -name "PulpGpuSmoke.appex" \
+        -not -path "*/PlugIns/*" -print -quit)
+    if [[ -z "$gpu_appex" ]]; then
         echo "ERROR: $gpu_sdk GPU leg did not produce PulpGpuSmoke.appex" >&2
         return 1
     fi
     echo "OK: iOS GPU smoke example compiled with PULP_ENABLE_GPU=ON (simulator Skia slice)"
+
+    # The build above runs with CODE_SIGNING_ALLOWED=NO, which hides any bundle
+    # layout that codesign rejects. Sign copies ad hoc, the way Xcode signs the
+    # products, so an extension that could never be installed fails here.
+    gpu_host_app=$(find "$gpu_build_dir" -type d -name "PulpGpuSmoke.app" -print -quit)
+    if [[ -z "$gpu_host_app" ]]; then
+        echo "ERROR: $gpu_sdk GPU leg did not produce PulpGpuSmoke.app" >&2
+        return 1
+    fi
+    run_logged "$gpu_sdk AUv3 ad-hoc signing" 300 "$build_root/sign-$gpu_sdk-gpu.log" \
+        bash "$root/tools/scripts/check_apple_bundle_signing.sh" \
+        "$gpu_appex" "$gpu_host_app" || return
+    echo "OK: iOS AUv3 extension and host app sign ad hoc and verify strictly"
 }
 
 # Stop each process before walking its children so it cannot spawn a new one

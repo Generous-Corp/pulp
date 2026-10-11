@@ -218,3 +218,16 @@ test('metadata validation preserves semantic and canvas bindings and rejects dup
     canvas_bindings: [{ ...canvas, anchor: 'canvas:8' }],
   }), /canvas binding 0 is invalid/);
 });
+
+test('normalizes supported pseudo planes and rejects malformed paint', () => {
+  const pseudo = { index: 0, anchor: 'body', path: [], pseudo: 'before',
+    box: { left: 0, top: 0, width: 320, height: 240 },
+    background_gradient: 'radial-gradient(circle, #0ff, transparent)',
+    opacity: 0.5, z_index: 0, pointer_events: 'none' };
+  const normalized = normalizeMaterializedMetadata({ pseudo_bindings: [pseudo] });
+  assert.deepEqual(normalized.pseudo_bindings, [pseudo]);
+  assert.throws(() => normalizeMaterializedMetadata({ pseudo_bindings: [{
+    ...pseudo, background_gradient: 'url(foo.png)',
+  }] }), /pseudo binding 0 paint is invalid/);
+  assert.throws(() => normalizeMaterializedMetadata({ pseudo_bindings: [pseudo, { ...pseudo, pseudo: 'after' }] }), /duplicate index 0/);
+});

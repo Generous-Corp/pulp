@@ -510,7 +510,10 @@ them yourself.
 
 ### Ship a self-contained GPU bundle
 
-A GPU plugin loads `libwgpu_native.dylib` at runtime. From a source build the
+A plugin built with Skia's Dawn (the normal GPU build) does not load
+`libwgpu_native.dylib` and needs no WebGPU runtime beside it. A build without
+Skia's Dawn falls back to wgpu-native and loads `libwgpu_native.dylib` at
+runtime. From a source build the
 WebGPU dependency copies that dylib next to each format binary automatically; an
 installed-SDK consumer has no such upstream copy step, so a `find_package(Pulp)`
 plugin must place the dylib itself and bake an `@loader_path` rpath — otherwise

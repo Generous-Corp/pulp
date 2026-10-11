@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # `build-api-docs.sh` reads the reviewed contract-debt baseline from
           # the trusted `origin/main` ref, so the history must be fetchable.
