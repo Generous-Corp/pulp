@@ -90,6 +90,7 @@ paths = [
   "tools/scripts/test_changed_surface_policy.py",
   "tools/scripts/test_changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_shadow_plans.py",
+  "tools/scripts/test_check_apple_bundle_signing.py",
   "tools/scripts/test_check_au_component_preflight.py",
   "tools/scripts/test_check_cli_mcp_parity.py",
   "tools/scripts/test_check_daw_bench_evidence.py",
@@ -1558,7 +1559,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2c5157571b02"
+name = "script-readers-5d023dbea308"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
