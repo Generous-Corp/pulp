@@ -15,7 +15,7 @@ jobs:
     name: Audit dependency pins and notices
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Run dependency audit
         run: |

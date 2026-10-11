@@ -64,6 +64,15 @@ class AssetEscapeTests(unittest.TestCase):
         self.assertIn("outside the document directory", stderr)
         self.assertEqual(escaped, missing, "an escaping asset must render as if absent")
 
+    def test_escape_to_an_absent_file_is_refused_identically(self) -> None:
+        # The refusal is decided by text before any lookup, so it must not
+        # reveal whether a file exists outside the document.
+        missing, _ = self.render("assets/missing.png")
+        absent, stderr = self.render("../absent.png")
+        self.assertIn("refused", stderr)
+        self.assertIn("outside the document directory", stderr)
+        self.assertEqual(absent, missing)
+
 
 def main() -> int:
     global OBSERVER

@@ -47,6 +47,7 @@
     "browser_capture/materialized_coordinate_space.mjs",
     "browser_capture/materialized_layout_bindings.mjs",
     "browser_capture/materialized_paint_bindings.mjs",
+    "browser_capture/materialized_pseudo_bindings.mjs",
     "browser_capture/materialized_text_bindings.mjs",
     "browser_capture/network_dependencies.mjs",
     "browser_capture/platform_fonts.mjs",

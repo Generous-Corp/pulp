@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -919,14 +920,16 @@ TEST_CASE("runtime asset resolution leaves a resolvable manifest path alone",
     CHECK(resolved_asset_uri(relative_asset, document_directory) ==
           "file://" + relative.lexically_normal().generic_string());
 
-    // An absolute path outside the document is honoured when its bytes match
-    // the declared SHA-256.
+    // An absolute path inside the document resolves; one outside it does not,
+    // even with a matching declared SHA-256.
     IRAssetRef absolute_asset;
     absolute_asset.asset_id = "logo";
+    absolute_asset.local_path = relative.string();
+    CHECK(resolved_asset_uri(absolute_asset, document_directory) ==
+          "file://" + relative.lexically_normal().generic_string());
     absolute_asset.local_path = absolute.string();
     absolute_asset.content_hash = pulp::runtime::sha256_hex("pulp-test-asset-bytes");
-    CHECK(resolved_asset_uri(absolute_asset, document_directory) ==
-          "file://" + absolute.lexically_normal().generic_string());
+    CHECK(resolve_asset_file(absolute_asset, document_directory) == std::nullopt);
 
     // A self-contained URI still wins over an absent file, unchanged.
     IRAssetRef inline_asset;
@@ -978,17 +981,110 @@ TEST_CASE("runtime asset resolution refuses a manifest path that leaves the docu
         asset.local_path = "linked/escape.png";
         refused(asset);
     }
-    SECTION("an escaping path whose bytes match a declared sha256 is honoured") {
+    SECTION("an escape whose target does not exist is refused the same way") {
+        // Refusing by text, before any lookup, keeps the answer from revealing
+        // whether a file exists outside the document.
+        asset.local_path = "../absent.png";
+        refused(asset);
+        asset.local_path = "../escape.png";
+        refused(asset);
+    }
+    SECTION("a backslash-separated escape") {
+        asset.local_path = "..\\escape.png";
+        refused(asset);
+    }
+    SECTION("a drive-letter root") {
+        asset.local_path = "C:escape.png";
+        refused(asset);
+        asset.local_path = "C:\\escape.png";
+        refused(asset);
+    }
+    SECTION("a UNC root") {
+        asset.local_path = "//server/share/escape.png";
+        refused(asset);
+        asset.local_path = "\\\\server\\share\\escape.png";
+        refused(asset);
+    }
+    SECTION("a declared sha256 that matches the outside file does not admit it") {
+        // The document controls the hash, so a matching hash proves nothing
+        // about whether the document may read that file.
         asset.local_path = "../escape.png";
         asset.content_hash = pulp::runtime::sha256_hex("outside-bytes");
-        CHECK(resolve_asset_file(asset, document_directory) == outside.lexically_normal());
+        refused(asset);
+        asset.local_path = outside.string();
+        refused(asset);
     }
     SECTION("paths that stay inside the document still resolve") {
         asset.local_path = "assets/../assets/inside.png";
         CHECK(resolve_asset_file(asset, document_directory).has_value());
+        asset.local_path = "other/../assets/inside.png";
+        CHECK(resolve_asset_file(asset, document_directory).has_value());
         asset.local_path = (document_directory / "assets" / "inside.png").string();
         CHECK(resolve_asset_file(asset, document_directory).has_value());
     }
+}
+
+TEST_CASE("runtime asset resolution admits Pulp's asset cache only for a matching hash",
+          "[design-ir-helpers][asset-resolution][path-escape]") {
+    TempTree tree;
+    const auto document_directory = tree.path / "project" / "doc";
+    fs::create_directories(document_directory);
+    const auto cache = tree.path / "cache";
+    const auto cached = write_bytes(cache / "by-hash" / "fetched.png", "fetched-bytes");
+    const auto elsewhere = write_bytes(tree.path / "elsewhere.png", "fetched-bytes");
+
+    struct CacheEnv {
+        std::optional<std::string> saved;
+        explicit CacheEnv(const fs::path& value) {
+            if (const char* previous = std::getenv("PULP_IMPORT_ASSET_CACHE"))
+                saved = previous;
+            set(value.string());
+        }
+        ~CacheEnv() {
+            saved ? set(*saved) : set("");
+        }
+        static void set(const std::string& value) {
+#ifdef _WIN32
+            _putenv_s("PULP_IMPORT_ASSET_CACHE", value.c_str());
+#else
+            if (value.empty())
+                ::unsetenv("PULP_IMPORT_ASSET_CACHE");
+            else
+                ::setenv("PULP_IMPORT_ASSET_CACHE", value.c_str(), 1);
+#endif
+        }
+    } cache_env(cache);
+
+    IRAssetRef asset;
+    asset.asset_id = "fetched";
+    asset.content_hash = pulp::runtime::sha256_hex("fetched-bytes");
+
+    SECTION("a cache path with a matching hash loads") {
+        asset.local_path = cached.string();
+        CHECK(resolve_asset_file(asset, document_directory) == cached.lexically_normal());
+    }
+    SECTION("a cache path with a different hash is refused") {
+        asset.local_path = cached.string();
+        asset.content_hash = pulp::runtime::sha256_hex("other-bytes");
+        CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    }
+    SECTION("a document-relative path climbing into the cache is refused") {
+        asset.local_path = "../../cache/by-hash/fetched.png";
+        CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    }
+    SECTION("an absolute path outside the cache is refused even with a matching hash") {
+        asset.local_path = elsewhere.string();
+        CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    }
+#ifndef _WIN32
+    SECTION("cache membership follows the resolved file, not the manifest text") {
+        std::error_code ec;
+        fs::create_directory_symlink(tree.path, cache / "up", ec);
+        REQUIRE_FALSE(ec);
+        asset.local_path = (cache / "up" / "elsewhere.png").string();
+        CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    }
+#endif
 }
 
 TEST_CASE("runtime asset resolution verifies a packaged asset before recovering a stale path",
