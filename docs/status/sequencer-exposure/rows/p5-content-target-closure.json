@@ -5,8 +5,7 @@
   "delivery_state": "pending",
   "claim_id": "p5-content-target-closure-20261010",
   "owned_paths": [
-    "examples/timeline-sdk-consumer/CMakeLists.txt",
-    "examples/StepSequencer/CMakeLists.txt"
+    "examples/timeline-sdk-consumer/CMakeLists.txt"
   ],
   "evidence": [
     {
@@ -14,12 +13,6 @@
       "needles": [
         "Audit the installed target graph, not a hand-maintained dependency list.",
         "Pulp::timeline"
-      ]
-    },
-    {
-      "path": "examples/StepSequencer/CMakeLists.txt",
-      "needles": [
-        "target_link_libraries(StepSequencer_CLAP PRIVATE pulp::content)"
       ]
     }
   ],

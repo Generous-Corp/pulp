@@ -122,7 +122,9 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 #   pulp-format — the adapter the plugin is packaged as. Its own closure brings
 #     the parameter store and the buffer types: state and events directly,
 #     signal and sample_bank_manifest through pulp-audio, plus graph and
-#     native-components.
+#     native-components, and content: the CLAP and AU adapters own a
+#     PresetManager whose preset list includes installed content-pack presets
+#     (ContentRegistry), so pulp-format-core links pulp-content.
 #
 # None of this is a permission. It is the bill the format packaging currently
 # presents, written down so the gate polices the artifact that exists instead
@@ -135,7 +137,7 @@ set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
 # that the concrete piano roll necessarily reaches. Format packaging contributes
 # the remaining modules by the same routes as the step-sequencer plugin.
 set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
-    events graph native-components sample_bank_manifest signal state)
+    content events graph native-components sample_bank_manifest signal state)
 
 # Entries whose edge only exists in some configurations, appended under the
 # condition that creates them. Appending rather than exempting is deliberate:

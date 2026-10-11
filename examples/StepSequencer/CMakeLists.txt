@@ -14,13 +14,6 @@ pulp_add_plugin(StepSequencer
     MANUFACTURER_CODE "Pulp"
 )
 
-# The content registry was carved out of pulp-state. Keep this plugin's
-# dependency explicit at its consumer boundary rather than relying on the
-# historical state transitive edge.
-if(TARGET StepSequencer_CLAP)
-    target_link_libraries(StepSequencer_CLAP PRIVATE pulp::content)
-endif()
-
 # What does packaging this sequencer as a plugin actually cost, and what does
 # the binary certainly contain? TIER is the ceiling — nothing outside it or
 # PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP in tools/cmake/PulpLinkFloor.cmake may
