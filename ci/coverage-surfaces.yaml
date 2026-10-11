@@ -74,8 +74,8 @@ producers:
     flag: os-macos
     report: build-coverage/coverage.cobertura.xml
     expected_component_sets: [native-default, macos-platform]
-    events: [schedule-8h, workflow-dispatch]
-    cadence: supersession-immune 8-hour refresh
+    events: [pull-request, schedule-8h, workflow-dispatch]
+    cadence: every native PR plus supersession-immune 8-hour refresh
     uploads:
       - workflow: .github/workflows/coverage.yml
         job: coverage

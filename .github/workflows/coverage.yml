@@ -29,6 +29,7 @@ permissions:
 # planning/coverage-tooling-decision-2026-04-21.md §7.
 
 on:
+  pull_request:
   schedule:
     # Supersession-immune main-dashboard refresh. A scheduled run lives in its
     # own concurrency group (see `concurrency:` below) and forces the full

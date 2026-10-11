@@ -402,7 +402,8 @@ class AdvisoryMacOSCadenceTests(unittest.TestCase):
         for name, path in ADVISORY_WORKFLOWS.items():
             with self.subTest(workflow=name):
                 triggers = trigger_map(load_workflow(path))
-                self.assertNotIn("pull_request", triggers)
+                if name != "coverage":
+                    self.assertNotIn("pull_request", triggers)
                 self.assertIn("schedule", triggers)
                 self.assertIn("workflow_dispatch", triggers)
                 if name == "coverage":

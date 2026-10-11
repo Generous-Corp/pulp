@@ -229,7 +229,7 @@ class CoverageSurfaceContract(unittest.TestCase):
 
     def test_canonical_refresh_and_pr_triggers_cannot_disappear(self):
         canonical_on = self.workflow(CANONICAL_WORKFLOW)["on"]
-        self.assertNotIn("pull_request", canonical_on)
+        self.assertIn("pull_request", canonical_on)
         self.assertNotIn("push", canonical_on)
         self.assertEqual(
             canonical_on["schedule"],
