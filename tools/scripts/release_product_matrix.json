@@ -65,6 +65,7 @@
     "pulp-audio-analysis",
     "pulp-authoring-capsule",
     "pulp-canvas",
+    "pulp-content",
     "pulp-dawproject-export",
     "pulp-dawproject-import",
     "pulp-design-import",

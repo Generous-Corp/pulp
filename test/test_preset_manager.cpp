@@ -1122,6 +1122,7 @@ TEST_CASE("ContentCapabilityManifest loads from disk and drives PresetManager co
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
+    pm.set_content_preset_source(content_registry_preset_source());
     pm.set_content_data_root(data_root);
     pm.set_content_manifest(*manifest);
 
@@ -1146,6 +1147,7 @@ TEST_CASE("PresetManager exposes content-pack presets as read-only expansions",
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
+    pm.set_content_preset_source(content_registry_preset_source());
     pm.set_content_data_root(data_root);
     pm.set_content_plugin_id("dev.pulp.test.plugin");
     pm.set_content_capabilities({"content.presets.v1"});
@@ -1179,6 +1181,43 @@ TEST_CASE("PresetManager exposes content-pack presets as read-only expansions",
     auto content_after_save = pm.content_presets();
     REQUIRE(content_after_save.size() == 1);
     REQUIRE(fs::exists(content_after_save.front().path));
+}
+
+TEST_CASE("PresetManager lists content-pack presets only through an installed source",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-content-source");
+    const auto data_root = sandbox.root / "user-data";
+    write_content_pack(data_root, "dev.pulp.test.plugin", "dev.pulp.test.expansion", "0.1.0");
+
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+    pm.set_content_data_root(data_root);
+    pm.set_content_plugin_id("dev.pulp.test.plugin");
+    pm.set_content_capabilities({"content.presets.v1"});
+
+    // pulp-state has no content-pack reader: the installed pack is invisible
+    // until a source is installed.
+    REQUIRE(pm.content_presets().empty());
+
+    std::vector<std::filesystem::path> seen_roots;
+    std::vector<std::string> seen_plugins;
+    pm.set_content_preset_source(
+        [&](const ContentCapabilityManifest& manifest, const std::filesystem::path& root) {
+            seen_plugins.push_back(manifest.plugin_id);
+            seen_roots.push_back(root);
+            return content_registry_preset_source()(manifest, root);
+        });
+    auto content = pm.content_presets();
+    REQUIRE(content.size() == 1);
+    REQUIRE(content.front().name == "ExpansionInit");
+    REQUIRE(seen_plugins == std::vector<std::string>{"dev.pulp.test.plugin"});
+    REQUIRE(seen_roots == std::vector<std::filesystem::path>{data_root});
+
+    // No plugin id: the source is never consulted.
+    pm.set_content_plugin_id("");
+    REQUIRE(pm.content_presets().empty());
+    REQUIRE(seen_plugins.size() == 1);
 }
 
 TEST_CASE("runtime content installer previews and installs only after approval",

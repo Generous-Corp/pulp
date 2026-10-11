@@ -3,6 +3,7 @@
 /// @file content_registry.hpp
 /// Discovery for installed data-only Pulp content packs.
 
+#include <pulp/state/content_capability_manifest.hpp>
 #include <pulp/state/preset_manager.hpp>
 
 #include <filesystem>
@@ -12,16 +13,6 @@
 #include <vector>
 
 namespace pulp::state {
-
-/// Capabilities a plugin declares before consuming installed content packs.
-struct ContentCapabilityManifest {
-    std::string schema = "pulp.plugin-runtime.v1";
-    std::string plugin_id;
-    std::vector<std::string> capabilities;
-    std::vector<std::string> content_kinds;
-    std::vector<std::string> hot_reload_kinds;
-    std::vector<std::string> manual_rescan_kinds;
-};
 
 /// Parse the plugin-side content capability manifest embedded in a built
 /// plugin/app bundle. Schema:
@@ -34,8 +25,7 @@ parse_content_capability_manifest(std::string_view json, std::string* error = nu
 
 /// Load and parse a plugin content capability manifest from disk.
 std::optional<ContentCapabilityManifest>
-load_content_capability_manifest(const std::filesystem::path& path,
-                                 std::string* error = nullptr);
+load_content_capability_manifest(const std::filesystem::path& path, std::string* error = nullptr);
 
 /// Serialize a capability manifest for embedding in plugin bundle resources.
 std::string content_capability_manifest_to_json(const ContentCapabilityManifest& manifest);
@@ -55,11 +45,7 @@ struct ContentPackInfo {
     std::vector<std::filesystem::path> wavetables;
 };
 
-enum class ContentReloadPolicy {
-    hot_reload,
-    manual_rescan,
-    restart_required
-};
+enum class ContentReloadPolicy { hot_reload, manual_rescan, restart_required };
 
 struct ContentInstallPolicy {
     std::string kind;
@@ -85,13 +71,15 @@ struct ContentInstallResult {
 /// Installed content lookup. Content packs are data-only and live under the
 /// same user-data root used by `pulp content install`.
 class ContentRegistry {
-public:
+  public:
     explicit ContentRegistry(std::filesystem::path data_root = platform_data_root());
 
     static std::filesystem::path platform_data_root();
     static std::filesystem::path content_root_for_data_root(const std::filesystem::path& data_root);
 
-    const std::filesystem::path& data_root() const { return data_root_; }
+    const std::filesystem::path& data_root() const {
+        return data_root_;
+    }
     std::filesystem::path content_root() const;
 
     /// Return all installed packs for a plugin id, without capability filtering.
@@ -103,26 +91,30 @@ public:
     /// Return content-pack presets as read-only factory/expansion presets.
     std::vector<PresetInfo> presets_for_plugin(const ContentCapabilityManifest& manifest) const;
 
-private:
+  private:
     std::filesystem::path data_root_;
 };
+
+/// A PresetManager content-preset source backed by this registry: it lists the
+/// installed packs' presets under `data_root`, or under platform_data_root()
+/// when `data_root` is empty. Format adapters install it on the PresetManager
+/// they own (PresetManager::set_content_preset_source).
+ContentPresetSource content_registry_preset_source();
 
 /// Validate a local content-pack directory or .pulpcontent archive against a
 /// trusted plugin runtime manifest without copying any files. This is the
 /// runtime-side backend for in-app "Install Content Pack..." and drag/drop
 /// review flows.
 ContentInstallPreview preview_content_pack_install(
-    const std::filesystem::path& input,
-    const ContentCapabilityManifest& plugin,
+    const std::filesystem::path& input, const ContentCapabilityManifest& plugin,
     const std::filesystem::path& data_root = ContentRegistry::platform_data_root());
 
 /// Install a previously previewable data-only content pack. `approved` must be
 /// true so UI code cannot accidentally turn preview/drop into mutation.
-ContentInstallResult install_content_pack(
-    const std::filesystem::path& input,
-    const ContentCapabilityManifest& plugin,
-    const std::filesystem::path& data_root = ContentRegistry::platform_data_root(),
-    bool approved = false);
+ContentInstallResult
+install_content_pack(const std::filesystem::path& input, const ContentCapabilityManifest& plugin,
+                     const std::filesystem::path& data_root = ContentRegistry::platform_data_root(),
+                     bool approved = false);
 
 const char* to_string(ContentReloadPolicy policy);
 
