@@ -920,15 +920,6 @@ void WidgetBridge::set_ai_cli_command(std::string cmd) {
     if (!cmd.empty()) ai_cli_command_ = std::move(cmd);
 }
 
-void WidgetBridge::set_time_source(TimeSource source) {
-    time_source_ = std::move(source);
-    performance_epoch_ = time_now();
-}
-
-std::chrono::steady_clock::time_point WidgetBridge::time_now() const {
-    return time_source_ ? time_source_() : std::chrono::steady_clock::now();
-}
-
 #ifdef PULP_BENCHMARK
 void WidgetBridge::set_bench_counters(render::bench::PerfCounters* counters) {
     bench_counters_ = counters;

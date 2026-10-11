@@ -418,14 +418,8 @@ public:
     void set_host_kind(std::string kind) { host_kind_ = std::move(kind); }
     const std::string& host_kind() const { return host_kind_; }
 
-    /// The clock that script-visible time reads: setTimeout / setInterval
-    /// deadlines, performance.now(), and the requestAnimationFrame timestamp
-    /// derived from it. Defaults to std::chrono::steady_clock::now, which is
-    /// what a host runs on. A harness that drives frames from a fixed schedule
-    /// installs its own source so a timer fires on a scheduled frame instead
-    /// of whenever wall time passes its deadline. Setting a source restarts
-    /// performance.now() at zero for this bridge. Date.now() is the engine's
-    /// own wall clock and does not follow it.
+    /// Clock for script timers, performance.now() and the rAF timestamp
+    /// (default steady_clock::now; Date.now() never follows it).
     using TimeSource = std::function<std::chrono::steady_clock::time_point()>;
     void set_time_source(TimeSource source);
     std::chrono::steady_clock::time_point time_now() const;
@@ -588,7 +582,6 @@ private:
     std::string ai_cli_command_ = "claude --print --model {model}";
     std::string host_kind_ = "unknown";
     TimeSource time_source_;
-    // performance.now() origin, per bridge (a document's time origin).
     std::chrono::steady_clock::time_point performance_epoch_ = std::chrono::steady_clock::now();
 
     struct AsyncExecResult {

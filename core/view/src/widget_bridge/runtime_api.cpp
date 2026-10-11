@@ -344,4 +344,16 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     });
 }
 
+// Script-visible time (timers, performance.now(), the rAF timestamp) reads
+// this clock; a harness on a fixed frame schedule installs its own source.
+// performance.now() restarts at zero for this bridge when the source changes.
+void WidgetBridge::set_time_source(TimeSource source) {
+    time_source_ = std::move(source);
+    performance_epoch_ = time_now();
+}
+
+std::chrono::steady_clock::time_point WidgetBridge::time_now() const {
+    return time_source_ ? time_source_() : std::chrono::steady_clock::now();
+}
+
 } // namespace pulp::view
