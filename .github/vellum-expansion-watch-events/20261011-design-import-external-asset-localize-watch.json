@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261011-design-import-external-asset-localize-watch",
+  "created_at": "2026-10-11T07:07:53Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Vellum move P18 (follow-up to F3b, Pulp #10077). Adds an end-to-end test, registered as import-design-external-asset-localized, proving pulp-import-design copies a local asset named outside the source design's directory into the saved document's assets/<sha256>.png: the file is recorded by that relative path, its bytes hash to the recorded content_hash, and with the external source deleted pulp-design-ir-observe still paints it from the saved document under the loader's document-root containment. A missing external file still reports asset-unresolved. The only source edits are comments: core/view/include/pulp/view/design_ir_io.hpp (doc comment on collect_design_ir_assets) and core/view/src/design_import.cpp (comment in resolve_local_asset) state that an external file keeps an absolute path there and that a caller serializing the IR must copy it beside the document first. They also correct a stale claim that a hash-gated recovery path remains for external files, which #10077 removed. Those two paths select design-ir-contract and render-assets-and-backends; the new test file and its manifest line select design-source-ingest. No behaviour, importer output, DesignIR schema, renderer, asset, packaging or Vellum artifact changes, and no authority moves.",
+  "tests": [
+    "python3 test/test_import_design_external_asset.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
