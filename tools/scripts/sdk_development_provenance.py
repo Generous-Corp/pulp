@@ -70,14 +70,12 @@ def gpu_archive_path(root):
     ``.lib``. Both are archive containers and are checked with the same
     identity normalization below.
     """
-    for suffix in ('.a', '.lib'):
-        candidate = root / ('core/gpu_audio/libpulp-gpu-audio' + suffix)
-        if candidate.is_file():
-            return candidate
-    for suffix in ('.a', '.lib'):
-        candidate = root / ('lib/libpulp-gpu-audio' + suffix)
-        if candidate.is_file():
-            return candidate
+    for directory in ('core/gpu_audio', 'lib'):
+        for stem in ('libpulp-gpu-audio', 'pulp-gpu-audio'):
+            for suffix in ('.a', '.lib'):
+                candidate = root / directory / (stem + suffix)
+                if candidate.is_file():
+                    return candidate
     raise FileNotFoundError(f'GPU archive not found under {root}')
 
 
