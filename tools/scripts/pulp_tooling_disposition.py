@@ -178,11 +178,27 @@ def find_repo_root(start: Path | None = None) -> Path:
     raise InventoryError("not inside a Pulp source checkout")
 
 
+# Exit status for "this interpreter cannot run the check": a missing dependency
+# says nothing about the committed file, so callers must not report it as stale.
+MISSING_DEPENDENCY = 3
+
+
+def missing_pyyaml() -> str | None:
+    """Why this interpreter cannot read cli-commands.yaml, or None."""
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        return (f"PyYAML is not installed for {sys.executable}; install it "
+                f"({sys.executable} -m pip install pyyaml) or put a python3 with "
+                "PyYAML first on PATH")
+    return None
+
+
 def _load_yaml(path: Path) -> Any:
     try:
         import yaml
-    except ImportError as exc:  # pragma: no cover - repository gates install PyYAML
-        raise InventoryError("PyYAML is required to inventory cli-commands.yaml") from exc
+    except ImportError as exc:
+        raise InventoryError(missing_pyyaml() or "PyYAML is not importable") from exc
     try:
         return yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -471,6 +487,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, help="Pulp checkout root (defaults to cwd discovery)")
     parser.add_argument("--map", dest="map_path", type=Path, help="override map path (tests)")
     args = parser.parse_args(argv)
+
+    if reason := missing_pyyaml():
+        print(f"pulp-tooling-disposition: {reason}", file=sys.stderr)
+        return MISSING_DEPENDENCY
 
     try:
         root = find_repo_root(args.root)

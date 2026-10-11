@@ -70,6 +70,7 @@ import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
 import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mjs";
+import { buildMaterializedPseudoBindings } from "./materialized_pseudo_bindings.mjs";
 import {
   normalizeMaterializedBindingDocument,
 } from "../jsx-runtime/materialized_binding_contract.mjs";
@@ -1934,6 +1935,11 @@ async function runCapture(options) {
       materializedDocument.paint_bindings = buildMaterializedPaintBindings(
         { ...snapshot, computedStyleNames: COMPUTED_STYLES },
         materializedDocument.coordinate_space);
+      const pseudoEvidence = buildMaterializedPseudoBindings(
+        { ...snapshot, computedStyleNames: COMPUTED_STYLES },
+        materializedDocument.coordinate_space);
+      materializedDocument.pseudo_bindings = pseudoEvidence.bindings;
+      materializedDocument.pseudo_diagnostics = pseudoEvidence.diagnostics;
     }
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
