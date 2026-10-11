@@ -21,9 +21,11 @@ The tooling identifies each file by the `version` field in its TOML
 frontmatter. A file named `vX.Y.Z.md` must carry that same `version`;
 the generator fails the build otherwise, because a renamed note that
 kept its old `version` would be shown for the wrong upgrade. A
-non-empty `applies_if` must parse and must select exactly the hops that
-cross the note's own `version` (it must apply from `0.0.0` to
-`version`, and not from `0.0.0` to the release just before it).
+non-empty `applies_if` must be exactly
+`cli_version_from < X && cli_version_to >= X`, where `X` is the note's own
+`version`: the hops that cross it, and nothing else. Any other expression,
+including one that also selects an unrelated range through `||`, fails the
+build.
 
 ## Frontmatter schema
 

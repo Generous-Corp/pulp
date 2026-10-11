@@ -296,7 +296,12 @@ the note so a curious user can verify why it applied.
 Grammar: Boolean combinations (`&&`, `||`, parentheses) over comparisons
 of `cli_version_from` / `cli_version_to` against a literal semver. Six
 operators: `<`, `<=`, `>`, `>=`, `==`, `!=`. See
-`docs/migrations/README.md` for full details.
+`docs/migrations/README.md` for full details. The evaluator accepts the
+whole grammar, but a note in `docs/migrations/` may only carry the canonical
+`cli_version_from < X && cli_version_to >= X` for its own version `X`: the
+index generator refuses anything else, because an extra `||` arm can show a
+note for an unrelated upgrade while still passing a probe of the boundary
+hops.
 
 ## Common breaking-change patterns
 
