@@ -28,3 +28,15 @@ delete an existing one.
 match with the change event, and that every change event carrying the
 inheritance prefix has an entry here or a row in the frozen ledger. It also
 keeps the frozen ledger frozen.
+
+## Corrections and non-entries
+
+- `20261010-continuous-frame-registration-hook`: the frozen ledger row says the
+  commit is "pending P3 branch commit". The landing commit is the first-parent
+  `main` commit that added the event file, `e49c5a5390` (#10032). `c4505fe7f2`
+  is the branch commit that created it. No entry file is needed, because the
+  event already has its row in the frozen ledger.
+- `20261010-p5-content-registry-carve-pulp-only` has no entry file on purpose.
+  It carves the Pulp-kept `content` unit, touches no transferred slice, and
+  emits no change event, so Vellum inherits nothing from it. The extraction
+  program's planning ledger records the carve.
