@@ -24,6 +24,15 @@
 
 namespace pulp::view {
 
+// ── Meter ────────────────────────────────────────────────────────────────────
+
+// The peak / held-peak indicator lines are stroked (line width up to 2px)
+// CENTERED on the meter's extreme edge coordinate (y=0 or y=height at full
+// scale), so they bleed ~1px past local_bounds(); paint is unclipped
+// (overflow: visible). Bounded invalidation must therefore cover a slightly
+// padded rect, or that fringe is never re-cleared when the peak decays and a
+// stale line persists on the static chrome. See the request_repaint(Rect)
+// caller contract (out-of-bounds decoration → pass the padded rect).
 namespace {
 constexpr float kMeterPeakOverscan = 2.0f;
 }
@@ -256,7 +265,7 @@ void Meter::paint(canvas::Canvas& canvas) {
     }
 }
 
-// ── XYPad ────────────────────────────────────────────────────────────────────
+// ── WaveformView ─────────────────────────────────────────────────────────────
 
 size_t WaveformView::find_trigger_index(const float* samples, size_t count, TriggerMode mode) {
     if (mode == TriggerMode::free_run || count < 2)
@@ -573,7 +582,7 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
     }
 }
 
-// ── Panel ────────────────────────────────────────────────────────────────────
+// ── SpectrogramView ──────────────────────────────────────────────────────────
 
 void SpectrogramView::configure(int history_columns, int freq_rows, signal::ColorRamp ramp,
                                 float min_db, float max_db) {

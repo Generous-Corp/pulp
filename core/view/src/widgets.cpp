@@ -2060,9 +2060,10 @@ void GroupBox::on_mouse_event(const MouseEvent& event) {
     View::on_mouse_event(event);
 }
 
-// Visualizer implementations (ImageView / Meter / XYPad / WaveformView /
-// SpectrumView / Panel / SpectrogramView / MultiMeter / CorrelationMeter)
-// live in core/view/src/widgets/visualizers.cpp.
+// Visualizer implementations live in core/view/src/widgets/visualizers.cpp
+// (ImageView / XYPad / Panel) and, for the audio meters and analyzers (Meter /
+// WaveformView / SpectrumView / SpectrogramView / MultiMeter / CorrelationMeter),
+// in core/view/audio/src/widgets/visualizers.cpp.
 
 // ── WaveformRecorder ─────────────────────────────────────────────────────────
 

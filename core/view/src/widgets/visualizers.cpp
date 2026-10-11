@@ -358,16 +358,6 @@ void ImageView::paint(canvas::Canvas& canvas) {
     canvas.fill_text_anchored(name, b.width * 0.5f, b.height * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
 }
 
-// ── Meter ────────────────────────────────────────────────────────────────────
-
-// The peak / held-peak indicator lines are stroked (line width up to 2px)
-// CENTERED on the meter's extreme edge coordinate (y=0 or y=height at full
-// scale), so they bleed ~1px past local_bounds(); paint is unclipped
-// (overflow: visible). Bounded invalidation must therefore cover a slightly
-// padded rect, or that fringe is never re-cleared when the peak decays and a
-// stale line persists on the static chrome. See the request_repaint(Rect)
-// caller contract (out-of-bounds decoration → pass the padded rect).
-
 canvas::Color ImageView::fill_gradient_color_at(float t) const {
     if (fill_gradient_.empty()) return fill_color_;
     if (fill_gradient_.size() == 1) return fill_gradient_.front();
@@ -380,6 +370,7 @@ canvas::Color ImageView::fill_gradient_color_at(float t) const {
     return fill_gradient_[i].interpolate(fill_gradient_[i + 1], frac);
 }
 
+// ── XYPad ────────────────────────────────────────────────────────────────────
 
 void XYPad::update_from_pos(Point pos) {
     auto b = local_bounds();
@@ -473,8 +464,7 @@ void XYPad::paint(canvas::Canvas& canvas) {
     }
 }
 
-// ── WaveformView ─────────────────────────────────────────────────────────────
-
+// ── Panel ────────────────────────────────────────────────────────────────────
 
 void Panel::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
@@ -496,8 +486,6 @@ void Panel::paint(canvas::Canvas& canvas) {
                                     std::max(0.0f, eff_radius - inset));
     }
 }
-
-// ── SpectrogramView ──────────────────────────────────────────────────────────
 
 
 } // namespace pulp::view
