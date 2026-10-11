@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261011-design-import-fail-closed-f4-watch",
+  "created_at": "2026-10-11T04:26:23Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Design import now fails closed or warns on malformed input that it used to accept silently: ZIP members that collide on extraction refuse the import; parse_design_ir_json refuses an envelope version newer than it reads; the native resolver/materializer warn on unknown node types, duplicate stable anchors and undecodable image assets (a new canvas probe_image_file); browser capture health lists web fonts Chromium could not decode and the lowering warns on each. Every change narrows what is accepted or adds a diagnostic; output for well-formed input is unchanged. No design-import, Chromium, rendering or packaging authority moves; Pulp-only per the 2026-10-04 owner decision, Vellum inherits.",
+  "tests": [
+    "build/test/pulp-test-import-design-tool '[zip]'",
+    "build/test/pulp-test-design-import '[fail-closed]'",
+    "build/test/pulp-test-design-import-native-common '[fail-closed]'",
+    "build/test/pulp-test-browser-capture-import '[fail-closed]'",
+    "python3 test/test_design_ir_observe_interactions.py --observer build/tools/import-design/pulp-design-ir-observe",
+    "node --test tools/import-design/browser_capture/health.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
