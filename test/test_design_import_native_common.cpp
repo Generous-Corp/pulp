@@ -978,6 +978,30 @@ TEST_CASE("runtime asset resolution refuses a manifest path that leaves the docu
         asset.local_path = "linked/escape.png";
         refused(asset);
     }
+    SECTION("an escape whose target does not exist is refused the same way") {
+        // Refusing by text, before any lookup, keeps the answer from revealing
+        // whether a file exists outside the document.
+        asset.local_path = "../absent.png";
+        refused(asset);
+        asset.local_path = "../escape.png";
+        refused(asset);
+    }
+    SECTION("a backslash-separated escape") {
+        asset.local_path = "..\\escape.png";
+        refused(asset);
+    }
+    SECTION("a drive-letter root") {
+        asset.local_path = "C:escape.png";
+        refused(asset);
+        asset.local_path = "C:\\escape.png";
+        refused(asset);
+    }
+    SECTION("a UNC root") {
+        asset.local_path = "//server/share/escape.png";
+        refused(asset);
+        asset.local_path = "\\\\server\\share\\escape.png";
+        refused(asset);
+    }
     SECTION("an escaping path whose bytes match a declared sha256 is honoured") {
         asset.local_path = "../escape.png";
         asset.content_hash = pulp::runtime::sha256_hex("outside-bytes");
@@ -985,6 +1009,8 @@ TEST_CASE("runtime asset resolution refuses a manifest path that leaves the docu
     }
     SECTION("paths that stay inside the document still resolve") {
         asset.local_path = "assets/../assets/inside.png";
+        CHECK(resolve_asset_file(asset, document_directory).has_value());
+        asset.local_path = "other/../assets/inside.png";
         CHECK(resolve_asset_file(asset, document_directory).has_value());
         asset.local_path = (document_directory / "assets" / "inside.png").string();
         CHECK(resolve_asset_file(asset, document_directory).has_value());
