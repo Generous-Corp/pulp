@@ -8,6 +8,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+from unittest import mock
 from pathlib import Path
 
 from sequencer_exposure_check import (
@@ -38,7 +39,9 @@ from sequencer_exposure_check import (
     validate_schema_contract,
     validate_tombstone_provenance,
     validate_transition,
+    sequencer_paths_after_dependabot_exemption,
 )
+import sequencer_exposure_check
 
 
 SHA_A = "1" * 40
@@ -328,6 +331,19 @@ def initialize_history(root: Path) -> tuple[str, str, str, str]:
 
 
 def main() -> int:
+    mixed_paths = [".github/workflows/timeline-fuzz.yml", "core/timeline/x.cpp"]
+    with mock.patch.object(
+        sequencer_exposure_check, "dependabot_uses_only_diff", return_value=False
+    ):
+        retained = sequencer_paths_after_dependabot_exemption(
+            "origin/main", "HEAD", mixed_paths
+        )
+    if retained != mixed_paths:
+        raise AssertionError(
+            "mixed workflow plus core/timeline diff was incorrectly exempted"
+        )
+    _CHECK_TALLY["clean"] += 1
+
     negative = _ancestry_problem(
         subprocess.CompletedProcess([], 1, stdout="", stderr=""),
         "not ancestor", "history unavailable",

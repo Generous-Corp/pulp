@@ -44,8 +44,19 @@ _USES_DIFF_LINE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*\S+(?:\s+#.*)?\s*$")
 
 def workflow_uses_only_diff(base: str, head: str = "HEAD") -> bool:
     """Return true for a workflow-only patch whose changed lines are ``uses:``."""
+    names = subprocess.run(
+        ["git", "diff", "--no-ext-diff", "--name-only", f"{base}...{head}"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    if names.returncode != 0:
+        return False
+    changed_paths = [path for path in names.stdout.splitlines() if path]
+    if not changed_paths or any(
+        not path.startswith(".github/workflows/") for path in changed_paths
+    ):
+        return False
     result = subprocess.run(
-        ["git", "diff", "--no-ext-diff", "--unified=0", f"{base}...{head}", "--", ".github/workflows"],
+        ["git", "diff", "--no-ext-diff", "--unified=0", f"{base}...{head}"],
         capture_output=True, text=True, encoding="utf-8",
     )
     if result.returncode != 0:
@@ -68,10 +79,30 @@ def workflow_uses_only_diff(base: str, head: str = "HEAD") -> bool:
 
 
 def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | None = None) -> bool:
-    """Allow the workflow-only shape only when GitHub identifies Dependabot."""
-    if (actor if actor is not None else os.environ.get("GITHUB_ACTOR", "")) != "dependabot[bot]":
+    """Allow the workflow-only shape only for a Dependabot-authored range.
+
+    The actor is deliberately not authoritative: merge-group runs and
+    maintainer re-runs use a different actor while retaining the commit
+    authorship that identifies the Dependabot update.
+    """
+    if not workflow_uses_only_diff(base, head):
         return False
-    return workflow_uses_only_diff(base, head)
+    authors = subprocess.run(
+        ["git", "log", "--format=%an%x00%ae", f"{base}..{head}"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    if authors.returncode != 0:
+        return False
+    records = [line.split("\x00", 1) for line in authors.stdout.splitlines() if line]
+    if not records:
+        return False
+    dependabot_email = "49699333+dependabot[bot]@users.noreply.github.com"
+    return all(
+        len(record) == 2
+        and record[0] == "dependabot[bot]"
+        and record[1].lower() == dependabot_email
+        for record in records
+    )
 
 
 # ── Git helpers ─────────────────────────────────────────────────────────

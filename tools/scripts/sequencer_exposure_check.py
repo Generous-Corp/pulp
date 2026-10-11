@@ -17,7 +17,7 @@ from gate_common import (
     git_comparison_receipt,
     read_git_path,
     resolve_git_comparison,
-    workflow_uses_only_diff,
+    dependabot_uses_only_diff,
 )
 
 
@@ -1198,6 +1198,15 @@ def is_sequencer_owned_path(path: str) -> bool:
     )
 
 
+def sequencer_paths_after_dependabot_exemption(
+    base: str, head: str, changed_paths: list[str]
+) -> list[str]:
+    """Drop paths only for a proven Dependabot uses-only workflow range."""
+    if dependabot_uses_only_diff(base, head):
+        return []
+    return changed_paths
+
+
 def _rows_by_id(document: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(document, dict) or not isinstance(document.get("rows"), list):
         return {}
@@ -1932,10 +1941,12 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root, comparison_base, changed_paths,
                 comparison.resolved_head or "HEAD",
             )
-            if workflow_uses_only_diff(args.base, comparison.resolved_head or "HEAD"):
+            if dependabot_uses_only_diff(args.base, comparison.resolved_head or "HEAD"):
                 # An action-only workflow bump has no sequencer semantic change,
                 # even when a workflow filename contains timeline/playback.
-                changed_paths = []
+                changed_paths = sequencer_paths_after_dependabot_exemption(
+                    args.base, comparison.resolved_head or "HEAD", changed_paths
+                )
                 trailer_ids, semantic_paths, mechanical_paths = [], set(), set()
                 print("sequencer exposure: Dependabot uses-only workflow diff")
         else:

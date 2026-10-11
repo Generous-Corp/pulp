@@ -565,43 +565,51 @@ class QuotedTrailerIsNotABypassTests(unittest.TestCase):
 
 
 class DependabotUsesOnlyDiffTests(unittest.TestCase):
-    def check(self, patch: str, actor: str = "dependabot[bot]") -> bool:
-        result = subprocess.CompletedProcess(
-            args=["git"], returncode=0, stdout=patch, stderr=""
-        )
-        with mock.patch.object(gc.subprocess, "run", return_value=result):
+    PATCH = (
+        "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
+        "@@ -1 +1 @@\n"
+        "-      uses: actions/checkout@v5\n"
+        "+      uses: actions/checkout@v7\n"
+    )
+
+    def check(self, authors: str, actor: str = "github-merge-queue[bot]", patch: str | None = None) -> bool:
+        diff = patch or self.PATCH
+
+        def run(args, **kwargs):
+            if "--name-only" in args:
+                return subprocess.CompletedProcess(args, 0, ".github/workflows/a.yml\n", "")
+            if args[1] == "log":
+                return subprocess.CompletedProcess(args, 0, authors, "")
+            return subprocess.CompletedProcess(args, 0, diff, "")
+
+        with mock.patch.object(gc.subprocess, "run", side_effect=run):
             return gc.dependabot_uses_only_diff("origin/main", actor=actor)
 
     def test_uses_only_workflow_diff_passes(self) -> None:
-        patch = (
-            "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
-            "@@ -1 +1 @@\n"
-            "-      uses: actions/checkout@v5\n"
-            "+      uses: actions/checkout@v7\n"
+        self.assertTrue(self.check("dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n"))
+
+    def test_merge_group_actor_is_not_authoritative(self) -> None:
+        self.assertTrue(self.check(
+            "dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n",
+            actor="github-merge-queue[bot]",
+        ))
+
+    def test_human_authored_uses_only_diff_does_not_bypass(self) -> None:
+        self.assertFalse(self.check("Daniel Raffel\x00daniel@example.com\n"))
+
+    def test_mixed_author_range_does_not_bypass(self) -> None:
+        self.assertFalse(self.check(
+            "dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n"
+            "Daniel Raffel\x00daniel@example.com\n"
+        ))
+
+    def test_workflow_helper_rejects_core_change_before_line_scan(self) -> None:
+        names = subprocess.CompletedProcess(
+            args=["git"], returncode=0,
+            stdout=".github/workflows/a.yml\ncore/timeline/x.cpp\n", stderr=""
         )
-        self.assertTrue(self.check(patch))
-        result = subprocess.CompletedProcess(args=["git"], returncode=0, stdout=patch, stderr="")
-        with mock.patch.object(gc.subprocess, "run", return_value=result):
-            self.assertTrue(gc.workflow_uses_only_diff("origin/main"))
-
-    def test_non_dependabot_actor_does_not_bypass(self) -> None:
-        self.assertFalse(self.check(
-            "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
-            "@@ -1 +1 @@\n"
-            "-      uses: actions/checkout@v5\n"
-            "+      uses: actions/checkout@v7\n",
-            actor="danielraffel",
-        ))
-
-    def test_mixed_workflow_diff_does_not_bypass(self) -> None:
-        self.assertFalse(self.check(
-            "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
-            "@@ -1,2 +1,2 @@\n"
-            "-      uses: actions/checkout@v5\n"
-            "+      uses: actions/checkout@v7\n"
-            "-      run: old\n"
-            "+      run: changed\n"
-        ))
+        with mock.patch.object(gc.subprocess, "run", return_value=names):
+            self.assertFalse(gc.workflow_uses_only_diff("origin/main"))
 
 
 if __name__ == "__main__":
