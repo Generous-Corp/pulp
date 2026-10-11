@@ -2852,6 +2852,7 @@
   "pulp-test-synthesiser",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
+  "pulp-test-threejs-bridge",
   "pulp-test-tilt-eq",
   "pulp-test-tilt-eq-no-exceptions",
   "pulp-test-timebase-groove-kernels",
@@ -6145,6 +6146,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-ir-observe-asset-escape": {
+   "entry": "test/test_design_ir_observe_asset_escape.py",
+   "inputs": [
+    "test/test_design_ir_observe_asset_escape.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-interactions": {
    "entry": "test/test_design_ir_observe_interactions.py",
    "inputs": [
@@ -7044,6 +7052,25 @@
     "test/test_pulp_installer_mcp_contract.sh"
    ],
    "kind": "shell"
+  },
+  "pulp-materialized-runtime-conformance": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-materialized-runtime-node-dependencies": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
+   ],
+   "kind": "node"
   },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
