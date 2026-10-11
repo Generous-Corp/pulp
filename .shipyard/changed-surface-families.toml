@@ -3173,6 +3173,35 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-13fbfbc1d05b"
+paths = ["tools/scripts/test_include_boundary.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "pulp-view-core-include-boundary-negative-contract",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-80436f18961a"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
@@ -5030,6 +5059,35 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-9526fb27d8c9"
+paths = ["tools/scripts/test_view_audio_symbol_floor.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "pulp-view-audio-symbol-floor-negative-contract",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-86a427870a0c"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
@@ -5531,6 +5589,41 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-2c816f38fca2"
+paths = ["tools/scripts/view_audio_symbol_floor.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "pulp-view-audio-symbol-floor",
+  "reuse-policy-replay-selftest",
+]
+build_targets = [
+  "pulp-cli",
+  "pulp-design-import",
+  "pulp-view-audio",
+  "pulp-view-core",
+  "pulp-view-script",
+]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-412708482ddd"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
@@ -5917,6 +6010,7 @@ paths = [
   "tools/scripts/test_hotspot_size_guard.py",
   "tools/scripts/test_hydrate_gpu_provenance_commits.py",
   "tools/scripts/test_hydrate_real_git.py",
+  "tools/scripts/test_include_boundary.py",
   "tools/scripts/test_inspector_truth_check.py",
   "tools/scripts/test_install_sha256sums.py",
   "tools/scripts/test_install_shipyard_queue_repair.py",
@@ -6063,6 +6157,7 @@ paths = [
   "tools/scripts/test_version_at_land.py",
   "tools/scripts/test_version_consistency_check.py",
   "tools/scripts/test_version_consistency_check_extra.py",
+  "tools/scripts/test_view_audio_symbol_floor.py",
   "tools/scripts/test_visual_python_deps_step.py",
   "tools/scripts/test_web_timeline_source_closure_check.py",
   "tools/scripts/test_webclap_relevance.py",
@@ -6100,6 +6195,7 @@ paths = [
   "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
+  "tools/scripts/view_audio_symbol_floor.py",
   "tools/scripts/web_timeline_source_closure_check.py",
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",
@@ -6456,6 +6552,7 @@ paths = [
   "tools/scripts/test_hotspot_size_guard.py",
   "tools/scripts/test_hydrate_gpu_provenance_commits.py",
   "tools/scripts/test_hydrate_real_git.py",
+  "tools/scripts/test_include_boundary.py",
   "tools/scripts/test_inspector_truth_check.py",
   "tools/scripts/test_install_sha256sums.py",
   "tools/scripts/test_install_shipyard_queue_repair.py",
@@ -6602,6 +6699,7 @@ paths = [
   "tools/scripts/test_version_at_land.py",
   "tools/scripts/test_version_consistency_check.py",
   "tools/scripts/test_version_consistency_check_extra.py",
+  "tools/scripts/test_view_audio_symbol_floor.py",
   "tools/scripts/test_visual_python_deps_step.py",
   "tools/scripts/test_web_timeline_source_closure_check.py",
   "tools/scripts/test_webclap_relevance.py",
@@ -6639,6 +6737,7 @@ paths = [
   "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
+  "tools/scripts/view_audio_symbol_floor.py",
   "tools/scripts/web_timeline_source_closure_check.py",
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",

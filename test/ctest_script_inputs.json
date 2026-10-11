@@ -4401,6 +4401,7 @@
    "inputs": [
     "core/runtime/CMakeLists.txt",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view/audio/include",
     "inspect/include",
     "inspect/include/pulp",
     "inspect/include/pulp/inspect",
@@ -4423,6 +4424,7 @@
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
     "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
     "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+    "core/view/audio/include",
     "inspect/include",
     "inspect/include/pulp",
     "inspect/include/pulp/inspect",
@@ -4725,9 +4727,16 @@
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
     "core/platform",
+    "core/platform/include",
     "core/runtime",
+    "core/runtime/include",
     "core/simd",
-    "tools/scripts/foundation_include_lint.py"
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "tools/scripts/foundation_include_lint.py",
+    "tools/scripts/include_boundary.py"
    ],
    "kind": "python"
   },
@@ -7227,6 +7236,46 @@
    ],
    "kind": "python"
   },
+  "pulp-view-audio-symbol-floor": {
+   "entry": "tools/scripts/view_audio_symbol_floor.py",
+   "inputs": [
+    "tools/scripts/view_audio_symbol_floor.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-audio-symbol-floor-negative-contract": {
+   "entry": "tools/scripts/test_view_audio_symbol_floor.py",
+   "inputs": [
+    "tools/scripts/test_view_audio_symbol_floor.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-core-include-boundary": {
+   "entry": "tools/scripts/include_boundary.py",
+   "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "tools/scripts/include_boundary.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-core-include-boundary-negative-contract": {
+   "entry": "tools/scripts/test_include_boundary.py",
+   "inputs": [
+    "core/audio/include/pulp/audio/buffer.hpp",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/src/view.cpp",
+    "tools/scripts/test_include_boundary.py"
+   ],
+   "kind": "python"
+  },
   "pulp-worktree-creation-selftest": {
    "entry": "tools/ci/test_pulp_worktree_creation.py",
    "inputs": [
@@ -9345,6 +9394,7 @@
   "status-tone-signal-lint": {
    "entry": "tools/scripts/status_tone_signal_lint.py",
    "inputs": [
+    "core/view/audio/src",
     "core/view/src",
     "tools/scripts/status_tone_signal_lint.py"
    ],
@@ -9353,6 +9403,8 @@
   "status-tone-signal-lint-selftest": {
    "entry": "tools/scripts/test_status_tone_signal_lint.py",
    "inputs": [
+    "core/view/audio/src",
+    "core/view/src",
     "tools/scripts/test_status_tone_signal_lint.py"
    ],
    "kind": "python"
@@ -9665,6 +9717,8 @@
   "token-key-correctness": {
    "entry": "tools/scripts/token_key_check.py",
    "inputs": [
+    "core/view/audio/src",
+    "core/view/audio/src/widgets",
     "core/view/src",
     "core/view/src/theme_presets.cpp",
     "core/view/src/widgets",

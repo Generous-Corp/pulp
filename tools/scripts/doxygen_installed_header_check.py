@@ -14,6 +14,9 @@ GENERATED_HEADER = "core/runtime/include/pulp/runtime/build_info.hpp"
 POLICY = Path("docs/doxygen/installed-public-header-policy.json")
 DOXYFILE = Path("docs/doxygen/Doxyfile")
 INSTALL_RULES = Path("tools/cmake/PulpInstallRules.cmake")
+# The audio-UI widget headers (GraphEditorView) live outside view-core's include
+# root so view-core stays audio-free, and install under the same pulp/ prefix.
+VIEW_AUDIO_ROOT = "core/view/audio/include"
 GPU_HEALTH_TOOLING_ROOT = "tools/cli/gpu_health/include"
 GPU_TOOLING_DOCUMENTATION_CONTRACTS = {
     Path("tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp"): (
@@ -244,6 +247,8 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
             continue
         if sources == ["${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"]:
             continue
+        if sources == [f"${{CMAKE_CURRENT_SOURCE_DIR}}/{VIEW_AUDIO_ROOT}/pulp/"]:
+            continue
         if sources and all(
             source.startswith("${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/")
             for source in sources
@@ -257,11 +262,14 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
     for source in public_install_sources:
         if not (source.startswith("inspect/include/pulp/") or
                 source == "tools/audio/analysis/include/pulp/" or
+                source == f"{VIEW_AUDIO_ROOT}/pulp/" or
                 source == "tools/cli/gpu_health/include/pulp_tooling/"):
             raise ValueError(f"unsupported independent public-header install authority: {source}")
     roots = [f"core/{name}/include" for name in subsystems]
     if 'tools/audio/analysis/include/pulp/' in text:
         roots.append("tools/audio/analysis/include")
+    if f"{VIEW_AUDIO_ROOT}/pulp/" in text:
+        roots.append(VIEW_AUDIO_ROOT)
     if 'tools/cli/gpu_health/include/pulp_tooling/' in text:
         roots.append(GPU_HEALTH_TOOLING_ROOT)
     roots.append("inspect/include")
