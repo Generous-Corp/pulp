@@ -4735,7 +4735,8 @@
     "core/view",
     "core/view/audio",
     "core/view/include",
-    "tools/scripts/foundation_include_lint.py"
+    "tools/scripts/foundation_include_lint.py",
+    "tools/scripts/include_boundary.py"
    ],
    "kind": "python"
   },
@@ -7239,7 +7240,8 @@
     "core/simd/include",
     "core/view",
     "core/view/audio",
-    "core/view/include"
+    "core/view/include",
+    "tools/scripts/include_boundary.py"
    ],
    "kind": "python"
   },
@@ -7248,7 +7250,8 @@
    "inputs": [
     "core/audio/include/pulp/audio/buffer.hpp",
     "core/view/include/pulp/view/view.hpp",
-    "core/view/src/view.cpp"
+    "core/view/src/view.cpp",
+    "tools/scripts/test_include_boundary.py"
    ],
    "kind": "python"
   },
