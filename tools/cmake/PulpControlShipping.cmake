@@ -390,7 +390,7 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     set(_marker_source
         "${CMAKE_CURRENT_BINARY_DIR}/${target}_${artifact_target}_${_format_identifier}_control_shipping_marker.cpp")
     set(_marker_content
-        "#if defined(_MSC_VER)\n#define PULP_SHIPPING_USED\n#else\n#define PULP_SHIPPING_USED __attribute__((used, visibility(\"default\")))\n#endif\nextern \"C\" PULP_SHIPPING_USED const volatile char pulp_control_shipping_${_format_identifier}_v1[] = \"PULP_CONTROL_PROFILE_${_profile_identifier}_V1\\0PULP_CONTROL_MANIFEST_SHA256_${_control_manifest_digest}_V1\\0PULP_CONTROL_SHIPPING_SHA256_${_shipping_manifest_digest}_V1\\0PULP_CONTROL_ARTIFACT_FORMAT_${_format_identifier}_V1\\0PULP_CONTROL_ARTIFACT_PLATFORM_${_platform_identifier}_V1${_architecture_markers}${_standalone_marker}\";\n")
+        "#if defined(_MSC_VER)\n#define PULP_SHIPPING_USED __declspec(dllexport)\n#else\n#define PULP_SHIPPING_USED __attribute__((used, visibility(\"default\")))\n#endif\nextern \"C\" PULP_SHIPPING_USED const volatile char pulp_control_shipping_${_format_identifier}_v1[] = \"PULP_CONTROL_PROFILE_${_profile_identifier}_V1\\0PULP_CONTROL_MANIFEST_SHA256_${_control_manifest_digest}_V1\\0PULP_CONTROL_SHIPPING_SHA256_${_shipping_manifest_digest}_V1\\0PULP_CONTROL_ARTIFACT_FORMAT_${_format_identifier}_V1\\0PULP_CONTROL_ARTIFACT_PLATFORM_${_platform_identifier}_V1${_architecture_markers}${_standalone_marker}\";\n")
     file(GENERATE OUTPUT "${_marker_source}" CONTENT "${_marker_content}")
     target_sources(${artifact_target} PRIVATE "${_marker_source}")
 

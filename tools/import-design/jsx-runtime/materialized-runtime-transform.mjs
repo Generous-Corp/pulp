@@ -20,7 +20,10 @@ import {
   validateMaterializedLayerContract,
 } from './materialized_layer_contract.mjs';
 import { resolveMaterializedFrames } from './materialized_frame_contract.mjs';
-import { loadMaterializedStateAtlas } from './materialized_state_atlas.mjs';
+import {
+  canonicalizeCanvasAuthorityMatches,
+  loadMaterializedStateAtlas,
+} from './materialized_state_atlas.mjs';
 import { materializedCssVariables } from './materialized_css_variables.mjs';
 import { canonicalizeMaterializedRuntimeDocument } from
   './materialized_runtime_canonicalization.mjs';
@@ -36,7 +39,7 @@ if (args.includes('--help') || args.includes('-h')) {
   [--visual-authority reference|native] \\
   [--runtime-document-asset <relative-path>] \\
   [--state-atlas <captured-states.json>] [--portable-state-assets] \
-  [--activate-state <id>] \
+  [--activate-state <id>] [--canvas-authority] \
   --out <behavior.js>
 
 Compiles Chromium's captured executable document into an @pulp/react tree.
@@ -87,6 +90,7 @@ if (portableStateAssets && !stateAtlasArg) {
 }
 const requestedState = args.includes('--activate-state')
   ? String(value('--activate-state')) : '';
+const canvasAuthority = args.includes('--canvas-authority');
 const productPrelude = preludeArgs
   .map((path) => readFileSync(path, 'utf8'))
   .join('\n');
@@ -117,10 +121,12 @@ const fontBindings = mainMetadata.font_bindings;
 const layoutBindings = mainMetadata.layout_bindings;
 const textBindings = mainMetadata.text_bindings;
 const paintBindings = mainMetadata.paint_bindings;
-const stateAtlas = loadMaterializedStateAtlas(stateAtlasArg, {
+let stateAtlas = loadMaterializedStateAtlas(stateAtlasArg, {
   visualAuthority,
   runtimeBase: portableStateAssets ? dirname(output) : '',
 });
+stateAtlas = canonicalizeCanvasAuthorityMatches(
+  stateAtlas, mainMetadata.canvas_bindings, { enabled: canvasAuthority });
 for (const state of stateAtlas) {
   if (!state.metadata) continue;
   state.metadata = {
@@ -219,6 +225,7 @@ const entry = buildMaterializedRuntimeEntry({
   visualWidth,
   visualHeight,
   canvasBindings,
+  canvasAuthority,
   behaviorCanvasAnchors,
   capturedPaintAuthorityAnchors,
 });

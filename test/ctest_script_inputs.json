@@ -3851,6 +3851,15 @@
    ],
    "kind": "python"
   },
+  "clean-worktree-planning-selftest": {
+   "entry": "tools/scripts/test_clean_worktree_planning.py",
+   "inputs": [
+    "tools/scripts",
+    "tools/scripts/clean_worktree_planning.py",
+    "tools/scripts/test_clean_worktree_planning.py"
+   ],
+   "kind": "python"
+  },
   "clean-worktrees-selftest": {
    "entry": "tools/scripts/test_clean_worktrees.py",
    "inputs": [
@@ -4445,6 +4454,14 @@
     "tools/scripts/test_ensure_signing_ready.sh"
    ],
    "kind": "shell"
+  },
+  "evidence-archive-selftest": {
+   "entry": "tools/ci/test_evidence_archive.py",
+   "inputs": [
+    "tools/ci/evidence_archive.py",
+    "tools/ci/test_evidence_archive.py"
+   ],
+   "kind": "python"
   },
   "example-validation-paths": {
    "entry": "tools/scripts/test_example_validation_paths.py",
@@ -6051,6 +6068,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-ir-observe-interactions": {
+   "entry": "test/test_design_ir_observe_interactions.py",
+   "inputs": [
+    "test/test_design_ir_observe_interactions.py"
+   ],
+   "kind": "python"
+  },
   "import-fidelity-diff": {
    "entry": "test/test_import_fidelity_diff.py",
    "inputs": [
@@ -6770,6 +6794,8 @@
   "prepush-queue-rebase-hint": {
    "entry": "tools/scripts/test_prepush_queue_rebase_hint.py",
    "inputs": [
+    ".githooks/lib",
+    ".githooks/pre-push",
     "tools/scripts/prepush_queue_rebase_hint.py",
     "tools/scripts/test_prepush_queue_rebase_hint.py"
    ],
@@ -6935,6 +6961,25 @@
    ],
    "kind": "shell"
   },
+  "pulp-materialized-runtime-conformance": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-materialized-runtime-node-dependencies": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
+   ],
+   "kind": "node"
+  },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
    "inputs": [
@@ -7027,6 +7072,16 @@
    "entry": "tools/scripts/test_pulp_uninstall.py",
    "inputs": [
     "tools/scripts/test_pulp_uninstall.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-worktree-creation-selftest": {
+   "entry": "tools/ci/test_pulp_worktree_creation.py",
+   "inputs": [
+    "tools/ci",
+    "tools/ci/checkout_location_guard.py",
+    "tools/ci/pulp-worktree.sh",
+    "tools/ci/test_pulp_worktree_creation.py"
    ],
    "kind": "python"
   },
@@ -9508,7 +9563,8 @@
    "entry": "tools/scripts/test_vellum_workflow_dispatch.py",
    "inputs": [
     "tools/ci/net-retry.sh",
-    "tools/scripts/test_vellum_workflow_dispatch.py"
+    "tools/scripts/test_vellum_workflow_dispatch.py",
+    "tools/scripts/vellum_trusted_merge.py"
    ],
    "kind": "python"
   },

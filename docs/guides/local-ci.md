@@ -2,6 +2,11 @@
 
 Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before merging.
 
+The macOS retarget lane keeps the untrusted-runner boundary for contributor
+code and invokes `tools/ci/governed-build.sh` inside that namespace for its
+build. This preserves the lane's runner isolation while applying the same
+bounded worker and build-directory locking policy as the other build emitters.
+
 > Setting up a dedicated machine as a persistent CI runner? See
 > [self-hosted-runner.md](self-hosted-runner.md) for the walkthrough
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
@@ -2505,9 +2510,11 @@ tell an executed `macos` suite from a reused receipt), the other workflows'
 jobs through one `commits/<sha>/check-runs` read kept to those runs' check
 suites (so a push run on the landed commit is never read as the gate), and the
 commit's statuses for a context published as a status. Never by a run's
-conclusion, which also folds in advisory legs: while hosted Linux was failing
+conclusion, which used to fold in advisory legs: while hosted Linux was failing
 every merge group, reading the run called every green tip red and turned the
-Linux failure into a fake batch streak. And never by `macos` alone: on
+Linux failure into a fake batch streak. In a merge group the Linux matrix leg is
+now job-level `continue-on-error`, so it no longer turns the run's conclusion
+red, but a run conclusion still cannot say which required context failed. And never by `macos` alone: on
 2026-09-29 the required `drift-fast` context was red on main for about fourteen
 hours while `macos` stayed green, the macos-only detector read `healthy`
 throughout, and every batch that failed `drift-fast` read as a pass, so the
@@ -7413,6 +7420,12 @@ tests did. The GPU-audio SDK upload is a contract downstream consumers rely
 on, so a failed first attempt is retried once after a 90-second pause with
 `overwrite: true` (the reset can land after the artifact record exists), and
 the job still fails if that retry fails.
+The `plugins-<key>` bundles on macOS and the `ios-gate-ok-<digest>` marker
+are also `continue-on-error`. Nothing reads the bundles; they are a download
+for people. A lost iOS marker only makes a later run build the iOS gate again.
+An "Upload progress stalled" on the plugin bundles once ejected a merge batch
+after every test passed. The protected-validation receipt and the A2T
+verification stay failing, because merge decisions read them.
 
 ### The GPU provenance hydration step is bounded
 

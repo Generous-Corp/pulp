@@ -76,10 +76,35 @@ concurrency:
   # ref between the no-PR check and a reclaim). Serialization removes the
   # competitor entirely, so that race cannot occur. The direct path's group is
   # left exactly as before, so this changes nothing until the toggle is flipped.
+  #
+  # Only events whose job actually runs join the serial group. A group holds a
+  # single pending run, and a new arrival cancels it, so a `pull_request:
+  # dequeued` for any other PR, or a green bump-branch `workflow_run`, used to
+  # cancel a pending push drain and then skip its own job. Those events get a
+  # per-run group instead, so they never contend. The serial-group condition
+  # mirrors the job `if` below; test_version_at_land.py evaluates both against
+  # every event shape and fails if they diverge.
   group: >-
     ${{ vars.PULP_BUMP_ROUTE == 'pr'
+        && (github.event_name == 'push'
+          || github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'schedule'
+            && github.repository == vars.PULP_PRIMARY_REPO)
+          || (github.event_name == 'pull_request'
+            && github.event.pull_request.head.ref == 'release/version-bump'
+            && github.event.pull_request.head.repo.full_name == github.repository)
+          || (github.event_name == 'workflow_run'
+            && github.event.workflow_run.head_repository.full_name == github.repository
+            && github.event.workflow_run.conclusion != 'success'
+            && github.event.workflow_run.conclusion != 'skipped'
+            && github.event.workflow_run.conclusion != 'neutral'))
         && 'version-at-land-serial'
-        || format('version-at-land-{0}', github.event_name) }}
+        || ((github.event_name == 'pull_request'
+            || github.event_name == 'workflow_run'
+            || (github.event_name == 'schedule'
+              && github.repository != vars.PULP_PRIMARY_REPO))
+          && format('version-at-land-idle-{0}', github.run_id)
+          || format('version-at-land-{0}', github.event_name)) }}
   cancel-in-progress: false
 
 permissions:

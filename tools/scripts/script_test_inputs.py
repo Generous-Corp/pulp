@@ -148,7 +148,32 @@ def _cache_values(build_dir: Path) -> dict[str, str] | None:
     return out
 
 
-def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
+def _jsx_runtime_registration_reason(build_dir: Path, cache: dict[str, str],
+                                     inventory: dict | list[dict] | None) -> str | None:
+    """Require both materialized-runtime tests when configure found Node."""
+    tests = ((inventory or {}).get("tests", []) if isinstance(inventory, dict) else inventory) \
+        if inventory is not None else []
+    names = {str(t.get("name", "")) for t in tests}
+    node_found = any(
+        any(Path(str(arg)).name in ("node", "nodejs") for arg in (t.get("command") or []))
+        for t in tests
+    )
+    if not node_found:
+        node_value = cache.get("_PULP_NODE_FOR_TESTS", "").strip()
+        node_found = bool(node_value) and not node_value.endswith("-NOTFOUND")
+    if not node_found:
+        return None
+    required = {"pulp-materialized-runtime-conformance", "pulp-materialized-runtime-node-dependencies"}
+    missing = sorted(required - names)
+    if not missing:
+        return None
+    return ("jsx-runtime npm dependencies are missing from this configure; registered Node tests omit "
+            f"{', '.join(missing)}. Run `npm ci --prefix tools/import-design/jsx-runtime` "
+            "then reconfigure the build")
+
+
+def outside_gate_profile_build(build_dir: Path | None,
+                               inventory: dict | list[dict] | None = None) -> list[str]:
     """Why this build's compiled entries cannot stand for the gate's: each
     switch whose value differs from the gate's configure (examples off, a
     Release build, no sanitizer, the exact-provider proof off). Empty for a gate-shaped build, and for one
@@ -177,6 +202,9 @@ def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
     for flag, sdk in (("PULP_HAS_VST3", "external/vst3sdk"), ("PULP_HAS_AUSDK", "external/AudioUnitSDK")):
         if flag in cache and off(cache[flag]):
             reasons.append(f"{flag}={cache[flag]} (the gate configures with {sdk} checked out)")
+    jsx_reason = _jsx_runtime_registration_reason(build_dir, cache, inventory)
+    if jsx_reason:
+        reasons.append(jsx_reason)
     return reasons
 
 
@@ -1163,7 +1191,7 @@ def main(argv: list[str]) -> int:
               "this is a skip, not a pass.")
         return SKIP_EXIT
     current = build_list(inventory, root, build_dir)
-    off_profile = outside_gate_profile_build(build_dir) if "executables" in current else []
+    off_profile = outside_gate_profile_build(build_dir, inventory)
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
     if a.write and off_profile:

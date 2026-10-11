@@ -210,7 +210,7 @@ TEST_CASE("input notes are consumed, not passed through",
     }
 }
 
-TEST_CASE("every control the panel declares resolves to a parameter",
+TEST_CASE("every control the MIDI effect panel declares resolves to a parameter",
           "[design-panel-arp][binding]") {
     DesignPanelMidiEffect plugin;
     state::StateStore store;

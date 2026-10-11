@@ -1286,6 +1286,15 @@ jobs:
       matrix: ${{ fromJSON(needs.protected-receipt-reuse.outputs.matrix_json || needs.resolve-provider.outputs.matrix_json || '{"include":[]}') }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
+    # In a merge group only the macOS child is a required context; the Linux
+    # child is advisory and the queue never waits on it. Without this, a red
+    # advisory leg turns the whole run's conclusion to `failure` while every
+    # required check is green, and anything that reads run conclusions (the
+    # Actions list, `gh run list`, queue audits) reports a healthy batch as
+    # failed. The leg's own check run still shows its result. The macOS child
+    # is never covered, so a real required failure still fails the run, and PR
+    # and push runs keep their existing conclusions.
+    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.key != 'macos' }}
     # The macOS child owns the required `macos` context directly on PR heads,
     # Shipyard workflow dispatches, and merge groups. A reporter cannot depend
     # on one matrix child, so
@@ -1473,7 +1482,7 @@ jobs:
       # and github-hosted runners (have actions/cache).
       - name: Namespace cache (brew + ccache + Pulp FetchContent)
         if: runner.os == 'macOS' && (contains(matrix.runs_on_json, 'namespace') || contains(matrix.runs_on_json, 'nscloud'))
-        uses: namespacelabs/nscloud-cache-action@v1
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: brew
           path: |
@@ -2078,8 +2087,11 @@ jobs:
       # (PR heads and merge groups alike: artifacts are repository-wide, not
       # branch-scoped like the Actions cache) can find it. The Build step skips
       # the gate on a trusted receipt from this step; see ios_gate_digest.py.
+      # A lost marker only makes a later run build the iOS gate again, so an
+      # artifact-service stall here must not red a gate whose build passed.
       - name: Record iOS gate digest
         if: steps.build.outputs.ios_gate_digest != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}
@@ -2934,8 +2946,12 @@ jobs:
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's
       # PULP_BUILD_EXAMPLES=OFF gating) so there are no bundles to upload.
+      # A convenience download for people: no workflow, script or repository
+      # reads plugins-macos, and the bundles were already built and tested. An
+      # upload stall here after a green suite once ejected a merge batch.
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS' && github.event_name != 'pull_request'
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: plugins-${{ matrix.key }}

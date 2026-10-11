@@ -101,7 +101,7 @@ jobs:
       - name: Install Rust (only when experimental/pulp-rs/ is present)
         id: rust-toolchain
         if: hashFiles('experimental/pulp-rs/Cargo.toml') != ''
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
 
       - name: Build C++ CLI (pulp-cli target only)
         id: cpp-build

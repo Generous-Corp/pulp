@@ -909,7 +909,8 @@ TEST_CASE("VCO output is deterministic with character engaged", "[signal][osc][v
 TEST_CASE("drift wanders the pitch slowly at ~the commanded RMS",
           "[signal][osc][vco][drift]") {
     constexpr double f0 = 1000.0;
-    constexpr int kLen = static_cast<int>(10.0 * kSampleRate); // 10 s analyzed.
+    constexpr int kLen =
+        static_cast<int>(6.0 * kSampleRate); // 6 s analyzed; enough for the 4 s drift correlation.
     constexpr int kWarmup = static_cast<int>(2.0 * kSampleRate); // let the walk settle.
     constexpr int kWin = 4096;   // 85 ms ≪ the drift correlation time, so a frame
     constexpr int kHop = 4096;   // reads the quasi-static drifted pitch; non-overlap.

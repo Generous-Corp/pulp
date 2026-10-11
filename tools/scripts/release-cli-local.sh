@@ -38,7 +38,7 @@ cmake -S "$REPO_ROOT" -B "$MAC_BUILD_DIR" \
     -DPULP_ENABLE_SCENE3D=ON \
     -DPULP_ENABLE_AUDIO_PROBES=OFF \
     -DPULP_BUILD_WEBVIEW=ON
-cmake --build "$MAC_BUILD_DIR" --target pulp-cli --config Release
+bash "$REPO_ROOT/tools/ci/governed-build.sh" cmake --build "$MAC_BUILD_DIR" --target pulp-cli --config Release
 if [ ! -f "$MAC_BUILD_DIR/tools/cli/pulp" ]; then
     fail "macOS build failed"
     exit 1
@@ -61,7 +61,7 @@ cmake -S "$REPO_ROOT" -B "$MAC_SDK_BUILD_DIR" \
     -DPULP_ENABLE_SCENE3D=OFF \
     -DPULP_ENABLE_AUDIO_PROBES=OFF \
     -DPULP_BUILD_WEBVIEW=ON
-cmake --build "$MAC_SDK_BUILD_DIR" --config Release
+bash "$REPO_ROOT/tools/ci/governed-build.sh" cmake --build "$MAC_SDK_BUILD_DIR" --config Release
 cmake --install "$MAC_SDK_BUILD_DIR" --prefix "$SDK_STAGING" --config Release
 if [ -f "$SDK_STAGING/version.txt" ]; then
     SDK_WEBVIEW_LIB="$SDK_STAGING/lib/libpulp-view-core.a" python3 - <<'PY'
@@ -97,7 +97,7 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntu "echo ok" &>/dev/null; then
             -DPULP_BUILD_WEBVIEW=ON"
 
     # Build
-    ssh ubuntu "cd ~/pulp && cmake --build build-cli --target pulp-cli"
+    ssh ubuntu "cd ~/pulp && bash tools/ci/governed-build.sh cmake --build build-cli --target pulp-cli"
 
     if ssh ubuntu "test -f ~/pulp/build-cli/tools/cli/pulp && echo ok" | grep -q ok; then
         ssh ubuntu "strip ~/pulp/build-cli/tools/cli/pulp"
@@ -125,7 +125,7 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes win2 "echo ok" &>/dev/null; then
             "$REPO_ROOT/" win2:~/pulp/
 
         ssh win2 "cd ~/pulp && cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF -DPULP_ENABLE_AUDIO_PROBES=OFF -DPULP_BUILD_WEBVIEW=ON"
-        ssh win2 "cd ~/pulp && cmake --build build-cli --target pulp-cli --config Release"
+        ssh win2 "cd ~/pulp && bash tools/ci/governed-build.sh cmake --build build-cli --target pulp-cli --config Release"
 
         if ssh win2 "if exist ~/pulp/build-cli/tools/cli/Release/pulp.exe (echo ok)" | grep -q ok; then
             scp win2:~/pulp/build-cli/tools/cli/Release/pulp.exe "$DIST_DIR/pulp.exe"

@@ -31,9 +31,11 @@ jobs:
       - name: Check out the proposed merge tree
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # On pull_request/merge_group the default checkout already IS the
-          # proposed merge tree. Manual recovery re-runs this restricted event
-          # context from a separate checkout-free workflow.
+          # merge_group: the default checkout IS the exact queued candidate.
+          # pull_request: the default checkout is GitHub's merge ref, which
+          # may already be behind main; the next step replaces it with a merge
+          # against live protected main. Manual recovery re-runs this
+          # restricted event context from a separate checkout-free workflow.
           fetch-depth: 0
           persist-credentials: false
 
@@ -46,23 +48,61 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            # The pull-request checkout is GitHub's proposed merge commit.
-            # Its first parent is the protected-main snapshot that was used to
-            # construct this candidate.  Comparing from the event payload's
-            # original PR base replays every watch event that landed on main
-            # after the branch fork and can report an unrelated duplicate
-            # family claim as if this PR authored it.
-            protected_base="$(git rev-parse --verify "$GITHUB_SHA^1")"
-            tools/ci/net-retry.sh git fetch --no-tags origin refs/heads/main
-            live_base="$(git rev-parse --verify FETCH_HEAD)"
-            if [[ "$protected_base" != "$live_base" ]]; then
-              echo "proposed merge base $protected_base is not current protected main $live_base; rerun this check" >&2
+            # Validate the PR as it would merge into protected main NOW, the
+            # same construction the trusted gate and manual recovery use.
+            #
+            # GitHub builds refs/pull/N/merge once per push, and main moves
+            # many times a day, so its first parent is routinely an older main.
+            # Requiring the two to be equal failed every PR that main outran,
+            # and a rerun reused the same merge ref, so the only repair was a
+            # hand merge of main. Rebuilding the candidate here from live main
+            # plus the exact PR head removes that race without trusting a
+            # stale snapshot: a violation that only exists against current
+            # main (a slice frozen after the merge ref was built) is still
+            # evaluated, and merge_group re-checks the exact queued base.
+            #
+            # The comparison base is the candidate's FIRST parent, never the
+            # event payload's PR base. Diffing from the PR's fork point would
+            # replay every watch event main gained after the branch forked and
+            # report another PR's family claim as this PR's duplicate. With
+            # live main as both the base and the first parent, those events
+            # sit on both sides of the diff and cancel, so only this PR's own
+            # change is measured.
+            tools/ci/net-retry.sh git fetch --no-tags origin \
+              '+refs/heads/main:refs/vellum/live-main'
+            live_base="$(git rev-parse --verify 'refs/vellum/live-main^{commit}')"
+            if ! git cat-file -e "$PR_SOURCE_HEAD^{commit}" 2>/dev/null; then
+              tools/ci/net-retry.sh git fetch --no-tags origin "$PR_SOURCE_HEAD"
+            fi
+            source_head="$(git rev-parse --verify "$PR_SOURCE_HEAD^{commit}")"
+            if [[ "$source_head" != "$PR_SOURCE_HEAD" ]]; then
+              echo "vellum-freeze: PR head $PR_SOURCE_HEAD resolved to $source_head" >&2
               exit 1
             fi
+            candidate_file="$RUNNER_TEMP/vellum-freeze-candidate"
+            if ! python3 tools/scripts/vellum_trusted_merge.py \
+              --repo . \
+              --base "$live_base" \
+              --head "$source_head" \
+              --output "$candidate_file"
+            then
+              echo "vellum-freeze: PR head $source_head does not merge cleanly with current protected main $live_base; merge main into the branch" >&2
+              exit 1
+            fi
+            candidate="$(cat "$candidate_file")"
+            parents="$(git rev-list --parents -n 1 "$candidate")"
+            if [[ "$parents" != "$candidate $live_base $source_head" ]]; then
+              echo "vellum-freeze: candidate parents are not current protected main plus the exact PR head" >&2
+              exit 1
+            fi
+            # Later steps read the working tree (inventory verification), so
+            # they must see the same candidate the validators diff.
+            git checkout --quiet --detach "$candidate"
+            echo "validating PR head $source_head merged into current protected main $live_base as $candidate" >&2
             {
-              echo "base=$protected_base"
-              echo "head=$GITHUB_SHA"
-              echo "source_head=$PR_SOURCE_HEAD"
+              echo "base=$live_base"
+              echo "head=$candidate"
+              echo "source_head=$source_head"
             } >> "$GITHUB_OUTPUT"
           else
             {

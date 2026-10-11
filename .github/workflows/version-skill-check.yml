@@ -16,8 +16,8 @@ on:
     branches: [main, develop]
     types: [opened, synchronize, reopened, edited]
   # Run the required `Enforce version & skill sync` gate on queued merge groups
-  # so a merge queue on `main` can land PRs. On merge_group the diff base
-  # resolves to origin/main (see the "Resolve diff base" step).
+  # so a merge queue on `main` can land PRs. On merge_group the diff base is
+  # the entry's own merge_group.base_sha (see the "Resolve diff base" step).
   merge_group:
   workflow_dispatch:
     inputs:
@@ -85,21 +85,23 @@ jobs:
 
       - name: Resolve diff base
         id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
-          # Every gate below compares HEAD against the merge-base, not the
-          # base tip. The checked-out merge ref can lag the live base branch,
-          # and a gate that reads a file at the tip (node ABI order, the skill
-          # map, hotspot sizes) would blame the PR for whatever main changed
-          # since. Three-dot diffs and commit ranges are unchanged by this.
-          # workflow_dispatch and merge_group compare against origin/main.
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="origin/${{ github.base_ref }}"
-          else
-            base="origin/main"
-          fi
-          ref=$(git merge-base "$base" HEAD)
-          echo "diff base: $ref (merge-base of $base and HEAD)"
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          # Every gate below compares HEAD against this one commit. On
+          # merge_group it is the queue entry's own base (merge_group.base_sha):
+          # a group commit sits on top of every entry ahead of it, so a
+          # merge-base with origin/main would put their commits in this entry's
+          # range and fail it for them. On pull_request it is the merge-base
+          # with the base branch, so a gate reading a file at the base tip does
+          # not blame the PR for whatever the base changed since. The rules and
+          # their tests live in tools/scripts/ci_diff_base.py.
+          python3 tools/scripts/ci_diff_base.py \
+              --event "$EVENT_NAME" \
+              --base-ref "$BASE_REF" \
+              --merge-group-base-sha "$MERGE_GROUP_BASE_SHA"
 
       - name: Skill-sync check
         run: |
@@ -329,6 +331,7 @@ jobs:
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
+          python3 tools/scripts/test_ci_diff_base.py
           python3 tools/scripts/test_node_abi_gate.py
           python3 tools/scripts/test_hotspot_size_guard.py
           python3 tools/scripts/test_header_fanout_guard.py

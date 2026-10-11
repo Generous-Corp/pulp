@@ -15,7 +15,6 @@ target_sources(pulp-host PRIVATE
     src/signal_graph_control.cpp
     src/processor_signal_graph_binding.cpp
     src/signal_graph_prepare.cpp
-    src/signal_graph_diagnostics.cpp
     src/signal_graph_reference_walk.cpp
     src/signal_graph_live_swap.cpp
     src/signal_graph_prepared_topology_edit.cpp
@@ -36,6 +35,7 @@ target_sources(pulp-host PRIVATE
     src/forge_dynamics_catalog.cpp
     src/forge_catalog_export_modulation.cpp
     src/forge_catalog_export_lofi.cpp
+    src/forge_lofi_catalog.cpp
     src/forge_catalog_export_pitch_sequencing.cpp
     src/forge_catalog_export_space_synthesis.cpp
     src/forge_space_catalog.cpp

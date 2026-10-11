@@ -144,7 +144,7 @@ TEST_CASE("feedback cannot run away", "[design-panel][audio][rt-safety]") {
     }
 }
 
-TEST_CASE("every control the panel declares resolves to a parameter",
+TEST_CASE("every control the plugin panel declares resolves to a parameter",
           "[design-panel][binding]") {
     // The failure this catches is silent by construction: a control whose key
     // matches nothing renders, turns, and moves no parameter. It cost this

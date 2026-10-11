@@ -556,5 +556,20 @@ class ArtifactUploadResilienceTest(unittest.TestCase):
         # Consumers rely on the artifact: a job that never published it fails.
         self.assertNotIn("continue-on-error", retry_step)
 
+    def test_unread_uploads_never_red_the_gate(self) -> None:
+        # Nothing gates on these: the plugin bundles are a human download and
+        # a lost iOS marker only costs a later rebuild.
+        for name in ("Upload plugin bundles (macOS)", "Record iOS gate digest"):
+            with self.subTest(step=name):
+                self.assertIs(self.steps[name].get("continue-on-error"), True)
+
+    def test_evidence_publishes_still_fail_the_job(self) -> None:
+        # Receipts and verification evidence are read by merge decisions; a
+        # job that did not publish them must not look green.
+        for name in ("Publish exact protected-validation receipt",
+                     "Publish A2T structural verification"):
+            with self.subTest(step=name):
+                self.assertNotIn("continue-on-error", self.steps[name])
+
 if __name__ == "__main__":
     unittest.main()

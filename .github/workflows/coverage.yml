@@ -150,7 +150,7 @@ jobs:
   changed-files:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
-    # dorny/paths-filter@v3 in PR mode requires pull-requests:read; without
+    # dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4 in PR mode requires pull-requests:read; without
     # it the action silently returns no changed files, which would defeat
     # the iOS-relevant path filter that gates the slow Swift coverage leg.
     permissions:
@@ -171,7 +171,7 @@ jobs:
         # above forces `ios=true` for push + workflow_dispatch. We still
         # run the action on PR events where it diffs against the base ref.
         if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
         with:
           # iOS-relevant surface — keep narrow but inclusive enough that
           # any CMake/toolchain/iOS-platform change triggers the slow
@@ -1276,7 +1276,7 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
           packages: platform-tools
 
