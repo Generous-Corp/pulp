@@ -535,8 +535,8 @@ jobs:
             # workflow_dispatch checkouts are depth-1; fetch this exact head
             # with bounded history so merge-base can resolve without fetching
             # every repository ref.
-            git fetch --no-tags --depth=32 origin "$GITHUB_SHA"
-            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+            git fetch --no-tags --depth=64 origin "$GITHUB_SHA"
+            git fetch --no-tags --depth=64 origin main:refs/remotes/origin/main
             protected_base="$(git merge-base HEAD origin/main)"
             git update-ref refs/remotes/origin/main "$protected_base"
           fi
