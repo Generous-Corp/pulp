@@ -2994,13 +2994,12 @@ The rejection corpus (Vellum `tools/parity/corpus/fixtures/malformed/`) holds
 each of these to a code. Keep the codes and the wording the lane's regexes
 match:
 
-- **A DesignIR envelope newer than the reader is refused.**
-  `parse_design_ir_json` throws `unsupported DesignIR version N (this build
-  reads versions up to 1)` for `version > kDesignIrReadableVersion`. The writer
-  still emits whatever `ir.version` holds. A test that wants a "future" document
-  has to build the `DesignIR` directly; parsing one now throws. Any tool that
-  calls the reader catches the exception, prints it, and exits 1. An uncaught
-  throw is a SIGABRT, and the lane scores that as a crash, not a reject.
+- **A DesignIR envelope newer than this build warns; it is not refused.**
+  The reader deliberately keeps and round-trips any `version` (tests pin
+  this), so the check lives in the native resolver:
+  `document-version-unsupported` with the text `unsupported DesignIR version
+  N`. Do not move it into `parse_design_ir_json`: refusing there breaks the
+  preserve contract, and it was ruled out.
 - **Two ZIP members that land on one file refuse the import.**
   `zip_entry_policy.hpp` keys members by the lexically normalized,
   case-folded path. `Scene.pulp.json` and `./assets//a.png` collide with
