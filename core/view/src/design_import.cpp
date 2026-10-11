@@ -630,7 +630,6 @@ static std::vector<uint8_t> read_binary_file(const fs::path& path) {
 
 static bool write_binary_file(const fs::path& path,
                               const std::vector<uint8_t>& bytes);
-static fs::path default_asset_cache_directory();
 
 void enrich_imported_image_asset_metadata(DesignIR& ir,
                                           const IRAssetManifest& manifest,
@@ -681,7 +680,7 @@ void enrich_imported_image_asset_metadata(DesignIR& ir,
                                             // sha256 like the rest of the pipeline —
                                             // std::hash is implementation-defined and
                                             // unstable across runs and compilers.
-                                            fs::path dir = default_asset_cache_directory();
+                                            fs::path dir = design_import_asset_cache_directory();
                                             std::error_code dec;
                                             fs::create_directories(dir, dec);
                                             const auto digest = pulp::runtime::sha256_hex(
@@ -749,18 +748,6 @@ static bool write_binary_file(const fs::path& path, const std::vector<uint8_t>& 
     file.write(reinterpret_cast<const char*>(bytes.data()),
                static_cast<std::streamsize>(bytes.size()));
     return file.good();
-}
-
-static fs::path default_asset_cache_directory() {
-    if (const char* env = std::getenv("PULP_IMPORT_ASSET_CACHE"); env && *env)
-        return fs::path(env);
-#ifdef _WIN32
-    if (const char* local = std::getenv("LOCALAPPDATA"); local && *local)
-        return fs::path(local) / "Pulp" / "import-assets";
-#endif
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return fs::path(home) / ".pulp" / "import-assets";
-    return fs::temp_directory_path() / "pulp-import-assets";
 }
 
 static std::string asset_id_for(const std::string& stable_key) {
@@ -1281,9 +1268,8 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
     collect_font_family_metadata_from_node(ir.root, font_family_by_uri);
 
     std::unordered_map<std::string, size_t> asset_index_by_key;
-    const auto cache_dir = options.cache_directory.empty()
-        ? default_asset_cache_directory()
-        : options.cache_directory;
+    const auto cache_dir = options.cache_directory.empty() ? design_import_asset_cache_directory()
+                                                           : options.cache_directory;
 
     for (const auto& uri : uris) {
         const auto resolved_uri = (!is_data_uri(uri) && !is_network_url(uri)
