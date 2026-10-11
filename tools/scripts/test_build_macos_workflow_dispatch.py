@@ -717,7 +717,7 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         document = yaml.safe_load(RECONCILER.read_text(encoding="utf-8"))
         _assert_reconciler(document)
         pending = _job_text("publish-macos-pending")
-        upload = pending.index("actions/upload-artifact@v4")
+        upload = pending.index("actions/upload-artifact@v7")
         create = pending.index("--raw-field name=macos")
         self.assertLess(upload, create)
 
