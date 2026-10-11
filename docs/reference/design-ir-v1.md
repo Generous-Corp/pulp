@@ -189,6 +189,17 @@ also carry diagnostics scoped to that asset.
 }
 ```
 
+Native materialization also reports defects a render cannot show, each as a
+warning diagnostic and one `[pulp:warn] design-import:` line:
+
+| Code | Raised when |
+|---|---|
+| `document-version-unsupported` | The envelope declares a `version` newer than this build knows (1). The reader still accepts and round-trips it; its fields are read as version 1 defines them. |
+| `node-type-unknown` | A node's `type` is not one the native resolver recognizes. The node still imports by its audio role, its name, or as a plain View. |
+| `identity-duplicate` | A node repeats an earlier node's `stable_anchor_id`. Bindings and re-import tweaks reach only the first. |
+| `asset-undecodable` | An image asset's file exists but cannot be decoded (corrupt, truncated, or not an image), so the node paints blank. PNG chunk CRCs and `IEND` are checked as well as the decode, because the decoder fills the missing rows of a truncated PNG and still reports success. |
+| `font-undecodable` | A browser capture's page declared a web font the browser could not decode; its text was captured in a fallback face. |
+
 Known `kind` values are `unsupported_property`, `unresolved_asset`,
 `snapshot_semantics_warning`, `legacy_field_shortcut`, `capture_partial`,
 `fallback_used`, and `unknown`. Legacy diagnostics that only include `code`
