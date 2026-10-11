@@ -5,6 +5,14 @@
 #include <choc/javascript/choc_javascript_QuickJS.h>
 #include <choc/javascript/choc_javascript_Console.h>
 
+// CHOC's QuickJS compatibility header leaks DEFAULT=default. Perfetto's
+// generated ProtoLog enums legitimately use DEFAULT as an identifier; keep
+// that compatibility macro local to the QuickJS implementation instead of
+// letting it reach the traced SDK headers.
+#ifdef DEFAULT
+#undef DEFAULT
+#endif
+
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/js_engine.hpp>

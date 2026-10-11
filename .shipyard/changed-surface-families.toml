@@ -253,6 +253,7 @@ paths = [
   "tools/scripts/test_workflow_lint.py",
   "tools/scripts/test_workflow_runner_selector_audit.py",
   "tools/scripts/validation_profile_select.py",
+  "tools/scripts/vellum_closure.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_validation_manifest.py",
@@ -2083,7 +2084,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-56711f2c84fd"
+name = "script-readers-29b919dda0eb"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -2094,6 +2095,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "cli-dsp-capabilities-dynamics-regression",
+  "dsp-capability-registry-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2591,6 +2593,35 @@ tests = [
   "clean-worktree-planning-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-clean-agent-journey-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-2693e784ebff"
+paths = ["tools/scripts/test_gpu_device_link_closure_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-device-link-closure-rules",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
   "gpu-first-visible-campaign-selftest",
@@ -5699,6 +5730,7 @@ paths = [
   "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
   "tools/scripts/test_gpu_audio_provider_identity.py",
   "tools/scripts/test_gpu_clean_agent_journey.py",
+  "tools/scripts/test_gpu_device_link_closure_check.py",
   "tools/scripts/test_gpu_dpr_calibration_failure_proof.py",
   "tools/scripts/test_gpu_dpr_experiment.py",
   "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
@@ -5888,6 +5920,7 @@ paths = [
   "tools/scripts/trace_span_category_lint.py",
   "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
+  "tools/scripts/vellum_closure.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",
@@ -5935,6 +5968,7 @@ tests = [
   "ctest-label-exclusion-guard",
   "ctest-label-exclusion-guard-selftest",
   "drift-fast-selftest",
+  "dsp-capability-registry-selftest",
   "fleet-remote-probe-selftest",
   "forced-restore-lint",
   "forced-restore-lint-selftest",
@@ -5944,6 +5978,8 @@ tests = [
   "gpu-probe-historical-v1-acceptance",
   "gpu-probe-terminal-recorder-selftest",
   "graphql-filtered-count-guard",
+  "host-lane-probe-requires-plugins",
+  "host-lane-probe-unloadable-bundle-is-setup-error",
   "inspector-protocol-registry-check-selftest",
   "inspector-protocol-registry-complete",
   "interchange-concepts-drift",
@@ -5990,6 +6026,7 @@ tests = [
 ]
 build_targets = [
   "pulp-cli",
+  "pulp-host-lane-probe",
   "pulp-timeline-schema-emit",
 ]
 supported_build_types = [
@@ -6226,6 +6263,7 @@ paths = [
   "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
   "tools/scripts/test_gpu_audio_provider_identity.py",
   "tools/scripts/test_gpu_clean_agent_journey.py",
+  "tools/scripts/test_gpu_device_link_closure_check.py",
   "tools/scripts/test_gpu_dpr_calibration_failure_proof.py",
   "tools/scripts/test_gpu_dpr_experiment.py",
   "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
@@ -6415,6 +6453,7 @@ paths = [
   "tools/scripts/trace_span_category_lint.py",
   "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
+  "tools/scripts/vellum_closure.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",
@@ -6450,7 +6489,6 @@ tests = [
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
-  "pulp-materialized-runtime-conformance",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
   "pulp_bundle_threejs_for_jsc_smoke",

@@ -627,3 +627,17 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_core_audio_free.cmake)
     set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "view;gate")
 endif()
+
+# pulp-host-lane-probe (tools/editor-open/host_lane_probe.mm) must refuse to
+# run without plug-ins and must report an unloadable bundle as a setup error
+# (exit 2), never as written observations. The functional lane needs built
+# example bundles and is driven by the Vellum parity host lane.
+if(APPLE AND NOT IOS AND TARGET pulp::host AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME host-lane-probe-requires-plugins
+        COMMAND sh -c "\"$1\" >/dev/null 2>&1; test $? -eq 2" sh $<TARGET_FILE:pulp-host-lane-probe>)
+    add_test(NAME host-lane-probe-unloadable-bundle-is-setup-error
+        COMMAND sh -c "out=$(\"$1\" --plugin /nonexistent/Missing.clap --out \"$2\" 2>&1); rc=$?; test $rc -eq 2 && printf '%s' \"$out\" | grep -q 'load /nonexistent/Missing.clap failed' && test ! -e \"$2/host-observation.json\""
+            sh $<TARGET_FILE:pulp-host-lane-probe> ${CMAKE_CURRENT_BINARY_DIR}/host-lane-probe-missing)
+    set_tests_properties(host-lane-probe-requires-plugins host-lane-probe-unloadable-bundle-is-setup-error
+        PROPERTIES LABELS "view;editor-open;tools" TIMEOUT 60)
+endif()

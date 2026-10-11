@@ -54,6 +54,11 @@ list(APPEND PULP_SDK_TARGETS
 if(TARGET pulp-audio-analysis)
     list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)
 endif()
+# The view-free CLAP adapter behind pulp_add_plugin(NO_EDITOR); present only
+# when the CLAP SDK is.
+if(TARGET pulp-format-clap-core)
+    list(APPEND PULP_SDK_TARGETS pulp-format-clap-core)
+endif()
 
 # pulp-view-script (the JS scripting + web-compat layer) is EXCLUDE_FROM_ALL
 # when PULP_ENABLE_JS=OFF (native-only build), so it is never built. Exporting
@@ -103,16 +108,24 @@ if(TARGET pulp-view-audio)
     list(APPEND PULP_SDK_TARGETS pulp-view-audio)
 endif()
 
+# The GPU device layer is exported with the renderer that links it, and on its
+# own for pulp-gpu-audio, which links the device without the 2D renderer.
+if(TARGET pulp-gpu-device-api)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-device-api)
+endif()
+if(TARGET pulp-gpu-device)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-device)
+endif()
 if(TARGET pulp-render)
     list(APPEND PULP_SDK_TARGETS pulp-render)
 endif()
 
 # pulp-gpu-audio is the GPU-agnostic real-time audio transport plus the optional
 # GPU convolver/spectral nodes. The transport target is always built, but its
-# GPU nodes (and the PUBLIC link to pulp::render / pulp::signal) only compile
+# GPU nodes (and the PUBLIC link to pulp::gpu-device / pulp::signal) only compile
 # when GPU is enabled. Export it when configured so find_package(Pulp) consumers
 # — GPU plugins that drive a GpuAudioTransport — get pulp::gpu-audio. Its PUBLIC
-# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::render + pulp::signal)
+# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::gpu-device + pulp::signal)
 # are all already in the export set, so the export set stays self-consistent.
 if(TARGET pulp-gpu-audio)
     list(APPEND PULP_SDK_TARGETS pulp-gpu-audio)
@@ -937,6 +950,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_no_editor.cpp"
     DESTINATION src/pulp/format
 )
 
