@@ -573,7 +573,8 @@ jobs:
             -DPULP_TEST_PCH=OFF \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_GPU=OFF
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_TEST_TIMEOUT_SCALE=4
 
       - name: Build
         run: tools/ci/governed-build.sh cmake --build build-rtsan
@@ -585,4 +586,14 @@ jobs:
         run: bash tools/ci/install_visual_python_deps.sh build-rtsan
 
       - name: Test with RTSan
-        run: ctest --test-dir build-rtsan --output-on-failure -j$(nproc) --exclude-regex "GpuSurface|compileShader"
+        run: |
+          # PULP_ENABLE_GPU=OFF: GPU-health tests cannot exercise a provider.
+          # No Skia is installed: Skia-render fixtures have no implementation.
+          # No capture provider is present: browser-capture fixtures are inapplicable.
+          # SDK-consumer/install-layout fixtures are slow-fixture coverage, not RTSan.
+          # PULP_TEST_TIMEOUT_SCALE=4 covers sanitizer slowdown (including FDN reverb).
+          ctest --test-dir build-rtsan --output-on-failure \
+            -j$(nproc) \
+            --timeout 240 \
+            --label-exclude 'skia|browser-capture|gpu-health|slow-affected|agent-capability-installed-sdk' \
+            --exclude-regex 'sdk-consumer|install-layout|clean-consumer|project-package-compile-out|cmake-pulp-install|GpuSurface|compileShader'
