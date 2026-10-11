@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09480"></a>
+## [0.948.0] - 2026-10-11
+
+- release/version bump ([#10083](https://github.com/Generous-Corp/pulp/pull/10083))
+- feature/vellum p10 boundary ([#10039](https://github.com/Generous-Corp/pulp/pull/10039))
+- fix/actionlint timeout 20261011 ([#10079](https://github.com/Generous-Corp/pulp/pull/10079))
+- codex/windows gpu sdk 20261010 ([#10072](https://github.com/Generous-Corp/pulp/pull/10072))
+- feature/vellum carve P5 ([#10036](https://github.com/Generous-Corp/pulp/pull/10036))
+
 <a id="v09470"></a>
 ## [0.947.0] - 2026-10-11
 
@@ -10416,6 +10425,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.948.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.948.0
 [0.947.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.947.0
 [0.946.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.946.0
 [0.945.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.945.1
