@@ -217,7 +217,7 @@ IRNode audio_node(std::string id,
                   float width,
                   float height) {
     IRNode node;
-    node.type = "audio_widget";
+    node.type = "frame"; // importers carry the control role in audio_widget, not in type
     node.stable_anchor_id = std::move(id);
     node.audio_widget = type;
     node.audio_label = std::move(label);
