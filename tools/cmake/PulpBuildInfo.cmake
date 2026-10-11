@@ -9,10 +9,16 @@
 # alone — Info.plist carries only a product version.
 #
 # Placement:
-#   * Apple bundles  — <bundle>/Contents/Resources/pulp-build-info.json
-#                      (flat iOS bundles: <bundle>/Resources/...). Written by a
-#                      POST_BUILD step, so it exists before any signing step and
-#                      is covered by the bundle's sealed resources.
+#   * macOS bundles  — <bundle>/Contents/Resources/pulp-build-info.json
+#   * iOS and other shallow Apple bundles — <bundle>/pulp-build-info.json.
+#                      A shallow bundle keeps its resources at the root; a
+#                      top-level Resources/ directory makes codesign classify it
+#                      as a malformed macOS bundle ("bundle format unrecognized",
+#                      or every other root file reported as unsigned code), so
+#                      the bundle could not be signed or installed.
+#                      Written by a POST_BUILD step, so it exists before any
+#                      signing step and is covered by the bundle's sealed
+#                      resources.
 #   * LV2            — <bundle>.lv2/pulp-build-info.json
 #   * other modules  — <binary>.pulp-build-info.json beside the binary
 #
@@ -167,6 +173,19 @@ function(_pulp_build_info_archs out_var)
     set(${out_var} "${_archs}" PARENT_SCOPE)
 endfunction()
 
+# Directory, relative to a bundle's content directory, that holds
+# pulp-build-info.json for an Apple bundle built for `system_name`
+# (CMAKE_SYSTEM_NAME): "Resources" for a macOS (deep) bundle, "" for a shallow
+# iOS / tvOS / watchOS / visionOS bundle, whose content directory is the bundle
+# root and which must not contain a Resources/ directory.
+function(_pulp_build_info_apple_resource_subdir system_name out_var)
+    if("${system_name}" STREQUAL "Darwin" OR "${system_name}" STREQUAL "")
+        set(${out_var} "Resources" PARENT_SCOPE)
+    else()
+        set(${out_var} "" PARENT_SCOPE)
+    endif()
+endfunction()
+
 # Attach pulp-build-info.json to one bundle-producing target.
 #
 #   target        the pulp_add_plugin() product name (e.g. PulpGain)
@@ -309,13 +328,23 @@ function(_pulp_attach_build_info target format_target format name bundle_id vers
     set(_template "${_template_dir}/$<CONFIG>/pulp-build-info.json.in")
     file(GENERATE OUTPUT "${_template}" CONTENT "${_content}")
 
+    set(_retire_dir "")
     get_target_property(_is_bundle ${format_target} BUNDLE)
     get_target_property(_is_app_bundle ${format_target} MACOSX_BUNDLE)
     if("${format_target}" MATCHES "_LV2$")
         set(_output "$<TARGET_FILE_DIR:${format_target}>/pulp-build-info.json")
     elseif(APPLE AND (_is_bundle OR _is_app_bundle))
+        _pulp_build_info_apple_resource_subdir("${CMAKE_SYSTEM_NAME}" _resource_subdir)
+        if(NOT _resource_subdir)
+            # Earlier releases wrote the record under a top-level Resources/
+            # here, which makes the bundle unsignable; retire it.
+            set(_retire_dir "$<TARGET_BUNDLE_CONTENT_DIR:${format_target}>/Resources")
+        endif()
+        if(_resource_subdir)
+            set(_resource_subdir "/${_resource_subdir}")
+        endif()
         set(_output
-            "$<TARGET_BUNDLE_CONTENT_DIR:${format_target}>/Resources/pulp-build-info.json")
+            "$<TARGET_BUNDLE_CONTENT_DIR:${format_target}>${_resource_subdir}/pulp-build-info.json")
     else()
         set(_output
             "$<TARGET_FILE_DIR:${format_target}>/$<TARGET_FILE_BASE_NAME:${format_target}>.pulp-build-info.json")
@@ -333,6 +362,7 @@ function(_pulp_attach_build_info target format_target format name bundle_id vers
             "-DPULP_BUILD_INFO_GIT_DIRTY=${_git_dirty}"
             "-DPULP_BUILD_INFO_EMBED=${_pins}"
             "-DPULP_BUILD_INFO_GIT=${GIT_EXECUTABLE}"
+            "-DPULP_BUILD_INFO_RETIRE_DIR=${_retire_dir}"
             -P "${_finalize}")
 
     # Two triggers, because neither alone keeps the record current:
