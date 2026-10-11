@@ -53,6 +53,7 @@ INPUT                  = ../../core/audio/include \
                          ../../core/timeline_editor/include \
                          ../../core/timeline_view/include \
                          ../../core/view/include \
+                         ../../core/view/audio/include \
                          ../../tools/audio/analysis/include \
                          ../../tools/cli/gpu_health/include \
                          ../../tools/cli/gpu_probe/include \

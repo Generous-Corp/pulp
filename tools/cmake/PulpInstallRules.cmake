@@ -48,7 +48,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-view-core pulp-view-audio pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-view-core pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
@@ -88,6 +88,9 @@ endif()
 # platforms that actually built it.
 if(TARGET pulp-host)
     list(APPEND PULP_SDK_TARGETS pulp-host)
+endif()
+if(TARGET pulp-view-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-view-audio)
 endif()
 
 if(TARGET pulp-render)

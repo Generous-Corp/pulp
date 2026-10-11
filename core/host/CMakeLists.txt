@@ -66,10 +66,9 @@ target_sources(pulp-host PRIVATE
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
+# GraphEditorView, the audio-UI consumer of the host graph, lives in
+# pulp-view-audio (core/view), so the host does not depend on view-core.
 target_link_libraries(pulp-host PRIVATE pulp::platform)
-# GraphEditorView is an audio-UI consumer of the host graph. Keep the host
-# target independent from view-core so the view↔host cycle is removed.
-target_link_libraries(pulp-view-audio PUBLIC pulp::host)
 
 # The GPU convolution realization is an explicit opt-in.  Keeping this edge
 # disabled by default leaves the CPU catalog (and its zero-latency contract)

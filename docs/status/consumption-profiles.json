@@ -1208,6 +1208,9 @@
       "pulp/timeline_editor/track_header_projection.hpp",
       "pulp/timeline_editor/viewport_projection.hpp"
     ],
+    "core/view/audio/include": [
+      "pulp/view/widgets/graph_editor_view.hpp"
+    ],
     "core/view/include": [
       "pulp/design/design_adherence.hpp",
       "pulp/design/design_gallery.hpp",
@@ -1424,7 +1427,6 @@
       "pulp/view/widget_schema.hpp",
       "pulp/view/widget_skin_derive.hpp",
       "pulp/view/widgets.hpp",
-      "pulp/view/widgets/graph_editor_view.hpp",
       "pulp/view/widgets/svg_line.hpp",
       "pulp/view/widgets/svg_rect.hpp",
       "pulp/view/window_classes.hpp",
@@ -1552,7 +1554,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 73,
+        "installed_target_count": 74,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -1565,6 +1567,10 @@
           {
             "exported_as": "Pulp::inspect-sample-region-runtime",
             "closure_node_count": 93
+          },
+          {
+            "exported_as": "Pulp::view-audio",
+            "closure_node_count": 88
           },
           {
             "exported_as": "Pulp::host",
@@ -3333,7 +3339,6 @@
             "pulp-playback",
             "pulp-runtime",
             "pulp-state",
-            "pulp-view-core",
             "vst3-sdk"
           ]
         },
@@ -6911,12 +6916,155 @@
           },
           "public_headers": {
             "roots": [
+              "core/view/audio/include",
               "core/view/include"
             ],
             "generated_include_roots": 0
           },
           "direct_dependencies": [
             "pulp-view-script"
+          ]
+        },
+        "view-audio": {
+          "target": "pulp-view-audio",
+          "exported_as": "Pulp::view-audio",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "core/view",
+          "closure": {
+            "node_count": 88,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-bundled-fonts",
+              "pulp-canvas",
+              "pulp-events",
+              "pulp-format",
+              "pulp-format-core",
+              "pulp-format-view",
+              "pulp-foundation",
+              "pulp-graph",
+              "pulp-host",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-native-components",
+              "pulp-platform",
+              "pulp-playback",
+              "pulp-render",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-simd",
+              "pulp-state",
+              "pulp-timebase",
+              "pulp-timeline",
+              "pulp-view-audio",
+              "pulp-view-core",
+              "pulp-view-script"
+            ],
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "ausdk",
+              "clap",
+              "everest",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "skia::skia",
+              "vst3-sdk",
+              "webgpu",
+              "yaml-cpp",
+              "yogacore"
+            ]
+          },
+          "external_dependencies": {
+            "count": 62,
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "ausdk",
+              "clap",
+              "everest",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "skia::skia",
+              "vst3-sdk",
+              "webgpu",
+              "yaml-cpp",
+              "yogacore"
+            ],
+            "prebuilt_archives": [
+              "libdawn_combined.a",
+              "libjsonreader.a",
+              "libskia.a",
+              "libskottie.a",
+              "libskparagraph.a",
+              "libskresources.a",
+              "libsksg.a",
+              "libskshaper.a",
+              "libskunicode_core.a",
+              "libskunicode_icu.a",
+              "libsvg.a"
+            ],
+            "imported_targets": [],
+            "frameworks": [
+              "AVFoundation",
+              "Accelerate",
+              "AppKit",
+              "AudioToolbox",
+              "AudioUnit",
+              "Carbon",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreGraphics",
+              "CoreHaptics",
+              "CoreMIDI",
+              "CoreMedia",
+              "CoreServices",
+              "CoreText",
+              "CoreVideo",
+              "ForceFeedback",
+              "Foundation",
+              "GameController",
+              "IOKit",
+              "IOSurface",
+              "ImageIO",
+              "Metal",
+              "MetalKit",
+              "QuartzCore",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm",
+              "m",
+              "objc"
+            ]
+          },
+          "public_headers": {
+            "roots": [
+              "core/view/audio/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "pulp-host",
+            "pulp-view-core"
           ]
         },
         "view-core": {
@@ -7032,6 +7180,7 @@
           },
           "public_headers": {
             "roots": [
+              "core/view/audio/include",
               "core/view/include"
             ],
             "generated_include_roots": 1
@@ -7172,6 +7321,7 @@
           },
           "public_headers": {
             "roots": [
+              "core/view/audio/include",
               "core/view/include"
             ],
             "generated_include_roots": 0
@@ -7294,6 +7444,7 @@
           },
           "public_headers": {
             "roots": [
+              "core/view/audio/include",
               "core/view/include"
             ],
             "generated_include_roots": 1

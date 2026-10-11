@@ -17,15 +17,22 @@ target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_EN
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 
-add_library(pulp-view-audio)
-add_library(pulp::view-audio ALIAS pulp-view-audio)
+# Audio-UI widgets (GraphEditorView) that bind to the plug-in host graph. The
+# view umbrellas do not link this target: a consumer that draws a host graph
+# links pulp::view-audio, so an ordinary view or plug-in UI never pulls in the
+# plug-in host stack. The host is not built on iOS (no third-party plug-in
+# hosting there), so neither is this target; its header still installs with
+# the view headers. pulp::host is defined later (core/host), which the link
+# resolves at generate time.
 if(NOT PULP_IOS)
-    target_sources(pulp-view-audio PRIVATE audio/src/graph_editor_view.cpp)
+    add_library(pulp-view-audio audio/src/graph_editor_view.cpp)
+    add_library(pulp::view-audio ALIAS pulp-view-audio)
+    target_include_directories(pulp-view-audio PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>
+        $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(pulp-view-audio PUBLIC pulp::view-core pulp::host)
 endif()
-target_include_directories(pulp-view-audio PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>
-    $<INSTALL_INTERFACE:include>
-)
 
 add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)
@@ -35,20 +42,12 @@ target_compile_definitions(pulp-view-native PUBLIC PULP_BUILD_WEBVIEW=0)
 if(PULP_ENABLE_JS)
     target_link_libraries(pulp-view PUBLIC pulp::view-script)
     target_link_libraries(pulp-view-native PUBLIC pulp::view-script)
-    if(NOT PULP_IOS)
-        target_link_libraries(pulp-view PUBLIC pulp::view-audio)
-        target_link_libraries(pulp-view-native PUBLIC pulp::view-audio)
-    endif()
 else()
     # Native-only: link the JS-free core directly and keep view-script defined
     # (so its still-evaluated config blocks below never dangle) but out of the
     # default build and every binary, so no JS engine is compiled or shipped.
     target_link_libraries(pulp-view PUBLIC pulp::view-core)
     target_link_libraries(pulp-view-native PUBLIC pulp::view-core)
-    if(NOT PULP_IOS)
-        target_link_libraries(pulp-view PUBLIC pulp::view-audio)
-        target_link_libraries(pulp-view-native PUBLIC pulp::view-audio)
-    endif()
     set_target_properties(pulp-view-script PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
     # Authoritative native-only guard. The binary nm-check (AssertNoJsSymbols.cmake)
@@ -91,7 +90,7 @@ foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-na
 endforeach()
 unset(_pulp_view_target)
 
-foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native pulp-view-audio)
+foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native)
     target_include_directories(${_pulp_view_target}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>
