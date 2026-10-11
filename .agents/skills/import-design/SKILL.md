@@ -3027,6 +3027,42 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   and exits 1 with the reason. Malformed fixtures for this path live in the
   parity harness corpus (`tools/parity/corpus/fixtures/malformed/` in Vellum).
 
+### Malformed imports fail closed or warn — never pass silently
+
+The rejection corpus (Vellum `tools/parity/corpus/fixtures/malformed/`) holds
+each of these to a code. Keep the codes and the wording the lane's regexes
+match:
+
+- **A DesignIR envelope newer than this build warns; it is not refused.**
+  The reader deliberately keeps and round-trips any `version` (tests pin
+  this), so the check lives in the native resolver:
+  `document-version-unsupported` with the text `unsupported DesignIR version
+  N`. Do not move it into `parse_design_ir_json`: refusing there breaks the
+  preserve contract, and it was ruled out.
+- **Two ZIP members that land on one file refuse the import.**
+  `zip_entry_policy.hpp` keys members by the lexically normalized,
+  case-folded path. `Scene.pulp.json` and `./assets//a.png` collide with
+  `scene.pulp.json` and `assets/a.png` on a case-insensitive volume.
+- **The native resolver warns on `node-type-unknown` and
+  `identity-duplicate`.** Each warning is a diagnostic plus a
+  `[pulp:warn] design-import:` line. "Unknown" means `kind_from_type` does not
+  recognize the type and it is not a vector kind. The warning fires even when
+  the node's audio role or name still resolves it. Duplicates are found by a
+  document-order walk of `stable_anchor_id`.
+- **A successful decode does not prove an image is intact.** Skia's PNG
+  decoder fills the rows of a truncated file with transparent pixels and
+  returns `kSuccess`, and the node paints blank. `canvas::probe_image_file`
+  therefore also walks the PNG chunks (whole chunks, correct CRCs, an `IEND`).
+  `asset-undecodable` comes from that probe. A PNG with a bad CRC now warns
+  even when it displays. Test fixtures need real CRCs: the 67-byte
+  `tiny_png_bytes()` in `test_import_design_tool.cpp` has a wrong IDAT length,
+  so it fails the probe.
+- **Web fonts that fail in Chromium are named.** The capture health probe
+  lists `document.fonts` faces whose `status` is `error` as
+  `provenance.health.failed_fonts`. The lowering turns each one into a
+  `font-undecodable` warning. The capture stays `healthy`, because text still
+  paints in a fallback face.
+
 ### Faithful-vector lane (Plan B): `faithful_svg` render mode → `DesignFrameView`
 
 A parallel, newer rendering strategy to the per-widget sprite/native lanes
