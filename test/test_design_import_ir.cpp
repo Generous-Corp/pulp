@@ -2,6 +2,8 @@
 #include "test_design_import_shared.hpp"
 #include <pulp/runtime/crypto.hpp>
 
+#include <optional>
+
 // ── Design source parsing ───────────────────────────────────────────────
 
 TEST_CASE("parse_design_source recognizes valid sources", "[view][import]") {
@@ -14,6 +16,65 @@ TEST_CASE("parse_design_source recognizes valid sources", "[view][import]") {
     REQUIRE(parse_design_source("designmd") == DesignSource::designmd);
     REQUIRE(parse_design_source("jsx") == DesignSource::jsx);
     REQUIRE_FALSE(parse_design_source("unknown").has_value());
+}
+
+TEST_CASE("malformed DesignIR JSON is refused without reading past the input",
+          "[view][import][parse][malformed]") {
+    const std::string valid = R"({"version": 1, "source": "figma", "root": {"type": "frame",
+      "name": "Root", "attributes": {"asset_ref": "swatch"}, "children": []}})";
+    REQUIRE(parse_design_ir_json(valid).root.name == "Root");
+
+    const auto refused = [](const std::string& text) -> std::optional<DesignIrParseError> {
+        try {
+            (void)parse_design_ir_json(text);
+        } catch (const DesignIrParseError& error) {
+            return error;
+        }
+        return std::nullopt;
+    };
+
+    SECTION("cut inside a string literal") {
+        // The pinned JSON parser walks past the end of an unterminated string.
+        const auto cut = valid.substr(0, valid.find("swatch") + 3);
+        const auto error = refused(cut);
+        REQUIRE(error);
+        REQUIRE(std::string(error->what()).find("unterminated string") != std::string::npos);
+        REQUIRE(error->offset == cut.rfind('"'));
+    }
+    SECTION("cut between members") {
+        const auto error = refused(valid.substr(0, valid.find("\"root\"")));
+        REQUIRE(error);
+        REQUIRE(std::string(error->what()).find("truncated") != std::string::npos);
+    }
+    SECTION("cut inside a unicode escape") {
+        REQUIRE(refused("{\"version\": 1, \"root\": {\"name\": \"\\u00"));
+        REQUIRE(refused("{\"version\": 1, \"root\": {\"name\": \"\\u0\"}}"));
+    }
+    SECTION("embedded NUL byte") {
+        std::string text = valid;
+        text[text.find("Root")] = '\0';
+        const auto error = refused(text);
+        REQUIRE(error);
+        REQUIRE(error->offset == valid.find("Root"));
+    }
+    SECTION("unbalanced brackets") {
+        REQUIRE(refused(R"({"version": 1, "root": {"children": [}})"));
+    }
+    SECTION("nesting deeper than the limit") {
+        const std::string deep = std::string(kMaxDesignIrJsonDepth + 1, '[') +
+                                 std::string(kMaxDesignIrJsonDepth + 1, ']');
+        const auto error = refused(deep);
+        REQUIRE(error);
+        REQUIRE(std::string(error->what()).find("nesting") != std::string::npos);
+        const std::string allowed = R"({"version": 1, "root": {"type": "frame", "x": )" +
+                                    std::string(100, '[') + std::string(100, ']') + "}}";
+        REQUIRE_FALSE(refused(allowed));
+    }
+    SECTION("well-bounded text the JSON parser rejects is still a DesignIrParseError") {
+        const auto error = refused(R"({"version": 1, "root": nope})");
+        REQUIRE(error);
+        REQUIRE(error->offset == std::string::npos);
+    }
 }
 
 TEST_CASE("parse coerces CSS string dimensions to floats", "[view][import][parse]") {

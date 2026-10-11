@@ -1,12 +1,15 @@
 #pragma once
 
 /// @file design_ir.hpp
-/// Normalized intermediate representation (IR) for imported designs. Defines
-/// the IR model (style, layout, nodes, tokens, asset manifest, diagnostics)
-/// plus the canonical JSON serialize/parse and asset-collection entry points
-/// shared by every design-import source adapter.
+/// Normalized intermediate representation (IR) for imported designs: the IR
+/// value model (style, layout, nodes, tokens, asset manifest, diagnostics).
+///
+/// This header is the `pulp-design-ir` unit. It sits below view-core and
+/// includes only the standard library, so generic view code can carry IR
+/// values without reaching the importer. The canonical JSON serialize/parse,
+/// asset collection, and interactive-frame promotion entry points are importer
+/// operations and live in design_ir_io.hpp (`pulp-design-import`).
 
-#include <pulp/view/theme.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -331,26 +334,6 @@ enum class WidgetPromotionSignal {
     aria_role_button,
     cursor_pointer
 };
-
-/// Inspect one IR node for interactive-frame promotion signals.
-WidgetPromotionSignal classify_interactive_signal(const IRNode& node);
-
-/// Promote parsed `frame` nodes carrying click/ARIA/cursor signals to
-/// `button`. Runs automatically from the parse APIs; exposed for tests and
-/// callers that construct IR manually.
-std::size_t promote_interactive_frames(IRNode& root);
-
-/// Parse a CSS `box-shadow` value into ordered layers. Splits on top-level
-/// commas only (commas inside `rgb()`/`rgba()` are preserved), then parses
-/// each layer's offsets/blur/spread/color/inset. Numeric lengths accept an
-/// optional `px` suffix. Empty / "none" input yields an empty vector. Each
-/// layer keeps its trimmed original text in `raw` for lossless round-trip.
-std::vector<IRBoxShadow> parse_css_box_shadow(const std::string& css);
-
-/// Serialize ordered box-shadow layers back to a CSS `box-shadow` string,
-/// preferring each layer's `raw` text when present (lossless) and otherwise
-/// reconstructing from the parsed fields. Empty input yields an empty string.
-std::string box_shadow_to_css(const std::vector<IRBoxShadow>& shadows);
 
 // ── Additive identity fields on IRNode ────────────────────────────────────
 // The TS-side @pulp/import-ir package already defines the canonical shape.
@@ -746,7 +729,15 @@ struct IRAssetManifest {
     std::vector<IRAssetRef> assets;
     int version = 1;
 
-    const IRAssetRef* resolve(std::string_view asset_id) const;
+    const IRAssetRef* resolve(std::string_view asset_id) const {
+        if (asset_id.empty())
+            return nullptr;
+        for (const auto& asset : assets) {
+            if (asset.asset_id == asset_id)
+                return &asset;
+        }
+        return nullptr;
+    }
 };
 
 /// A bundled (non-system) font shipped with the design (figma-plugin #43a:
@@ -810,26 +801,5 @@ struct DesignIrAssetOptions {
     std::string base_url;
     std::unordered_map<std::string, std::string> expected_hash_by_uri;
 };
-
-/// Serialize a DesignIR as a deterministic, versioned canonical JSON
-/// envelope. The reader remains permissive; this writer emits only the
-/// canonical nested form.
-std::string serialize_design_ir(const DesignIR& ir,
-                                const DesignIrJsonOptions& options = {});
-
-/// Parse either the v1 canonical envelope or a legacy bare-node IR JSON
-/// document. Legacy source adapters keep their JSON-first compatibility by
-/// routing through this reader.
-DesignIR parse_design_ir_json(const std::string& json);
-
-/// Collect all external resources referenced by the IR into a manifest.
-/// Network fetches require explicit opt-in through options.
-IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
-                                         const DesignIrAssetOptions& options = {});
-
-/// Refresh ir.asset_manifest from the current tree while preserving embedded
-/// manifest entries whose stable asset_id may already be referenced by nodes.
-void refresh_design_ir_asset_manifest(DesignIR& ir,
-                                      const DesignIrAssetOptions& options = {});
 
 } // namespace pulp::view

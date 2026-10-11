@@ -4,7 +4,7 @@ permissions:
   contents: read
 
 # ASan + UBSan on every relevant PR and nightly, TSan advisory, RTSan on-demand.
-# Non-Apple RTSan needs Clang 18 from apt.llvm.org.
+# Non-Apple RTSan needs LLVM 20 or newer from apt.llvm.org.
 # Local equivalents: scripts/run_asan.sh, scripts/run_tsan.sh.
 #
 # Each sanitizer job's runs-on is routable via three signals (priority order):
@@ -178,6 +178,19 @@ jobs:
           submodules: false
           lfs: false
 
+      - name: Fetch protected capability base
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
+
       - name: Hydrate bounded GPU provenance commits
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
@@ -326,6 +339,19 @@ jobs:
           submodules: false
           lfs: false
 
+      - name: Fetch protected capability base
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
+
       - name: Set up Namespace macOS cache
         if: contains(needs.resolve-runners.outputs.tsan_runs_on, 'namespace-profile')
         uses: ./.github/actions/setup-namespace-macos-cache
@@ -390,6 +416,19 @@ jobs:
         with:
           submodules: false
           lfs: false
+
+      - name: Fetch protected capability base
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
 
       - name: Hydrate bounded GPU provenance commits
         shell: bash
@@ -469,15 +508,13 @@ jobs:
   rtsan:
     needs: resolve-runners
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.rtsan_runs_on) }}
-    name: RealtimeSanitizer (Linux x86_64, Clang 18)
-    # RTSan requires upstream LLVM Clang 18+. Not available in Apple Clang.
+    name: RealtimeSanitizer (Linux x86_64, Clang 20)
+    # RTSan first shipped in upstream LLVM 20 and is not available in Apple Clang.
     # See: https://clang.llvm.org/docs/RealtimeSanitizer.html
     #
-    # Advisory-only: the apt.llvm.org Clang 18 package on ubuntu-24.04
-    # ships without the compiler-rt realtime runtime, so
-    # `-fsanitize=realtime` errors with "unsupported argument". Until
-    # the runtime is available in that channel (or we vendor a build),
-    # the job runs on workflow_dispatch only so it doesn't block PRs.
+    # Advisory-only: keep RTSan dispatch-only while its findings baseline is
+    # triaged and its relatively expensive Linux lane is run on demand.
+    # Configure and Build are validated by the workflow_dispatch proof lane.
     if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v7
@@ -485,21 +522,36 @@ jobs:
           submodules: false
           lfs: false
 
+      - name: Fetch protected capability base
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
+
       - name: Hydrate bounded GPU provenance commits
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
 
-      - name: Install Clang 18
+      - name: Install Clang 20
         # apt.llvm.org intermittently 5xx's during release cuts; retry
         # the whole install rather than bubble a transient up. #418.
         uses: ./.github/actions/retry
         with:
-          label: 'Install Clang 18'
+          label: 'Install Clang 20'
           run: |
+            sudo apt-get update
+            sudo apt-get install -y lsb-release
             wget https://apt.llvm.org/llvm.sh
             chmod +x llvm.sh
-            sudo ./llvm.sh 18
-            sudo apt-get install -y clang-18 lld-18
+            sudo ./llvm.sh 20
+            sudo apt-get install -y clang-20 lld-20
 
       - name: Install Linux dev headers
         uses: ./.github/actions/install-linux-build-deps
@@ -509,13 +561,16 @@ jobs:
 
       - name: Configure with RTSan
         run: |
+          # Clang 20 RTSan's instrumentation changes the AST PIE mode;
+          # disable only the shared test PCH so every test still compiles.
           cmake -S . -B build-rtsan \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_COMPILER=clang-18 \
-            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_C_COMPILER=clang-20 \
+            -DCMAKE_CXX_COMPILER=clang++-20 \
             -DCMAKE_CXX_FLAGS="-fsanitize=realtime -fno-omit-frame-pointer" \
             -DCMAKE_C_FLAGS="-fsanitize=realtime -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=realtime" \
+            -DPULP_TEST_PCH=OFF \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF

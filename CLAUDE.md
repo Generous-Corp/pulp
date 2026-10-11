@@ -1070,6 +1070,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **editor-open** — measure what a host shows while a plug-in editor opens
 - A user reports an AU editor opening in stages in Logic (small/placeholder, then empty, then the UI) and you need the stages a host window actually showed out of process, and how long the host waited for the view. → `tools/editor-open/editor_open_oop_probe.sh`
   - ⚠ **Cannot see:** Reads back the host's own window with CGWindowListCreateImage, which must run in the logged-in GUI session (hence --gui-session over ssh) and has read back only the host backdrop on a macOS 27 host while the editor was demonstrably drawing; a run whose every image is host-empty proves the instrument blind, not the editor. It sees what is composited, not why — pair it with a trace from the plug-in process (~/.config/pulp/trace-autostart in a traced build).
+- You need host-side evidence that built plug-in bundles (CLAP, VST3, AU v2) load, open/resize/close/reopen their editors, keep audio byte-identical with the editor open, and coexist with another plug-in in one process — the data the Vellum parity host lane compares. → `tools/editor-open/host_lane_probe.sh`
+  - ⚠ **Cannot see:** Records observations, never a verdict — the paired comparison and its negative controls live in Vellum tools/parity/host_lane.py. Read-back uses CGWindowListCreateImage on the probe's own off-screen window; a frame with read=false is a blind instrument, not an empty editor. Animated editors do not reproduce pixel for pixel across runs.
 
 **import-validation**
 - Validate a Chromium DevTools Protocol browser-render receipt before comparing an imported native render. → `tools/import-validation/verify_browser_fidelity_receipt.py`

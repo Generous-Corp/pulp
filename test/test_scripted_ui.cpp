@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <pulp/format/reload/scripted_ui_swap_unit.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -1091,4 +1092,84 @@ TEST_CASE("ScriptedUiSession keeps its declared host kind across a reload",
     REQUIRE(session.reload(&error));
     CHECK(session.bridge()->host_kind() == "plugin");
     CHECK(rendered_kind() == "plugin");
+}
+
+// A view-first (deferred) document mounts inside poll() or
+// complete_pending_load(), and the host presents that frame. A control bound
+// with bindWidgetToParam must already show its parameter there: the frame
+// pump that services bindings runs on the NEXT poll, so without a binding pass
+// at mount the first document frame painted the control at its construction
+// default and it jumped to the parameter one frame later.
+TEST_CASE("ScriptedUiSession: a deferred document's first frame shows bound parameter values",
+          "[view][scripted-ui][deferred-load][param-binding]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-ui-mount-binding");
+    const auto script_path = temp_dir / "main.js";
+    write_text(script_path, R"(
+        createKnob('cutoff', '');
+        bindWidgetToParam('cutoff', 'cutoff');
+        createFader('level', 'vertical', '');
+        bindWidgetToParam('level', 'level');
+    )");
+
+    const auto make_store = [](StateStore& store) {
+        store.add_parameter({.id = 1, .name = "cutoff", .range = {0.0f, 1.0f, 0.5f}});
+        store.add_parameter({.id = 2, .name = "level", .range = {0.0f, 1.0f, 0.25f}});
+    };
+    const auto bound_values = [](ScriptedUiSession& session) {
+        auto* knob = dynamic_cast<Knob*>(session.bridge()->widget("cutoff"));
+        auto* fader = dynamic_cast<Fader*>(session.bridge()->widget("level"));
+        REQUIRE(knob != nullptr);
+        REQUIRE(fader != nullptr);
+        return std::pair{knob->value(), fader->value()};
+    };
+
+    SECTION("mounted from the session's own poll (view-first open)") {
+        View root;
+        root.set_bounds({0, 0, 240, 160});
+        StateStore store;
+        make_store(store);
+        ScriptedUiSession session(
+            root, store,
+            {.script_path = script_path, .enable_hot_reload = false, .enable_theme_reload = false});
+        std::optional<std::pair<float, float>> at_callback;
+        session.set_document_loaded_callback([&](bool loaded, const std::string&) {
+            REQUIRE(loaded);
+            at_callback = bound_values(session);
+        });
+        {
+            ScopedDeferredDocumentLoad guard;
+            REQUIRE(session.load_deferrable());
+        }
+        REQUIRE(session.document_load_pending());
+        REQUIRE(session.poll()); // the empty, correctly sized frame
+        REQUIRE(session.document_load_pending());
+        REQUIRE(session.poll()); // evaluates the document: the mount frame
+        REQUIRE_FALSE(session.document_load_pending());
+        REQUIRE_FALSE(session.settling());
+
+        const auto [cutoff, level] = bound_values(session);
+        CHECK_THAT(cutoff, WithinAbs(0.5, 1e-6));
+        CHECK_THAT(level, WithinAbs(0.25, 1e-6));
+        REQUIRE(at_callback.has_value());
+        CHECK_THAT(at_callback->first, WithinAbs(0.5, 1e-6));
+        CHECK_THAT(at_callback->second, WithinAbs(0.25, 1e-6));
+    }
+
+    SECTION("mounted by complete_pending_load (content-first open)") {
+        View root;
+        root.set_bounds({0, 0, 240, 160});
+        StateStore store;
+        make_store(store);
+        ScriptedUiSession session(
+            root, store,
+            {.script_path = script_path, .enable_hot_reload = false, .enable_theme_reload = false});
+        {
+            ScopedDeferredDocumentLoad guard;
+            REQUIRE(session.load_deferrable());
+        }
+        REQUIRE(session.complete_pending_load());
+        const auto [cutoff, level] = bound_values(session);
+        CHECK_THAT(cutoff, WithinAbs(0.5, 1e-6));
+        CHECK_THAT(level, WithinAbs(0.25, 1e-6));
+    }
 }

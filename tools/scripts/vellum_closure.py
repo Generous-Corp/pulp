@@ -1,0 +1,579 @@
+#!/usr/bin/env python3
+"""Generate, gate, and export Vellum extraction closures.
+
+The manifest is derived from CMake's file-api codemodel after a clean configure.
+It is intentionally a receipt generator, not a source-authority switch: exports
+must land on a protected mirror ref and never rewrite Vellum main.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Iterable
+
+INCLUDE_RE = re.compile(r"^\s*#\s*include\s*[<\"]([^>\"]+)[>\"]", re.M)
+FORBIDDEN_TARGET = re.compile(r"(?:^|[-_:])(audio|signal|host|midi|music|format|content|gpu_audio)(?:$|[-_:])", re.I)
+FORBIDDEN_INCLUDE = re.compile(r"^pulp/(?:audio|signal|host|midi|music|format|content)(?:/|$)", re.I)
+FORBIDDEN_ROOTS = tuple(f"core/{name}/" for name in ("audio", "signal", "host", "midi", "music", "format", "content"))
+TEXT_EXTS = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".m", ".mm", ".cmake"}
+RESOURCE_EXTS = {".sksl", ".glsl", ".frag", ".vert", ".ttf", ".otf", ".woff", ".woff2"}
+
+
+def run(*cmd: str, cwd: Path | None = None) -> str:
+    return subprocess.check_output(cmd, cwd=cwd, text=True, encoding="utf-8", stderr=subprocess.STDOUT).strip()
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def find_reply(build: Path, prefix: str) -> Path:
+    replies = sorted((build / ".cmake/api/v1/reply").glob(prefix + "*.json"))
+    if not replies:
+        raise SystemExit(f"missing CMake file-api reply {prefix}*.json; configure after creating query")
+    return replies[-1]
+
+
+def codemodel(build: Path) -> tuple[dict, dict]:
+    index = json.loads(find_reply(build, "index-").read_text(encoding="utf-8"))
+    cm = next((x for x in index["reply"].values() if x.get("kind") == "codemodel"), None)
+    if not cm:
+        raise SystemExit("CMake file-api index has no codemodel reply")
+    model = json.loads((build / ".cmake/api/v1/reply" / cm["jsonFile"]).read_text(encoding="utf-8"))
+    configurations = model.get("configurations", [])
+    if not configurations:
+        raise SystemExit("CMake codemodel has no configuration")
+    config = configurations[0]
+    targets: dict[str, dict] = {}
+    for entry in config.get("targets", []):
+        data = json.loads((build / ".cmake/api/v1/reply" / entry["jsonFile"]).read_text(encoding="utf-8"))
+        targets[data["id"]] = data
+    return config, targets
+
+
+def norm_path(raw: str, source: Path, build: Path) -> str:
+    p = Path(raw)
+    if not p.is_absolute():
+        # File-api paths are relative to the codemodel source root unless
+        # explicitly rooted.  Resolving against cwd made the manifest depend
+        # on where the script was launched.
+        p = source / p
+    # Build directories normally live below the source checkout.  Check the
+    # build root first or generated/FetchContent files would be mislabeled as
+    # repository paths and become export members.
+    try:
+        return "@build/" + p.resolve().relative_to(build.resolve()).as_posix()
+    except ValueError:
+        try:
+            return p.resolve().relative_to(source.resolve()).as_posix()
+        except ValueError:
+            return str(p.resolve())
+
+
+def resolve_include(name: str, origin: Path, include_dirs: list[Path], source: Path) -> Path | None:
+    candidates = [origin.parent / name] + [d / name for d in include_dirs] + [source / name]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def collect_headers(files: set[Path], include_dirs: list[Path], source: Path) -> set[Path]:
+    queue = list(files)
+    seen = set(files)
+    while queue:
+        path = queue.pop()
+        if path.suffix.lower() not in TEXT_EXTS or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for name in INCLUDE_RE.findall(text):
+            found = resolve_include(name, path, include_dirs, source)
+            if found and found not in seen:
+                seen.add(found)
+                queue.append(found)
+    return seen
+
+
+def fetchcontent_pins(source: Path) -> dict[str, dict[str, str]]:
+    """Return repository and immutable pin metadata keyed by dependency name."""
+    manifest = source / "tools" / "deps" / "manifest.json"
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        rows = payload.get("dependencies", []) if isinstance(payload, dict) else payload
+    except (OSError, json.JSONDecodeError):
+        return {}
+    pins: dict[str, dict[str, str]] = {}
+    setup_text = ""
+    try:
+        setup_text = (source / "setup.sh").read_text(encoding="utf-8")
+    except OSError:
+        pass
+    for row in rows:
+        if row.get("source_kind") != "fetchcontent":
+            continue
+        name = str(row.get("name", "")).lower()
+        repository = row.get("repository")
+        version = str(row.get("version", ""))
+        match = re.search(r"\b[0-9a-f]{40}\b", version)
+        pin = match.group(0) if match else str(row.get("upstream", {}).get("ref", ""))
+        # setup.sh seeds the shared FetchContent cache with the immutable
+        # commit. Prefer that full cache hash over a display tag or short hash
+        # in tools/deps/manifest.json.
+        setup_match = re.search(
+            rf'ensure_shared_git_source_with_retry\s+"{re.escape(name)}"[^\n]*\n\s+"([0-9a-f]{{40}})"',
+            setup_text,
+            re.IGNORECASE,
+        )
+        if setup_match:
+            pin = setup_match.group(1)
+        if name and repository and pin:
+            pins[name] = {"source": str(repository), "pin": pin}
+    return pins
+
+
+def build_external_input(rel: str, pins: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Describe a FetchContent source copied into the build tree.
+
+    These files are build-machine inputs, never exportable Pulp files.  Keep
+    the path for auditability and bind it to the dependency's source and
+    immutable cache pin so a Vellum consumer can provision the same input.
+    """
+    path = rel.removeprefix("@build/")
+    match = re.search(r"(?:^|/)_deps/(?:pulp-mutable-)?(?P<name>[^/]+?)(?:-(?:src|build))(?:/|$)", path)
+    name = match.group("name").lower() if match else ""
+    if not name:
+        lowered = path.lower()
+        compact = re.sub(r"[^a-z0-9]", "", lowered)
+        name = next(
+            (candidate for candidate in pins
+             if re.sub(r"[^a-z0-9]", "", candidate) in compact),
+            "",
+        )
+    metadata = pins.get(name)
+    if metadata is None:
+        return {"path": rel, "source": "build-tree", "pin": "unresolved"}
+    return {"path": rel, **metadata}
+
+
+def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
+    config, targets = codemodel(build)
+    by_name = {data.get("name"): data for data in targets.values()}
+    selected: list[dict] = []
+    missing: list[str] = []
+    all_files: set[Path] = set()
+    all_include_dirs: set[Path] = set()
+    all_defines: set[str] = set()
+    links: set[str] = set()
+    generated: set[str] = set()
+    resources: set[str] = set()
+    external_paths: set[str] = set()
+    for name in names:
+        data = by_name.get(name)
+        if not data:
+            missing.append(name)
+            continue
+        target_files: set[Path] = set()
+        source_entries = data.get("sources", [])
+        for group in data.get("sourceGroups", []):
+            for index in group.get("sourceIndexes", []):
+                item = source_entries[index] if index < len(source_entries) else {}
+                raw = item.get("path")
+                if raw:
+                    p = Path(raw)
+                    if not p.is_absolute():
+                        p = source / p
+                    p = p.resolve()
+                    target_files.add(p)
+                    all_files.add(p)
+                    rel = norm_path(raw, source, build)
+                    if p.suffix.lower() in RESOURCE_EXTS:
+                        resources.add(rel)
+                    if rel.startswith("@build/"):
+                        generated.add(rel)
+        includes: list[str] = []
+        defines: list[str] = []
+        for group in data.get("compileGroups", []):
+            for item in group.get("includes", []):
+                raw = item.get("path")
+                if raw:
+                    p = Path(raw)
+                    if not p.is_absolute():
+                        p = source / p
+                    p = p.resolve()
+                    all_include_dirs.add(p)
+                    includes.append(norm_path(raw, source, build))
+            for item in group.get("defines", []):
+                value = item.get("define")
+                if value:
+                    all_defines.add(value)
+                    defines.append(value)
+        deps: list[str] = []
+        for dep in data.get("dependencies", []):
+            dep_data = targets.get(dep.get("id"))
+            dep_name = dep_data.get("name") if dep_data else dep.get("id")
+            if dep_name:
+                links.add(dep_name)
+                deps.append(dep_name)
+        selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if not rel.startswith(("@build/", "/"))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps))})
+    all_files = collect_headers(all_files, sorted(all_include_dirs), source)
+    normalized = [norm_path(str(p), source, build) for p in all_files]
+    # File-api does not list configure-time generated headers when they are
+    # consumed only through an include directory. Add the known generated
+    # products for the selected unit so the receipt remains reproducible.
+    selected_names = set(names)
+    if selected_names & {"pulp-runtime", "pulp-platform", "pulp-simd", "pulp-state"}:
+        runtime_root = build / "core/runtime/generated"
+        if runtime_root.is_dir():
+            for candidate in runtime_root.rglob("*"):
+                if candidate.is_file() and candidate.suffix.lower() in TEXT_EXTS:
+                    normalized.append(norm_path(str(candidate), source, build))
+                    all_files.add(candidate.resolve())
+    if "pulp-canvas" in selected_names:
+        for candidate in (build / "core/canvas").glob("pulp-bundled-fonts_data.*"):
+            if candidate.is_file():
+                normalized.append(norm_path(str(candidate), source, build))
+                all_files.add(candidate.resolve())
+    if "pulp-view-script" in selected_names:
+        for suffix in ("web_compat_preludes_gen.hpp", "web_compat_preludes_gen.cpp"):
+            candidate = build / "core/view" / suffix
+            if candidate.is_file():
+                normalized.append(norm_path(str(candidate), source, build))
+                all_files.add(candidate.resolve())
+    sdl_revision = build / "_deps/sdl3-build/include-revision/SDL3/SDL_revision.h"
+    if sdl_revision.is_file() and selected_names & {"pulp-platform", "pulp-runtime", "pulp-canvas", "pulp-view-script"}:
+        normalized.append(norm_path(str(sdl_revision), source, build))
+        all_files.add(sdl_revision.resolve())
+    # FetchContent source trees are reproducible external inputs.  Build-tree
+    # products (including dependency build products such as SDL's generated
+    # include revision) are generated inputs and must never become mirror files.
+    for rel in normalized:
+        if not rel.startswith("@build/"):
+            continue
+        if rel.startswith("@build/_deps/"):
+            dep_path = rel.removeprefix("@build/_deps/")
+            if re.search(r"(?:^|/)[^/]+-src/", dep_path):
+                external_paths.add(rel)
+                continue
+        generated.add(rel)
+    external_paths.update(p for p in normalized if p.startswith("/") and not p.startswith(str(source.resolve())))
+    pins = fetchcontent_pins(source)
+    external = [build_external_input(p, pins) for p in sorted(external_paths)]
+    # Keep the exact CMake/script producers in the closure so the generated
+    # input receipt can prove which repository rules produced each build file.
+    producer_map = {
+        "@build/core/canvas/pulp-bundled-fonts_data.hpp": ["core/canvas/src/bundled_fonts.cpp"],
+        "@build/core/view/web_compat_preludes_gen.cpp": ["core/view/cmake/PulpViewJsPreludes.cmake", "core/view/js/embed_js.py"],
+    }
+    for rel in sorted(generated):
+        if rel.startswith("@build/core/runtime/generated/"):
+            producer_map[rel] = ["core/runtime/CMakeLists.txt", "core/runtime/include/pulp/runtime/build_info.hpp.in"]
+        elif "/_deps/sdl3-build/include-revision/" in rel:
+            producer_map[rel] = ["tools/cmake/PulpInstallRules.cmake"]
+    producer_paths = {path for paths_for_input in producer_map.values() for path in paths_for_input}
+    for producer in producer_paths:
+        candidate = source / producer
+        if candidate.is_file():
+            all_files.add(candidate.resolve())
+            normalized.append(producer)
+    files = sorted({p for p in normalized if p not in external_paths and not p.startswith("/") and not p.startswith("@build/")})
+    generated_rows = []
+    for rel in sorted(generated - external_paths):
+        candidate = build / rel.removeprefix("@build/")
+        if not candidate.is_file():
+            continue
+        generated_rows.append({"path": rel, "sha256": sha256(candidate), "producer_paths": sorted(set(producer_map.get(rel, [])))})
+    for rel in files:
+        if Path(rel).suffix.lower() in RESOURCE_EXTS:
+            resources.add(rel)
+    return {"schema": "pulp.vellum.closure.v1", "source_root": str(source), "build_dir": str(build), "configuration": config.get("name", ""), "targets": selected, "missing_targets": missing, "files": files, "external_inputs": external, "public_include_dirs": sorted(str(p) for p in all_include_dirs), "compile_definitions": sorted(all_defines), "transitive_link_targets": sorted(links), "resources": sorted(resources), "generated_inputs": generated_rows}
+
+
+
+def js_runtime_manifest(source: Path, unit: str) -> dict:
+    """Build a deterministic closure for the tracked JSX import runtime.
+
+    JavaScript dependencies are installed inputs rather than mirror files.  The
+    committed lockfile is part of the closure and its digest pins the complete
+    node_modules graph that a Vellum consumer must provision.
+    """
+    if not source.is_dir():
+        raise SystemExit(f"JSX runtime source root does not exist: {source}")
+    try:
+        repo_root = Path(run("git", "-C", str(source), "rev-parse", "--show-toplevel"))
+        rel_root = source.resolve().relative_to(repo_root.resolve()).as_posix()
+        tracked = run("git", "-C", str(repo_root), "ls-files", "--", rel_root).splitlines()
+    except (subprocess.CalledProcessError, ValueError) as exc:
+        raise SystemExit(f"cannot enumerate tracked JSX runtime files: {exc}") from exc
+    files = []
+    for rel in tracked:
+        if not rel or rel == rel_root or rel.startswith(rel_root + "/node_modules/"):
+            continue
+        path = repo_root / rel
+        if path.is_file():
+            files.append(rel)
+    lock_rel = f"{rel_root}/package-lock.json"
+    lock_path = repo_root / lock_rel
+    if not lock_path.is_file() or lock_rel not in files:
+        raise SystemExit(f"tracked JSX runtime lockfile is required: {lock_rel}")
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"invalid JSX runtime package-lock.json: {exc}") from exc
+    packages = lock.get("packages")
+    if not isinstance(packages, dict):
+        raise SystemExit("package-lock.json has no packages object")
+    lock_pin = "sha256:" + sha256(lock_path)
+    external = []
+    for package_path, metadata in sorted(packages.items()):
+        if not package_path.startswith("node_modules/"):
+            continue
+        row = {"path": f"{rel_root}/{package_path}", "source": "npm", "pin": lock_pin}
+        external.append(row)
+    if not external:
+        raise SystemExit("package-lock.json contains no node_modules packages")
+    return {
+        "schema": "pulp.vellum.closure.v1",
+        "unit": unit,
+        "source_root": str(source),
+        "build_dir": None,
+        "configuration": "",
+        "targets": [],
+        "missing_targets": [],
+        "files": sorted(set(files)),
+        "external_inputs": external,
+        "public_include_dirs": [],
+        "compile_definitions": [],
+        "transitive_link_targets": [],
+        "resources": [],
+        "generated_inputs": [],
+    }
+
+
+def cmd_js_manifest(args: argparse.Namespace) -> int:
+    result = js_runtime_manifest(Path(args.source_root).resolve(), args.unit)
+    Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"closure_manifest={args.output} files={len(result['files'])} external_inputs={len(result['external_inputs'])}")
+    return 0
+
+def cmd_manifest(args: argparse.Namespace) -> int:
+    result = target_manifest(Path(args.source_root).resolve(), Path(args.build_dir).resolve(), args.target)
+    Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"closure_manifest={args.output} files={len(result['files'])} missing={len(result['missing_targets'])}")
+    return 0
+
+
+def policy_target_forbidden(name: str) -> bool:
+    return bool(FORBIDDEN_TARGET.search(name.removeprefix("pulp::")))
+
+
+def policy_include_forbidden(name: str) -> bool:
+    return bool(FORBIDDEN_INCLUDE.match(name))
+
+
+def symbol_closure(undefined: Iterable[str], allowed: Iterable[str] = ()) -> list[str]:
+    allowed_set = set(allowed)
+    return sorted(symbol for symbol in undefined if symbol not in allowed_set and re.search(r"(?:audio|signal|host|midi|music|format|content|ContentRegistry)", symbol, re.I))
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    failed = False
+    for raw in args.manifest:
+        data = json.loads(Path(raw).read_text(encoding="utf-8"))
+        name = Path(raw).name
+        violations: list[str] = []
+        if data.get("missing_targets"):
+            violations.extend("missing target: " + x for x in data["missing_targets"])
+        for target in data.get("targets", []):
+            for link in target.get("link_targets", []):
+                if policy_target_forbidden(link) and link not in args.allow:
+                    violations.append(f"forbidden link {target['name']} -> {link}")
+        for symbol in data.get("undefined_symbols", []):
+            if symbol_closure([symbol]):
+                violations.append(f"forbidden undefined symbol {symbol}")
+        for path in data.get("files", []):
+            if path.startswith("@build/"):
+                continue
+            if path.startswith(FORBIDDEN_ROOTS) and not any(path.startswith(prefix) for prefix in args.allow_root_prefix):
+                violations.append(f"forbidden closure root {path}")
+                continue
+            full = Path(data["source_root"]) / path
+            if full.suffix.lower() in TEXT_EXTS and full.is_file():
+                text = full.read_text(encoding="utf-8", errors="replace")
+                for line_no, line in enumerate(text.splitlines(), 1):
+                    match = re.search(r'#\s*include\s*[<\"]([^>\"]+)[>\"]', line)
+                    if match and policy_include_forbidden(match.group(1)):
+                        include_name = match.group(1)
+                        allowed = any(path == allowed_path or path.startswith(prefix) for allowed_path in args.allow_include_path for prefix in (allowed_path,))
+                        allowed = allowed or any(path.startswith(prefix) for prefix in args.allow_include_prefix)
+                        if not allowed:
+                            violations.append(f"forbidden include {path}:{line_no}: {line.strip()}")
+        status = "PASS" if not violations else ("REPORT-ONLY" if args.report_only else "FAIL")
+        print(f"{name}: {status}")
+        for violation in violations:
+            print(f"  {violation}")
+        failed |= bool(violations)
+    return 1 if failed and not args.report_only else 0
+
+
+def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
+    rows: list[dict] = []
+    for path in paths:
+        if path.startswith("@build/"):
+            continue
+        try:
+            row = run("git", "-C", str(repo), "ls-tree", commit, "--", path)
+        except subprocess.CalledProcessError:
+            continue
+        if row:
+            mode, kind, blob, name = row.split("\t", 1)[0].split(" ") + [row.split("\t", 1)[1]]
+            if kind == "blob":
+                rows.append({"path": name, "mode": mode, "blob": blob})
+    return rows
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    if not re.fullmatch(r"[0-9a-f]{40}", args.pulp_sha):
+        raise SystemExit("--pulp-sha must be a full 40-hex commit SHA")
+    manifests = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.manifest]
+    repo = Path(args.repo).resolve()
+    out = Path(args.output).resolve()
+    if out.exists() and any(out.iterdir()):
+        raise SystemExit(f"output must be empty: {out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    filter_repo = shutil.which("git-filter-repo") or shutil.which("git-filter-repo.py")
+    if not filter_repo:
+        raise SystemExit("git-filter-repo is required for export; refusing fallback projection")
+    paths = sorted({p for manifest in manifests for p in manifest["files"] if not p.startswith("@build/")})
+    subprocess.run(["git", "clone", "--no-local", str(repo), str(out)], check=True, stdout=subprocess.DEVNULL)
+    mirror_root = args.mirror_root.strip("/")
+    if not mirror_root or mirror_root.startswith("@"):
+        raise SystemExit("mirror-root must be a non-empty repository-relative directory")
+    rename_map = args.rename_map or {}
+    cmd = [filter_repo, "--force"]
+    for path in paths:
+        mirror_path = rename_map.get(path, path)
+        if Path(mirror_path).is_absolute() or ".." in Path(mirror_path).parts:
+            raise SystemExit(f"rename map escapes repository: {path} -> {mirror_path}")
+        cmd.extend(["--path", path, "--path-rename", f"{path}:{mirror_root}/{mirror_path}"])
+    run("git", "-C", str(out), "update-ref", "refs/heads/export-source", args.pulp_sha)
+    run("git", "-C", str(out), "checkout", "--detach", "export-source")
+    cmd.extend(["--refs", "export-source"])
+    subprocess.run(cmd, cwd=out, check=True)
+    run("git", "-C", str(out), "checkout", "--detach", "export-source")
+    mirror_sha = run("git", "-C", str(out), "rev-parse", "refs/heads/export-source")
+    mirror_tree = run("git", "-C", str(out), "rev-parse", f"{mirror_sha}:mirror")
+    rows = git_blob_rows(repo, args.pulp_sha, paths)
+    by_path = {row["path"]: row["blob"] for row in rows}
+    export_id = f"{datetime.now(timezone.utc):%Y%m%d}-{args.pulp_sha[:12]}"
+    landing = Path(args.landing).resolve() if args.landing else out.parent / f"vellum-export-{export_id}"
+    closure_dir = landing / "provenance" / "mirror" / "closures" / export_id
+    closure_dir.mkdir(parents=True, exist_ok=True)
+    units = []
+    for index, manifest in enumerate(manifests):
+        unit_name = args.unit_name[index] if index < len(args.unit_name) else Path(args.manifest[index]).stem
+        normalized = dict(manifest)
+        normalized["source_root"] = None
+        normalized["build_dir"] = None
+        closure_path = closure_dir / f"{unit_name}.json"
+        closure_path.write_text(json.dumps(normalized, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        units.append({"name": unit_name, "closure_manifest": f"provenance/mirror/closures/{export_id}/{unit_name}.json", "closure_sha256": sha256(closure_path), "oracle_class": "identity"})
+    files = sorted(({"mirror_path": f"{mirror_root}/{rename_map.get(path, path)}", "pulp_path": path, "mode": next(row["mode"] for row in rows if row["path"] == path), "blob": by_path[path]} for path in paths if path in by_path), key=lambda row: row["mirror_path"])
+    commit_map_src = out / ".git" / "filter-repo" / "commit-map"
+    commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
+    commit_map_path.parent.mkdir(parents=True, exist_ok=True)
+    commit_map_bytes = commit_map_src.read_bytes() if commit_map_src.is_file() else b""
+    required_map_row = f"{args.pulp_sha} {mirror_sha}\n".encode()
+    if required_map_row not in commit_map_bytes:
+        commit_map_bytes += required_map_row
+    commit_map_path.write_bytes(commit_map_bytes)
+    tool_rows = git_blob_rows(repo, args.pulp_sha, ["tools/scripts/vellum_closure.py"])
+    receipt_rel = f"provenance/mirror/receipts/{export_id}.json"
+    generated_inputs = []
+    seen_generated = set()
+    for manifest in manifests:
+        for item in manifest.get("generated_inputs", []):
+            if not isinstance(item, dict) or not {"path", "sha256", "producer_paths"} <= set(item):
+                raise SystemExit("generated_inputs entries require path, sha256, and producer_paths")
+            key = item["path"]
+            if key in seen_generated and next(row for row in generated_inputs if row["path"] == key) != item:
+                raise SystemExit(f"conflicting generated input: {key}")
+            if key not in seen_generated:
+                generated_inputs.append({"path": key, "sha256": item["sha256"], "producer_paths": sorted(set(item["producer_paths"]))})
+                seen_generated.add(key)
+    generated_inputs.sort(key=lambda row: row["path"])
+    file_paths = {row["pulp_path"] for row in files}
+    for item in generated_inputs:
+        missing = sorted(set(item["producer_paths"]) - file_paths)
+        if missing:
+            raise SystemExit(f"generated input producers are not exported: {item['path']}: {missing}")
+    receipt = {
+        "schema": "pulp.vellum.export-receipt.v2",
+        "pulp_repository": "Generous-Corp/pulp",
+        "export_id": export_id,
+        "pulp_sha": args.pulp_sha,
+        "mirror_ref": args.mirror_ref,
+        "mirror_sha": mirror_sha,
+        "mirror_tree": mirror_tree,
+        "rename": {"from_prefix": "", "to_prefix": "mirror/"},
+        "commit_map": {"path": f"provenance/mirror/commit-maps/{export_id}.txt", "sha256": sha256(commit_map_path)},
+        "units": units,
+        "files": files,
+        "generated_inputs": generated_inputs,
+        "tool": {"path": "tools/scripts/vellum_closure.py", "pulp_blob": tool_rows[0]["blob"] if tool_rows else ""},
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    if args.dry_run:
+        receipt["dry_run"] = True
+    receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"export_receipt={receipt_path} mirror_sha={mirror_sha} blobs={len(files)}")
+    return 0
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    receipt = json.loads(Path(args.receipt).read_text(encoding="utf-8"))
+    repo = Path(args.mirror).resolve()
+    head = run("git", "-C", str(repo), "rev-parse", "HEAD")
+    recorded_head = receipt.get("mirror_sha", receipt.get("mirror_commit"))
+    if head != recorded_head:
+        print(f"identity=FAIL\n  mirror HEAD {head} != receipt mirror commit {recorded_head}")
+        return 1
+    expected = {row["mirror_path"]: row["blob"] for row in receipt["files"]}
+    actual = {row["path"]: row["blob"] for row in git_blob_rows(repo, head, expected)}
+    bad = [path for path, blob in expected.items() if actual.get(path) != blob]
+    if bad:
+        print("identity=FAIL")
+        for path in bad[:20]: print(f"  mismatch: {path}")
+        return 1
+    print(f"identity=PASS blobs={len(expected)}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append", required=True); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
+    p = sub.add_parser("js-manifest"); p.add_argument("--source-root", required=True); p.add_argument("--unit", default="design-import"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_js_manifest)
+    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
+    p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
+    p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
+    args = parser.parse_args()
+    return args.func(args)
+
+if __name__ == "__main__":
+    raise SystemExit(main())

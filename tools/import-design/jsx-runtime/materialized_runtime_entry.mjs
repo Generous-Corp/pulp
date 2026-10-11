@@ -36,6 +36,7 @@ export function buildMaterializedRuntimeEntry({
   visualWidth,
   visualHeight,
   canvasBindings,
+  canvasAuthority,
   behaviorCanvasAnchors,
   capturedPaintAuthorityAnchors,
 }) {
@@ -1115,6 +1116,7 @@ activeNativeRoot = new NativeRoot();
 activeNativeRoot.render(capturedRootElement);
 if (typeof g.__pulpRuntimeSettle__ === 'function') g.__pulpRuntimeSettle__(8);
 const capturedStates = ${JSON.stringify(stateAtlas)};
+const canvasAuthorityEnabled = ${JSON.stringify(Boolean(canvasAuthority))};
 for (const state of capturedStates) {
   if (state.match) {
     recordMaterializedSelectorAttributes(state.match.selector);
@@ -1183,11 +1185,26 @@ function driveRequestedCapturedState() {
 }
 if (requestedCapturedState) requestAnimationFrame(driveRequestedCapturedState);
 function resolveCapturedStateFromAtlas() {
-  // Every state's lookup in one registry pass; the answer is the last state
-  // in atlas order whose selector matches, as before.
-  const matches = g.__pulpFindMaterializedElements__(capturedStates.map(
-    state => state.match ? { selector: state.match.selector,
-      ancestor: state.match.ancestor } : null));
+  const usesCanvasAuthority = canvasAuthorityEnabled && capturedStates.some(
+    state => state.canvas_index !== null && state.canvas_index !== undefined);
+  const registeredCanvases = usesCanvasAuthority
+    ? materializedDomRegistryValues().filter(node =>
+      String(node && node.tagName || '').toLowerCase() === 'canvas')
+    : [];
+  // Every semantic selector lookup is answered in one registry pass. Canvas
+  // authority states carry the binding index validated by the transformer so
+  // multiple captured canvases cannot accidentally resolve to the first one.
+  const semanticMatches = g.__pulpFindMaterializedElements__(capturedStates.map(
+    state => canvasAuthorityEnabled &&
+      state.canvas_index !== null && state.canvas_index !== undefined
+      ? null
+      : state.match ? { selector: state.match.selector,
+        ancestor: state.match.ancestor } : null));
+  const matches = capturedStates.map((state, index) =>
+    canvasAuthorityEnabled && state.canvas_index !== null &&
+      state.canvas_index !== undefined
+      ? registeredCanvases[state.canvas_index] || null
+      : semanticMatches[index]);
   for (let index = capturedStates.length - 1; index >= 0; --index) {
     if (matches[index]) return capturedStates[index].id;
   }

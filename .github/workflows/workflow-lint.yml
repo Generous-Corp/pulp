@@ -264,6 +264,7 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: yamllint + actionlint + structural parse
     steps:
       - uses: actions/checkout@v7

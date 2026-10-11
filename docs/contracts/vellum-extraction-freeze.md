@@ -69,7 +69,8 @@ workflow recomputes the compact outbox record without secrets and dispatches it
 to the private Vellum observatory from a one-step credential-bearing job. The
 event remains permanently replayable from Pulp history even if dispatch is
 temporarily unavailable. Neither workflow copies or applies source changes.
-Generic features and fixes originate in Vellum after authority transfers.
+Generic features and fixes originate in Vellum after authority transfers,
+except under the temporary inheritance exception described below.
 
 If Vellum is abandoned, authority does not drift back silently. A reviewed
 ownership-reversal commit must update both repositories and state whether Pulp
@@ -81,4 +82,21 @@ frozen for a defined support period.
 Per the owner decision recorded in the design-import refactor goal, generic
 design-import, UI compiler, bridge-contract, and SDK improvements land in Pulp;
 Vellum inherits them later through the package manifests and inheritance ledger.
-This decision does not transfer source authority or authorize edits to Vellum.
+This decision does not transfer source authority.
+
+This is a temporary exception to "generic features and fixes originate in
+Vellum". While it holds, a Pulp change to a transferred-slice file that carries
+generic behavior uses disposition `pulp-only` with a rationale that starts
+exactly with:
+
+> design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)
+
+and adds a row to [`vellum-inheritance-ledger.md`](vellum-inheritance-ledger.md).
+Here `pulp-only` means "landed in Pulp", not "Pulp-specific": the prefix and the
+ledger row are what distinguish an inherited generic change from Pulp-specific
+integration work.
+
+The exception ends per target, not globally: in the same Pulp change that
+switches a target to an exact installed Vellum package, that target's Pulp copy
+freezes and generic work on it originates in Vellum from then on. Until that
+change lands for a target, Pulp remains the editable source for it.

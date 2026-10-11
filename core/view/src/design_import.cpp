@@ -65,14 +65,6 @@ const char* design_source_name(DesignSource source) {
     return "unknown";
 }
 
-const IRAssetRef* IRAssetManifest::resolve(std::string_view asset_id) const {
-    if (asset_id.empty()) return nullptr;
-    for (const auto& asset : assets) {
-        if (asset.asset_id == asset_id) return &asset;
-    }
-    return nullptr;
-}
-
 /// Motion provenance vendor key. Matches the `source` token the import CLI
 /// accepts, lowercased + slash-friendly so the resulting `source_id`
 /// (e.g. "figma:LevelMeter/Panel") is easy to grep through fixtures. Stable

@@ -50,6 +50,12 @@ class P2CampaignContractTests(unittest.TestCase):
             with patch.object(campaign, "REPO_ROOT", Path(root)):
                 receipt = campaign.validate_host_preflight(path, source)
             self.assertEqual(receipt["host_id"], "m5-studio")
+            receipt["thermal_state"] = "serious"
+            path.write_text(json.dumps(receipt), encoding="utf-8")
+            with patch.object(campaign, "REPO_ROOT", Path(root)):
+                with self.assertRaisesRegex(RuntimeError, "thermal"):
+                    campaign.validate_host_preflight(path, source)
+            receipt["thermal_state"] = "nominal"
             receipt["gpu_health_observation"]["observation"]["measured_at_utc"] = "2000-01-01T00:00:00Z"
             path.write_text(json.dumps(receipt), encoding="utf-8")
             with patch.object(campaign, "REPO_ROOT", Path(root)):

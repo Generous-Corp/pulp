@@ -249,6 +249,9 @@ component_management:
       paths:
         - "core/canvas/**"
         - "!core/canvas/platform/**"
+    - component_id: content
+      name: content
+      paths: ["core/content/**"]
     - component_id: dawproject
       name: dawproject
       paths: ["core/dawproject/**"]

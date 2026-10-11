@@ -674,7 +674,12 @@ def main(argv: list[str]) -> int:
         print(f"changed-surface script families: SKIP: {args.build_dir} has no CMake file-API "
               "codemodel reply (touch .cmake/api/v1/query/codemodel-v2 and reconfigure)")
         return SKIP_EXIT
-    off_profile = outside_gate_profile(args.build_dir)
+    try:
+        tests = inventory.load_ctest_json(args.build_dir)
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"changed-surface script families: cannot read CTest inventory: {error}", file=sys.stderr)
+        return 2
+    off_profile = outside_gate_profile(args.build_dir, tests)
     if off_profile:
         # The environment-bound family lists every declared test the configure
         # registers, so a build the gate does not make writes a file the gate
@@ -691,7 +696,6 @@ def main(argv: list[str]) -> int:
         return SKIP_EXIT
     try:
         current = families_path.read_text(encoding="utf-8") if families_path.is_file() else ""
-        tests = inventory.load_ctest_json(args.build_dir)
         model = inventory.load_codemodel_targets(args.build_dir)
         updated = render(generate(root, tests, model))
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, GenerationError) as error:
@@ -723,12 +727,12 @@ def main(argv: list[str]) -> int:
     return 1
 
 
-def outside_gate_profile(build_dir: Path) -> list[str]:
+def outside_gate_profile(build_dir: Path, tests: dict | None = None) -> list[str]:
     """Why this build registers a different test set from the required gate's
     configure: script_test_inputs' gate-profile switches (the one rule both
     generated manifests share) and another platform. Empty for a gate-profile
     build."""
-    reasons = script_test_inputs.outside_gate_profile_build(build_dir)
+    reasons = script_test_inputs.outside_gate_profile_build(build_dir, tests)
     platform = script_test_inputs.outside_gate_platform(build_dir)
     if platform:
         reasons.append(platform)

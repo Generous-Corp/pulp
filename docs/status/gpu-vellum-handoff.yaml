@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "166a7d18ae6083177f1ad9d5b4095b46aed2d52e",
-          "object_id": "e504b33290ba41033ab58bb3352eecf144e2888a",
+          "revision": "b638830bc2ec90b90740af35c89cd0678112c1d5",
+          "object_id": "3088bf6cef2e52f6056f7209e6a6ebb19b630c6e",
           "object_type": "blob"
         },
         {
@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "a2333ff9c9757afca3ebe26757ea0c438ed3ff61",
-          "object_id": "e386ee336383751989d38ab7f06ff5fb7d9f163c",
+          "revision": "d812c9a0f251aa0c37b1fc806109d48a86e426e6",
+          "object_id": "d6f8b7670d72ada9614844d8e928fde191e89a4d",
           "object_type": "blob"
         },
         {
@@ -3058,8 +3058,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "ec7d25991696400d1211a0d5b5a02c0c511e7a01",
-          "object_id": "0e7a07a3ae341a0b2635f6417b5f7207fb9a54d1",
+          "revision": "eb1486dd1e4d6f76a85eb6b60336573e63b80d6c",
+          "object_id": "1a9350be37b89286c6e456904d6fd4641c3bb563",
           "object_type": "blob"
         },
         {

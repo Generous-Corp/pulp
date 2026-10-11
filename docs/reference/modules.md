@@ -2665,6 +2665,17 @@ external designs into Pulp's import IR for `pulp import-design`.
 yaml-cpp (MIT, vendored via CMake FetchContent) provides the
 frontmatter parse. See [`reference/imports/designmd.md`](imports/designmd.md).
 
+The design subsystem is three link targets. `pulp::design-ir` is the
+header-only DesignIR value model (`design_ir.hpp`, `design_source_types.hpp`);
+view-core links it, so generic widgets can carry IR values. `pulp::design-import`
+holds the importers and codegen above view-core and is built only with
+`PULP_ENABLE_DESIGN_IMPORT=ON`; code that calls an importer or the IR JSON
+round-trip (`design_ir_io.hpp`) without the JS runtime links it alongside
+`pulp::view-core`. `pulp::design-import-audio-pack` is the built-in Pulp Figma
+Library of audio controls for the recognition resolver
+(`recognition_resolver_with_builtin_library()`). `pulp::view` and
+`pulp::view-native` link all three when design import is enabled.
+
 ### JS-scripted UI
 
 Write your plugin UI in JavaScript. Live hot reload is validated in the macOS

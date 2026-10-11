@@ -218,6 +218,18 @@ target_link_libraries(pulp-design-ir-observe PRIVATE
     pulp::state
     pulp::platform)
 
+# Fixed-clock frame observer for the parity harness's interaction and time
+# lanes: replays a frame schedule (host timestamps, input, parameter, resize and
+# view attach/detach events) and records every frame.
+add_executable(pulp-ui-frames-observe
+    ui_frames_observe.cpp)
+target_include_directories(pulp-ui-frames-observe PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-ui-frames-observe PRIVATE
+    pulp::view
+    pulp::state
+    pulp::runtime
+    pulp::platform)
+
 # Annotated-capture import lane: manifest parse + DesignFrameView codegen.
 # Kept as a small static lib so the test target can link the parser/codegen core
 # directly (no CLI process spawn) while the CLI below drives it end-to-end.
@@ -243,4 +255,5 @@ include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)
 pulp_link_fontconfig_after_skia(pulp-import-design)
 pulp_link_fontconfig_after_skia(pulp-design-import-bench)
 pulp_link_fontconfig_after_skia(pulp-design-ir-observe)
+pulp_link_fontconfig_after_skia(pulp-ui-frames-observe)
 pulp_link_fontconfig_after_skia(pulp-annotated-capture-import)

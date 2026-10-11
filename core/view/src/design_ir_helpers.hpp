@@ -163,6 +163,36 @@ inline bool is_sha256_hex(std::string_view value) {
         });
 }
 
+// True when `file` hashes to the asset's declared SHA-256. An asset without a
+// SHA-256 declaration never verifies.
+inline bool asset_file_matches_declared_sha256(const IRAssetRef& asset,
+                                               const std::filesystem::path& file) {
+    const auto expected = asset_content_hash_stem(asset);
+    if (!is_sha256_hex(expected))
+        return false;
+    constexpr std::uint64_t kMaxPackagedAssetBytes = 256ull * 1024 * 1024;
+    const auto actual = runtime::sha256_file_hex(file, kMaxPackagedAssetBytes);
+    return actual && actual->size() == expected.size() &&
+           std::equal(
+               actual->begin(), actual->end(), expected.begin(),
+               [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
+}
+
+// True when `path` lies inside `root` once symlinks in both are resolved, so
+// neither a `..` segment nor a symlinked directory can leave the document.
+inline bool asset_path_within(const std::filesystem::path& path,
+                              const std::filesystem::path& root) {
+    std::error_code ec;
+    const auto real_root = std::filesystem::weakly_canonical(root, ec);
+    if (ec)
+        return false;
+    const auto real_path = std::filesystem::weakly_canonical(path, ec);
+    if (ec)
+        return false;
+    const auto relative = real_path.lexically_relative(real_root);
+    return !relative.empty() && relative.is_relative() && *relative.begin() != "..";
+}
+
 // A packaged archive may carry an old producer-host local_path even though it
 // correctly includes the referenced bytes under its own assets/ directory.
 // Recovering by leaf name alone would let an unrelated same-name file satisfy
@@ -174,24 +204,33 @@ inline std::optional<std::filesystem::path> verified_packaged_asset_file(
     if (asset_base_directory.empty() || !asset.local_path || asset.local_path->empty())
         return std::nullopt;
 
-    const auto expected = asset_content_hash_stem(asset);
-    if (!is_sha256_hex(expected)) return std::nullopt;
-
     const auto leaf = std::filesystem::path(*asset.local_path).filename();
     if (leaf.empty()) return std::nullopt;
     const auto candidate = existing_asset_file(asset_base_directory / "assets" / leaf);
-    if (!candidate) return std::nullopt;
-
-    constexpr std::uint64_t kMaxPackagedAssetBytes = 256ull * 1024 * 1024;
-    const auto actual = runtime::sha256_file_hex(*candidate, kMaxPackagedAssetBytes);
-    if (!actual || actual->size() != expected.size() ||
-        !std::equal(actual->begin(), actual->end(), expected.begin(),
-                    [](unsigned char a, unsigned char b) {
-                        return std::tolower(a) == std::tolower(b);
-                    })) {
+    if (!candidate || !asset_file_matches_declared_sha256(asset, *candidate))
         return std::nullopt;
-    }
     return candidate;
+}
+
+// The file a document-loaded asset may read at `candidate`. A document names
+// its assets relative to its own directory; a path that leaves it (`..`, an
+// absolute path, a symlink pointing out) is honoured only when its bytes match
+// the declared SHA-256, so a crafted manifest cannot paint an arbitrary file
+// from the host. Without a document directory there is nothing to escape.
+inline std::optional<std::filesystem::path>
+contained_asset_file(const IRAssetRef& asset, const std::filesystem::path& candidate,
+                     const std::filesystem::path& asset_base_directory, std::string_view field) {
+    auto found = existing_asset_file(candidate);
+    if (!found || asset_base_directory.empty())
+        return found;
+    if (asset_path_within(*found, asset_base_directory) ||
+        asset_file_matches_declared_sha256(asset, *found))
+        return found;
+    runtime::log_warn("design-import: asset '{}' refused — {} '{}' resolves outside the document "
+                      "directory '{}' and does not match a declared sha256",
+                      asset.asset_id, field, candidate.generic_string(),
+                      asset_base_directory.generic_string());
+    return std::nullopt;
 }
 
 // The extension (including the dot) of a URI or path, ignoring any query or
@@ -224,7 +263,9 @@ inline std::vector<std::filesystem::path> asset_search_roots(
 
 // The readable file backing a manifest asset, or nullopt when none of the
 // candidates exist. Order: the recorded local_path (absolute, or relative to
-// the document directory), then a `file://` original_uri, then the
+// the document directory), then a `file://` original_uri — each confined to
+// the document directory unless its bytes match the declared SHA-256 (see
+// contained_asset_file) — then the
 // content-addressed `<hash><ext>` under each search root. Recovering by hash
 // is logged — a manifest path that no longer points at its bytes is a defect
 // upstream, and one diagnosable line is what keeps it from reading as a
@@ -236,11 +277,13 @@ inline std::optional<std::filesystem::path> resolve_asset_file(
         auto path = std::filesystem::path(*asset.local_path);
         if (path.is_relative() && !asset_base_directory.empty())
             path = asset_base_directory / path;
-        if (auto found = existing_asset_file(path)) return found;
+        if (auto found = contained_asset_file(asset, path, asset_base_directory, "local_path"))
+            return found;
     }
     if (asset.original_uri.rfind("file://", 0) == 0) {
         if (auto found =
-                existing_asset_file(std::filesystem::path(asset.original_uri.substr(7))))
+                contained_asset_file(asset, std::filesystem::path(asset.original_uri.substr(7)),
+                                     asset_base_directory, "original_uri"))
             return found;
     }
 

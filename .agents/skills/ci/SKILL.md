@@ -31,6 +31,12 @@ on a real PR. Do them in order.
      without a committed `.github/vellum-expansion-watch-events/` event FAILS
      (exit 10) and prints the exact JSON; or run
      `python3 tools/scripts/vellum_watch_preflight.py --write-event --rationale "..."`.
+   - **foundation include lint** — `foundation_include_lint.py` fails when a
+     file under `core/platform`, `core/runtime` or `core/simd` includes an
+     upper-layer `pulp/<area>/` header or a quoted relative path that resolves
+     outside those roots (it resolves through the foundation include dirs, the
+     way the compiler does). Put the code in the owning subsystem instead of
+     allowlisting it; a stale allowlist entry also fails.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
@@ -507,6 +513,11 @@ logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
 queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
 
 ## Wait on a blocking waiter, not a poll loop
+
+For an unattended pull request, use `shipyard wait pr <PR> --state merged`
+with an explicit timeout. This uses Shipyard's single authoritative PR watch
+ledger and can run from any fleet host. Never wrap `gh pr view` or `gh pr
+checks` in a polling loop.
 
 A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|release`,
 `shipyard ship --pr <n>` (merges on green), or a background command that exits
@@ -1723,6 +1734,10 @@ tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
 integration file back into the unit aggregate or remove that install step: the
 former exhausts the aggregate deadline before later tests run, while the latter
 turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
+Before regenerating `test/ctest_script_inputs.json` or
+`.shipyard/changed-surface-families.toml`, run that same locked install and
+reconfigure from the gate profile so both materialized-runtime tests remain
+registered.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
@@ -6446,6 +6461,10 @@ the failure surfaces on the first unrelated PR that tries to land on it (looks
 like the PR's fault; it is not). Fix by reconciling the gate config to the
 branch's real state **in the landing PR**: raise the hotspot ceiling to the file's
 current LOC, and add the missing codecov flag+component (`paths: core/<new>/**`).
+A new `core/<module>/` needs TWO entries even on a short-lived branch: the
+`codecov.yml` component, and the component's name in a producer's set in
+`ci/coverage-surfaces.yaml` (or an explicit `not_applicable` disposition) —
+`test_coverage_surface_contract.py` rejects a component no producer claims.
 Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
 are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
 config you didn't author trips skill-sync/version-bump (config maps to the `ci`

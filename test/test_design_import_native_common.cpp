@@ -919,9 +919,12 @@ TEST_CASE("runtime asset resolution leaves a resolvable manifest path alone",
     CHECK(resolved_asset_uri(relative_asset, document_directory) ==
           "file://" + relative.lexically_normal().generic_string());
 
+    // An absolute path outside the document is honoured when its bytes match
+    // the declared SHA-256.
     IRAssetRef absolute_asset;
     absolute_asset.asset_id = "logo";
     absolute_asset.local_path = absolute.string();
+    absolute_asset.content_hash = pulp::runtime::sha256_hex("pulp-test-asset-bytes");
     CHECK(resolved_asset_uri(absolute_asset, document_directory) ==
           "file://" + absolute.lexically_normal().generic_string());
 
@@ -931,6 +934,61 @@ TEST_CASE("runtime asset resolution leaves a resolvable manifest path alone",
     inline_asset.original_uri = "data:image/png;base64,AA==";
     CHECK(resolved_asset_uri(inline_asset, document_directory) ==
           "data:image/png;base64,AA==");
+}
+
+TEST_CASE("runtime asset resolution refuses a manifest path that leaves the document",
+          "[design-ir-helpers][asset-resolution][path-escape]") {
+    TempTree tree;
+    const auto document_directory = tree.path / "doc";
+    write_bytes(document_directory / "assets" / "inside.png", "inside-bytes");
+    const auto outside = write_bytes(tree.path / "escape.png", "outside-bytes");
+
+    const auto refused = [&](IRAssetRef asset) {
+        std::string logged;
+        std::optional<fs::path> resolved;
+        {
+            StderrCapture capture(tree.path / "stderr.log");
+            resolved = resolve_asset_file(asset, document_directory);
+            logged = capture.text();
+        }
+        CHECK(resolved == std::nullopt);
+        CHECK(logged.find("refused") != std::string::npos);
+        CHECK(logged.find("outside the document directory") != std::string::npos);
+    };
+
+    IRAssetRef asset;
+    asset.asset_id = "swatch";
+
+    SECTION("a relative path climbing out with ..") {
+        asset.local_path = "../escape.png";
+        refused(asset);
+    }
+    SECTION("an absolute path elsewhere on the host") {
+        asset.local_path = outside.string();
+        refused(asset);
+    }
+    SECTION("a file:// original_uri elsewhere on the host") {
+        asset.original_uri = "file://" + outside.generic_string();
+        refused(asset);
+    }
+    SECTION("a symlinked directory inside the document pointing out") {
+        std::error_code ec;
+        fs::create_directory_symlink(tree.path, document_directory / "linked", ec);
+        REQUIRE_FALSE(ec);
+        asset.local_path = "linked/escape.png";
+        refused(asset);
+    }
+    SECTION("an escaping path whose bytes match a declared sha256 is honoured") {
+        asset.local_path = "../escape.png";
+        asset.content_hash = pulp::runtime::sha256_hex("outside-bytes");
+        CHECK(resolve_asset_file(asset, document_directory) == outside.lexically_normal());
+    }
+    SECTION("paths that stay inside the document still resolve") {
+        asset.local_path = "assets/../assets/inside.png";
+        CHECK(resolve_asset_file(asset, document_directory).has_value());
+        asset.local_path = (document_directory / "assets" / "inside.png").string();
+        CHECK(resolve_asset_file(asset, document_directory).has_value());
+    }
 }
 
 TEST_CASE("runtime asset resolution verifies a packaged asset before recovering a stale path",
