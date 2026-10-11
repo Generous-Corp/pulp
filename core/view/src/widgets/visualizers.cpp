@@ -1,6 +1,7 @@
 // Visualizer widget implementations. Public declarations stay in
 // core/view/include/pulp/view/widgets.hpp.
 
+#include <pulp/view/visualizers.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/asset_manager.hpp>

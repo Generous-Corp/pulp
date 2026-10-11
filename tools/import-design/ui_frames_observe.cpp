@@ -848,8 +848,14 @@ int main(int argc, char** argv) {
         return 1;
     }
     view::DesignIR ir;
-    if (!options.design_ir.empty())
-        ir = view::parse_design_ir_json(input_bytes);
+    if (!options.design_ir.empty()) {
+        try {
+            ir = view::parse_design_ir_json(input_bytes);
+        } catch (const view::DesignIrParseError& error) {
+            std::cerr << "Error: invalid DesignIR: " << error.what() << "\n";
+            return 1;
+        }
+    }
 
     Observer observer(options, std::move(ir));
     std::string error;

@@ -83,6 +83,16 @@ class CrossBuildScript(unittest.TestCase):
         self.assertIn("-DCMAKE_OSX_ARCHITECTURES=x86_64", self.text)
         self.assertIn("PULP_RUST_CLI_TARGET=x86_64-apple-darwin", self.text)
 
+    def test_guest_build_uses_governor(self):
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build-x64",
+            self.text,
+        )
+        self.assertNotIn(
+            "\ncmake --build build-x64",
+            self.text,
+        )
+
     def test_verifies_thin_arch_and_rosetta_run(self):
         self.assertIn("lipo -archs", self.text)
         self.assertIn("arch -x86_64", self.text)
