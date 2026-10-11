@@ -9,6 +9,7 @@
 #include <pulp/view/design_ir.hpp>
 
 #include <cstddef>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -39,9 +40,27 @@ std::string box_shadow_to_css(const std::vector<IRBoxShadow>& shadows);
 /// canonical nested form.
 std::string serialize_design_ir(const DesignIR& ir, const DesignIrJsonOptions& options = {});
 
+/// Thrown by parse_design_ir_json for input that is not well-formed JSON:
+/// truncated documents, unterminated strings or escapes, unbalanced or
+/// over-deep nesting, embedded NUL bytes, and anything the JSON parser itself
+/// refuses. `offset` is the byte offset of the problem, or `std::string::npos`
+/// when the parser reports only a line and column (included in the message).
+struct DesignIrParseError : std::runtime_error {
+    DesignIrParseError(const std::string& message, std::size_t byte_offset)
+        : std::runtime_error(message), offset(byte_offset) {}
+    std::size_t offset;
+};
+
+/// Deepest object/array nesting parse_design_ir_json accepts. The JSON
+/// parser recurses once per level, so unbounded nesting would exhaust the
+/// stack instead of failing.
+inline constexpr std::size_t kMaxDesignIrJsonDepth = 512;
+
 /// Parse either the v1 canonical envelope or a legacy bare-node IR JSON
 /// document. Legacy source adapters keep their JSON-first compatibility by
-/// routing through this reader.
+/// routing through this reader. Malformed input throws DesignIrParseError;
+/// the bytes are bounds-checked before the JSON parser sees them, so a
+/// truncated or hostile document cannot read past the end of `json`.
 DesignIR parse_design_ir_json(const std::string& json);
 
 /// Collect all external resources referenced by the IR into a manifest.

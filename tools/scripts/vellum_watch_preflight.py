@@ -80,6 +80,10 @@ NO_VERDICT = 20
 WRITE_REFUSED = 2
 INVENTORY_STALE = 11
 CHANGE_EVENT_OWED = 12
+INVENTORY_UNVERIFIED = 13
+# A verifier's own exit status for "this interpreter cannot run me" (a missing
+# dependency such as PyYAML): not evidence that the committed file is stale.
+VERIFIER_MISSING_DEPENDENCY = 3
 
 FREEZE_CHECKER_REL = "tools/scripts/vellum_freeze_check.py"
 CHANGE_EVENT_DIR_REL = ".github/vellum-change-events"
@@ -402,6 +406,7 @@ def check_inventories(root: pathlib.Path, stream, *,
     A verifier that is absent (an older checkout) is skipped, never failed.
     """
     stale: list[tuple[str, str, str]] = []
+    unverified: list[tuple[str, str]] = []
     for label, argv, regenerate in INVENTORIES:
         if not (root / argv[0]).is_file():
             continue
@@ -412,19 +417,27 @@ def check_inventories(root: pathlib.Path, stream, *,
             continue
         if done.returncode != 0:
             detail = (done.stderr or done.stdout).strip().splitlines()
-            stale.append((label, detail[-1] if detail else f"exit {done.returncode}",
-                          regenerate))
-    if not stale:
+            last = detail[-1] if detail else f"exit {done.returncode}"
+            if done.returncode == VERIFIER_MISSING_DEPENDENCY:
+                unverified.append((label, last))
+            else:
+                stale.append((label, last, regenerate))
+    if not stale and not unverified:
         return NOTHING_OWED
     lines = ["  ✗ vellum-inventory (the required `Vellum freeze` check runs the same "
              "verifiers in \"Verify extraction and tooling inventories\"):"]
     for label, detail, regenerate in stale:
         lines += [f"     {label} is stale: {detail}",
                   f"       regenerate: {regenerate}"]
-    lines += ["     Commit the regenerated file(s). The verifiers read the working",
-              "     tree, so an uncommitted edit can also trip this locally."]
+    if stale:
+        lines += ["     Commit the regenerated file(s). The verifiers read the working",
+                  "     tree, so an uncommitted edit can also trip this locally."]
+    for label, detail in unverified:
+        lines += [f"     {label} could not be verified: the verifier itself could not run,",
+                  "     so nothing is known to be wrong with the file.",
+                  f"       {detail}"]
     _emit(lines, stream)
-    return INVENTORY_STALE
+    return INVENTORY_STALE if stale else INVENTORY_UNVERIFIED
 
 
 # ── the change-event (freeze) check ─────────────────────────────────────────
@@ -761,21 +774,21 @@ def main(argv: list[str] | None = None) -> int:
                             enforce=args.enforce)
     except Exception:
         freeze = NO_VERDICT
-    stale = False
+    inventories = NOTHING_OWED
     if args.inventories:
         try:
-            stale = check_inventories(root, sys.stderr) == INVENTORY_STALE
+            inventories = check_inventories(root, sys.stderr)
         except Exception:
-            stale = False
+            inventories = NOTHING_OWED
     # Every finding is printed; the exit code names the highest-ranked one
-    # (owed watch event, owed change event, stale inventory), and both callers
-    # block on any of the three.
+    # (owed watch event, owed change event, stale inventory, unverifiable
+    # inventory), and both callers block on any of the four.
     if code == EVENT_OWED:
         return EVENT_OWED
     if freeze == CHANGE_EVENT_OWED:
         return CHANGE_EVENT_OWED
-    if stale:
-        return INVENTORY_STALE
+    if inventories in (INVENTORY_STALE, INVENTORY_UNVERIFIED):
+        return inventories
     return code
 
 if __name__ == "__main__":

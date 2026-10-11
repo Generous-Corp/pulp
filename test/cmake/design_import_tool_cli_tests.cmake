@@ -461,6 +461,18 @@ if(Python3_Interpreter_FOUND)
         TIMEOUT 60)
 endif()
 
+# pulp-design-ir-observe refuses a manifest asset whose path leaves the
+# document directory, and renders it as absent.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-asset-escape
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_asset_escape.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-asset-escape PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120)
+endif()
+
 # pulp-design-ir-observe interaction replay: --click/--drag/--key steps run
 # against the materialized DesignIR before the render, and the per-step log
 # (hit target, focus, control state) is what a parity harness compares across
@@ -473,6 +485,18 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_interactions.py
                 --observer $<TARGET_FILE:pulp-design-ir-observe>)
     set_tests_properties(import-design-ir-observe-interactions PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120)
+endif()
+
+# pulp-design-ir-observe refuses a truncated or malformed DesignIR with exit 1
+# and a named reason instead of terminating by signal.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-malformed
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_malformed.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-malformed PROPERTIES
         LABELS "parser-import;import"
         TIMEOUT 120)
 endif()

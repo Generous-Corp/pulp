@@ -35,7 +35,7 @@ jobs:
       REPO: ${{ github.repository }}
       TARGET_SHA: ${{ inputs.target_sha || github.sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Prove every required gate ran for this commit
         run: python3 tools/scripts/required_gate_liveness.py

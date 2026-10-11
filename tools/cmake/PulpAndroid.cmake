@@ -124,11 +124,11 @@ function(pulp_wire_android_sources)
     endif()
 
     # -- Platform: permissions, lifecycle, file provider, clipboard --
-    # Note: jni_bridge.cpp and jni_motion.cpp are NOT added here — they
-    # are compiled into the pulp-jni shared library target instead (see
-    # root CMakeLists.txt). pulp-platform does not link against
-    # pulp::view, so adding jni_motion.cpp here would unresolved-link
-    # `pulp::view::motion::*`. pulp-jni links the full target closure.
+    # Note: jni_bridge.cpp is NOT added here — it is compiled into the
+    # pulp-jni shared library target instead (see root CMakeLists.txt),
+    # which links the full target closure. The view motion JNI bridge
+    # (core/view/platform/android/jni_motion.cpp) is also a pulp-jni
+    # source, so nothing under core/platform includes a view header.
     # The audio-dependent JNI exports live in
     # core/audio/platform/android/audio_jni.cpp, also compiled only into
     # pulp-jni, so nothing under core/platform includes an audio header.
@@ -136,7 +136,6 @@ function(pulp_wire_android_sources)
         set(_android_plat_dir "${CMAKE_SOURCE_DIR}/core/platform/src/android")
         file(GLOB _android_plat_sources "${_android_plat_dir}/*.cpp")
         list(FILTER _android_plat_sources EXCLUDE REGEX "jni_bridge\\.cpp$")
-        list(FILTER _android_plat_sources EXCLUDE REGEX "jni_motion\\.cpp$")
         if(_android_plat_sources)
             target_sources(pulp-platform PRIVATE ${_android_plat_sources})
         endif()
@@ -146,24 +145,18 @@ function(pulp_wire_android_sources)
         )
     endif()
 
-    # -- Render: Vulkan backend + AChoreographer + View hierarchy --
+    # -- Render: Vulkan backend + AChoreographer --
+    # The Android app shell (gpu_surface_android.cpp and its JNI bridge) is NOT
+    # added here. It drives the view hierarchy, the widget bridge, the state
+    # store and the demo synth, so it is compiled into the pulp-jni shared
+    # library (root CMakeLists.txt), which links that whole closure. pulp-render
+    # keeps only the render-layer Android source, and the
+    # render-upward-edge-check ctest keeps it that way.
     if(TARGET pulp-render AND PULP_ENABLE_GPU)
         set(_android_render_dir "${CMAKE_SOURCE_DIR}/core/render/platform/android")
         if(EXISTS "${_android_render_dir}/choreographer_android.cpp")
             target_sources(pulp-render PRIVATE
                 ${_android_render_dir}/choreographer_android.cpp
-            )
-        endif()
-        if(EXISTS "${_android_render_dir}/gpu_surface_android.cpp")
-            target_sources(pulp-render PRIVATE
-                ${_android_render_dir}/gpu_surface_android.cpp
-            )
-        endif()
-        # JNI `extern "C"` bridge — split out of gpu_surface_android.cpp.
-        # Forwards onto the android_* entry points.
-        if(EXISTS "${_android_render_dir}/gpu_surface_android_jni.cpp")
-            target_sources(pulp-render PRIVATE
-                ${_android_render_dir}/gpu_surface_android_jni.cpp
             )
         endif()
         target_link_libraries(pulp-render PRIVATE android log)
@@ -172,21 +165,6 @@ function(pulp_wire_android_sources)
         if(TARGET pulp-gpu-device)
             target_link_libraries(pulp-gpu-device PRIVATE android log)
         endif()
-        # View headers needed for rendering the widget hierarchy on Android
-        target_include_directories(pulp-render PRIVATE
-            ${CMAKE_SOURCE_DIR}/core/view/include
-            ${CMAKE_SOURCE_DIR}/core/platform/include
-            ${CMAKE_SOURCE_DIR}/core/signal/include
-            ${CMAKE_SOURCE_DIR}/core/simd/include
-            ${CMAKE_SOURCE_DIR}/core/state/include
-            ${CMAKE_SOURCE_DIR}/core/audio/include
-            ${CMAKE_SOURCE_DIR}/core/events/include
-            ${CMAKE_SOURCE_DIR}/core/midi/include
-            ${CMAKE_SOURCE_DIR}/core/format/include
-            ${CMAKE_SOURCE_DIR}/core/runtime/include
-            ${CMAKE_SOURCE_DIR}/core/canvas/include
-            ${CMAKE_SOURCE_DIR}/external/choc
-        )
         target_compile_definitions(pulp-render PRIVATE PULP_VULKAN_BACKEND=1)
     endif()
 

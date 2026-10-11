@@ -589,18 +589,25 @@ removed. Android BLE-MIDI peripheral/advertising mode is out of scope.
 
 These are hard-won lessons from the bringup. Violating any of these will cause crashes or subtle bugs.
 
-### The JNI `.so` whole-archives the GPU device archive too
+### The Android app shell compiles into `pulp-jni`, not `pulp-render`
 
-`pulp-jni` links `pulp-render` with `-Wl,--whole-archive` so the JNI entry
-points in its Android sources survive. The Dawn surface and compute TUs that
-`gpu_surface_android.cpp` calls into live in `pulp-gpu-device`, a separate
-archive below `pulp-render`; the root `CMakeLists.txt` whole-archives it next
-to `pulp-render` so the `.so` keeps exactly the objects it had when those TUs
-were part of `pulp-render`. `PulpAndroid.cmake` also gives `pulp-gpu-device`
-the same `android log` link. `gpu_surface_android*.cpp` stay in `pulp-render`
-because they include `pulp/view` and `pulp/canvas`; they cannot move into the
-device layer, which may include only the device API and `pulp/runtime`
-(enforced by the `gpu-device-link-closure` ctest).
+`core/render/platform/android/gpu_surface_android.cpp` and its JNI bridge
+`gpu_surface_android_jni.cpp` are the Android app shell. They own the GPU
+surface, drive the view hierarchy and the widget bridge, read the state store
+and play the demo synth. They are compiled straight into the `pulp-jni` shared
+library (root `CMakeLists.txt`), the same way `jni_motion.cpp` is, because only
+that target links the whole closure. `pulp-render` keeps just
+`choreographer_android.cpp`, with no view/state/audio include directories. The
+`render-upward-edge-check` ctest fails if a renderer source includes above
+`pulp/{render,canvas,runtime,scene}`, if a CMake file adds a shell source back
+to `pulp-render`, or if a shell source stops being compiled into `pulp-jni`.
+The files stay under `core/render/platform/android/`, because the accepted Vellum
+cut manifest pins their paths; the separation is by target, not directory.
+
+`pulp-jni` also whole-archives `pulp-render` and `pulp-gpu-device` (the Dawn
+surface/compute archive below it) so the `.so` keeps every object those
+archives contribute. `PulpAndroid.cmake` gives `pulp-gpu-device` the same
+`android log` link.
 
 ### Platform Detection Order
 
@@ -1178,37 +1185,32 @@ shared bridge pump.
 
 The Kotlin / Compose / View bridge for `pulp::view::motion` lives in
 `android/app/src/main/kotlin/com/pulp/motion/`. JNI shims live in
-`core/platform/src/android/jni_motion.cpp`. Full design and DSL
+`core/view/platform/android/jni_motion.cpp`. Full design and DSL
 docs are in the **motion** skill (Path H) — this section captures
 the Android-specific wiring gotchas only.
 
 ### CMake wiring — jni_motion.cpp belongs in `pulp-jni`
 
-`jni_motion.cpp` is intentionally **excluded** from the
-`pulp-platform` glob in `tools/cmake/PulpAndroid.cmake` (alongside
-`jni_bridge.cpp`) and added **explicitly** to the `pulp-jni`
-SHARED target in the root `CMakeLists.txt`.
+`jni_motion.cpp` lives with the view sources
+(`core/view/platform/android/`) and is listed **explicitly** in the
+`pulp-jni` SHARED target in the root `CMakeLists.txt`. It is not part of
+`pulp-view`'s Android sources (`PulpAndroid.cmake` adds only
+`accessibility_android.cpp` there), so it is compiled exactly once.
 
-Why: `pulp-platform` does not link against `pulp::view`, so
-compiling `jni_motion.cpp` there leaves
-`pulp::view::motion::Coordinator::*` unresolved at link time. The
-`pulp-jni` target links the full `pulp::{platform,runtime,view,...}`
-closure so the JNI shims resolve cleanly.
+Why `pulp-jni`: the JNI shims need the full `pulp::{platform,runtime,view,...}`
+closure that only `libpulp.so` links. Why not `core/platform`: the foundation
+layer may not include view headers.
 
-If you add another JNI file that depends on a higher-layer subsystem,
-add it to both excludes (PulpAndroid glob filter) AND to the
-`add_library(pulp-jni SHARED ...)` source list.
-
-Audio-dependent JNI exports do not go under `core/platform` at all: they
-live in `core/audio/platform/android/audio_jni.cpp`, which is listed in the
-`pulp-jni` sources and is not part of the explicit `pulp-audio` Android
-source list. `tools/scripts/foundation_include_lint.py` (ctest
-`foundation-include-lint`, also run by `gates.sh`) fails if any file under
-`core/platform`, `core/runtime` or `core/simd` includes an upper-layer header,
-including a quoted `"../../audio/..."` path that only resolves through
-`core/platform/include`. The one tracked exception is `jni_motion.cpp`'s
-`pulp/view/motion.hpp`; its allowlist entry must be removed when the file
-moves, or the lint fails on the stale entry.
+If you add another JNI file that depends on a higher-layer subsystem, put it
+under that subsystem's `platform/android/` directory and add it to the
+`add_library(pulp-jni SHARED ...)` source list. Audio-dependent exports
+already follow this: they live in `core/audio/platform/android/audio_jni.cpp`.
+`tools/scripts/foundation_include_lint.py` (ctest `foundation-include-lint`,
+also run by `gates.sh`) fails if any file under `core/platform`,
+`core/runtime` or `core/simd` includes an upper-layer header, including a
+quoted `"../../audio/..."` path that only resolves through
+`core/platform/include`. Its allowlist is empty; an entry that stops matching
+fails the lint.
 
 ### View probe uses `OnPreDrawListener`, not `OnGlobalLayoutListener`
 

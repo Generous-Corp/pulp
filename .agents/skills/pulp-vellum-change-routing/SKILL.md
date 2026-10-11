@@ -109,6 +109,15 @@ The event's `capability_families` must equal the affected set exactly, and its
 `rationale` should name the single line that crossed the selector, so a reader
 can tell a manifest registration apart from a real harness change.
 
+## The inventory step can fail without anything being stale
+
+`vellum_watch_preflight.py --inventories` runs the `Vellum freeze`
+verifiers. A verifier that exits 3 could not run at all (for example,
+`pulp_tooling_disposition.py` under a python3 without PyYAML). The preflight
+reports it as "could not be verified" with exit 13, and never prints a
+regenerate command for it. Fix the interpreter and push again; do not
+regenerate the inventory.
+
 ## GPU doctor boundary
 
 Pulp owns the `pulp doctor gpu` CLI/MCP adapters, typed GPU-health evidence,

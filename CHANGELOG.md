@@ -9,6 +9,92 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09501"></a>
+## [0.950.1] - 2026-10-11
+
+- release/version bump ([#10112](https://github.com/Generous-Corp/pulp/pull/10112))
+- release/version bump ([#10109](https://github.com/Generous-Corp/pulp/pull/10109))
+- fix/design ir asset path lexical ([#10077](https://github.com/Generous-Corp/pulp/pull/10077))
+- feat/pseudo materialized import 20261011 ([#10084](https://github.com/Generous-Corp/pulp/pull/10084))
+- fix/vellum inventory pyyaml message ([#10096](https://github.com/Generous-Corp/pulp/pull/10096))
+- codex/gate host build poka yoke ([#10088](https://github.com/Generous-Corp/pulp/pull/10088))
+- codex/dependabot actions 20261010 ([#10042](https://github.com/Generous-Corp/pulp/pull/10042))
+- release/version bump ([#10105](https://github.com/Generous-Corp/pulp/pull/10105))
+- release/version bump ([#10104](https://github.com/Generous-Corp/pulp/pull/10104))
+- fix/ios shallow bundle signing ([#10097](https://github.com/Generous-Corp/pulp/pull/10097))
+- feature/vellum p14 wgpu native skia off ([#10053](https://github.com/Generous-Corp/pulp/pull/10053))
+- release/version bump ([#10102](https://github.com/Generous-Corp/pulp/pull/10102))
+
+<a id="v09500"></a>
+## [0.950.0] - 2026-10-11
+
+- release/version bump ([#10099](https://github.com/Generous-Corp/pulp/pull/10099))
+- codex/windows gpu sdk 20261010 ([#10094](https://github.com/Generous-Corp/pulp/pull/10094))
+- codex/govern intel cross build 20261011 ([#10095](https://github.com/Generous-Corp/pulp/pull/10095))
+- codex/govern windows cli emitter 20261011 ([#10092](https://github.com/Generous-Corp/pulp/pull/10092))
+- feature/vellum x export fetchcontent 20261011 ([#10087](https://github.com/Generous-Corp/pulp/pull/10087))
+- fix/source selftests skip regex ([#10086](https://github.com/Generous-Corp/pulp/pull/10086))
+- release/version bump ([#10093](https://github.com/Generous-Corp/pulp/pull/10093))
+- fix/design ir json truncated input ([#10068](https://github.com/Generous-Corp/pulp/pull/10068))
+- feature/vellum carve P12 ([#10085](https://github.com/Generous-Corp/pulp/pull/10085))
+
+<a id="v09490"></a>
+## [0.949.0] - 2026-10-11
+
+- release/version bump ([#10090](https://github.com/Generous-Corp/pulp/pull/10090))
+- docs/aax gui acceptance poka yoke 20261009 ([#9974](https://github.com/Generous-Corp/pulp/pull/9974))
+- docs/vellum carve migration notes ([#10080](https://github.com/Generous-Corp/pulp/pull/10080))
+- feature/vellum carve P8 ([#10029](https://github.com/Generous-Corp/pulp/pull/10029))
+- fix/p16 migration note version fields ([#10081](https://github.com/Generous-Corp/pulp/pull/10081))
+
+<a id="v09480"></a>
+## [0.948.0] - 2026-10-11
+
+- release/version bump ([#10083](https://github.com/Generous-Corp/pulp/pull/10083))
+- feature/vellum p10 boundary ([#10039](https://github.com/Generous-Corp/pulp/pull/10039))
+- fix/actionlint timeout 20261011 ([#10079](https://github.com/Generous-Corp/pulp/pull/10079))
+- codex/windows gpu sdk 20261010 ([#10072](https://github.com/Generous-Corp/pulp/pull/10072))
+- feature/vellum carve P5 ([#10036](https://github.com/Generous-Corp/pulp/pull/10036))
+
+<a id="v09470"></a>
+## [0.947.0] - 2026-10-11
+
+- release/version bump ([#10078](https://github.com/Generous-Corp/pulp/pull/10078))
+- fix/p16 migration note version ([#10070](https://github.com/Generous-Corp/pulp/pull/10070))
+
+<a id="v09460"></a>
+## [0.946.0] - 2026-10-11
+
+- feature/scripted ui time source ([#10051](https://github.com/Generous-Corp/pulp/pull/10051))
+- release/version bump ([#10069](https://github.com/Generous-Corp/pulp/pull/10069))
+- feature/vellum p13 android shell ([#10066](https://github.com/Generous-Corp/pulp/pull/10066))
+- feature/p15 audio only plugin ([#10054](https://github.com/Generous-Corp/pulp/pull/10054))
+- codex/sanitizer rtsan lsb release 2026 10 10 ([#10048](https://github.com/Generous-Corp/pulp/pull/10048))
+
+<a id="v09451"></a>
+## [0.945.1] - 2026-10-11
+
+- release/version bump ([#10064](https://github.com/Generous-Corp/pulp/pull/10064))
+- feature/design ir observe gpu backend ([#10046](https://github.com/Generous-Corp/pulp/pull/10046))
+- feature/p16 pulp add plugin unknown args ([#10059](https://github.com/Generous-Corp/pulp/pull/10059))
+- feature/l3 host lane 20261010 ([#10043](https://github.com/Generous-Corp/pulp/pull/10043))
+- fix/windows perfetto msvc 20261010 ([#10056](https://github.com/Generous-Corp/pulp/pull/10056))
+- feature/vellum carve P9 followup ([#10061](https://github.com/Generous-Corp/pulp/pull/10061))
+- feature/vellum p6 gpu device ([#10038](https://github.com/Generous-Corp/pulp/pull/10038))
+- docs/canary comment touch ([#9795](https://github.com/Generous-Corp/pulp/pull/9795))
+
+<a id="v09450"></a>
+## [0.945.0] - 2026-10-11
+
+- release/version bump ([#10060](https://github.com/Generous-Corp/pulp/pull/10060))
+- codex/p2 thermal validator 20261011 ([#10055](https://github.com/Generous-Corp/pulp/pull/10055))
+- docs/vellum inheritance exception end 20261010 ([#10037](https://github.com/Generous-Corp/pulp/pull/10037))
+- feature/vellum x export ([#10026](https://github.com/Generous-Corp/pulp/pull/10026))
+- codex/w17 phase01 20261010 ([#10025](https://github.com/Generous-Corp/pulp/pull/10025))
+- feature/vellum carve P11 ([#10052](https://github.com/Generous-Corp/pulp/pull/10052))
+- fix/scripted ui mount frame bindings ([#10047](https://github.com/Generous-Corp/pulp/pull/10047))
+- feature/ui timeline observer ([#10044](https://github.com/Generous-Corp/pulp/pull/10044))
+
 <a id="v09440"></a>
 ## [0.944.0] - 2026-10-10
 
@@ -10377,6 +10463,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.950.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.950.1
+[0.950.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.950.0
+[0.949.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.949.0
+[0.948.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.948.0
+[0.947.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.947.0
+[0.946.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.946.0
+[0.945.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.945.1
+[0.945.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.945.0
 [0.944.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.944.0
 [0.943.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.943.0
 [0.942.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.942.0

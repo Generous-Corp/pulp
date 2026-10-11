@@ -561,10 +561,12 @@ knowing before you touch that file:
   only `begin_host_frame`'s answer stalls an input-started animation (a knob's
   hover glow froze at 0.37 for nine frames). Gotchas it makes visible: a
   view-first scripted document's first mounted frame paints `bindWidgetToParam`
-  controls at 0, one frame before the binding service catches up; and JS
-  `setTimeout`/`setInterval` deadlines follow the wall clock, not the host
-  clock, so timer-driven readiness cannot be fixed by a schedule (drive it with
-  `requestAnimationFrame` instead).
+  controls at 0, one frame before the binding service catches up. Script
+  timers and `performance.now()` read the schedule's host clock by default
+  (`WidgetBridge::set_time_source`, `--timer-clock schedule`); pass
+  `--timer-clock wall` to see what a real host does, where a timer fires when
+  wall time passes its deadline however few frames that took. `Date.now()` is
+  always the engine's wall clock, so never derive timing from it in a fixture.
 
 **The lane that works (Figma is the source of truth):**
 ```bash
@@ -2986,6 +2988,20 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   vertical}`), grid (`gridTemplate*`/`gridAutoFlow`/`gridColumn`/`gridRow`), and
   text `runs` are all written now; mirror this for future IR additions and add a
   `[serialization]` round-trip test.
+- **A document-loaded asset stays inside its document.** With an
+  `asset_base_directory`, `resolve_asset_file` honours a manifest `local_path`
+  or `file://` `original_uri` only when the path stays inside that directory
+  — judged by text first (`..` folded, backslashes as separators, absolute,
+  drive-letter and UNC roots refused, no lookup) and then by the resolved path
+  (symlinks). A declared SHA-256 alone does not admit an escaping path,
+  because the document controls that hash; the one outside root is Pulp's own
+  asset cache (`design_import_asset_cache_directory()`), where an absolute path
+  loads only if its resolved file is in the cache and matches the hash. A refusal logs `asset '…' refused — … resolves
+  outside the document directory` and reads as unresolved. It is decided
+  before any lookup on purpose: refusing only files that exist would tell a
+  crafted manifest which outside files are present. An external local file the
+  importer records by absolute path will not load later; copy it into the
+  document's `assets/` instead.
 - **Pencil stroke lives in an attribute.** Shape stroke can arrive as
   `attributes["stroke_color"]` (+ `stroke_width`/`stroke-width`), NOT
   `style.border_color`. `synthesize_primitive_paths` consumes both, else a
@@ -3001,6 +3017,51 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   fills its axis even when the node has an explicit cross-axis size (Yoga clamps
   up to the min) — no longer a no-op. (Text-run UTF-16→byte offset conversion is
   also handled now — see the per-range text section.)
+- **Never hand DesignIR bytes to `choc::json::parse` directly.** The pinned
+  CHOC fork checks for end of input only after a backslash, so a document cut
+  inside a string literal makes it read past the buffer (the observer died with
+  SIGBUS), and its `ParseError` aborts any caller that does not catch it.
+  `parse_design_ir_json` bounds-checks the bytes first (terminated strings and
+  `\u` escapes, balanced nesting within `kMaxDesignIrJsonDepth`, no embedded
+  NUL) and throws `DesignIrParseError`; a CLI that loads a DesignIR catches it
+  and exits 1 with the reason. Malformed fixtures for this path live in the
+  parity harness corpus (`tools/parity/corpus/fixtures/malformed/` in Vellum).
+
+### Malformed imports fail closed or warn — never pass silently
+
+The rejection corpus (Vellum `tools/parity/corpus/fixtures/malformed/`) holds
+each of these to a code. Keep the codes and the wording the lane's regexes
+match:
+
+- **A DesignIR envelope newer than this build warns; it is not refused.**
+  The reader deliberately keeps and round-trips any `version` (tests pin
+  this), so the check lives in the native resolver:
+  `document-version-unsupported` with the text `unsupported DesignIR version
+  N`. Do not move it into `parse_design_ir_json`: refusing there breaks the
+  preserve contract, and it was ruled out.
+- **Two ZIP members that land on one file refuse the import.**
+  `zip_entry_policy.hpp` keys members by the lexically normalized,
+  case-folded path. `Scene.pulp.json` and `./assets//a.png` collide with
+  `scene.pulp.json` and `assets/a.png` on a case-insensitive volume.
+- **The native resolver warns on `node-type-unknown` and
+  `identity-duplicate`.** Each warning is a diagnostic plus a
+  `[pulp:warn] design-import:` line. "Unknown" means `kind_from_type` does not
+  recognize the type and it is not a vector kind. The warning fires even when
+  the node's audio role or name still resolves it. Duplicates are found by a
+  document-order walk of `stable_anchor_id`.
+- **A successful decode does not prove an image is intact.** Skia's PNG
+  decoder fills the rows of a truncated file with transparent pixels and
+  returns `kSuccess`, and the node paints blank. `canvas::probe_image_file`
+  therefore also walks the PNG chunks (whole chunks, correct CRCs, an `IEND`).
+  `asset-undecodable` comes from that probe. A PNG with a bad CRC now warns
+  even when it displays. Test fixtures need real CRCs: the 67-byte
+  `tiny_png_bytes()` in `test_import_design_tool.cpp` has a wrong IDAT length,
+  so it fails the probe.
+- **Web fonts that fail in Chromium are named.** The capture health probe
+  lists `document.fonts` faces whose `status` is `error` as
+  `provenance.health.failed_fonts`. The lowering turns each one into a
+  `font-undecodable` warning. The capture stays `healthy`, because text still
+  paints in a fallback face.
 
 ### Faithful-vector lane (Plan B): `faithful_svg` render mode → `DesignFrameView`
 

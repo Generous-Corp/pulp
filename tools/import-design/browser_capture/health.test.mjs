@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import assert from "node:assert/strict";
 import test from "node:test";
+import vm from "node:vm";
 
 import {
   installCaptureHealthMonitor,
@@ -113,3 +114,44 @@ test("capture health rejects missing resources even when a shell painted",
           return true;
         });
     });
+
+test("capture health reports undecodable web fonts without refusing the capture",
+    async () => {
+      const cdp = fakeCdp({
+        visible_elements: 24,
+        visible_text_characters: 120,
+        painted_surfaces: 8,
+        failed_fonts: ["Broken"],
+      });
+      const report = await verifyCaptureHealth(
+        cdp, snapshot(30), installCaptureHealthMonitor(cdp), []);
+      assert.equal(report.status, "healthy");
+      assert.deepEqual(report.failed_fonts, ["Broken"]);
+    });
+
+test("the health probe names each face whose load failed, once", async () => {
+  let expression = "";
+  const cdp = {
+    on() {},
+    async call(_method, params) {
+      expression = params.expression;
+      return { result: { value: { visible_elements: 2, painted_surfaces: 1 } } };
+    },
+  };
+  await verifyCaptureHealth(
+    cdp, snapshot(30), installCaptureHealthMonitor(cdp), []);
+  // Run the page-side probe against a stand-in document.
+  const value = vm.runInNewContext(expression, {
+    document: {
+      querySelectorAll: () => [],
+      fonts: [
+        { family: '"Broken"', status: "error" },
+        { family: "Inter", status: "loaded" },
+        { family: "Broken", status: "error" },
+        { family: "Unused", status: "unloaded" },
+      ],
+    },
+    getComputedStyle: () => ({}),
+  });
+  assert.deepEqual([...value.failed_fonts], ["Broken"]);
+});

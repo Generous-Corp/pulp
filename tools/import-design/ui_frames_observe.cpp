@@ -37,6 +37,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -47,6 +48,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -75,7 +77,7 @@ bool write_text(const fs::path& path, const std::string& text) {
 void usage() {
     std::cerr << "Usage: pulp-ui-frames-observe (--design-ir <file> | --script <ui.js>) "
                  "--schedule <schedule.json> --width <px> --height <px> [--scale <factor>] "
-                 "--out-dir <dir>\n";
+                 "[--timer-clock schedule|wall] --out-dir <dir>\n";
 }
 
 std::optional<std::pair<view::KeyCode, std::uint16_t>> parse_key(std::string_view text) {
@@ -225,6 +227,10 @@ struct Options {
     float width = 0.0f;
     float height = 0.0f;
     float scale = 2.0f;
+    // "schedule": script timers and performance.now() read the schedule's host
+    // clock, so a timer fires on the frame whose timestamp passes its deadline.
+    // "wall": they read the steady clock, as in a real host.
+    std::string timer_clock = "schedule";
 };
 
 struct Event {
@@ -279,6 +285,16 @@ class Observer {
                 view::ScriptedUiOptions{.script_path = options_.script,
                                         .enable_hot_reload = false,
                                         .enable_theme_reload = false});
+            if (options_.timer_clock == "schedule") {
+                // A fixed origin, offset by the scheduled host time: two runs
+                // of one schedule see identical script time.
+                ov->session->set_time_source([this] {
+                    return std::chrono::steady_clock::time_point{} + std::chrono::hours(1) +
+                           std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                               std::chrono::duration<double>(current_timestamp_ -
+                                                             schedule_.timestamps.front()));
+                });
+            }
             auto* raw = ov.get();
             ov->session->set_document_loaded_callback(
                 [this, raw](bool loaded, const std::string& why) {
@@ -576,6 +592,7 @@ class Observer {
 
     int run(choc::value::Value& log) {
         std::string error;
+        current_timestamp_ = schedule_.timestamps.front();
         for (int i = 0; i < schedule_.initial_views; ++i) {
             if (!attach_view(0, error)) {
                 std::cerr << "Error: could not open view " << i << ": " << error << "\n";
@@ -585,6 +602,7 @@ class Observer {
         auto frames = choc::value::createEmptyArray();
         for (std::size_t f = 0; f < schedule_.timestamps.size(); ++f) {
             current_frame_ = static_cast<int>(f);
+            current_timestamp_ = schedule_.timestamps[f];
             auto frame = choc::value::createObject("");
             frame.addMember("frame", choc::value::createInt64(current_frame_));
             frame.addMember("timestamp", choc::value::createFloat64(schedule_.timestamps[f]));
@@ -665,6 +683,7 @@ class Observer {
     state::StateStore store_;
     std::vector<std::unique_ptr<ObservedView>> views_;
     int current_frame_ = 0;
+    double current_timestamp_ = 0.0;
 };
 
 std::optional<Schedule> parse_schedule(const std::string& text, state::StateStore& store,
@@ -798,6 +817,9 @@ int main(int argc, char** argv) {
         else if (arg == "--width" && parse_positive(value, options.width)) {
         } else if (arg == "--height" && parse_positive(value, options.height)) {
         } else if (arg == "--scale" && parse_positive(value, options.scale)) {
+        } else if (arg == "--timer-clock" &&
+                   (std::string_view{value} == "schedule" || std::string_view{value} == "wall")) {
+            options.timer_clock = value;
         } else {
             usage();
             return 2;
@@ -826,8 +848,14 @@ int main(int argc, char** argv) {
         return 1;
     }
     view::DesignIR ir;
-    if (!options.design_ir.empty())
-        ir = view::parse_design_ir_json(input_bytes);
+    if (!options.design_ir.empty()) {
+        try {
+            ir = view::parse_design_ir_json(input_bytes);
+        } catch (const view::DesignIrParseError& error) {
+            std::cerr << "Error: invalid DesignIR: " << error.what() << "\n";
+            return 1;
+        }
+    }
 
     Observer observer(options, std::move(ir));
     std::string error;
@@ -841,6 +869,7 @@ int main(int argc, char** argv) {
     environment.addMember("platform", choc::value::createString(platform_name()));
     environment.addMember("arch", choc::value::createString(arch_name()));
     environment.addMember("backend", choc::value::createString("skia-raster"));
+    environment.addMember("timer_clock", choc::value::createString(options.timer_clock));
     environment.addMember("scale", choc::value::createFloat64(options.scale));
     environment.addMember("width", choc::value::createFloat64(options.width));
     environment.addMember("height", choc::value::createFloat64(options.height));

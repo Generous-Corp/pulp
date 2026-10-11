@@ -133,6 +133,10 @@ figma-plugin <file>` reads a `.pulp.zip` directly (it unpacks the archive and
 resolves the bundled assets from the manifest for you). You only need to unzip
 by hand for a hand-authored archive whose internal layout differs from the
 plugin's; in that case, point the importer at the extracted `scene.pulp.json`.
+The importer refuses an archive in which two members land on the same file
+(an exact repeat, a case variant such as `Scene.pulp.json`, or an equivalent
+spelling such as `./assets/a.png`), because which one would be imported depends
+on archive order.
 
 The plugin runs **entirely on your machine** — its manifest declares
 `networkAccess: { allowedDomains: ["none"] }`, so no design data leaves your

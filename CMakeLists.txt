@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.945.1
+    VERSION 0.951.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -408,6 +408,7 @@ add_subdirectory(core/timeline_editor)
 add_subdirectory(core/playback)
 add_subdirectory(core/events)
 add_subdirectory(core/sample_bank_manifest)
+add_subdirectory(core/content)
 add_subdirectory(core/state)
 add_subdirectory(core/audio)
 if(PULP_ENABLE_AUTHORING_CAPSULE)
@@ -549,9 +550,9 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     endif()
     enable_testing()
     # The file-api query is retained in the build tree so the Vellum closure
-    # receipt can be regenerated from the exact configured target graph.  The
-    # initial lane is report-only while P1-P10 carve PRs remove their allowlist
-    # edges; it becomes enforcing when the accepted boundary is complete.
+    # receipt can be regenerated from the exact configured target graph. The
+    # gate is enforcing; only explicitly pending P4/P12/P13/P17 debts remain
+    # allowlisted and are removed as those carve PRs land.
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
     file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -565,6 +566,9 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --target pulp-render
             --target pulp-view-core
             --target pulp-view-script
+            --target pulp-platform
+            --target pulp-runtime
+            --target pulp-simd
             --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
     set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
         LABELS "validation")
@@ -573,9 +577,33 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
             gate
             --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
-            --report-only)
+            --allow pulp-audio
+            --allow pulp-midi
+            --allow pulp-view-audio
+            --allow pulp-content
+            --allow-include-prefix core/view/include/pulp/view/
+            --allow-include-prefix core/view/src/
+            --allow-include-prefix core/audio/include/pulp/audio/
+            --allow-include-prefix core/signal/include/pulp/signal/
+            --allow-include-path core/platform/src/android/jni_motion.cpp
+            --allow-include-prefix core/render/platform/android/gpu_surface_android
+            --allow-root-prefix core/audio/
+            --allow-root-prefix core/signal/)
     set_tests_properties(pulp.vellum-closure-gate PROPERTIES
         DEPENDS pulp.vellum-closure-boundary
+        LABELS "validation")
+    add_test(NAME pulp.vellum-closure-gate-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json"
+            --break "perl -0pi -e 's/pulp::runtime/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
+    set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
+        LABELS "validation")
+    add_test(NAME pulp.vellum-closure-policy-selftest
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/test_vellum_closure.py")
+    set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
         LABELS "validation")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
@@ -707,8 +735,10 @@ endif()
 # ordinary unit-test owners above intentionally load before those public helper
 # modules.
 if(PULP_BUILD_TESTS)
-    add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/bundle_name_quoting)
+    add_subdirectory(test/fixtures/render_provider_floor)
+    add_subdirectory(test/fixtures/native_ui_link_floor)
+    add_subdirectory(test/fixtures/no_editor_link_floor)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
@@ -905,7 +935,7 @@ endif()
 if(ANDROID)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
-        core/platform/src/android/jni_motion.cpp
+        core/view/platform/android/jni_motion.cpp
         core/audio/platform/android/audio_jni.cpp
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
@@ -931,6 +961,16 @@ if(ANDROID)
         android
         log
     )
+    # The Android app shell: it owns the GPU surface, drives the view hierarchy
+    # and the widget bridge, and plays the demo synth, so it sits at the top of
+    # the closure with the JNI bridge rather than inside pulp-render.
+    if(TARGET pulp-render AND PULP_ENABLE_GPU)
+        target_sources(pulp-jni PRIVATE
+            core/render/platform/android/gpu_surface_android.cpp
+            core/render/platform/android/gpu_surface_android_jni.cpp
+        )
+        target_link_libraries(pulp-jni PRIVATE pulp::render)
+    endif()
     # Ensure all static library symbols are included (needed for JNI registration)
     # Ensure JNI exports from static libs are included in the shared lib.
     # Without --whole-archive, the linker strips "unused" JNI_OnLoad and

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-vellum-p14-wgpu-native-skia-off-watch",
+  "created_at": "2026-10-10T23:44:47Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Links the wgpu-native webgpu target into pulp-render only when the renderer has no Skia Dawn archive (the existing Windows rule on every platform), and makes runtime staging and bundle build-info follow that link, so Skia-on images neither ship nor load libwgpu_native. Skia's static Dawn remains the only WebGPU implementation in those images; rendering output is unchanged (byte-identical Graphite renders measured). Tests and the consumption census follow the link. No render, Skia/Dawn, capture, design-import, or packaging authority moves to or from Vellum; this is Pulp-side hygiene (vellum-move P14) under the 2026-10-04 temporary Pulp exception, matching the accepted D4 refinement.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-control-trusted-host-e2e",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -1,8 +1,10 @@
 #include "../core/view/src/design_import_internal.hpp"
 #include "../core/view/src/design_import_native_common.hpp"
 #include "../core/view/src/design_ir_helpers.hpp"
+#include "../core/view/src/design_import_document_checks.hpp"
 #include "support/unique_temp_dir.hpp"
 
+#include <pulp/canvas/image_probe.hpp>
 #include <pulp/view/design_tokens.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/widgets.hpp>
@@ -13,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -919,11 +922,16 @@ TEST_CASE("runtime asset resolution leaves a resolvable manifest path alone",
     CHECK(resolved_asset_uri(relative_asset, document_directory) ==
           "file://" + relative.lexically_normal().generic_string());
 
+    // An absolute path inside the document resolves; one outside it does not,
+    // even with a matching declared SHA-256.
     IRAssetRef absolute_asset;
     absolute_asset.asset_id = "logo";
-    absolute_asset.local_path = absolute.string();
+    absolute_asset.local_path = relative.string();
     CHECK(resolved_asset_uri(absolute_asset, document_directory) ==
-          "file://" + absolute.lexically_normal().generic_string());
+          "file://" + relative.lexically_normal().generic_string());
+    absolute_asset.local_path = absolute.string();
+    absolute_asset.content_hash = pulp::runtime::sha256_hex("pulp-test-asset-bytes");
+    CHECK(resolve_asset_file(absolute_asset, document_directory) == std::nullopt);
 
     // A self-contained URI still wins over an absent file, unchanged.
     IRAssetRef inline_asset;
@@ -931,6 +939,154 @@ TEST_CASE("runtime asset resolution leaves a resolvable manifest path alone",
     inline_asset.original_uri = "data:image/png;base64,AA==";
     CHECK(resolved_asset_uri(inline_asset, document_directory) ==
           "data:image/png;base64,AA==");
+}
+
+TEST_CASE("runtime asset resolution refuses a manifest path that leaves the document",
+          "[design-ir-helpers][asset-resolution][path-escape]") {
+    TempTree tree;
+    const auto document_directory = tree.path / "doc";
+    write_bytes(document_directory / "assets" / "inside.png", "inside-bytes");
+    const auto outside = write_bytes(tree.path / "escape.png", "outside-bytes");
+
+    const auto refused = [&](IRAssetRef asset) {
+        std::string logged;
+        std::optional<fs::path> resolved;
+        {
+            StderrCapture capture(tree.path / "stderr.log");
+            resolved = resolve_asset_file(asset, document_directory);
+            logged = capture.text();
+        }
+        CHECK(resolved == std::nullopt);
+        CHECK(logged.find("refused") != std::string::npos);
+        CHECK(logged.find("outside the document directory") != std::string::npos);
+    };
+
+    IRAssetRef asset;
+    asset.asset_id = "swatch";
+
+    SECTION("a relative path climbing out with ..") {
+        asset.local_path = "../escape.png";
+        refused(asset);
+    }
+    SECTION("an absolute path elsewhere on the host") {
+        asset.local_path = outside.string();
+        refused(asset);
+    }
+    SECTION("a file:// original_uri elsewhere on the host") {
+        asset.original_uri = "file://" + outside.generic_string();
+        refused(asset);
+    }
+    SECTION("a symlinked directory inside the document pointing out") {
+        std::error_code ec;
+        fs::create_directory_symlink(tree.path, document_directory / "linked", ec);
+        REQUIRE_FALSE(ec);
+        asset.local_path = "linked/escape.png";
+        refused(asset);
+    }
+    SECTION("an escape whose target does not exist is refused the same way") {
+        // Refusing by text, before any lookup, keeps the answer from revealing
+        // whether a file exists outside the document.
+        asset.local_path = "../absent.png";
+        refused(asset);
+        asset.local_path = "../escape.png";
+        refused(asset);
+    }
+    SECTION("a backslash-separated escape") {
+        asset.local_path = "..\\escape.png";
+        refused(asset);
+    }
+    SECTION("a drive-letter root") {
+        asset.local_path = "C:escape.png";
+        refused(asset);
+        asset.local_path = "C:\\escape.png";
+        refused(asset);
+    }
+    SECTION("a UNC root") {
+        asset.local_path = "//server/share/escape.png";
+        refused(asset);
+        asset.local_path = "\\\\server\\share\\escape.png";
+        refused(asset);
+    }
+    SECTION("a declared sha256 that matches the outside file does not admit it") {
+        // The document controls the hash, so a matching hash proves nothing
+        // about whether the document may read that file.
+        asset.local_path = "../escape.png";
+        asset.content_hash = pulp::runtime::sha256_hex("outside-bytes");
+        refused(asset);
+        asset.local_path = outside.string();
+        refused(asset);
+    }
+    SECTION("paths that stay inside the document still resolve") {
+        asset.local_path = "assets/../assets/inside.png";
+        CHECK(resolve_asset_file(asset, document_directory).has_value());
+        asset.local_path = "other/../assets/inside.png";
+        CHECK(resolve_asset_file(asset, document_directory).has_value());
+        asset.local_path = (document_directory / "assets" / "inside.png").string();
+        CHECK(resolve_asset_file(asset, document_directory).has_value());
+    }
+}
+
+TEST_CASE("runtime asset resolution admits Pulp's asset cache only for a matching hash",
+          "[design-ir-helpers][asset-resolution][path-escape]") {
+    TempTree tree;
+    const auto document_directory = tree.path / "project" / "doc";
+    fs::create_directories(document_directory);
+    const auto cache = tree.path / "cache";
+    const auto cached = write_bytes(cache / "by-hash" / "fetched.png", "fetched-bytes");
+    const auto elsewhere = write_bytes(tree.path / "elsewhere.png", "fetched-bytes");
+
+    struct CacheEnv {
+        std::optional<std::string> saved;
+        explicit CacheEnv(const fs::path& value) {
+            if (const char* previous = std::getenv("PULP_IMPORT_ASSET_CACHE"))
+                saved = previous;
+            set(value.string());
+        }
+        ~CacheEnv() {
+            saved ? set(*saved) : set("");
+        }
+        static void set(const std::string& value) {
+#ifdef _WIN32
+            _putenv_s("PULP_IMPORT_ASSET_CACHE", value.c_str());
+#else
+            if (value.empty())
+                ::unsetenv("PULP_IMPORT_ASSET_CACHE");
+            else
+                ::setenv("PULP_IMPORT_ASSET_CACHE", value.c_str(), 1);
+#endif
+        }
+    } cache_env(cache);
+
+    IRAssetRef asset;
+    asset.asset_id = "fetched";
+    asset.content_hash = pulp::runtime::sha256_hex("fetched-bytes");
+
+    SECTION("a cache path with a matching hash loads") {
+        asset.local_path = cached.string();
+        CHECK(resolve_asset_file(asset, document_directory) == cached.lexically_normal());
+    }
+    SECTION("a cache path with a different hash is refused") {
+        asset.local_path = cached.string();
+        asset.content_hash = pulp::runtime::sha256_hex("other-bytes");
+        CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    }
+    SECTION("a document-relative path climbing into the cache is refused") {
+        asset.local_path = "../../cache/by-hash/fetched.png";
+        CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    }
+    SECTION("an absolute path outside the cache is refused even with a matching hash") {
+        asset.local_path = elsewhere.string();
+        CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    }
+#ifndef _WIN32
+    SECTION("cache membership follows the resolved file, not the manifest text") {
+        std::error_code ec;
+        fs::create_directory_symlink(tree.path, cache / "up", ec);
+        REQUIRE_FALSE(ec);
+        asset.local_path = (cache / "up" / "elsewhere.png").string();
+        CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    }
+#endif
 }
 
 TEST_CASE("runtime asset resolution verifies a packaged asset before recovering a stale path",
@@ -1191,4 +1347,128 @@ TEST_CASE("a design that states every widget colour reports no gap",
                        [](const ImportDiagnostic& d) {
                            return d.code == "design-token-unmapped";
                        }));
+}
+
+namespace {
+
+bool has_code(const std::vector<ImportDiagnostic>& diagnostics, std::string_view code) {
+    return std::any_of(diagnostics.begin(), diagnostics.end(),
+                       [&](const ImportDiagnostic& d) { return d.code == code; });
+}
+
+void collect_codes(const ResolvedNativeNode& node, std::vector<ImportDiagnostic>& out) {
+    out.insert(out.end(), node.diagnostics.begin(), node.diagnostics.end());
+    for (const auto& c : node.children)
+        collect_codes(c, out);
+}
+
+// A 1x1 RGBA PNG with valid chunk CRCs (IHDR, IDAT, IEND).
+constexpr std::uint8_t kTinyPng[] = {
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+    0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+    0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+    0xda, 0x63, 0x50, 0x68, 0xf8, 0xff, 0x1f, 0x00, 0x05, 0x02, 0x02, 0x9f, 0xa9, 0xf6,
+    0x54, 0xd9, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+
+} // namespace
+
+TEST_CASE("native resolver names a node type it does not recognize",
+          "[design-import][native][fail-closed]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    for (const char* type : {"hologram", "text", "image", "rectangle", "knob", "Frame"}) {
+        IRNode n;
+        n.type = type;
+        n.name = std::string("n-") + type;
+        ir.root.children.push_back(n);
+    }
+    const auto resolved = resolve_design_ir_native(ir, {});
+    std::vector<ImportDiagnostic> all;
+    collect_codes(resolved, all);
+    std::vector<std::string> unknown;
+    for (const auto& d : all)
+        if (d.code == "node-type-unknown")
+            unknown.push_back(d.path + " " + d.message);
+    REQUIRE(unknown.size() == 1);
+    CHECK(unknown[0] == "$/children[0] unknown node type 'hologram'");
+}
+
+TEST_CASE("native resolver names every repeat of a stable anchor",
+          "[design-import][native][fail-closed]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    for (const char* anchor : {"swatch", "other", "swatch", "swatch"}) {
+        IRNode n;
+        n.type = "frame";
+        n.stable_anchor_id = anchor;
+        ir.root.children.push_back(n);
+    }
+    const auto resolved = resolve_design_ir_native(ir, {});
+    std::vector<std::string> duplicates;
+    for (const auto& d : resolved.diagnostics)
+        if (d.code == "identity-duplicate")
+            duplicates.push_back(d.path + " " + d.message);
+    REQUIRE(duplicates.size() == 2);
+    CHECK(duplicates[0] ==
+          "$/children[2] duplicate stable anchor 'swatch' (first at $/children[0])");
+    CHECK(duplicates[1] ==
+          "$/children[3] duplicate stable anchor 'swatch' (first at $/children[0])");
+}
+
+TEST_CASE("native materializer names an image asset the renderer cannot decode",
+          "[design-import][native][fail-closed]") {
+    TempTree tree;
+    const std::string good(std::begin(kTinyPng), std::end(kTinyPng));
+    const auto materialize = [&](std::string_view bytes) {
+        write_bytes(tree.path / "assets" / "swatch.png", bytes);
+        DesignIR ir;
+        ir.root.type = "frame";
+        IRNode image;
+        image.type = "image";
+        image.attributes["asset_ref"] = "swatch";
+        ir.root.children.push_back(image);
+        IRAssetRef asset;
+        asset.asset_id = "swatch";
+        asset.mime = "image/png";
+        asset.local_path = "assets/swatch.png";
+        ir.asset_manifest.assets.push_back(asset);
+        std::vector<ImportDiagnostic> diagnostics;
+        auto root = build_native_view_tree(
+            ir, ir.asset_manifest,
+            {.diagnostics_out = &diagnostics, .asset_base_directory = tree.path});
+        REQUIRE(root);
+        return diagnostics;
+    };
+    if (pulp::canvas::probe_image_file((tree.path / "missing.png").string()) ==
+        pulp::canvas::ImageFileProbe::unavailable)
+        SKIP("no raster decoder in this build");
+
+    CHECK_FALSE(has_code(materialize(good), "asset-undecodable"));
+    CHECK(has_code(materialize(good.substr(0, 33)), "asset-undecodable")); // header, no pixel data
+    // Cut inside the pixel data: Skia's decoder fills the missing rows and
+    // reports success, so only the PNG's own structure shows the loss.
+    CHECK(has_code(materialize(good.substr(0, 45)), "asset-undecodable"));
+    std::string flipped = good;
+    flipped[43] = static_cast<char>(flipped[43] ^ 0x01); // IDAT byte; CRC no longer matches
+    CHECK(has_code(materialize(flipped), "asset-undecodable"));
+    CHECK(has_code(materialize("GIF89a this is not an image\n"), "asset-undecodable"));
+}
+
+TEST_CASE("native resolver warns on a DesignIR envelope newer than it knows",
+          "[design-import][native][fail-closed]") {
+    const auto version_warnings = [](int version) {
+        DesignIR ir;
+        ir.version = version;
+        ir.root.type = "frame";
+        std::vector<std::string> out;
+        for (const auto& d : resolve_design_ir_native(ir, {}).diagnostics)
+            if (d.code == "document-version-unsupported")
+                out.push_back(d.message);
+        return out;
+    };
+    CHECK(version_warnings(kDesignIrNewestKnownVersion).empty());
+    const auto newer = version_warnings(99);
+    REQUIRE(newer.size() == 1);
+    CHECK(newer[0] == "unsupported DesignIR version 99");
 }

@@ -28,8 +28,8 @@
 // Matches the fix used in PulpBridge.cpp.
 
 #if defined(__ANDROID__)
-#include <jni.h>
 #include <android/log.h>
+#include <jni.h>
 #define PULP_MOTION_HAVE_JNI 1
 #else
 #define PULP_MOTION_HAVE_JNI 0
@@ -48,7 +48,7 @@
 
 #if PULP_MOTION_HAVE_JNI
 #define PULP_MOTION_TAG "PulpMotion"
-#define PULP_MOTION_LOGI(...) __android_log_print(ANDROID_LOG_INFO,  PULP_MOTION_TAG, __VA_ARGS__)
+#define PULP_MOTION_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_MOTION_TAG, __VA_ARGS__)
 #define PULP_MOTION_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, PULP_MOTION_TAG, __VA_ARGS__)
 #else
 #define PULP_MOTION_LOGI(...) ((void)0)
@@ -106,29 +106,23 @@ bool pulp_motion_tracing_enabled(void) {
     return pulp::view::motion::Coordinator::instance().tracing_enabled();
 }
 
-void pulp_motion_publish_value(const char* view,
-                               const char* metric,
-                               double value,
-                               double epsilon,
+void pulp_motion_publish_value(const char* view, const char* metric, double value, double epsilon,
                                int precision) {
-    if (!pulp::view::motion::Coordinator::instance().tracing_enabled()) return;
+    if (!pulp::view::motion::Coordinator::instance().tracing_enabled())
+        return;
     pulp::view::motion::PublishOptions opts;
     opts.epsilon = epsilon;
     opts.precision = precision;
-    pulp::view::motion::publish_value(safe_string(view),
-                                      safe_string(metric),
-                                      value, opts);
+    pulp::view::motion::publish_value(safe_string(view), safe_string(metric), value, opts);
 }
 
-void pulp_motion_publish_components(const char* view,
-                                    const char* metric,
-                                    const char* const* keys,
-                                    const double* values,
-                                    int count,
-                                    double epsilon,
+void pulp_motion_publish_components(const char* view, const char* metric, const char* const* keys,
+                                    const double* values, int count, double epsilon,
                                     int precision) {
-    if (!pulp::view::motion::Coordinator::instance().tracing_enabled()) return;
-    if (count < 0 || !keys || !values) return;
+    if (!pulp::view::motion::Coordinator::instance().tracing_enabled())
+        return;
+    if (count < 0 || !keys || !values)
+        return;
     std::vector<std::pair<std::string, double>> comps;
     comps.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i) {
@@ -137,18 +131,15 @@ void pulp_motion_publish_components(const char* view,
     pulp::view::motion::PublishOptions opts;
     opts.epsilon = epsilon;
     opts.precision = precision;
-    pulp::view::motion::publish_components(safe_string(view),
-                                           safe_string(metric),
-                                           std::move(comps), opts);
+    pulp::view::motion::publish_components(safe_string(view), safe_string(metric), std::move(comps),
+                                           opts);
 }
 
-void pulp_motion_set_ambient_provenance(const char* kind,
-                                        const char* id,
-                                        const char* file,
+void pulp_motion_set_ambient_provenance(const char* kind, const char* id, const char* file,
                                         int line) {
     pulp::view::motion::Provenance p;
     p.source_kind = safe_string(kind);
-    p.source_id   = safe_string(id);
+    p.source_id = safe_string(id);
     p.source_file = safe_string(file);
     p.source_line = line;
     pulp::view::motion::set_ambient_provenance(std::move(p));
@@ -160,7 +151,8 @@ void pulp_motion_clear_ambient_provenance(void) {
 
 int pulp_motion_register_geometry_trace(const char* view_name, int fps) {
     auto& coord = pulp::view::motion::Coordinator::instance();
-    if (!coord.tracing_enabled()) return 0;
+    if (!coord.tracing_enabled())
+        return 0;
     auto state = std::make_shared<MotionGeometryState>();
 
     pulp::view::motion::TraceOptions opts;
@@ -168,44 +160,46 @@ int pulp_motion_register_geometry_trace(const char* view_name, int fps) {
 
     using Component = pulp::view::motion::TraceBuilder::Component;
     std::vector<Component> components;
-    components.emplace_back("minX",   [state] { return state->minx.load(std::memory_order_relaxed); });
-    components.emplace_back("minY",   [state] { return state->miny.load(std::memory_order_relaxed); });
-    components.emplace_back("width",  [state] { return state->width.load(std::memory_order_relaxed); });
-    components.emplace_back("height", [state] { return state->height.load(std::memory_order_relaxed); });
+    components.emplace_back("minX",
+                            [state] { return state->minx.load(std::memory_order_relaxed); });
+    components.emplace_back("minY",
+                            [state] { return state->miny.load(std::memory_order_relaxed); });
+    components.emplace_back("width",
+                            [state] { return state->width.load(std::memory_order_relaxed); });
+    components.emplace_back("height",
+                            [state] { return state->height.load(std::memory_order_relaxed); });
 
     pulp::view::motion::Provenance prov;
     prov.source_kind = "android";
-    prov.source_id   = safe_string(view_name);
+    prov.source_id = safe_string(view_name);
 
     auto handle = coord.trace(safe_string(view_name), opts)
-        .multi("frame", std::move(components), /*precision*/ 2, /*epsilon*/ 0.1)
-        .with_provenance(std::move(prov))
-        .attach();
+                      .multi("frame", std::move(components), /*precision*/ 2, /*epsilon*/ 0.1)
+                      .with_provenance(std::move(prov))
+                      .attach();
 
-    if (!handle.is_attached()) return 0;
+    if (!handle.is_attached())
+        return 0;
 
     const int token = next_geometry_token().fetch_add(1, std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> lock(geometry_mutex());
         MotionGeometryEntry entry;
-        entry.state  = state;
+        entry.state = state;
         entry.handle = std::move(handle);
         geometry_registry().emplace(token, std::move(entry));
     }
     return token;
 }
 
-void pulp_motion_update_geometry(int trace_id,
-                                 const char* metric_name,
-                                 double minX,
-                                 double minY,
-                                 double width,
-                                 double height) {
+void pulp_motion_update_geometry(int trace_id, const char* metric_name, double minX, double minY,
+                                 double width, double height) {
     std::shared_ptr<MotionGeometryState> state;
     {
         std::lock_guard<std::mutex> lock(geometry_mutex());
         auto it = geometry_registry().find(trace_id);
-        if (it == geometry_registry().end()) return;
+        if (it == geometry_registry().end())
+            return;
         state = it->second.state;
     }
     state->minx.store(minX, std::memory_order_relaxed);
@@ -221,18 +215,19 @@ void pulp_motion_update_geometry(int trace_id,
     // here for `name == "frame"`.
     const std::string name = safe_string(metric_name);
     if (!name.empty() && name != "frame") {
-        if (!pulp::view::motion::Coordinator::instance().tracing_enabled()) return;
+        if (!pulp::view::motion::Coordinator::instance().tracing_enabled())
+            return;
         std::vector<std::pair<std::string, double>> comps;
         comps.reserve(4);
-        comps.emplace_back("minX",   minX);
-        comps.emplace_back("minY",   minY);
-        comps.emplace_back("width",  width);
+        comps.emplace_back("minX", minX);
+        comps.emplace_back("minY", minY);
+        comps.emplace_back("width", width);
         comps.emplace_back("height", height);
         pulp::view::motion::PublishOptions opts;
         opts.epsilon = 0.1;
         opts.precision = 2;
-        pulp::view::motion::publish_components(
-            std::string("android"), name, std::move(comps), opts);
+        pulp::view::motion::publish_components(std::string("android"), name, std::move(comps),
+                                               opts);
     }
 }
 
@@ -241,7 +236,8 @@ void pulp_motion_detach_trace(int trace_id) {
     {
         std::lock_guard<std::mutex> lock(geometry_mutex());
         auto it = geometry_registry().find(trace_id);
-        if (it == geometry_registry().end()) return;
+        if (it == geometry_registry().end())
+            return;
         entry = std::move(it->second);
         geometry_registry().erase(it);
     }
@@ -265,23 +261,33 @@ namespace {
 
 void throw_runtime(JNIEnv* env, const char* msg) {
     jclass cls = env->FindClass("java/lang/RuntimeException");
-    if (cls) env->ThrowNew(cls, msg);
+    if (cls)
+        env->ThrowNew(cls, msg);
 }
 
 /// RAII helper to copy a `jstring` into a `std::string` without leaking
 /// the UTF char buffer on the exception path. `nullptr` jstrings round-
 /// trip to empty strings — matching `safe_string()` above.
 class JniUtf8 {
-public:
+  public:
     JniUtf8(JNIEnv* env, jstring js) : env_(env), js_(js) {
-        if (js_) raw_ = env_->GetStringUTFChars(js_, nullptr);
+        if (js_)
+            raw_ = env_->GetStringUTFChars(js_, nullptr);
     }
-    ~JniUtf8() { if (js_ && raw_) env_->ReleaseStringUTFChars(js_, raw_); }
+    ~JniUtf8() {
+        if (js_ && raw_)
+            env_->ReleaseStringUTFChars(js_, raw_);
+    }
     JniUtf8(const JniUtf8&) = delete;
     JniUtf8& operator=(const JniUtf8&) = delete;
-    const char* c_str() const { return raw_ ? raw_ : ""; }
-    std::string str() const { return raw_ ? std::string(raw_) : std::string(); }
-private:
+    const char* c_str() const {
+        return raw_ ? raw_ : "";
+    }
+    std::string str() const {
+        return raw_ ? std::string(raw_) : std::string();
+    }
+
+  private:
     JNIEnv* env_ = nullptr;
     jstring js_ = nullptr;
     const char* raw_ = nullptr;
@@ -290,8 +296,7 @@ private:
 } // namespace
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_pulp_motion_PulpMotionNative_nativeTracingEnabled(
-    JNIEnv* env, jobject /*thiz*/) {
+Java_com_pulp_motion_PulpMotionNative_nativeTracingEnabled(JNIEnv* env, jobject /*thiz*/) {
     try {
         return pulp_motion_tracing_enabled() ? JNI_TRUE : JNI_FALSE;
     } catch (const std::exception& e) {
@@ -302,16 +307,14 @@ Java_com_pulp_motion_PulpMotionNative_nativeTracingEnabled(
     return JNI_FALSE;
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_pulp_motion_PulpMotionNative_nativePublishValue(
-    JNIEnv* env, jobject /*thiz*/,
-    jstring viewName, jstring metricName,
-    jdouble value, jdouble epsilon, jint precision) {
+extern "C" JNIEXPORT void JNICALL Java_com_pulp_motion_PulpMotionNative_nativePublishValue(
+    JNIEnv* env, jobject /*thiz*/, jstring viewName, jstring metricName, jdouble value,
+    jdouble epsilon, jint precision) {
     try {
         JniUtf8 v(env, viewName);
         JniUtf8 m(env, metricName);
-        pulp_motion_publish_value(v.c_str(), m.c_str(),
-                                  value, epsilon, static_cast<int>(precision));
+        pulp_motion_publish_value(v.c_str(), m.c_str(), value, epsilon,
+                                  static_cast<int>(precision));
     } catch (const std::exception& e) {
         throw_runtime(env, e.what());
     } catch (...) {
@@ -319,21 +322,20 @@ Java_com_pulp_motion_PulpMotionNative_nativePublishValue(
     }
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_pulp_motion_PulpMotionNative_nativePublishComponents(
-    JNIEnv* env, jobject /*thiz*/,
-    jstring viewName, jstring metricName,
-    jobjectArray keys, jdoubleArray values,
-    jdouble epsilon, jint precision) {
+extern "C" JNIEXPORT void JNICALL Java_com_pulp_motion_PulpMotionNative_nativePublishComponents(
+    JNIEnv* env, jobject /*thiz*/, jstring viewName, jstring metricName, jobjectArray keys,
+    jdoubleArray values, jdouble epsilon, jint precision) {
     try {
-        if (!keys || !values) return;
+        if (!keys || !values)
+            return;
         const jsize key_count = env->GetArrayLength(keys);
         const jsize val_count = env->GetArrayLength(values);
         if (key_count != val_count) {
             throw_runtime(env, "nativePublishComponents: keys/values length mismatch");
             return;
         }
-        if (key_count <= 0) return;
+        if (key_count <= 0)
+            return;
 
         // Snapshot strings into a stable storage so the const char**
         // we hand to the C ABI stays valid for the duration of the
@@ -348,17 +350,17 @@ Java_com_pulp_motion_PulpMotionNative_nativePublishComponents(
             key_storage.emplace_back(k.str());
             env->DeleteLocalRef(js);
         }
-        for (const auto& s : key_storage) key_ptrs.push_back(s.c_str());
+        for (const auto& s : key_storage)
+            key_ptrs.push_back(s.c_str());
 
         std::vector<double> val_storage(static_cast<size_t>(val_count));
         env->GetDoubleArrayRegion(values, 0, val_count, val_storage.data());
 
         JniUtf8 v(env, viewName);
         JniUtf8 m(env, metricName);
-        pulp_motion_publish_components(v.c_str(), m.c_str(),
-                                       key_ptrs.data(), val_storage.data(),
-                                       static_cast<int>(key_count),
-                                       epsilon, static_cast<int>(precision));
+        pulp_motion_publish_components(v.c_str(), m.c_str(), key_ptrs.data(), val_storage.data(),
+                                       static_cast<int>(key_count), epsilon,
+                                       static_cast<int>(precision));
     } catch (const std::exception& e) {
         throw_runtime(env, e.what());
     } catch (...) {
@@ -366,16 +368,13 @@ Java_com_pulp_motion_PulpMotionNative_nativePublishComponents(
     }
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_pulp_motion_PulpMotionNative_nativeSetAmbientProvenance(
-    JNIEnv* env, jobject /*thiz*/,
-    jstring kind, jstring id, jstring file, jint line) {
+extern "C" JNIEXPORT void JNICALL Java_com_pulp_motion_PulpMotionNative_nativeSetAmbientProvenance(
+    JNIEnv* env, jobject /*thiz*/, jstring kind, jstring id, jstring file, jint line) {
     try {
         JniUtf8 k(env, kind);
         JniUtf8 i(env, id);
         JniUtf8 f(env, file);
-        pulp_motion_set_ambient_provenance(k.c_str(), i.c_str(), f.c_str(),
-                                           static_cast<int>(line));
+        pulp_motion_set_ambient_provenance(k.c_str(), i.c_str(), f.c_str(), static_cast<int>(line));
     } catch (const std::exception& e) {
         throw_runtime(env, e.what());
     } catch (...) {
@@ -384,8 +383,7 @@ Java_com_pulp_motion_PulpMotionNative_nativeSetAmbientProvenance(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_pulp_motion_PulpMotionNative_nativeClearAmbientProvenance(
-    JNIEnv* env, jobject /*thiz*/) {
+Java_com_pulp_motion_PulpMotionNative_nativeClearAmbientProvenance(JNIEnv* env, jobject /*thiz*/) {
     try {
         pulp_motion_clear_ambient_provenance();
     } catch (const std::exception& e) {
@@ -395,15 +393,12 @@ Java_com_pulp_motion_PulpMotionNative_nativeClearAmbientProvenance(
     }
 }
 
-extern "C" JNIEXPORT jint JNICALL
-Java_com_pulp_motion_PulpMotionNative_nativeRegisterGeometryTrace(
-    JNIEnv* env, jobject /*thiz*/,
-    jstring viewName, jint fps) {
+extern "C" JNIEXPORT jint JNICALL Java_com_pulp_motion_PulpMotionNative_nativeRegisterGeometryTrace(
+    JNIEnv* env, jobject /*thiz*/, jstring viewName, jint fps) {
     try {
         JniUtf8 v(env, viewName);
         return static_cast<jint>(
-            pulp_motion_register_geometry_trace(v.c_str(),
-                                                static_cast<int>(fps)));
+            pulp_motion_register_geometry_trace(v.c_str(), static_cast<int>(fps)));
     } catch (const std::exception& e) {
         throw_runtime(env, e.what());
     } catch (...) {
@@ -412,16 +407,13 @@ Java_com_pulp_motion_PulpMotionNative_nativeRegisterGeometryTrace(
     return 0;
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_pulp_motion_PulpMotionNative_nativeUpdateGeometry(
-    JNIEnv* env, jobject /*thiz*/,
-    jint traceId, jstring metricName,
-    jdouble minX, jdouble minY,
+extern "C" JNIEXPORT void JNICALL Java_com_pulp_motion_PulpMotionNative_nativeUpdateGeometry(
+    JNIEnv* env, jobject /*thiz*/, jint traceId, jstring metricName, jdouble minX, jdouble minY,
     jdouble width, jdouble height) {
     try {
         JniUtf8 m(env, metricName);
-        pulp_motion_update_geometry(static_cast<int>(traceId), m.c_str(),
-                                    minX, minY, width, height);
+        pulp_motion_update_geometry(static_cast<int>(traceId), m.c_str(), minX, minY, width,
+                                    height);
     } catch (const std::exception& e) {
         throw_runtime(env, e.what());
     } catch (...) {
@@ -429,8 +421,7 @@ Java_com_pulp_motion_PulpMotionNative_nativeUpdateGeometry(
     }
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_pulp_motion_PulpMotionNative_nativeDetachTrace(
+extern "C" JNIEXPORT void JNICALL Java_com_pulp_motion_PulpMotionNative_nativeDetachTrace(
     JNIEnv* env, jobject /*thiz*/, jint traceId) {
     try {
         pulp_motion_detach_trace(static_cast<int>(traceId));
@@ -441,4 +432,4 @@ Java_com_pulp_motion_PulpMotionNative_nativeDetachTrace(
     }
 }
 
-#endif  // PULP_MOTION_HAVE_JNI
+#endif // PULP_MOTION_HAVE_JNI

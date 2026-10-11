@@ -315,6 +315,10 @@ array**, when the plug-in ships none — an empty array makes a host
 draw an empty menu. The table is discovered from the loaded bundle, so
 it is empty in any unit-test binary; a test stages a folder through
 the Pulp-private `pulpFactoryPresetTable` accessor.
+`FactoryPresetTable::bind` installs `state::content_registry_preset_source()`
+on its `PresetManager`; pulp-state has no content-pack reader of its own, so a
+`PresetManager` built elsewhere lists no content-pack presets until a source is
+installed.
 
 `setCurrentPreset:` implements Apple's documented split, and getting
 it wrong is the trap here:
@@ -589,6 +593,20 @@ skips `FRAMEWORK` targets because a `Contents/Resources` directory at a
 framework root is an unsealed-root codesign failure. `pulp_add_ios_auv3()`
 bypasses `pulp_add_plugin()`, so it attaches the record itself — keep that
 call when editing either entry point.
+
+On iOS the `.appex` and host `.app` are shallow bundles: the record goes at the
+bundle root, never under a `Resources/` directory. A top-level `Resources/` in a
+shallow bundle makes `codesign` reject the whole extension ("bundle format
+unrecognized", or the root JSON sidecars reported as unsigned code) — Xcode's
+CodeSign step fails and the extension cannot be installed. Builds with
+`CODE_SIGNING_ALLOWED=NO` (the iOS compile gate) never see it, so the gate signs
+the extension ad hoc with `tools/scripts/check_apple_bundle_signing.sh`. Do not
+switch that check to `codesign --deep`: `--deep` signs data files it mistakes for
+code through extended attributes and hides the failure. `pulp.plugin-runtime.json`
+(content-kind plug-ins) follows the same rule (`PulpInstall.cmake`). The
+build-info finalize step deletes Pulp's own records from an old top-level
+`Resources/` and removes the directory once it is empty, so existing build trees
+heal without a clean.
 
 **Do NOT put `au_entry.mm`'s `PulpAUFactoryObj` (legacy
 AudioComponentRegister factory C function) anywhere in the macOS AU v3

@@ -260,6 +260,32 @@ class ShellPortabilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Bash-only PIPESTATUS", result.stdout)
 
+    def test_gate_host_build_guard_runs_through_real_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tartci = root / "tartci"
+            tartci.write_text("#!/bin/sh\nprintf '%s\\n' '{\"reserved_gate_cores\": 14}'\n", encoding="utf-8")
+            tartci.chmod(0o755)
+            hook = Path(__file__).parents[2] / "hooks/scripts/shell-portability-hint.sh"
+            env = os.environ.copy()
+            path_value = env["PATH"]
+            env["PATH"] = f"{root}:{path_value}"
+            env["TOOL_INPUT"] = json.dumps({"command": "cmake --build build"})
+            refused = subprocess.run(["bash", str(hook)], cwd=Path(__file__).parents[2], env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("governed-build.sh", refused.stderr)
+            env["TOOL_INPUT"] = json.dumps({"command": "tools/ci/governed-build.sh cmake --build build"})
+            allowed = subprocess.run(["bash", str(hook)], cwd=Path(__file__).parents[2], env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            for text_command in (
+                'grep "cmake --build" docs/example.md',
+                'git commit -m "mention cmake --build"',
+                'echo cmake --build build',
+            ):
+                env["TOOL_INPUT"] = json.dumps({"command": text_command})
+                text_result = subprocess.run(["bash", str(hook)], cwd=Path(__file__).parents[2], env=env, capture_output=True, text=True, encoding="utf-8")
+                self.assertEqual(text_result.returncode, 0, text_command)
+
     def test_manifest_is_valid(self) -> None:
         import json
         manifest = json.loads((Path(__file__).with_name("shell_portability_rules.json")).read_text())

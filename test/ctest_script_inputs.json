@@ -2310,6 +2310,7 @@
   "pulp-project-package-publish-helper",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
+  "pulp-render-provider-floor-wgpu-control",
   "pulp-sampler-cli-sidecar-probe",
   "pulp-sampler-heritage-render-wav",
   "pulp-sampler-render-wav",
@@ -2852,6 +2853,7 @@
   "pulp-test-synthesiser",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
+  "pulp-test-threejs-bridge",
   "pulp-test-tilt-eq",
   "pulp-test-tilt-eq-no-exceptions",
   "pulp-test-timebase-groove-kernels",
@@ -2944,6 +2946,7 @@
   "affected-targets-selftest": {
    "entry": "tools/scripts/test_affected_targets.py",
    "inputs": [
+    ".github/workflows",
     "core/host",
     "core/host/include",
     "core/runtime",
@@ -3012,6 +3015,7 @@
   "agent-capability-manifest-check": {
    "entry": "tools/scripts/agent_capability_manifest.py",
    "inputs": [
+    ".github/workflows",
     "core/audio/include/pulp/audio",
     "core/host/include",
     "core/midi/include/pulp/midi",
@@ -3048,6 +3052,7 @@
   "agent-capability-manifest-selftest": {
    "entry": "tools/scripts/test_agent_capability_manifest.py",
    "inputs": [
+    ".github/workflows",
     "core/audio/include/pulp/audio",
     "core/host/include",
     "core/midi/include/pulp/midi",
@@ -3087,6 +3092,7 @@
   "agent-capability-rederive-selftest": {
    "entry": "tools/scripts/test_agent_capability_rederive.py",
    "inputs": [
+    ".github/workflows",
     "core/audio/include/pulp/audio",
     "core/host/include",
     "core/midi/include/pulp/midi",
@@ -3172,6 +3178,21 @@
     "tools/scripts/android_smoke.sh"
    ],
    "kind": "shell"
+  },
+  "apple-bundle-signing-check": {
+   "entry": "tools/scripts/test_check_apple_bundle_signing.py",
+   "inputs": [
+    "tools/scripts/test_check_apple_bundle_signing.py"
+   ],
+   "kind": "python"
+  },
+  "archive-symbol-closure-selftest": {
+   "entry": "tools/scripts/test_archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/test_archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
   },
   "audio-glitch-trace-selftest": {
    "entry": "tools/audio/test_glitch_trace.py",
@@ -3387,6 +3408,7 @@
   "changed-surface-policy-inventory": {
    "entry": "tools/scripts/test_changed_surface_policy.py",
    "inputs": [
+    ".github/workflows",
     "core/host",
     "core/host/include",
     "core/platform/include/pulp/platform/child_process.hpp",
@@ -3444,6 +3466,7 @@
   "changed-surface-policy-selftest": {
    "entry": "tools/scripts/test_changed_surface_policy.py",
    "inputs": [
+    ".github/workflows",
     "core/host",
     "core/host/include",
     "core/platform/include/pulp/platform/child_process.hpp",
@@ -3501,6 +3524,7 @@
   "changed-surface-registration-projection-selftest": {
    "entry": "tools/scripts/test_changed_surface_registration_projection.py",
    "inputs": [
+    ".github/workflows",
     "core/host",
     "core/host/include",
     "docs/status",
@@ -3519,6 +3543,7 @@
   "changed-surface-runner-selftest": {
    "entry": "tools/scripts/test_run_changed_surface_tests.py",
    "inputs": [
+    ".github/workflows",
     "core/host",
     "core/host/include",
     "docs/status",
@@ -3553,6 +3578,7 @@
   "changed-surface-script-families-drift": {
    "entry": "tools/scripts/changed_surface_script_families.py",
    "inputs": [
+    ".github/workflows",
     "core/host",
     "core/host/include",
     "docs/status",
@@ -3635,6 +3661,7 @@
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
     "test/fixtures",
@@ -4196,6 +4223,7 @@
   "ctest-inventory-parity-self-check": {
    "entry": "tools/scripts/ctest_inventory_parity.py",
    "inputs": [
+    ".github/workflows",
     "core/host",
     "core/host/include",
     "docs/status",
@@ -4532,6 +4560,7 @@
    "entry": "tools/ci/test_executable_keys.py",
    "inputs": [
     ".github/rulesets/main-protection.json",
+    ".github/workflows",
     ".github/workflows/build.yml",
     "core/host",
     "core/host/include",
@@ -4696,7 +4725,6 @@
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
     "core/platform",
-    "core/platform/src/android/jni_motion.cpp",
     "core/runtime",
     "core/simd",
     "tools/scripts/foundation_include_lint.py"
@@ -4709,7 +4737,6 @@
     "core/audio/platform/android/demo_synth.hpp",
     "core/platform/include/pulp/platform/platform.hpp",
     "core/platform/src/android/jni_bridge.cpp",
-    "core/platform/src/android/jni_motion.cpp",
     "core/platform/src/platform.cpp",
     "tools/scripts/test_foundation_include_lint.py"
    ],
@@ -4779,6 +4806,7 @@
   "gate-common-selftest": {
    "entry": "tools/scripts/test_gate_common.py",
    "inputs": [
+    ".github/workflows",
     "tools/cli",
     "tools/cli/cmd_doctor.cpp",
     "tools/scripts/gate_common.py",
@@ -5723,6 +5751,7 @@
    "entry": "tools/scripts/test_gpu_handoff_pin_freshness.py",
    "inputs": [
     ".githooks/pre-push",
+    ".github/workflows",
     "core/view/src/view.cpp",
     "docs/status/gpu-vellum-handoff.yaml",
     "tools/scripts/gate_common.py",
@@ -6145,6 +6174,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-ir-observe-asset-escape": {
+   "entry": "test/test_design_ir_observe_asset_escape.py",
+   "inputs": [
+    "test/test_design_ir_observe_asset_escape.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-gpu": {
    "entry": "test/test_design_ir_observe_gpu.py",
    "inputs": [
@@ -6156,6 +6192,13 @@
    "entry": "test/test_design_ir_observe_interactions.py",
    "inputs": [
     "test/test_design_ir_observe_interactions.py"
+   ],
+   "kind": "python"
+  },
+  "import-design-ir-observe-malformed": {
+   "entry": "test/test_design_ir_observe_malformed.py",
+   "inputs": [
+    "test/test_design_ir_observe_malformed.py"
    ],
    "kind": "python"
   },
@@ -6305,6 +6348,7 @@
   "inspector-truth-check-selftest": {
    "entry": "tools/scripts/test_inspector_truth_check.py",
    "inputs": [
+    ".github/workflows",
     "docs/status/cli-commands.yaml",
     "experimental/pulp-rs/src/cmd",
     "experimental/pulp-rs/src/cmd/trace.rs",
@@ -6752,6 +6796,7 @@
   "pr-head-affected-tests-selftest": {
    "entry": "tools/ci/test_pr_head_affected_tests.py",
    "inputs": [
+    ".github/workflows",
     ".github/workflows/build.yml",
     "core/gpu_audio/CMakeLists.txt",
     "core/host",
@@ -6806,6 +6851,7 @@
   "pr-head-diff-scoped-registrations": {
    "entry": "tools/ci/pr_head_affected_tests.py",
    "inputs": [
+    ".github/workflows",
     ".github/workflows/build.yml",
     "core/host",
     "core/host/include",
@@ -6938,6 +6984,7 @@
     "tools/import-design/browser_capture/materialized_coordinate_space.test.mjs",
     "tools/import-design/browser_capture/materialized_layout_bindings.test.mjs",
     "tools/import-design/browser_capture/materialized_paint_bindings.test.mjs",
+    "tools/import-design/browser_capture/materialized_pseudo_bindings.test.mjs",
     "tools/import-design/browser_capture/materialized_text_bindings.test.mjs",
     "tools/import-design/browser_capture/native_text_diagnostics.test.mjs",
     "tools/import-design/browser_capture/network_dependencies.test.mjs",
@@ -7052,6 +7099,25 @@
    ],
    "kind": "shell"
   },
+  "pulp-materialized-runtime-conformance": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-materialized-runtime-node-dependencies": {
+   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
+   ],
+   "kind": "node"
+  },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
    "inputs": [
@@ -7092,6 +7158,13 @@
    "inputs": [
     "experimental/pulp-rs/Cargo.toml",
     "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-state-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
    ],
    "kind": "python"
   },
@@ -7160,6 +7233,14 @@
   "pulp.vellum-closure-boundary": {
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
     "tools/scripts/vellum_closure.py"
    ],
    "kind": "python"
@@ -7167,6 +7248,38 @@
   "pulp.vellum-closure-gate": {
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/scripts/vellum_closure.py"
+   ],
+   "kind": "python"
+  },
+  "pulp.vellum-closure-gate-negative": {
+   "entry": "tools/scripts/confirm_failure.sh",
+   "inputs": [
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/vellum_closure_gate_fixture.json"
+   ],
+   "kind": "shell"
+  },
+  "pulp.vellum-closure-policy-selftest": {
+   "entry": "tools/scripts/test_vellum_closure.py",
+   "inputs": [
+    "core/canvas",
+    "core/canvas/src/bundled_fonts.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/js/embed_js.py",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/scripts/test_vellum_closure.py",
     "tools/scripts/vellum_closure.py"
    ],
    "kind": "python"
@@ -8612,6 +8725,7 @@
   "release-trailer-guard-selftest": {
    "entry": "tools/scripts/test_release_trailer_guard.py",
    "inputs": [
+    ".github/workflows",
     "tools/scripts/gate_common.py",
     "tools/scripts/release_trailer_guard.py",
     "tools/scripts/test_release_trailer_guard.py",
@@ -8620,6 +8734,35 @@
     "tools/scripts/version_bump_heuristics.py",
     "tools/scripts/version_bump_render.py",
     "tools/scripts/version_bump_surfaces.py"
+   ],
+   "kind": "python"
+  },
+  "render-upward-edge-check": {
+   "entry": "tools/scripts/render_upward_edge_check.py",
+   "inputs": [
+    "core/render",
+    "core/render/platform/android/gpu_surface_android.cpp",
+    "core/render/platform/android/gpu_surface_android_internal.hpp",
+    "core/render/platform/android/gpu_surface_android_jni.cpp",
+    "core/render/platform/android/synth_ui.js.h",
+    "tools/scripts/render_upward_edge_check.py"
+   ],
+   "kind": "python"
+  },
+  "render-upward-edge-check-rules": {
+   "entry": "tools/scripts/test_render_upward_edge_check.py",
+   "inputs": [
+    "core/render",
+    "core/render/platform/android/choreographer_android.cpp",
+    "core/render/platform/android/gpu_surface_android.cpp",
+    "core/render/platform/android/gpu_surface_android_internal.hpp",
+    "core/render/platform/android/gpu_surface_android_jni.cpp",
+    "core/render/platform/android/synth_ui.js.h",
+    "core/render/src/renderer3d.cpp",
+    "core/render/src/skia_surface.cpp",
+    "tools/cmake/PulpAndroid.cmake",
+    "tools/scripts/render_upward_edge_check.py",
+    "tools/scripts/test_render_upward_edge_check.py"
    ],
    "kind": "python"
   },
@@ -8677,6 +8820,7 @@
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
     "test/fixtures",
@@ -8741,6 +8885,7 @@
    "entry": "tools/ci/test_reuse_record.py",
    "inputs": [
     ".github/rulesets/main-protection.json",
+    ".github/workflows",
     ".github/workflows/build.yml",
     "core/host",
     "core/host/include",
@@ -8817,6 +8962,7 @@
   "sample-region-compat-baseline": {
    "entry": "tools/scripts/sample_region_compat_baseline.py",
    "inputs": [
+    ".github/workflows",
     "core/format/include/pulp/format/processor.hpp",
     "core/host/include/pulp/host/plugin_slot.hpp",
     "tools/scripts/gate_common.py",
@@ -8828,6 +8974,7 @@
   "sample-region-compat-baseline-selftest": {
    "entry": "tools/scripts/test_sample_region_compat_baseline.py",
    "inputs": [
+    ".github/workflows",
     "core/format/include/pulp/format/processor.hpp",
     "core/host/include/pulp/host/plugin_slot.hpp",
     "tools/scripts/gate_common.py",
@@ -8918,6 +9065,7 @@
   "script-test-inputs-drift": {
    "entry": "tools/scripts/script_test_inputs.py",
    "inputs": [
+    ".github/workflows",
     "core/host",
     "core/host/include",
     "docs/status",
@@ -8934,6 +9082,7 @@
   "script-test-inputs-selftest": {
    "entry": "tools/scripts/test_script_test_inputs.py",
    "inputs": [
+    ".github/workflows",
     "core/events/include/pulp/events/child_process_manager.hpp",
     "core/host",
     "core/host/include",
@@ -8988,6 +9137,7 @@
   "sequencer-control-skill-coverage": {
    "entry": "tools/scripts/sequencer_control_skill_check.py",
    "inputs": [
+    ".github/workflows",
     "docs/status/cli-commands.yaml",
     "experimental/pulp-rs/src/cmd/trace.rs",
     "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
@@ -9019,6 +9169,7 @@
   "sequencer-control-skill-coverage-selftest": {
    "entry": "tools/scripts/test_sequencer_control_skill_check.py",
    "inputs": [
+    ".github/workflows",
     "docs/status/cli-commands.yaml",
     "experimental/pulp-rs/src/cmd/trace.rs",
     "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
@@ -9088,6 +9239,7 @@
   "silent-revert-guard-selftest": {
    "entry": "tools/scripts/test_silent_revert_guard.py",
    "inputs": [
+    ".github/workflows",
     "tools/scripts/gate_common.py",
     "tools/scripts/silent_revert_guard.py",
     "tools/scripts/test_silent_revert_guard.py"
@@ -9682,6 +9834,7 @@
   "version-at-land-selftest": {
    "entry": "tools/scripts/test_version_at_land.py",
    "inputs": [
+    ".github/workflows",
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/status/pulp-tooling-disposition.json",
     "tools/scripts/connected_git_history.py",
