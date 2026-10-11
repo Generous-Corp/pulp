@@ -209,8 +209,8 @@ inline void prepend_to_path(const fs::path& dir) {
 inline std::string pinned_shipyard_version_for_test() {
 #if defined(PULP_CLI_BINARY)
     {
-        auto candidate = fs::path(PULP_CLI_BINARY).parent_path().parent_path().parent_path().parent_path()
-                       / "tools" / "shipyard.toml";
+        auto candidate = fs::path(PULP_CLI_BINARY).parent_path().parent_path().parent_path()
+                       .parent_path() / "tools" / "shipyard.toml";
         if (fs::is_regular_file(candidate)) {
             auto toml = read_file(candidate);
             std::istringstream lines(toml);
@@ -230,7 +230,10 @@ inline std::string pinned_shipyard_version_for_test() {
     fs::path toml;
     for (auto cursor = root; !cursor.empty(); cursor = cursor.parent_path()) {
         auto candidate = cursor / "tools" / "shipyard.toml";
-        if (fs::is_regular_file(candidate)) { toml = candidate; break; }
+        if (fs::is_regular_file(candidate)) {
+            toml = candidate;
+            break;
+        }
         if (cursor == cursor.parent_path()) break;
     }
     if (toml.empty()) return "v0.56.2";
@@ -238,8 +241,10 @@ inline std::string pinned_shipyard_version_for_test() {
     std::string line;
     while (std::getline(lines, line)) {
         auto pos = line.find("version");
-        if (pos == std::string::npos || line.substr(0, pos).find_first_not_of(" \t") != std::string::npos)
+        if (pos == std::string::npos ||
+            line.substr(0, pos).find_first_not_of(" \t") != std::string::npos) {
             continue;
+        }
         auto eq = line.find('=', pos);
         if (eq == std::string::npos) continue;
         auto value = line.substr(eq + 1);
