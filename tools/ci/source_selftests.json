@@ -264,6 +264,12 @@
       ]
     },
     {
+      "name": "dsp-capability-registry-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_dsp_capability_registry.py"
+      ]
+    },
+    {
       "name": "dsp-provenance-audit-selftest",
       "argv": [
         "{repo}/tools/scripts/test_dsp_provenance_audit.py"
@@ -965,6 +971,18 @@
       "name": "tmp-leak-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_tmp_leak_guard.py"
+      ]
+    },
+    {
+      "name": "toolchain-test_generate-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_generate.py"
+      ]
+    },
+    {
+      "name": "toolchain-mise_profile-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_mise_profile.py"
       ]
     },
     {
