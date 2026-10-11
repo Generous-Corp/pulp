@@ -39,3 +39,18 @@ if(PULP_ENABLE_GPU)
         LIBRARIES pulp::render
         DISCOVERY_ARGS ${PULP_GPU_TEST_DISCOVERY_ARGS})
 endif()
+
+# The renderer compiles nothing above the render layer, on any platform. Static
+# (the Android app shell only reaches a target in an Android configure), so it
+# is registered outside the GPU gate.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME render-upward-edge-check
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/render_upward_edge_check.py
+                --repo ${CMAKE_SOURCE_DIR})
+    add_test(NAME render-upward-edge-check-rules
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_render_upward_edge_check.py)
+    set_tests_properties(render-upward-edge-check render-upward-edge-check-rules
+        PROPERTIES LABELS "render;link-closure" TIMEOUT 60)
+endif()

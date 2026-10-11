@@ -561,10 +561,12 @@ knowing before you touch that file:
   only `begin_host_frame`'s answer stalls an input-started animation (a knob's
   hover glow froze at 0.37 for nine frames). Gotchas it makes visible: a
   view-first scripted document's first mounted frame paints `bindWidgetToParam`
-  controls at 0, one frame before the binding service catches up; and JS
-  `setTimeout`/`setInterval` deadlines follow the wall clock, not the host
-  clock, so timer-driven readiness cannot be fixed by a schedule (drive it with
-  `requestAnimationFrame` instead).
+  controls at 0, one frame before the binding service catches up. Script
+  timers and `performance.now()` read the schedule's host clock by default
+  (`WidgetBridge::set_time_source`, `--timer-clock schedule`); pass
+  `--timer-clock wall` to see what a real host does, where a timer fires when
+  wall time passes its deadline however few frames that took. `Date.now()` is
+  always the engine's wall clock, so never derive timing from it in a fixture.
 
 **The lane that works (Figma is the source of truth):**
 ```bash

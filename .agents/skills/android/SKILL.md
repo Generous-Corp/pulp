@@ -589,18 +589,25 @@ removed. Android BLE-MIDI peripheral/advertising mode is out of scope.
 
 These are hard-won lessons from the bringup. Violating any of these will cause crashes or subtle bugs.
 
-### The JNI `.so` whole-archives the GPU device archive too
+### The Android app shell compiles into `pulp-jni`, not `pulp-render`
 
-`pulp-jni` links `pulp-render` with `-Wl,--whole-archive` so the JNI entry
-points in its Android sources survive. The Dawn surface and compute TUs that
-`gpu_surface_android.cpp` calls into live in `pulp-gpu-device`, a separate
-archive below `pulp-render`; the root `CMakeLists.txt` whole-archives it next
-to `pulp-render` so the `.so` keeps exactly the objects it had when those TUs
-were part of `pulp-render`. `PulpAndroid.cmake` also gives `pulp-gpu-device`
-the same `android log` link. `gpu_surface_android*.cpp` stay in `pulp-render`
-because they include `pulp/view` and `pulp/canvas`; they cannot move into the
-device layer, which may include only the device API and `pulp/runtime`
-(enforced by the `gpu-device-link-closure` ctest).
+`core/render/platform/android/gpu_surface_android.cpp` and its JNI bridge
+`gpu_surface_android_jni.cpp` are the Android app shell. They own the GPU
+surface, drive the view hierarchy and the widget bridge, read the state store
+and play the demo synth. They are compiled straight into the `pulp-jni` shared
+library (root `CMakeLists.txt`), the same way `jni_motion.cpp` is, because only
+that target links the whole closure. `pulp-render` keeps just
+`choreographer_android.cpp`, with no view/state/audio include directories. The
+`render-upward-edge-check` ctest fails if a renderer source includes above
+`pulp/{render,canvas,runtime,scene}`, if a CMake file adds a shell source back
+to `pulp-render`, or if a shell source stops being compiled into `pulp-jni`.
+The files stay under `core/render/platform/android/`, because the accepted Vellum
+cut manifest pins their paths; the separation is by target, not directory.
+
+`pulp-jni` also whole-archives `pulp-render` and `pulp-gpu-device` (the Dawn
+surface/compute archive below it) so the `.so` keeps every object those
+archives contribute. `PulpAndroid.cmake` gives `pulp-gpu-device` the same
+`android log` link.
 
 ### Platform Detection Order
 
