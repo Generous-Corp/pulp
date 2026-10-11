@@ -24,10 +24,10 @@ SKIP_EXIT = 77
 
 
 def run(observer: Path, out: Path, *, source: tuple[str, Path], schedule: Path,
-        width: int, height: int) -> subprocess.CompletedProcess[str]:
+        width: int, height: int, extra: tuple[str, ...] = ()) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(observer), source[0], str(source[1]), "--schedule", str(schedule),
-         "--width", str(width), "--height", str(height), "--out-dir", str(out)],
+         "--width", str(width), "--height", str(height), *extra, "--out-dir", str(out)],
         capture_output=True, text=True, encoding="utf-8", check=False)
 
 
@@ -148,6 +148,44 @@ def check_script(observer: Path, work: Path) -> None:
     assert now["frames"][0]["views"][0]["state"] != []
 
 
+def label_texts(log: dict, ident: str) -> list[str]:
+    return [control(f["views"][0], ident)["text"] for f in log["frames"]]
+
+
+def check_timers(observer: Path, work: Path) -> None:
+    """Script timers run on the schedule's host clock, not on render time."""
+    schedule = FIXTURES / "timers.schedule.json"
+    source = ("--script", FIXTURES / "timers.ui.js")
+    log = observe(observer, work / "timers-a", source=source, schedule=schedule, width=200, height=80)
+    assert log["environment"]["timer_clock"] == "schedule"
+    status = label_texts(log, "status")
+    ticks = label_texts(log, "ticks")
+    first_fired = status.index("fired")
+    # 50 ms at 60 Hz: frame 3 (t = 50 ms, within float rounding) or frame 4.
+    assert first_fired in (3, 4), status
+    assert ticks[-1] == "5", ticks
+    assert ticks[1] == "0" and ticks[2] in ("1", "2"), ticks
+
+    again = run(observer, work / "timers-b", source=source, schedule=schedule, width=200, height=80)
+    assert again.returncode == 0, again.stderr
+    assert (work / "timers-a" / "frames.json").read_bytes() == (work / "timers-b" / "frames.json").read_bytes()
+
+    # Twice the frame rate: the same 50 ms lands on a later frame index.
+    fast = json.loads(schedule.read_text(encoding="utf-8"))
+    fast["timestamps"] = [round(10.0 + i / 120, 9) for i in range(len(fast["timestamps"]))]
+    fast["nominal_dt"] = round(1 / 120, 9)
+    fast_path = work / "timers-fast.schedule.json"
+    fast_path.write_text(json.dumps(fast), encoding="utf-8")
+    quick = observe(observer, work / "timers-fast", source=source, schedule=fast_path, width=200, height=80)
+    assert label_texts(quick, "status").index("fired") in (6, 7)
+
+    # The wall clock stays available (and is what a real host uses); it is
+    # recorded, so a comparison cannot mistake one clock for the other.
+    wall = observe(observer, work / "timers-wall", source=source, schedule=schedule, width=200,
+                   height=80, extra=("--timer-clock", "wall"))
+    assert wall["environment"]["timer_clock"] == "wall"
+
+
 def check_refusals(observer: Path, work: Path) -> None:
     source = ("--design-ir", FIXTURES / "controls.ir.json")
     base = json.loads((FIXTURES / "controls-ir.schedule.json").read_text(encoding="utf-8"))
@@ -165,6 +203,9 @@ def check_refusals(observer: Path, work: Path) -> None:
     refused(lambda d: d["events"].append({"frame": 999, "kind": "click"}), 2)
     refused(lambda d: d["events"].append({"frame": 3, "kind": "teleport"}), 1)
     refused(lambda d: d["events"].append({"frame": 3, "view": 4, "kind": "click"}), 1)
+    bad_clock = run(observer, work / "bad", source=source, schedule=FIXTURES / "controls-ir.schedule.json",
+                    width=320, height=160, extra=("--timer-clock", "sundial"))
+    assert bad_clock.returncode == 2, bad_clock.stderr
     usage = subprocess.run([str(observer), "--design-ir", str(FIXTURES / "controls.ir.json")],
                            capture_output=True, text=True, encoding="utf-8", check=False)
     assert usage.returncode == 2
@@ -178,6 +219,7 @@ def main() -> int:
         work = Path(tmp)
         check_design_ir(args.observer, work)
         check_script(args.observer, work)
+        check_timers(args.observer, work)
         check_refusals(args.observer, work)
     print("ui-frames-observe: all checks passed")
     return 0
