@@ -204,8 +204,11 @@ def validate_host_preflight(path: Path, expected_source_revision: str,
         "host_vitals": receipt.get("host_vitals_level") == "green",
         "contention": receipt.get("gpu_contention") is False
         and receipt.get("ui_contention") is False,
-        "thermal": isinstance(receipt.get("thermal_state"), str)
-        and bool(receipt["thermal_state"].strip()),
+        # The producer only emits a passed receipt for a current nominal
+        # Foundation thermal observation.  Keep the consumer fail-closed as
+        # well: a caller-supplied receipt must not relabel fair/serious/unknown
+        # thermal state as an admitted quiet host.
+        "thermal": receipt.get("thermal_state") == "nominal",
     }
     gpu_observation = receipt.get("gpu_health_observation")
     gpu_source = receipt.get("gpu_health_source")
