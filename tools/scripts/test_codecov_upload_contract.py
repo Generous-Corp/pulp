@@ -53,13 +53,8 @@ class CoverageWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-    def test_pull_request_coverage_trigger_cannot_silently_disappear(self) -> None:
-        self.assertIn(
-            "\n  pull_request:\n",
-            self.coverage,
-            "coverage.yml contains PR-only jobs and uploads; without the event "
-            "trigger Codecov never receives PR coverage",
-        )
+    def test_coverage_is_dispatch_and_schedule_only(self) -> None:
+        self.assertNotIn("\n  pull_request:\n", self.coverage)
         self.assertIn(
             "not in protected main's required-check set",
             self.coverage,
@@ -68,15 +63,9 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertIn("name: Diff coverage advisory", self.coverage)
         self.assertIn("--advisory", self.coverage)
         self.assertNotIn("--no-advisory", self.coverage)
-        self.assertIn(
-            "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
-            self.coverage,
-            "stale advisory PR coverage must not consume the native fleet",
-        )
         self.assertIn("after_n_builds: 1", self.coverage)
         self.assertNotIn("after_n_builds: 4", self.coverage)
         self.assertIn('macos=\'"macos-15"\'', self.coverage)
-        self.assertIn('[ "${PR_HEAD_REPO}" != "${THIS_REPO}" ]', self.coverage)
 
     def test_native_upload_requires_semantically_verified_report(self) -> None:
         self.assertIn("id: native_cobertura", self.coverage)

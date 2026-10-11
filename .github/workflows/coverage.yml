@@ -8,16 +8,11 @@ permissions:
 # Full design: planning/coverage-sanitizers-spec-2026-04-16.md
 #              planning/coverage-tooling-decision-2026-04-21.md
 #
-# Per-PR coverage is macOS-only. Pulp's team actively develops and tests
-# on macOS, so per-PR coverage measures the macOS development surface —
-# the surface a contributor can actually move and verify locally. The
-# `coverage` job's matrix is event-conditional (see the `matrix-config`
-# job below):
-#   - pull_request → macOS leg only
-#   - schedule + workflow_dispatch → full {linux, macos, windows}
-#     matrix, so the canonical main-branch head and manual runs keep a
-#     complete per-OS Codecov picture.
-# Linux / Windows / Android coverage on PRs is provided by the nightly
+# Coverage runs nightly on main and once at arm time through workflow_dispatch.
+# Scheduled and manually dispatched runs use the full {linux, macos, windows}
+# matrix, so the canonical main-branch head and approved PR heads keep a
+# complete per-OS Codecov picture.
+# Linux / Windows / Android coverage is provided by the nightly
 # `cross-platform-check.yml` lane instead, which runs the full non-macOS
 # build + test every night and files per-platform tracking issues on
 # breakage. Each OS still produces its own Cobertura XML and uploads to
@@ -29,7 +24,6 @@ permissions:
 # planning/coverage-tooling-decision-2026-04-21.md §7.
 
 on:
-  pull_request:
   schedule:
     # Supersession-immune main-dashboard refresh. A scheduled run lives in its
     # own concurrency group (see `concurrency:` below) and forces the full
