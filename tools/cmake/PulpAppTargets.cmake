@@ -218,6 +218,7 @@ endfunction()
 #       VERSION "1.0.0"
 #   )
 function(pulp_add_app target)
+    _pulp_resolve_consumer_targets()
     cmake_parse_arguments(APP
         ""
         "APP_NAME;BUNDLE_ID;VERSION"

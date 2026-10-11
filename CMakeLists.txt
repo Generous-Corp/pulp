@@ -939,6 +939,20 @@ endif()
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
 
+# Match the target names exported by find_package(Pulp) for source consumers.
+# Aliases are global targets, so the parent of add_subdirectory(Pulp) sees them.
+foreach(_pulp_export_target IN LISTS PULP_SDK_TARGETS)
+    if(TARGET "${_pulp_export_target}")
+        get_target_property(_pulp_export_name "${_pulp_export_target}" EXPORT_NAME)
+        if(NOT _pulp_export_name)
+            string(REGEX REPLACE "^pulp-" "" _pulp_export_name "${_pulp_export_target}")
+        endif()
+        if(NOT TARGET "Pulp::${_pulp_export_name}")
+            add_library("Pulp::${_pulp_export_name}" ALIAS "${_pulp_export_target}")
+        endif()
+    endif()
+endforeach()
+
 # Build-specific Forge metadata is separate from the statically audited public
 # header install surface. The catalog module installs only share/pulp JSON.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpForgeCatalogInstall.cmake)
