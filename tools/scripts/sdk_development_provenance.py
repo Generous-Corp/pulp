@@ -63,6 +63,24 @@ def archive_identity(data):
     return digest(normalized)
 
 
+def gpu_archive_path(root):
+    """Return the platform's built or installed GPU archive.
+
+    Unix SDKs use ``.a`` while MSVC exports the same static library as
+    ``.lib``. Both are archive containers and are checked with the same
+    identity normalization below.
+    """
+    for suffix in ('.a', '.lib'):
+        candidate = root / ('core/gpu_audio/libpulp-gpu-audio' + suffix)
+        if candidate.is_file():
+            return candidate
+    for suffix in ('.a', '.lib'):
+        candidate = root / ('lib/libpulp-gpu-audio' + suffix)
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f'GPU archive not found under {root}')
+
+
 def git(source, *args):
     return subprocess.check_output(['git', '-C', str(source), *args], text=True).strip()
 
@@ -94,12 +112,15 @@ def inspect(source, build, prefix, sha):
     require((build / 'PulpConfig.cmake').read_bytes() ==
             (prefix / 'lib/cmake/Pulp/PulpConfig.cmake').read_bytes(),
             'installed/generated package config drift')
-    built_archive = (build / 'core/gpu_audio/libpulp-gpu-audio.a').read_bytes()
-    installed_archive = (prefix / 'lib/libpulp-gpu-audio.a').read_bytes()
+    built_archive_path = gpu_archive_path(build)
+    installed_archive_path = gpu_archive_path(prefix)
+    built_archive = built_archive_path.read_bytes()
+    installed_archive = installed_archive_path.read_bytes()
     require(archive_identity(built_archive) == archive_identity(installed_archive),
             'installed/build GPU archive drift')
     artifacts = {}
-    for name in ('lib/libpulp-gpu-audio.a', 'include/pulp/runtime/build_info.hpp',
+    installed_archive_name = installed_archive_path.relative_to(prefix).as_posix()
+    for name in (installed_archive_name, 'include/pulp/runtime/build_info.hpp',
                  'lib/cmake/Pulp/PulpConfig.cmake', 'lib/cmake/Pulp/PulpTargets.cmake',
                  'version.txt', 'sdk_build_type.txt'):
         artifacts[name] = digest((prefix / name).read_bytes())

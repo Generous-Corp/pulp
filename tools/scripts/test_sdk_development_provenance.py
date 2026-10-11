@@ -106,6 +106,13 @@ class AdoptionTest(unittest.TestCase):
         self.cache.write_bytes(self.cache.read_bytes().replace(b'\n', b'\r\n'))
         self.assertEqual(self.inspect()['build_type'], 'Release')
 
+    def test_msvc_gpu_archive_is_accepted(self):
+        built = self.build / 'core/gpu_audio/libpulp-gpu-audio.a'
+        installed = self.installed_archive
+        built.rename(self.build / 'core/gpu_audio/libpulp-gpu-audio.lib')
+        installed.rename(self.prefix / 'lib/libpulp-gpu-audio.lib')
+        self.assertEqual(self.inspect()['build_type'], 'Release')
+
     def test_config_drift_rejected(self):
         (self.prefix / 'lib/cmake/Pulp/PulpConfig.cmake').write_text('wrong config')
         with self.assertRaisesRegex(tool.ProvenanceError, 'package config drift'):
