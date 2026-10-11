@@ -47,6 +47,38 @@ asserts both directions; if you flip the default, that suite fails, and that is
 the point. Reach for `PULP_AAX_PLUGIN_WITH_GUI` in an example or template only
 once the editor has actually been driven in Pro Tools.
 
+### GUI acceptance gate (mandatory)
+
+Never describe an AAX build as having a working editor from processor validation
+alone. Before handing an artifact to a user, record which mode was built:
+
+| Artifact mode | Entry macro | What the validator can prove | Required host claim |
+| --- | --- | --- | --- |
+| Processor-only | `PULP_AAX_PLUGIN` | Descriptor, load/unload, parameters, and audio processing | “AAX processor validated; editor intentionally absent” |
+| Custom editor | `PULP_AAX_PLUGIN_WITH_GUI` | The descriptor contains `EffectGUI` and the processor tests pass | “Editor registration present”; rendering and interaction still require Pro Tools |
+
+The AAX Validator warning `Effect doesn't contain EffectGUI.` is a hard
+classification signal, not an ignorable warning. Treat it as a failed GUI gate
+and stop the handoff if the requested artifact is supposed to show the custom
+editor. A bundle named or compiled as `*Headless*` must likewise never be
+reported as GUI-capable.
+
+There is no standalone AAX renderer that reproduces Pro Tools' view-container,
+window, GPU-surface, resize, and automation behavior. Unit tests can exercise
+`create_effect_gui()`, sizing, attach failure, and teardown; AAX Validator can
+prove registration and processor behavior; only Pro Tools proves that the editor
+actually appears and paints. The minimum GUI evidence is a current Pro Tools
+insert with the Spectr editor visible, plus a log or accessibility-tree record
+showing the editor container is populated. A blank `FXTDMEditView` counts as a
+failure even when the AAX shell and audio are working.
+
+Build scripts and private handoffs must emit an explicit mode field (for example
+`aax_ui_mode: headless` or `aax_ui_mode: custom-editor`) beside the artifact
+hash. Do not infer the mode from the filename after signing; verify the entry
+macro/compile definition before signing and repeat the validator classification
+after signing. This prevents a processor-only emergency build from silently
+becoming the “latest GUI build.”
+
 Gotchas that are specific to AAX and cost time if you rediscover them:
 
 - **The proc pointer is the whole game.** A custom UI appears only because

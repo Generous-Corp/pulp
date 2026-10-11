@@ -4275,6 +4275,12 @@ auto-release deliberately does not hold. Read it as:
   runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
   failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
   job is skipped, so the pre-tag check ignores it too.
+- The MSVC build step invokes `bash tools/ci/governed-build.sh cmake --build
+  build-win-cli --target pulp-cli pulp-mcp -- -k 0`. Keep the wrapper even though
+  the hosted Windows runner is single-tenant: it supplies the same bounded
+  parallelism and build-directory lock contract as the other emitters, and the
+  wrapper's MSYS path handles the runner without attempting POSIX-only lock
+  probes.
 - **Promoting it to required** needs a `merge_group` trigger plus the ruleset
   entry. The scope job always reports and an irrelevant change skips the compile
   job (a skipped job satisfies a required check), so nothing else changes.
@@ -6461,6 +6467,10 @@ the failure surfaces on the first unrelated PR that tries to land on it (looks
 like the PR's fault; it is not). Fix by reconciling the gate config to the
 branch's real state **in the landing PR**: raise the hotspot ceiling to the file's
 current LOC, and add the missing codecov flag+component (`paths: core/<new>/**`).
+A new `core/<module>/` needs TWO entries even on a short-lived branch: the
+`codecov.yml` component, and the component's name in a producer's set in
+`ci/coverage-surfaces.yaml` (or an explicit `not_applicable` disposition) —
+`test_coverage_surface_contract.py` rejects a component no producer claims.
 Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
 are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
 config you didn't author trips skill-sync/version-bump (config maps to the `ci`

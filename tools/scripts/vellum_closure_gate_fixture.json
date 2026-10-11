@@ -1,0 +1,8 @@
+{
+  "source_root": ".",
+  "missing_targets": [],
+  "targets": [
+    {"name": "foundation", "link_targets": ["pulp::runtime"]}
+  ],
+  "files": []
+}

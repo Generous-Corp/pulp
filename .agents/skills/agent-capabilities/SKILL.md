@@ -1257,6 +1257,15 @@ the bypass trailer by reflex:
   A note costs the same as the trailer and leaves the next person something to
   read.
 
+- **A new archive over headers that were already installed** — splitting a
+  target (for example `pulp-gpu-device` and the INTERFACE `pulp-gpu-device-api`
+  carved out of `pulp-render`, over the same `core/render/include`) adds no
+  capability surface, so there is nothing to classify. The new archive stem
+  still goes into `release_product_matrix.json` in the same change:
+  `test_installed_sdk_archives_match_release_matrix` compares
+  `PULP_SDK_TARGETS` minus INTERFACE targets against that list, so an INTERFACE
+  target needs no stem and a STATIC one does.
+
 ## A platform header installed for per-binary recompilation is not capability surface
 
 `PulpInstallRules.cmake` installs more than public API. The macOS ObjC cluster

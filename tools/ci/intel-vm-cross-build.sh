@@ -105,7 +105,7 @@ env -u SKIA_DIR cmake -S . -B build-x64 -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=x86_64 -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin \
   -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_AUDIO_PROBES=OFF \
   -DPULP_REQUIRE_GPU_FOR_SDK=ON -DPULP_SKIA_AUTOFETCH=ON -DPULP_BUILD_WEBVIEW=ON
-cmake --build build-x64 --config Release $BUILD_TARGETS
+tools/ci/governed-build.sh cmake --build build-x64 --config Release $BUILD_TARGETS
 BIN=build-x64/pulp
 [ -x "\$BIN" ] || { echo "FAIL: \$BIN missing"; exit 13; }
 ARCHS=\$(lipo -archs "\$BIN")
