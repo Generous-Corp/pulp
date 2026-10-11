@@ -619,5 +619,7 @@
       "run_started_at": "2026-10-11T08:22:45Z",
       "status": "queued"
     }
-  ]
+  ],
+  "measurement_phase": "pre-change baseline",
+  "measurement_note": "Captured before PR #10100 changes were applied; this is a baseline, not an after measurement."
 }

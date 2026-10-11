@@ -102,6 +102,8 @@ on:
       - 'tools/deps/test_validate_hosts.py'
       - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/dispatch_advisory_lanes.sh'
+      - 'tools/scripts/test_dispatch_advisory_lanes.py'
       - 'tools/scripts/test_fork_pr_runner_routing.py'
       - 'tools/scripts/ctest_scheduling_policy.py'
       - 'tools/scripts/test_ctest_scheduling_contract.py'
@@ -221,6 +223,8 @@ on:
       - 'tools/deps/test_validate_hosts.py'
       - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/dispatch_advisory_lanes.sh'
+      - 'tools/scripts/test_dispatch_advisory_lanes.py'
       - 'tools/scripts/test_fork_pr_runner_routing.py'
       - 'tools/scripts/ctest_scheduling_policy.py'
       - 'tools/scripts/test_ctest_scheduling_contract.py'
@@ -347,6 +351,7 @@ jobs:
           python3 tools/ci/test_install_linux_build_deps.py
           python3 tools/scripts/test_example_validation_paths.py
           python3 tools/scripts/test_ci_throughput_workflows.py
+          python3 tools/scripts/test_dispatch_advisory_lanes.py
           python3 tools/scripts/test_verify_control_shipping_native_evidence.py
           python3 tools/scripts/test_control_shipping_native_workflow.py
           python3 tools/scripts/test_codecov_upload_contract.py

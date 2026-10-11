@@ -566,9 +566,17 @@ The one visible difference is `--target`: build the group
 
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are advisory hosted-macOS lanes. They run from the nightly
-`schedule` on `main` and from `workflow_dispatch` when Shipyard arms a PR head;
-they do not start on every `pull_request` push. The sanitizer workflow keeps
-ASan and UBSan on non-draft PRs that touch `core/**`, while TSan is nightly or
-explicitly dispatched. Coverage and sanitizer orchestration cap matrix fan-out
-at two concurrent legs. These lanes remain advisory and do not replace the
-required Vellum checks.
+`schedule` on `main` and from `workflow_dispatch` on an approved PR head; they
+do not start on every `pull_request` push. The `pulp pr` wrapper calls
+`tools/scripts/dispatch_advisory_lanes.sh` after its delegated Shipyard arm/ship
+path succeeds. Direct `shipyard pr` invocations do not yet call that Pulp hook,
+so nightly main runs are the interim signal until the Shipyard arm hook lands.
+The sanitizer workflow keeps ASan and UBSan on non-draft PRs that touch
+`core/**`, while TSan is nightly or explicitly dispatched. Coverage is the only
+matrix with a `max-parallel: 2` cap; sanitizer legs are independent named jobs,
+not one matrix, so no aggregate cap is claimed. These lanes remain advisory and
+do not replace the required Vellum checks.
+
+The files under `docs/evidence/hosted-macos-advisory/` are labeled pre-change
+baselines. A post-merge follow-up must capture hosted-macOS running plus queued
+jobs and the Vellum required-check queue wait at the same hour of day.

@@ -65,10 +65,6 @@ jobs:
   resolve-runners:
     if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
     runs-on: ubuntu-latest
-    strategy:
-      # Keep the sanitizer orchestration contract capped if this resolver is
-      # expanded into a matrix; the current legs remain individually named.
-      max-parallel: 2
     outputs:
       asan_runs_on: ${{ steps.resolve.outputs.asan_runs_on }}
       tsan_runs_on: ${{ steps.resolve.outputs.tsan_runs_on }}

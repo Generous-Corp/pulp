@@ -369,12 +369,6 @@ class SanitizerCadenceTests(unittest.TestCase):
         for name in ("asan", "ubsan"):
             self.assertIn("github.event.pull_request.draft == false", self.workflow["jobs"][name]["if"])
 
-    def test_sanitizer_throughput_cap_is_declared(self) -> None:
-        # The sanitizer jobs are independent legs rather than one matrix; keep
-        # the cap explicit in the workflow contract for future matrix changes.
-        self.assertEqual(self.workflow["jobs"]["resolve-runners"]["strategy"]["max-parallel"], 2)
-
-
     def test_nightly_entry_job_is_fork_guarded(self) -> None:
         condition = self.workflow["jobs"]["resolve-runners"]["if"]
         self.assertIn(
@@ -411,6 +405,8 @@ class AdvisoryMacOSCadenceTests(unittest.TestCase):
                 self.assertNotIn("pull_request", triggers)
                 self.assertIn("schedule", triggers)
                 self.assertIn("workflow_dispatch", triggers)
+                if name == "coverage":
+                    self.assertNotIn("push", triggers)
 
     def test_coverage_matrix_is_bounded(self) -> None:
         strategy = load_workflow(ADVISORY_WORKFLOWS["coverage"])["jobs"]["coverage"]["strategy"]

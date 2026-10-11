@@ -29,18 +29,11 @@ permissions:
 # planning/coverage-tooling-decision-2026-04-21.md §7.
 
 on:
-  push:
-    branches: [main]
   schedule:
-    # Supersession-immune main-dashboard refresh. Push-triggered coverage on a
-    # high-churn main gets superseded while QUEUED (cancel-in-progress:false +
-    # GitHub's queue-depth-1, compounded by hosted-runner backlog) and never
-    # completes — so the C++ os-linux/os-macos/os-windows flags stop uploading
-    # and the Codecov tree collapses to the fast pulp-react Vitest lane (the
-    # 2026-05-25 → 2026-06-10 regression: 0 successful main coverage runs).
-    # A scheduled run lives in its own concurrency group (see `concurrency:`
-    # below) so pushes cannot supersede it, and forces the full native matrix
-    # (see the `classify` job), guaranteeing a periodic full cross-OS upload.
+    # Supersession-immune main-dashboard refresh. A scheduled run lives in its
+    # own concurrency group (see `concurrency:` below) and forces the full
+    # native matrix (see the `classify` job), guaranteeing a periodic full
+    # cross-OS upload without starting on every main push.
     - cron: '17 */8 * * *'  # 00:17, 08:17, 16:17 UTC — 3×/day, offset off the hour
   workflow_dispatch:
     inputs:

@@ -40,6 +40,7 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <cerrno>
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
@@ -202,6 +203,19 @@ bool has_clean_worktree(const fs::path& root) {
 bool push_upstream(const fs::path& root, const std::string& branch) {
     std::cout << color::dim() << "Pushing " << branch << " to origin..." << color::reset() << "\n";
     return run_passthrough("git", {"-C", root.string(), "push", "-u", "origin", branch}) == 0;
+}
+
+bool has_flag(const std::vector<std::string>& args, const std::string& flag) {
+    return std::find(args.begin(), args.end(), flag) != args.end();
+}
+
+int dispatch_advisory_lanes(const fs::path& root) {
+    auto head = trim(run_capture("git", {"-C", root.string(), "rev-parse", "HEAD"}).stdout_text);
+    if (head.empty()) {
+        std::cerr << "pulp pr: could not resolve the approved head for advisory dispatch\n";
+        return 1;
+    }
+    return run_passthrough("bash", {(root / "tools/scripts/dispatch_advisory_lanes.sh").string(), head}, root);
 }
 
 // ── Subcommand steps ────────────────────────────────────────────────────
@@ -568,12 +582,19 @@ int cmd_pr(const std::vector<std::string>& args) {
         if (workflow.workflow == "shipyard") {
             auto shipyard = locate_tool_on_path("shipyard");
             if (!shipyard.empty()) {
-                if (auto root = find_project_root(); !root.empty()) {
+                auto root = find_project_root();
+                if (!root.empty()) {
                     if (int rc = enforce_shipyard_version_pin(root, shipyard); rc != 0) {
                         return rc;
                     }
                 }
-                return exec_shipyard_pr(shipyard, forward);
+                const int rc = exec_shipyard_pr(shipyard, forward);
+                // Shipyard owns arming; invoke the Pulp-side hook only after a
+                // successful arm/ship path. `--no-arm` is deliberately quiet.
+                if (rc == 0 && !root.empty() && !has_flag(forward, "--no-arm")) {
+                    return dispatch_advisory_lanes(root) == 0 ? 0 : 1;
+                }
+                return rc;
             }
             print_install_shipyard_hint();
             return 2;
@@ -731,6 +752,11 @@ int cmd_pr(const std::vector<std::string>& args) {
     // Step 6: hand off to shipyard for validation + merge.
     if (int rc = step_shipyard_ship(root); rc != 0) {
         std::cerr << "\npulp pr: shipyard ship failed.\n";
+        return rc;
+    }
+
+    if (int rc = dispatch_advisory_lanes(root); rc != 0) {
+        std::cerr << "pulp pr: advisory lane dispatch failed after ship.\n";
         return rc;
     }
 
