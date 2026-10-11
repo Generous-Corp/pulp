@@ -149,12 +149,17 @@ struct EditorSizePlan {
     float aspect_ratio = 0.0f; ///< design aspect; meaningful iff pin_viewport
 };
 
-/// Convert Pulp's logical editor coordinates to AAX host units. On macOS the
-/// AAX view container uses backing-pixel dimensions; the view tree itself
-/// remains in logical points. The JUCE AAX adapter applies this same scale.
+/// Convert Pulp's logical editor coordinates to AAX host units.
+///
+/// AAX's view-size contract is expressed in the host view's logical
+/// coordinate space. macOS applies the Retina backing scale when it composites
+/// the native view; multiplying these values here makes Pro Tools create a
+/// 2x-sized host frame around a 1x logical editor. Keep the display-scale
+/// argument for source compatibility with callers that already have a native
+/// scale, but deliberately do not apply it at this adapter boundary.
 constexpr uint32_t aax_host_dimension(uint32_t logical, float display_scale) {
-    if (logical == 0 || display_scale <= 1.0f) return logical;
-    return static_cast<uint32_t>(static_cast<float>(logical) * display_scale + 0.5f);
+    (void)display_scale;
+    return logical;
 }
 
 /// Derive the sizing plan from a plugin's declared `ViewSize` hints.
