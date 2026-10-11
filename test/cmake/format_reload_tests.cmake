@@ -301,6 +301,7 @@ if(PULP_HAS_AAX)
     pulp_add_test_suite(pulp-test-aax-effect-gui
         SOURCES test_aax_effect_gui.cpp
                 "${CMAKE_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+                "$<$<PLATFORM_ID:Darwin>:${CMAKE_SOURCE_DIR}/core/format/src/aax_display_scale_mac.mm>"
         LIBRARIES pulp::format pulp::view pulp-aax-library
         INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
     target_compile_options(pulp-test-aax-effect-gui PRIVATE
@@ -318,6 +319,7 @@ if(PULP_HAS_AAX)
         SOURCES test_aax_entry_registration.cpp
                 "${CMAKE_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
                 "${CMAKE_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+                "$<$<PLATFORM_ID:Darwin>:${CMAKE_SOURCE_DIR}/core/format/src/aax_display_scale_mac.mm>"
                 "${CMAKE_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
         LIBRARIES pulp::format pulp::view pulp-aax-library
         INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")

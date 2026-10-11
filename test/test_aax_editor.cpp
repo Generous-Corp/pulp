@@ -753,3 +753,13 @@ TEST_CASE("AAX mirror reports a write the manager refused", "[aax][view-bridge]"
 
     CHECK_FALSE(mirror.on_store_value_changed(kGain, 0.75f));
 }
+
+TEST_CASE("AAX host dimensions scale logical points once and round consistently",
+          "[aax][view-bridge][resize]") {
+    CHECK(aax_host_dimension(990, 1.0f) == 990);
+    CHECK(aax_host_dimension(990, 2.0f) == 1980);
+    CHECK(aax_host_dimension(645, 2.0f) == 1290);
+    CHECK(aax_host_dimension(101, 1.5f) == 152);
+    CHECK(aax_host_dimension(0, 2.0f) == 0);
+    CHECK(aax_host_dimension(990, 0.0f) == 990);
+}

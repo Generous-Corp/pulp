@@ -12,6 +12,7 @@
 #include <pulp/format/aax_effect_gui.hpp>
 
 #include <pulp/format/aax_editor.hpp>
+#include <pulp/format/aax_display_scale.hpp>
 #include <pulp/format/aax_model.hpp>
 #include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/format/gpu_host_select.hpp>
@@ -56,7 +57,8 @@ constexpr int32_t kHostableContainerType =
 class PulpAaxEffectGUI final : public AAX_CEffectGUI {
 public:
     PulpAaxEffectGUI()
-        : initial_sync_alive_(std::make_shared<std::atomic<bool>>(true)) {}
+        : initial_sync_alive_(std::make_shared<std::atomic<bool>>(true)),
+          aax_scale_(aax_display_scale(nullptr)) {}
 
     ~PulpAaxEffectGUI() override {
         initial_sync_alive_->store(false, std::memory_order_release);
@@ -157,6 +159,10 @@ private:
             bridge_.reset();
             return;
         }
+        // The Pulp view host remains in logical points. AAX's macOS container
+        // transaction is in backing pixels, so keep this conversion at the
+        // adapter boundary rather than scaling the view tree itself.
+        aax_scale_ = aax_display_scale(parent);
 
         // AAX has no host-driven size callback: the plug-in reports a size from
         // GetViewSize and pushes later changes up through the container. Forward
@@ -170,7 +176,9 @@ private:
                 // the fields being named vert/horz.  Use the SDK's constructor
                 // order for every host resize transaction; GetViewSize below
                 // writes the named fields directly.
-                AAX_Point size(static_cast<float>(h), static_cast<float>(w));
+                AAX_Point size(
+                    static_cast<float>(aax_host_dimension(h, aax_scale_)),
+                    static_cast<float>(aax_host_dimension(w, aax_scale_)));
                 view_container->SetViewSize(size);
             }
         });
@@ -193,8 +201,8 @@ private:
                         auto* container = GetViewContainer();
                         if (!container) return false;
                         AAX_Point size(
-                            static_cast<float>(requested_height),
-                            static_cast<float>(requested_width));
+                            static_cast<float>(aax_host_dimension(requested_height, aax_scale_)),
+                            static_cast<float>(aax_host_dimension(requested_width, aax_scale_)));
                         return container->SetViewSize(size) == AAX_SUCCESS;
                     });
                 if (!accepted || !host_) return false;
@@ -223,8 +231,9 @@ private:
         // the first frame, the native child, and the visible resize grip share
         // one geometry instead of waiting for a user resize to reconcile them.
         if (auto* view_container = GetViewContainer()) {
-            AAX_Point initial_size(static_cast<float>(plan.height),
-                                   static_cast<float>(plan.width));
+            AAX_Point initial_size(
+                static_cast<float>(aax_host_dimension(plan.height, aax_scale_)),
+                static_cast<float>(aax_host_dimension(plan.width, aax_scale_)));
             if (view_container->SetViewSize(initial_size) != AAX_SUCCESS) {
                 runtime::log_error("AAX editor: initial SetViewSize rejected ({}x{})",
                                    plan.width, plan.height);
@@ -275,8 +284,8 @@ private:
             return AAX_ERROR_NULL_OBJECT;
         }
         const auto plan = plan_editor_size(*hints);
-        oViewSize->horz = static_cast<float>(plan.width);
-        oViewSize->vert = static_cast<float>(plan.height);
+        oViewSize->horz = static_cast<float>(aax_host_dimension(plan.width, aax_scale_));
+        oViewSize->vert = static_cast<float>(aax_host_dimension(plan.height, aax_scale_));
         return AAX_SUCCESS;
     }
 
@@ -291,8 +300,8 @@ private:
             return AAX_ERROR_NULL_OBJECT;
         }
         const auto plan = plan_editor_size(*hints);
-        oMinimumViewSize->horz = static_cast<float>(plan.min_width);
-        oMinimumViewSize->vert = static_cast<float>(plan.min_height);
+        oMinimumViewSize->horz = static_cast<float>(aax_host_dimension(plan.min_width, aax_scale_));
+        oMinimumViewSize->vert = static_cast<float>(aax_host_dimension(plan.min_height, aax_scale_));
         return AAX_SUCCESS;
     }
 
@@ -408,8 +417,9 @@ private:
             // AAX frame; dragging the corner later happens to perform the
             // missing transaction and makes the editor appear to "fix" itself.
             if (auto* view_container = owner->GetViewContainer()) {
-                AAX_Point size(static_cast<float>(height),
-                               static_cast<float>(width));
+                AAX_Point size(
+                    static_cast<float>(aax_host_dimension(height, owner->aax_scale_)),
+                    static_cast<float>(aax_host_dimension(width, owner->aax_scale_)));
                 (void)view_container->SetViewSize(size);
             }
             owner->host_->set_size(width, height);
@@ -430,6 +440,7 @@ private:
     std::function<void()> idle_pump_;
     view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding_;
     std::shared_ptr<std::atomic<bool>> initial_sync_alive_;
+    float aax_scale_ = 1.0f;
 };
 
 } // namespace

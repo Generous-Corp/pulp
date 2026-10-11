@@ -149,6 +149,14 @@ struct EditorSizePlan {
     float aspect_ratio = 0.0f; ///< design aspect; meaningful iff pin_viewport
 };
 
+/// Convert Pulp's logical editor coordinates to AAX host units. On macOS the
+/// AAX view container uses backing-pixel dimensions; the view tree itself
+/// remains in logical points. The JUCE AAX adapter applies this same scale.
+constexpr uint32_t aax_host_dimension(uint32_t logical, float display_scale) {
+    if (logical == 0 || display_scale <= 1.0f) return logical;
+    return static_cast<uint32_t>(static_cast<float>(logical) * display_scale + 0.5f);
+}
+
 /// Derive the sizing plan from a plugin's declared `ViewSize` hints.
 inline EditorSizePlan plan_editor_size(const ViewSize& hints) {
     EditorSizePlan plan;
