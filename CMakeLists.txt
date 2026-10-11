@@ -549,9 +549,9 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     endif()
     enable_testing()
     # The file-api query is retained in the build tree so the Vellum closure
-    # receipt can be regenerated from the exact configured target graph.  The
-    # initial lane is report-only while P1-P10 carve PRs remove their allowlist
-    # edges; it becomes enforcing when the accepted boundary is complete.
+    # receipt can be regenerated from the exact configured target graph. The
+    # gate is enforcing; only explicitly pending P4/P12/P13/P17 debts remain
+    # allowlisted and are removed as those carve PRs land.
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
     file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -576,13 +576,10 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
             gate
             --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
-            --allow pulp-audio
-            --allow pulp-midi
-            --allow-include-prefix core/platform/src/android/
+            --allow pulp-view-audio
+            --allow pulp-content
             --allow-include-path core/platform/src/android/jni_motion.cpp
-            --allow-include-prefix core/render/platform/android/gpu_surface_android
-            --allow-include-prefix core/view/
-            --report-only)
+            --allow-include-prefix core/render/platform/android/gpu_surface_android)
     set_tests_properties(pulp.vellum-closure-gate PROPERTIES
         DEPENDS pulp.vellum-closure-boundary
         LABELS "validation")
@@ -593,6 +590,11 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
     set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
+        LABELS "validation")
+    add_test(NAME pulp.vellum-closure-policy-selftest
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/test_vellum_closure.py")
+    set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
         LABELS "validation")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
