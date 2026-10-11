@@ -469,6 +469,36 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-71fbe815c062"
+paths = ["tools/scripts/design_unit_boundary_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "design-unit-boundary",
+  "design-unit-boundary-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-c2cadf1193e5"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
@@ -1977,6 +2007,35 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "ctest-unique-names-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-e5459fd0ae36"
+paths = ["tools/scripts/test_design_unit_boundary_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "design-unit-boundary-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5407,6 +5466,7 @@ paths = [
   "tools/scripts/ctest_inventory_parity.py",
   "tools/scripts/ctest_nonruns.py",
   "tools/scripts/ctest_unique_names_check.py",
+  "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
@@ -5557,6 +5617,7 @@ paths = [
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
+  "tools/scripts/test_design_unit_boundary_check.py",
   "tools/scripts/test_designated_initializer_lint.py",
   "tools/scripts/test_docs_generate.py",
   "tools/scripts/test_docs_noise_lint.py",
@@ -5929,6 +5990,7 @@ paths = [
   "tools/scripts/ctest_inventory_parity.py",
   "tools/scripts/ctest_nonruns.py",
   "tools/scripts/ctest_unique_names_check.py",
+  "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
@@ -6079,6 +6141,7 @@ paths = [
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
+  "tools/scripts/test_design_unit_boundary_check.py",
   "tools/scripts/test_designated_initializer_lint.py",
   "tools/scripts/test_docs_generate.py",
   "tools/scripts/test_docs_noise_lint.py",

@@ -2045,6 +2045,18 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
+## The macOS CLI force-load list names implementation archives, not modules
+
+`tools/cli/CMakeLists.txt` force-loads a fixed list of static archives into
+`pulp-cli` on Apple, because helper objects that become needed while ld64 is
+already scanning an archive are otherwise skipped and the installed CLI links
+with undefined symbols. The list is of TARGETS, so when code the CLI uses moves
+into its own archive the new target must join the list. The design importer is
+the example: it left `pulp-view-core` for `pulp-design-import`, and only
+force-loading `pulp-view-core` would no longer pull the importer's objects.
+Guard each entry with `if(TARGET …)` (the importer target exists only with
+`PULP_ENABLE_DESIGN_IMPORT=ON`).
+
 ## CLI Git/CMake shell helpers
 
 `tools/cli/cmd_project_common.cpp` and `tools/cli/cmd_misc.cpp` shell out to

@@ -1323,7 +1323,7 @@
     "test/test_design_import_parity.cpp"
    ],
    "inputs": [
-    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/cmake/PulpDesignUnits.cmake",
     "core/view/include/pulp/view/design_ir.hpp",
     "core/view/src"
    ],
@@ -4330,6 +4330,21 @@
    ],
    "kind": "python"
   },
+  "design-unit-boundary": {
+   "entry": "tools/scripts/design_unit_boundary_check.py",
+   "inputs": [
+    "tools/scripts/design_unit_boundary_check.py"
+   ],
+   "kind": "python"
+  },
+  "design-unit-boundary-selftest": {
+   "entry": "tools/scripts/test_design_unit_boundary_check.py",
+   "inputs": [
+    "tools/scripts/design_unit_boundary_check.py",
+    "tools/scripts/test_design_unit_boundary_check.py"
+   ],
+   "kind": "python"
+  },
   "diff-cover-targets-selftest": {
    "entry": "tools/scripts/test_diff_cover_targets.py",
    "inputs": [
@@ -6119,6 +6134,13 @@
    "inputs": [
     "tools/import-design/realtime_contract.py",
     "tools/import-design/test_realtime_contract.py"
+   ],
+   "kind": "python"
+  },
+  "import-ui-frames-observe": {
+   "entry": "test/test_ui_frames_observe.py",
+   "inputs": [
+    "test/test_ui_frames_observe.py"
    ],
    "kind": "python"
   },

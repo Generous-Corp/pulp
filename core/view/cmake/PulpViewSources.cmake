@@ -218,52 +218,14 @@ target_sources(pulp-view-script PRIVATE
 )
 
 # Design-import authoring cluster (PULP_ENABLE_DESIGN_IMPORT).
-# Importers, codegen, lock-to-source, JSX-lock, and the runtime design-import
-# opt-in. Gated out of shipped plugins; the runtime W3C token pair
-# (src/w3c_tokens.cpp) and the runtime widgets (canvas/svg/design_frame_view/
-# css_gradient/visualization/app_framework/widget_skin_derive) stay
-# always-compiled above.
+# The importers, codegen, lock-to-source and JSX-lock compile into their own
+# `pulp-design-import` target (cmake/PulpDesignUnits.cmake), above view-core.
+# The runtime-import bridge below boots a ScriptEngine + WidgetBridge, and
+# view-script's prewarm worker consumes its document cache, so it stays in the
+# JS UI runtime (view-script). The runtime W3C token pair (src/w3c_tokens.cpp)
+# and the runtime widgets (canvas/svg/design_frame_view/css_gradient/
+# visualization/app_framework/widget_skin_derive) stay always-compiled above.
 if(PULP_ENABLE_DESIGN_IMPORT)
-    target_sources(pulp-view-core PRIVATE
-        src/anchor_strategy.cpp
-        src/design_export.cpp
-        src/design_import.cpp
-        src/design_update.cpp
-        src/design_import_claude_css.cpp
-        src/design_import_png.cpp
-        src/design_binding_metadata.cpp
-        src/design_ir_json.cpp
-        src/design_ir_normalize.cpp
-        src/recognition_resolver.cpp
-        src/design_ir_analysis.cpp
-        src/design_import_v0_tsx.cpp
-        src/design_import_native_common.cpp
-        src/design_cpp_codegen.cpp
-        src/design_cpp_binding_codegen.cpp
-        src/design_cpp_codegen_support.cpp
-        src/design_cpp_style_codegen.cpp
-        src/design_cpp_tree_codegen.cpp
-        src/design_swift_codegen.cpp
-        src/design_tokens.cpp
-        src/design_tokens_w3c.cpp
-        src/design_manifest.cpp
-        src/design_adherence.cpp
-        src/design_ledger.cpp
-        src/design_codegen.cpp
-        src/design_fidelity.cpp
-        src/design_fidelity_ledger.cpp
-        src/design_variants.cpp
-        src/design_gallery.cpp
-        src/design_handoff.cpp
-        src/design_tweaks.cpp
-        src/design_knobs.cpp
-        src/lock_to_source.cpp
-        src/jsx_lock.cpp
-        src/design_import_shortcuts.cpp
-        src/design_import_designmd.cpp
-        src/design_import_designmd_schema.cpp
-        src/token_lock.cpp
-    )
     target_sources(pulp-view-script PRIVATE
         src/widget_bridge/runtime_import_api.cpp
         src/claude_bundle.cpp

@@ -48,7 +48,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-view-core pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
@@ -63,6 +63,13 @@ endif()
 # so it is only required in the export set then.
 if(PULP_ENABLE_JS)
     list(APPEND PULP_SDK_TARGETS pulp-view-script)
+endif()
+
+# The importer and its built-in recognition pack exist only when the
+# design-import subsystem is compiled; view-script and the view umbrellas link
+# them PUBLIC in that configuration, so the export set needs them then.
+if(PULP_ENABLE_DESIGN_IMPORT)
+    list(APPEND PULP_SDK_TARGETS pulp-design-import pulp-design-import-audio-pack)
 endif()
 if(PULP_BUILD_WEBVIEW)
     list(APPEND PULP_SDK_TARGETS pulp-view-webview)
@@ -236,7 +243,7 @@ if(TARGET yogacore)
 endif()
 if(PULP_ENABLE_DESIGN_IMPORT AND TARGET yaml-cpp)
     # yaml-cpp remains an implementation detail of the public DESIGN.md parser,
-    # but pulp-view-core is static, so installed consumers need its archive in
+    # but pulp-design-import is static, so installed consumers need its archive in
     # their final link closure. Export it under Pulp's namespace rather than
     # installing a second, independently discoverable yaml-cpp package.
     set_target_properties(yaml-cpp PROPERTIES EXPORT_NAME yaml-cpp)

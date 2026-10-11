@@ -1266,8 +1266,10 @@
       "pulp/view/design_frame_view.hpp",
       "pulp/view/design_import.hpp",
       "pulp/view/design_ir.hpp",
+      "pulp/view/design_ir_io.hpp",
       "pulp/view/design_param_binding.hpp",
       "pulp/view/design_shortcuts.hpp",
+      "pulp/view/design_source_types.hpp",
       "pulp/view/design_sources.hpp",
       "pulp/view/design_tokens.hpp",
       "pulp/view/design_tokens_w3c.hpp",
@@ -1350,6 +1352,7 @@
       "pulp/view/property_panel_view.hpp",
       "pulp/view/query_service.hpp",
       "pulp/view/range_slider_view.hpp",
+      "pulp/view/recognition_audio_pack.hpp",
       "pulp/view/recognition_resolver.hpp",
       "pulp/view/relative_point.hpp",
       "pulp/view/reload_autocaps.hpp",
@@ -1552,83 +1555,91 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 73,
+        "installed_target_count": 76,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 99
+            "closure_node_count": 103
           },
           {
             "exported_as": "Pulp::inspect-graph-runtime",
-            "closure_node_count": 92
+            "closure_node_count": 95
           },
           {
             "exported_as": "Pulp::inspect-sample-region-runtime",
-            "closure_node_count": 92
+            "closure_node_count": 95
           },
           {
             "exported_as": "Pulp::host",
-            "closure_node_count": 86
-          },
-          {
-            "exported_as": "Pulp::inspect-offline-runtime",
-            "closure_node_count": 84
+            "closure_node_count": 89
           },
           {
             "exported_as": "Pulp::inspect",
-            "closure_node_count": 83
+            "closure_node_count": 87
+          },
+          {
+            "exported_as": "Pulp::inspect-offline-runtime",
+            "closure_node_count": 87
           },
           {
             "exported_as": "Pulp::standalone",
-            "closure_node_count": 83
+            "closure_node_count": 87
           },
           {
             "exported_as": "Pulp::standalone-native",
-            "closure_node_count": 83
-          },
-          {
-            "exported_as": "Pulp::format",
-            "closure_node_count": 81
+            "closure_node_count": 87
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 81
+            "closure_node_count": 85
+          },
+          {
+            "exported_as": "Pulp::format",
+            "closure_node_count": 84
           },
           {
             "exported_as": "Pulp::format-view",
-            "closure_node_count": 80
+            "closure_node_count": 83
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
+            "closure_node_count": 78
+          },
+          {
+            "exported_as": "Pulp::view",
+            "closure_node_count": 77
+          },
+          {
+            "exported_as": "Pulp::view-native",
+            "closure_node_count": 77
+          },
+          {
+            "exported_as": "Pulp::design-import-audio-pack",
+            "closure_node_count": 75
+          },
+          {
+            "exported_as": "Pulp::view-script",
+            "closure_node_count": 75
+          },
+          {
+            "exported_as": "Pulp::design-import",
             "closure_node_count": 74
           },
           {
             "exported_as": "Pulp::inspect-telemetry",
-            "closure_node_count": 73
-          },
-          {
-            "exported_as": "Pulp::view",
-            "closure_node_count": 73
-          },
-          {
-            "exported_as": "Pulp::view-native",
-            "closure_node_count": 73
-          },
-          {
-            "exported_as": "Pulp::view-script",
-            "closure_node_count": 72
+            "closure_node_count": 74
           },
           {
             "exported_as": "Pulp::view-core",
-            "closure_node_count": 71
+            "closure_node_count": 72
           },
           {
             "exported_as": "Pulp::gpu-audio",
-            "closure_node_count": 70
+            "closure_node_count": 71
           },
           {
             "exported_as": "Pulp::render",
-            "closure_node_count": 57
+            "closure_node_count": 58
           },
           {
             "exported_as": "Pulp::canvas",
@@ -1800,6 +1811,10 @@
           },
           {
             "exported_as": "Pulp::clap",
+            "closure_node_count": 1
+          },
+          {
+            "exported_as": "Pulp::design-ir",
             "closure_node_count": 1
           },
           {
@@ -2414,6 +2429,279 @@
             "pulp-timeline"
           ]
         },
+        "design-import": {
+          "target": "pulp-design-import",
+          "exported_as": "Pulp::design-import",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "core/view",
+          "closure": {
+            "node_count": 74,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-bundled-fonts",
+              "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
+              "pulp-events",
+              "pulp-foundation",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-platform",
+              "pulp-render",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-simd",
+              "pulp-state",
+              "pulp-timebase",
+              "pulp-view-core"
+            ],
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "skia::skia",
+              "webgpu",
+              "yaml-cpp",
+              "yogacore"
+            ]
+          },
+          "external_dependencies": {
+            "count": 56,
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "skia::skia",
+              "webgpu",
+              "yaml-cpp",
+              "yogacore"
+            ],
+            "prebuilt_archives": [
+              "libdawn_combined.a",
+              "libjsonreader.a",
+              "libskia.a",
+              "libskottie.a",
+              "libskparagraph.a",
+              "libskresources.a",
+              "libsksg.a",
+              "libskshaper.a",
+              "libskunicode_core.a",
+              "libskunicode_icu.a",
+              "libsvg.a"
+            ],
+            "imported_targets": [],
+            "frameworks": [
+              "AVFoundation",
+              "Accelerate",
+              "AudioToolbox",
+              "Carbon",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreGraphics",
+              "CoreHaptics",
+              "CoreMIDI",
+              "CoreMedia",
+              "CoreServices",
+              "CoreText",
+              "CoreVideo",
+              "ForceFeedback",
+              "Foundation",
+              "GameController",
+              "IOKit",
+              "IOSurface",
+              "ImageIO",
+              "Metal",
+              "MetalKit",
+              "QuartzCore",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm",
+              "m",
+              "objc"
+            ]
+          },
+          "public_headers": {
+            "roots": [],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "pulp-design-ir",
+            "pulp-view-core",
+            "yaml-cpp"
+          ]
+        },
+        "design-import-audio-pack": {
+          "target": "pulp-design-import-audio-pack",
+          "exported_as": "Pulp::design-import-audio-pack",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "core/view",
+          "closure": {
+            "node_count": 75,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-bundled-fonts",
+              "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
+              "pulp-events",
+              "pulp-foundation",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-platform",
+              "pulp-render",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-simd",
+              "pulp-state",
+              "pulp-timebase",
+              "pulp-view-core"
+            ],
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "skia::skia",
+              "webgpu",
+              "yaml-cpp",
+              "yogacore"
+            ]
+          },
+          "external_dependencies": {
+            "count": 56,
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "skia::skia",
+              "webgpu",
+              "yaml-cpp",
+              "yogacore"
+            ],
+            "prebuilt_archives": [
+              "libdawn_combined.a",
+              "libjsonreader.a",
+              "libskia.a",
+              "libskottie.a",
+              "libskparagraph.a",
+              "libskresources.a",
+              "libsksg.a",
+              "libskshaper.a",
+              "libskunicode_core.a",
+              "libskunicode_icu.a",
+              "libsvg.a"
+            ],
+            "imported_targets": [],
+            "frameworks": [
+              "AVFoundation",
+              "Accelerate",
+              "AudioToolbox",
+              "Carbon",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreGraphics",
+              "CoreHaptics",
+              "CoreMIDI",
+              "CoreMedia",
+              "CoreServices",
+              "CoreText",
+              "CoreVideo",
+              "ForceFeedback",
+              "Foundation",
+              "GameController",
+              "IOKit",
+              "IOSurface",
+              "ImageIO",
+              "Metal",
+              "MetalKit",
+              "QuartzCore",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm",
+              "m",
+              "objc"
+            ]
+          },
+          "public_headers": {
+            "roots": [],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "pulp-design-import"
+          ]
+        },
+        "design-ir": {
+          "target": "pulp-design-ir",
+          "exported_as": "Pulp::design-ir",
+          "type": "INTERFACE_LIBRARY",
+          "source_dir": "core/view",
+          "closure": {
+            "node_count": 1,
+            "pulp_targets": [
+              "pulp-design-ir"
+            ],
+            "third_party_targets": []
+          },
+          "external_dependencies": {
+            "count": 0,
+            "third_party_targets": [],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [],
+            "system_libraries": []
+          },
+          "public_headers": {
+            "roots": [
+              "core/view/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": []
+        },
         "dsl": {
           "target": "pulp-dsl",
           "exported_as": "Pulp::dsl",
@@ -2599,11 +2887,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 81,
+            "node_count": 84,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -2641,12 +2931,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -2664,6 +2955,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -2828,11 +3120,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 80,
+            "node_count": 83,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format-core",
               "pulp-format-view",
@@ -2869,12 +3163,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -2892,6 +3187,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -2991,7 +3287,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/gpu_audio",
           "closure": {
-            "node_count": 70,
+            "node_count": 71,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -3022,11 +3318,12 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "skia::skia"
+              "skia::skia",
+              "webgpu"
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 55,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3039,7 +3336,8 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "skia::skia"
+              "skia::skia",
+              "webgpu"
             ],
             "prebuilt_archives": [
               "libdawn_combined.a",
@@ -3179,11 +3477,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 86,
+            "node_count": 89,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -3224,12 +3524,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 61,
+            "count": 62,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3247,6 +3548,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -3363,11 +3665,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 83,
+            "node_count": 87,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
               "pulp-midi",
@@ -3407,12 +3712,13 @@
               "pulp-inspect-telemetry",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 61,
+            "count": 62,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3432,6 +3738,7 @@
               "pulp-inspect-telemetry",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -3708,11 +4015,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 92,
+            "node_count": 95,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -3759,12 +4068,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 65,
+            "count": 66,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3786,6 +4096,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -3857,11 +4168,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 84,
+            "node_count": 87,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -3902,12 +4215,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 62,
+            "count": 63,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3928,6 +4242,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -4154,11 +4469,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 74,
+            "node_count": 78,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
               "pulp-midi",
@@ -4189,12 +4507,13 @@
               "pulp-inspect-runtime-eval",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 56,
+            "count": 57,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4209,6 +4528,7 @@
               "pulp-inspect-runtime-eval",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -4277,11 +4597,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 92,
+            "node_count": 95,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -4328,12 +4650,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 65,
+            "count": 66,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4355,6 +4678,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -4426,11 +4750,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 99,
+            "node_count": 103,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -4484,12 +4811,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 71,
+            "count": 72,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4517,6 +4845,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -4592,11 +4921,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 73,
+            "node_count": 74,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
               "pulp-midi",
@@ -4626,7 +4956,7 @@
               "pulp-inspect-telemetry",
               "pulp-tracing",
               "skia::skia",
-              "yaml-cpp",
+              "webgpu",
               "yogacore"
             ]
           },
@@ -4647,7 +4977,7 @@
               "pulp-inspect-telemetry",
               "pulp-tracing",
               "skia::skia",
-              "yaml-cpp",
+              "webgpu",
               "yogacore"
             ],
             "prebuilt_archives": [
@@ -4716,11 +5046,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 81,
+            "node_count": 85,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
               "pulp-midi",
@@ -4758,12 +5091,13 @@
               "pulp-inspect-ui-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4781,6 +5115,7 @@
               "pulp-inspect-ui-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -5455,7 +5790,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 57,
+            "node_count": 58,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -5477,11 +5812,12 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "skia::skia"
+              "skia::skia",
+              "webgpu"
             ]
           },
           "external_dependencies": {
-            "count": 50,
+            "count": 51,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -5494,7 +5830,8 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "skia::skia"
+              "skia::skia",
+              "webgpu"
             ],
             "prebuilt_archives": [
               "libdawn_combined.a",
@@ -5556,7 +5893,8 @@
             "framework:QuartzCore",
             "pulp-canvas",
             "pulp-runtime",
-            "skia::skia"
+            "skia::skia",
+            "webgpu"
           ]
         },
         "runtime": {
@@ -6173,11 +6511,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 83,
+            "node_count": 87,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -6217,12 +6558,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 61,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -6241,6 +6583,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -6313,11 +6656,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 83,
+            "node_count": 87,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -6357,12 +6703,13 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 61,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -6381,6 +6728,7 @@
               "pulp-tracing",
               "skia::skia",
               "vst3-sdk",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -6771,11 +7119,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 73,
+            "node_count": 77,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
               "pulp-midi",
@@ -6805,12 +7156,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -6824,6 +7176,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -6883,6 +7236,7 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": [
+            "pulp-design-import-audio-pack",
             "pulp-view-script"
           ]
         },
@@ -6892,11 +7246,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 71,
+            "node_count": 72,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
               "pulp-midi",
@@ -6924,7 +7279,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
-              "yaml-cpp",
+              "webgpu",
               "yogacore"
             ]
           },
@@ -6943,7 +7298,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
-              "yaml-cpp",
+              "webgpu",
               "yogacore"
             ],
             "prebuilt_archives": [
@@ -7012,13 +7367,13 @@
             "framework:UniformTypeIdentifiers",
             "pulp-audio",
             "pulp-canvas",
+            "pulp-design-ir",
             "pulp-events",
             "pulp-platform",
             "pulp-render",
             "pulp-runtime",
             "pulp-signal",
             "pulp-state",
-            "yaml-cpp",
             "yogacore"
           ]
         },
@@ -7028,11 +7383,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 73,
+            "node_count": 77,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-import-audio-pack",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
               "pulp-midi",
@@ -7062,12 +7420,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7081,6 +7440,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -7140,6 +7500,7 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": [
+            "pulp-design-import-audio-pack",
             "pulp-view-script"
           ]
         },
@@ -7149,11 +7510,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 72,
+            "node_count": 75,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
               "pulp-midi",
@@ -7182,12 +7545,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7201,6 +7565,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -7260,6 +7625,7 @@
             "generated_include_roots": 1
           },
           "direct_dependencies": [
+            "pulp-design-import",
             "pulp-render",
             "pulp-runtime",
             "pulp-view-core"
@@ -12683,79 +13049,79 @@
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 97
+            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::inspect-graph-runtime",
-            "closure_node_count": 90
+            "closure_node_count": 91
           },
           {
             "exported_as": "Pulp::inspect-sample-region-runtime",
-            "closure_node_count": 90
+            "closure_node_count": 91
           },
           {
             "exported_as": "Pulp::host",
-            "closure_node_count": 84
+            "closure_node_count": 85
           },
           {
             "exported_as": "Pulp::inspect",
-            "closure_node_count": 83
+            "closure_node_count": 84
           },
           {
             "exported_as": "Pulp::inspect-offline-runtime",
-            "closure_node_count": 82
+            "closure_node_count": 83
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 81
+            "closure_node_count": 82
           },
           {
             "exported_as": "Pulp::standalone",
-            "closure_node_count": 81
+            "closure_node_count": 82
           },
           {
             "exported_as": "Pulp::standalone-native",
-            "closure_node_count": 81
+            "closure_node_count": 82
           },
           {
             "exported_as": "Pulp::format",
-            "closure_node_count": 79
+            "closure_node_count": 80
           },
           {
             "exported_as": "Pulp::format-view",
-            "closure_node_count": 78
+            "closure_node_count": 79
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
-            "closure_node_count": 74
+            "closure_node_count": 75
           },
           {
             "exported_as": "Pulp::inspect-telemetry",
-            "closure_node_count": 73
+            "closure_node_count": 74
           },
           {
             "exported_as": "Pulp::view",
-            "closure_node_count": 73
+            "closure_node_count": 74
           },
           {
             "exported_as": "Pulp::view-native",
-            "closure_node_count": 73
+            "closure_node_count": 74
           },
           {
             "exported_as": "Pulp::view-script",
-            "closure_node_count": 72
+            "closure_node_count": 73
           },
           {
             "exported_as": "Pulp::view-core",
-            "closure_node_count": 71
+            "closure_node_count": 72
           },
           {
             "exported_as": "Pulp::gpu-audio",
-            "closure_node_count": 70
+            "closure_node_count": 71
           },
           {
             "exported_as": "Pulp::render",
-            "closure_node_count": 57
+            "closure_node_count": 58
           },
           {
             "exported_as": "Pulp::canvas",
@@ -13676,7 +14042,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 79,
+            "node_count": 80,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -13716,12 +14082,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 57,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -13737,6 +14104,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -13895,7 +14263,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 78,
+            "node_count": 79,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -13934,12 +14302,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 57,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -13955,6 +14324,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -14054,7 +14424,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/gpu_audio",
           "closure": {
-            "node_count": 70,
+            "node_count": 71,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -14085,11 +14455,12 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "skia::skia"
+              "skia::skia",
+              "webgpu"
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 55,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -14102,7 +14473,8 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "skia::skia"
+              "skia::skia",
+              "webgpu"
             ],
             "prebuilt_archives": [
               "libdawn_combined.a",
@@ -14242,7 +14614,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 84,
+            "node_count": 85,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -14285,12 +14657,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -14306,6 +14679,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -14421,7 +14795,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 83,
+            "node_count": 84,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -14465,12 +14839,13 @@
               "pulp-inspect-telemetry",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 61,
+            "count": 62,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -14490,6 +14865,7 @@
               "pulp-inspect-telemetry",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -14766,7 +15142,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 90,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -14815,12 +15191,13 @@
               "pulp-inspect-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 63,
+            "count": 64,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -14840,6 +15217,7 @@
               "pulp-inspect-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -14911,7 +15289,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 82,
+            "node_count": 83,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -14954,12 +15332,13 @@
               "pulp-inspect-protocol",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 61,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -14978,6 +15357,7 @@
               "pulp-inspect-protocol",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -15204,7 +15584,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 74,
+            "node_count": 75,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -15239,12 +15619,13 @@
               "pulp-inspect-runtime-eval",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 56,
+            "count": 57,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -15259,6 +15640,7 @@
               "pulp-inspect-runtime-eval",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -15327,7 +15709,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 90,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -15376,12 +15758,13 @@
               "pulp-inspect-sample-region-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 63,
+            "count": 64,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -15401,6 +15784,7 @@
               "pulp-inspect-sample-region-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -15472,7 +15856,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 97,
+            "node_count": 98,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -15528,12 +15912,13 @@
               "pulp-inspect-ui-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 69,
+            "count": 70,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -15559,6 +15944,7 @@
               "pulp-inspect-ui-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -15634,7 +16020,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 73,
+            "node_count": 74,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -15668,12 +16054,13 @@
               "pulp-inspect-telemetry",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 57,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -15689,6 +16076,7 @@
               "pulp-inspect-telemetry",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -15758,7 +16146,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 81,
+            "node_count": 82,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -15800,12 +16188,13 @@
               "pulp-inspect-ui-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -15823,6 +16212,7 @@
               "pulp-inspect-ui-runtime",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -16497,7 +16887,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 57,
+            "node_count": 58,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -16519,11 +16909,12 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "skia::skia"
+              "skia::skia",
+              "webgpu"
             ]
           },
           "external_dependencies": {
-            "count": 50,
+            "count": 51,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -16536,7 +16927,8 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "skia::skia"
+              "skia::skia",
+              "webgpu"
             ],
             "prebuilt_archives": [
               "libdawn_combined.a",
@@ -16598,7 +16990,8 @@
             "framework:QuartzCore",
             "pulp-canvas",
             "pulp-runtime",
-            "skia::skia"
+            "skia::skia",
+            "webgpu"
           ]
         },
         "runtime": {
@@ -17211,7 +17604,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 81,
+            "node_count": 82,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -17253,12 +17646,13 @@
               "pulp-standalone",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 58,
+            "count": 59,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -17275,6 +17669,7 @@
               "pulp-standalone",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -17347,7 +17742,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 81,
+            "node_count": 82,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -17389,12 +17784,13 @@
               "pulp-standalone-native",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 58,
+            "count": 59,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -17411,6 +17807,7 @@
               "pulp-standalone-native",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -17801,7 +18198,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 73,
+            "node_count": 74,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -17835,12 +18232,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -17854,6 +18252,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -17922,7 +18321,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 71,
+            "node_count": 72,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -17954,12 +18353,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -17973,6 +18373,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -18058,7 +18459,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 73,
+            "node_count": 74,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -18092,12 +18493,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -18111,6 +18513,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
@@ -18179,7 +18582,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 72,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -18212,12 +18615,13 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -18231,6 +18635,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "webgpu",
               "yaml-cpp",
               "yogacore"
             ],
