@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.944.0
+    VERSION 0.945.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -429,7 +429,7 @@ endif()
 if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
 endif()
-# After core/render so the GPU convolver node can link pulp::render when GPU is
+# After core/render so the GPU convolver node can link pulp::gpu-device when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
@@ -941,6 +941,7 @@ if(ANDROID)
         $<TARGET_FILE:pulp-platform>
         $<TARGET_FILE:pulp-audio>
         $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
+        $<$<TARGET_EXISTS:pulp-gpu-device>:$<TARGET_FILE:pulp-gpu-device>>
         -Wl,--no-whole-archive)
 
     # TalkBack accessibility JNI entry points live in pulp-view
