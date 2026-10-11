@@ -71,7 +71,7 @@ from pathlib import Path
 # `conflict-marker-size` (see the module docstring's limitations).
 START_END_RE = re.compile(r"^(?:<{7}|>{7}|\|{7})(?:\s|$)")
 
-# The separator is only decisive inside a conflict block — plain runs of "=" are
+# The separator is only decisive inside a conflict block; plain runs of "=" are
 # common (Markdown headings, banners), so it is reported only when the file also
 # has a start/end marker. Matched as a whole line of exactly seven "=".
 SEPARATOR_RE = re.compile(r"^={7}$")

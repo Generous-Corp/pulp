@@ -116,6 +116,7 @@ set(PULP_CLEAN_CONSUMER_REALIZED_BY_tls
 # WebGPU/Dawn and the modules that require it.
 set(PULP_CLEAN_CONSUMER_REALIZED_BY_gpu
     webgpu Pulp::webgpu
+    Pulp::gpu-device
     Pulp::render
     Pulp::gpu-audio)
 
