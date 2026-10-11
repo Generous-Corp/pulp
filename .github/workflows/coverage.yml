@@ -91,7 +91,7 @@ jobs:
   # platform subtree isn't `!`-excluded it gets double-counted; when the
   # two ignore lists drift the bot fires a false low-patch-coverage check.
   # All three are pure-config faults invisible to a normal build, so this
-  # job runs on every PR with no native build and fails loudly on drift.
+  # job runs on every scheduled or dispatched refresh and fails loudly on drift.
   # These contract tests (test_coverage_surface_contract.py /
   # test_codecov_config.py / test_codecov_components.py)
   # were authored alongside #1055 but were never wired into a gate — the
@@ -119,13 +119,11 @@ jobs:
   # Coverage workflow runs the Swift coverage step through a different
   # code path (`tools/scripts/run_swift_coverage.py`) which configures
   # an iOS try-compile via `cmake -DCMAKE_SYSTEM_NAME=iOS`. That leg
-  # adds ~25-30 min to every PR — including TS-only, doc-only, and
+  # adds ~25-30 min to each full refresh — including TS-only, doc-only, and
   # harness-only PRs that can't possibly affect the iOS toolchain.
   #
-  # On `pull_request`, this job inspects the diff and only sets
-  # `outputs.ios=true` when iOS-relevant files changed. On `push` to
-  # main and `workflow_dispatch`, `outputs.ios` is forced to `true` so
-  # the full iOS try-compile still runs on the canonical lanes. The downstream
+  # On scheduled and dispatched runs, this job sets `outputs.ios=true` so
+  # the full iOS try-compile runs on the canonical lanes. The downstream
   # macOS-leg Swift step + Apple LCOV verify/upload all gate on this
   # output, so a TS-only PR exits the macOS leg in <20 min instead of
   # ~45-60 min.
@@ -297,11 +295,9 @@ jobs:
             --base "${{ github.event.pull_request.base.sha || 'origin/main' }}"
 
   # ── Build the event-conditional coverage matrix ────────────────────────
-  # Per-PR coverage is macOS-only; scheduled refresh and workflow_dispatch keep
-  # the full 3-OS matrix. This job emits the `coverage` job's matrix
+  # Scheduled refresh and workflow_dispatch use the full 3-OS matrix. This job emits the `coverage` job's matrix
   # `include` list as JSON so the conditional lives in one place:
-  #   - pull_request → [macOS]
-  #   - push / workflow_dispatch → [linux, macOS, windows]
+  #   - schedule / workflow_dispatch → [linux, macOS, windows]
   # The per-OS `runs_on_json` values are threaded through from the
   # `resolve-runners` job so the matrix legs still honour any repo-variable
   # or workflow_dispatch runner overrides. `os-windows` / `os-linux` flags
@@ -322,7 +318,7 @@ jobs:
         run: |
           set -euo pipefail
           # One include entry per OS leg. macOS is always present; Linux
-          # and Windows are appended only for non-pull_request events.
+          # Linux and Windows are included for the full scheduled/dispatched matrix.
           #
           # `runs_on_json` MUST be encoded with `tojson`, never `tostring`.
           # The downstream `coverage` job consumes it via
@@ -334,23 +330,17 @@ jobs:
           macos=$(jq -nc \
             --argjson runs_on "${MACOS_RUNS_ON_JSON}" \
             '{os:"macos", label:"macOS", flag:"os-macos", runs_on_json:($runs_on|tojson)}')
-          if [ "${EVENT_NAME}" = "pull_request" ]; then
-            # Per-PR coverage is macOS-only — Linux/Windows coverage is
-            # provided by the nightly cross-platform-check.yml lane.
-            include=$(jq -nc --argjson m "${macos}" '[$m]')
-          else
-            linux=$(jq -nc \
-              --argjson runs_on "${LINUX_RUNS_ON_JSON}" \
-              '{os:"linux", label:"Linux", flag:"os-linux", runs_on_json:($runs_on|tojson)}')
-            windows=$(jq -nc \
-              --argjson runs_on "${WINDOWS_RUNS_ON_JSON}" \
-              '{os:"windows", label:"Windows", flag:"os-windows", runs_on_json:($runs_on|tojson)}')
-            include=$(jq -nc \
-              --argjson l "${linux}" \
-              --argjson m "${macos}" \
-              --argjson w "${windows}" \
-              '[$l, $m, $w]')
-          fi
+          linux=$(jq -nc \
+            --argjson runs_on "${LINUX_RUNS_ON_JSON}" \
+            '{os:"linux", label:"Linux", flag:"os-linux", runs_on_json:($runs_on|tojson)}')
+          windows=$(jq -nc \
+            --argjson runs_on "${WINDOWS_RUNS_ON_JSON}" \
+            '{os:"windows", label:"Windows", flag:"os-windows", runs_on_json:($runs_on|tojson)}')
+          include=$(jq -nc \
+            --argjson l "${linux}" \
+            --argjson m "${macos}" \
+            --argjson w "${windows}" \
+            '[$l, $m, $w]')
           matrix=$(jq -nc --argjson inc "${include}" '{include:$inc}')
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
           echo "Coverage matrix for event '${EVENT_NAME}': ${matrix}"
@@ -377,11 +367,7 @@ jobs:
       # when one leg flakes.
       #
       # The matrix `include` list is built by the `matrix-config` job and
-      # is event-conditional: pull_request → macOS leg only; push to main
-      # and workflow_dispatch → full {linux, macos, windows}. Per-PR
-      # coverage therefore measures the macOS development surface only;
-      # Linux/Windows coverage on PRs is provided by the nightly
-      # cross-platform-check.yml lane.
+      # uses the full {linux, macos, windows} matrix on scheduled and dispatched runs.
       fail-fast: false
       max-parallel: 2
       matrix: ${{ fromJSON(needs.matrix-config.outputs.matrix) }}
@@ -716,7 +702,7 @@ jobs:
         # Gated on `needs.changed-files.outputs.ios` (closes #1887): the
         # underlying `run_swift_coverage.py` configures an iOS try-compile
         # via `cmake -DCMAKE_SYSTEM_NAME=iOS`, which adds ~25-30 min to
-        # every PR. Skip it on PRs whose diff doesn't touch iOS-relevant
+        # each refresh. Skip it when the changed files do not touch iOS-relevant
         # paths; always run on scheduled refresh and workflow_dispatch so the
         # canonical lane still exercises the iOS toolchain daily.
         if: matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
@@ -893,7 +879,7 @@ jobs:
         # `coverage-cobertura-windows-${sha}`). The downstream
         # `coverage-diff-gate` job downloads whichever of the three
         # exist and merges them via merge_cobertura.py — on
-        # `pull_request` events only the macOS leg runs, so only the
+        # Scheduled and dispatched runs include all OS legs, so the
         # macOS artifact is produced and the gate measures the macOS
         # development surface (see the `matrix-config` job).
         #
@@ -1241,10 +1227,8 @@ jobs:
     # emulator/device smoke remain in android.yml.
     name: Coverage report (Android, Kotlin)
     needs: [resolve-runners, classify, coverage_publish_barrier]
-    # PR coverage is macOS-only; Linux / Windows / Android coverage is
-    # supplied by the nightly cross-platform lane. Keep this Kotlin upload
-    # for canonical main/manual runs only so PRs do not allocate an Android
-    # coverage runner after the native matrix has already been narrowed.
+    # Keep this Kotlin upload for canonical scheduled and manually dispatched
+    # runs so the dashboard includes the Android surface.
     if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true' && needs.coverage_publish_barrier.result == 'success'
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.android_kotlin_runs_on) }}
     timeout-minutes: 30
@@ -1423,7 +1407,7 @@ jobs:
           receipt-name: codecov-upload-pulp-react-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   coverage-diff-gate:
-    # Per-PR diff-coverage report. It fails its own advisory check when the
+    # Advisory diff-coverage report. It fails its own advisory check when the
     # threshold is missed and posts a summary comment, but it is deliberately
     # not in protected main's required-check set. Coverage therefore remains
     # visible and actionable without serializing the merge critical path.
@@ -1432,23 +1416,19 @@ jobs:
     # tools/scripts/merge_cobertura.py. The merge takes max(hits) per
     # (filename, line) across whatever per-OS artifacts exist, so a line
     # covered on any OS counts as covered overall. The merge mechanism is
-    # kept (scheduled refresh and workflow_dispatch still produce all three
-    # per-OS XMLs), but on `pull_request` events ONLY the macOS Cobertura
-    # XML exists — per-PR coverage is macOS-only (see the `matrix-config`
-    # job). So per-PR this gate measures the macOS development surface:
-    # the lines a contributor can actually exercise and verify locally.
+    # kept because scheduled refresh and workflow_dispatch produce all three
+    # per-OS XMLs, so this gate measures the complete cross-platform surface.
     #
     # Platform-specific source — `**/platform/linux/**`,
     # `**/platform/windows/**`, `android/**`, `*_linux.*`, `*_win*.*` —
-    # is ABSENT from the macOS XML, so diff-cover does not gate it
-    # per-PR. That code is validated by the nightly cross-platform lane
+    # is ABSENT from an individual OS XML, so diff-cover does not gate it
+    # directly. That code is validated by the nightly cross-platform lane
     # (cross-platform-check.yml). The "Note platform-specific paths…"
     # step below makes that gap visible in the PR comment (a note, not a
     # block — blocking would hurt macOS-first development velocity).
     #
-    # Runs only on pull_request events — the gate question "of the lines
-    # this PR adds, how many are covered?" is meaningless on a direct
-    # scheduled refresh where there is no diff to compute against.
+    # The gate is advisory and only runs when a pull request context supplies
+    # a diff; scheduled refreshes still publish the complete native receipts.
     #
     # NOTE: the previous dynamic name `Diff coverage required (${{ ... }})`
     # did NOT evaluate at runtime — GitHub Actions renders `name:` at
@@ -1542,12 +1522,8 @@ jobs:
         # Linux artifact uses the historical name
         # `coverage-cobertura-${sha}`. macOS and Windows use OS-suffixed
         # names (see the matrix `coverage` job's upload step). On
-        # `pull_request` events only the macOS leg runs (per-PR coverage
-        # is macOS-only — see `matrix-config`), so this Linux artifact
-        # legitimately does NOT exist and the download fails; that is
-        # tolerated via `continue-on-error: true` and the merge step
-        # writes a macOS-only XML. On scheduled refresh / workflow_dispatch
-        # all three artifacts exist and are merged. The gate only reaches
+        # Scheduled and dispatched runs include the Linux artifact; a missing
+        # artifact is tolerated via `continue-on-error: true`. The gate only reaches
         # this step when the classifier said native coverage IS required,
         # so if EVERY input is missing the merge step fails RED (see
         # "Merge per-OS Cobertura XMLs" below) rather than silently
@@ -1560,8 +1536,7 @@ jobs:
         continue-on-error: true
 
       - name: Download Cobertura XML from coverage job (macOS)
-        # Always present — macOS is the one leg that runs on every event,
-        # including `pull_request`.
+        # Scheduled and dispatched runs include the macOS artifact.
         if: steps.gate_preconditions.outputs.gate_ready == 'true'
         uses: actions/download-artifact@v6
         with:
@@ -1570,8 +1545,7 @@ jobs:
         continue-on-error: true
 
       - name: Download Cobertura XML from coverage job (Windows)
-        # Like the Linux artifact above: absent on `pull_request` events
-        # (per-PR coverage is macOS-only), present on schedule / dispatch.
+        # Scheduled and dispatched runs include the Windows artifact.
         if: steps.gate_preconditions.outputs.gate_ready == 'true'
         uses: actions/download-artifact@v6
         with:
@@ -1610,13 +1584,9 @@ jobs:
         # taking max(hits) per (filename, line) so a line counted as
         # covered on any OS is treated as covered overall.
         #
-        # On `pull_request` events only the macOS artifact exists
-        # (per-PR coverage is macOS-only), so the merge is effectively a
-        # pass-through of the macOS XML — diff-cover then gates the
-        # macOS development surface. On scheduled refresh / workflow_dispatch
-        # all three per-OS artifacts are merged, giving Codecov's main
-        # head a true cross-OS picture. Platform-specific files absent
-        # from the macOS XML are surfaced per-PR by the "Note
+        # All three per-OS artifacts are merged, giving Codecov's main head a
+        # true cross-OS picture. Platform-specific files absent from the
+        # selected XMLs are surfaced by the "Note
         # platform-specific paths…" step, not gated here.
         #
         # Exit-code policy: the script uses a DEDICATED exit code (2) for the
@@ -1803,14 +1773,13 @@ jobs:
           echo "----- end comment -----"
         shell: bash
 
-      - name: Note platform-specific paths not covered by per-PR macOS coverage
-        # Per-PR coverage is macOS-only (see the `matrix-config` job). The
-        # merged Cobertura XML therefore contains only the macOS leg's
-        # source files. A PR that touches platform-specific code —
+      - name: Note platform-specific paths outside the macOS coverage leg
+        # The merged Cobertura XML contains the macOS leg's source files.
+        # A run that touches platform-specific code —
         # `**/platform/linux/**`, `**/platform/windows/**`, `android/**`,
         # or files matching `*_linux.*` / `*_win*.*` — has those files
         # ABSENT from the macOS XML, so diff-cover silently omits them and
-        # they are NOT gated per-PR.
+        # they are not part of the native coverage gate.
         #
         # This step classifies the PR's changed files and, when any fall
         # under those platform-specific paths, appends a clearly-marked
@@ -1858,7 +1827,7 @@ jobs:
             printf '> [!WARNING]\n'
             printf '> **%d changed file(s) are platform-specific (linux/windows/android)' \
               "${#PLATFORM_FILES[@]}"
-            printf ' and are NOT covered by per-PR macOS coverage.**\n'
+            printf ' and are NOT covered by the native coverage matrix.**\n'
             printf '> They are validated by the nightly cross-platform lane'
             printf " (\`cross-platform-check.yml\`), not by this advisory diff-coverage signal.\n"
             printf '>\n'

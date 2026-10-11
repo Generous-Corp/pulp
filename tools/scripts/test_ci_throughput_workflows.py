@@ -46,6 +46,10 @@ ADVISORY_WORKFLOWS = {
     "examples": ROOT / ".github" / "workflows" / "examples-validation.yml",
     "control": ROOT / ".github" / "workflows" / "control-shipping-native.yml",
 }
+SCHEDULED_REPO_GUARD_WORKFLOWS = {
+    **ADVISORY_WORKFLOWS,
+    "codeql": ROOT / ".github" / "workflows" / "codeql-advanced.yml",
+}
 ANDROID = ROOT / ".github" / "workflows" / "android.yml"
 TOPOLOGY = ROOT / "tools" / "scripts" / "runner_topology.json"
 SHIPYARD_PROFILE = ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml"
@@ -407,6 +411,14 @@ class AdvisoryMacOSCadenceTests(unittest.TestCase):
                 self.assertIn("workflow_dispatch", triggers)
                 if name == "coverage":
                     self.assertNotIn("push", triggers)
+
+    def test_scheduled_guards_use_the_configured_primary_repository(self) -> None:
+        stale = "github.repository == 'danielraffel/pulp'"
+        for name, path in SCHEDULED_REPO_GUARD_WORKFLOWS.items():
+            with self.subTest(workflow=name):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn(stale, text)
+                self.assertIn("github.repository == vars.PULP_PRIMARY_REPO", text)
 
     def test_coverage_matrix_is_bounded(self) -> None:
         strategy = load_workflow(ADVISORY_WORKFLOWS["coverage"])["jobs"]["coverage"]["strategy"]

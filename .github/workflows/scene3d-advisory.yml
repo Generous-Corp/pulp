@@ -38,7 +38,7 @@ concurrency:
 jobs:
   scene3d-build-test:
     name: SCENE3D build + test (advisory)
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: macos-15
     timeout-minutes: 90
     env:

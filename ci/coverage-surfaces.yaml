@@ -74,8 +74,8 @@ producers:
     flag: os-macos
     report: build-coverage/coverage.cobertura.xml
     expected_component_sets: [native-default, macos-platform]
-    events: [pull-request, schedule-8h, workflow-dispatch]
-    cadence: every native PR plus supersession-immune 8-hour refresh
+    events: [schedule-8h, workflow-dispatch]
+    cadence: supersession-immune 8-hour refresh
     uploads:
       - workflow: .github/workflows/coverage.yml
         job: coverage
@@ -123,8 +123,8 @@ producers:
     flag: apple-swift
     report: build-coverage/apple/coverage.apple.lcov
     expected_component_sets: [apple-swift]
-    events: [pull-request-ios-paths, schedule-8h, workflow-dispatch]
-    cadence: iOS-relevant PRs plus supersession-immune 8-hour refresh
+    events: [schedule-8h, workflow-dispatch]
+    cadence: supersession-immune 8-hour refresh
     uploads:
       - workflow: .github/workflows/coverage.yml
         job: coverage
@@ -135,8 +135,8 @@ producers:
     flag: pulp-react
     report: packages/pulp-react/coverage/cobertura-coverage.xml
     expected_component_sets: [pulp-react]
-    events: [pull-request-react-paths, schedule-8h, workflow-dispatch]
-    cadence: React-relevant PRs plus supersession-immune 8-hour refresh
+    events: [schedule-8h, workflow-dispatch]
+    cadence: supersession-immune 8-hour refresh
     uploads:
       - workflow: .github/workflows/coverage.yml
         job: pulp-react-coverage
