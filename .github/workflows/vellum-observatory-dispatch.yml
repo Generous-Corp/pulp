@@ -43,7 +43,7 @@ jobs:
     steps:
       # This job never checks out or executes repository code. Only the pinned
       # GitHub-owned action sees the App private key, and its installation token
-      # is scoped to the one private Vellum repository.
+      # is scoped to the one Vellum repository.
       - name: Mint one-repository Vellum dispatcher token
         id: vellum-dispatcher-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
