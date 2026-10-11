@@ -798,6 +798,7 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
     pseudoBindings: [{ index: 0, anchor: 'body', path: [], pseudo: 'before',
       box: { left: 2, top: 3, width: 20, height: 10 },
       background_gradient: 'radial-gradient(circle, #0ff, transparent)',
+      background_color: 'rgba(1, 2, 3, 0.4)',
       opacity: 0.5, z_index: 0, pointer_events: 'none' },
     { index: 1, anchor: 'body', path: [], pseudo: 'after',
       box: { left: 4, top: 5, width: 12, height: 8 },
@@ -805,6 +806,7 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
       opacity: 0.25, z_index: 1, pointer_events: 'none' }],
     bridge: {
       createCol: (id, parent) => calls.push(['createCol', id, parent]),
+      setBackground: (id, value) => calls.push(['background', id, value]),
       setBackgroundGradient: (id, value) => calls.push(['gradient', id, value]),
       setLeft: (id, value) => calls.push(['left', id, value]),
       setTop: (id, value) => calls.push(['top', id, value]),
@@ -820,6 +822,7 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
     ['top', '__pulp_materialized_pseudo_0', 3],
     ['flex', '__pulp_materialized_pseudo_0', 'width', 20],
     ['flex', '__pulp_materialized_pseudo_0', 'height', 10],
+    ['background', '__pulp_materialized_pseudo_0', 'rgba(1, 2, 3, 0.4)'],
     ['gradient', '__pulp_materialized_pseudo_0', 'radial-gradient(circle, #0ff, transparent)'],
     ['opacity', '__pulp_materialized_pseudo_0', 0.5],
     ['pointer', '__pulp_materialized_pseudo_0', 'none'],

@@ -144,6 +144,7 @@ function normalizeMaterializedPseudoBindings(bindings, label = 'materialized') {
   if (bindings === undefined) return [];
   if (!Array.isArray(bindings) || bindings.length > 256)
     throw new Error(`${label} pseudo_bindings is invalid`);
+  const indexes = new Set();
   return bindings.map((binding, index) => {
     const name = `${label} pseudo binding ${index}`;
     if (!binding || typeof binding !== 'object' ||
@@ -159,6 +160,9 @@ function normalizeMaterializedPseudoBindings(bindings, label = 'materialized') {
         !Number.isSafeInteger(binding.z_index) ||
         typeof binding.pointer_events !== 'string')
       throw new Error(`${name} is invalid`);
+    if (indexes.has(binding.index))
+      throw new Error(`${name} has duplicate index ${binding.index}`);
+    indexes.add(binding.index);
     const path = binding.path.map((step, stepIndex) => {
       if (!step || typeof step !== 'object' ||
           typeof step.tag !== 'string' || !/^[a-z][a-z0-9-]*$/.test(step.tag) ||

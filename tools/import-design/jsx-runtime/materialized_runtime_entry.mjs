@@ -1118,9 +1118,11 @@ for (const binding of capturedPseudoBindings) {
   setTop(id, Number(binding.box.top) - Number(${JSON.stringify(authoredTop)}));
   setFlex(id, 'width', binding.box.width);
   setFlex(id, 'height', binding.box.height);
+  // CSS background layers paint from the color layer into the image layer;
+  // preserve that order when both were captured.
+  if (binding.background_color) setBackground(id, binding.background_color);
   if (binding.background_gradient && typeof setBackgroundGradient === 'function')
     setBackgroundGradient(id, binding.background_gradient);
-  else if (binding.background_color) setBackground(id, binding.background_color);
   setOpacity(id, binding.opacity);
   setPointerEvents(id, 'none');
   setZIndex(id, ${MATERIALIZED_BEHAVIOR_Z - 1000} + Math.max(-999, Math.min(999, binding.z_index)));

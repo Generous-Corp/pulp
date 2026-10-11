@@ -229,4 +229,5 @@ test('normalizes supported pseudo planes and rejects malformed paint', () => {
   assert.throws(() => normalizeMaterializedMetadata({ pseudo_bindings: [{
     ...pseudo, background_gradient: 'url(foo.png)',
   }] }), /pseudo binding 0 paint is invalid/);
+  assert.throws(() => normalizeMaterializedMetadata({ pseudo_bindings: [pseudo, { ...pseudo, pseudo: 'after' }] }), /duplicate index 0/);
 });
