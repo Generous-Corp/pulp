@@ -314,9 +314,10 @@ class SkipAccountingTests(unittest.TestCase):
         return rc, out.getvalue()
 
     def _tree(self, root: pathlib.Path) -> None:
-        (root / "ok.py").write_text("print('ran')\n")
-        (root / "exit77.py").write_text("raise SystemExit(77)\n")
-        (root / "says_skip.py").write_text("print('thing_skipped=no plan')\nraise SystemExit(1)\n")
+        (root / "ok.py").write_text("print('ran')\n", encoding="utf-8")
+        (root / "exit77.py").write_text("raise SystemExit(77)\n", encoding="utf-8")
+        (root / "says_skip.py").write_text(
+            "print('thing_skipped=no plan')\nraise SystemExit(1)\n", encoding="utf-8")
 
     def test_a_skip_return_code_is_skipped_not_passed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
