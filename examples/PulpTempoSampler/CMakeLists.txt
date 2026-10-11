@@ -46,6 +46,14 @@ if(PULP_BUILD_TESTS)
         pulp::format pulp::audio pulp::signal Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
     target_compile_definitions(pulp-tempo-sampler-test PRIVATE
         $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+    # settings_panel.hpp (included unconditionally) declares its meters with
+    # the audio widgets' header, which pulp-view-audio provides. That target
+    # carries no windowing stack, so it links on every platform.
+    if(TARGET pulp::view-audio)
+        target_link_libraries(pulp-tempo-sampler-test PRIVATE pulp::view-audio)
+    elseif(TARGET Pulp::view-audio)
+        target_link_libraries(pulp-tempo-sampler-test PRIVATE Pulp::view-audio)
+    endif()
     # The WaveformDropView drop-target test (Apple-gated in the source) needs
     # pulp::view. Link it only on macOS so the advisory Linux test lane doesn't
     # pull the desktop windowing stack (SDL3/X11) — mirrors the screenshot tool.
