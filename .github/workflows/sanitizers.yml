@@ -189,8 +189,6 @@ jobs:
               "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
           else
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-            protected_base="$(git merge-base HEAD origin/main)"
-            git update-ref refs/remotes/origin/main "$protected_base"
           fi
 
       - name: Hydrate bounded GPU provenance commits
@@ -535,6 +533,8 @@ jobs:
               "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
           else
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+            protected_base="$(git merge-base HEAD origin/main)"
+            git update-ref refs/remotes/origin/main "$protected_base"
           fi
 
       - name: Hydrate bounded GPU provenance commits
