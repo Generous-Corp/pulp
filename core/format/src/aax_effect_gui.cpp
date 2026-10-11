@@ -32,11 +32,6 @@
 #include <optional>
 #include <functional>
 #include <string>
-#include <atomic>
-
-#if defined(__APPLE__)
-#include <dispatch/dispatch.h>
-#endif
 
 namespace pulp::format::aax {
 
@@ -57,11 +52,9 @@ constexpr int32_t kHostableContainerType =
 class PulpAaxEffectGUI final : public AAX_CEffectGUI {
 public:
     PulpAaxEffectGUI()
-        : initial_sync_alive_(std::make_shared<std::atomic<bool>>(true)),
-          aax_scale_(aax_display_scale(nullptr)) {}
+        : aax_scale_(aax_display_scale(nullptr)) {}
 
     ~PulpAaxEffectGUI() override {
-        initial_sync_alive_->store(false, std::memory_order_release);
         // The SDK calls DeleteViewContainer from SetViewContainer(null), but a
         // host that drops the GUI without that call would otherwise leak the
         // bridge and strand Processor::on_view_closed.
@@ -225,29 +218,12 @@ private:
             host_->set_fixed_aspect_ratio(plan.aspect_ratio);
         }
 
-        // Publish the preferred size only after the host's viewport transform
-        // is ready.  AAX_Point's constructor is (vertical, horizontal);
-        // GetViewSize() below writes the named fields directly.  This makes
-        // the first frame, the native child, and the visible resize grip share
-        // one geometry instead of waiting for a user resize to reconcile them.
-        if (auto* view_container = GetViewContainer()) {
-            AAX_Point initial_size(
-                static_cast<float>(aax_host_dimension(plan.height, aax_scale_)),
-                static_cast<float>(aax_host_dimension(plan.width, aax_scale_)));
-            if (view_container->SetViewSize(initial_size) != AAX_SUCCESS) {
-                runtime::log_error("AAX editor: initial SetViewSize rejected ({}x{})",
-                                   plan.width, plan.height);
-            }
-        }
-
-        // Pro Tools may accept SetViewSize without sending an NSView frame
-        // callback back through the embedded host. Seed the native host from
-        // the exact size just published, then attach the bridge and deliver
-        // that size through its normal lifecycle callback. The order matters:
-        // ViewBridge::resize() deliberately does nothing before
-        // notify_attached(), so calling it first leaves a native editor with
-        // its authored bounds until the user performs a second resize. That
-        // is the first-frame crop/grip regression seen in Pro Tools.
+        // AAX owns the initial outer editor frame. Do not call SetViewSize
+        // during CreateViewContainer: Pro Tools may still be constructing its
+        // wrapper, and an early write can leave the wrapper and native child in
+        // different coordinate spaces. GetViewSize supplies the preferred
+        // frame during insertion; SetViewSize is reserved for later explicit
+        // editor resize requests.
         host_->set_size(plan.width, plan.height);
 
         bridge_->notify_attached();
@@ -255,16 +231,6 @@ private:
         // Content-first: the first composited frame is the mounted document
         // (ViewBridge::prepare_first_frame()).
         bridge_->prepare_first_frame(*host_);
-
-#if defined(__APPLE__)
-        // Pro Tools may apply the NSView frame after CreateViewContainer()
-        // returns and does not provide an AAX size callback for that settle.
-        // Reconcile a bounded number of times on the main queue, matching the
-        // AUv3 late-layout path. This prevents the first editor frame from
-        // being clipped until a manual corner drag, while stopping quickly so
-        // deliberate user resizes are never fought indefinitely.
-        schedule_initial_size_sync(plan.width, plan.height);
-#endif
 
         runtime::log_info("AAX editor: attached ({}x{}, mode={}, gpu={})",
                           plan.width, plan.height, gpu.mode, host_->is_gpu_backed());
@@ -394,52 +360,10 @@ private:
         }
     }
 
-#if defined(__APPLE__)
-    void schedule_initial_size_sync(uint32_t width, uint32_t height) {
-        constexpr unsigned kMaxAttempts = 8;
-        constexpr int64_t kIntervalMs = 60;
-        auto alive = std::weak_ptr<std::atomic<bool>>(initial_sync_alive_);
-        auto* owner = this;
-        auto sync = std::make_shared<std::function<void(unsigned)>>();
-        *sync = [alive, owner, sync, width, height](unsigned attempt) {
-            if (attempt >= kMaxAttempts) return;
-            auto token = alive.lock();
-            if (!token || !token->load(std::memory_order_acquire)) return;
-            if (!owner->bridge_ || !owner->host_) return;
-
-            // SetViewSize is the only AAX transaction that can resize the
-            // Pro Tools-owned editor window.  The first call can arrive
-            // before Pro Tools has finished installing its widget frame and
-            // be accepted without changing that frame.  Re-publish the
-            // preferred size while the host settles, then mirror it into the
-            // shared view host.  Without this second publication the native
-            // child paints at the authored size inside the stale, smaller
-            // AAX frame; dragging the corner later happens to perform the
-            // missing transaction and makes the editor appear to "fix" itself.
-            if (auto* view_container = owner->GetViewContainer()) {
-                AAX_Point size(
-                    static_cast<float>(aax_host_dimension(height, owner->aax_scale_)),
-                    static_cast<float>(aax_host_dimension(width, owner->aax_scale_)));
-                (void)view_container->SetViewSize(size);
-            }
-            owner->host_->set_size(width, height);
-            owner->bridge_->resize(width, height);
-            if (attempt + 1 < kMaxAttempts) {
-                dispatch_after(
-                    dispatch_time(DISPATCH_TIME_NOW, kIntervalMs * NSEC_PER_MSEC),
-                    dispatch_get_main_queue(),
-                    ^{ (*sync)(attempt + 1); });
-            }
-        };
-        dispatch_async(dispatch_get_main_queue(), ^{ (*sync)(0); });
-    }
-#endif
-
     std::unique_ptr<ViewBridge> bridge_;
     std::unique_ptr<view::PluginViewHost> host_;
     std::function<void()> idle_pump_;
     view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding_;
-    std::shared_ptr<std::atomic<bool>> initial_sync_alive_;
     float aax_scale_ = 1.0f;
 };
 
