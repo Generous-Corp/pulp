@@ -15,6 +15,13 @@
 #   PULP_BUILD_INFO_EMBED      optional JSON file substituted for the embed token;
 #                              a missing file substitutes `null`
 #   PULP_BUILD_INFO_GIT        git executable (optional; looked up when empty)
+#   PULP_BUILD_INFO_RETIRE_DIR optional directory of an earlier layout: Pulp's
+#                              own records left there (pulp-build-info.json,
+#                              pulp.plugin-runtime.json) are deleted, and the
+#                              directory too once that leaves it empty. A
+#                              shallow iOS bundle built before its records
+#                              moved to the root otherwise keeps an unsignable
+#                              Resources/ directory across incremental builds.
 #
 # Tokens: "__PULP_GIT_SHA__" (a JSON string, quotes included),
 # __PULP_GIT_DIRTY__ (a bare JSON boolean or null) and __PULP_EMBED__ (a bare
@@ -131,4 +138,14 @@ if(NOT _existing STREQUAL _content)
     get_filename_component(_output_dir "${PULP_BUILD_INFO_OUTPUT}" DIRECTORY)
     file(MAKE_DIRECTORY "${_output_dir}")
     file(WRITE "${PULP_BUILD_INFO_OUTPUT}" "${_content}")
+endif()
+
+if(NOT "${PULP_BUILD_INFO_RETIRE_DIR}" STREQUAL "" AND IS_DIRECTORY "${PULP_BUILD_INFO_RETIRE_DIR}")
+    file(REMOVE
+        "${PULP_BUILD_INFO_RETIRE_DIR}/pulp-build-info.json"
+        "${PULP_BUILD_INFO_RETIRE_DIR}/pulp.plugin-runtime.json")
+    file(GLOB _retire_left LIST_DIRECTORIES TRUE "${PULP_BUILD_INFO_RETIRE_DIR}/*" "${PULP_BUILD_INFO_RETIRE_DIR}/.*")
+    if(NOT _retire_left)
+        file(REMOVE_RECURSE "${PULP_BUILD_INFO_RETIRE_DIR}")
+    endif()
 endif()

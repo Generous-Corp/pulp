@@ -27,6 +27,18 @@ if(APPLE AND NOT PULP_IOS)
             LABELS "cmake;ios"
             TIMEOUT 180)
 
+        # The ad-hoc signing check the iOS gate runs on the bundles it builds
+        # unsigned, against clang-built shallow and deep bundles: the layouts
+        # codesign rejects (a top-level Resources/ in a shallow bundle, data in
+        # Contents/MacOS) must fail it, the sealed ones must pass.
+        add_test(NAME apple-bundle-signing-check
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_apple_bundle_signing.py")
+        set_tests_properties(apple-bundle-signing-check PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "cmake;ios;signing"
+            TIMEOUT 180)
+
         # Shadow-mode identity of an iOS gate run: the digest over the gate's
         # input set + toolchain, the artifact lookup, and the annotation that
         # build.yml's Build step emits. No gating depends on it.
