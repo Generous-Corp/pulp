@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -212,6 +213,21 @@ inline std::optional<std::filesystem::path> verified_packaged_asset_file(
     return candidate;
 }
 
+// Pulp's own asset cache: where the importer stores network-fetched assets
+// (content-addressed under by-hash/) and derived art. It is chosen by the host
+// (PULP_IMPORT_ASSET_CACHE, else the per-user cache), never by a document.
+inline std::filesystem::path design_import_asset_cache_directory() {
+    if (const char* env = std::getenv("PULP_IMPORT_ASSET_CACHE"); env && *env)
+        return std::filesystem::path(env);
+#ifdef _WIN32
+    if (const char* local = std::getenv("LOCALAPPDATA"); local && *local)
+        return std::filesystem::path(local) / "Pulp" / "import-assets";
+#endif
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / ".pulp" / "import-assets";
+    return std::filesystem::temp_directory_path() / "pulp-import-assets";
+}
+
 // True when a manifest path names a location by a root this platform does not
 // share with the document: a drive letter (`C:x`, `C:\x`) or a UNC / network
 // prefix (`\\server`, `//server`). Checked on the raw text because a POSIX
@@ -245,10 +261,12 @@ inline bool asset_path_lexically_within(std::string_view raw, const std::filesys
 // it -- `..`, an absolute path, a drive or UNC root -- is refused by text,
 // before any lookup, so the refusal is identical whether or not a file is
 // there; a symlink pointing out is caught after the lookup. A declared SHA-256
-// does not admit an escaping path: the document controls that hash, so a
-// crafted manifest could name a well-known file and read or probe for it. The
-// only hash-gated recovery is verified_packaged_asset_file, which looks inside
-// the document's own assets/ directory. Without a document directory there is
+// alone does not admit an escaping path, because the document controls that
+// hash and could name a well-known file to read or probe for. The one root
+// outside the document that may be read is Pulp's own asset cache, chosen by
+// the host: an absolute path whose resolved file lies inside it AND hashes to
+// the declared SHA-256 loads, so a saved document that names a network asset
+// at its cache path keeps working. Without a document directory there is
 // nothing to escape.
 inline std::optional<std::filesystem::path>
 contained_asset_file(const IRAssetRef& asset, std::string_view raw,
@@ -265,6 +283,16 @@ contained_asset_file(const IRAssetRef& asset, std::string_view raw,
     if (asset_path_lexically_within(raw, asset_base_directory)) {
         auto found = existing_asset_file(candidate);
         if (!found || asset_path_within(*found, asset_base_directory))
+            return found;
+    } else if (!asset_path_names_foreign_root(raw) &&
+               std::filesystem::path(std::string(raw)).is_absolute()) {
+        // Only an absolute path may name the cache; a document-relative path
+        // that climbs into it is refused like any other escape.
+        // Root membership is decided on the resolved file against the resolved
+        // cache directory, never on the manifest's text.
+        if (auto found = existing_asset_file(candidate);
+            found && asset_path_within(*found, design_import_asset_cache_directory()) &&
+            asset_file_matches_declared_sha256(asset, *found))
             return found;
     }
     runtime::log_warn("design-import: asset '{}' refused — {} '{}' resolves outside the document "
