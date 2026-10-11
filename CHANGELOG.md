@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09470"></a>
+## [0.947.0] - 2026-10-11
+
+- release/version bump ([#10078](https://github.com/Generous-Corp/pulp/pull/10078))
+- fix/p16 migration note version ([#10070](https://github.com/Generous-Corp/pulp/pull/10070))
+
+<a id="v09460"></a>
+## [0.946.0] - 2026-10-11
+
+- feature/scripted ui time source ([#10051](https://github.com/Generous-Corp/pulp/pull/10051))
+- release/version bump ([#10069](https://github.com/Generous-Corp/pulp/pull/10069))
+- feature/vellum p13 android shell ([#10066](https://github.com/Generous-Corp/pulp/pull/10066))
+- feature/p15 audio only plugin ([#10054](https://github.com/Generous-Corp/pulp/pull/10054))
+- codex/sanitizer rtsan lsb release 2026 10 10 ([#10048](https://github.com/Generous-Corp/pulp/pull/10048))
+
 <a id="v09451"></a>
 ## [0.945.1] - 2026-10-11
 
@@ -10401,6 +10416,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.947.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.947.0
+[0.946.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.946.0
 [0.945.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.945.1
 [0.945.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.945.0
 [0.944.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.944.0

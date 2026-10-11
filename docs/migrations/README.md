@@ -17,9 +17,13 @@ docs/migrations/
 └── ...
 ```
 
-Names are advisory — the tooling identifies each file by the `version`
-field in its TOML frontmatter, not by the filename. Keep them in sync
-anyway to make grep easy.
+The tooling identifies each file by the `version` field in its TOML
+frontmatter. A file named `vX.Y.Z.md` must carry that same `version`;
+the generator fails the build otherwise, because a renamed note that
+kept its old `version` would be shown for the wrong upgrade. A
+non-empty `applies_if` must parse and must select exactly the hops that
+cross the note's own `version` (it must apply from `0.0.0` to
+`version`, and not from `0.0.0` to the release just before it).
 
 ## Frontmatter schema
 
