@@ -2310,6 +2310,7 @@
   "pulp-project-package-publish-helper",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
+  "pulp-render-provider-floor-wgpu-control",
   "pulp-sampler-cli-sidecar-probe",
   "pulp-sampler-heritage-render-wav",
   "pulp-sampler-render-wav",
