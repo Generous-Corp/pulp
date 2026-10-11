@@ -31,6 +31,12 @@ on a real PR. Do them in order.
      without a committed `.github/vellum-expansion-watch-events/` event FAILS
      (exit 10) and prints the exact JSON; or run
      `python3 tools/scripts/vellum_watch_preflight.py --write-event --rationale "..."`.
+   - **foundation include lint** — `foundation_include_lint.py` fails when a
+     file under `core/platform`, `core/runtime` or `core/simd` includes an
+     upper-layer `pulp/<area>/` header or a quoted relative path that resolves
+     outside those roots (it resolves through the foundation include dirs, the
+     way the compiler does). Put the code in the owning subsystem instead of
+     allowlisting it; a stale allowlist entry also fails.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
@@ -1728,6 +1734,10 @@ tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
 integration file back into the unit aggregate or remove that install step: the
 former exhausts the aggregate deadline before later tests run, while the latter
 turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
+Before regenerating `test/ctest_script_inputs.json` or
+`.shipyard/changed-surface-families.toml`, run that same locked install and
+reconfigure from the gate profile so both materialized-runtime tests remain
+registered.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:

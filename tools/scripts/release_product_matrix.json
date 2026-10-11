@@ -67,6 +67,8 @@
     "pulp-canvas",
     "pulp-dawproject-export",
     "pulp-dawproject-import",
+    "pulp-design-import",
+    "pulp-design-import-audio-pack",
     "pulp-events",
     "pulp-format",
     "pulp-format-clap-core",
