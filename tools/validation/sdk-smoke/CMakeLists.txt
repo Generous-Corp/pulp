@@ -283,10 +283,10 @@ if(TARGET Pulp::host)
 endif()
 
 # DESIGN.md parser export probe. yaml-cpp is intentionally absent from Pulp's
-# public headers, but the installed static view-core archive retains YAML
-# symbols. Link only Pulp::view-core here so its install interface must supply
-# that private implementation dependency, then run the executable so the proof
-# covers the parser rather than merely an unreferenced archive.
+# public headers, but the installed static design-import archive retains YAML
+# symbols. Link only Pulp::design-import here so its install interface must
+# supply that private implementation dependency, then run the executable so the
+# proof covers the parser rather than merely an unreferenced archive.
 if(TARGET Pulp::view-core)
     get_target_property(_pulp_view_core_definitions
         Pulp::view-core INTERFACE_COMPILE_DEFINITIONS)
@@ -308,10 +308,26 @@ int main() {
 ]=])
         add_executable(PulpSDKSmokeDesignMdProbe
             "${CMAKE_CURRENT_BINARY_DIR}/designmd_export_probe.cpp")
-        target_link_libraries(PulpSDKSmokeDesignMdProbe PRIVATE Pulp::view-core)
+        # The parser lives in Pulp::design-import (above view-core); an SDK
+        # built with design import exports it, so its absence is a packaging bug.
+        if(NOT TARGET Pulp::design-import)
+            message(FATAL_ERROR "Pulp::view-core reports PULP_HAS_DESIGN_IMPORT=1 "
+                "but the installed SDK exports no Pulp::design-import target")
+        endif()
+        target_link_libraries(PulpSDKSmokeDesignMdProbe PRIVATE Pulp::design-import)
         add_custom_command(TARGET PulpSDKSmokeDesignMdProbe POST_BUILD
             COMMAND "$<TARGET_FILE:PulpSDKSmokeDesignMdProbe>"
             COMMENT "Running installed-SDK DESIGN.md parser probe"
+            VERBATIM)
+
+        # The same parser through the umbrella alone: a consumer that links
+        # only Pulp::view keeps the importer without naming Pulp::design-import.
+        add_executable(PulpSDKSmokeDesignMdUmbrellaProbe
+            "${CMAKE_CURRENT_BINARY_DIR}/designmd_export_probe.cpp")
+        target_link_libraries(PulpSDKSmokeDesignMdUmbrellaProbe PRIVATE Pulp::view)
+        add_custom_command(TARGET PulpSDKSmokeDesignMdUmbrellaProbe POST_BUILD
+            COMMAND "$<TARGET_FILE:PulpSDKSmokeDesignMdUmbrellaProbe>"
+            COMMENT "Running installed-SDK DESIGN.md parser probe through Pulp::view"
             VERBATIM)
     endif()
     unset(_pulp_view_core_definitions)

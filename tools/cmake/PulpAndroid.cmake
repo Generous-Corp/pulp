@@ -146,7 +146,13 @@ function(pulp_wire_android_sources)
         )
     endif()
 
-    # -- Render: Vulkan backend + AChoreographer + View hierarchy --
+    # -- Render: Vulkan backend + AChoreographer --
+    # The Android app shell (gpu_surface_android.cpp and its JNI bridge) is NOT
+    # added here. It drives the view hierarchy, the widget bridge, the state
+    # store and the demo synth, so it is compiled into the pulp-jni shared
+    # library (root CMakeLists.txt), which links that whole closure. pulp-render
+    # keeps only the render-layer Android source, and the
+    # render-upward-edge-check ctest keeps it that way.
     if(TARGET pulp-render AND PULP_ENABLE_GPU)
         set(_android_render_dir "${CMAKE_SOURCE_DIR}/core/render/platform/android")
         if(EXISTS "${_android_render_dir}/choreographer_android.cpp")
@@ -154,34 +160,12 @@ function(pulp_wire_android_sources)
                 ${_android_render_dir}/choreographer_android.cpp
             )
         endif()
-        if(EXISTS "${_android_render_dir}/gpu_surface_android.cpp")
-            target_sources(pulp-render PRIVATE
-                ${_android_render_dir}/gpu_surface_android.cpp
-            )
-        endif()
-        # JNI `extern "C"` bridge — split out of gpu_surface_android.cpp.
-        # Forwards onto the android_* entry points.
-        if(EXISTS "${_android_render_dir}/gpu_surface_android_jni.cpp")
-            target_sources(pulp-render PRIVATE
-                ${_android_render_dir}/gpu_surface_android_jni.cpp
-            )
-        endif()
         target_link_libraries(pulp-render PRIVATE android log)
-        # View headers needed for rendering the widget hierarchy on Android
-        target_include_directories(pulp-render PRIVATE
-            ${CMAKE_SOURCE_DIR}/core/view/include
-            ${CMAKE_SOURCE_DIR}/core/platform/include
-            ${CMAKE_SOURCE_DIR}/core/signal/include
-            ${CMAKE_SOURCE_DIR}/core/simd/include
-            ${CMAKE_SOURCE_DIR}/core/state/include
-            ${CMAKE_SOURCE_DIR}/core/audio/include
-            ${CMAKE_SOURCE_DIR}/core/events/include
-            ${CMAKE_SOURCE_DIR}/core/midi/include
-            ${CMAKE_SOURCE_DIR}/core/format/include
-            ${CMAKE_SOURCE_DIR}/core/runtime/include
-            ${CMAKE_SOURCE_DIR}/core/canvas/include
-            ${CMAKE_SOURCE_DIR}/external/choc
-        )
+        # The Dawn surface/compute TUs live in pulp-gpu-device; give it the same
+        # NDK link it had while those TUs were part of pulp-render.
+        if(TARGET pulp-gpu-device)
+            target_link_libraries(pulp-gpu-device PRIVATE android log)
+        endif()
         target_compile_definitions(pulp-render PRIVATE PULP_VULKAN_BACKEND=1)
     endif()
 

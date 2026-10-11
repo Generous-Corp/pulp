@@ -166,6 +166,12 @@ public:
     /// already knows. See WidgetBridge::set_host_kind.
     void set_host_kind(std::string kind);
     const std::string& host_kind() const { return host_kind_; }
+    /// The clock script timers and performance.now() read (see
+    /// WidgetBridge::set_time_source). Kept by the session and applied to
+    /// every realm a load or reload builds, so a harness driving frames from
+    /// a fixed schedule keeps that clock across hot reloads. Empty restores
+    /// the steady clock.
+    void set_time_source(WidgetBridge::TimeSource source);
     /// Install the host-owned rebind run after a successful deferred
     /// Runtime.evaluate realm reset. The callback runs from poll(), after the
     /// replacement bridge is live and before that bridge pumps a frame. Hosts
@@ -320,6 +326,7 @@ private:
     bool root_released_ = false;
     std::function<void()> repaint_callback_;
     std::string host_kind_ = "unknown";
+    WidgetBridge::TimeSource time_source_;
     std::function<void()> post_evaluation_reset_callback_;
     bool post_evaluation_reset_callback_pending_ = false;
     LogCallback log_callback_;

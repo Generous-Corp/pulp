@@ -21,6 +21,8 @@ function(_pulp_pick_target out_var)
 endfunction()
 
 _pulp_pick_target(_PULP_FORMAT_TARGET Pulp::format pulp::format)
+_pulp_pick_target(_PULP_FORMAT_CORE_TARGET Pulp::format-core pulp::format-core)
+_pulp_pick_target(_PULP_FORMAT_CLAP_CORE_TARGET Pulp::format-clap-core pulp::format-clap-core)
 _pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
 _pulp_pick_target(_PULP_NATIVE_VIEW_TARGET Pulp::view-native pulp::view-native)
 _pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)

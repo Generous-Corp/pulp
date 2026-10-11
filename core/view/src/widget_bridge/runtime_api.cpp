@@ -227,7 +227,7 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
         auto delay_ms = std::chrono::milliseconds(static_cast<long long>(delay));
         WidgetBridge::PendingTimer t;
         t.id = id;
-        t.deadline = std::chrono::steady_clock::now() + delay_ms;
+        t.deadline = self.time_now() + delay_ms;
         t.interval = delay_ms;
         t.repeating = repeat;
         // Replace any prior schedule for this id (shouldn't happen, but
@@ -250,7 +250,7 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
 
     register_bridge_function(api, "__flushTimers__", [&self](choc::javascript::ArgumentList) {
         if (self.pending_timers_.empty()) return choc::value::Value();
-        auto now = std::chrono::steady_clock::now();
+        auto now = self.time_now();
         std::vector<int> to_fire;
         // Two-phase: first collect ids whose deadline has passed, then
         // fire them. Mutating pending_timers_ while iterating would lose
@@ -328,10 +328,10 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     );
 
     // performance.now() - high-resolution monotonic time in milliseconds.
-    register_bridge_function(api, "__performanceNow__", [](choc::javascript::ArgumentList) {
-        static auto start = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(now - start).count();
+    register_bridge_function(api, "__performanceNow__", [&self](choc::javascript::ArgumentList) {
+        double ms =
+            std::chrono::duration<double, std::milli>(self.time_now() - self.performance_epoch_)
+                .count();
         return choc::value::createFloat64(ms);
     });
 
@@ -342,6 +342,18 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     register_bridge_function(api, "hostKind", [&self](choc::javascript::ArgumentList) {
         return choc::value::createString(self.host_kind());
     });
+}
+
+// Script-visible time (timers, performance.now(), the rAF timestamp) reads
+// this clock; a harness on a fixed frame schedule installs its own source.
+// performance.now() restarts at zero for this bridge when the source changes.
+void WidgetBridge::set_time_source(TimeSource source) {
+    time_source_ = std::move(source);
+    performance_epoch_ = time_now();
+}
+
+std::chrono::steady_clock::time_point WidgetBridge::time_now() const {
+    return time_source_ ? time_source_() : std::chrono::steady_clock::now();
 }
 
 } // namespace pulp::view

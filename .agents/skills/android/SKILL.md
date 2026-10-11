@@ -589,6 +589,26 @@ removed. Android BLE-MIDI peripheral/advertising mode is out of scope.
 
 These are hard-won lessons from the bringup. Violating any of these will cause crashes or subtle bugs.
 
+### The Android app shell compiles into `pulp-jni`, not `pulp-render`
+
+`core/render/platform/android/gpu_surface_android.cpp` and its JNI bridge
+`gpu_surface_android_jni.cpp` are the Android app shell. They own the GPU
+surface, drive the view hierarchy and the widget bridge, read the state store
+and play the demo synth. They are compiled straight into the `pulp-jni` shared
+library (root `CMakeLists.txt`), the same way `jni_motion.cpp` is, because only
+that target links the whole closure. `pulp-render` keeps just
+`choreographer_android.cpp`, with no view/state/audio include directories. The
+`render-upward-edge-check` ctest fails if a renderer source includes above
+`pulp/{render,canvas,runtime,scene}`, if a CMake file adds a shell source back
+to `pulp-render`, or if a shell source stops being compiled into `pulp-jni`.
+The files stay under `core/render/platform/android/`, because the accepted Vellum
+cut manifest pins their paths; the separation is by target, not directory.
+
+`pulp-jni` also whole-archives `pulp-render` and `pulp-gpu-device` (the Dawn
+surface/compute archive below it) so the `.so` keeps every object those
+archives contribute. `PulpAndroid.cmake` gives `pulp-gpu-device` the same
+`android log` link.
+
 ### Platform Detection Order
 
 ```cpp
