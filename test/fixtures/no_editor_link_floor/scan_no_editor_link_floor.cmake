@@ -88,10 +88,17 @@ foreach(_fmt VST3 CLAP AU LV2)
                 "NO_EDITOR ${_fmt} module contains ${_n} '${_name}' symbols: ${${_fmt}}")
         endif()
     endforeach()
+    # Runtimes are staged beside the module. That directory belongs to this
+    # module only inside a bundle (<name>.clap/Contents/MacOS); a flat output
+    # directory such as build/VST3 on Linux is shared with every other plug-in,
+    # whose staged runtime says nothing about this one. There the dependency
+    # scan above is the check.
     get_filename_component(_dir "${${_fmt}}" DIRECTORY)
-    file(GLOB _staged "${_dir}/libwgpu_native*")
-    if(_staged)
-        message(FATAL_ERROR "NO_EDITOR ${_fmt} module staged a GPU runtime: ${_staged}")
+    if(_dir MATCHES "\\.(vst3|clap|component|lv2)/Contents/")
+        file(GLOB _staged "${_dir}/libwgpu_native*")
+        if(_staged)
+            message(FATAL_ERROR "NO_EDITOR ${_fmt} module staged a GPU runtime: ${_staged}")
+        endif()
     endif()
     file(SIZE "${${_fmt}}" _size)
     message(STATUS "NO_EDITOR ${_fmt}: clean (${_size} bytes)")
