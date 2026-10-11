@@ -36,6 +36,7 @@ concurrency:
 
 jobs:
   native:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     strategy:
       fail-fast: false
       matrix:

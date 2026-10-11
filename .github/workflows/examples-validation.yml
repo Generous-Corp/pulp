@@ -39,6 +39,7 @@ permissions:
 jobs:
   changes:
     name: Detect example changes
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     # Advisory bookkeeping must never wait behind the required macOS gate.
     runs-on: ubuntu-latest
     outputs:
@@ -101,6 +102,7 @@ jobs:
 
   resolve-advisory-macos:
     name: Resolve isolated advisory macOS runner
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     outputs:
       selector_json: ${{ steps.resolve.outputs.selector_json }}

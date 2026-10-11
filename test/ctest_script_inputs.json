@@ -9260,15 +9260,6 @@
    ],
    "kind": "python"
   },
-  "advisory-dispatch-selftest": {
-   "entry": "tools/scripts/test_dispatch_advisory_lanes.py",
-   "inputs": [
-    "tools/cli/cmd_pr.cpp",
-    "tools/scripts/dispatch_advisory_lanes.sh",
-    "tools/scripts/test_dispatch_advisory_lanes.py"
-   ],
-   "kind": "python"
-  },
   "source-selftest-lane-selftest": {
    "entry": "tools/ci/test_source_selftests.py",
    "inputs": [

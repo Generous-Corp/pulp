@@ -35,6 +35,7 @@ concurrency:
 jobs:
   x86_64-build-test:
     name: x86_64 build + test (Rosetta, advisory)
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     # Fork PRs run on the same free GitHub-hosted runner; only skip scheduled
     # noise on forks (this workflow has no schedule, so the guard is a no-op
     # today and kept for parity with the nightly).
