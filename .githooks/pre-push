@@ -30,9 +30,11 @@ cd "$ROOT" || exit 0
 
 # Always compare against a fresh main tip.  The merge-tree check below is
 # deliberately script-only and bounded; compiled checks remain later gates.
-if ! git fetch --quiet origin main; then
-    echo "[pre-push] could not refresh origin/main; refusing to validate a stale base." >&2
-    exit 2
+if git remote get-url origin >/dev/null 2>&1; then
+    if ! git fetch --quiet origin main; then
+        echo "[pre-push] could not refresh origin/main; refusing to validate a stale base." >&2
+        exit 2
+    fi
 fi
 
 # Git exports GIT_DIR / GIT_WORK_TREE (and friends) into hook environments.

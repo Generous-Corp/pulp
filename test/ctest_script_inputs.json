@@ -6944,6 +6944,7 @@
     ".githooks/lib",
     ".githooks/pre-push",
     "tools/scripts",
+    "tools/scripts/merge_tree_script_state.py",
     "tools/scripts/refresh_push_check.py",
     "tools/scripts/test_refresh_push_check.py"
    ],

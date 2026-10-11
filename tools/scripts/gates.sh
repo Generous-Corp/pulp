@@ -85,9 +85,11 @@ if [ -z "$ROOT" ]; then
 fi
 cd "$ROOT" || exit 2
 
-if ! git fetch --quiet origin main; then
-    echo "gates.sh: could not refresh origin/main; refusing to validate a stale base" >&2
-    exit 2
+if git remote get-url origin >/dev/null 2>&1; then
+    if ! git fetch --quiet origin main; then
+        echo "gates.sh: could not refresh origin/main; refusing to validate a stale base" >&2
+        exit 2
+    fi
 fi
 
 PYTHON="${PYTHON:-python3}"
