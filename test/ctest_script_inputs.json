@@ -3174,6 +3174,14 @@
    ],
    "kind": "shell"
   },
+  "archive-symbol-closure-selftest": {
+   "entry": "tools/scripts/test_archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/test_archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
   "audio-glitch-trace-selftest": {
    "entry": "tools/audio/test_glitch_trace.py",
    "inputs": [
@@ -3636,6 +3644,7 @@
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
     "test/fixtures",
@@ -7115,6 +7124,13 @@
    ],
    "kind": "python"
   },
+  "pulp-state-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
   "pulp-test-data-cmake-selftest": {
    "entry": "tools/scripts/test_pulp_test_data_cmake.py",
    "inputs": [
@@ -8726,6 +8742,7 @@
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
     "test/fixtures",

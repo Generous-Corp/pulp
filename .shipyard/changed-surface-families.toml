@@ -292,6 +292,45 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-1105a6e9aea7"
+paths = ["tools/scripts/archive_symbol_closure_check.py"]
+tests = [
+  "archive-symbol-closure-selftest",
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "pulp-state-symbol-closure",
+  "reuse-policy-replay-selftest",
+]
+build_targets = [
+  "pulp-audio",
+  "pulp-cli",
+  "pulp-content",
+  "pulp-events",
+  "pulp-midi",
+  "pulp-runtime",
+  "pulp-sample-bank-manifest",
+  "pulp-state",
+]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-09d7ee9c1ce3"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
@@ -1073,6 +1112,35 @@ name = "script-readers-b07c05ee330f"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-d00128fdcec3"
+paths = ["tools/scripts/test_archive_symbol_closure_check.py"]
+tests = [
+  "archive-symbol-closure-selftest",
   "build-parallelism-guard",
   "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
@@ -5566,6 +5634,7 @@ name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
   "tools/scripts/action_pin_lint.py",
+  "tools/scripts/archive_symbol_closure_check.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -5663,6 +5732,7 @@ paths = [
   "tools/scripts/test_android_premerge_probe.py",
   "tools/scripts/test_android_target.py",
   "tools/scripts/test_api_contracts_workflow.py",
+  "tools/scripts/test_archive_symbol_closure_check.py",
   "tools/scripts/test_audit_top_level.py",
   "tools/scripts/test_auto_release_decision_extra.py",
   "tools/scripts/test_bench_diff.py",
@@ -6101,6 +6171,7 @@ name = "script-surface-environment-bound"
 paths = [
   ".agents/skills/*/SKILL.md",
   "tools/scripts/action_pin_lint.py",
+  "tools/scripts/archive_symbol_closure_check.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -6198,6 +6269,7 @@ paths = [
   "tools/scripts/test_android_premerge_probe.py",
   "tools/scripts/test_android_target.py",
   "tools/scripts/test_api_contracts_workflow.py",
+  "tools/scripts/test_archive_symbol_closure_check.py",
   "tools/scripts/test_audit_top_level.py",
   "tools/scripts/test_auto_release_decision_extra.py",
   "tools/scripts/test_bench_diff.py",
