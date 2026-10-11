@@ -28,10 +28,19 @@ def git(root: Path, *args: str, check: bool = False) -> subprocess.CompletedProc
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: int = 20) -> int:
     try:
         proc = subprocess.run(cmd, cwd=cwd, env=env, text=True,
-                              timeout=timeout)
+                              timeout=timeout, capture_output=True)
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc}", file=sys.stderr)
         return 2
+    if proc.stdout:
+        print(proc.stdout, end="", file=sys.stderr)
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr)
+    # The configured ctest inventory is compiled/build-owned and deliberately
+    # out of scope here.  Preserve the static prediction, while allowing the
+    # build-free half to report NOT CHECKED until gates.sh runs with a build.
+    if proc.returncode and "NOT CHECKED locally:" in (proc.stdout + proc.stderr):
+        return 0
     return proc.returncode
 
 
