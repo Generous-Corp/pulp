@@ -20,6 +20,8 @@
 #include "tools/import-design/browser_capture_ir.hpp"
 #include "tools/import-design/browser_capture_tree.hpp"
 
+#include <pulp/view/design_ir_io.hpp>
+
 #include <algorithm>
 #include <array>
 #include <filesystem>

@@ -257,7 +257,7 @@ std::string read_surface_source(const std::string& root, const Surface& surface)
 }
 
 void require_cpp_surface_matches_cmake(const std::string& root) {
-    const auto cmake = read_file(root + "core/view/cmake/PulpViewSources.cmake");
+    const auto cmake = read_file(root + "core/view/cmake/PulpDesignUnits.cmake");
     const std::regex source_pattern(R"((src/design_cpp_[A-Za-z0-9_]+\.cpp))");
     std::set<std::string> registered;
     for (std::sregex_iterator it(cmake.begin(), cmake.end(), source_pattern), end; it != end; ++it)
@@ -270,7 +270,7 @@ void require_cpp_surface_matches_cmake(const std::string& root) {
     const std::set<std::string> guarded(cpp->paths.begin(), cpp->paths.end());
 
     INFO("The C++ parity surface must exactly match the exporter sources registered "
-         "in core/view/cmake/PulpViewSources.cmake");
+         "in core/view/cmake/PulpDesignUnits.cmake");
     REQUIRE(guarded == registered);
 }
 
