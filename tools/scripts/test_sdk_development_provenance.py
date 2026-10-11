@@ -102,6 +102,10 @@ class AdoptionTest(unittest.TestCase):
         with self.assertRaisesRegex(tool.ProvenanceError, 'cache source'):
             self.inspect()
 
+    def test_windows_crlf_cache_paths_are_normalized(self):
+        self.cache.write_bytes(self.cache.read_bytes().replace(b'\n', b'\r\n'))
+        self.assertEqual(self.inspect()['build_type'], 'Release')
+
     def test_config_drift_rejected(self):
         (self.prefix / 'lib/cmake/Pulp/PulpConfig.cmake').write_text('wrong config')
         with self.assertRaisesRegex(tool.ProvenanceError, 'package config drift'):

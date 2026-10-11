@@ -73,7 +73,11 @@ def inspect(source, build, prefix, sha):
     require(git(source, 'rev-parse', 'HEAD') == sha, 'source HEAD drift')
     require(not git(source, 'status', '--porcelain', '--untracked-files=no'), 'dirty source')
     cache_bytes = (build / 'CMakeCache.txt').read_bytes()
-    cache = dict(re.findall(r'^([A-Za-z_][A-Za-z0-9_]*):[^=\n]+=(.*)$', cache_bytes.decode(), re.M))
+    # CMake writes CRLF on Windows. Normalize before parsing so path values do
+    # not retain a trailing ``\r`` and fail the exact source/build identity
+    # checks below. The raw cache bytes remain hashed unchanged for provenance.
+    cache_text = cache_bytes.decode().replace('\r\n', '\n')
+    cache = dict(re.findall(r'^([A-Za-z_][A-Za-z0-9_]*):[^=\n]+=(.*)$', cache_text, re.M))
     require(Path(cache['CMAKE_HOME_DIRECTORY']).resolve() == source, 'cache source mismatch')
     require(Path(cache['CMAKE_CACHEFILE_DIR']).resolve() == build, 'cache build mismatch')
     require(cache['CMAKE_BUILD_TYPE'] == 'Release', 'Release build required')
