@@ -200,8 +200,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
                 text = full.read_text(encoding="utf-8", errors="replace")
                 for line_no, line in enumerate(text.splitlines(), 1):
                     if re.search(r"#\s*include\s*[<\"]pulp/(?:audio|signal|host|midi|format|content)/", line, re.I):
-                        if path not in args.allow_include_path and not any(path.startswith(prefix) for prefix in args.allow_include_prefix):
-                            violations.append(f"forbidden include {path}:{line_no}: {line.strip()}")
+                        violations.append(f"forbidden include {path}:{line_no}: {line.strip()}")
         status = "PASS" if not violations else ("REPORT-ONLY" if args.report_only else "FAIL")
         print(f"{name}: {status}")
         for violation in violations:
@@ -230,16 +229,14 @@ def cmd_export(args: argparse.Namespace) -> int:
     manifests = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.manifest]
     repo = Path(args.repo).resolve()
     out = Path(args.output).resolve()
-    if out.exists() and any(out.iterdir()) and not args.existing_output:
+    if out.exists() and any(out.iterdir()):
         raise SystemExit(f"output must be empty: {out}")
     out.parent.mkdir(parents=True, exist_ok=True)
     filter_repo = shutil.which("git-filter-repo") or shutil.which("git-filter-repo.py")
     if not filter_repo:
         raise SystemExit("git-filter-repo is required for export; refusing fallback projection")
     paths = sorted({p for manifest in manifests for p in manifest["files"] if not p.startswith("@build/")})
-    if not args.existing_output:
-        clone_flags = [] if args.local_clone else ["--no-local"]
-        subprocess.run(["git", "clone", *clone_flags, str(repo), str(out)], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "clone", "--no-local", str(repo), str(out)], check=True, stdout=subprocess.DEVNULL)
     mirror_root = args.mirror_root.strip("/")
     if not mirror_root or mirror_root.startswith("@"):
         raise SystemExit("mirror-root must be a non-empty repository-relative directory")
@@ -300,9 +297,6 @@ def cmd_export(args: argparse.Namespace) -> int:
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     if args.dry_run:
-        # Dry-run receipts are explicitly non-landing artifacts.  The marker
-        # makes accidental promotion fail closed while retaining the v2
-        # receipt shape for review tooling.
         receipt["dry_run"] = True
     receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -334,8 +328,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append", required=True); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
-    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
-    p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--local-clone", action="store_true"); p.add_argument("--existing-output", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
+    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
+    p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
     args = parser.parse_args()
     return args.func(args)

@@ -17,6 +17,7 @@
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/recognition_audio_pack.hpp>
 #include <pulp/view/recognition_resolver.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -106,7 +107,7 @@ TEST_CASE("recognition manifest wires a third-party design's own component keys"
     // The component identity survived the parse (parse_ir_node stamps it).
     REQUIRE(node->attributes.at("figmaComponentKey") == "abc123designerkey");
 
-    auto resolver = RecognitionResolver::with_builtin_library();
+    auto resolver = recognition_resolver_with_builtin_library();
     std::string err;
     auto src = RecognitionResolver::parse_manifest_json(user_manifest, "user-manifest", &err);
     REQUIRE(err.empty());
@@ -142,7 +143,7 @@ TEST_CASE("recognition manifest name-prefix fallback wires when the key differs"
     auto ir = parse_figma_plugin_json(
         third_party_envelope("a_DIFFERENT_instance_key", "Studio / BigFader Large"));
 
-    auto resolver = RecognitionResolver::with_builtin_library();
+    auto resolver = recognition_resolver_with_builtin_library();
     std::string err;
     auto src = RecognitionResolver::parse_manifest_json(user_manifest, "user-manifest", &err);
     REQUIRE(src.has_value());
@@ -164,7 +165,7 @@ TEST_CASE("without a manifest, a third-party component is left unrecognized and 
     auto ir = parse_figma_plugin_json(
         third_party_envelope("unknown_designer_key", "InkSignal / NumberBox"));
 
-    auto resolver = RecognitionResolver::with_builtin_library();
+    auto resolver = recognition_resolver_with_builtin_library();
     std::vector<UnmatchedComponent> unmatched;
     const int wired = apply_recognition_resolver(ir.root, resolver, &unmatched);
 
@@ -185,7 +186,7 @@ TEST_CASE("the built-in Pulp Library key still resolves with no user manifest",
     auto ir = parse_figma_plugin_json(third_party_envelope(
         "f74264ffa9108521fb0d3398dc8f5ea88e23a84e", "Pulp / Knob", "Gain"));
 
-    auto resolver = RecognitionResolver::with_builtin_library();
+    auto resolver = recognition_resolver_with_builtin_library();
     std::vector<UnmatchedComponent> unmatched;
     const int wired = apply_recognition_resolver(ir.root, resolver, &unmatched);
 
@@ -221,7 +222,7 @@ TEST_CASE("an already-recognized widget is never overridden by the resolver",
     auto ir = parse_figma_plugin_json(envelope);
     REQUIRE(first_child(ir.root)->audio_widget == AudioWidgetType::meter);
 
-    auto resolver = RecognitionResolver::with_builtin_library();
+    auto resolver = recognition_resolver_with_builtin_library();
     std::string err;
     auto src = RecognitionResolver::parse_manifest_json(user_manifest, "user-manifest", &err);
     REQUIRE(src.has_value());
@@ -237,7 +238,7 @@ TEST_CASE("an already-recognized widget is never overridden by the resolver",
 TEST_CASE("user-manifest source overrides the built-in on a key collision",
           "[view][import][recognition][issue-4676]") {
     // The user maps the built-in KNOB key to a fader. Later sources win.
-    auto resolver = RecognitionResolver::with_builtin_library();
+    auto resolver = recognition_resolver_with_builtin_library();
     const std::string user_manifest = R"({
         "widgets": {
             "override": {
@@ -323,7 +324,7 @@ TEST_CASE("the built-in recognition table matches library-manifest.json",
     REQUIRE(json.hasObjectMember("widgets"));
     auto widgets = json["widgets"];
 
-    auto resolver = RecognitionResolver::with_builtin_library();
+    auto resolver = recognition_resolver_with_builtin_library();
 
     for (uint32_t i = 0; i < widgets.size(); ++i) {
         const auto member = widgets.getObjectMemberAt(i);
@@ -399,7 +400,7 @@ TEST_CASE("installed-package design_controls merge into the resolver and resolve
     REQUIRE(pkg.sources.size() == 1);
     REQUIRE(pkg.sources[0].name == "acme-controls");
 
-    auto resolver = RecognitionResolver::with_builtin_library();
+    auto resolver = recognition_resolver_with_builtin_library();
     for (auto& s : pkg.sources) resolver.add_source(std::move(s));
 
     auto ir = parse_figma_plugin_json(

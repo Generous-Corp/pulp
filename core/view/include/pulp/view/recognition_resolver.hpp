@@ -24,6 +24,8 @@
 /// `→ factory_id`) table, with later sources MERGED OVER earlier ones on key
 /// collision. The built-in library is always source 0 (lowest precedence); the
 /// user manifest is added over it; package fragments will be added over both.
+/// The built-in library's audio-control rules are a Pulp-owned pack
+/// (recognition_audio_pack.hpp); this module is the generic merge layer.
 ///
 /// ── Authoritative lane ──────────────────────────────────────────────────────
 /// The C++ figma-plugin lane (design_import.cpp::parse_figma_plugin_json) is the
@@ -101,13 +103,6 @@ const char* audio_widget_kind_to_manifest_id(AudioWidgetType kind);
 ///   2. name_prefix case-insensitive prefix match (fallback). Later sources win.
 class RecognitionResolver {
 public:
-    /// Seed source 0 with the built-in Pulp Figma Library
-    /// (library-manifest.json), so the built-in path is always authoritative
-    /// when no user manifest overrides a key. This mirrors the manifest shape in
-    /// code so the C++ importer can re-resolve keys without reading the JSON at
-    /// runtime; the table is verified against the JSON by a unit test.
-    static RecognitionResolver with_builtin_library();
-
     /// Empty resolver (no built-in seed) — used by tests and by callers that
     /// want full control over the source list.
     RecognitionResolver() = default;
