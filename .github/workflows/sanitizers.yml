@@ -532,6 +532,9 @@ jobs:
             git fetch --no-tags --depth=1 origin \
               "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
           else
+            if [ -f .git/shallow ]; then
+              git fetch --no-tags --unshallow origin
+            fi
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
             protected_base="$(git merge-base HEAD origin/main)"
             git update-ref refs/remotes/origin/main "$protected_base"
