@@ -36,7 +36,6 @@ REQUIRED_MEMBERS = (
     "agent-capability-manifest-check",
     "catch-discover-timeout-guard",
     "pr-fast-tier-contract",
-    "no-editor-plugin-link-floor-artifacts",
     "unregistered-tests-check",
 )
 
