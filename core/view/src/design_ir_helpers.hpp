@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -212,23 +213,91 @@ inline std::optional<std::filesystem::path> verified_packaged_asset_file(
     return candidate;
 }
 
-// The file a document-loaded asset may read at `candidate`. A document names
-// its assets relative to its own directory; a path that leaves it (`..`, an
-// absolute path, a symlink pointing out) is honoured only when its bytes match
-// the declared SHA-256, so a crafted manifest cannot paint an arbitrary file
-// from the host. Without a document directory there is nothing to escape.
+// Pulp's own asset cache: where the importer stores network-fetched assets
+// (content-addressed under by-hash/) and derived art. It is chosen by the host
+// (PULP_IMPORT_ASSET_CACHE, else the per-user cache), never by a document.
+inline std::filesystem::path design_import_asset_cache_directory() {
+    if (const char* env = std::getenv("PULP_IMPORT_ASSET_CACHE"); env && *env)
+        return std::filesystem::path(env);
+#ifdef _WIN32
+    if (const char* local = std::getenv("LOCALAPPDATA"); local && *local)
+        return std::filesystem::path(local) / "Pulp" / "import-assets";
+#endif
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / ".pulp" / "import-assets";
+    return std::filesystem::temp_directory_path() / "pulp-import-assets";
+}
+
+// True when a manifest path names a location by a root this platform does not
+// share with the document: a drive letter (`C:x`, `C:\x`) or a UNC / network
+// prefix (`\\server`, `//server`). Checked on the raw text because a POSIX
+// filesystem path would otherwise read `C:x` as an ordinary file name.
+inline bool asset_path_names_foreign_root(std::string_view raw) {
+    const bool drive = raw.size() >= 2 && raw[1] == ':' &&
+                       ((raw[0] >= 'A' && raw[0] <= 'Z') || (raw[0] >= 'a' && raw[0] <= 'z'));
+    const bool unc =
+        raw.size() >= 2 && (raw[0] == '\\' || raw[0] == '/') && (raw[1] == '\\' || raw[1] == '/');
+    return drive || unc;
+}
+
+// True when `raw`, resolved against `root` by text alone, stays inside it:
+// backslashes are read as separators, `.` and `..` are folded, and no
+// filesystem lookup happens, so the answer cannot depend on whether a file
+// exists or appears later.
+inline bool asset_path_lexically_within(std::string_view raw, const std::filesystem::path& root) {
+    if (asset_path_names_foreign_root(raw))
+        return false;
+    std::string text(raw);
+    std::replace(text.begin(), text.end(), '\\', '/');
+    std::filesystem::path path(text);
+    const auto base = root.lexically_normal();
+    const auto joined = (path.is_absolute() ? path : base / path).lexically_normal();
+    const auto relative = joined.lexically_relative(base);
+    return !relative.empty() && relative.is_relative() && *relative.begin() != "..";
+}
+
+// The file a document-loaded asset may read for the manifest text `raw`. A
+// document names its assets relative to its own directory. A path that leaves
+// it -- `..`, an absolute path, a drive or UNC root -- is refused by text,
+// before any lookup, so the refusal is identical whether or not a file is
+// there; a symlink pointing out is caught after the lookup. A declared SHA-256
+// alone does not admit an escaping path, because the document controls that
+// hash and could name a well-known file to read or probe for. The one root
+// outside the document that may be read is Pulp's own asset cache, chosen by
+// the host: an absolute path whose resolved file lies inside it AND hashes to
+// the declared SHA-256 loads, so a saved document that names a network asset
+// at its cache path keeps working. Without a document directory there is
+// nothing to escape.
 inline std::optional<std::filesystem::path>
-contained_asset_file(const IRAssetRef& asset, const std::filesystem::path& candidate,
+contained_asset_file(const IRAssetRef& asset, std::string_view raw,
                      const std::filesystem::path& asset_base_directory, std::string_view field) {
-    auto found = existing_asset_file(candidate);
-    if (!found || asset_base_directory.empty())
-        return found;
-    if (asset_path_within(*found, asset_base_directory) ||
-        asset_file_matches_declared_sha256(asset, *found))
-        return found;
+    std::filesystem::path candidate{std::string(raw)};
+    if (candidate.is_relative() && !asset_base_directory.empty())
+        candidate = asset_base_directory / candidate;
+    if (asset_base_directory.empty())
+        return existing_asset_file(candidate);
+    // Look up the same text-folded path the containment check judged, so a
+    // `..` is never resolved through a directory that does not exist or a
+    // symlink the check did not see.
+    candidate = candidate.lexically_normal();
+    if (asset_path_lexically_within(raw, asset_base_directory)) {
+        auto found = existing_asset_file(candidate);
+        if (!found || asset_path_within(*found, asset_base_directory))
+            return found;
+    } else if (!asset_path_names_foreign_root(raw) &&
+               std::filesystem::path(std::string(raw)).is_absolute()) {
+        // Only an absolute path may name the cache; a document-relative path
+        // that climbs into it is refused like any other escape.
+        // Root membership is decided on the resolved file against the resolved
+        // cache directory, never on the manifest's text.
+        if (auto found = existing_asset_file(candidate);
+            found && asset_path_within(*found, design_import_asset_cache_directory()) &&
+            asset_file_matches_declared_sha256(asset, *found))
+            return found;
+    }
     runtime::log_warn("design-import: asset '{}' refused — {} '{}' resolves outside the document "
-                      "directory '{}' and does not match a declared sha256",
-                      asset.asset_id, field, candidate.generic_string(),
+                      "directory '{}'",
+                      asset.asset_id, field, std::string(raw),
                       asset_base_directory.generic_string());
     return std::nullopt;
 }
@@ -264,8 +333,7 @@ inline std::vector<std::filesystem::path> asset_search_roots(
 // The readable file backing a manifest asset, or nullopt when none of the
 // candidates exist. Order: the recorded local_path (absolute, or relative to
 // the document directory), then a `file://` original_uri — each confined to
-// the document directory unless its bytes match the declared SHA-256 (see
-// contained_asset_file) — then the
+// the document directory (see contained_asset_file) — then the
 // content-addressed `<hash><ext>` under each search root. Recovering by hash
 // is logged — a manifest path that no longer points at its bytes is a defect
 // upstream, and one diagnosable line is what keeps it from reading as a
@@ -274,16 +342,13 @@ inline std::optional<std::filesystem::path> resolve_asset_file(
     const IRAssetRef& asset,
     const std::filesystem::path& asset_base_directory = {}) {
     if (asset.local_path && !asset.local_path->empty()) {
-        auto path = std::filesystem::path(*asset.local_path);
-        if (path.is_relative() && !asset_base_directory.empty())
-            path = asset_base_directory / path;
-        if (auto found = contained_asset_file(asset, path, asset_base_directory, "local_path"))
+        if (auto found =
+                contained_asset_file(asset, *asset.local_path, asset_base_directory, "local_path"))
             return found;
     }
     if (asset.original_uri.rfind("file://", 0) == 0) {
-        if (auto found =
-                contained_asset_file(asset, std::filesystem::path(asset.original_uri.substr(7)),
-                                     asset_base_directory, "original_uri"))
+        if (auto found = contained_asset_file(asset, std::string_view(asset.original_uri).substr(7),
+                                              asset_base_directory, "original_uri"))
             return found;
     }
 
