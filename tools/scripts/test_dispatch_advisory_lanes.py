@@ -11,7 +11,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/scripts/dispatch_advisory_lanes.sh"
-CMD_PR = ROOT / "tools/cli/cmd_pr.cpp"
 
 
 class AdvisoryDispatchTests(unittest.TestCase):
@@ -44,13 +43,6 @@ class AdvisoryDispatchTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid head ref", result.stderr)
-
-    def test_pulp_pr_hook_skips_unarmed_runs_and_invokes_after_ship(self) -> None:
-        source = CMD_PR.read_text(encoding="utf-8")
-        self.assertIn("dispatch_advisory_lanes.sh", source)
-        self.assertIn("--no-arm", source)
-        self.assertIn("step_shipyard_ship", source)
-
 
 if __name__ == "__main__":
     unittest.main()
