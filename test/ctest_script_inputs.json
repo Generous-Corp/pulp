@@ -9270,6 +9270,7 @@
   "status-tone-signal-lint": {
    "entry": "tools/scripts/status_tone_signal_lint.py",
    "inputs": [
+    "core/view/audio/src",
     "core/view/src",
     "tools/scripts/status_tone_signal_lint.py"
    ],
@@ -9278,6 +9279,8 @@
   "status-tone-signal-lint-selftest": {
    "entry": "tools/scripts/test_status_tone_signal_lint.py",
    "inputs": [
+    "core/view/audio/src",
+    "core/view/src",
     "tools/scripts/test_status_tone_signal_lint.py"
    ],
    "kind": "python"
@@ -9590,6 +9593,8 @@
   "token-key-correctness": {
    "entry": "tools/scripts/token_key_check.py",
    "inputs": [
+    "core/view/audio/src",
+    "core/view/audio/src/widgets",
     "core/view/src",
     "core/view/src/theme_presets.cpp",
     "core/view/src/widgets",
