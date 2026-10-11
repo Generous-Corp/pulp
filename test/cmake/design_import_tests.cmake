@@ -60,3 +60,48 @@ set_tests_properties(agent-panel-clipped-is-rejected PROPERTIES
     RESOURCE_LOCK browser
     TIMEOUT 600
     SKIP_RETURN_CODE 77)
+
+# Design-unit boundary. pulp-design-ir (value types) sits below view-core;
+# pulp-design-import (importers, codegen) and the Pulp-owned audio-control
+# recognition pack sit above it. The files share core/view, so the boundary is
+# recorded only in the targets' file lists and link edges: configure writes
+# those resolved properties here and the gate checks link edges plus direct
+# includes. The unit test drives the same gate over synthetic trees with one
+# injected violation each, so a gate that cannot see a violation fails there.
+set(_pulp_design_unit_targets pulp-design-ir pulp-view-core)
+if(TARGET pulp-design-import)
+    list(APPEND _pulp_design_unit_targets pulp-design-import pulp-design-import-audio-pack)
+endif()
+set(_pulp_design_unit_manifest_content "")
+foreach(_unit IN LISTS _pulp_design_unit_targets)
+    foreach(_field_property IN ITEMS
+            "type=TYPE" "source_dir=SOURCE_DIR" "sources=SOURCES"
+            "links=LINK_LIBRARIES" "interface_links=INTERFACE_LINK_LIBRARIES"
+            "headers=PULP_UNIT_HEADERS")
+        string(REPLACE "=" ";" _pair "${_field_property}")
+        list(GET _pair 0 _field)
+        list(GET _pair 1 _property)
+        string(APPEND _pulp_design_unit_manifest_content
+            "${_unit}\t${_field}\t$<TARGET_PROPERTY:${_unit},${_property}>\n")
+    endforeach()
+endforeach()
+# `.txt`: a configure-written build-tree input with any other extension reads to
+# changed_surface_script_families.py as a build product no target owns, which
+# would leave the checker script unmapped.
+set(_pulp_design_unit_manifest "${CMAKE_BINARY_DIR}/design-unit-boundary/manifest.txt")
+file(GENERATE OUTPUT "${_pulp_design_unit_manifest}"
+    CONTENT "${_pulp_design_unit_manifest_content}")
+add_test(
+    NAME design-unit-boundary
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/design_unit_boundary_check.py"
+        --manifest "${_pulp_design_unit_manifest}")
+set_tests_properties(design-unit-boundary PROPERTIES LABELS "parser-import;contract")
+add_test(
+    NAME design-unit-boundary-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_design_unit_boundary_check.py")
+set_tests_properties(design-unit-boundary-selftest PROPERTIES LABELS "parser-import;contract")
+unset(_pulp_design_unit_targets)
+unset(_pulp_design_unit_manifest_content)
+unset(_pulp_design_unit_manifest)

@@ -1323,7 +1323,7 @@
     "test/test_design_import_parity.cpp"
    ],
    "inputs": [
-    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/cmake/PulpDesignUnits.cmake",
     "core/view/include/pulp/view/design_ir.hpp",
     "core/view/src"
    ],
@@ -2850,7 +2850,6 @@
   "pulp-test-synthesiser",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
-  "pulp-test-threejs-bridge",
   "pulp-test-tilt-eq",
   "pulp-test-tilt-eq-no-exceptions",
   "pulp-test-timebase-groove-kernels",
@@ -4329,6 +4328,21 @@
    ],
    "kind": "python"
   },
+  "design-unit-boundary": {
+   "entry": "tools/scripts/design_unit_boundary_check.py",
+   "inputs": [
+    "tools/scripts/design_unit_boundary_check.py"
+   ],
+   "kind": "python"
+  },
+  "design-unit-boundary-selftest": {
+   "entry": "tools/scripts/test_design_unit_boundary_check.py",
+   "inputs": [
+    "tools/scripts/design_unit_boundary_check.py",
+    "tools/scripts/test_design_unit_boundary_check.py"
+   ],
+   "kind": "python"
+  },
   "diff-cover-targets-selftest": {
    "entry": "tools/scripts/test_diff_cover_targets.py",
    "inputs": [
@@ -4404,6 +4418,18 @@
     "tools/ci/drift_fast.py",
     "tools/ci/test_drift_fast.py",
     "tools/scripts/hydrate_gpu_provenance_commits.py"
+   ],
+   "kind": "python"
+  },
+  "dsp-capability-registry-selftest": {
+   "entry": "tools/scripts/test_dsp_capability_registry.py",
+   "inputs": [
+    "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
+    "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+    "core/host/src/forge_dynamics_catalog.cpp",
+    "docs/status/dsp-capabilities.json",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/test_dsp_capability_registry.py"
    ],
    "kind": "python"
   },
@@ -4663,6 +4689,29 @@
     "tools/scripts/test_format_changed.sh"
    ],
    "kind": "shell"
+  },
+  "foundation-include-lint": {
+   "entry": "tools/scripts/foundation_include_lint.py",
+   "inputs": [
+    "core/platform",
+    "core/platform/src/android/jni_motion.cpp",
+    "core/runtime",
+    "core/simd",
+    "tools/scripts/foundation_include_lint.py"
+   ],
+   "kind": "python"
+  },
+  "foundation-include-lint-negative-contract": {
+   "entry": "tools/scripts/test_foundation_include_lint.py",
+   "inputs": [
+    "core/audio/platform/android/demo_synth.hpp",
+    "core/platform/include/pulp/platform/platform.hpp",
+    "core/platform/src/android/jni_bridge.cpp",
+    "core/platform/src/android/jni_motion.cpp",
+    "core/platform/src/platform.cpp",
+    "tools/scripts/test_foundation_include_lint.py"
+   ],
+   "kind": "python"
   },
   "framework-neutrality": {
    "entry": "tools/scripts/framework_neutrality_check.py",
@@ -6121,6 +6170,13 @@
    ],
    "kind": "python"
   },
+  "import-ui-frames-observe": {
+   "entry": "test/test_ui_frames_observe.py",
+   "inputs": [
+    "test/test_ui_frames_observe.py"
+   ],
+   "kind": "python"
+  },
   "import-validation-browser-fidelity-receipt-selftest": {
    "entry": "tools/import-validation/test_verify_browser_fidelity_receipt.py",
    "inputs": [
@@ -6961,25 +7017,6 @@
    ],
    "kind": "shell"
   },
-  "pulp-materialized-runtime-conformance": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
-   ],
-   "kind": "node"
-  },
-  "pulp-materialized-runtime-node-dependencies": {
-   "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
-   "inputs": [
-    "tools/import-design/browser_capture/vendor_payload.mjs",
-    "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
-    "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
-   ],
-   "kind": "node"
-  },
   "pulp-mcp-binary-smoke": {
    "entry": "test/test_pulp_mcp_binary_smoke.py",
    "inputs": [
@@ -7082,6 +7119,20 @@
     "tools/ci/checkout_location_guard.py",
     "tools/ci/pulp-worktree.sh",
     "tools/ci/test_pulp_worktree_creation.py"
+   ],
+   "kind": "python"
+  },
+  "pulp.vellum-closure-boundary": {
+   "entry": "tools/scripts/vellum_closure.py",
+   "inputs": [
+    "tools/scripts/vellum_closure.py"
+   ],
+   "kind": "python"
+  },
+  "pulp.vellum-closure-gate": {
+   "entry": "tools/scripts/vellum_closure.py",
+   "inputs": [
+    "tools/scripts/vellum_closure.py"
    ],
    "kind": "python"
   },
@@ -9433,6 +9484,24 @@
     "test/test_tool_registry_reminder_hook.sh"
    ],
    "kind": "shell"
+  },
+  "toolchain-mise_profile-selftest": {
+   "entry": "tools/toolchain/test_mise_profile.py",
+   "inputs": [
+    "tools/ci",
+    "tools/toolchain/test_mise_profile.py"
+   ],
+   "kind": "python"
+  },
+  "toolchain-test_generate-selftest": {
+   "entry": "tools/toolchain/test_generate.py",
+   "inputs": [
+    "tools/toolchain",
+    "tools/toolchain/generate.py",
+    "tools/toolchain/manifest.toml",
+    "tools/toolchain/test_generate.py"
+   ],
+   "kind": "python"
   },
   "tools-registry-check": {
    "entry": "tools/scripts/tools_registry_check.py",

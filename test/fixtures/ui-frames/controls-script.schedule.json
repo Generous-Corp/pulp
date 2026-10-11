@@ -1,0 +1,105 @@
+{
+ "schema": "pulp-ui-frame-schedule-v1",
+ "timestamps": [
+  10.0,
+  10.016666667,
+  10.033333333,
+  10.05,
+  10.066666667,
+  10.083333333,
+  10.1,
+  10.116666667,
+  10.133333333,
+  10.15,
+  10.166666667,
+  10.183333333,
+  10.2,
+  10.216666667,
+  10.233333333,
+  10.25,
+  10.266666667,
+  10.283333333,
+  10.3,
+  10.316666667,
+  10.333333333,
+  10.35,
+  10.366666667,
+  10.383333333
+ ],
+ "nominal_dt": 0.016666667,
+ "readiness": "deferred",
+ "params": [
+  {
+   "name": "cutoff",
+   "default": 0.5
+  },
+  {
+   "name": "level",
+   "default": 0.25
+  },
+  {
+   "name": "mode",
+   "default": 0
+  }
+ ],
+ "views": 1,
+ "events": [
+  {
+   "frame": 8,
+   "kind": "hover",
+   "x": 40,
+   "y": 60
+  },
+  {
+   "frame": 10,
+   "kind": "attach_view"
+  },
+  {
+   "frame": 12,
+   "kind": "drag",
+   "x": 40,
+   "y": 70,
+   "to_x": 40,
+   "to_y": 20
+  },
+  {
+   "frame": 14,
+   "kind": "set_param",
+   "name": "level",
+   "value": 0.9
+  },
+  {
+   "frame": 16,
+   "view": 1,
+   "kind": "resize",
+   "width": 260,
+   "height": 180
+  },
+  {
+   "frame": 17,
+   "kind": "click",
+   "x": 175,
+   "y": 32
+  },
+  {
+   "frame": 18,
+   "kind": "key",
+   "key": "down"
+  },
+  {
+   "frame": 19,
+   "kind": "key",
+   "key": "enter"
+  },
+  {
+   "frame": 20,
+   "view": 1,
+   "kind": "detach_view"
+  }
+ ],
+ "capture": [
+  1,
+  6,
+  23
+ ]
+}

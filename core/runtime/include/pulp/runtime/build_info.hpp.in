@@ -22,7 +22,7 @@ inline constexpr std::string_view kBuildType   = "@PULP_BUILD_TYPE@";
 /// this header. Useful to confirm a fresh build picked up your edits.
 inline constexpr std::string_view kBuildIso8601 = "@PULP_BUILD_ISO8601@";
 
-/// Short git SHA of the working tree at configure time. Empty when
+/// Full git SHA of the working tree at configure time. Empty when
 /// the source tree is not a git checkout (e.g. distribution tarball).
 inline constexpr std::string_view kGitSha      = "@PULP_GIT_SHA@";
 
@@ -34,7 +34,7 @@ inline constexpr bool kGitDirty                = @PULP_GIT_DIRTY@;
 inline constexpr std::string_view kSdkVersion  = "@PULP_VERSION@";
 
 /// Convenience: ready-to-render label
-/// (`"0.135.1 (Release, abc1234, 2026-05-18T22:00:00Z)"`).
+/// (`"0.135.1 (Release, abc1234567890..., 2026-05-18T22:00:00Z)"`).
 inline constexpr std::string_view kStampLabel  = "@PULP_BUILD_STAMP@";
 
 } // namespace pulp::runtime

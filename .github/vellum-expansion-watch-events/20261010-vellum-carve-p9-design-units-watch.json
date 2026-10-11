@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-vellum-carve-p9-design-units-watch",
+  "created_at": "2026-10-10T18:14:31Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Vellum move carve P9 (R5 2.3 row P9, DECISIONS D3): split the design subsystem into link targets without moving or renaming any file. pulp-design-ir (header-only DesignIR value types: design_ir.hpp plus design_source_types.hpp, split out of design_sources.hpp) sits below view-core; the 38 importer/codegen sources formerly gated into pulp-view-core compile as pulp-design-import above it; the built-in Pulp Figma Library recognition table moves from RecognitionResolver::with_builtin_library() into the Pulp-owned pulp-design-import-audio-pack (recognition_resolver_with_builtin_library()). The IR JSON/asset/promotion function declarations move to design_ir_io.hpp, reached through design_sources.hpp as before; test_browser_capture_tree.cpp gains that one explicit include, which is the only chromium-authoring-frontend path touched. Every source, parser, codegen output, capture path, render backend and package surface is byte-for-byte the same code; pulp::view and pulp::view-native link all three targets, so consumers see the same surface. No design-import, Chromium, rendering, or packaging authority moves; Pulp remains the source owner under the 2026-10-04 temporary exception.",
+  "tests": [
+    "ctest --test-dir build -R design-unit-boundary",
+    "ctest --test-dir build -R pulp-test-browser-capture-tree",
+    "ctest --test-dir build -R recognition",
+    "python3 tools/scripts/test_design_unit_boundary_check.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
