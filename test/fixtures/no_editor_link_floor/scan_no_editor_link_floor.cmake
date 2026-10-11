@@ -72,7 +72,13 @@ if(CONTROL_GPU_RUNTIME AND NOT _control_deps MATCHES "${_runtime_deps}")
         "control module has no GPU-runtime dependency; the dependency check is blind:\n${_control_deps}")
 endif()
 if(NOT CONTROL_GPU_RUNTIME)
-    message(STATUS "control GPU runtime: not built (PULP_ENABLE_GPU=OFF); dependency control skipped")
+    # No GPU runtime to look for, but the dependency listing must still be
+    # proven to work: every module loads the platform C/C++ runtime.
+    if(NOT _control_deps MATCHES "libSystem|libc\\.so|libc\\+\\+|libstdc\\+\\+")
+        message(FATAL_ERROR
+            "control module lists no C/C++ runtime dependency; the dependency scan is blind:\n${_control_deps}")
+    endif()
+    message(STATUS "control GPU runtime: not built (PULP_ENABLE_GPU=OFF); dependency listing proven by the C/C++ runtime")
 endif()
 foreach(_family IN LISTS _families)
     string(REPLACE "=" ";" _pair "${_family}")
