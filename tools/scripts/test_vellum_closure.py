@@ -2,6 +2,8 @@
 import unittest
 from vellum_closure import (
     external_input_violations,
+    edge_key,
+    load_allowlist,
     policy_include_forbidden,
     policy_target_forbidden,
     receipt_path_violations,
@@ -45,6 +47,12 @@ class ClosurePolicyTests(unittest.TestCase):
             "generated_inputs": [{"path": "@build/core/runtime/generated/build_info.hpp", "producer_paths": ["core/runtime/CMakeLists.txt"]}],
         }), [])
         self.assertTrue(receipt_path_violations({"files": [{"pulp_path": "/Users/agent/build/rogue.hpp"}]}))
+
+    def test_edge_allowlist_is_exact_and_canonicalizes_p4_target(self):
+        self.assertEqual(edge_key("pulp-design-import", "pulp-audio"), "pulp-design-import->pulp-view-audio")
+        entries = load_allowlist(__import__("pathlib").Path(__file__).with_name("vellum_closure_allowlist.json"))
+        self.assertTrue(any(e["kind"] == "edge" and e["match"] == "pulp-design-import->pulp-view-audio" for e in entries))
+        self.assertFalse(any(e["kind"] == "target" for e in entries))
 
 
 if __name__ == "__main__":

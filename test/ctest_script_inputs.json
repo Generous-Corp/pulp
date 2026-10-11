@@ -7241,9 +7241,18 @@
     "core/view/cmake/PulpViewJsPreludes.cmake",
     "core/view/js/embed_js.py",
     "tools/cmake/PulpInstallRules.cmake",
-    "tools/scripts/vellum_closure.py"
+    "tools/scripts/vellum_closure.py",
+    "tools/scripts/vellum_d3_units.json"
    ],
    "kind": "python"
+  },
+  "pulp.vellum-closure-edge-negative": {
+   "entry": "tools/scripts/confirm_failure.sh",
+   "inputs": [
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/vellum_closure_edge_fixture.json"
+   ],
+   "kind": "shell"
   },
   "pulp.vellum-closure-external-input-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
@@ -7265,7 +7274,8 @@
     "core/view/js/embed_js.py",
     "tools/cmake/PulpInstallRules.cmake",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_closure_allowlist.json"
+    "tools/scripts/vellum_closure_allowlist.json",
+    "tools/scripts/vellum_d3_units.json"
    ],
    "kind": "python"
   },

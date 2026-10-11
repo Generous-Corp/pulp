@@ -1,0 +1,18 @@
+{
+  "schema": "pulp.vellum.d3-units.v1",
+  "units": [
+    {"name": "foundation", "targets": ["pulp-runtime", "pulp-simd"]},
+    {"name": "gpu-device-api", "targets": ["pulp-gpu-device"]},
+    {"name": "gpu-device", "targets": ["pulp-gpu-device"]},
+    {"name": "canvas", "targets": ["pulp-canvas"]},
+    {"name": "render-2d", "targets": ["pulp-render"]},
+    {"name": "render-3d", "targets": ["pulp-render"]},
+    {"name": "state-core", "targets": ["pulp-state"]},
+    {"name": "design-ir", "targets": ["pulp-design-import"]},
+    {"name": "design-import", "targets": ["pulp-design-import"]},
+    {"name": "view-core", "targets": ["pulp-view-core"]},
+    {"name": "view-platform", "targets": ["pulp-view-native", "pulp-platform"]},
+    {"name": "view-script", "targets": ["pulp-view-script"]},
+    {"name": "ui-js-packages", "targets": ["pulp-jsx-runtime-materialized-contract", "pulp-jsx-runtime-materialized-emitter"]}
+  ]
+}

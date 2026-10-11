@@ -424,8 +424,32 @@ def cmd_js_manifest(args: argparse.Namespace) -> int:
     print(f"closure_manifest={args.output} files={len(result['files'])} external_inputs={len(result['external_inputs'])}")
     return 0
 
+
+def unit_manifest_targets(path: Path) -> list[str]:
+    """Return unique CMake targets named by the checked-in D3 unit manifest."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"invalid Vellum unit manifest {path}: {exc}") from exc
+    if payload.get("schema") != "pulp.vellum.d3-units.v1":
+        raise SystemExit(f"invalid Vellum unit manifest schema: {path}")
+    units = payload.get("units")
+    if not isinstance(units, list) or not units:
+        raise SystemExit("Vellum unit manifest must contain units")
+    targets: list[str] = []
+    for unit in units:
+        if not isinstance(unit, dict) or not isinstance(unit.get("name"), str):
+            raise SystemExit("Vellum unit manifest units require a name")
+        unit_targets = unit.get("targets")
+        if not isinstance(unit_targets, list) or not unit_targets or not all(isinstance(t, str) for t in unit_targets):
+            raise SystemExit(f"Vellum unit {unit['name']} requires non-empty targets")
+        targets.extend(unit_targets)
+    return list(dict.fromkeys(targets))
+
+
 def cmd_manifest(args: argparse.Namespace) -> int:
-    result = target_manifest(Path(args.source_root).resolve(), Path(args.build_dir).resolve(), args.target)
+    targets = unit_manifest_targets(Path(args.unit_manifest)) if args.unit_manifest else args.target
+    result = target_manifest(Path(args.source_root).resolve(), Path(args.build_dir).resolve(), targets)
     Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"closure_manifest={args.output} files={len(result['files'])} missing={len(result['missing_targets'])}")
     return 0
@@ -458,8 +482,12 @@ def load_allowlist(path: Path) -> list[dict]:
         if entry["id"] in seen:
             raise SystemExit(f"duplicate closure allowlist id: {entry['id']}")
         seen.add(entry["id"])
-        if entry["kind"] not in {"target", "include", "root"}:
+        if entry["kind"] not in {"edge", "target", "include", "root"}:
             raise SystemExit(f"invalid closure allowlist kind: {entry['kind']}")
+        if entry["kind"] == "edge" and (
+            not isinstance(entry.get("exit_criterion"), str) or not entry["exit_criterion"].strip()
+        ):
+            raise SystemExit(f"edge allowlist entry requires exit_criterion: {entry['id']}")
     return entries
 
 
@@ -475,14 +503,23 @@ def allowlist_match(entries: list[dict], kind: str, value: str, used: set[str]) 
     return False
 
 
+def edge_key(source: str, target: str) -> str:
+    # The current Pulp graph calls the retained P4 target pulp-audio; the D3
+    # ledger calls that boundary pulp-view-audio.
+    target = target.removeprefix("pulp::")
+    target = "pulp-view-audio" if target in {"pulp-audio", "audio"} else target
+    return f"{source.removeprefix('pulp::')}->{target.removeprefix('pulp::')}"
+
+
 def cmd_gate(args: argparse.Namespace) -> int:
     failed = False
     allowlist = load_allowlist(Path(args.allowlist)) if args.allowlist else None
     used_allowlist: set[str] = set()
+    generated_targets = unit_manifest_targets(Path(args.unit_manifest)) if args.unit_manifest else args.target
     for raw in args.manifest:
         manifest_path = Path(raw)
         if not manifest_path.is_file() and args.generate:
-            if not args.source_root or not args.build_dir or not args.target:
+            if not args.source_root or not args.build_dir or not generated_targets:
                 raise SystemExit("--generate requires --source-root, --build-dir, and --target")
             api_reply = Path(args.build_dir) / ".cmake/api/v1/reply"
             if not list(api_reply.glob("index-*.json")):
@@ -492,7 +529,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
                     stdout=subprocess.DEVNULL,
                 )
             generated = target_manifest(
-                Path(args.source_root).resolve(), Path(args.build_dir).resolve(), args.target
+                Path(args.source_root).resolve(), Path(args.build_dir).resolve(), generated_targets
             )
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_text(json.dumps(generated, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -506,6 +543,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
             for link in target.get("link_targets", []):
                 allowed = link in args.allow
                 if allowlist:
+                    allowed = allowed or allowlist_match(allowlist, "edge", edge_key(target["name"], link), used_allowlist)
                     allowed = allowed or allowlist_match(allowlist, "target", link, used_allowlist)
                 if policy_target_forbidden(link) and not allowed:
                     violations.append(f"forbidden link {target['name']} -> {link}")
@@ -689,10 +727,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append", required=True); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
+    p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
     p = sub.add_parser("js-manifest"); p.add_argument("--source-root", required=True); p.add_argument("--unit", default="design-import"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_js_manifest)
-    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.set_defaults(func=cmd_gate, report_only=False)
-    p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.set_defaults(func=cmd_gate, report_only=True)
+    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
+    p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=True)
     p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
     args = parser.parse_args()
