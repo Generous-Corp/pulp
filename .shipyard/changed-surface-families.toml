@@ -803,6 +803,36 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-1b1930d77ab4"
+paths = ["tools/scripts/render_upward_edge_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "render-upward-edge-check",
+  "render-upward-edge-check-rules",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-5848c7dd4679"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
@@ -3713,6 +3743,35 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-d9d613f9d2f3"
+paths = ["tools/scripts/test_render_upward_edge_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "render-upward-edge-check-rules",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-a0238b3b9c2d"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
@@ -5576,6 +5635,7 @@ paths = [
   "tools/scripts/relay_contract_check.py",
   "tools/scripts/release_checksum_manifest.py",
   "tools/scripts/release_platform_subset_check.py",
+  "tools/scripts/render_upward_edge_check.py",
   "tools/scripts/required_check_machinery.py",
   "tools/scripts/resign_macos_release_tree.py",
   "tools/scripts/resolve_linux_route.py",
@@ -5816,6 +5876,7 @@ paths = [
   "tools/scripts/test_release_reconcile.py",
   "tools/scripts/test_release_trailer_guard.py",
   "tools/scripts/test_release_workflow_test_step.py",
+  "tools/scripts/test_render_upward_edge_check.py",
   "tools/scripts/test_repo_source_scan.py",
   "tools/scripts/test_required_check_machinery.py",
   "tools/scripts/test_required_gate_liveness.py",
@@ -6109,6 +6170,7 @@ paths = [
   "tools/scripts/relay_contract_check.py",
   "tools/scripts/release_checksum_manifest.py",
   "tools/scripts/release_platform_subset_check.py",
+  "tools/scripts/render_upward_edge_check.py",
   "tools/scripts/required_check_machinery.py",
   "tools/scripts/resign_macos_release_tree.py",
   "tools/scripts/resolve_linux_route.py",
@@ -6349,6 +6411,7 @@ paths = [
   "tools/scripts/test_release_reconcile.py",
   "tools/scripts/test_release_trailer_guard.py",
   "tools/scripts/test_release_workflow_test_step.py",
+  "tools/scripts/test_render_upward_edge_check.py",
   "tools/scripts/test_repo_source_scan.py",
   "tools/scripts/test_required_check_machinery.py",
   "tools/scripts/test_required_gate_liveness.py",
@@ -6489,6 +6552,7 @@ tests = [
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
+  "pulp-materialized-runtime-conformance",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
   "pulp_bundle_threejs_for_jsc_smoke",
