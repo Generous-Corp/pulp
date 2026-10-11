@@ -1200,4 +1200,12 @@ ContentInstallResult install_content_pack(const fs::path& input,
     return result;
 }
 
+ContentPresetSource content_registry_preset_source() {
+    return [](const ContentCapabilityManifest& manifest, const fs::path& data_root) {
+        ContentRegistry registry(data_root.empty() ? ContentRegistry::platform_data_root()
+                                                   : data_root);
+        return registry.presets_for_plugin(manifest);
+    };
+}
+
 } // namespace pulp::state

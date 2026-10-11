@@ -282,6 +282,8 @@ if(PULP_HAS_CLAP)
         src/clap_note_name.cpp
     )
     target_link_libraries(pulp-format-view PUBLIC clap)
+    # The CLAP adapter installs pulp-content's preset source on its PresetManager.
+    target_link_libraries(pulp-format-view PRIVATE pulp::content)
     # Keep PulpClapPlugin's layout identical between clap_adapter.cpp and the
     # per-plugin clap_entry.cpp TU. The entry target defines PULP_CLAP_GUI=1;
     # the shared adapter must do the same or GUI members shift later fields.

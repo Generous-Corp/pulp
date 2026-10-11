@@ -3172,6 +3172,14 @@
    ],
    "kind": "shell"
   },
+  "archive-symbol-closure-selftest": {
+   "entry": "tools/scripts/test_archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/test_archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
   "audio-glitch-trace-selftest": {
    "entry": "tools/audio/test_glitch_trace.py",
    "inputs": [
@@ -7066,6 +7074,13 @@
    "inputs": [
     "experimental/pulp-rs/Cargo.toml",
     "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-state-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
    ],
    "kind": "python"
   },

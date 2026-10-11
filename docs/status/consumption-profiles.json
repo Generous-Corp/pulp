@@ -1122,6 +1122,7 @@
     "core/state/include": [
       "pulp/state/binding.hpp",
       "pulp/state/cached_property.hpp",
+      "pulp/state/content_capability_manifest.hpp",
       "pulp/state/edit_history.hpp",
       "pulp/state/external_binding.hpp",
       "pulp/state/listener_token.hpp",
@@ -3324,6 +3325,7 @@
           },
           "direct_dependencies": [
             "clap",
+            "pulp-content",
             "pulp-format-core",
             "pulp-view-core",
             "pulp-view-script"

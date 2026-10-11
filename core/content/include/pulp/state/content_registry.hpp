@@ -3,6 +3,7 @@
 /// @file content_registry.hpp
 /// Discovery for installed data-only Pulp content packs.
 
+#include <pulp/state/content_capability_manifest.hpp>
 #include <pulp/state/preset_manager.hpp>
 
 #include <filesystem>
@@ -12,16 +13,6 @@
 #include <vector>
 
 namespace pulp::state {
-
-/// Capabilities a plugin declares before consuming installed content packs.
-struct ContentCapabilityManifest {
-    std::string schema = "pulp.plugin-runtime.v1";
-    std::string plugin_id;
-    std::vector<std::string> capabilities;
-    std::vector<std::string> content_kinds;
-    std::vector<std::string> hot_reload_kinds;
-    std::vector<std::string> manual_rescan_kinds;
-};
 
 /// Parse the plugin-side content capability manifest embedded in a built
 /// plugin/app bundle. Schema:
@@ -103,6 +94,12 @@ class ContentRegistry {
   private:
     std::filesystem::path data_root_;
 };
+
+/// A PresetManager content-preset source backed by this registry: it lists the
+/// installed packs' presets under `data_root`, or under platform_data_root()
+/// when `data_root` is empty. Format adapters install it on the PresetManager
+/// they own (PresetManager::set_content_preset_source).
+ContentPresetSource content_registry_preset_source();
 
 /// Validate a local content-pack directory or .pulpcontent archive against a
 /// trusted plugin runtime manifest without copying any files. This is the
