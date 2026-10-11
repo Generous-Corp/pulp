@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09450"></a>
+## [0.945.0] - 2026-10-11
+
+- release/version bump ([#10060](https://github.com/Generous-Corp/pulp/pull/10060))
+- codex/p2 thermal validator 20261011 ([#10055](https://github.com/Generous-Corp/pulp/pull/10055))
+- docs/vellum inheritance exception end 20261010 ([#10037](https://github.com/Generous-Corp/pulp/pull/10037))
+- feature/vellum x export ([#10026](https://github.com/Generous-Corp/pulp/pull/10026))
+- codex/w17 phase01 20261010 ([#10025](https://github.com/Generous-Corp/pulp/pull/10025))
+- feature/vellum carve P11 ([#10052](https://github.com/Generous-Corp/pulp/pull/10052))
+- fix/scripted ui mount frame bindings ([#10047](https://github.com/Generous-Corp/pulp/pull/10047))
+- feature/ui timeline observer ([#10044](https://github.com/Generous-Corp/pulp/pull/10044))
+
 <a id="v09440"></a>
 ## [0.944.0] - 2026-10-10
 
@@ -10377,6 +10389,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.945.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.945.0
 [0.944.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.944.0
 [0.943.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.943.0
 [0.942.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.942.0
