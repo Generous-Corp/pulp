@@ -10,7 +10,7 @@
     "design-source-ingest",
     "render-assets-and-backends"
   ],
-  "rationale": "resolve_asset_file now refuses a document-loaded asset path that leaves the document directory by text, before any filesystem lookup (.. folded, backslashes as separators, absolute, drive-letter and UNC roots), keeping the resolved-path symlink check as a second layer and the declared-sha256 exception; the refusal no longer reveals whether an outside file exists. Generic DesignIR asset-resolution hardening landed in Pulp per the 2026-10-04 temporary ownership exception; Vellum inherits it. No design-import, Chromium, rendering or packaging authority moves.",
+  "rationale": "resolve_asset_file now refuses a document-loaded asset path that leaves the document directory by text, before any filesystem lookup (.. folded, backslashes as separators, absolute, drive-letter and UNC roots), keeping the resolved-path symlink check as a second layer; a declared sha256 no longer admits an escaping path, and the only outside root is Pulp's own asset cache (absolute path, resolved file inside the host-configured cache, matching declared hash). The refusal no longer reveals whether an outside file exists. Generic DesignIR asset-resolution hardening landed in Pulp per the 2026-10-04 temporary ownership exception; Vellum inherits it. No design-import, Chromium, rendering or packaging authority moves.",
   "tests": [
     "ctest --test-dir build -R pulp-test-design-import-native-common",
     "python3 test/test_design_ir_observe_asset_escape.py",
