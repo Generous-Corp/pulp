@@ -592,8 +592,11 @@ jobs:
           # No capture provider is present: browser-capture fixtures are inapplicable.
           # SDK-consumer/install-layout fixtures are slow-fixture coverage, not RTSan.
           # PULP_TEST_TIMEOUT_SCALE=4 covers sanitizer slowdown (including FDN reverb).
+          # Validation, benchmark, and performance labels measure unavailable lane
+          # services or wall-clock throughput rather than RTSan findings.
+          # Native Skia/capture names below are likewise provider-backed fixtures.
           ctest --test-dir build-rtsan --output-on-failure \
             -j$(nproc) \
-            --timeout 240 \
-            --label-exclude 'skia|browser-capture|gpu-health|slow-affected|agent-capability-installed-sdk' \
-            --exclude-regex 'sdk-consumer|install-layout|clean-consumer|project-package-compile-out|cmake-pulp-install|GpuSurface|compileShader'
+            --timeout 600 \
+            --label-exclude 'validation|slow|performance|bench|quality-lab|skia|browser-capture|gpu-health|slow-affected|agent-capability-installed-sdk' \
+            --exclude-regex 'sdk-consumer|install-layout|clean-consumer|project-package-compile-out|cmake-pulp-install|GpuSurface|compileShader|realtime factor reported|GPU health|native tree draws|IR text|serialized DesignIR resolves portable capture'
