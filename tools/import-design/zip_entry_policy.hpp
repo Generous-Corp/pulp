@@ -18,12 +18,14 @@ namespace pulp::import_design {
 //     macOS, where this CLI also reads archives authored on Windows.
 //   - A leading `\` is an ordinary character to fs::path on a Unix host.
 inline std::optional<std::string_view> unsafe_zip_entry_reason(const std::string& name) {
-    if (name.find("..") != std::string::npos) return "contains '..'";
-    if (std::filesystem::path(name).is_absolute()) return "absolute path";
-    if (name.size() >= 2 && std::isalpha(static_cast<unsigned char>(name[0])) &&
-        name[1] == ':')
+    if (name.find("..") != std::string::npos)
+        return "contains '..'";
+    if (std::filesystem::path(name).is_absolute())
+        return "absolute path";
+    if (name.size() >= 2 && std::isalpha(static_cast<unsigned char>(name[0])) && name[1] == ':')
         return "drive-relative Windows path";
-    if (!name.empty() && (name[0] == '/' || name[0] == '\\')) return "leading slash";
+    if (!name.empty() && (name[0] == '/' || name[0] == '\\'))
+        return "leading slash";
     return std::nullopt;
 }
 
@@ -35,19 +37,21 @@ inline std::optional<std::string_view> unsafe_zip_entry_reason(const std::string
 // Windows by default, where `Scene.pulp.json` and `./scene.pulp.json` are both
 // the same file as `scene.pulp.json`.
 class ZipMemberSet {
-public:
+  public:
     // The earlier member that lands on the same file as @p name, or nullopt
     // after recording @p name as the owner of that file.
     std::optional<std::string> claim(const std::string& name) {
         std::string key = std::filesystem::path(name).lexically_normal().generic_string();
-        for (auto& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (auto& c : key)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         auto [it, inserted] = claimed_.emplace(std::move(key), name);
-        if (inserted) return std::nullopt;
+        if (inserted)
+            return std::nullopt;
         return it->second;
     }
 
-private:
+  private:
     std::unordered_map<std::string, std::string> claimed_;
 };
 
-}  // namespace pulp::import_design
+} // namespace pulp::import_design

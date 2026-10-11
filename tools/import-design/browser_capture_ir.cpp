@@ -2051,21 +2051,20 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // A web font the page declared but the browser could not decode leaves its
     // text in a fallback face. The capture still succeeds and its pixels look
     // plausible, so the substitution has to be named here or not at all.
-    const auto failed_fonts =
-        array_member(object_member(provenance, "health"), "failed_fonts");
+    const auto failed_fonts = array_member(object_member(provenance, "health"), "failed_fonts");
     if (failed_fonts.isArray()) {
         for (uint32_t i = 0; i < failed_fonts.size(); ++i) {
-            if (!failed_fonts[i].isString()) continue;
+            if (!failed_fonts[i].isString())
+                continue;
             view::ImportDiagnostic diagnostic;
             diagnostic.severity = view::ImportDiagnosticSeverity::warning;
             diagnostic.kind = view::ImportDiagnosticKind::unresolved_asset;
             diagnostic.code = "font-undecodable";
             diagnostic.path = "$";
             diagnostic.property = "font-family";
-            diagnostic.message =
-                "web font '" + std::string(failed_fonts[i].getString()) +
-                "' failed to decode in the browser; text set in it was "
-                "captured in a fallback face";
+            diagnostic.message = "web font '" + std::string(failed_fonts[i].getString()) +
+                                 "' failed to decode in the browser; text set in it was "
+                                 "captured in a fallback face";
             ir.diagnostics.push_back(std::move(diagnostic));
         }
     }

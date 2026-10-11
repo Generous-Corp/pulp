@@ -6,9 +6,9 @@ namespace pulp::canvas {
 
 /// Whether the renderer can decode an encoded raster image file.
 enum class ImageFileProbe {
-    decodes,      ///< Every pixel decoded.
-    undecodable,  ///< Unreadable, not an image the renderer knows, or truncated.
-    unavailable,  ///< No raster decoder in this build (no Skia); nothing was checked.
+    decodes,     ///< Every pixel decoded.
+    undecodable, ///< Unreadable, not an image the renderer knows, or truncated.
+    unavailable, ///< No raster decoder in this build (no Skia); nothing was checked.
 };
 
 /// Decode @p path fully with the codec the Skia canvas draws file images
@@ -19,4 +19,4 @@ enum class ImageFileProbe {
 /// undecodable. File I/O — never call it on the audio or render thread.
 ImageFileProbe probe_image_file(const std::string& path);
 
-}  // namespace pulp::canvas
+} // namespace pulp::canvas

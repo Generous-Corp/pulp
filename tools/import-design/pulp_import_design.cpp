@@ -567,8 +567,8 @@ std::string current_utc_timestamp() {
 
 // Per-stage timing breakdown printed on a successful import — struct and
 // formatters live in import_timing.hpp; main() only stamps the boundaries.
-using pulp::import_design::StageTimings;
 using pulp::import_design::format_import_timing_line;
+using pulp::import_design::StageTimings;
 using pulp::import_design::unsafe_zip_entry_reason;
 using pulp::import_design::ZipMemberSet;
 
@@ -1396,9 +1396,8 @@ extract_pulp_zip_if_present(const std::string& input_file,
             return out;
         }
         if (auto earlier = members.claim(entry_name)) {
-            std::cerr << "Error: refusing ZIP " << input_file
-                      << ": duplicate zip member '" << entry_name
-                      << "' lands on the same file as '" << *earlier
+            std::cerr << "Error: refusing ZIP " << input_file << ": duplicate zip member '"
+                      << entry_name << "' lands on the same file as '" << *earlier
                       << "', so which one is imported is ambiguous\n";
             mz_zip_reader_end(&zip);
             return out;

@@ -1571,10 +1571,14 @@ TEST_CASE("pulp-import-design refuses a .pulp.zip whose members collide",
         "root": { "type": "frame", "name": "Root", "figma_node_id": "1:1",
                   "style": { "width": 120, "height": 80 }, "children": [] }
     })JSON";
-    const std::string other = std::string(envelope).replace(envelope.find("\"Root\""), 6, "\"Evil\"");
+    const std::string other =
+        std::string(envelope).replace(envelope.find("\"Root\""), 6, "\"Evil\"");
     const std::vector<std::uint8_t> other_bytes(other.begin(), other.end());
 
-    struct Case { const char* label; std::vector<std::pair<std::string, std::vector<std::uint8_t>>> extra; };
+    struct Case {
+        const char* label;
+        std::vector<std::pair<std::string, std::vector<std::uint8_t>>> extra;
+    };
     const std::vector<Case> cases = {
         {"exact duplicate document", {{"scene.pulp.json", other_bytes}}},
         {"case-variant document", {{"Scene.pulp.json", other_bytes}}},
@@ -1588,8 +1592,8 @@ TEST_CASE("pulp-import-design refuses a .pulp.zip whose members collide",
         const auto zip = tmp.path / ("dup" + std::to_string(index) + ".pulp.zip");
         const auto output = tmp.path / ("ui" + std::to_string(index++) + ".js");
         REQUIRE(make_pulp_zip(zip, envelope, c.extra));
-        auto r = run_import_design({"--from", "figma-plugin", "--file", zip.string(),
-                                    "--output", output.string()});
+        auto r = run_import_design(
+            {"--from", "figma-plugin", "--file", zip.string(), "--output", output.string()});
         REQUIRE_FALSE(r.timed_out);
         INFO("stderr: " << r.stderr_output);
         CHECK(r.exit_code != 0);
@@ -1601,8 +1605,8 @@ TEST_CASE("pulp-import-design refuses a .pulp.zip whose members collide",
     const auto zip = tmp.path / "clean.pulp.zip";
     const auto output = tmp.path / "clean.js";
     REQUIRE(make_pulp_zip(zip, envelope, {{"assets/swatch.png", tiny_png_bytes()}}));
-    auto r = run_import_design({"--from", "figma-plugin", "--file", zip.string(),
-                                "--output", output.string()});
+    auto r = run_import_design(
+        {"--from", "figma-plugin", "--file", zip.string(), "--output", output.string()});
     REQUIRE_FALSE(r.timed_out);
     INFO("stderr: " << r.stderr_output);
     CHECK(r.exit_code == 0);

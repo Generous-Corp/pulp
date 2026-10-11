@@ -437,7 +437,8 @@ TEST_CASE("browser capture names each web font the browser could not decode",
     const auto font_diagnostics = [](const pulp::view::DesignIR& ir) {
         std::vector<pulp::view::ImportDiagnostic> out;
         for (const auto& d : ir.diagnostics)
-            if (d.code == "font-undecodable") out.push_back(d);
+            if (d.code == "font-undecodable")
+                out.push_back(d);
         return out;
     };
 

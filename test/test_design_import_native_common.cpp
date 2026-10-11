@@ -1204,7 +1204,8 @@ bool has_code(const std::vector<ImportDiagnostic>& diagnostics, std::string_view
 
 void collect_codes(const ResolvedNativeNode& node, std::vector<ImportDiagnostic>& out) {
     out.insert(out.end(), node.diagnostics.begin(), node.diagnostics.end());
-    for (const auto& c : node.children) collect_codes(c, out);
+    for (const auto& c : node.children)
+        collect_codes(c, out);
 }
 
 // A 1x1 RGBA PNG with valid chunk CRCs (IHDR, IDAT, IEND).
@@ -1215,7 +1216,7 @@ constexpr std::uint8_t kTinyPng[] = {
     0xda, 0x63, 0x50, 0x68, 0xf8, 0xff, 0x1f, 0x00, 0x05, 0x02, 0x02, 0x9f, 0xa9, 0xf6,
     0x54, 0xd9, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
 
-}  // namespace
+} // namespace
 
 TEST_CASE("native resolver names a node type it does not recognize",
           "[design-import][native][fail-closed]") {
@@ -1232,7 +1233,8 @@ TEST_CASE("native resolver names a node type it does not recognize",
     collect_codes(resolved, all);
     std::vector<std::string> unknown;
     for (const auto& d : all)
-        if (d.code == "node-type-unknown") unknown.push_back(d.path + " " + d.message);
+        if (d.code == "node-type-unknown")
+            unknown.push_back(d.path + " " + d.message);
     REQUIRE(unknown.size() == 1);
     CHECK(unknown[0] == "$/children[0] unknown node type 'hologram'");
 }
@@ -1251,10 +1253,13 @@ TEST_CASE("native resolver names every repeat of a stable anchor",
     const auto resolved = resolve_design_ir_native(ir, {});
     std::vector<std::string> duplicates;
     for (const auto& d : resolved.diagnostics)
-        if (d.code == "identity-duplicate") duplicates.push_back(d.path + " " + d.message);
+        if (d.code == "identity-duplicate")
+            duplicates.push_back(d.path + " " + d.message);
     REQUIRE(duplicates.size() == 2);
-    CHECK(duplicates[0] == "$/children[2] duplicate stable anchor 'swatch' (first at $/children[0])");
-    CHECK(duplicates[1] == "$/children[3] duplicate stable anchor 'swatch' (first at $/children[0])");
+    CHECK(duplicates[0] ==
+          "$/children[2] duplicate stable anchor 'swatch' (first at $/children[0])");
+    CHECK(duplicates[1] ==
+          "$/children[3] duplicate stable anchor 'swatch' (first at $/children[0])");
 }
 
 TEST_CASE("native materializer names an image asset the renderer cannot decode",
@@ -1286,12 +1291,12 @@ TEST_CASE("native materializer names an image asset the renderer cannot decode",
         SKIP("no raster decoder in this build");
 
     CHECK_FALSE(has_code(materialize(good), "asset-undecodable"));
-    CHECK(has_code(materialize(good.substr(0, 33)), "asset-undecodable"));  // header, no pixel data
+    CHECK(has_code(materialize(good.substr(0, 33)), "asset-undecodable")); // header, no pixel data
     // Cut inside the pixel data: Skia's decoder fills the missing rows and
     // reports success, so only the PNG's own structure shows the loss.
     CHECK(has_code(materialize(good.substr(0, 45)), "asset-undecodable"));
     std::string flipped = good;
-    flipped[43] = static_cast<char>(flipped[43] ^ 0x01);  // IDAT byte; CRC no longer matches
+    flipped[43] = static_cast<char>(flipped[43] ^ 0x01); // IDAT byte; CRC no longer matches
     CHECK(has_code(materialize(flipped), "asset-undecodable"));
     CHECK(has_code(materialize("GIF89a this is not an image\n"), "asset-undecodable"));
 }
@@ -1304,7 +1309,8 @@ TEST_CASE("native resolver warns on a DesignIR envelope newer than it knows",
         ir.root.type = "frame";
         std::vector<std::string> out;
         for (const auto& d : resolve_design_ir_native(ir, {}).diagnostics)
-            if (d.code == "document-version-unsupported") out.push_back(d.message);
+            if (d.code == "document-version-unsupported")
+                out.push_back(d.message);
         return out;
     };
     CHECK(version_warnings(kDesignIrNewestKnownVersion).empty());
