@@ -8,7 +8,10 @@ description: Route repository-qualified changes across Pulp and Vellum using Pul
 ## Design-import refactor event contract
 
 The design-import refactor keeps generic importer, compiler, bridge-contract,
-and SDK work in Pulp until Vellum is activated. Two independent event kinds
+and SDK work in Pulp until each target flips: the exception ends for a target in
+the same Pulp change that switches it to an exact installed Vellum package and
+freezes its Pulp copy (see `docs/contracts/vellum-extraction-freeze.md`). Source
+authority being `active` in `.github/vellum-ownership.json` does not end it. Two independent event kinds
 remain in force: a **watch** event under
 `.github/vellum-expansion-watch-events/` for watched capability-family paths,
 and a **change** event under `.github/vellum-change-events/` for a transferred
