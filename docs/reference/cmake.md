@@ -38,6 +38,8 @@ pulp_add_plugin(<target>
 
 ### Parameters
 
+An argument `pulp_add_plugin()` does not recognise (a misspelled keyword, a keyword newer than the SDK in use, or a stray value) stops configuration with `unknown argument(s): …`, and so does a `FORMATS` value outside the list below (names are case-sensitive). `PRODUCES_MIDI` keeps its own warning. `pulp_add_plugin_bundle()` applies the same checks.
+
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `FORMATS` | Yes | -- | Space-separated list: `VST3`, `AU`, `AUv3`, `CLAP`, `LV2`, `AAX`, `Standalone` |
