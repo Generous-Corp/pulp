@@ -6121,6 +6121,16 @@
    ],
    "kind": "python"
   },
+  "host-lane-probe-requires-plugins": {
+   "entry": "${CMAKE_BINARY_DIR}/test/\"$1\" >/dev/null 2>&1; test $? -eq 2",
+   "inputs": [],
+   "kind": "shell"
+  },
+  "host-lane-probe-unloadable-bundle-is-setup-error": {
+   "entry": "${CMAKE_BINARY_DIR}/test/out=$(\"$1\" --plugin /nonexistent/Missing.clap --out \"$2\" 2>&1); rc=$?; test $rc -eq 2 && printf '%s' \"$out\" | grep -q 'load /nonexistent/Missing.clap failed' && test ! -e \"$2/host-observation.json\"",
+   "inputs": [],
+   "kind": "shell"
+  },
   "host-quirks-catalog-parity": {
    "entry": "tools/scripts/test_host_quirks_catalog_parity.py",
    "inputs": [
