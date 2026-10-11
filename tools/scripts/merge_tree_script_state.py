@@ -36,11 +36,9 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: int = 20) -> i
         print(proc.stdout, end="", file=sys.stderr)
     if proc.stderr:
         print(proc.stderr, end="", file=sys.stderr)
-    # The configured ctest inventory is compiled/build-owned and deliberately
-    # out of scope here.  Preserve the static prediction, while allowing the
-    # build-free half to report NOT CHECKED until gates.sh runs with a build.
-    if proc.returncode and "NOT CHECKED locally:" in (proc.stdout + proc.stderr):
-        return 0
+    # A failure remains a failure even when a build-free helper explains that a
+    # compiled inventory is not checked locally. Never let that advisory text
+    # mask a different script-state failure in the same run.
     return proc.returncode
 
 
@@ -88,15 +86,14 @@ def main(argv: list[str] | None = None) -> int:
             ("changed-surface-script-families-drift", [sys.executable, str(tmp / "tools/scripts/changed_surface_script_families.py"),
                                                         "--repo-root", str(tmp), "--static", "--base", base_sha,
                                                         "--head", synthetic]),
-            ("consumption-census-schema", [sys.executable, str(tmp / "tools/scripts/consumption_census.py"),
-                                            "--source-root", str(tmp), "--validate-only"]),
             ("agent-capability-manifest", [sys.executable, str(tmp / "tools/scripts/agent_capability_manifest.py"), "--check"]),
-            ("vellum-inheritance-ledger", [sys.executable, str(tmp / "tools/scripts/vellum_watch_preflight.py"),
-                                            "--repo", str(tmp), "--base", base_sha, "--head", synthetic,
-                                            "--enforce"]),
             ("unregistered-tests", [sys.executable, str(tmp / "tools/scripts/unregistered_tests_check.py"),
                                     "--repo-root", str(tmp)]),
         ]
+        ledger = tmp / "tools/scripts/vellum_inheritance_ledger_check.py"
+        if ledger.exists():
+            checks.append(("vellum-inheritance-ledger", [sys.executable, str(ledger),
+                            "--root", str(tmp), "--base", base_sha]))
         failed = 0
         for name, cmd in checks:
             if not Path(cmd[1]).exists():

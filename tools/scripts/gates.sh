@@ -96,8 +96,8 @@ PYTHON="${PYTHON:-python3}"
 BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 
 MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
-if [ -f "$MERGE_TREE_SCRIPT_STATE" ] && [ "$BASE" = "origin/main" ]; then
-    "$PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base origin/main --head HEAD || exit $?
+if [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
+    "$PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$BASE" --head HEAD || exit $?
 fi
 
 VBC="$ROOT/tools/scripts/version_bump_check.py"

@@ -85,11 +85,6 @@ if [ -z "${PULP_PYTHON:-}" ] || [ ! -x "${PULP_PYTHON}" ]; then
     exit 2
 fi
 
-MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
-if [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
-    "$PULP_PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base origin/main --head HEAD || exit $?
-fi
-
 # ── Queued-PR guard (blocking, before every gate and the diff-cover build) ──
 # A PR in the merge queue never needs a rebase or a merge of main: the queue
 # builds it on top of current main. Pushing to it anyway ran the multi-minute
@@ -159,6 +154,20 @@ fi
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
     exit 0
+fi
+
+# Refresh the base only when the normal gates are enabled. The merge-tree
+# script-state check honors the same explicit base as the remaining gates.
+MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
+MERGE_TREE_BASE="${PULP_PREPUSH_BASE:-origin/main}"
+if git remote get-url origin >/dev/null 2>&1; then
+    if ! git fetch --quiet origin main; then
+        echo "[pre-push] could not refresh origin/main; refusing stale script-state validation." >&2
+        exit 2
+    fi
+fi
+if [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
+    "$PULP_PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$MERGE_TREE_BASE" --head HEAD || exit $?
 fi
 
 # Agent/tool subprocesses can inherit nonblocking stdout/stderr pipes. Python's
