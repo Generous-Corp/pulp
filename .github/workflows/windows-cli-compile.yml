@@ -153,7 +153,7 @@ jobs:
 
       - name: Restore compiler cache
         id: ccache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ github.workspace }}\.ccache
           key: windows-cli-msvc-ccache-v1-${{ steps.cache-key.outputs.week }}
@@ -253,7 +253,7 @@ jobs:
           always()
           && github.event_name == 'push'
           && steps.ccache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}\.ccache
           key: windows-cli-msvc-ccache-v1-${{ steps.cache-key.outputs.week }}

@@ -1487,7 +1487,7 @@ jobs:
             pulp-sdk-${{ matrix.platform }}.*
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-${{ matrix.platform }}
           path: pulp-${{ matrix.platform }}.*
@@ -1497,7 +1497,7 @@ jobs:
           retention-days: 7
 
       - name: Upload SDK artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-sdk-${{ matrix.platform }}
           path: pulp-sdk-${{ matrix.platform }}.*
@@ -1548,7 +1548,7 @@ jobs:
 
     steps:
       - name: Download CLI artifact for this platform
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pulp-${{ matrix.platform }}
           path: artifact-in/
@@ -1952,7 +1952,7 @@ jobs:
           fetch-tags: true
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts/
 
@@ -2062,7 +2062,7 @@ jobs:
 
       - name: Create release
         if: steps.existing.outputs.published != 'true'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           # Bare tag name (owner: drop the "Pulp CLI" prefix — one product, one

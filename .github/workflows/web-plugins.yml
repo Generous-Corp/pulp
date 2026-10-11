@@ -78,7 +78,7 @@ jobs:
       # Same pin as the job below, for the same reason: emsdk `latest` floats
       # and has landed breaking changes on PRs that touched nothing.
       - name: Set up Emscripten
-        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
+        uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
           version: 6.0.2
 
@@ -91,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -102,7 +102,7 @@ jobs:
       # verified against; 4.0.10 is the floor for the emdawnwebgpu port, so any
       # future bump stays at or above it.
       - name: Set up Emscripten
-        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
+        uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
           version: 6.0.2
 
@@ -178,7 +178,7 @@ jobs:
       #    in use; the cache is keyed on that manifest.
       - name: Cache the Skia wasm slice
         id: skia-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/skia-wasm
           key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
@@ -351,7 +351,7 @@ jobs:
 
       - name: Upload sample-region browser evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sample-region-web-proof
           path: /tmp/sample-region-web-proof.json
@@ -431,7 +431,7 @@ jobs:
 
       - name: Upload browser screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-plugins-screenshots
           path: /tmp/*-browser.png
@@ -476,7 +476,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -487,7 +487,7 @@ jobs:
           chrome-version: stable
 
       - name: Set up Emscripten
-        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
+        uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
           version: 6.0.2
 
@@ -550,7 +550,7 @@ jobs:
       # would skip. A real GPU is the whole point.
       - name: Cache the Skia wasm slice
         id: skia-cache-macos
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/skia-wasm
           key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
@@ -630,7 +630,7 @@ jobs:
 
       - name: Upload the proof screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gpu-audio-macos
           path: /tmp/gpu-audio-macos.png

@@ -1559,7 +1559,7 @@ jobs:
       - name: Restore FetchContent sources (GitHub-hosted)
         if: runner.os != 'macOS' || runner.environment == 'github-hosted'
         id: fetchcontent-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           # Cache where FetchContent actually writes. The three paths this
           # replaced never populated — on Linux the cased `Pulp` did not match
@@ -1580,7 +1580,7 @@ jobs:
       - name: Restore ccache (GitHub-hosted)
         if: runner.os != 'macOS' || runner.environment == 'github-hosted'
         id: ccache-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/Library/Caches/ccache
@@ -1709,7 +1709,7 @@ jobs:
       #     merge_group and workflow_dispatch, which is not what we mean.
       - name: Save FetchContent sources (main push, GitHub-hosted Linux/Windows)
         if: runner.environment == 'github-hosted' && runner.os != 'macOS' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           # Cache where FetchContent actually writes. The three paths this
           # replaced never populated — on Linux the cased `Pulp` did not match
@@ -1812,7 +1812,7 @@ jobs:
       # that verifies the committed dependency lock.
       - name: Set up Node.js for materialized runtime tests (Linux)
         if: runner.os == 'Linux'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22.15.0'
           cache: npm
@@ -2092,7 +2092,7 @@ jobs:
       - name: Record iOS gate digest
         if: steps.build.outputs.ios_gate_digest != ''
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}
           path: ${{ runner.temp }}/ios-gate-shadow/marker.json
@@ -2128,7 +2128,7 @@ jobs:
       # overwritten in place regardless.
       - name: Save ccache (main push, GitHub-hosted Linux/Windows)
         if: runner.environment == 'github-hosted' && runner.os != 'macOS' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/Library/Caches/ccache
@@ -2453,7 +2453,7 @@ jobs:
           always() && github.event_name == 'merge_group' && runner.os == 'macOS'
           && steps.build.outcome == 'success'
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: test-receipts-macos
           path: ${{ runner.temp }}/merge-group-shadows/test-receipts.json
@@ -2641,7 +2641,7 @@ jobs:
               || github.event_name == 'merge_group'
               || github.event_name == 'workflow_dispatch')
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
           path: |
@@ -2660,7 +2660,7 @@ jobs:
 
       - name: Upload exact GPU-audio SDK (macOS ARM64, retry)
         if: steps.gpu_audio_sdk_upload.outcome == 'failure'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
           path: |
@@ -2706,7 +2706,7 @@ jobs:
         if: >-
           steps.a2t_structural_verification.outcome == 'success'
           && needs.classify.outputs.a2t_receipt_attestation_required == 'true'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}
           path: ${{ runner.temp }}/a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}/attestation.json
@@ -2768,7 +2768,7 @@ jobs:
         # every test passed must never turn a green gate red.
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ctest-logs-${{ matrix.key }}
           path: |
@@ -2834,7 +2834,7 @@ jobs:
         id: reuse_record_upload
         if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           # One artifact per run attempt: a re-run keeps the failed attempt's
           # record, which is the flake evidence a replay most needs.
@@ -2936,7 +2936,7 @@ jobs:
 
       - name: Publish exact protected-validation receipt
         if: steps.protected_receipt.outcome == 'success'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: protected-validation-${{ matrix.key }}-${{ github.event.pull_request.head.sha }}-${{ github.event.pull_request.base.sha }}
           path: ${{ steps.protected_receipt.outputs.path }}/receipt.json
@@ -2952,7 +2952,7 @@ jobs:
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS' && github.event_name != 'pull_request'
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -2963,7 +2963,7 @@ jobs:
 
       - name: Upload plugin bundles (Windows)
         if: success() && runner.os == 'Windows' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -2973,7 +2973,7 @@ jobs:
 
       - name: Upload plugin bundles (Linux)
         if: success() && runner.os == 'Linux' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -3276,7 +3276,7 @@ jobs:
         id: reuse_record_upload
         if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
           path: ${{ runner.temp }}/reuse-record/
@@ -3371,7 +3371,7 @@ jobs:
         id: reuse_record_upload
         if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
           path: ${{ runner.temp }}/reuse-record/

@@ -106,7 +106,7 @@ jobs:
         # `always()` because the signal is most needed on the runs a
         # failure-only upload would discard.
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: base-poison-signal
           path: ${{ runner.temp }}/base-poison-signal.json
