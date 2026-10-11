@@ -7229,6 +7229,20 @@
    ],
    "kind": "python"
   },
+  "pulp-view-audio-symbol-floor": {
+   "entry": "tools/scripts/view_audio_symbol_floor.py",
+   "inputs": [
+    "tools/scripts/view_audio_symbol_floor.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-audio-symbol-floor-negative-contract": {
+   "entry": "tools/scripts/test_view_audio_symbol_floor.py",
+   "inputs": [
+    "tools/scripts/test_view_audio_symbol_floor.py"
+   ],
+   "kind": "python"
+  },
   "pulp-view-core-include-boundary": {
    "entry": "tools/scripts/include_boundary.py",
    "inputs": [
