@@ -95,7 +95,7 @@ def changed_entries(root: Path, base: str) -> list[str]:
     completed = subprocess.run(
         ["git", "-C", str(root), "diff", "--name-status", "--no-renames",
          f"{base}...HEAD", "--", ENTRIES_DIR.as_posix()],
-        check=True, text=True, stdout=subprocess.PIPE,
+        check=True, text=True, encoding="utf-8", stdout=subprocess.PIPE,
     )
     errors = []
     for line in completed.stdout.splitlines():
