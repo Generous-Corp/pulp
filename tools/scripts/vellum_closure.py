@@ -213,7 +213,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
         for path in data.get("files", []):
             if path.startswith("@build/"):
                 continue
-            if path.startswith(FORBIDDEN_ROOTS):
+            if path.startswith(FORBIDDEN_ROOTS) and not any(path.startswith(prefix) for prefix in args.allow_root_prefix):
                 violations.append(f"forbidden closure root {path}")
                 continue
             full = Path(data["source_root"]) / path
@@ -354,7 +354,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append", required=True); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
-    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
+    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
     p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
     args = parser.parse_args()

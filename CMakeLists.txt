@@ -576,10 +576,16 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
             gate
             --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+            --allow pulp-audio
+            --allow pulp-midi
             --allow pulp-view-audio
             --allow pulp-content
+            --allow-include-prefix core/view/include/pulp/view/
+            --allow-include-prefix core/view/src/
             --allow-include-path core/platform/src/android/jni_motion.cpp
-            --allow-include-prefix core/render/platform/android/gpu_surface_android)
+            --allow-include-prefix core/render/platform/android/gpu_surface_android
+            --allow-root-prefix core/audio/
+            --allow-root-prefix core/signal/)
     set_tests_properties(pulp.vellum-closure-gate PROPERTIES
         DEPENDS pulp.vellum-closure-boundary
         LABELS "validation")
