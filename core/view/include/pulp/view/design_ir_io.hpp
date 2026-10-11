@@ -65,6 +65,12 @@ DesignIR parse_design_ir_json(const std::string& json);
 
 /// Collect all external resources referenced by the IR into a manifest.
 /// Network fetches require explicit opt-in through options.
+///
+/// A local file outside options.base_directory is recorded by its absolute
+/// path. A loader resolves assets only inside the saved document's directory
+/// and refuses that path, so a caller that serializes the IR must first copy
+/// such files beside the document and record relative paths, as
+/// `pulp import-design` does for every lane that writes a document.
 IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
                                          const DesignIrAssetOptions& options = {});
 
