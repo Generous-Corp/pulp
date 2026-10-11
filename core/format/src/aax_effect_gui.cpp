@@ -397,6 +397,21 @@ private:
             auto token = alive.lock();
             if (!token || !token->load(std::memory_order_acquire)) return;
             if (!owner->bridge_ || !owner->host_) return;
+
+            // SetViewSize is the only AAX transaction that can resize the
+            // Pro Tools-owned editor window.  The first call can arrive
+            // before Pro Tools has finished installing its widget frame and
+            // be accepted without changing that frame.  Re-publish the
+            // preferred size while the host settles, then mirror it into the
+            // shared view host.  Without this second publication the native
+            // child paints at the authored size inside the stale, smaller
+            // AAX frame; dragging the corner later happens to perform the
+            // missing transaction and makes the editor appear to "fix" itself.
+            if (auto* view_container = owner->GetViewContainer()) {
+                AAX_Point size(static_cast<float>(height),
+                               static_cast<float>(width));
+                (void)view_container->SetViewSize(size);
+            }
             owner->host_->set_size(width, height);
             owner->bridge_->resize(width, height);
             if (attempt + 1 < kMaxAttempts) {
