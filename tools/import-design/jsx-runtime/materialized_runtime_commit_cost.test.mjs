@@ -798,7 +798,11 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
     pseudoBindings: [{ index: 0, anchor: 'body', path: [], pseudo: 'before',
       box: { left: 2, top: 3, width: 20, height: 10 },
       background_gradient: 'radial-gradient(circle, #0ff, transparent)',
-      opacity: 0.5, z_index: 0, pointer_events: 'none' }],
+      opacity: 0.5, z_index: 0, pointer_events: 'none' },
+    { index: 1, anchor: 'body', path: [], pseudo: 'after',
+      box: { left: 4, top: 5, width: 12, height: 8 },
+      background_color: 'rgba(0, 0, 0, 0.2)',
+      opacity: 0.25, z_index: 1, pointer_events: 'none' }],
     bridge: {
       createCol: (id, parent) => calls.push(['createCol', id, parent]),
       setBackgroundGradient: (id, value) => calls.push(['gradient', id, value]),
@@ -821,5 +825,10 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
     ['pointer', '__pulp_materialized_pseudo_0', 'none'],
     ['z', '__pulp_materialized_pseudo_0', 19000],
   ]);
+  const planeIds = new Set(calls.filter(call => call[0] === 'createCol' &&
+    call[1].startsWith('__pulp_materialized_pseudo_')).map(call => call[1]));
+  assert.deepEqual(planeIds, new Set([
+    '__pulp_materialized_pseudo_0', '__pulp_materialized_pseudo_1',
+  ]));
   assert.ok(sandbox);
 });

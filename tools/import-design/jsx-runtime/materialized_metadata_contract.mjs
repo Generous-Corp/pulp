@@ -149,6 +149,7 @@ function normalizeMaterializedPseudoBindings(bindings, label = 'materialized') {
     if (!binding || typeof binding !== 'object' ||
         (binding.anchor !== '#root' && binding.anchor !== 'body') ||
         (binding.pseudo !== 'before' && binding.pseudo !== 'after') ||
+        !Number.isSafeInteger(binding.index) || binding.index < 0 ||
         !Array.isArray(binding.path) || binding.path.length > 256 ||
         !binding.box || !finiteNumber(binding.box.left) ||
         !finiteNumber(binding.box.top) || !finiteNumber(binding.box.width) ||
@@ -174,7 +175,7 @@ function normalizeMaterializedPseudoBindings(bindings, label = 'materialized') {
       throw new Error(`${name} paint is invalid`);
     return {
       ...(binding.id === undefined ? {} : { id: binding.id }),
-      anchor: binding.anchor, path, pseudo: binding.pseudo,
+      index: binding.index, anchor: binding.anchor, path, pseudo: binding.pseudo,
       box: { left: binding.box.left, top: binding.box.top,
         width: binding.box.width, height: binding.box.height },
       ...(gradient === undefined ? {} : { background_gradient: gradient }),
