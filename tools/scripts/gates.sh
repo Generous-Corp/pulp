@@ -118,6 +118,7 @@ CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 LIVE_BUILD_CHECK="$ROOT/tools/scripts/live_build_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
+FOUNDATION_INCLUDE_LINT="$ROOT/tools/scripts/foundation_include_lint.py"
 SAFE_PATH_LINT="$ROOT/tools/scripts/safe_path_guard_lint.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
@@ -747,6 +748,18 @@ if [ -f "$WIN32_INCLUDE_LINT" ]; then
     echo "" >&2
     echo "▸ win32 include lint (MSVC C2589 min/max leak)" >&2
     if ! "$PYTHON" "$WIN32_INCLUDE_LINT" --root "$ROOT" >&2; then
+        fail=1
+    fi
+fi
+
+# ── 9c. foundation include lint (core/platform, runtime, simd stay bottom) ──
+# The foundation layer is linked by every other subsystem, so an upper-layer
+# include here (audio, view, format, ...) leaks that layer into audio-free
+# consumers. Lexical, whole-tree, sub-second.
+if [ -f "$FOUNDATION_INCLUDE_LINT" ]; then
+    echo "" >&2
+    echo "▸ foundation include lint (no upper-layer includes in core/platform|runtime|simd)" >&2
+    if ! "$PYTHON" "$FOUNDATION_INCLUDE_LINT" --root "$ROOT" >&2; then
         fail=1
     fi
 fi

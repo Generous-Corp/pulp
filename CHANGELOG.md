@@ -9,6 +9,55 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09450"></a>
+## [0.945.0] - 2026-10-11
+
+- release/version bump ([#10060](https://github.com/Generous-Corp/pulp/pull/10060))
+- codex/p2 thermal validator 20261011 ([#10055](https://github.com/Generous-Corp/pulp/pull/10055))
+- docs/vellum inheritance exception end 20261010 ([#10037](https://github.com/Generous-Corp/pulp/pull/10037))
+- feature/vellum x export ([#10026](https://github.com/Generous-Corp/pulp/pull/10026))
+- codex/w17 phase01 20261010 ([#10025](https://github.com/Generous-Corp/pulp/pull/10025))
+- feature/vellum carve P11 ([#10052](https://github.com/Generous-Corp/pulp/pull/10052))
+- fix/scripted ui mount frame bindings ([#10047](https://github.com/Generous-Corp/pulp/pull/10047))
+- feature/ui timeline observer ([#10044](https://github.com/Generous-Corp/pulp/pull/10044))
+
+<a id="v09440"></a>
+## [0.944.0] - 2026-10-10
+
+- codex/fix p2 build identity 20261010 ([#10041](https://github.com/Generous-Corp/pulp/pull/10041))
+- feature/vellum carve P9 ([#10040](https://github.com/Generous-Corp/pulp/pull/10040))
+- release/version bump ([#10045](https://github.com/Generous-Corp/pulp/pull/10045))
+- codex/sanitizer origin main fetch 2026 10 10 ([#10024](https://github.com/Generous-Corp/pulp/pull/10024))
+- codex/families gate profile node deps 20261010 ([#10034](https://github.com/Generous-Corp/pulp/pull/10034))
+
+<a id="v09430"></a>
+## [0.943.0] - 2026-10-10
+
+- release/version bump ([#10035](https://github.com/Generous-Corp/pulp/pull/10035))
+- feature/vellum carve P3 ([#10032](https://github.com/Generous-Corp/pulp/pull/10032))
+- feature/design ir observe interactions ([#10031](https://github.com/Generous-Corp/pulp/pull/10031))
+- codex/w6 retention 20261010 ([#10002](https://github.com/Generous-Corp/pulp/pull/10002))
+- codex/evidence archive 20261010 ([#10020](https://github.com/Generous-Corp/pulp/pull/10020))
+- feature/vellum carve P1 ([#10027](https://github.com/Generous-Corp/pulp/pull/10027))
+- release/version bump ([#10028](https://github.com/Generous-Corp/pulp/pull/10028))
+- codex/w4 pulp wait docs 20261010 ([#10017](https://github.com/Generous-Corp/pulp/pull/10017))
+- release/version bump ([#10023](https://github.com/Generous-Corp/pulp/pull/10023))
+- fix/materialized canvas match selector 20261010 ([#10022](https://github.com/Generous-Corp/pulp/pull/10022))
+- release/version bump ([#10021](https://github.com/Generous-Corp/pulp/pull/10021))
+- codex/materialized state selection test 20261011 ([#10018](https://github.com/Generous-Corp/pulp/pull/10018))
+- release/version bump ([#10019](https://github.com/Generous-Corp/pulp/pull/10019))
+- release/version bump ([#10016](https://github.com/Generous-Corp/pulp/pull/10016))
+- codex/govern tracing sdk 20261009 ([#10004](https://github.com/Generous-Corp/pulp/pull/10004))
+- codex/contract rows 2 15 20261010 ([#10006](https://github.com/Generous-Corp/pulp/pull/10006))
+- codex/sanitizer red 2026 10 10 ([#9999](https://github.com/Generous-Corp/pulp/pull/9999))
+- release/version bump ([#10005](https://github.com/Generous-Corp/pulp/pull/10005))
+- codex/w16 pin actions ([#9998](https://github.com/Generous-Corp/pulp/pull/9998))
+- codex/p8 advisory reds ([#9995](https://github.com/Generous-Corp/pulp/pull/9995))
+- codex/q1 vellum live main ([#9996](https://github.com/Generous-Corp/pulp/pull/9996))
+- codex/govern android fixtures 20261009 ([#10003](https://github.com/Generous-Corp/pulp/pull/10003))
+- release/version bump ([#10001](https://github.com/Generous-Corp/pulp/pull/10001))
+- fix/prepush queued guard ([#9977](https://github.com/Generous-Corp/pulp/pull/9977))
+
 <a id="v09420"></a>
 ## [0.942.0] - 2026-10-10
 
@@ -10340,6 +10389,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.945.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.945.0
+[0.944.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.944.0
+[0.943.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.943.0
 [0.942.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.942.0
 [0.941.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.941.0
 [0.940.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.940.0

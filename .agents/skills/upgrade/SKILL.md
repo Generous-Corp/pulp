@@ -304,6 +304,28 @@ These are the patterns that have shown up in Pulp migration notes. When
 you spot one, suggest the exact grep / replacement to the user instead
 of leaving them to figure it out from a prose paragraph.
 
+### Link-target splits (a module's code moves to a new imported target)
+
+**Pattern.** Code that used to live inside one installed archive moves to a
+new `Pulp::*` target, e.g. the design importers leaving `Pulp::view-core` for
+`Pulp::design-import`. Umbrella targets (`Pulp::view`) usually keep linking the
+new target, so only consumers that link the narrower target directly break,
+and they break at LINK time with undefined `pulp::...` symbols, not at compile
+time.
+
+**What to do.** Find the consumer's direct links to the narrowed target and add
+the new one (or switch to the umbrella):
+
+```bash
+grep -rn "Pulp::view-core" --include=CMakeLists.txt --include=*.cmake .
+```
+
+**Authoring such a note.** Versions are assigned after merge
+(`post_merge_assignment`), so the release number a split lands in is unknown
+while its PR is open. Write the note in a follow-up once the split has merged
+and the number is predictable from the pending bump, and verify it with
+`pulp upgrade --notes --json --from <prev> --to <next>`.
+
 ### CMake macro renames
 
 **Pattern.** A `pulp_add_*` function in `tools/cmake/Pulp*.cmake` is

@@ -527,6 +527,47 @@ knowing before you touch that file:
   Production native promotion is disabled; `threshold_eligible` is advisory
   evidence only. See `docs/tools/importer-differential-lab.md`.
 
+- `pulp-design-ir-observe` replays input headlessly: ordered `--click x,y`,
+  `--drag x1,y1:x2,y2` and `--key <name>` (`tab`/`shift+tab` traverse focus
+  as the window hosts do; other keys go to the focused view) run after layout
+  and BEFORE the render, so the PNG shows the post-interaction state. Steps
+  require `--interaction-log <json>`; the log records per step the hit
+  target's anchor and child-index path, `handled`, focus, and tree-ordered
+  control state. Two gotchas: a bare click never moves a knob (drag does),
+  and anchors are not unique — the figma-plugin scene fixture gives three
+  siblings one `stable_anchor_id` — so compare by `path`, not by anchor.
+
+- `pulp-design-ir-observe --backend gpu` renders through Skia Graphite on a
+  Dawn device (the default stays `skia`, the CPU raster, byte-identical to
+  before), and `--render-receipt <json>` records the backend actually used,
+  the adapter, frame outcome, readback, device loss, Skia milestone and Dawn
+  revision. A GPU request that cannot render fails; it never comes back as a
+  CPU render. Gotchas: an unscaled image blit renders byte-identically on
+  Graphite and CPU raster, so pixels alone cannot catch a silent fallback on
+  such a design (check the receipt and which GPU driver loaded); Pulp's macOS
+  GPU binaries also load `libwgpu_native.dylib`, a second WebGPU C API next to
+  Skia's static Dawn; and a SECOND Dawn copy in the process (e.g. via
+  `DYLD_INSERT_LIBRARIES`) is not benign — the observer then hits WebGPU
+  validation errors and a Tint internal compiler error. `--gpu-fault` seeds
+  failures for parity-lane calibration only.
+
+- `pulp-ui-frames-observe` records an imported panel (`--design-ir`) or a
+  scripted UI (`--script`) frame by frame under a fixed host clock: a
+  `pulp-ui-frame-schedule-v1` file supplies the host timestamps, the
+  StateStore parameters, and timed hover/click/drag/key/context-press,
+  `set_param`, `resize` and editor `attach_view`/`detach_view` events
+  (`test/fixtures/ui-frames/`). It follows the host frame contract exactly,
+  including the SECOND continuity check after `advance_host_frame`: keeping
+  only `begin_host_frame`'s answer stalls an input-started animation (a knob's
+  hover glow froze at 0.37 for nine frames). Gotchas it makes visible: a
+  view-first scripted document's first mounted frame paints `bindWidgetToParam`
+  controls at 0, one frame before the binding service catches up. Script
+  timers and `performance.now()` read the schedule's host clock by default
+  (`WidgetBridge::set_time_source`, `--timer-clock schedule`); pass
+  `--timer-clock wall` to see what a real host does, where a timer fires when
+  wall time passes its deadline however few frames that took. `Date.now()` is
+  always the engine's wall clock, so never derive timing from it in a fixture.
+
 **The lane that works (Figma is the source of truth):**
 ```bash
 # 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).
@@ -1902,7 +1943,9 @@ SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
   (`RecognitionResolver`) is the ONE place that combines recognition SOURCES
   into a merged `component_set_key → kind` (and `→ factory_id`) table. Sources,
   in precedence order (later wins on key collision):
-  1. built-in Pulp Figma Library (`RecognitionResolver::with_builtin_library()`,
+  1. built-in Pulp Figma Library (`recognition_resolver_with_builtin_library()`,
+     a Pulp-owned pack in `recognition_audio_pack.{hpp,cpp}` linked as
+     `pulp-design-import-audio-pack`, NOT part of the generic resolver;
      mirrored in code from `tools/figma-plugin/library-manifest.json` and pinned
      against the JSON by a drift-guard test),
   2. the user's `--recognition-manifest` (flat library-manifest shape),

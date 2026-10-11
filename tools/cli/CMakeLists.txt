@@ -190,7 +190,7 @@ target_link_libraries(pulp-cli PRIVATE
 # making the installed SDK CLI link deterministic on arm64 macOS.
 if(APPLE)
     foreach(_pulp_cli_force_archive IN ITEMS
-            pulp-view-core pulp-view-script pulp-canvas
+            pulp-view-core pulp-design-import pulp-view-script pulp-canvas
             pulp-runtime pulp-inspect-protocol)
         if(TARGET ${_pulp_cli_force_archive})
             target_link_options(pulp-cli PRIVATE

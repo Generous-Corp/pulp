@@ -3,9 +3,28 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>  // ScrollView
-#include <pulp/view/eq_curve_view.hpp>
+
+#include <array>
+#include <atomic>
 
 namespace pulp::view {
+
+namespace {
+
+constexpr size_t runtime_view_kind_count = 7;
+std::array<std::atomic<ContinuousFramePredicate>, runtime_view_kind_count> predicates{};
+
+size_t predicate_index(RuntimeViewKind kind) {
+    return static_cast<size_t>(kind);
+}
+
+} // namespace
+
+void register_continuous_frame_predicate(RuntimeViewKind kind, ContinuousFramePredicate predicate) {
+    const auto index = predicate_index(kind);
+    if (index < predicates.size())
+        predicates[index].store(predicate);
+}
 
 bool needs_continuous_frames(const View* view) {
     if (!view) return false;
@@ -41,8 +60,9 @@ bool needs_continuous_frames(const View* view) {
         if (static_cast<const ScrollView*>(view)->scroll_animating()) return true;
         break;
     case RuntimeViewKind::eq_curve: {
-        const auto* eq = static_cast<const EqCurveView*>(view);
-        if (eq->hover_animating() || eq->analyzer_animating()) return true;
+        if (const auto predicate = predicates[predicate_index(RuntimeViewKind::eq_curve)].load();
+            predicate && predicate(view))
+            return true;
         break;
     }
     default:

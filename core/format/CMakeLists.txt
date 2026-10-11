@@ -273,6 +273,28 @@ if(PULP_HAS_CLAP)
     # per-plugin clap_entry.cpp TU. The entry target defines PULP_CLAP_GUI=1;
     # the shared adapter must do the same or GUI members shift later fields.
     target_compile_definitions(pulp-format-view PRIVATE PULP_CLAP=1 PULP_CLAP_GUI=1)
+
+    # The same adapter without the GUI extension, for editor-less plug-ins
+    # (pulp_add_plugin NO_EDITOR). PULP_CLAP_GUI is undefined here and in the
+    # entry TU of such a plug-in, so PulpClapPlugin has the view-free layout on
+    # both sides. Links pulp::format-core only: an editor-less CLAP image then
+    # carries no view, canvas, render, Skia or Dawn code.
+    add_library(pulp-format-clap-core
+        src/clap_adapter.cpp
+        src/clap_remote_controls.cpp
+        src/clap_note_name.cpp
+    )
+    add_library(pulp::format-clap-core ALIAS pulp-format-clap-core)
+    target_include_directories(pulp-format-clap-core
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(pulp-format-clap-core PUBLIC pulp::format-core clap)
+    target_compile_definitions(pulp-format-clap-core PRIVATE PULP_CLAP=1)
+    if(PULP_HAS_AUSDK)
+        set_target_properties(pulp-format-clap-core PROPERTIES CXX_STANDARD 23)
+    endif()
 endif()
 
 # LV2 adapter

@@ -43,7 +43,7 @@ catch_discover_tests(pulp-test-import-object-coverage PROPERTIES LABELS "parser-
 # surface sources + design_ir.hpp from PULP_SRC_DIR; links Catch2 only.
 add_executable(pulp-test-design-import-parity test_design_import_parity.cpp)
 pulp_test_data(pulp-test-design-import-parity NO_DEFINE
-    PATHS core/view/src core/view/cmake/PulpViewSources.cmake
+    PATHS core/view/src core/view/cmake/PulpDesignUnits.cmake
         core/view/include/pulp/view/design_ir.hpp)
 target_link_libraries(pulp-test-design-import-parity PRIVATE Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-parity PRIVATE
@@ -104,7 +104,8 @@ catch_discover_tests(pulp-test-design-import-toggle-binding
     PROPERTIES LABELS "parser-import")
 
 add_executable(pulp-test-view-core-link test_view_core_link.cpp)
-target_link_libraries(pulp-test-view-core-link PRIVATE pulp::view-core Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-view-core-link
+    PRIVATE pulp::view-core pulp::design-import Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view-core-link
     PROPERTIES LABELS "parser-import")
 
@@ -303,7 +304,7 @@ add_executable(pulp-test-design-import-cpp-core-link
     test_design_import_cpp_core_link.cpp
     ${CHAINER_PHASE_F_HYBRID_CPP})
 target_link_libraries(pulp-test-design-import-cpp-core-link
-    PRIVATE pulp::view-core Catch2::Catch2WithMain)
+    PRIVATE pulp::view-core pulp::design-import Catch2::Catch2WithMain)
 target_include_directories(pulp-test-design-import-cpp-core-link PRIVATE
     ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated)
 catch_discover_tests(pulp-test-design-import-cpp-core-link
@@ -313,7 +314,7 @@ add_executable(pulp-test-design-import-cpp-only
     test_design_import_cpp_only.cpp
     ${CHAINER_PHASE_F_HYBRID_CPP})
 target_link_libraries(pulp-test-design-import-cpp-only
-    PRIVATE pulp::view-core Catch2::Catch2WithMain)
+    PRIVATE pulp::view-core pulp::design-import Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-cpp-only PRIVATE
     PULP_UI_RUNTIME_CPP_ONLY=1
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")

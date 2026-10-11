@@ -48,11 +48,16 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-view-core pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
     list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)
+endif()
+# The view-free CLAP adapter behind pulp_add_plugin(NO_EDITOR); present only
+# when the CLAP SDK is.
+if(TARGET pulp-format-clap-core)
+    list(APPEND PULP_SDK_TARGETS pulp-format-clap-core)
 endif()
 
 # pulp-view-script (the JS scripting + web-compat layer) is EXCLUDE_FROM_ALL
@@ -63,6 +68,13 @@ endif()
 # so it is only required in the export set then.
 if(PULP_ENABLE_JS)
     list(APPEND PULP_SDK_TARGETS pulp-view-script)
+endif()
+
+# The importer and its built-in recognition pack exist only when the
+# design-import subsystem is compiled; view-script and the view umbrellas link
+# them PUBLIC in that configuration, so the export set needs them then.
+if(PULP_ENABLE_DESIGN_IMPORT)
+    list(APPEND PULP_SDK_TARGETS pulp-design-import pulp-design-import-audio-pack)
 endif()
 if(PULP_BUILD_WEBVIEW)
     list(APPEND PULP_SDK_TARGETS pulp-view-webview)
@@ -90,16 +102,24 @@ if(TARGET pulp-host)
     list(APPEND PULP_SDK_TARGETS pulp-host)
 endif()
 
+# The GPU device layer is exported with the renderer that links it, and on its
+# own for pulp-gpu-audio, which links the device without the 2D renderer.
+if(TARGET pulp-gpu-device-api)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-device-api)
+endif()
+if(TARGET pulp-gpu-device)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-device)
+endif()
 if(TARGET pulp-render)
     list(APPEND PULP_SDK_TARGETS pulp-render)
 endif()
 
 # pulp-gpu-audio is the GPU-agnostic real-time audio transport plus the optional
 # GPU convolver/spectral nodes. The transport target is always built, but its
-# GPU nodes (and the PUBLIC link to pulp::render / pulp::signal) only compile
+# GPU nodes (and the PUBLIC link to pulp::gpu-device / pulp::signal) only compile
 # when GPU is enabled. Export it when configured so find_package(Pulp) consumers
 # — GPU plugins that drive a GpuAudioTransport — get pulp::gpu-audio. Its PUBLIC
-# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::render + pulp::signal)
+# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::gpu-device + pulp::signal)
 # are all already in the export set, so the export set stays self-consistent.
 if(TARGET pulp-gpu-audio)
     list(APPEND PULP_SDK_TARGETS pulp-gpu-audio)
@@ -236,7 +256,7 @@ if(TARGET yogacore)
 endif()
 if(PULP_ENABLE_DESIGN_IMPORT AND TARGET yaml-cpp)
     # yaml-cpp remains an implementation detail of the public DESIGN.md parser,
-    # but pulp-view-core is static, so installed consumers need its archive in
+    # but pulp-design-import is static, so installed consumers need its archive in
     # their final link closure. Export it under Pulp's namespace rather than
     # installing a second, independently discoverable yaml-cpp package.
     set_target_properties(yaml-cpp PROPERTIES EXPORT_NAME yaml-cpp)
@@ -918,6 +938,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_no_editor.cpp"
     DESTINATION src/pulp/format
 )
 

@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.942.0
+    VERSION 0.946.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -429,7 +429,7 @@ endif()
 if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
 endif()
-# After core/render so the GPU convolver node can link pulp::render when GPU is
+# After core/render so the GPU convolver node can link pulp::gpu-device when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
@@ -548,6 +548,35 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "For a stripped build set -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF.")
     endif()
     enable_testing()
+    # The file-api query is retained in the build tree so the Vellum closure
+    # receipt can be regenerated from the exact configured target graph.  The
+    # initial lane is report-only while P1-P10 carve PRs remove their allowlist
+    # edges; it becomes enforcing when the accepted boundary is complete.
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
+    file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME pulp.vellum-closure-boundary
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+            manifest
+            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --build-dir "${CMAKE_BINARY_DIR}"
+            --target pulp-canvas
+            --target pulp-render
+            --target pulp-view-core
+            --target pulp-view-script
+            --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+    set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+        LABELS "validation")
+    add_test(NAME pulp.vellum-closure-gate
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+            gate
+            --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+            --report-only)
+    set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+        DEPENDS pulp.vellum-closure-boundary
+        LABELS "validation")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
     FetchContent_Declare(
@@ -680,6 +709,7 @@ endif()
 if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/bundle_name_quoting)
+    add_subdirectory(test/fixtures/no_editor_link_floor)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
@@ -877,6 +907,7 @@ if(ANDROID)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
         core/platform/src/android/jni_motion.cpp
+        core/audio/platform/android/audio_jni.cpp
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
     target_include_directories(pulp-jni PRIVATE
@@ -901,6 +932,16 @@ if(ANDROID)
         android
         log
     )
+    # The Android app shell: it owns the GPU surface, drives the view hierarchy
+    # and the widget bridge, and plays the demo synth, so it sits at the top of
+    # the closure with the JNI bridge rather than inside pulp-render.
+    if(TARGET pulp-render AND PULP_ENABLE_GPU)
+        target_sources(pulp-jni PRIVATE
+            core/render/platform/android/gpu_surface_android.cpp
+            core/render/platform/android/gpu_surface_android_jni.cpp
+        )
+        target_link_libraries(pulp-jni PRIVATE pulp::render)
+    endif()
     # Ensure all static library symbols are included (needed for JNI registration)
     # Ensure JNI exports from static libs are included in the shared lib.
     # Without --whole-archive, the linker strips "unused" JNI_OnLoad and
@@ -910,6 +951,7 @@ if(ANDROID)
         $<TARGET_FILE:pulp-platform>
         $<TARGET_FILE:pulp-audio>
         $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
+        $<$<TARGET_EXISTS:pulp-gpu-device>:$<TARGET_FILE:pulp-gpu-device>>
         -Wl,--no-whole-archive)
 
     # TalkBack accessibility JNI entry points live in pulp-view
