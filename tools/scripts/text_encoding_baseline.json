@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4299,
+  "total": 4298,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -637,7 +637,7 @@
     "tools/scripts/test_android_aligned_buffer.py": 2,
     "tools/scripts/test_android_premerge_probe.py": 1,
     "tools/scripts/test_auto_release_decision_extra.py": 2,
-    "tools/scripts/test_build_combined_installer.py": 26,
+    "tools/scripts/test_build_combined_installer.py": 25,
     "tools/scripts/test_build_dir_sentinel.py": 5,
     "tools/scripts/test_build_fetch_resilience.py": 21,
     "tools/scripts/test_build_macos_workflow_dispatch.py": 6,

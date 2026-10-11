@@ -257,34 +257,48 @@ bool is_runnable_candidate(const fs::path& artifact) {
                         fs::perms::others_exec)) != fs::perms::none;
 }
 
+// A bundle's Contents/Resources (or the Contents/MacOS a sidecar there maps
+// to) that is a symlink could pair a manifest with a binary from another
+// bundle; the audit never follows it.
+bool is_symlinked_directory(const fs::path& directory) {
+    std::error_code error;
+    return fs::is_symlink(fs::symlink_status(directory, error));
+}
+
 bool has_matching_inspector_sidecar(const fs::path& executable,
                                     ArtifactSnapshotCache& snapshots) {
     const auto directory = executable.parent_path();
     const auto executable_name = executable.filename().string();
     std::error_code error;
     std::size_t sidecar_count = 0;
-    for (fs::directory_iterator iterator(directory, error), end;
-         !error && iterator != end; iterator.increment(error)) {
-        const auto path = iterator->path();
-        const auto filename = path.filename().string();
-        if (iterator->is_symlink() || !iterator->is_regular_file() ||
-            !filename.ends_with(".inspector-capabilities.json"))
+    for (const auto& sidecar_directory : pulp::inspect::control_sidecar_directories(directory)) {
+        std::error_code exists_error;
+        if (sidecar_directory != directory && (is_symlinked_directory(sidecar_directory) ||
+                                               !fs::is_directory(sidecar_directory, exists_error)))
             continue;
-        ++sidecar_count;
-        constexpr std::string_view suffix = ".inspector-capabilities.json";
-        const auto sidecar_target =
-            filename.substr(0, filename.size() - suffix.size());
-        if (sidecar_target == executable_name ||
-            sidecar_target + ".exe" == executable_name)
-            return true;
-        Manifest manifest;
-        std::string ignored_error;
-        if (!read_manifest(path, manifest, ignored_error)) continue;
-        if (manifest.product_name == executable_name ||
-            manifest.product_name + ".exe" == executable_name ||
-            manifest.target == executable_name ||
-            manifest.target + ".exe" == executable_name)
-            return true;
+        for (fs::directory_iterator iterator(sidecar_directory, error), end;
+             !error && iterator != end; iterator.increment(error)) {
+            const auto path = iterator->path();
+            const auto filename = path.filename().string();
+            if (iterator->is_symlink() || !iterator->is_regular_file() ||
+                !filename.ends_with(".inspector-capabilities.json"))
+                continue;
+            ++sidecar_count;
+            constexpr std::string_view suffix = ".inspector-capabilities.json";
+            const auto sidecar_target = filename.substr(0, filename.size() - suffix.size());
+            if (sidecar_target == executable_name || sidecar_target + ".exe" == executable_name)
+                return true;
+            Manifest manifest;
+            std::string ignored_error;
+            if (!read_manifest(path, manifest, ignored_error))
+                continue;
+            if (manifest.product_name == executable_name ||
+                manifest.product_name + ".exe" == executable_name ||
+                manifest.target == executable_name || manifest.target + ".exe" == executable_name)
+                return true;
+        }
+        if (error)
+            break;
     }
     if (error || sidecar_count != 1 ||
         !artifact_has_standalone_marker(executable, snapshots))
@@ -574,19 +588,28 @@ Report load_artifact_report(const fs::path& search_root) {
                     path.string();
                 return report;
             }
+            // A macOS bundle's sidecar lives in Contents/Resources and
+            // describes the executable in Contents/MacOS.
+            const auto executable_directory =
+                pulp::inspect::control_sidecar_executable_directory(path.parent_path());
+            if (executable_directory != path.parent_path() &&
+                is_symlinked_directory(executable_directory)) {
+                report.error_code = "audit.symlink-forbidden";
+                report.error = "control audit does not follow a symlinked bundle code directory: " +
+                               executable_directory.string();
+                return report;
+            }
             std::vector<fs::path> exact_candidates = {
-                path.parent_path() / manifest.product_name,
-                path.parent_path() / (manifest.product_name + ".exe"),
+                executable_directory / manifest.product_name,
+                executable_directory / (manifest.product_name + ".exe"),
             };
             if (!manifest.target.empty()) {
-                exact_candidates.push_back(path.parent_path() / manifest.target);
-                exact_candidates.push_back(
-                    path.parent_path() / (manifest.target + ".exe"));
+                exact_candidates.push_back(executable_directory / manifest.target);
+                exact_candidates.push_back(executable_directory / (manifest.target + ".exe"));
             }
             if (!canonical) {
-                exact_candidates.push_back(path.parent_path() / target);
-                exact_candidates.push_back(
-                    path.parent_path() / (target + ".exe"));
+                exact_candidates.push_back(executable_directory / target);
+                exact_candidates.push_back(executable_directory / (target + ".exe"));
             }
             std::sort(exact_candidates.begin(), exact_candidates.end());
             exact_candidates.erase(
@@ -609,10 +632,9 @@ Report load_artifact_report(const fs::path& search_root) {
                          is_runnable_candidate);
             if (existing.empty() && !canonical) {
                 std::error_code sibling_error;
-                for (fs::directory_iterator sibling(path.parent_path(), sibling_error),
+                for (fs::directory_iterator sibling(executable_directory, sibling_error),
                      sibling_end;
-                     !sibling_error && sibling != sibling_end;
-                     sibling.increment(sibling_error)) {
+                     !sibling_error && sibling != sibling_end; sibling.increment(sibling_error)) {
                     if (is_runnable_candidate(sibling->path()) &&
                         artifact_has_standalone_marker(sibling->path(),
                                                        artifact_snapshots))
@@ -747,28 +769,56 @@ Report audit_artifact(const fs::path& artifact_or_bundle) {
         ? fs::current_path()
         : audit_target.parent_path();
     const auto filename = audit_target.filename().string();
-    const auto exact_sidecar =
-        parent / (filename + ".inspector-capabilities.json");
+    // Contents/Resources first for a macOS bundle, then beside the executable.
+    const auto sidecar_directories = pulp::inspect::control_sidecar_directories(parent);
+    for (const auto& directory : sidecar_directories) {
+        if (directory != parent && is_symlinked_directory(directory)) {
+            Report report;
+            report.error_code = "audit.symlink-forbidden";
+            report.error = "control audit does not follow a symlinked bundle resource directory: " +
+                           directory.string();
+            return report;
+        }
+    }
+    fs::path exact_sidecar;
+    for (const auto& directory : sidecar_directories) {
+        const auto candidate = directory / (filename + ".inspector-capabilities.json");
+        if (!fs::is_regular_file(candidate))
+            continue;
+        if (!exact_sidecar.empty()) {
+            // A bundle with the sidecar in both places resolves no differently
+            // from a directory audit of it: ambiguous, never a silent pick.
+            Report report;
+            report.error_code = "audit.manifest-ambiguous";
+            report.error =
+                "multiple control manifests match artifact: " + artifact_or_bundle.string();
+            return report;
+        }
+        exact_sidecar = candidate;
+    }
     std::vector<fs::path> candidates;
-    if (fs::is_regular_file(exact_sidecar)) {
+    if (!exact_sidecar.empty()) {
         candidates.push_back(exact_sidecar);
     } else {
-        std::error_code iteration_error;
-        for (fs::directory_iterator iterator(parent, iteration_error), end;
-             !iteration_error && iterator != end;
-             iterator.increment(iteration_error)) {
-            const auto candidate = iterator->path();
-            if (iterator->is_regular_file() &&
-                candidate.filename().string().ends_with(
-                    ".inspector-capabilities.json"))
-                candidates.push_back(candidate);
-        }
-        if (iteration_error) {
-            Report report;
-            report.error_code = "audit.manifest-enumeration";
-            report.error = "could not enumerate control manifests beside: " +
-                                  audit_target.string();
-            return report;
+        for (const auto& directory : sidecar_directories) {
+            std::error_code exists_error;
+            if (directory != parent && !fs::is_directory(directory, exists_error))
+                continue;
+            std::error_code iteration_error;
+            for (fs::directory_iterator iterator(directory, iteration_error), end;
+                 !iteration_error && iterator != end; iterator.increment(iteration_error)) {
+                const auto candidate = iterator->path();
+                if (iterator->is_regular_file() &&
+                    candidate.filename().string().ends_with(".inspector-capabilities.json"))
+                    candidates.push_back(candidate);
+            }
+            if (iteration_error) {
+                Report report;
+                report.error_code = "audit.manifest-enumeration";
+                report.error =
+                    "could not enumerate control manifests beside: " + audit_target.string();
+                return report;
+            }
         }
     }
     std::sort(candidates.begin(), candidates.end());

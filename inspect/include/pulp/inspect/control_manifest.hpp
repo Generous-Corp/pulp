@@ -3,6 +3,7 @@
 #include <pulp/inspect/capabilities.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -159,6 +160,26 @@ bool validate_control_manifest(const ControlManifest& manifest, std::string& err
 ControlManifestValidation validate_control_manifest_detailed(const ControlManifest& manifest);
 std::optional<ControlManifest>
 parse_control_manifest(std::string_view json, ControlManifestDiagnostics* diagnostics = nullptr);
+
+/// Directories that may hold the control sidecars of an executable living in
+/// `executable_directory` (`<name>.inspector-capabilities.json`,
+/// `<name>.<format>.control-shipping.json`, `...-report.json`), in lookup
+/// order. A macOS bundle keeps them in `Contents/Resources`: Apple reserves
+/// `Contents/MacOS` for code, and a data file there makes the bundle fail an
+/// ordinary (non `--deep`) code signature. Bundles built before that layout
+/// kept them beside the executable, which is still listed second so they stay
+/// readable. Any other artifact keeps them beside its binary. (A framework's
+/// sidecars, in `Versions/<v>/Resources`, are build evidence that no reader
+/// resolves from an executable, so they are not covered here.) Pure path
+/// arithmetic; nothing is read from disk.
+std::vector<std::filesystem::path>
+control_sidecar_directories(const std::filesystem::path& executable_directory);
+
+/// The directory of the executable a sidecar in `sidecar_directory` describes:
+/// `<bundle>/Contents/MacOS` for a macOS bundle's `Contents/Resources`, and the
+/// directory itself otherwise. Pure path arithmetic; nothing is read from disk.
+std::filesystem::path
+control_sidecar_executable_directory(const std::filesystem::path& sidecar_directory);
 
 /// Emits the unique stable byte representation used for artifact digests.
 std::string serialize_control_manifest(const ControlManifest& manifest);
