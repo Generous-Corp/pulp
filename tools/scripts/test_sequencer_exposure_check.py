@@ -25,6 +25,7 @@ from sequencer_exposure_check import (
     _load_sequencer_trailers,
     _read_ledger_at_anchor,
     _mechanical_version_paths,
+    _mechanical_workflow_paths,
     _semantic_added_paths,
     assemble_ledger,
     config_doc_targets,
@@ -1361,6 +1362,7 @@ def main() -> int:
         if not any(fixture_guide in error and "owned_paths" in error for error in planted):
             raise AssertionError(f"a row owning a mapped guide was accepted: {planted}")
         _CHECK_TALLY["calibrated"] += 1
+
         owning_guide_tombstone = copy.deepcopy(valid)
         owning_guide_tombstone["tombstones"] = [
             {
@@ -1732,6 +1734,38 @@ def main() -> int:
             raise AssertionError(
                 "control: a disposition change was treated as a mechanical version "
                 f"rewrite, so the exemption is not diff-scoped: {nonver_paths}"
+            )
+        _CHECK_TALLY["calibrated"] += 1
+
+        # Workflow action refs are mechanical per path, regardless of author.
+        workflow_path = ".github/workflows/timeline-fuzz.yml"
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "seed workflow")
+        workflow_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v5\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "workflow action bump")
+        action_paths, action_errors = _mechanical_workflow_paths(
+            mech_root, workflow_base, [workflow_path], "HEAD"
+        )
+        if action_errors or workflow_path not in action_paths:
+            raise AssertionError(
+                f"uses-only sequencer workflow was not mechanical: {action_paths}, {action_errors}"
+            )
+        _CHECK_TALLY["clean"] += 1
+
+        # CONTROL: a run change in the same workflow remains sequencer-owned.
+        run_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - run: ctest\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "workflow run change")
+        run_paths, run_errors = _mechanical_workflow_paths(
+            mech_root, run_base, [workflow_path], "HEAD"
+        )
+        if run_errors or workflow_path in run_paths:
+            raise AssertionError(
+                f"control: run change was treated as mechanical: {run_paths}, {run_errors}"
             )
         _CHECK_TALLY["calibrated"] += 1
 

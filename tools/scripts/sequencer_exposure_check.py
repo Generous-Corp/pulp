@@ -21,6 +21,9 @@ from gate_common import (
 )
 
 
+_USES_ONLY_LINE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*\S+(?:\s+#.*)?\s*$")
+
+
 CLASSIFICATIONS = {
     "ci_test_only",
     "engine_internal",
@@ -1557,6 +1560,34 @@ def _mechanical_version_paths(
     return matched, errors
 
 
+def _mechanical_workflow_paths(
+    repo_root: Path, base: str, changed_paths: list[str], head: str = "HEAD"
+) -> tuple[set[str], list[str]]:
+    """Classify workflow files whose complete diff only changes ``uses:`` lines."""
+    matched: set[str] = set()
+    errors: list[str] = []
+    for path in changed_paths:
+        if not path.startswith(".github/workflows/"):
+            continue
+        diff = _git(
+            repo_root, "diff", "--no-renames", "--no-ext-diff", "--unified=0",
+            f"{base}...{head}", "--", path,
+        )
+        if diff.returncode != 0:
+            errors.append(
+                f"transition: cannot scan workflow action change in {path}: "
+                f"{diff.stderr.strip()}"
+            )
+            continue
+        body = [
+            line for line in diff.stdout.splitlines()
+            if line[:1] in {"+", "-"} and not line.startswith(("+++", "---"))
+        ]
+        if body and all(_USES_ONLY_LINE_RE.fullmatch(line[1:]) for line in body):
+            matched.add(path)
+    return matched, errors
+
+
 def _semantic_added_paths(
     repo_root: Path, base: str, changed_paths: list[str], head: str = "HEAD"
 ) -> tuple[set[str], list[str]]:
@@ -1941,6 +1972,11 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root, comparison_base, changed_paths,
                 comparison.resolved_head or "HEAD",
             )
+            workflow_mechanical_paths, workflow_mechanical_errors = _mechanical_workflow_paths(
+                repo_root, comparison_base, changed_paths,
+                comparison.resolved_head or "HEAD",
+            )
+            mechanical_paths |= workflow_mechanical_paths
             if dependabot_uses_only_diff(args.base, comparison.resolved_head or "HEAD"):
                 # An action-only workflow bump has no sequencer semantic change,
                 # even when a workflow filename contains timeline/playback.
@@ -1953,10 +1989,12 @@ def main(argv: list[str] | None = None) -> int:
             trailer_ids, trailer_errors = [], []
             semantic_paths, semantic_errors = set(), []
             mechanical_paths, mechanical_errors = set(), []
+            workflow_mechanical_errors = []
         errors.extend(transition_errors)
         errors.extend(trailer_errors)
         errors.extend(semantic_errors)
         errors.extend(mechanical_errors)
+        errors.extend(workflow_mechanical_errors)
         errors.extend(
             validate_transition(
                 base_document,
