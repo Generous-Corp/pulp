@@ -207,7 +207,7 @@ jobs:
               raise SystemExit("PR-safe assignment rejected: " + ", ".join(failed))
           PY
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Preserve the ordinary pull_request Linux gate's integration
           # semantics: build GitHub's proposed merge, not the raw PR head.

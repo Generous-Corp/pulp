@@ -15,7 +15,6 @@ lint = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(lint)
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-MOTION = "core/platform/src/android/jni_motion.cpp"
 
 
 class FoundationIncludeLintTests(unittest.TestCase):
@@ -26,7 +25,6 @@ class FoundationIncludeLintTests(unittest.TestCase):
                     '#include <pulp/platform/platform.hpp>\n#include "../include/x.hpp"\n')
         self._write("core/platform/include/x.hpp", "#pragma once\n")
         self._write("core/runtime/src/log.cpp", "#include <pulp/runtime/log.hpp>\n")
-        self._write(MOTION, "#include <pulp/view/motion.hpp>\n")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -70,9 +68,23 @@ class FoundationIncludeLintTests(unittest.TestCase):
         self._write("core/platform/src/b.cpp", '#include "../../runtime/src/log.cpp"\n')
         self.assertEqual(self._run(), 0)
 
-    def test_stale_allowlist_entry_fails(self):
-        self._write(MOTION, "#include <pulp/platform/android/jni.hpp>\n")
+    def test_view_include_fails(self):
+        self._write("core/platform/src/android/jni_motion.cpp",
+                    "#include <pulp/view/motion.hpp>\n")
         self.assertEqual(self._run(), 1)
+
+    def test_allowlisted_edge_passes_and_stale_entry_fails(self):
+        key = ("core/platform/src/a.cpp", "pulp/view/motion.hpp")
+        saved = dict(lint.ALLOWED)
+        lint.ALLOWED[key] = "test"
+        try:
+            self._write(key[0], "#include <pulp/view/motion.hpp>\n")
+            self.assertEqual(self._run(), 0)
+            self._write(key[0], "#include <pulp/platform/platform.hpp>\n")
+            self.assertEqual(self._run(), 1)
+        finally:
+            lint.ALLOWED.clear()
+            lint.ALLOWED.update(saved)
 
     def test_empty_tree_is_a_scan_error_not_a_pass(self):
         with tempfile.TemporaryDirectory() as empty:

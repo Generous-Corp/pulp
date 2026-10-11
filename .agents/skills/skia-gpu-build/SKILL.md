@@ -428,7 +428,22 @@ validate the digest-bound receipt with `gpu-probe-current-acceptance`. Those
 surfaces reject unavailable evidence. There is no compile-time
 `PULP_GPU_PROBE_REQUIRE_WORK` policy branch in the portable unit suite.
 
-A GPU plugin/app links `libwgpu_native.dylib`. The upstream WebGPU FetchContent
+**Skia-on builds no longer link wgpu-native.** `core/render` links the `webgpu`
+target only when the renderer has no Skia Dawn archive; with Skia's static Dawn,
+every WebGPU call binds inside the image to that Dawn, and staging/build-info read
+the same decision (`pulp_wgpu_runtime_linked`), so a Skia-on bundle neither ships
+nor loads `libwgpu_native.dylib`. That also removes a per-process hazard: dyld
+shares one `@rpath/libwgpu_native.dylib` by install name, so two Pulp plug-ins in
+one host used to run on whichever copy loaded first. The link-floor ctest
+`native-ui-link-floor-artifacts` asserts Dawn present and wgpu-native absent, with
+a positive control that really loads it. Gotcha: a reused build dir that once
+staged the dylib still has it in each bundle until that target relinks;
+`pulp_stage_runtime_dependencies` removes it POST_BUILD, so rebuild the bundle
+rather than trusting an old one. The rpath guidance below still applies
+to a no-Skia (wgpu-native fallback) build and to any other bundled runtime dylib
+(V8).
+
+A GPU plugin/app built without Skia's Dawn links `libwgpu_native.dylib`. The upstream WebGPU FetchContent
 copies the dylib INTO the bundle's `Contents/MacOS` but rpaths the binary only at
 the **build cache** (`~/Library/Caches/Pulp/fetchcontent-src/.../lib`). On the
 build machine that path exists, so the build, codesign, notarize, `auval`,

@@ -581,7 +581,7 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         self.assertIn("sdk_provenance_floor", self.text)
         self.assertIn("cannot substitute source_ref", self.text)
         guard = self.text.index("- name: Reject marker-era source substitution")
-        checkout = self.text.index("- uses: actions/checkout@v5", guard)
+        checkout = self.text.index("- uses: actions/checkout@v7", guard)
         self.assertLess(
             guard,
             checkout,

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-dependabot-actions-20261010-watch",
+  "created_at": "2026-10-10T06:42:29Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "This Dependabot action pin refresh changes only GitHub Actions references and gate coverage. It moves no design-import, rendering, packaging, Chromium, or visual-proof authority; the watch is retained for the affected workflow families.",
+  "tests": [
+    "python3 tools/scripts/test_build_fetch_resilience.py",
+    "python3 tools/scripts/test_build_macos_workflow_dispatch.py",
+    "python3 tools/scripts/test_changed_surface_shadow_plans.py",
+    "python3 tools/scripts/test_config_doc_check.py",
+    "python3 tools/scripts/test_gate_common.py",
+    "python3 tools/scripts/test_release_workflow_test_step.py",
+    "python3 tools/scripts/test_skill_sync_check.py",
+    "python3 tools/scripts/test_vellum_authority_workflows.py",
+    "python3 tools/scripts/test_windows_runner_policy.py",
+    "python3 tools/scripts/test_workflow_lint.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
