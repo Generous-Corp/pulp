@@ -473,11 +473,9 @@ jobs:
     # RTSan first shipped in upstream LLVM 20 and is not available in Apple Clang.
     # See: https://clang.llvm.org/docs/RealtimeSanitizer.html
     #
-    # Advisory-only: the apt.llvm.org LLVM 20 package on ubuntu-24.04
-    # ships without the compiler-rt realtime runtime, so
-    # `-fsanitize=realtime` errors with "unsupported argument". Until
-    # the runtime is available in that channel (or we vendor a build),
-    # the job runs on workflow_dispatch only so it doesn't block PRs.
+    # Advisory-only: keep RTSan dispatch-only while its findings baseline is
+    # triaged and its relatively expensive Linux lane is run on demand.
+    # Configure and Build are validated by the workflow_dispatch proof lane.
     if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v5
