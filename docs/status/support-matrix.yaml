@@ -579,11 +579,11 @@ widgets:
     notes: Searchable, category-grouped preset browser with keyboard navigation; CI coverage includes pulp-test-preset-browser. See core/view/include/pulp/view/preset_browser.hpp.
   eq_curve_view:
     status: usable
-    notes: Draggable EQ band handles over the true biquad magnitude response (signal::response_curve_db), with an optional spectrum overlay resampled onto the shared log-frequency axis; CI coverage includes pulp-test-phase9-widgets. See core/view/include/pulp/view/eq_curve_view.hpp.
+    notes: Draggable EQ band handles over the true biquad magnitude response (signal::response_curve_db), with an optional spectrum overlay resampled onto the shared log-frequency axis; CI coverage includes pulp-test-phase9-widgets. See core/view/audio/include/pulp/view/eq_curve_view.hpp.
   graph_editor_view:
     status: usable
     ci_test: pulp-test-graph-editor-view
-    notes: Canvas-based node editor on top of pulp::canvas; renders a SignalGraph as a draggable, connectable graph; CI coverage includes pulp-test-graph-editor-view. See core/view/include/pulp/view/widgets/graph_editor_view.hpp.
+    notes: Canvas-based node editor on top of pulp::canvas; renders a SignalGraph as a draggable, connectable graph; CI coverage includes pulp-test-graph-editor-view. See core/view/audio/include/pulp/view/widgets/graph_editor_view.hpp.
   # General-purpose UI widgets surfaced by the audit as missing rows.
   file_browser:
     status: usable

@@ -101,6 +101,12 @@ endif()
 if(TARGET pulp-host)
     list(APPEND PULP_SDK_TARGETS pulp-host)
 endif()
+if(TARGET pulp-view-graph-editor)
+    list(APPEND PULP_SDK_TARGETS pulp-view-graph-editor)
+endif()
+if(TARGET pulp-view-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-view-audio)
+endif()
 
 # The GPU device layer is exported with the renderer that links it, and on its
 # own for pulp-gpu-audio, which links the device without the 2D renderer.
@@ -359,6 +365,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+# GraphEditorView is an audio-UI header kept outside view-core, while retaining
+# its public pulp/view/widgets include path for installed consumers.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include/pulp/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+    FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"
