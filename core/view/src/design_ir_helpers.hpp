@@ -244,10 +244,12 @@ inline bool asset_path_lexically_within(std::string_view raw, const std::filesys
 // document names its assets relative to its own directory. A path that leaves
 // it -- `..`, an absolute path, a drive or UNC root -- is refused by text,
 // before any lookup, so the refusal is identical whether or not a file is
-// there; a symlink pointing out is caught after the lookup. Either is honoured
-// only when the manifest declares a SHA-256 and the file matches it, so a
-// crafted manifest cannot paint, or probe for, an arbitrary file on the host.
-// Without a document directory there is nothing to escape.
+// there; a symlink pointing out is caught after the lookup. A declared SHA-256
+// does not admit an escaping path: the document controls that hash, so a
+// crafted manifest could name a well-known file and read or probe for it. The
+// only hash-gated recovery is verified_packaged_asset_file, which looks inside
+// the document's own assets/ directory. Without a document directory there is
+// nothing to escape.
 inline std::optional<std::filesystem::path>
 contained_asset_file(const IRAssetRef& asset, std::string_view raw,
                      const std::filesystem::path& asset_base_directory, std::string_view field) {
@@ -260,19 +262,13 @@ contained_asset_file(const IRAssetRef& asset, std::string_view raw,
     // `..` is never resolved through a directory that does not exist or a
     // symlink the check did not see.
     candidate = candidate.lexically_normal();
-    const bool lexically_inside = asset_path_lexically_within(raw, asset_base_directory);
-    if (lexically_inside) {
+    if (asset_path_lexically_within(raw, asset_base_directory)) {
         auto found = existing_asset_file(candidate);
-        if (!found || asset_path_within(*found, asset_base_directory) ||
-            asset_file_matches_declared_sha256(asset, *found))
-            return found;
-    } else if (is_sha256_hex(asset_content_hash_stem(asset))) {
-        if (auto found = existing_asset_file(candidate);
-            found && asset_file_matches_declared_sha256(asset, *found))
+        if (!found || asset_path_within(*found, asset_base_directory))
             return found;
     }
     runtime::log_warn("design-import: asset '{}' refused — {} '{}' resolves outside the document "
-                      "directory '{}' and does not match a declared sha256",
+                      "directory '{}'",
                       asset.asset_id, field, std::string(raw),
                       asset_base_directory.generic_string());
     return std::nullopt;
@@ -309,8 +305,7 @@ inline std::vector<std::filesystem::path> asset_search_roots(
 // The readable file backing a manifest asset, or nullopt when none of the
 // candidates exist. Order: the recorded local_path (absolute, or relative to
 // the document directory), then a `file://` original_uri — each confined to
-// the document directory unless its bytes match the declared SHA-256 (see
-// contained_asset_file) — then the
+// the document directory (see contained_asset_file) — then the
 // content-addressed `<hash><ext>` under each search root. Recovering by hash
 // is logged — a manifest path that no longer points at its bytes is a defect
 // upstream, and one diagnosable line is what keeps it from reading as a

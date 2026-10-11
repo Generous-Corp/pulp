@@ -919,14 +919,16 @@ TEST_CASE("runtime asset resolution leaves a resolvable manifest path alone",
     CHECK(resolved_asset_uri(relative_asset, document_directory) ==
           "file://" + relative.lexically_normal().generic_string());
 
-    // An absolute path outside the document is honoured when its bytes match
-    // the declared SHA-256.
+    // An absolute path inside the document resolves; one outside it does not,
+    // even with a matching declared SHA-256.
     IRAssetRef absolute_asset;
     absolute_asset.asset_id = "logo";
+    absolute_asset.local_path = relative.string();
+    CHECK(resolved_asset_uri(absolute_asset, document_directory) ==
+          "file://" + relative.lexically_normal().generic_string());
     absolute_asset.local_path = absolute.string();
     absolute_asset.content_hash = pulp::runtime::sha256_hex("pulp-test-asset-bytes");
-    CHECK(resolved_asset_uri(absolute_asset, document_directory) ==
-          "file://" + absolute.lexically_normal().generic_string());
+    CHECK(resolve_asset_file(absolute_asset, document_directory) == std::nullopt);
 
     // A self-contained URI still wins over an absent file, unchanged.
     IRAssetRef inline_asset;
@@ -1002,10 +1004,14 @@ TEST_CASE("runtime asset resolution refuses a manifest path that leaves the docu
         asset.local_path = "\\\\server\\share\\escape.png";
         refused(asset);
     }
-    SECTION("an escaping path whose bytes match a declared sha256 is honoured") {
+    SECTION("a declared sha256 that matches the outside file does not admit it") {
+        // The document controls the hash, so a matching hash proves nothing
+        // about whether the document may read that file.
         asset.local_path = "../escape.png";
         asset.content_hash = pulp::runtime::sha256_hex("outside-bytes");
-        CHECK(resolve_asset_file(asset, document_directory) == outside.lexically_normal());
+        refused(asset);
+        asset.local_path = outside.string();
+        refused(asset);
     }
     SECTION("paths that stay inside the document still resolve") {
         asset.local_path = "assets/../assets/inside.png";
