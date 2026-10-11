@@ -1102,6 +1102,14 @@ add_test(NAME cmake-inspector-shipping-scanner
 set_tests_properties(cmake-inspector-shipping-scanner PROPERTIES
     LABELS "cmake;inspect;ship" TIMEOUT 30)
 
+add_test(NAME cmake-pulp-add-plugin-unknown-args
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-add-plugin-unknown-args
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_plugin_unknown_args.cmake)
+set_tests_properties(cmake-pulp-add-plugin-unknown-args PROPERTIES
+    LABELS "cmake;format" TIMEOUT 120)
+
 add_test(NAME cmake-control-shipping-matrix
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}

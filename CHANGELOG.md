@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09440"></a>
+## [0.944.0] - 2026-10-10
+
+- codex/fix p2 build identity 20261010 ([#10041](https://github.com/Generous-Corp/pulp/pull/10041))
+- feature/vellum carve P9 ([#10040](https://github.com/Generous-Corp/pulp/pull/10040))
+- release/version bump ([#10045](https://github.com/Generous-Corp/pulp/pull/10045))
+- codex/sanitizer origin main fetch 2026 10 10 ([#10024](https://github.com/Generous-Corp/pulp/pull/10024))
+- codex/families gate profile node deps 20261010 ([#10034](https://github.com/Generous-Corp/pulp/pull/10034))
+
 <a id="v09430"></a>
 ## [0.943.0] - 2026-10-10
 
@@ -10368,6 +10377,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.944.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.944.0
 [0.943.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.943.0
 [0.942.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.942.0
 [0.941.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.941.0
