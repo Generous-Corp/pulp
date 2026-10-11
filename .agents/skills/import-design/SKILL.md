@@ -2988,11 +2988,13 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   `[serialization]` round-trip test.
 - **A document-loaded asset stays inside its document.** With an
   `asset_base_directory`, `resolve_asset_file` honours a manifest `local_path`
-  or `file://` `original_uri` only when the file lies inside that directory once
-  symlinks are resolved, or hashes to the declared SHA-256. A `../` path, an
-  absolute host path or a symlinked directory pointing out is refused with an
-  `asset '…' refused — … resolves outside the document directory` warning and
-  reads as unresolved. An importer that writes absolute local_paths must also
+  or `file://` `original_uri` only when the path stays inside that directory
+  — judged by text first (`..` folded, backslashes as separators, absolute,
+  drive-letter and UNC roots refused, no lookup) and then by the resolved path
+  (symlinks) — or the file hashes to the declared SHA-256. A refusal logs
+  `asset '…' refused — … resolves outside the document directory` and reads as
+  unresolved. It is decided before any lookup on purpose: refusing only files
+  that exist would tell a crafted manifest which outside files are present. An importer that writes absolute local_paths must also
   write the asset's sha256, or the asset will not load from a saved document.
 - **Pencil stroke lives in an attribute.** Shape stroke can arrive as
   `attributes["stroke_color"]` (+ `stroke_width`/`stroke-width`), NOT
