@@ -643,6 +643,29 @@ set_tests_properties(pulp-view-core-include-boundary
     pulp-view-core-include-boundary-negative-contract
     PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
 
+# The symbol half: neither header nor link checks see an object that needs
+# another library's code (a dynamic_cast to Meter compiles against a view-core
+# header but needs Meter's typeinfo from pulp-view-audio). This reads the
+# archives. view-script and design-import still bind audio widgets directly;
+# those edges are tracked debts, removed by the audio-widget seam (P19).
+if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET pulp-design-import)
+    add_test(NAME pulp-view-audio-symbol-floor
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/view_audio_symbol_floor.py"
+            --audio "$<TARGET_FILE:pulp-view-audio>"
+            --check "view-core=$<TARGET_FILE:pulp-view-core>"
+            --check "view-script=$<TARGET_FILE:pulp-view-script>"
+            --check "design-import=$<TARGET_FILE:pulp-design-import>"
+            --debt "view-script=view-script-view-audio-link (P19)"
+            --debt "design-import=design-import-view-audio-link (P19)")
+    add_test(NAME pulp-view-audio-symbol-floor-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_view_audio_symbol_floor.py")
+    set_tests_properties(pulp-view-audio-symbol-floor
+        pulp-view-audio-symbol-floor-negative-contract
+        PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+endif()
+
 # pulp-host-lane-probe (tools/editor-open/host_lane_probe.mm) must refuse to
 # run without plug-ins and must report an unloadable bundle as a setup error
 # (exit 2), never as written observations. The functional lane needs built

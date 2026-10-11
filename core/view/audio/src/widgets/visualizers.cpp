@@ -37,6 +37,11 @@ namespace {
 constexpr float kMeterPeakOverscan = 2.0f;
 }
 
+void Meter::inspector_facts(std::vector<InspectorFacts::Fact>& out) const {
+    out.push_back({"rms", "RMS", display_rms(), false, true});
+    out.push_back({"peak", "Peak", display_peak(), false, true});
+}
+
 void Meter::set_level(float rms, float peak) {
     current_rms_ = std::clamp(rms, 0.0f, 1.0f);
     current_peak_ = std::clamp(peak, 0.0f, 1.0f);
@@ -285,6 +290,10 @@ size_t WaveformView::find_trigger_index(const float* samples, size_t count, Trig
     return 0;
 }
 
+void WaveformView::inspector_facts(std::vector<InspectorFacts::Fact>& out) const {
+    out.push_back({"samples", "Samples", static_cast<double>(sample_count()), true, false});
+}
+
 void WaveformView::set_preview_shape(std::string_view shape) {
     std::string normalized(shape);
     std::transform(normalized.begin(), normalized.end(), normalized.begin(),
@@ -501,6 +510,10 @@ void WaveformView::paint(canvas::Canvas& canvas) {
 }
 
 // ── SpectrumView ─────────────────────────────────────────────────────────────
+
+void SpectrumView::inspector_facts(std::vector<InspectorFacts::Fact>& out) const {
+    out.push_back({"bins", "Bins", static_cast<double>(bin_count()), true, false});
+}
 
 void SpectrumView::set_spectrum(const float* magnitudes_db, size_t bin_count) {
     bins_.assign(magnitudes_db, magnitudes_db + bin_count);

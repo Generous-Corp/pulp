@@ -1,7 +1,7 @@
 #include <pulp/design/sampler_starter.hpp>
 
-#include <pulp/design/design_system.hpp>  // apply_ink_signal + the umbrella widgets
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/design/design_system.hpp> // apply_ink_signal + the umbrella widgets
 
 #include <cmath>
 #include <memory>
@@ -18,7 +18,7 @@ using canvas::Color;
 // Root that paints the app background; children carry explicit bounds so the
 // flex/Yoga pass is suppressed (same approach as the widget gallery's root).
 class SamplerRoot : public View {
-public:
+  public:
     void paint(canvas::Canvas& canvas) override {
         canvas.set_fill_color(resolve_color("bg.primary", Color::rgba8(22, 26, 33)));
         canvas.fill_rect(0, 0, bounds().width, bounds().height);
@@ -37,7 +37,7 @@ std::vector<float> demo_waveform(size_t n = 1024) {
     return s;
 }
 
-}  // namespace
+} // namespace
 
 std::unique_ptr<View> build_sampler_starter(const Theme& theme) {
     auto root = std::make_unique<SamplerRoot>();
@@ -121,4 +121,4 @@ std::unique_ptr<View> build_sampler_starter(const Theme& theme) {
     return root;
 }
 
-}  // namespace pulp::design
+} // namespace pulp::design

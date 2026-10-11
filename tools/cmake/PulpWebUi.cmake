@@ -255,6 +255,7 @@ set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/widgets/label.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/widgets/visualizers.cpp
     ${_PULP_WEBUI_ROOT}/core/view/audio/src/widgets/visualizers.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/inspector_facts.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/widgets/svg_rect.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/widgets/svg_line.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/svg_fragment.cpp
