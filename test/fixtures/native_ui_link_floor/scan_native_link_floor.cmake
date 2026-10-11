@@ -102,9 +102,14 @@ foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}")
 
     get_filename_component(_artifact_dir "${_artifact}" DIRECTORY)
     file(GLOB_RECURSE _resources LIST_DIRECTORIES false "${_artifact_dir}/*")
-    if("${_resources}" MATCHES "libwgpu_native")
+    if(EXPECT_DAWN)
+        if("${_resources}" MATCHES "libwgpu_native")
+            message(FATAL_ERROR
+                "native artifact staged libwgpu_native beside its Dawn executable: ${_artifact_dir}\n${_resources}")
+        endif()
+    elseif(NOT "${_resources}" MATCHES "libwgpu_native")
         message(FATAL_ERROR
-            "native artifact staged libwgpu_native beside its executable: ${_artifact_dir}\n${_resources}")
+            "wgpu-native artifact did not stage libwgpu_native beside its executable: ${_artifact_dir}\n${_resources}")
     endif()
     if("${_resources}" MATCHES "WebKit|WebView")
         message(FATAL_ERROR
