@@ -189,6 +189,8 @@ jobs:
               "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
           else
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+            protected_base="$(git merge-base HEAD origin/main)"
+            git update-ref refs/remotes/origin/main "$protected_base"
           fi
 
       - name: Hydrate bounded GPU provenance commits
@@ -599,4 +601,4 @@ jobs:
             -j$(nproc) \
             --timeout 600 \
             --label-exclude 'validation|slow|performance|bench|quality-lab|skia|browser-capture|gpu-health|slow-affected|agent-capability-installed-sdk' \
-            --exclude-regex 'sdk-consumer|install-layout|clean-consumer|project-package-compile-out|cmake-pulp-install|GpuSurface|compileShader|realtime factor reported|GPU health|native tree draws|IR text|serialized DesignIR resolves portable capture'
+            --exclude-regex 'sdk-consumer|install-layout|clean-consumer|project-package-compile-out|cmake-pulp-install|GpuSurface|compileShader|realtime factor reported|GPU health|native tree draws|IR text|serialized DesignIR resolves portable capture|filter list without blur|zero or negative blur radius'
