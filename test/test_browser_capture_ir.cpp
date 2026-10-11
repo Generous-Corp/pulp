@@ -411,6 +411,60 @@ TEST_CASE("browser capture envelope lowers to an honest faithful_capture DesignI
             "pulp-capture:///semantic-report.json");
 }
 
+TEST_CASE("browser capture names each web font the browser could not decode",
+          "[import-design][browser-capture][ir][fail-closed]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1","version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},"candidates":[]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1","version":1,
+      "colors":{"css/accent":"#7c5cff"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"calc(1rem + 2px)"},
+      "source_identity":{}
+    })JSON");
+
+    const auto lower = [&](std::string capture) {
+        temp.write("capture.json", capture);
+        return pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json",
+            {.source = pulp::view::DesignSource::claude, .source_file = "/source/font.html"});
+    };
+    const auto font_diagnostics = [](const pulp::view::DesignIR& ir) {
+        std::vector<pulp::view::ImportDiagnostic> out;
+        for (const auto& d : ir.diagnostics)
+            if (d.code == "font-undecodable")
+                out.push_back(d);
+        return out;
+    };
+
+    std::string capture = envelope("browser.png", pulp::runtime::sha256_hex(png));
+    const std::string settle =
+        R"JSON("settle":{"rounds":4,"stable_rounds":2,"elapsed_ms":120})JSON";
+    const auto position = capture.find(settle);
+    REQUIRE(position != std::string::npos);
+
+    // Control: a healthy capture names no font.
+    auto clean = lower(capture);
+    INFO(clean.error);
+    REQUIRE(clean);
+    CHECK(font_diagnostics(*clean.design_ir).empty());
+
+    capture.replace(position, settle.size(),
+                    settle + R"JSON(,"health":{"status":"healthy","failed_fonts":["Broken"]})JSON");
+    auto result = lower(capture);
+    REQUIRE(result);
+    const auto fonts = font_diagnostics(*result.design_ir);
+    REQUIRE(fonts.size() == 1);
+    CHECK(fonts[0].severity == pulp::view::ImportDiagnosticSeverity::warning);
+    CHECK(fonts[0].message.find("'Broken'") != std::string::npos);
+    CHECK(fonts[0].message.find("failed to decode") != std::string::npos);
+}
+
 TEST_CASE("browser static frame is a validated runtime asset, not the A/B oracle",
           "[import-design][browser-capture][ir][static-frame]") {
     TempCapture temp;

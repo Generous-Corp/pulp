@@ -164,6 +164,7 @@
       "pulp/canvas/image_codecs.hpp",
       "pulp/canvas/image_convolution.hpp",
       "pulp/canvas/image_file_cache.hpp",
+      "pulp/canvas/image_probe.hpp",
       "pulp/canvas/lottie_animation.hpp",
       "pulp/canvas/msdf_atlas.hpp",
       "pulp/canvas/path.hpp",
