@@ -73,3 +73,13 @@ add_test(NAME no-editor-plugin-link-floor-artifacts
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scan_no_editor_link_floor.cmake")
 set_tests_properties(no-editor-plugin-link-floor-artifacts PROPERTIES
     LABELS "format;link-contract;artifact" TIMEOUT 120)
+
+# The GPU-stack dependency pattern above is platform-specific, and a host only
+# builds its own platform's artifacts. This self-test checks the pattern
+# against recorded listings from every platform on any host.
+add_test(NAME no-editor-link-floor-runtime-pattern
+    COMMAND "${CMAKE_COMMAND}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/test_no_editor_runtime_deps.cmake")
+set_tests_properties(no-editor-link-floor-runtime-pattern PROPERTIES
+    LABELS "pr;link-contract" TIMEOUT 60)
+

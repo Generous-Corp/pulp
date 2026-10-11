@@ -25,14 +25,11 @@ set(_families
     "skia=[A-Za-z] (Sk[A-Z][A-Za-z0-9_]*::|skgpu::)"
     "dawn=[A-Za-z] dawn::"
     "wgpu=[A-Za-z] _?wgpu[A-Z]")
-# A GPU runtime reaches a module as a shared WebGPU/Skia library, or, when Skia
-# and Dawn are linked statically (a Skia build that carries its own Dawn links
-# no wgpu-native), as the platform GPU API that Dawn calls directly.
-set(_runtime_deps "libwgpu_native|libdawn|libwebgpu|libskia")
+include("${CMAKE_CURRENT_LIST_DIR}/no_editor_runtime_deps.cmake")
 if(APPLE)
-    string(APPEND _runtime_deps "|/Metal\\.framework/|/MetalKit\\.framework/|/QuartzCore\\.framework/")
+    pulp_no_editor_runtime_deps(_runtime_deps apple)
 else()
-    string(APPEND _runtime_deps "|libvulkan|libGL[.X]|libEGL")
+    pulp_no_editor_runtime_deps(_runtime_deps elf)
 endif()
 
 function(_scan artifact out_deps out_symbols)
