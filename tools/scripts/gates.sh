@@ -85,8 +85,18 @@ if [ -z "$ROOT" ]; then
 fi
 cd "$ROOT" || exit 2
 
+if ! git fetch --quiet origin main; then
+    echo "gates.sh: could not refresh origin/main; refusing to validate a stale base" >&2
+    exit 2
+fi
+
 PYTHON="${PYTHON:-python3}"
 BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
+
+MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
+if [ -f "$MERGE_TREE_SCRIPT_STATE" ] && [ "$BASE" = "origin/main" ]; then
+    "$PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base origin/main --head HEAD || exit $?
+fi
 
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"

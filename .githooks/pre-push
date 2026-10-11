@@ -28,6 +28,13 @@ set -u
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$ROOT" || exit 0
 
+# Always compare against a fresh main tip.  The merge-tree check below is
+# deliberately script-only and bounded; compiled checks remain later gates.
+if ! git fetch --quiet origin main; then
+    echo "[pre-push] could not refresh origin/main; refusing to validate a stale base." >&2
+    exit 2
+fi
+
 # Git exports GIT_DIR / GIT_WORK_TREE (and friends) into hook environments.
 # A set GIT_DIR OVERRIDES `git -C <dir>` repository discovery, so any test the
 # downstream gates run via ctest (e.g. local_diff_cover.sh) that shells out to
@@ -74,6 +81,11 @@ if [ -z "${PULP_PYTHON:-}" ] || [ ! -x "${PULP_PYTHON}" ]; then
     echo "[pre-push] required Python interpreter is unavailable; checked PYTHON, PATH, and standard macOS locations." >&2
     echo "[pre-push] set PYTHON=/absolute/path/to/python3 and retry." >&2
     exit 2
+fi
+
+MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
+if [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
+    "$PULP_PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base origin/main --head HEAD || exit $?
 fi
 
 # ── Queued-PR guard (blocking, before every gate and the diff-cover build) ──

@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/scripts/refresh_push_check.py"
 HOOK = ROOT / ".githooks/pre-push"
 HOOK_LIB = ROOT / ".githooks/lib"
+MERGE_TREE_STATE = ROOT / "tools/scripts/merge_tree_script_state.py"
 
 FAKE_GH = r"""#!/usr/bin/env python3
 import json, os, sys, time
@@ -338,6 +339,34 @@ def case_hook_wiring(fx: Fixture) -> None:
     assert res.returncode == 0 and "demoted to advisory" in res.stderr, res.stderr
     decisions = [e["decision"] for e in fx.entries()]
     assert decisions == ["warned", "refused", "refused"], decisions
+
+
+def case_merge_tree_conflict_refuses(fx: Fixture) -> None:
+    """A real merge-tree conflict is refused before any script check runs."""
+    repo = fx.tmp / "tree-state-repo"
+    repo.mkdir()
+    def g(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=repo, check=True,
+                              capture_output=True, text=True).stdout.strip()
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "test@example.invalid")
+    g("config", "user.name", "test")
+    (repo / "marker.txt").write_text("base\n")
+    g("add", "."); g("commit", "-qm", "base")
+    g("branch", "feature")
+    (repo / "marker.txt").write_text("main\n")
+    g("commit", "-qam", "main change")
+    g("checkout", "-q", "feature")
+    (repo / "marker.txt").write_text("feature\n")
+    g("commit", "-qam", "feature change")
+    base = g("rev-parse", "main")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+           "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+    res = subprocess.run([sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(repo),
+                          "--base", base, "--head", "HEAD"], cwd=repo, env=env,
+                         capture_output=True, text=True)
+    assert res.returncode == 1, (res.returncode, res.stdout, res.stderr)
+    assert "your branch is stale against main; merge origin/main and regenerate" in res.stderr
 
 
 CASES = [v for k, v in sorted(globals().items()) if k.startswith("case_")]
