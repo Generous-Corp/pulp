@@ -80,6 +80,7 @@ add_library(pulp-design-import STATIC
     src/design_ir_analysis.cpp
     src/design_import_v0_tsx.cpp
     src/design_import_native_common.cpp
+    src/design_import_document_checks.cpp
     src/design_cpp_codegen.cpp
     src/design_cpp_binding_codegen.cpp
     src/design_cpp_codegen_support.cpp
