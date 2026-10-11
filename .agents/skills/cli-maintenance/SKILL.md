@@ -3847,3 +3847,11 @@ command contract and run the paired UI build and clean-output lint tests. Keep
 the CLI dispatch, Rust/C++ help summaries, command documentation, and the
 clean-output manifest-role rules synchronized. A generated or vendor fixture
 must be hash-verified even when it is excluded from authored-source linting.
+
+## Advisory lane dispatch
+
+The `pulp pr` wrapper invokes `tools/scripts/dispatch_advisory_lanes.sh` only
+after a successful delegated Shipyard arm/ship path, and deliberately skips
+`--no-arm`. Keep this hook after arming so advisory workflow dispatches bind to
+the approved head; direct `shipyard pr` remains an interim gap until Shipyard
+provides a native arm hook.
