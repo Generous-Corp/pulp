@@ -1,6 +1,7 @@
 #include <pulp/format/au_factory_presets.hpp>
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/state/content_registry.hpp>
 
 #include <dlfcn.h>
 
@@ -77,6 +78,7 @@ void FactoryPresetTable::clear_entries() noexcept {
 void FactoryPresetTable::bind(state::StateStore& store, const std::string& manufacturer,
                               const std::string& plugin_name) {
     presets_ = std::make_unique<state::PresetManager>(store, manufacturer, plugin_name);
+    presets_->set_content_preset_source(state::content_registry_preset_source());
     presets_->set_factory_presets_dir(loaded_bundle_factory_presets_dir());
     rebuild();
 }

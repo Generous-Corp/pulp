@@ -44,7 +44,7 @@ endif()
 list(APPEND PULP_SDK_TARGETS
     pulp-timeline-agent-view pulp-timeline-editor
     pulp-playback pulp-events
-    pulp-sample-bank-manifest pulp-state
+    pulp-sample-bank-manifest pulp-content pulp-state
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
@@ -53,6 +53,11 @@ list(APPEND PULP_SDK_TARGETS
 )
 if(TARGET pulp-audio-analysis)
     list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)
+endif()
+# The view-free CLAP adapter behind pulp_add_plugin(NO_EDITOR); present only
+# when the CLAP SDK is.
+if(TARGET pulp-format-clap-core)
+    list(APPEND PULP_SDK_TARGETS pulp-format-clap-core)
 endif()
 
 # pulp-view-script (the JS scripting + web-compat layer) is EXCLUDE_FROM_ALL
@@ -338,7 +343,7 @@ if(TARGET pulp-authoring-capsule)
     list(APPEND _pulp_sdk_header_subsystems authoring_capsule)
 endif()
 list(APPEND _pulp_sdk_header_subsystems
-    simd timeline_agent_view timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
+    simd timeline_agent_view timeline_editor playback interchange dawproject smf events content state audio midi signal graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)
@@ -933,6 +938,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_no_editor.cpp"
     DESTINATION src/pulp/format
 )
 

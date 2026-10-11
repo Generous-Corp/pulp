@@ -197,6 +197,13 @@ jobs:
       # Mirrors the windows-* branch of release-cli.yml's `Configure (CLI, no
       # WebView on Linux)` step. tools/scripts/test_windows_cli_compile_workflow.py
       # fails if the two drift apart.
+      - name: Fetch pinned Windows Skia/Dawn binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/scripts/fetch_skia_for_release.py windows-x64
+          if ($LASTEXITCODE -ne 0) { throw "Windows Skia fetch failed ($LASTEXITCODE)" }
+
       - name: Configure (matches release-cli.yml Windows legs)
         shell: pwsh
         run: |
@@ -216,8 +223,8 @@ jobs:
             -DPULP_BUILD_EXAMPLES=OFF `
             -DPULP_ENABLE_AUDIO_PROBES=OFF `
             -DPULP_ENABLE_INSPECTOR=ON `
-            -DPULP_REQUIRE_GPU_FOR_SDK=OFF `
-            -DPULP_ENABLE_SCENE3D=OFF `
+            -DPULP_REQUIRE_GPU_FOR_SDK=ON `
+            -DPULP_ENABLE_SCENE3D=ON `
             -DPULP_BUILD_WEBVIEW=ON `
             @launcher
           if ($LASTEXITCODE -ne 0) { throw "configure failed ($LASTEXITCODE)" }

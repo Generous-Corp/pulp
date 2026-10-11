@@ -470,10 +470,9 @@ jobs:
       # binaries are pinned in tools/deps/manifest.json and live at
       # skia-builder's GitHub release assets — neither bootstrap nor
       # actions/checkout's LFS pull populates them, so we fetch here
-      # explicitly. Platforms without a published skia-builder asset
-      # (windows-*) print INFO and continue without GPU;
-      # PULP_REQUIRE_GPU_FOR_SDK is gated on the same condition so
-      # configure doesn't trip on them.
+      # explicitly. Every platform in the GPU-required case above has an
+      # exact asset and digest in tools/deps/manifest.json; a missing or
+      # mismatched archive must fail the release rather than ship a fallback UI.
 
       # Backfill safety net (pulp #1962): when a workflow_dispatch
       # backfill leaves source_ref blank, actions/checkout uses the old
@@ -853,16 +852,15 @@ jobs:
         # failure. Only enable it for platforms whose Skia binaries we just
         # fetched (matrix-platforms with an entry in fetch_skia_for_release.py's
         # MATRIX_TO_MANIFEST + a published release_assets entry in
-        # tools/deps/manifest.json). darwin-arm64, linux-x64, and linux-arm64
-        # all have published assets today; windows-* continues to build
-        # without Skia until its assets ship.
+        # tools/deps/manifest.json). Windows x64 and ARM64 are included so
+        # their SDKs cannot silently fall back to the slider-only CPU editor.
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
           SCENE3D="-DPULP_ENABLE_SCENE3D=OFF"
           case "${{ matrix.platform }}" in
-            darwin-arm64|darwin-x64|linux-x64|linux-arm64)
+            darwin-arm64|darwin-x64|linux-x64|linux-arm64|windows-x64|windows-arm64)
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
               SCENE3D="-DPULP_ENABLE_SCENE3D=ON"
               ;;

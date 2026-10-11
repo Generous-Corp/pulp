@@ -537,6 +537,20 @@ knowing before you touch that file:
   and anchors are not unique — the figma-plugin scene fixture gives three
   siblings one `stable_anchor_id` — so compare by `path`, not by anchor.
 
+- `pulp-design-ir-observe --backend gpu` renders through Skia Graphite on a
+  Dawn device (the default stays `skia`, the CPU raster, byte-identical to
+  before), and `--render-receipt <json>` records the backend actually used,
+  the adapter, frame outcome, readback, device loss, Skia milestone and Dawn
+  revision. A GPU request that cannot render fails; it never comes back as a
+  CPU render. Gotchas: an unscaled image blit renders byte-identically on
+  Graphite and CPU raster, so pixels alone cannot catch a silent fallback on
+  such a design (check the receipt and which GPU driver loaded); Pulp's macOS
+  GPU binaries also load `libwgpu_native.dylib`, a second WebGPU C API next to
+  Skia's static Dawn; and a SECOND Dawn copy in the process (e.g. via
+  `DYLD_INSERT_LIBRARIES`) is not benign — the observer then hits WebGPU
+  validation errors and a Tint internal compiler error. `--gpu-fault` seeds
+  failures for parity-lane calibration only.
+
 - `pulp-ui-frames-observe` records an imported panel (`--design-ir`) or a
   scripted UI (`--script`) frame by frame under a fixed host clock: a
   `pulp-ui-frame-schedule-v1` file supplies the host timestamps, the
@@ -547,10 +561,12 @@ knowing before you touch that file:
   only `begin_host_frame`'s answer stalls an input-started animation (a knob's
   hover glow froze at 0.37 for nine frames). Gotchas it makes visible: a
   view-first scripted document's first mounted frame paints `bindWidgetToParam`
-  controls at 0, one frame before the binding service catches up; and JS
-  `setTimeout`/`setInterval` deadlines follow the wall clock, not the host
-  clock, so timer-driven readiness cannot be fixed by a schedule (drive it with
-  `requestAnimationFrame` instead).
+  controls at 0, one frame before the binding service catches up. Script
+  timers and `performance.now()` read the schedule's host clock by default
+  (`WidgetBridge::set_time_source`, `--timer-clock schedule`); pass
+  `--timer-clock wall` to see what a real host does, where a timer fires when
+  wall time passes its deadline however few frames that took. `Date.now()` is
+  always the engine's wall clock, so never derive timing from it in a fixture.
 
 **The lane that works (Figma is the source of truth):**
 ```bash
