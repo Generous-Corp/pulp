@@ -2987,6 +2987,15 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   fills its axis even when the node has an explicit cross-axis size (Yoga clamps
   up to the min) — no longer a no-op. (Text-run UTF-16→byte offset conversion is
   also handled now — see the per-range text section.)
+- **Never hand DesignIR bytes to `choc::json::parse` directly.** The pinned
+  CHOC fork checks for end of input only after a backslash, so a document cut
+  inside a string literal makes it read past the buffer (the observer died with
+  SIGBUS), and its `ParseError` aborts any caller that does not catch it.
+  `parse_design_ir_json` bounds-checks the bytes first (terminated strings and
+  `\u` escapes, balanced nesting within `kMaxDesignIrJsonDepth`, no embedded
+  NUL) and throws `DesignIrParseError`; a CLI that loads a DesignIR catches it
+  and exits 1 with the reason. Malformed fixtures for this path live in the
+  parity harness corpus (`tools/parity/corpus/fixtures/malformed/` in Vellum).
 
 ### Faithful-vector lane (Plan B): `faithful_svg` render mode → `DesignFrameView`
 
