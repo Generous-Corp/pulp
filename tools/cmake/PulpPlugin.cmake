@@ -21,6 +21,41 @@ if(COMMAND pulp_add_plugin)
     return()
 endif()
 
+# An argument cmake_parse_arguments() did not recognise is a misspelled or
+# unsupported keyword (or a stray value before the first keyword). Ignoring it
+# builds something other than what the caller asked for -- a NO_EDITOR passed to
+# an SDK that predates it still links the full view stack -- so it is an error.
+# `tolerated` names keywords that are reported elsewhere and must not fail here.
+function(_pulp_reject_unknown_arguments context unparsed)
+    set(_unknown ${unparsed})
+    if(ARGN)
+        list(REMOVE_ITEM _unknown ${ARGN})
+    endif()
+    if(_unknown)
+        list(JOIN _unknown ", " _unknown_text)
+        message(FATAL_ERROR
+            "${context}: unknown argument(s): ${_unknown_text}. Check the spelling, or "
+            "update the Pulp SDK if the keyword is newer than this one.")
+    endif()
+endfunction()
+
+# A FORMATS value nothing handles builds nothing for it, silently; a misspelled
+# or lower-case format name ("clap", "VST") is an error for the same reason.
+function(_pulp_reject_unknown_formats context formats)
+    set(_unknown "")
+    foreach(_fmt IN LISTS formats)
+        if(NOT _fmt IN_LIST ARGN)
+            list(APPEND _unknown "${_fmt}")
+        endif()
+    endforeach()
+    if(_unknown)
+        list(JOIN _unknown ", " _unknown_text)
+        list(JOIN ARGN ", " _known_text)
+        message(FATAL_ERROR
+            "${context}: unknown format(s): ${_unknown_text}. Known formats: ${_known_text}.")
+    endif()
+endfunction()
+
 # ── pulp_add_plugin ─────────────────────────────────────────────────────────
 # Creates plugin targets for each requested format from a single declaration.
 #
@@ -64,6 +99,9 @@ function(pulp_add_plugin target)
             "Set PluginDescriptor::produces_midi = true in the processor; "
             "MIDI output is format/runtime metadata, not a CMake packaging flag.")
     endif()
+    _pulp_reject_unknown_arguments("pulp_add_plugin(${target})" "${PLUGIN_UNPARSED_ARGUMENTS}" PRODUCES_MIDI)
+    _pulp_reject_unknown_formats("pulp_add_plugin(${target})" "${PLUGIN_FORMATS}"
+        VST3 CLAP AU LV2 AAX AUv3 Standalone)
 
     # Defaults
     if(NOT PLUGIN_PLUGIN_NAME)
@@ -461,6 +499,11 @@ function(pulp_add_plugin_bundle target)
         "FORMATS;SOURCES"
         ${ARGN}
     )
+    _pulp_reject_unknown_arguments("pulp_add_plugin_bundle(${target})" "${BUNDLE_UNPARSED_ARGUMENTS}")
+    # AU, AUv3 and AAX are recognised so the dedicated "not yet supported"
+    # error below explains them.
+    _pulp_reject_unknown_formats("pulp_add_plugin_bundle(${target})" "${BUNDLE_FORMATS}"
+        VST3 CLAP AU AUv3 AAX)
     if(NOT BUNDLE_BUNDLE_NAME)
         set(BUNDLE_BUNDLE_NAME "${target}")
     endif()

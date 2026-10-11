@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-design-ir-observe-gpu-backend-watch",
+  "created_at": "2026-10-10T21:55:19Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Adds --backend gpu (Skia Graphite on a Dawn device), --render-receipt and development-only --gpu-fault to the development-only pulp-design-ir-observe tool, plus its CLI test. The default Skia CPU render is byte-identical to before. The observer only reads an existing DesignIR and reports how it rendered; no importer, DesignIR schema, Chromium capture, production rendering, or packaging behavior changes, and no design-import, Chromium, rendering, or packaging authority moves. It supplies the Pulp-side observation for the Vellum parity harness GPU lanes under the 2026-10-04 temporary Pulp exception.",
+  "tests": [
+    "python3 test/test_design_ir_observe_gpu.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
