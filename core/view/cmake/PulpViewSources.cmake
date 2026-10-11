@@ -52,6 +52,7 @@ target_sources(pulp-view-core PRIVATE
     src/widgets/visualizers.cpp
     src/editor_bridge.cpp
     src/inspector.cpp
+    src/inspector_facts.cpp
     src/sdl_window_host.cpp
     src/auto_ui.cpp
     src/text_edit_model.cpp
@@ -129,9 +130,7 @@ target_sources(pulp-view-core PRIVATE
     src/breadcrumb.cpp
     src/buttons.cpp
     src/gap_widgets.cpp
-    src/widget_gallery.cpp
     src/design_system.cpp
-    src/sampler_starter.cpp
     src/file_browser.cpp
     src/file_chooser.cpp
     src/code_editor.cpp
@@ -161,6 +160,9 @@ target_sources(pulp-view-audio PRIVATE
     audio/src/sample_asset_drop_target.cpp
     audio/src/audio_inspector_panel.cpp
     audio/src/audio_inspector_window.cpp
+    # The gallery and the sampler starter construct audio widgets.
+    audio/src/widget_gallery.cpp
+    audio/src/sampler_starter.cpp
 )
 
 # Scripted view and widget-bridge sources.
