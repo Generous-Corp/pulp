@@ -315,6 +315,10 @@ array**, when the plug-in ships none — an empty array makes a host
 draw an empty menu. The table is discovered from the loaded bundle, so
 it is empty in any unit-test binary; a test stages a folder through
 the Pulp-private `pulpFactoryPresetTable` accessor.
+`FactoryPresetTable::bind` installs `state::content_registry_preset_source()`
+on its `PresetManager`; pulp-state has no content-pack reader of its own, so a
+`PresetManager` built elsewhere lists no content-pack presets until a source is
+installed.
 
 `setCurrentPreset:` implements Apple's documented split, and getting
 it wrong is the trap here:
