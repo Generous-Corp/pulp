@@ -7164,6 +7164,13 @@
    ],
    "kind": "shell"
   },
+  "pulp.vellum-closure-policy-selftest": {
+   "entry": "tools/scripts/test_vellum_closure.py",
+   "inputs": [
+    "tools/scripts/vellum_closure.py"
+   ],
+   "kind": "python"
+  },
   "pulp_bundle_threejs_for_jsc_offline": {
    "entry": "tools/scripts/test_bundle_threejs_offline.mjs",
    "inputs": [
