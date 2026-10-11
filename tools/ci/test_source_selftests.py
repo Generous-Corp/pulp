@@ -622,6 +622,11 @@ class CtestLaneTests(unittest.TestCase):
         self.assertEqual(lane.ctest_verdict({"will_fail": True}, 1, ""), 0)
         self.assertEqual(lane.ctest_verdict({"will_fail": True}, 0, ""), 1)
         self.assertEqual(lane.ctest_verdict({}, 2, ""), 2)
+        # SKIP_REGULAR_EXPRESSION is a skip whatever the exit code or pass regex.
+        skip = {"skip_regex": ["thing_skipped="], "pass_regex": ["thing_verified="]}
+        self.assertEqual(lane.ctest_verdict(skip, 1, "thing_skipped=no plan"), 0)
+        self.assertEqual(lane.ctest_verdict(skip, 1, "thing_failed"), 1)
+        self.assertEqual(lane.ctest_verdict(skip, 0, "thing_verified=1"), 0)
 
     def test_build_paths_stay_absolute_for_a_base_rerun(self) -> None:
         repo = pathlib.Path("/work/branch")
@@ -688,7 +693,9 @@ class CtestLaneTests(unittest.TestCase):
         (root / "test" / "cmake" / "pr_fast_tests.cmake").write_text(
             "add_test(NAME fast-one COMMAND ${Python3_EXECUTABLE}\n"
             '    "${CMAKE_SOURCE_DIR}/tools/fast.py" --flag)\n'
-            "set_tests_properties(fast-one PROPERTIES TIMEOUT 42 SKIP_RETURN_CODE 77)\n"
+            "set_tests_properties(fast-one PROPERTIES TIMEOUT 42 SKIP_RETURN_CODE 77\n"
+            "    # A host without the plan skips.\n"
+            '    SKIP_REGULAR_EXPRESSION "fast_skipped=")\n'
             "add_test(NAME fast-needs-build COMMAND ${Python3_EXECUTABLE}\n"
             '    "${CMAKE_SOURCE_DIR}/tools/inv.py" --build-dir "${CMAKE_BINARY_DIR}")\n'
             "set(PULP_PR_FAST_TESTS\n    fast-one\n    fast-needs-build  # comment\n)\n")
@@ -708,6 +715,7 @@ class CtestLaneTests(unittest.TestCase):
         self.assertEqual([e["name"] for e in entries], ["fast-one"])
         self.assertEqual(entries[0]["argv"][1:], ["{repo}/tools/fast.py", "--flag"])
         self.assertEqual((entries[0]["timeout"], entries[0]["skip_return_code"]), (42.0, 77))
+        self.assertEqual(entries[0]["skip_regex"], ["fast_skipped="])
         self.assertIn("CMAKE_BINARY_DIR", not_checked["fast-needs-build"])
 
     def test_python_ctests_exclude_the_other_lanes(self) -> None:

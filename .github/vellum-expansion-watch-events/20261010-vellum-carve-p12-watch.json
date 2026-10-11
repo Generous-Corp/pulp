@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-vellum-carve-p12-watch",
+  "created_at": "2026-10-10T21:39:20Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "P12 moves the Android motion JNI bridge (jni_motion.cpp) unchanged from core/platform/src/android to core/view/platform/android so the foundation layer has no view include; it remains a pulp-jni source with the identical exported symbol set, the motion bridge test compiles it from the new path, and the foundation include lint allowlist is emptied. No design-import, Chromium, rendering, packaging, or Vellum source authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-motion-android-bridge",
+    "ctest --test-dir build -R foundation-include-lint",
+    "python3 tools/scripts/test_foundation_include_lint.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
