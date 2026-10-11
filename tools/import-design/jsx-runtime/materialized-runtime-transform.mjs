@@ -121,6 +121,7 @@ const fontBindings = mainMetadata.font_bindings;
 const layoutBindings = mainMetadata.layout_bindings;
 const textBindings = mainMetadata.text_bindings;
 const paintBindings = mainMetadata.paint_bindings;
+const pseudoBindings = mainMetadata.pseudo_bindings;
 let stateAtlas = loadMaterializedStateAtlas(stateAtlasArg, {
   visualAuthority,
   runtimeBase: portableStateAssets ? dirname(output) : '',
@@ -211,6 +212,7 @@ const entry = buildMaterializedRuntimeEntry({
   textBindings,
   layoutBindings,
   paintBindings,
+  pseudoBindings,
   runtimeDocumentAsset,
   sidecar,
   productPrelude,

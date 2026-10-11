@@ -140,6 +140,51 @@ export function materializedSvgRectGeometry(box) {
   return { x: box.left, y: box.top, width: box.width, height: box.height };
 }
 
+function normalizeMaterializedPseudoBindings(bindings, label = 'materialized') {
+  if (bindings === undefined) return [];
+  if (!Array.isArray(bindings) || bindings.length > 256)
+    throw new Error(`${label} pseudo_bindings is invalid`);
+  return bindings.map((binding, index) => {
+    const name = `${label} pseudo binding ${index}`;
+    if (!binding || typeof binding !== 'object' ||
+        (binding.anchor !== '#root' && binding.anchor !== 'body') ||
+        (binding.pseudo !== 'before' && binding.pseudo !== 'after') ||
+        !Array.isArray(binding.path) || binding.path.length > 256 ||
+        !binding.box || !finiteNumber(binding.box.left) ||
+        !finiteNumber(binding.box.top) || !finiteNumber(binding.box.width) ||
+        binding.box.width < 0 || !finiteNumber(binding.box.height) ||
+        binding.box.height < 0 || !finiteNumber(binding.opacity) ||
+        binding.opacity < 0 || binding.opacity > 1 ||
+        !Number.isSafeInteger(binding.z_index) ||
+        typeof binding.pointer_events !== 'string')
+      throw new Error(`${name} is invalid`);
+    const path = binding.path.map((step, stepIndex) => {
+      if (!step || typeof step !== 'object' ||
+          typeof step.tag !== 'string' || !/^[a-z][a-z0-9-]*$/.test(step.tag) ||
+          !Number.isSafeInteger(step.index) || step.index < 0)
+        throw new Error(`${name} path ${stepIndex} is invalid`);
+      return { tag: step.tag, index: step.index };
+    });
+    const gradient = binding.background_gradient;
+    const color = binding.background_color;
+    if ((gradient !== undefined && (typeof gradient !== 'string' ||
+         gradient.length > 4096 || !/^(?:repeating-)?(?:linear|radial|conic)-gradient\(/i.test(gradient))) ||
+        (color !== undefined && (typeof color !== 'string' || color.length > 256)) ||
+        (gradient === undefined && color === undefined))
+      throw new Error(`${name} paint is invalid`);
+    return {
+      ...(binding.id === undefined ? {} : { id: binding.id }),
+      anchor: binding.anchor, path, pseudo: binding.pseudo,
+      box: { left: binding.box.left, top: binding.box.top,
+        width: binding.box.width, height: binding.box.height },
+      ...(gradient === undefined ? {} : { background_gradient: gradient }),
+      ...(color === undefined ? {} : { background_color: color }),
+      opacity: binding.opacity, z_index: binding.z_index,
+      pointer_events: binding.pointer_events,
+    };
+  });
+}
+
 export function normalizeMaterializedMetadata(document, label = 'materialized') {
   if (!document || typeof document !== 'object') {
     throw new Error(`${label} metadata document is invalid`);
@@ -151,6 +196,7 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
     throw new Error(`${label} ${error.message}`);
   }
   const fontBindings = normalizeMaterializedFontBindings(document.font_bindings);
+  const pseudoBindings = normalizeMaterializedPseudoBindings(document.pseudo_bindings, label);
   const coordinateSpace = document.coordinate_space === undefined
     ? null : normalizeMaterializedCoordinateSpace(
       document.coordinate_space, `${label} coordinate space`);
@@ -392,5 +438,5 @@ export function normalizeMaterializedMetadata(document, label = 'materialized') 
     bindings_by_id: bindingsById,
     semantic_bindings: semanticBindings, layout_bindings: layoutBindings,
     text_bindings: textBindings, paint_bindings: paintBindings,
-    canvas_bindings: canvasBindings };
+    canvas_bindings: canvasBindings, pseudo_bindings: pseudoBindings };
 }

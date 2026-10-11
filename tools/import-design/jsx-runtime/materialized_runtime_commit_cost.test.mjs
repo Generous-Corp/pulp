@@ -14,7 +14,7 @@ import { buildMaterializedRuntimeEntry } from './materialized_runtime_entry.mjs'
 
 // Native bridge functions the entry calls while mounting its behavior root.
 const BRIDGE_STUBS = ['createCol', 'createImage', 'setPosition', 'setLeft', 'setTop', 'setFlex',
-  'setVisible', 'setOpacity', 'setPointerEvents', 'setZIndex',
+  'setVisible', 'setOpacity', 'setPointerEvents', 'setZIndex', 'setBackground', 'setBackgroundGradient',
   'setTransformOrigin', 'setTransform', 'setObjectFit', 'setImageSource'];
 
 // The entry is an ES module whose only imports are React and the native
@@ -23,12 +23,12 @@ const BRIDGE_STUBS = ['createCol', 'createImage', 'setPosition', 'setLeft', 'set
 // rather than a re-implementation of it. Evaluating it (instead of parsing it)
 // is deliberate: a declaration placed in the wrong function body still parses.
 function evaluateEntry({ layoutBindings = [], registryNodes = [],
-                         textBindings = [], paintBindings = [], stateAtlas = [],
+                         textBindings = [], paintBindings = [], pseudoBindings = [], stateAtlas = [],
                          bridge = {}, productPrelude = '',
                          visualAuthority = null }) {
   const source = buildMaterializedRuntimeEntry({
     capturedCssVariables: {}, presentationTime: 0, requestedState: '',
-    textBindings, layoutBindings, paintBindings,
+    textBindings, layoutBindings, paintBindings, pseudoBindings,
     runtimeDocumentAsset: null, sidecar: null, productPrelude,
     surfaceBackground: null, authoredLeft: 0, authoredTop: 0,
     authoredWidth: 100, authoredHeight: 100, authoredTransform: null,
@@ -789,4 +789,37 @@ test('a batched miss is retained for the epoch like a single lookup\'s', () => {
   sandbox.__pulpMaterializedTreeEpoch__ = 2;
   assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
   assert.ok(tests > firstScan, 'a bumped epoch did not invalidate the miss');
+});
+
+
+test('materialized pseudo gradient creates an inert absolute plane', () => {
+  const calls = [];
+  const sandbox = evaluateEntry({
+    pseudoBindings: [{ index: 0, anchor: 'body', path: [], pseudo: 'before',
+      box: { left: 2, top: 3, width: 20, height: 10 },
+      background_gradient: 'radial-gradient(circle, #0ff, transparent)',
+      opacity: 0.5, z_index: 0, pointer_events: 'none' }],
+    bridge: {
+      createCol: (id, parent) => calls.push(['createCol', id, parent]),
+      setBackgroundGradient: (id, value) => calls.push(['gradient', id, value]),
+      setLeft: (id, value) => calls.push(['left', id, value]),
+      setTop: (id, value) => calls.push(['top', id, value]),
+      setFlex: (id, axis, value) => calls.push(['flex', id, axis, value]),
+      setOpacity: (id, value) => calls.push(['opacity', id, value]),
+      setPointerEvents: (id, value) => calls.push(['pointer', id, value]),
+      setZIndex: (id, value) => calls.push(['z', id, value]),
+    },
+  });
+  assert.deepEqual(calls.filter(call => call[1] === '__pulp_materialized_pseudo_0'), [
+    ['createCol', '__pulp_materialized_pseudo_0', '__pulp_materialized_behavior__'],
+    ['left', '__pulp_materialized_pseudo_0', 2],
+    ['top', '__pulp_materialized_pseudo_0', 3],
+    ['flex', '__pulp_materialized_pseudo_0', 'width', 20],
+    ['flex', '__pulp_materialized_pseudo_0', 'height', 10],
+    ['gradient', '__pulp_materialized_pseudo_0', 'radial-gradient(circle, #0ff, transparent)'],
+    ['opacity', '__pulp_materialized_pseudo_0', 0.5],
+    ['pointer', '__pulp_materialized_pseudo_0', 'none'],
+    ['z', '__pulp_materialized_pseudo_0', 19000],
+  ]);
+  assert.ok(sandbox);
 });

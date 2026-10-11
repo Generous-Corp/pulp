@@ -22,6 +22,7 @@ export function buildMaterializedRuntimeEntry({
   textBindings,
   layoutBindings,
   paintBindings,
+  pseudoBindings = [],
   runtimeDocumentAsset,
   sidecar,
   productPrelude,
@@ -181,10 +182,12 @@ function materializedDomRegistryValues() {
 const capturedTextBindings = ${JSON.stringify(textBindings)};
 const capturedLayoutBindings = ${JSON.stringify(layoutBindings)};
 const capturedPaintBindings = ${JSON.stringify(paintBindings)};
+const capturedPseudoBindings = ${JSON.stringify(pseudoBindings ?? [])};
 const capturedHomeMetadata = {
   layout_bindings: capturedLayoutBindings,
   text_bindings: capturedTextBindings,
   paint_bindings: capturedPaintBindings,
+  pseudo_bindings: capturedPseudoBindings,
 };
 let activeCapturedState = '';
 // React may commit a conditionally-mounted state over more than one pass.
@@ -1102,6 +1105,26 @@ setOpacity(behaviorRootId, ${visualAuthority === 'native' ? '1' : '0'});
 // in native mode those children also paint the complete UI.
 setPointerEvents(behaviorRootId, 'box-none');
 setZIndex(behaviorRootId, ${MATERIALIZED_BEHAVIOR_Z});
+// Pseudo-elements are not authored React nodes. Reify supported captured
+// gradients as inert native planes under the behavior root, preserving their
+// absolute Chromium box while keeping generated content and hit testing out of
+// the executable tree. Unsupported pseudo paint is retained as diagnostics in
+// the sidecar and never guessed here.
+for (const binding of capturedPseudoBindings) {
+  const id = "__pulp_materialized_pseudo_" + binding.index;
+  createCol(id, behaviorRootId);
+  setPosition(id, 'absolute');
+  setLeft(id, Number(binding.box.left) - Number(${JSON.stringify(authoredLeft)}));
+  setTop(id, Number(binding.box.top) - Number(${JSON.stringify(authoredTop)}));
+  setFlex(id, 'width', binding.box.width);
+  setFlex(id, 'height', binding.box.height);
+  if (binding.background_gradient && typeof setBackgroundGradient === 'function')
+    setBackgroundGradient(id, binding.background_gradient);
+  else if (binding.background_color) setBackground(id, binding.background_color);
+  setOpacity(id, binding.opacity);
+  setPointerEvents(id, 'none');
+  setZIndex(id, ${MATERIALIZED_BEHAVIOR_Z - 1000} + Math.max(-999, Math.min(999, binding.z_index)));
+}
 // Commit exactly the element supplied by the captured document's own
 // ReactDOM.createRoot(...).render(...) call. A declaration-only export may
 // omit that call, so retain one bounded compatibility fallback to App, but

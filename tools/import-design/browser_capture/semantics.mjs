@@ -31,6 +31,8 @@ export const COMPUTED_STYLES = [
   "background-repeat",
   "background-clip",
   "background-origin",
+  "content",
+  "pointer-events",
   "border-top-color",
   "border-right-color",
   "border-bottom-color",
