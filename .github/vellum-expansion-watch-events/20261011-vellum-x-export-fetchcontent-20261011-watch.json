@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261011-vellum-x-export-fetchcontent-20261011-watch",
+  "created_at": "2026-10-11T04:26:49Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The JSX runtime closure exporter adds a receipt path for tools/import-design/jsx-runtime and preserves design-import authority in Pulp. It emits tracked runtime files plus lockfile-pinned npm external inputs; no design-import, Chromium, rendering, or packaging authority moves. Focused closure CTest and manifest assertions passed; the export runner still requires git-filter-repo.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

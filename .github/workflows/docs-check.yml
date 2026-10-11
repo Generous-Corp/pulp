@@ -124,7 +124,7 @@ jobs:
     name: Validate docs consistency
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # tools/check-docs.sh verifies the installed capability manifest
           # against origin/main; a shallow workflow-dispatch checkout has no

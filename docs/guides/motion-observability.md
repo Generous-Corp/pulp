@@ -502,7 +502,7 @@ that may switch dispatchers inside the block.
 Bridging model: the Android facade lives in
 `android/app/src/main/kotlin/com/pulp/motion/`; the JNI shims and
 the matching C ABI live in
-`core/platform/src/android/jni_motion.cpp` (compiled into the
+`core/view/platform/android/jni_motion.cpp` (compiled into the
 `pulp-jni` shared library). `PulpApplication.onCreate` calls
 `PulpMotion.installNativeBackend()` once after
 `System.loadLibrary("pulp")` to wire the closure-bag backend to
@@ -515,7 +515,7 @@ Files: `android/app/src/main/kotlin/com/pulp/motion/PulpMotion.kt` (facade),
 (`View.pulpMotionTrace` + `PulpMotionGeometryProbe`), `MotionCompose.kt`
 (`Modifier.pulpMotionGeometry`), `PulpMotionBackend.kt` +
 `PulpMotionNative.kt` (closure-bag seam + JNI declarations),
-`core/platform/src/android/jni_motion.cpp` (C ABI + JNI shims),
+`core/view/platform/android/jni_motion.cpp` (C ABI + JNI shims),
 `android/app/src/test/kotlin/com/pulp/motion/PulpMotionTest.kt` (JVM unit
 tests, no native lib), `test/test_motion_android_bridge.cpp` (Catch2
 round-trip).

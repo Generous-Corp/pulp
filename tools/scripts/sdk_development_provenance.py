@@ -63,6 +63,22 @@ def archive_identity(data):
     return digest(normalized)
 
 
+def gpu_archive_path(root):
+    """Return the platform's built or installed GPU archive.
+
+    Unix SDKs use ``.a`` while MSVC exports the same static library as
+    ``.lib``. Both are archive containers and are checked with the same
+    identity normalization below.
+    """
+    for directory in ('core/gpu_audio', 'lib'):
+        for stem in ('libpulp-gpu-audio', 'pulp-gpu-audio'):
+            for suffix in ('.a', '.lib'):
+                candidate = root / directory / (stem + suffix)
+                if candidate.is_file():
+                    return candidate
+    raise FileNotFoundError(f'GPU archive not found under {root}')
+
+
 def git(source, *args):
     return subprocess.check_output(['git', '-C', str(source), *args], text=True).strip()
 
@@ -73,7 +89,11 @@ def inspect(source, build, prefix, sha):
     require(git(source, 'rev-parse', 'HEAD') == sha, 'source HEAD drift')
     require(not git(source, 'status', '--porcelain', '--untracked-files=no'), 'dirty source')
     cache_bytes = (build / 'CMakeCache.txt').read_bytes()
-    cache = dict(re.findall(r'^([A-Za-z_][A-Za-z0-9_]*):[^=\n]+=(.*)$', cache_bytes.decode(), re.M))
+    # CMake writes CRLF on Windows. Normalize before parsing so path values do
+    # not retain a trailing ``\r`` and fail the exact source/build identity
+    # checks below. The raw cache bytes remain hashed unchanged for provenance.
+    cache_text = cache_bytes.decode().replace('\r\n', '\n')
+    cache = dict(re.findall(r'^([A-Za-z_][A-Za-z0-9_]*):[^=\n]+=(.*)$', cache_text, re.M))
     require(Path(cache['CMAKE_HOME_DIRECTORY']).resolve() == source, 'cache source mismatch')
     require(Path(cache['CMAKE_CACHEFILE_DIR']).resolve() == build, 'cache build mismatch')
     require(cache['CMAKE_BUILD_TYPE'] == 'Release', 'Release build required')
@@ -90,12 +110,15 @@ def inspect(source, build, prefix, sha):
     require((build / 'PulpConfig.cmake').read_bytes() ==
             (prefix / 'lib/cmake/Pulp/PulpConfig.cmake').read_bytes(),
             'installed/generated package config drift')
-    built_archive = (build / 'core/gpu_audio/libpulp-gpu-audio.a').read_bytes()
-    installed_archive = (prefix / 'lib/libpulp-gpu-audio.a').read_bytes()
+    built_archive_path = gpu_archive_path(build)
+    installed_archive_path = gpu_archive_path(prefix)
+    built_archive = built_archive_path.read_bytes()
+    installed_archive = installed_archive_path.read_bytes()
     require(archive_identity(built_archive) == archive_identity(installed_archive),
             'installed/build GPU archive drift')
     artifacts = {}
-    for name in ('lib/libpulp-gpu-audio.a', 'include/pulp/runtime/build_info.hpp',
+    installed_archive_name = installed_archive_path.relative_to(prefix).as_posix()
+    for name in (installed_archive_name, 'include/pulp/runtime/build_info.hpp',
                  'lib/cmake/Pulp/PulpConfig.cmake', 'lib/cmake/Pulp/PulpTargets.cmake',
                  'version.txt', 'sdk_build_type.txt'):
         artifacts[name] = digest((prefix / name).read_bytes())

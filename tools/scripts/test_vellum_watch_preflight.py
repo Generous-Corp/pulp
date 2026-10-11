@@ -340,6 +340,19 @@ class VellumWatchPreflightTest(_PreflightRepo, unittest.TestCase):
         code, output = self._run("main", "HEAD", "--enforce", "--inventories")
         self.assertEqual(code, 0, msg=output)
 
+    def test_a_verifier_that_cannot_run_is_not_reported_stale(self) -> None:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write("tools/scripts/pulp_tooling_disposition.py",
+                    "import sys\nprint('pulp-tooling-disposition: PyYAML is not installed for "
+                    "/x/python3; install it', file=sys.stderr)\nsys.exit(3)\n")
+        self._commit("chore: a tooling change")
+        code, output = self._run("main", "HEAD", "--enforce", "--inventories")
+        self.assertEqual(code, 13, msg=output)
+        self.assertIn("could not be verified", output)
+        self.assertIn("PyYAML is not installed for /x/python3", output)
+        self.assertNotIn("is stale", output)
+        self.assertNotIn("--write", output)
+
     def test_an_owed_event_and_a_stale_inventory_are_both_reported(self) -> None:
         _git(self.repo, "checkout", "-q", "-b", "topic")
         self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
@@ -410,9 +423,10 @@ class VellumWatchPreflightTest(_PreflightRepo, unittest.TestCase):
             self.assertRegex(
                 block,
                 r'vellum_rc"? -eq 10 \] \|\| \[ "\$vellum_rc"? -eq 11 \] '
-                r'\|\| \[ "\$vellum_rc"? -eq 12 \]; then\s+fail=1',
+                r'\|\| \[ "\$vellum_rc"? -eq 12 \] \|\|\s+\[ "\$vellum_rc"? -eq 13 \];'
+                r' then\s+fail=1',
                 msg=f"{rel} does not fail on an owed watch event, a stale "
-                    "inventory, or an owed change event")
+                    "inventory, an owed change event, or an unverifiable inventory")
             self.assertNotRegex(block, r"-eq 20|-ne 0|-gt 0",
                                 msg=f"{rel} blocks on a no-verdict exit")
 

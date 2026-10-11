@@ -1569,6 +1569,14 @@ CLI flag or command is enough to stale `docs/status/pulp-tooling-disposition.jso
 the regenerate command (`python3 tools/scripts/pulp_tooling_disposition.py
 --write`, and so on) for whichever is stale.
 
+**"Could not be verified" is not "stale".** `pulp_tooling_disposition.py`
+reads `cli-commands.yaml` and needs PyYAML. Without it, the generator exits 3,
+naming the interpreter, and the gate prints "could not be verified" (exit 13)
+instead of a regenerate command. Regenerating would change nothing. Put a
+python3 that has PyYAML first on `PATH`, or set `PYTHON=`, and push again.
+Before this change the same failure printed "is stale", and three agents in
+one day went to regenerate a file that was current.
+
 **Reading that step's log:** the line `vellum-ownership-projection: error:
 ownership projection is stale` used to be printed by a *passing* negative
 control in `test_generate_vellum_ownership_projection.py`, so it appeared in
@@ -4275,6 +4283,12 @@ auto-release deliberately does not hold. Read it as:
   runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
   failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
   job is skipped, so the pre-tag check ignores it too.
+- The MSVC build step invokes `bash tools/ci/governed-build.sh cmake --build
+  build-win-cli --target pulp-cli pulp-mcp -- -k 0`. Keep the wrapper even though
+  the hosted Windows runner is single-tenant: it supplies the same bounded
+  parallelism and build-directory lock contract as the other emitters, and the
+  wrapper's MSYS path handles the runner without attempting POSIX-only lock
+  probes.
 - **Promoting it to required** needs a `merge_group` trigger plus the ruleset
   entry. The scope job always reports and an irrelevant change skips the compile
   job (a skipped job satisfies a required check), so nothing else changes.

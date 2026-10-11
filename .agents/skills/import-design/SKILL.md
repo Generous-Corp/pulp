@@ -2988,6 +2988,20 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   vertical}`), grid (`gridTemplate*`/`gridAutoFlow`/`gridColumn`/`gridRow`), and
   text `runs` are all written now; mirror this for future IR additions and add a
   `[serialization]` round-trip test.
+- **A document-loaded asset stays inside its document.** With an
+  `asset_base_directory`, `resolve_asset_file` honours a manifest `local_path`
+  or `file://` `original_uri` only when the path stays inside that directory
+  — judged by text first (`..` folded, backslashes as separators, absolute,
+  drive-letter and UNC roots refused, no lookup) and then by the resolved path
+  (symlinks). A declared SHA-256 alone does not admit an escaping path,
+  because the document controls that hash; the one outside root is Pulp's own
+  asset cache (`design_import_asset_cache_directory()`), where an absolute path
+  loads only if its resolved file is in the cache and matches the hash. A refusal logs `asset '…' refused — … resolves
+  outside the document directory` and reads as unresolved. It is decided
+  before any lookup on purpose: refusing only files that exist would tell a
+  crafted manifest which outside files are present. An external local file the
+  importer records by absolute path will not load later; copy it into the
+  document's `assets/` instead.
 - **Pencil stroke lives in an attribute.** Shape stroke can arrive as
   `attributes["stroke_color"]` (+ `stroke_width`/`stroke-width`), NOT
   `style.border_color`. `synthesize_primitive_paths` consumes both, else a
@@ -3003,6 +3017,15 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   fills its axis even when the node has an explicit cross-axis size (Yoga clamps
   up to the min) — no longer a no-op. (Text-run UTF-16→byte offset conversion is
   also handled now — see the per-range text section.)
+- **Never hand DesignIR bytes to `choc::json::parse` directly.** The pinned
+  CHOC fork checks for end of input only after a backslash, so a document cut
+  inside a string literal makes it read past the buffer (the observer died with
+  SIGBUS), and its `ParseError` aborts any caller that does not catch it.
+  `parse_design_ir_json` bounds-checks the bytes first (terminated strings and
+  `\u` escapes, balanced nesting within `kMaxDesignIrJsonDepth`, no embedded
+  NUL) and throws `DesignIrParseError`; a CLI that loads a DesignIR catches it
+  and exits 1 with the reason. Malformed fixtures for this path live in the
+  parity harness corpus (`tools/parity/corpus/fixtures/malformed/` in Vellum).
 
 ### Faithful-vector lane (Plan B): `faithful_svg` render mode → `DesignFrameView`
 

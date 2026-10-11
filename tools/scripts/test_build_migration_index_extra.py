@@ -182,7 +182,7 @@ class CodegenAndMainExtra(unittest.TestCase):
                 "a-older.md",
                 'version = "0.31.0"\n'
                 'breaking = false\n'
-                'applies_if = "from < 0.31.0"\n'
+                'applies_if = "cli_version_from < 0.31.0 && cli_version_to >= 0.31.0"\n'
                 'summary = "older \\"summary\\""\n'
                 'extra_key = "ignored"',
                 'older body with slash \\\\ and tab\\ttext\n',

@@ -1185,37 +1185,32 @@ shared bridge pump.
 
 The Kotlin / Compose / View bridge for `pulp::view::motion` lives in
 `android/app/src/main/kotlin/com/pulp/motion/`. JNI shims live in
-`core/platform/src/android/jni_motion.cpp`. Full design and DSL
+`core/view/platform/android/jni_motion.cpp`. Full design and DSL
 docs are in the **motion** skill (Path H) — this section captures
 the Android-specific wiring gotchas only.
 
 ### CMake wiring — jni_motion.cpp belongs in `pulp-jni`
 
-`jni_motion.cpp` is intentionally **excluded** from the
-`pulp-platform` glob in `tools/cmake/PulpAndroid.cmake` (alongside
-`jni_bridge.cpp`) and added **explicitly** to the `pulp-jni`
-SHARED target in the root `CMakeLists.txt`.
+`jni_motion.cpp` lives with the view sources
+(`core/view/platform/android/`) and is listed **explicitly** in the
+`pulp-jni` SHARED target in the root `CMakeLists.txt`. It is not part of
+`pulp-view`'s Android sources (`PulpAndroid.cmake` adds only
+`accessibility_android.cpp` there), so it is compiled exactly once.
 
-Why: `pulp-platform` does not link against `pulp::view`, so
-compiling `jni_motion.cpp` there leaves
-`pulp::view::motion::Coordinator::*` unresolved at link time. The
-`pulp-jni` target links the full `pulp::{platform,runtime,view,...}`
-closure so the JNI shims resolve cleanly.
+Why `pulp-jni`: the JNI shims need the full `pulp::{platform,runtime,view,...}`
+closure that only `libpulp.so` links. Why not `core/platform`: the foundation
+layer may not include view headers.
 
-If you add another JNI file that depends on a higher-layer subsystem,
-add it to both excludes (PulpAndroid glob filter) AND to the
-`add_library(pulp-jni SHARED ...)` source list.
-
-Audio-dependent JNI exports do not go under `core/platform` at all: they
-live in `core/audio/platform/android/audio_jni.cpp`, which is listed in the
-`pulp-jni` sources and is not part of the explicit `pulp-audio` Android
-source list. `tools/scripts/foundation_include_lint.py` (ctest
-`foundation-include-lint`, also run by `gates.sh`) fails if any file under
-`core/platform`, `core/runtime` or `core/simd` includes an upper-layer header,
-including a quoted `"../../audio/..."` path that only resolves through
-`core/platform/include`. The one tracked exception is `jni_motion.cpp`'s
-`pulp/view/motion.hpp`; its allowlist entry must be removed when the file
-moves, or the lint fails on the stale entry.
+If you add another JNI file that depends on a higher-layer subsystem, put it
+under that subsystem's `platform/android/` directory and add it to the
+`add_library(pulp-jni SHARED ...)` source list. Audio-dependent exports
+already follow this: they live in `core/audio/platform/android/audio_jni.cpp`.
+`tools/scripts/foundation_include_lint.py` (ctest `foundation-include-lint`,
+also run by `gates.sh`) fails if any file under `core/platform`,
+`core/runtime` or `core/simd` includes an upper-layer header, including a
+quoted `"../../audio/..."` path that only resolves through
+`core/platform/include`. Its allowlist is empty; an entry that stops matching
+fails the lint.
 
 ### View probe uses `OnPreDrawListener`, not `OnGlobalLayoutListener`
 

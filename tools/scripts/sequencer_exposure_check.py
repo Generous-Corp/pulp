@@ -17,7 +17,11 @@ from gate_common import (
     git_comparison_receipt,
     read_git_path,
     resolve_git_comparison,
+    dependabot_uses_only_diff,
 )
+
+
+_USES_ONLY_LINE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*\S+(?:\s+#.*)?\s*$")
 
 
 CLASSIFICATIONS = {
@@ -1197,6 +1201,15 @@ def is_sequencer_owned_path(path: str) -> bool:
     )
 
 
+def sequencer_paths_after_dependabot_exemption(
+    base: str, head: str, changed_paths: list[str]
+) -> list[str]:
+    """Drop paths only for a proven Dependabot uses-only workflow range."""
+    if dependabot_uses_only_diff(base, head):
+        return []
+    return changed_paths
+
+
 def _rows_by_id(document: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(document, dict) or not isinstance(document.get("rows"), list):
         return {}
@@ -1302,12 +1315,12 @@ def validate_transition(
     sequencer_changes = sorted(
         path for path in changed
         if not is_ledger_path(path) and path not in E0_INFRASTRUCTURE_PATHS and
+        path not in (mechanical_version_paths or set()) and
         (
             is_sequencer_owned_path(path) or
             path in (semantic_added_paths or set()) or
             (
                 path in watched
-                and path not in (mechanical_version_paths or set())
             )
         )
     )
@@ -1543,6 +1556,34 @@ def _mechanical_version_paths(
                 mechanical = False
                 break
         if mechanical:
+            matched.add(path)
+    return matched, errors
+
+
+def _mechanical_workflow_paths(
+    repo_root: Path, base: str, changed_paths: list[str], head: str = "HEAD"
+) -> tuple[set[str], list[str]]:
+    """Classify workflow files whose complete diff only changes ``uses:`` lines."""
+    matched: set[str] = set()
+    errors: list[str] = []
+    for path in changed_paths:
+        if not path.startswith(".github/workflows/"):
+            continue
+        diff = _git(
+            repo_root, "diff", "--no-renames", "--no-ext-diff", "--unified=0",
+            f"{base}...{head}", "--", path,
+        )
+        if diff.returncode != 0:
+            errors.append(
+                f"transition: cannot scan workflow action change in {path}: "
+                f"{diff.stderr.strip()}"
+            )
+            continue
+        body = [
+            line for line in diff.stdout.splitlines()
+            if line[:1] in {"+", "-"} and not line.startswith(("+++", "---"))
+        ]
+        if body and all(_USES_ONLY_LINE_RE.fullmatch(line[1:]) for line in body):
             matched.add(path)
     return matched, errors
 
@@ -1931,14 +1972,29 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root, comparison_base, changed_paths,
                 comparison.resolved_head or "HEAD",
             )
+            workflow_mechanical_paths, workflow_mechanical_errors = _mechanical_workflow_paths(
+                repo_root, comparison_base, changed_paths,
+                comparison.resolved_head or "HEAD",
+            )
+            mechanical_paths |= workflow_mechanical_paths
+            if dependabot_uses_only_diff(args.base, comparison.resolved_head or "HEAD"):
+                # An action-only workflow bump has no sequencer semantic change,
+                # even when a workflow filename contains timeline/playback.
+                changed_paths = sequencer_paths_after_dependabot_exemption(
+                    args.base, comparison.resolved_head or "HEAD", changed_paths
+                )
+                trailer_ids, semantic_paths, mechanical_paths = [], set(), set()
+                print("sequencer exposure: Dependabot uses-only workflow diff")
         else:
             trailer_ids, trailer_errors = [], []
             semantic_paths, semantic_errors = set(), []
             mechanical_paths, mechanical_errors = set(), []
+            workflow_mechanical_errors = []
         errors.extend(transition_errors)
         errors.extend(trailer_errors)
         errors.extend(semantic_errors)
         errors.extend(mechanical_errors)
+        errors.extend(workflow_mechanical_errors)
         errors.extend(
             validate_transition(
                 base_document,

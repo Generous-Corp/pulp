@@ -42,7 +42,6 @@ REQUIRED_TOKENS = {
         "libpulp-scene": "Scene3D CPU module",
         "libfastgltf": "native glTF parser",
         "libsimdjson": "fastgltf JSON backend",
-        "libwgpu_native": "native WebGPU runtime",
         "libskia": "native image/decode/render support",
     },
     "core/render/CMakeFiles/pulp-scene3d-inspect-native.dir/link.txt": {
@@ -50,7 +49,6 @@ REQUIRED_TOKENS = {
         "libpulp-scene": "Scene3D CPU module",
         "libfastgltf": "native glTF parser",
         "libsimdjson": "fastgltf JSON backend",
-        "libwgpu_native": "native WebGPU runtime",
         "libskia": "native image/decode/render support",
     },
     "test/CMakeFiles/pulp-test-scene3d.dir/link.txt": {
@@ -63,9 +61,26 @@ REQUIRED_TOKENS = {
         "libpulp-scene": "Scene3D CPU module",
         "libfastgltf": "native glTF parser",
         "libsimdjson": "fastgltf JSON backend",
-        "libwgpu_native": "native WebGPU runtime",
         "libskia": "native image/decode/render support",
     },
+}
+
+# Renderer link lines intentionally support either implementation of the
+# WebGPU API.  A no-Skia build links wgpu-native, while a native Skia Graphite
+# build links Skia's static Dawn archive.  Requiring one concrete provider
+# here would make the boundary checker reject the provider split it is meant
+# to protect.
+WEBGPU_PROVIDER_LINK_PATHS = frozenset({
+    "core/render/CMakeFiles/pulp-renderer3d-probe.dir/link.txt",
+    "core/render/CMakeFiles/pulp-scene3d-inspect-native.dir/link.txt",
+    "test/CMakeFiles/pulp-test-renderer3d.dir/link.txt",
+})
+WEBGPU_PROVIDER_SPELLINGS = {
+    "wgpu-native": ("libwgpu_native", "-lwgpu_native"),
+    # FindSkia exports Dawn as a static archive (normally libdawn.a or
+    # libdawn_native.a).  Keep the symbol spelling as a fallback for linkers
+    # that preserve an imported target name instead of the archive path.
+    "Dawn": ("libdawn", "-ldawn", "dawn::native"),
 }
 
 
@@ -123,6 +138,23 @@ def scan_required(path: Path, text: str, build_dir: Path):
         spellings = REQUIRED_TOKEN_SPELLINGS.get(token, (token,))
         if not any(spelling.lower() in lowered for spelling in spellings):
             misses.append((token, reason))
+    try:
+        relative = path.relative_to(build_dir).as_posix()
+    except ValueError:
+        relative = ""
+    if relative in WEBGPU_PROVIDER_LINK_PATHS:
+        lowered = text.lower()
+        if not any(
+            spelling.lower() in lowered
+            for spellings in WEBGPU_PROVIDER_SPELLINGS.values()
+            for spelling in spellings
+        ):
+            misses.append(
+                (
+                    "WebGPU provider (wgpu-native or Dawn)",
+                    "WebGPU provider",
+                )
+            )
     return misses
 
 

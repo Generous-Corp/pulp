@@ -488,7 +488,8 @@ can trigger the same misleading subcomponent failure.
 ### Every bundle carries `pulp-build-info.json` — read it before guessing
 
 `pulp_add_plugin()` writes `Contents/Resources/pulp-build-info.json`
-(`pulp.build-info.v1`) into every bundle it makes, POST_BUILD, so the record is
+(`pulp.build-info.v1`; `<bundle>/pulp-build-info.json` in a shallow iOS-family
+bundle) into every bundle it makes, POST_BUILD, so the record is
 sealed by `pulp ship sign` like any other resource. It names the product
 version and source commit, build type/archs/min-OS, the SDK version, and embeds
 the SDK's `share/pulp/runtime-pins.json` (Skia release + commit + asset digest,
