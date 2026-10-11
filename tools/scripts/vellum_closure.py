@@ -229,15 +229,75 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
         selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if not rel.startswith(("@build/", "/"))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps))})
     all_files = collect_headers(all_files, sorted(all_include_dirs), source)
     normalized = [norm_path(str(p), source, build) for p in all_files]
-    external_paths.update(p for p in normalized if p.startswith("@build/_deps/"))
+    # File-api does not list configure-time generated headers when they are
+    # consumed only through an include directory. Add the known generated
+    # products for the selected unit so the receipt remains reproducible.
+    selected_names = set(names)
+    if selected_names & {"pulp-runtime", "pulp-platform", "pulp-simd", "pulp-state"}:
+        runtime_root = build / "core/runtime/generated"
+        if runtime_root.is_dir():
+            for candidate in runtime_root.rglob("*"):
+                if candidate.is_file() and candidate.suffix.lower() in TEXT_EXTS:
+                    normalized.append(norm_path(str(candidate), source, build))
+                    all_files.add(candidate.resolve())
+    if "pulp-canvas" in selected_names:
+        for candidate in (build / "core/canvas").glob("pulp-bundled-fonts_data.*"):
+            if candidate.is_file():
+                normalized.append(norm_path(str(candidate), source, build))
+                all_files.add(candidate.resolve())
+    if "pulp-view-script" in selected_names:
+        for suffix in ("web_compat_preludes_gen.hpp", "web_compat_preludes_gen.cpp"):
+            candidate = build / "core/view" / suffix
+            if candidate.is_file():
+                normalized.append(norm_path(str(candidate), source, build))
+                all_files.add(candidate.resolve())
+    sdl_revision = build / "_deps/sdl3-build/include-revision/SDL3/SDL_revision.h"
+    if sdl_revision.is_file() and selected_names & {"pulp-platform", "pulp-runtime", "pulp-canvas", "pulp-view-script"}:
+        normalized.append(norm_path(str(sdl_revision), source, build))
+        all_files.add(sdl_revision.resolve())
+    # FetchContent source trees are reproducible external inputs.  Build-tree
+    # products (including dependency build products such as SDL's generated
+    # include revision) are generated inputs and must never become mirror files.
+    for rel in normalized:
+        if not rel.startswith("@build/"):
+            continue
+        if rel.startswith("@build/_deps/"):
+            dep_path = rel.removeprefix("@build/_deps/")
+            if re.search(r"(?:^|/)[^/]+-src/", dep_path):
+                external_paths.add(rel)
+                continue
+        generated.add(rel)
     external_paths.update(p for p in normalized if p.startswith("/") and not p.startswith(str(source.resolve())))
     pins = fetchcontent_pins(source)
     external = [build_external_input(p, pins) for p in sorted(external_paths)]
-    files = sorted(p for p in normalized if p not in external_paths and not p.startswith("/"))
+    # Keep the exact CMake/script producers in the closure so the generated
+    # input receipt can prove which repository rules produced each build file.
+    producer_map = {
+        "@build/core/canvas/pulp-bundled-fonts_data.hpp": ["core/canvas/src/bundled_fonts.cpp"],
+        "@build/core/view/web_compat_preludes_gen.cpp": ["core/view/cmake/PulpViewJsPreludes.cmake", "core/view/js/embed_js.py"],
+    }
+    for rel in sorted(generated):
+        if rel.startswith("@build/core/runtime/generated/"):
+            producer_map[rel] = ["core/runtime/CMakeLists.txt", "core/runtime/include/pulp/runtime/build_info.hpp.in"]
+        elif "/_deps/sdl3-build/include-revision/" in rel:
+            producer_map[rel] = ["tools/cmake/PulpInstallRules.cmake"]
+    producer_paths = {path for paths_for_input in producer_map.values() for path in paths_for_input}
+    for producer in producer_paths:
+        candidate = source / producer
+        if candidate.is_file():
+            all_files.add(candidate.resolve())
+            normalized.append(producer)
+    files = sorted({p for p in normalized if p not in external_paths and not p.startswith("/") and not p.startswith("@build/")})
+    generated_rows = []
+    for rel in sorted(generated - external_paths):
+        candidate = build / rel.removeprefix("@build/")
+        if not candidate.is_file():
+            continue
+        generated_rows.append({"path": rel, "sha256": sha256(candidate), "producer_paths": sorted(set(producer_map.get(rel, [])))})
     for rel in files:
         if Path(rel).suffix.lower() in RESOURCE_EXTS:
             resources.add(rel)
-    return {"schema": "pulp.vellum.closure.v1", "source_root": str(source), "build_dir": str(build), "configuration": config.get("name", ""), "targets": selected, "missing_targets": missing, "files": files, "external_inputs": external, "public_include_dirs": sorted(str(p) for p in all_include_dirs), "compile_definitions": sorted(all_defines), "transitive_link_targets": sorted(links), "resources": sorted(resources), "generated_inputs": sorted(generated - external_paths)}
+    return {"schema": "pulp.vellum.closure.v1", "source_root": str(source), "build_dir": str(build), "configuration": config.get("name", ""), "targets": selected, "missing_targets": missing, "files": files, "external_inputs": external, "public_include_dirs": sorted(str(p) for p in all_include_dirs), "compile_definitions": sorted(all_defines), "transitive_link_targets": sorted(links), "resources": sorted(resources), "generated_inputs": generated_rows}
 
 
 def cmd_manifest(args: argparse.Namespace) -> int:
@@ -293,6 +353,8 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
+    if not re.fullmatch(r"[0-9a-f]{40}", args.pulp_sha):
+        raise SystemExit("--pulp-sha must be a full 40-hex commit SHA")
     manifests = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.manifest]
     repo = Path(args.repo).resolve()
     out = Path(args.output).resolve()
@@ -347,6 +409,24 @@ def cmd_export(args: argparse.Namespace) -> int:
     commit_map_path.write_bytes(commit_map_bytes)
     tool_rows = git_blob_rows(repo, args.pulp_sha, ["tools/scripts/vellum_closure.py"])
     receipt_rel = f"provenance/mirror/receipts/{export_id}.json"
+    generated_inputs = []
+    seen_generated = set()
+    for manifest in manifests:
+        for item in manifest.get("generated_inputs", []):
+            if not isinstance(item, dict) or not {"path", "sha256", "producer_paths"} <= set(item):
+                raise SystemExit("generated_inputs entries require path, sha256, and producer_paths")
+            key = item["path"]
+            if key in seen_generated and next(row for row in generated_inputs if row["path"] == key) != item:
+                raise SystemExit(f"conflicting generated input: {key}")
+            if key not in seen_generated:
+                generated_inputs.append({"path": key, "sha256": item["sha256"], "producer_paths": sorted(set(item["producer_paths"]))})
+                seen_generated.add(key)
+    generated_inputs.sort(key=lambda row: row["path"])
+    file_paths = {row["pulp_path"] for row in files}
+    for item in generated_inputs:
+        missing = sorted(set(item["producer_paths"]) - file_paths)
+        if missing:
+            raise SystemExit(f"generated input producers are not exported: {item['path']}: {missing}")
     receipt = {
         "schema": "pulp.vellum.export-receipt.v2",
         "pulp_repository": "Generous-Corp/pulp",
@@ -359,7 +439,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         "commit_map": {"path": f"provenance/mirror/commit-maps/{export_id}.txt", "sha256": sha256(commit_map_path)},
         "units": units,
         "files": files,
-        "generated_inputs": [],
+        "generated_inputs": generated_inputs,
         "tool": {"path": "tools/scripts/vellum_closure.py", "pulp_blob": tool_rows[0]["blob"] if tool_rows else ""},
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
