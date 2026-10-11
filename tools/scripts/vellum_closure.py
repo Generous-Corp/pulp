@@ -300,6 +300,73 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
     return {"schema": "pulp.vellum.closure.v1", "source_root": str(source), "build_dir": str(build), "configuration": config.get("name", ""), "targets": selected, "missing_targets": missing, "files": files, "external_inputs": external, "public_include_dirs": sorted(str(p) for p in all_include_dirs), "compile_definitions": sorted(all_defines), "transitive_link_targets": sorted(links), "resources": sorted(resources), "generated_inputs": generated_rows}
 
 
+
+def js_runtime_manifest(source: Path, unit: str) -> dict:
+    """Build a deterministic closure for the tracked JSX import runtime.
+
+    JavaScript dependencies are installed inputs rather than mirror files.  The
+    committed lockfile is part of the closure and its digest pins the complete
+    node_modules graph that a Vellum consumer must provision.
+    """
+    if not source.is_dir():
+        raise SystemExit(f"JSX runtime source root does not exist: {source}")
+    try:
+        repo_root = Path(run("git", "-C", str(source), "rev-parse", "--show-toplevel"))
+        rel_root = source.resolve().relative_to(repo_root.resolve()).as_posix()
+        tracked = run("git", "-C", str(repo_root), "ls-files", "--", rel_root).splitlines()
+    except (subprocess.CalledProcessError, ValueError) as exc:
+        raise SystemExit(f"cannot enumerate tracked JSX runtime files: {exc}") from exc
+    files = []
+    for rel in tracked:
+        if not rel or rel == rel_root or rel.startswith(rel_root + "/node_modules/"):
+            continue
+        path = repo_root / rel
+        if path.is_file():
+            files.append(rel)
+    lock_rel = f"{rel_root}/package-lock.json"
+    lock_path = repo_root / lock_rel
+    if not lock_path.is_file() or lock_rel not in files:
+        raise SystemExit(f"tracked JSX runtime lockfile is required: {lock_rel}")
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"invalid JSX runtime package-lock.json: {exc}") from exc
+    packages = lock.get("packages")
+    if not isinstance(packages, dict):
+        raise SystemExit("package-lock.json has no packages object")
+    lock_pin = "sha256:" + sha256(lock_path)
+    external = []
+    for package_path, metadata in sorted(packages.items()):
+        if not package_path.startswith("node_modules/"):
+            continue
+        row = {"path": f"{rel_root}/{package_path}", "source": "npm", "pin": lock_pin}
+        external.append(row)
+    if not external:
+        raise SystemExit("package-lock.json contains no node_modules packages")
+    return {
+        "schema": "pulp.vellum.closure.v1",
+        "unit": unit,
+        "source_root": str(source),
+        "build_dir": None,
+        "configuration": "",
+        "targets": [],
+        "missing_targets": [],
+        "files": sorted(set(files)),
+        "external_inputs": external,
+        "public_include_dirs": [],
+        "compile_definitions": [],
+        "transitive_link_targets": [],
+        "resources": [],
+        "generated_inputs": [],
+    }
+
+
+def cmd_js_manifest(args: argparse.Namespace) -> int:
+    result = js_runtime_manifest(Path(args.source_root).resolve(), args.unit)
+    Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"closure_manifest={args.output} files={len(result['files'])} external_inputs={len(result['external_inputs'])}")
+    return 0
+
 def cmd_manifest(args: argparse.Namespace) -> int:
     result = target_manifest(Path(args.source_root).resolve(), Path(args.build_dir).resolve(), args.target)
     Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -475,6 +542,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append", required=True); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
+    p = sub.add_parser("js-manifest"); p.add_argument("--source-root", required=True); p.add_argument("--unit", default="design-import"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_js_manifest)
     p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
     p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
