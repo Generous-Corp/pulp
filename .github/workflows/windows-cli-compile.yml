@@ -232,16 +232,14 @@ jobs:
       # The C++ CLI (`pulp-cli`, shipped as pulp-cpp.exe) and the MCP server are
       # the release's MSVC-compiled binaries; building them builds every library
       # they link. `-k 0` reports every failing translation unit, not the first.
-      # The explicit job count is the runner's visible cores: a GitHub-hosted
-      # Windows runner is single-tenant, so there is no shared host to divide.
+      # The governed wrapper selects the fair-share job grant and preserves the
+      # build-directory lock across the Windows lane.
       - name: Build CLI targets (MSVC)
         id: build
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $jobs = [int]$env:NUMBER_OF_PROCESSORS
-          if ($jobs -lt 1) { $jobs = 2 }
-          cmake --build build-win-cli --parallel $jobs --target pulp-cli pulp-mcp -- -k 0
+          bash tools/ci/governed-build.sh cmake --build build-win-cli --target pulp-cli pulp-mcp -- -k 0
           if ($LASTEXITCODE -ne 0) { throw "MSVC build of the CLI targets failed ($LASTEXITCODE)" }
 
       - name: Compiler cache stats
