@@ -12,13 +12,11 @@
     "design-source-ingest",
     "render-assets-and-backends"
   ],
-  "rationale": "Design import now fails closed or warns on malformed input that it used to accept silently: ZIP members that collide on extraction refuse the import; parse_design_ir_json refuses an envelope version newer than it reads; the native resolver/materializer warn on unknown node types, duplicate stable anchors and undecodable image assets (a new canvas probe_image_file); browser capture health lists web fonts Chromium could not decode and the lowering warns on each. Every change narrows what is accepted or adds a diagnostic; output for well-formed input is unchanged. No design-import, Chromium, rendering or packaging authority moves; Pulp-only per the 2026-10-04 owner decision, Vellum inherits.",
+  "rationale": "Design import now fails closed or warns on malformed input it used to accept silently: ZIP members that collide on extraction refuse the import; the native resolver/materializer warn on a DesignIR envelope newer than this build knows (the reader still preserves it), unknown node types, duplicate stable anchors and undecodable image assets (a new canvas probe_image_file); browser capture health lists web fonts Chromium could not decode and the lowering warns on each. Every change narrows what is accepted or adds a diagnostic; output for well-formed input is unchanged. No design-import, Chromium, rendering or packaging authority moves; Pulp-only per the 2026-10-04 owner decision, Vellum inherits.",
   "tests": [
     "build/test/pulp-test-import-design-tool '[zip]'",
-    "build/test/pulp-test-design-import '[fail-closed]'",
     "build/test/pulp-test-design-import-native-common '[fail-closed]'",
     "build/test/pulp-test-browser-capture-import '[fail-closed]'",
-    "python3 test/test_design_ir_observe_interactions.py --observer build/tools/import-design/pulp-design-ir-observe",
     "node --test tools/import-design/browser_capture/health.test.mjs",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>"
   ],
