@@ -230,6 +230,18 @@ set_tests_properties(cmake-registered-runtime-staging PROPERTIES
     LABELS "cmake;sdk;runtime;bundle"
     TIMEOUT 120)
 
+# Installed SDK consumers expose the renderer as Pulp::render (capital P).
+# Keep a focused fixture for the target-name/provider lookup so a source-build
+# target alias cannot hide a regression in downstream runtime staging.
+add_test(NAME cmake-installed-render-runtime-staging
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_render_runtime_staging.cmake)
+set_tests_properties(cmake-installed-render-runtime-staging PROPERTIES
+    LABELS "cmake;sdk;runtime;bundle;provider"
+    TIMEOUT 120)
+
 if(APPLE)
     add_test(NAME cmake-macho-linked-runtime-staging
         COMMAND ${CMAKE_COMMAND}

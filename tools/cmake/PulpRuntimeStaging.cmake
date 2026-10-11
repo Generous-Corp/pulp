@@ -127,8 +127,9 @@ endfunction()
 
 # Whether the renderer links the wgpu-native runtime, read from the render
 # target's own link interface so staging can never disagree with the link:
-# `pulp-render` in a source build, the exported `pulp::render` in a
-# find_package(Pulp) consumer. When Skia's Dawn is the WebGPU implementation
+# `pulp-render` in a source build, the exported `Pulp::render` in a
+# find_package(Pulp) consumer (with lowercase `pulp::render` retained for
+# older package exports). When Skia's Dawn is the WebGPU implementation
 # the runtime is not linked, and staging it would only ship a dylib nothing
 # loads.
 function(pulp_wgpu_runtime_linked out_var)
@@ -142,11 +143,19 @@ function(pulp_wgpu_runtime_linked out_var)
         else()
             get_target_property(_links pulp::render INTERFACE_LINK_LIBRARIES)
         endif()
+    elseif(TARGET Pulp::render)
+        get_target_property(_aliased Pulp::render ALIASED_TARGET)
+        if(_aliased)
+            get_target_property(_links ${_aliased} LINK_LIBRARIES)
+        else()
+            get_target_property(_links Pulp::render INTERFACE_LINK_LIBRARIES)
+        endif()
     endif()
     if(NOT _links)
         set(_links "")
     endif()
-    if("webgpu" IN_LIST _links)
+    list(FIND _links "webgpu" _webgpu_index)
+    if(NOT _webgpu_index EQUAL -1)
         set(${out_var} TRUE PARENT_SCOPE)
     else()
         set(${out_var} FALSE PARENT_SCOPE)
