@@ -49,7 +49,7 @@ target_include_directories(pulp-test-cli-content-commands PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/tools/cli ${CMAKE_BINARY_DIR}/tools/cli)
 pulp_test_data(pulp-test-cli-content-commands PATHS fixtures/packages/basic-content-pack)
 target_link_libraries(pulp-test-cli-content-commands PRIVATE
-    pulp::platform pulp::runtime pulp::state pulp::audio Catch2::Catch2WithMain)
+    pulp::platform pulp::runtime pulp::state pulp::content pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-content-commands)
 
 # The path it stages its fake screenshot tool at is named for the real one.

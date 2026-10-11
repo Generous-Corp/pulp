@@ -210,6 +210,7 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
     "test/mac_objc_coload_probe.cpp",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/pulp_state_link_closure.cmake.in",
     "docs/contracts/**",
     "docs/status/*.schema.json",
     "docs/status/gpu-recipes.yaml",
