@@ -43,7 +43,7 @@ BUILD_GUARD="${ROOT}/tools/scripts/agent_build_guard.py"
 if [ -x "${BUILD_GUARD}" ]; then
     "${PYTHON}" "${BUILD_GUARD}" --command "${COMMAND}"
     BUILD_STATUS=$?
-    [ "${BUILD_STATUS}" -eq 0 ] || exit "${BUILD_STATUS}"
+    [ "${BUILD_STATUS}" -eq 0 ] || exit 2
 fi
 
 SHELL_NAME="${PULP_AGENT_SHELL:-${SHELL##*/}}"

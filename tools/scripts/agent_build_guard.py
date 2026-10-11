@@ -11,7 +11,7 @@ def gate_reserved_cores() -> int:
     if not tartci:
         return 0
     try:
-        p = subprocess.run([tartci, "host-profile", "--json"], capture_output=True, text=True, timeout=5)
+        p = subprocess.run([tartci, "host-profile", "--json"], capture_output=True, text=True, encoding="utf-8", timeout=5)
         if p.returncode:
             return 0
         value = json.loads(p.stdout).get("reserved_gate_cores", 0)
@@ -22,9 +22,9 @@ def gate_reserved_cores() -> int:
 
 def raw_cmake_build(command: str) -> bool:
     compact = re.sub(r"\s+", " ", command).strip()
-    if "cmake --build" not in compact:
-        return False
-    return not bool(re.search(r"(?:^|[;&|])\s*(?:bash\s+)?(?:[^;&|]*?/)?governed-build\.sh\s+.*cmake\s+--build", compact))
+    # Only a cmake executable at the start of a shell segment is a build.
+    # Mentions in grep, echo, or commit messages are ordinary text.
+    return bool(re.search(r"(?:^|[;&|]\s*)(?:\S*/)?cmake\s+--build(?:\s|$)", compact))
 
 
 def main() -> int:

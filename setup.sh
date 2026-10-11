@@ -1017,6 +1017,8 @@ fi
 # for a deliberate full setup on that host.
 refuse_full_setup_on_gate_host() {
     $DEPS_ONLY && return 0
+    $DRY_RUN && return 0
+    $PRINT_PLAN && return 0
     [ "${PULP_SETUP_ALLOW_FULL:-0}" = 1 ] && return 0
     local tartci_bin profile reserved
     tartci_bin="$(command -v tartci 2>/dev/null || true)"
