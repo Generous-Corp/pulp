@@ -1320,6 +1320,7 @@
       "pulp/view/inline_value_editor_view.hpp",
       "pulp/view/input_events.hpp",
       "pulp/view/inspector.hpp",
+      "pulp/view/inspector_facts.hpp",
       "pulp/view/inspector_window.hpp",
       "pulp/view/js_engine.hpp",
       "pulp/view/js_engine_recommend.hpp",
