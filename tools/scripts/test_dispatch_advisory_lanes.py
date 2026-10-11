@@ -19,14 +19,14 @@ class AdvisoryDispatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             log = Path(td) / "gh.log"
             fake = Path(td) / "gh"
-            fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GH_LOG\"\n")
+            fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GH_LOG\"\n", encoding="utf-8")
             fake.chmod(0o755)
             env = {**os.environ, "GH_BIN": str(fake), "GH_LOG": str(log)}
             result = subprocess.run(
-                [str(SCRIPT), "abc123"], env=env, text=True, capture_output=True
+                [str(SCRIPT), "abc123"], env=env, text=True, encoding="utf-8", capture_output=True
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            calls = log.read_text().splitlines()
+            calls = log.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(calls), 6)
             for workflow in (
                 "coverage.yml", "sanitizers.yml", "intel-portability.yml",
@@ -40,13 +40,13 @@ class AdvisoryDispatchTests(unittest.TestCase):
 
     def test_invalid_head_is_rejected_without_dispatch(self) -> None:
         result = subprocess.run(
-            [str(SCRIPT), "bad ref"], text=True, capture_output=True
+            [str(SCRIPT), "bad ref"], text=True, encoding="utf-8", capture_output=True
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid head ref", result.stderr)
 
     def test_pulp_pr_hook_skips_unarmed_runs_and_invokes_after_ship(self) -> None:
-        source = CMD_PR.read_text()
+        source = CMD_PR.read_text(encoding="utf-8")
         self.assertIn("dispatch_advisory_lanes.sh", source)
         self.assertIn("--no-arm", source)
         self.assertIn("step_shipyard_ship", source)
