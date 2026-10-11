@@ -108,7 +108,9 @@ add_library(pulp-design-import STATIC
 )
 add_library(pulp::design-import ALIAS pulp-design-import)
 set_property(TARGET pulp-design-import PROPERTY PULP_UNIT_HEADERS ${PULP_DESIGN_IMPORT_HEADERS})
-target_link_libraries(pulp-design-import PUBLIC pulp::design-ir pulp::view-core)
+# Native materialization binds imported meters and waveforms to the audio
+# widgets (Meter, WaveformView, SpectrumView), which live in pulp-view-audio.
+target_link_libraries(pulp-design-import PUBLIC pulp::design-ir pulp::view-core pulp::view-audio)
 # yaml-cpp (MIT) — DESIGN.md frontmatter parsing. Public Pulp headers expose no
 # YAML types, but pulp-design-import is static: its parser object retains YAML
 # symbols that the final consumer link must resolve. Keep yaml-cpp private in
