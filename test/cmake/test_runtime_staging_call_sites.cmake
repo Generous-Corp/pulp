@@ -83,6 +83,9 @@ endforeach()
 set(_expected_sites
     "tools/cmake/PulpPluginFormats.cmake|\${target}_VST3"
     "tools/cmake/PulpPluginFormats.cmake|\${target}_CLAP"
+    # LV2 is a loadable module too: dropping this entry lets its bundle build
+    # successfully while omitting renderer sidecars from editor-enabled builds.
+    "tools/cmake/PulpPluginFormats.cmake|\${target}_LV2"
     "tools/cmake/PulpPluginFormats.cmake|\${target}_AAX"
     "tools/cmake/PulpPluginFormats.cmake|\${target}_AU"
     "tools/cmake/PulpAppTargets.cmake|\${target}_Standalone"
@@ -120,6 +123,18 @@ foreach(_site IN LISTS _expected_sites)
             "${_rel_path}: no ${_assert_needle}")
     endif()
 endforeach()
+
+# LV2 has an editorless branch in addition to its hosted path. Keep a focused
+# regression for that branch: the generic call-site check above catches a
+# removed staging call, while this assertion catches a change that would make
+# NO_EDITOR LV2 targets fail their configure-time staging contract.
+file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake" _plugin_formats)
+string(FIND "${_plugin_formats}"
+    "_pulp_mark_editorless_runtime(\${target}_LV2)" _lv2_editorless)
+if(_lv2_editorless EQUAL -1)
+    list(APPEND _failures
+        "PulpPluginFormats.cmake: LV2 editorless path no longer marks runtime staging")
+endif()
 
 # No format helper may call the wgpu primitive directly. It copies ONLY the wgpu
 # runtime — no Apple @loader_path rpath, no Windows ICU data — so a call site
