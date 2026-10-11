@@ -2988,6 +2988,14 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   vertical}`), grid (`gridTemplate*`/`gridAutoFlow`/`gridColumn`/`gridRow`), and
   text `runs` are all written now; mirror this for future IR additions and add a
   `[serialization]` round-trip test.
+- **A document-loaded asset stays inside its document.** With an
+  `asset_base_directory`, `resolve_asset_file` honours a manifest `local_path`
+  or `file://` `original_uri` only when the file lies inside that directory once
+  symlinks are resolved, or hashes to the declared SHA-256. A `../` path, an
+  absolute host path or a symlinked directory pointing out is refused with an
+  `asset '…' refused — … resolves outside the document directory` warning and
+  reads as unresolved. An importer that writes absolute local_paths must also
+  write the asset's sha256, or the asset will not load from a saved document.
 - **Pencil stroke lives in an attribute.** Shape stroke can arrive as
   `attributes["stroke_color"]` (+ `stroke_width`/`stroke-width`), NOT
   `style.border_color`. `synthesize_primitive_paths` consumes both, else a
@@ -3003,6 +3011,15 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   fills its axis even when the node has an explicit cross-axis size (Yoga clamps
   up to the min) — no longer a no-op. (Text-run UTF-16→byte offset conversion is
   also handled now — see the per-range text section.)
+- **Never hand DesignIR bytes to `choc::json::parse` directly.** The pinned
+  CHOC fork checks for end of input only after a backslash, so a document cut
+  inside a string literal makes it read past the buffer (the observer died with
+  SIGBUS), and its `ParseError` aborts any caller that does not catch it.
+  `parse_design_ir_json` bounds-checks the bytes first (terminated strings and
+  `\u` escapes, balanced nesting within `kMaxDesignIrJsonDepth`, no embedded
+  NUL) and throws `DesignIrParseError`; a CLI that loads a DesignIR catches it
+  and exits 1 with the reason. Malformed fixtures for this path live in the
+  parity harness corpus (`tools/parity/corpus/fixtures/malformed/` in Vellum).
 
 ### Faithful-vector lane (Plan B): `faithful_svg` render mode → `DesignFrameView`
 

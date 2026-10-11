@@ -76,12 +76,18 @@ WEBGPU_LINK_FILES = (
 
 
 def mutate_no_soname_webgpu_spelling(build_dir):
-    # The Linux spelling: the runtime named by -l rather than by its path.
+    # The Linux spelling: the runtime named by -l rather than by its path. A
+    # Skia+Dawn baseline legitimately has no wgpu-native spelling, so retain
+    # its Dawn provider while applying the mutation to a wgpu baseline.
     for relative in WEBGPU_LINK_FILES:
         path = build_dir / relative
-        text = re.sub(r"\S*libwgpu_native\S*", "-lwgpu_native", read_text(path))
-        if "-lwgpu_native" not in text:
-            raise ValueError(f"{relative} does not link the WebGPU runtime")
+        text = read_text(path)
+        if "libwgpu_native" in text:
+            text = re.sub(r"\S*libwgpu_native\S*", "-lwgpu_native", text)
+            if "-lwgpu_native" not in text:
+                raise ValueError(f"{relative} does not link the WebGPU runtime")
+        elif not any(spelling in text for spelling in ("libdawn", "-ldawn", "dawn::native")):
+            raise ValueError(f"{relative} does not link wgpu-native or Dawn")
         write_text(path, text)
 
 
@@ -114,17 +120,50 @@ def mutate_missing_scene_parser_token(build_dir):
 
 
 def mutate_missing_render_webgpu_token(build_dir):
-    remove_required_token(
-        build_dir,
-        "core/render/CMakeFiles/pulp-renderer3d-probe.dir/link.txt",
-        "libwgpu_native",
-        "-lwgpu_native",
-    )
+    remove_render_provider_tokens(build_dir)
+
+
+def remove_render_provider_tokens(build_dir):
+    """Remove both supported WebGPU providers from every render link line."""
+    for relative in WEBGPU_LINK_FILES:
+        path = build_dir / relative
+        text = read_text(path)
+        for spelling in (
+            "libwgpu_native",
+            "-lwgpu_native",
+            "libdawn_native",
+            "-ldawn_native",
+            "libdawn",
+            "-ldawn",
+            "dawn::native",
+        ):
+            text = text.replace(spelling, "")
+        write_text(path, text)
+
+
+def mutate_dawn_provider_link(build_dir):
+    """Model a Skia Graphite link line that carries static Dawn."""
+    for relative in WEBGPU_LINK_FILES:
+        path = build_dir / relative
+        text = read_text(path)
+        for spelling in (
+            "libwgpu_native",
+            "-lwgpu_native",
+            "libdawn_native",
+            "-ldawn_native",
+            "libdawn",
+            "-ldawn",
+            "dawn::native",
+        ):
+            text = text.replace(spelling, "")
+        write_text(path, text + " /sdk/libdawn.a\n")
 
 
 def mutate_missing_no_soname_webgpu_token(build_dir):
+    # The baseline may use either provider.  Normalize any wgpu spelling, then
+    # remove both provider forms so the negative control remains discriminating.
     mutate_no_soname_webgpu_spelling(build_dir)
-    mutate_missing_render_webgpu_token(build_dir)
+    remove_render_provider_tokens(build_dir)
 
 
 def mutate_missing_required_link_file(build_dir):
@@ -165,11 +204,12 @@ def main():
     cases = [
         ("valid-current-link-boundary", None, 0, "native_renderer_boundary_verified=7 link files"),
         ("valid-no-soname-webgpu-link", mutate_no_soname_webgpu_spelling, 0, "native_renderer_boundary_verified=7 link files"),
+        ("valid-dawn-provider-link", mutate_dawn_provider_link, 0, "native_renderer_boundary_verified=7 link files"),
         ("forbidden-view-link-token", mutate_forbidden_view_token, 1, "forbidden view module token"),
         ("forbidden-widget-link-token", mutate_forbidden_widget_token, 1, "forbidden runtime WebGPU bridge token"),
         ("missing-scene-parser-token", mutate_missing_scene_parser_token, 1, "missing required native glTF parser token"),
-        ("missing-render-webgpu-token", mutate_missing_render_webgpu_token, 1, "missing required native WebGPU runtime token"),
-        ("missing-no-soname-webgpu-token", mutate_missing_no_soname_webgpu_token, 1, "missing required native WebGPU runtime token"),
+        ("missing-render-webgpu-token", mutate_missing_render_webgpu_token, 1, "missing required WebGPU provider token"),
+        ("missing-no-soname-webgpu-token", mutate_missing_no_soname_webgpu_token, 1, "missing required WebGPU provider token"),
         ("missing-required-link-file", mutate_missing_required_link_file, 1, "No such file or directory"),
     ]
     errors = []
