@@ -306,6 +306,8 @@ if(PULP_HAS_CLAP)
             $<INSTALL_INTERFACE:include>
     )
     target_link_libraries(pulp-format-clap-core PUBLIC pulp::format-core clap)
+    # The CLAP adapter installs pulp-content's preset source on its PresetManager.
+    target_link_libraries(pulp-format-clap-core PRIVATE pulp::content)
     target_compile_definitions(pulp-format-clap-core PRIVATE PULP_CLAP=1)
     if(PULP_HAS_AUSDK)
         set_target_properties(pulp-format-clap-core PROPERTIES CXX_STANDARD 23)
