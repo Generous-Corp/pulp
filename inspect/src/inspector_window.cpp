@@ -1018,10 +1018,17 @@ void InspectorWindow::show_properties_for(View* view) {
     } else if (auto* label = dynamic_cast<Label*>(view)) {
         widget_value = "Text: " + label->text();
         has_widget_props = true;
-    } else if (auto* meter = dynamic_cast<Meter*>(view)) {
-        widget_value = "RMS: " + format_float(meter->display_rms(), 3)
-                     + "  Peak: " + format_float(meter->display_peak(), 3);
-        has_widget_props = true;
+    } else if (auto* facts = dynamic_cast<InspectorFacts*>(view)) {
+        std::vector<InspectorFacts::Fact> rows;
+        facts->inspector_facts(rows);
+        for (const auto& row : rows) {
+            if (!row.show_in_properties)
+                continue;
+            if (!widget_value.empty())
+                widget_value += "  ";
+            widget_value += row.label + ": " + format_float(static_cast<float>(row.value), 3);
+            has_widget_props = true;
+        }
     }
 
     if (widget_section_) {

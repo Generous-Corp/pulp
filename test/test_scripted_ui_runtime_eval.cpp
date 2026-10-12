@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <pulp/view/script_inspector_bridge.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/value_channel_set.hpp>
@@ -23,7 +24,48 @@ void write_text(const fs::path& path, const std::string& content) {
     file << content;
 }
 
+// Every session these tests build carries the Pulp inspector bridge.
+[[maybe_unused]] const bool kBridgeInstalled = (install_script_inspector_bridge(), true);
+
 } // namespace
+
+TEST_CASE("ScriptedUiSession carries an inspector port only when a factory is installed",
+          "[view][scripted-ui][inspector][runtime-eval]") {
+    const auto temp = make_temp_dir("pulp-scripted-ui-inspector-port");
+    const auto script = temp / "ui.js";
+    write_text(script, "createLabel('status', 'ready', '');");
+
+    struct RestoreFactory {
+        ScriptInspectorPortFactory saved = script_inspector_port_factory();
+        ~RestoreFactory() {
+            set_script_inspector_port_factory(saved);
+        }
+    } restore;
+
+    set_script_inspector_port_factory(nullptr);
+    {
+        View root;
+        StateStore store;
+        ScriptedUiSession session(root, store, {.script_path = script});
+        REQUIRE(session.script_inspector_port() == nullptr);
+        REQUIRE(script_inspector(session) == nullptr);
+        REQUIRE(session.load());
+        std::string error;
+        session.poll(&error);
+        REQUIRE(error.empty());
+    }
+
+    install_script_inspector_bridge();
+    View root;
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script});
+    REQUIRE(session.script_inspector_port() != nullptr);
+    REQUIRE(script_inspector(session) == session.script_inspector_port());
+    REQUIRE(session.load());
+    const auto result = script_inspector(session)->evaluate("40 + 2");
+    REQUIRE(result.ok);
+    REQUIRE(result.json == "42");
+}
 
 TEST_CASE("ScriptedUiSession uses bounded cleanup grace after evaluation timeout",
           "[view][scripted-ui][inspector][runtime-eval][deadline]") {
@@ -40,12 +82,12 @@ TEST_CASE("ScriptedUiSession uses bounded cleanup grace after evaluation timeout
     REQUIRE(session.load());
     REQUIRE(root.on_global_click);
 
-    const auto result = session.script_inspector()->evaluate(
-        "for (;;) {}", std::chrono::milliseconds::zero());
+    const auto result =
+        script_inspector(session)->evaluate("for (;;) {}", std::chrono::milliseconds::zero());
     REQUIRE_FALSE(result.ok);
     REQUIRE(result.timed_out);
     REQUIRE(result.error.find("evaluation timed out") != std::string::npos);
-    REQUIRE_FALSE(session.script_inspector()->capabilities().engine.empty());
+    REQUIRE_FALSE(script_inspector(session)->capabilities().engine.empty());
     REQUIRE(session.bridge() != nullptr);
 
     // The reset owed by the timed-out evaluation is discharged at the frame
@@ -60,7 +102,7 @@ TEST_CASE("ScriptedUiSession uses bounded cleanup grace after evaluation timeout
     REQUIRE(session.bridge() != nullptr);
     REQUIRE(root.on_global_click);
 
-    const auto recovered = session.script_inspector()->evaluate("40 + 2");
+    const auto recovered = script_inspector(session)->evaluate("40 + 2");
     REQUIRE(recovered.ok);
     REQUIRE(recovered.json == "42");
 
@@ -96,7 +138,7 @@ TEST_CASE("Runtime evaluation cannot wedge cleanup or retain theme mutations",
     other_combo->on_mouse_event(other_open_click);
     REQUIRE(other_combo->is_open());
 
-    const auto result = session.script_inspector()->evaluate(R"(
+    const auto result = script_inspector(session)->evaluate(R"(
         setTheme('light');
         __forgetWidgetCallbacks__ = function () { for (;;) {} };
         40 + 2;
@@ -118,7 +160,7 @@ TEST_CASE("Runtime evaluation cannot wedge cleanup or retain theme mutations",
     REQUIRE(root.on_global_click);
     REQUIRE(other_combo->is_open());
 
-    const auto recovered = session.script_inspector()->evaluate("6 * 7");
+    const auto recovered = script_inspector(session)->evaluate("6 * 7");
     REQUIRE(recovered.ok);
     REQUIRE(recovered.json == "42");
 
@@ -151,11 +193,11 @@ TEST_CASE("Runtime evaluation retires its realm no earlier than the next poll",
     // View inside the response fence.
     int destructor_calls = 0;
     root.add_child(std::make_unique<DestructorProbe>(destructor_calls));
-    REQUIRE(session.script_inspector()->evaluate("1").ok);
+    REQUIRE(script_inspector(session)->evaluate("1").ok);
     REQUIRE(destructor_calls == 0);
 
     root.add_child(std::make_unique<DestructorProbe>(destructor_calls));
-    REQUIRE(session.script_inspector()->evaluate("2").ok);
+    REQUIRE(script_inspector(session)->evaluate("2").ok);
     REQUIRE(destructor_calls == 0);
 
     session.poll();
@@ -192,10 +234,9 @@ TEST_CASE("retired realm destruction can reenter evaluation without corrupting i
     REQUIRE(session.load());
 
     bool reentrant_ok = false;
-    root.add_child(std::make_unique<ReentrantProbe>([&] {
-        reentrant_ok = session.script_inspector()->evaluate("3").ok;
-    }));
-    REQUIRE(session.script_inspector()->evaluate("1").ok);
+    root.add_child(std::make_unique<ReentrantProbe>(
+        [&] { reentrant_ok = script_inspector(session)->evaluate("3").ok; }));
+    REQUIRE(script_inspector(session)->evaluate("1").ok);
 
     // This poll discharges the debt: it rebuilds the realm, retires the old one
     // and destroys it — which re-enters evaluation from a widget releaser.
@@ -204,13 +245,13 @@ TEST_CASE("retired realm destruction can reenter evaluation without corrupting i
     // The re-entrant evaluation owes its own reset. The pass it ran inside had
     // already discharged the earlier debt, so this one must survive to the next
     // frame rather than be swallowed by the pass in progress.
-    REQUIRE(session.script_inspector()->post_evaluation_reset_pending());
+    REQUIRE(script_inspector(session)->post_evaluation_reset_pending());
 
     int second_batch_destructions = 0;
     root.add_child(
         std::make_unique<DestructorProbe>(second_batch_destructions));
     session.poll();
-    REQUIRE_FALSE(session.script_inspector()->post_evaluation_reset_pending());
+    REQUIRE_FALSE(script_inspector(session)->post_evaluation_reset_pending());
     REQUIRE(second_batch_destructions == 1);
 
     std::error_code cleanup_error;
@@ -257,7 +298,7 @@ TEST_CASE("Runtime reset reapplies cached theme override after source theme muta
     })");
     fs::last_write_time(temp / "theme.json", pinned_write_time);
 
-    const auto result = session.script_inspector()->evaluate("40 + 2");
+    const auto result = script_inspector(session)->evaluate("40 + 2");
     REQUIRE(result.ok);
     REQUIRE(result.json == "42");
     session.poll();
@@ -310,7 +351,7 @@ TEST_CASE("Runtime reset quarantines a partially built replacement until owner t
         // The evaluation itself succeeds and the realm it ran in stays live
         // until the frame boundary; the reset that cannot rebuild it fails
         // there, and poll() is what reports that failure now.
-        const auto result = session->script_inspector()->evaluate("1");
+        const auto result = script_inspector(*session)->evaluate("1");
         REQUIRE(result.ok);
         REQUIRE(session->bridge() != nullptr);
 
@@ -383,7 +424,7 @@ TEST_CASE("Runtime reset pairs last-good source with its original script base",
 
     REQUIRE_FALSE(session.reload_from(failed_dir / "missing.js", &error));
     REQUIRE(session.script_path() == failed_dir / "missing.js");
-    const auto result = session.script_inspector()->evaluate("1");
+    const auto result = script_inspector(session)->evaluate("1");
     REQUIRE(result.ok);
     session.poll();
 
@@ -527,7 +568,7 @@ TEST_CASE("an inspector evaluation leaves a registered change binding live",
 
     // Any evaluation at all. The claim under test is about what the realm reset
     // does to the caller's pointer, not about what the expression computes.
-    REQUIRE(session.script_inspector()->evaluate("1").ok);
+    REQUIRE(script_inspector(session)->evaluate("1").ok);
 
     click_slider(*slider, 50.0f);
     INFO("after eval " << after_first_click << " -> " << store.get_value(1));
@@ -556,14 +597,13 @@ TEST_CASE("The evaluated realm is discarded at the frame boundary",
     auto* before_eval = session.bridge()->widget("scrub");
     REQUIRE(before_eval != nullptr);
 
-    REQUIRE(session.script_inspector()->evaluate("globalThis.planted = 7; 1").ok);
-    REQUIRE(session.script_inspector()->post_evaluation_reset_pending());
+    REQUIRE(script_inspector(session)->evaluate("globalThis.planted = 7; 1").ok);
+    REQUIRE(script_inspector(session)->post_evaluation_reset_pending());
     // Still the caller's realm: the pointer it holds is the live one, and a
     // global the evaluation planted is still visible to the next evaluation,
     // because no frame has run to discard the realm they share.
     REQUIRE(session.bridge()->widget("scrub") == before_eval);
-    const auto shared_realm =
-        session.script_inspector()->evaluate("typeof globalThis.planted");
+    const auto shared_realm = script_inspector(session)->evaluate("typeof globalThis.planted");
     REQUIRE(shared_realm.ok);
     CHECK(shared_realm.json == "\"number\"");
 
@@ -571,12 +611,12 @@ TEST_CASE("The evaluated realm is discarded at the frame boundary",
 
     // The frame boundary discarded the realm that ran the evaluations, so
     // nothing they planted survives into the frame that follows.
-    REQUIRE_FALSE(session.script_inspector()->post_evaluation_reset_pending());
+    REQUIRE_FALSE(script_inspector(session)->post_evaluation_reset_pending());
     REQUIRE(session.bridge() != nullptr);
     auto* after_poll = session.bridge()->widget("scrub");
     REQUIRE(after_poll != nullptr);
     CHECK(after_poll != before_eval);
-    const auto planted = session.script_inspector()->evaluate("typeof globalThis.planted");
+    const auto planted = script_inspector(session)->evaluate("typeof globalThis.planted");
     REQUIRE(planted.ok);
     CHECK(planted.json == "\"undefined\"");
 
@@ -626,10 +666,9 @@ TEST_CASE("a host can rebind native hooks after an evaluated realm reset",
     // This is the exact host ordering that exposed the regression: inspect the
     // script-owned registry, then attach a native hook to the resolved View.
     // The evaluation schedules a realm reset for the next frame.
-    const auto registry = session.script_inspector()->evaluate(
-        "({ dial: { param: 'gain' } })");
+    const auto registry = script_inspector(session)->evaluate("({ dial: { param: 'gain' } })");
     REQUIRE(registry.ok);
-    REQUIRE(session.script_inspector()->post_evaluation_reset_pending());
+    REQUIRE(script_inspector(session)->post_evaluation_reset_pending());
     bind_host_hook();
     REQUIRE(armed_view != nullptr);
     View* const before_reset = armed_view;

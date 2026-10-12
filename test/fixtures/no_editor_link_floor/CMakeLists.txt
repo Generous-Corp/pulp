@@ -51,7 +51,7 @@ pulp_add_plugin(PulpNoEditorLinkFloorControl
 # hide a regression in the binary.
 foreach(_fmt IN LISTS _no_editor_formats)
     pulp_link_closure(PulpNoEditorLinkFloor_${_fmt} TARGETS_OUT _no_editor_closure)
-    foreach(_forbidden pulp-format pulp-format-view pulp-view pulp-view-core pulp-view-native
+    foreach(_forbidden pulp-format pulp-format-view pulp-view pulp-view-core pulp-view-native pulp-view-tooling
                        pulp-view-script pulp-canvas pulp-render pulp-standalone)
         if(_forbidden IN_LIST _no_editor_closure)
             message(FATAL_ERROR

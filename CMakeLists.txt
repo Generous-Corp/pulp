@@ -586,6 +586,15 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
+        add_test(NAME pulp.vellum-view-core-pulp-kept
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_view_core_pulp_kept_check.py"
+                --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
     else()
         # Register the gate as an explicit skip so a CPU-only configuration
         # reports it as not run rather than dropping it silently.
@@ -600,6 +609,12 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             COMMAND "${Python3_EXECUTABLE}" -c
                 "import sys; print('SKIP: Vellum closure gate needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-view-core-pulp-kept
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum view-core Pulp-kept check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
             SKIP_RETURN_CODE 77
             LABELS "pr")
     endif()
