@@ -12,7 +12,6 @@
 #include <pulp/view/virtual_grid.hpp>
 
 #include <atomic>
-#include <stdexcept>
 #include <memory>
 #include <string>
 
@@ -34,6 +33,15 @@ bool is_new_widget_factory_api(choc::javascript::ArgumentList& args) {
     if (test[0] >= '0' && test[0] <= '9') return false;
     if (test[0] == '-') return false;
     return true;
+}
+
+// What a display factory returns when no provider registered the display. The
+// bridge preamble turns it into a JS Error (see kJSPreamblePart2).
+choc::value::Value display_unavailable() {
+    auto marker = choc::value::createObject("");
+    marker.addMember("pulpUnavailable",
+                     std::string("audio widget unavailable: link pulp::view-audio"));
+    return marker;
 }
 
 } // namespace
@@ -284,7 +292,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto m = make_data_display("pulp.level");
         auto* level = m ? dynamic_cast<LevelDisplay*>(m.get()) : nullptr;
         if (!level)
-            throw std::runtime_error("audio widget unavailable: link pulp::view-audio");
+            return display_unavailable();
         m->set_id(id);
         if (o == "horizontal")
             level->set_level_orientation(LevelDisplay::Orientation::horizontal);
@@ -303,7 +311,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto w = make_data_display("pulp.series");
         if (!w || !dynamic_cast<SeriesDisplay*>(w.get()))
-            throw std::runtime_error("audio widget unavailable: link pulp::view-audio");
+            return display_unavailable();
         w->set_id(id);
         self.widgets_[id] = w.get(); self.resolve_parent(pid)->add_child(std::move(w));
         return choc::value::createString(id);
@@ -313,7 +321,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto s = make_data_display("pulp.bins");
         if (!s || !dynamic_cast<BinDisplay*>(s.get()))
-            throw std::runtime_error("audio widget unavailable: link pulp::view-audio");
+            return display_unavailable();
         s->set_id(id);
         self.widgets_[id] = s.get(); self.resolve_parent(pid)->add_child(std::move(s));
         return choc::value::createString(id);

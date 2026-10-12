@@ -351,42 +351,6 @@ TEST_CASE("generate_pulp_cpp falls back to native widgets when a faithful_svg as
     REQUIRE(result.source.find("unresolved at codegen time") != std::string::npos);
 }
 
-TEST_CASE("provider display codegen guards fallback in faithful and native modes",
-          "[view][import][cpp-codegen][p19][faithful-svg]") {
-    auto make_ir = [](NodeRenderMode mode) {
-        DesignIR ir;
-        ir.source = DesignSource::figma_plugin;
-        ir.root.type = "frame";
-        ir.root.name = "Meter";
-        ir.root.style.width = 80.0f;
-        ir.root.style.height = 24.0f;
-        ir.root.layout.direction = LayoutDirection::column;
-        ir.root.audio_widget = AudioWidgetType::meter;
-        ir.root.render_mode = mode;
-        if (mode == NodeRenderMode::faithful_svg) {
-            ir.root.svg_asset_id = "meter-svg";
-            IRAssetRef asset;
-            asset.asset_id = "meter-svg";
-            asset.original_uri =
-                "data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" "
-                "width=\"80\" height=\"24\"><rect width=\"80\" height=\"24\"/></svg>";
-            asset.mime = "image/svg+xml";
-            ir.asset_manifest.assets.push_back(std::move(asset));
-        }
-        return ir;
-    };
-
-    const auto native = generate_pulp_cpp(make_ir(NodeRenderMode::normal), {}, {});
-    REQUIRE(native.source.find("make_data_display(\"pulp.level\")") != std::string::npos);
-    REQUIRE(native.source.find("if (!node_0) node_0 = std::make_unique<pulp::view::View>();") !=
-            std::string::npos);
-
-    const auto faithful = generate_pulp_cpp(make_ir(NodeRenderMode::faithful_svg), {}, {});
-    REQUIRE(faithful.source.find("DesignFrameView") != std::string::npos);
-    REQUIRE(faithful.source.find("if (!node_0) node_0 = std::make_unique<pulp::view::View>();") ==
-            std::string::npos);
-}
-
 TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large SVG",
           "[view][import][cpp-codegen][faithful-svg]") {
     DesignIR ir;

@@ -26,6 +26,11 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 
 class ViewCoreBoundaryTests(unittest.TestCase):
     def setUp(self):
+        # The synthetic trees below hold none of the repository's allowlisted
+        # files, so they are scanned with an empty allowlist; the repository
+        # scan restores the real one.
+        self.repo_allowed = dict(boundary.ALLOWED["view-core"])
+        boundary.ALLOWED["view-core"].clear()
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
         self._write("core/view/include/pulp/view/view.hpp", "#pragma once\n")
@@ -38,6 +43,8 @@ class ViewCoreBoundaryTests(unittest.TestCase):
         self._write("core/audio/include/pulp/audio/buffer.hpp", "#pragma once\n")
 
     def tearDown(self):
+        boundary.ALLOWED["view-core"].clear()
+        boundary.ALLOWED["view-core"].update(self.repo_allowed)
         self.tmp.cleanup()
 
     def _write(self, rel: str, text: str) -> None:
@@ -100,20 +107,21 @@ class ViewCoreBoundaryTests(unittest.TestCase):
 
     def test_allowlisted_edge_passes_and_stale_entry_fails(self):
         key = ("core/view/src/planted.cpp", "pulp/audio/buffer.hpp")
-        saved = dict(boundary.ALLOWED["view-core"])
         boundary.ALLOWED["view-core"][key] = "test"
-        try:
-            self.assertEqual(self._plant("#include <pulp/audio/buffer.hpp>\n"), 0)
-            self.assertEqual(self._plant("#include <pulp/view/view.hpp>\n"), 1)
-        finally:
-            boundary.ALLOWED["view-core"].clear()
-            boundary.ALLOWED["view-core"].update(saved)
+        self.assertEqual(self._plant("#include <pulp/audio/buffer.hpp>\n"), 0)
+        self.assertEqual(self._plant("#include <pulp/view/view.hpp>\n"), 1)
+
+    def test_allowlist_entry_for_a_missing_file_is_stale(self):
+        # A deleted or renamed file must not keep its exemption.
+        boundary.ALLOWED["view-core"][("core/view/src/gone.cpp", "pulp/audio/buffer.hpp")] = "test"
+        self.assertEqual(self._run(), 1)
 
     def test_empty_tree_is_a_scan_error_not_a_pass(self):
         with tempfile.TemporaryDirectory() as empty:
             self.assertEqual(self._run(pathlib.Path(empty)), 2)
 
     def test_repository_is_clean(self):
+        boundary.ALLOWED["view-core"].update(self.repo_allowed)
         self.assertEqual(self._run(REPO), 0)
 
 

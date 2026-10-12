@@ -62,10 +62,42 @@ target_link_libraries(pulp-test-design-multi-state PRIVATE pulp::view Catch2::Ca
 catch_discover_tests(pulp-test-design-multi-state
     PROPERTIES LABELS "parser-import")
 
-add_executable(pulp-test-design-import-native-common test_design_import_native_common.cpp)
+add_executable(pulp-test-design-import-native-common
+    test_design_import_native_common.cpp
+    test_design_import_data_display.cpp)
 target_link_libraries(pulp-test-design-import-native-common PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-native-common
     PROPERTIES LABELS "parser-import")
+
+# The importer and the script bridge linked without pulp::view-audio: imported
+# level/series/bin displays must link (GNU ld is single-pass) and degrade to a
+# diagnosed placeholder, and the bridge's display factories to a script error.
+if(TARGET pulp-view-script AND TARGET pulp-design-import AND PULP_ENABLE_JS)
+    add_executable(pulp-test-data-display-link-floor test_data_display_link_floor.cpp)
+    target_link_libraries(pulp-test-data-display-link-floor
+        PRIVATE pulp::design-import pulp::view-script Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-data-display-link-floor
+        PROPERTIES LABELS "parser-import;link-contract")
+    # Configure-time half: the fixture's link closure must not reach the audio
+    # provider, or it would prove nothing. The umbrella-linked suite above is the
+    # positive control for the closure walk. Deferred to the end of the top-level
+    # configure, where pulp_link_closure is defined and every link is recorded.
+    function(_pulp_check_data_display_link_floor)
+        pulp_link_closure(pulp-test-data-display-link-floor TARGETS_OUT _floor_targets)
+        if("pulp-view-audio" IN_LIST _floor_targets)
+            message(FATAL_ERROR
+                "pulp-test-data-display-link-floor reaches pulp-view-audio: ${_floor_targets}")
+        endif()
+        pulp_link_closure(pulp-test-design-import-native-common TARGETS_OUT _umbrella_targets)
+        if(NOT "pulp-view-audio" IN_LIST _umbrella_targets)
+            message(FATAL_ERROR
+                "link-floor control: the umbrella-linked suite does not reach pulp-view-audio: "
+                "${_umbrella_targets}")
+        endif()
+    endfunction()
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+        CALL _pulp_check_data_display_link_floor)
+endif()
 
 add_executable(pulp-test-design-import-native-materializer
     test_design_import_native_materializer.cpp

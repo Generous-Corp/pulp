@@ -396,6 +396,28 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
         TIMEOUT 180)
 endif()
 
+# Installed-SDK consumer of the audio displays: a design-imported meter is a
+# real Meter after the explicit registration the installed SDK documents, and
+# register_audio_widgets is in the installed archive and the consumer image.
+if(TARGET pulp-view-audio AND PULP_ENABLE_DESIGN_IMPORT)
+    add_test(NAME cmake-view-audio-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            "-DPULP_NM=${CMAKE_NM}"
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_audio_sdk_consumer.cmake)
+    set_tests_properties(cmake-view-audio-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;view;data-display"
+        COST 60
+        TIMEOUT 600)
+endif()
+
 # What does adopting ONE piece of Pulp cost an outside project? Stages an
 # install, then configures two independent consumers against the prefix: an
 # ordinary one that must pass (the positive control, which also reports which

@@ -742,6 +742,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/render_provider_floor)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
+    add_subdirectory(test/fixtures/data_display_editor)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────

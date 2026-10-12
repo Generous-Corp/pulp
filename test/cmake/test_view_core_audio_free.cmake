@@ -5,7 +5,7 @@
 # direct target edge.
 
 foreach(_input PULP_SOURCE_DIR PULP_VIEW_CORE_LINKS PULP_VIEW_LINKS
-        PULP_VIEW_NATIVE_LINKS PULP_VIEW_AUDIO_LINKS)
+        PULP_VIEW_NATIVE_LINKS PULP_VIEW_AUDIO_LINKS PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE)
     if(NOT DEFINED ${_input})
         message(FATAL_ERROR "pulp-view-core-audio-free: missing test input ${_input}")
     endif()
@@ -63,4 +63,39 @@ foreach(_umbrella VIEW VIEW_NATIVE)
     endif()
 endforeach()
 
-message(STATUS "pulp-view-core-audio-free: PASS (view-core, view-audio and umbrella LINK_LIBRARIES; negative controls detected)")
+# pulp-view-audio publishes exactly one definition to its consumers: the gate
+# that lets widgets.hpp include the audio widget declarations. Anything else,
+# notably the design-import binder switch, would make consumer headers differ
+# with the provider's own build options. The list is the configured target
+# property, recorded after the whole configure has run.
+function(only_widgets_gate DEFINITIONS OUT_VAR)
+    if(DEFINITIONS STREQUAL "PULP_VIEW_HAS_AUDIO_WIDGETS=1")
+        set(${OUT_VAR} TRUE PARENT_SCOPE)
+    else()
+        set(${OUT_VAR} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+foreach(_control
+        "PULP_VIEW_HAS_AUDIO_WIDGETS=1;PULP_VIEW_AUDIO_HAS_DESIGN_IMPORT=1"
+        "PULP_VIEW_AUDIO_HAS_DESIGN_IMPORT=1;PULP_VIEW_HAS_AUDIO_WIDGETS=1"
+        "PULP_VIEW_AUDIO_HAS_DESIGN_IMPORT=1"
+        "")
+    only_widgets_gate("${_control}" _ok)
+    if(_ok)
+        message(FATAL_ERROR
+            "pulp-view-core-audio-free: definition negative control '${_control}' was accepted")
+    endif()
+endforeach()
+if(NOT EXISTS "${PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE}")
+    message(FATAL_ERROR
+        "pulp-view-core-audio-free: ${PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE} was not recorded at configure time")
+endif()
+file(READ "${PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE}" _view_audio_interface_definitions)
+only_widgets_gate("${_view_audio_interface_definitions}" _ok)
+if(NOT _ok)
+    message(FATAL_ERROR
+        "pulp-view-core-audio-free: pulp-view-audio INTERFACE_COMPILE_DEFINITIONS must be exactly "
+        "PULP_VIEW_HAS_AUDIO_WIDGETS=1, got '${_view_audio_interface_definitions}'")
+endif()
+
+message(STATUS "pulp-view-core-audio-free: PASS (view-core, view-audio and umbrella LINK_LIBRARIES; view-audio INTERFACE_COMPILE_DEFINITIONS; negative controls detected)")

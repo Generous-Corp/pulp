@@ -389,6 +389,23 @@ function on(id, eventName, fn) {
         __ensureNativeRegistered__(id, 'contextmenu');
     }
 }
+
+// The level, series and bin display factories return a marker object, not a
+// thrown C++ exception, when no provider has registered the display: unwinding
+// C++ through the engine's frames leaks the objects it owns. The marker becomes
+// an ordinary JS Error here, so a script can catch it.
+(function() {
+    ['createMeter', 'createWaveform', 'createSpectrum'].forEach(function(name) {
+        var native = globalThis[name];
+        if (typeof native !== 'function') return;
+        globalThis[name] = function() {
+            var result = native.apply(null, arguments);
+            if (result && typeof result === 'object' && typeof result.pulpUnavailable === 'string')
+                throw new Error(result.pulpUnavailable);
+            return result;
+        };
+    });
+})();
 )";
 
 // Window event-listener shim installed after the web-compat-document.js prelude

@@ -1,0 +1,58 @@
+{
+  "schema": "pulp.view-audio-seam-debts.v1",
+  "entries": [
+    {
+      "id": "vellum-header-audio-widgets-include",
+      "owner": "view",
+      "deferred_to": "phase6",
+      "file": "core/view/include/pulp/view/widgets.hpp",
+      "patterns": [
+        "^#if defined\\(PULP_VIEW_HAS_AUDIO_WIDGETS\\)$",
+        "^#include <pulp/view/audio_widgets.hpp>$",
+        "^#endif\\s*//.*PULP_VIEW_HAS_AUDIO_WIDGETS"
+      ]
+    },
+    {
+      "id": "design-import-audio-forward-decls",
+      "owner": "view",
+      "deferred_to": "phase6",
+      "file": "core/view/include/pulp/view/design_import.hpp",
+      "patterns": [
+        "^class Meter;$",
+        "^class WaveformView;$",
+        "virtual void bind_meter\\(Meter&",
+        "virtual void bind_waveform_display\\(WaveformView&"
+      ]
+    }
+  ],
+  "pending_proofs": [
+    {
+      "id": "vellum-package-inertness",
+      "status": "pending",
+      "blocked_on": "the Vellum package and its sterile-consumer lane do not exist yet",
+      "runs_in": "Vellum package sterile-consumer build",
+      "debts": [
+        "vellum-header-audio-widgets-include",
+        "design-import-audio-forward-decls"
+      ],
+      "checks": [
+        {
+          "id": "no-widgets-gate-definition",
+          "assert": "PULP_VIEW_HAS_AUDIO_WIDGETS is undefined in every consumer compile, read from the exported target properties and the consumer's compile commands"
+        },
+        {
+          "id": "no-audio-headers",
+          "assert": "no consumer translation unit includes pulp/view/audio* or a pulp/view/meter.hpp-family header (from -H or depfile output), and the package ships no such header"
+        },
+        {
+          "id": "no-audio-symbols",
+          "assert": "the linked consumer image has no defined or undefined reference to a symbol pulp-view-audio defines, via view_audio_symbol_floor against the image"
+        },
+        {
+          "id": "name-only-forward-declarations",
+          "assert": "the Meter/WaveformView forward declarations and the deprecated bind virtuals produce no symbol references in the consumer image"
+        }
+      ]
+    }
+  ]
+}

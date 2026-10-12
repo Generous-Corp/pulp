@@ -620,12 +620,32 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio)
         list(APPEND _pulp_view_boundary_args
             "-D${_pulp_view_boundary_var}=${_pulp_view_boundary_links}")
     endforeach()
+    # pulp-view-audio's own INTERFACE_COMPILE_DEFINITIONS, read after the whole
+    # configure has run so a definition added anywhere is seen. The only one it
+    # may publish is the widgets.hpp compatibility gate; the design-import binder
+    # switch stays PRIVATE so consumer headers do not depend on it.
+    set(_pulp_view_audio_interface_definitions_file
+        "${CMAKE_CURRENT_BINARY_DIR}/view-audio-interface-definitions.txt")
+    function(_pulp_record_view_audio_interface_definitions output)
+        get_target_property(_definitions pulp-view-audio INTERFACE_COMPILE_DEFINITIONS)
+        if(NOT _definitions)
+            set(_definitions "")
+        endif()
+        file(WRITE "${output}" "${_definitions}")
+    endfunction()
+    # Deferred arguments are expanded when the call runs, in the top-level
+    # scope, so the path is baked in here.
+    cmake_language(EVAL CODE "
+        cmake_language(DEFER DIRECTORY [[${CMAKE_SOURCE_DIR}]]
+            CALL _pulp_record_view_audio_interface_definitions
+                [[${_pulp_view_audio_interface_definitions_file}]])")
     add_test(NAME pulp-view-core-audio-free
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             ${_pulp_view_boundary_args}
+            "-DPULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE=${_pulp_view_audio_interface_definitions_file}"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_core_audio_free.cmake)
-    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "view;gate")
+    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "pr;view;gate")
 endif()
 
 # The include half of the same boundary: no core/view source outside
@@ -643,21 +663,65 @@ set_tests_properties(pulp-view-core-include-boundary
     pulp-view-core-include-boundary-negative-contract
     PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
 
-# G2c P19 seam proofs: the extracted-unit M4 controls, F3/A4 codegen guard,
-# P7 interface-definition/debt checks, and installed/plugin prerequisites.
-foreach(_p19_case m4 contracts runtime m6-3 f2 link-floor p7)
-    add_test(NAME "p19-${_p19_case}-proof"
-        COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/scripts/test_p19_audio_widget_proofs.py"
-            --source-root "${CMAKE_SOURCE_DIR}" --case "${_p19_case}")
-endforeach()
-set_tests_properties(p19-m4-proof p19-contracts-proof p19-runtime-proof
-    PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+# widgets.hpp declares the audio widgets only behind PULP_VIEW_HAS_AUDIO_WIDGETS,
+# which pulp::view-audio alone publishes. Compile probes with each extracted
+# unit's own include directories and definitions (as the build computes them)
+# and with a pulp::view-audio consumer's, in a separate configure.
+if(TARGET pulp-view-audio AND TARGET pulp-view-core)
+    set(_widgets_gate_targets pulp-view-core)
+    foreach(_widgets_gate_target pulp-view-script pulp-design-import)
+        if(TARGET ${_widgets_gate_target})
+            list(APPEND _widgets_gate_targets ${_widgets_gate_target})
+        endif()
+    endforeach()
+    set(_widgets_gate_content "set(WIDGETS_GATE_EXTRACTED_TARGETS ${_widgets_gate_targets})\n")
+    foreach(_widgets_gate_target IN LISTS _widgets_gate_targets)
+        string(APPEND _widgets_gate_content
+            "set(WIDGETS_GATE_${_widgets_gate_target}_INCLUDES [==[$<TARGET_PROPERTY:${_widgets_gate_target},INCLUDE_DIRECTORIES>]==])\n"
+            "set(WIDGETS_GATE_${_widgets_gate_target}_DEFINITIONS [==[$<TARGET_PROPERTY:${_widgets_gate_target},COMPILE_DEFINITIONS>]==])\n")
+    endforeach()
+    string(APPEND _widgets_gate_content
+        "set(WIDGETS_GATE_AUDIO_INCLUDES [==[$<TARGET_PROPERTY:pulp-view-audio,INTERFACE_INCLUDE_DIRECTORIES>]==])\n"
+        "set(WIDGETS_GATE_AUDIO_DEFINITIONS [==[$<TARGET_PROPERTY:pulp-view-audio,INTERFACE_COMPILE_DEFINITIONS>]==])\n")
+    file(GENERATE
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/view-audio-widgets-gate-$<CONFIG>.cmake"
+        CONTENT "${_widgets_gate_content}")
+    add_test(NAME pulp-view-audio-widgets-gate
+        COMMAND ${CMAKE_COMMAND}
+            "-DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            "-DPULP_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DFLAGS_FILE=${CMAKE_CURRENT_BINARY_DIR}/view-audio-widgets-gate-$<CONFIG>.cmake"
+            "-DGENERATOR=${CMAKE_GENERATOR}"
+            "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DOSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
+            "-DOSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_audio_widgets_gate.cmake")
+    set_tests_properties(pulp-view-audio-widgets-gate PROPERTIES
+        LABELS "pr;view;gate" TIMEOUT 300)
+endif()
 
-add_executable(pulp-test-p19-registration test_p19_registration_main.cpp)
-target_link_libraries(pulp-test-p19-registration PRIVATE pulp::view)
-add_test(NAME p19-test-main-registration COMMAND pulp-test-p19-registration)
-set_tests_properties(p19-test-main-registration PROPERTIES LABELS "pr;view;gate")
+# Explicit registration without the build-tree convenience shim: the support
+# library links pulp::view-audio PRIVATE, which does not forward the shim's
+# INTERFACE_SOURCES to the executable, so the only registration is the explicit
+# call. The executable fails if anything registered before main().
+if(TARGET pulp-view-audio)
+    add_library(pulp-test-audio-registration-support STATIC
+        support/audio_registration_check.cpp)
+    target_link_libraries(pulp-test-audio-registration-support PRIVATE pulp::view-audio)
+    add_executable(pulp-test-audio-registration test_audio_registration_main.cpp)
+    target_link_libraries(pulp-test-audio-registration PRIVATE
+        pulp-test-audio-registration-support)
+    add_test(NAME pulp-test-audio-registration COMMAND pulp-test-audio-registration)
+    set_tests_properties(pulp-test-audio-registration PROPERTIES LABELS "pr;view;gate")
+endif()
+
+# The two deferred view-audio seam debts and their pending Vellum-package
+# inertness proof must describe the headers as they are.
+add_test(NAME view-audio-seam-debts
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/view_audio_seam_debts.py"
+        --root "${CMAKE_SOURCE_DIR}")
+set_tests_properties(view-audio-seam-debts PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
 
 # The symbol half: neither header nor link checks see an object that needs
 # another library's code (a dynamic_cast to Meter compiles against a view-core
