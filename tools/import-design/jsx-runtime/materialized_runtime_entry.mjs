@@ -70,6 +70,11 @@ g.__pulpNativeBridgeFunctions__ = Object.freeze({
 });
 g.React = React;
 const behaviorRootId = '__pulp_materialized_behavior__';
+// Pseudo planes are a separate visual layer. The behavior root is intentionally
+// transparent in reference-authority imports so the captured DesignIR remains
+// visible; placing pseudo planes below that root would inherit opacity=0 and
+// silently drop authored ::before/::after paint.
+const pseudoRootId = '__pulp_materialized_pseudo_root__';
 const surfaceRootId = '__pulp_materialized_surface__';
 const stateAtlasRootId = '__pulp_materialized_state_atlas__';
 class NativeRoot {
@@ -332,15 +337,37 @@ g.__pulpReconcileMaterializedPaint__ = function (id, changes) {
 // deliberately passes nothing: a state flip replaces the whole binding table,
 // so nothing about the previous commit's dirty set describes it.
 const materializedPseudoPlanes = new Map();
+let materializedPseudoRootReady = false;
+function ensureMaterializedPseudoRoot() {
+  if (materializedPseudoRootReady) return;
+  createCol(pseudoRootId, '');
+  setPosition(pseudoRootId, 'absolute');
+  setLeft(pseudoRootId, ${JSON.stringify(authoredLeft)});
+  setTop(pseudoRootId, ${JSON.stringify(authoredTop)});
+  setFlex(pseudoRootId, 'width', ${JSON.stringify(authoredWidth)});
+  setFlex(pseudoRootId, 'height', ${JSON.stringify(authoredHeight)});
+  ${authoredTransform ? `
+  setTransformOrigin(pseudoRootId, 0, 0);
+  setTransform(pseudoRootId,
+    ${JSON.stringify(authoredTransform.a)}, ${JSON.stringify(authoredTransform.b)},
+    ${JSON.stringify(authoredTransform.c)}, ${JSON.stringify(authoredTransform.d)},
+    ${JSON.stringify(authoredTransform.e)}, ${JSON.stringify(authoredTransform.f)});` : ''}
+  setVisible(pseudoRootId, true);
+  setOpacity(pseudoRootId, 1);
+  setPointerEvents(pseudoRootId, 'box-none');
+  setZIndex(pseudoRootId, ${MATERIALIZED_BEHAVIOR_Z - 1000});
+  materializedPseudoRootReady = true;
+}
 function applyMaterializedPseudoBindings(metadata) {
   const bindings = Array.isArray(metadata && metadata.pseudo_bindings)
     ? metadata.pseudo_bindings : [];
+  if (bindings.length > 0) ensureMaterializedPseudoRoot();
   const live = new Set();
   for (const binding of bindings) {
     const id = "__pulp_materialized_pseudo_" + binding.index;
     live.add(id);
     if (!materializedPseudoPlanes.has(id)) {
-      createCol(id, behaviorRootId);
+      createCol(id, pseudoRootId);
       materializedPseudoPlanes.set(id, { gradient: false });
     }
     setPosition(id, 'absolute');

@@ -2,7 +2,8 @@
 """widgets_doc_check.py — keep docs/reference/widgets.md in sync with the code.
 
 Every developer-facing `class X : public View` primitive in
-core/view/include/pulp/view/*.hpp must have a row in docs/reference/widgets.md
+core/view/include/pulp/view/*.hpp, or in the audio widgets' headers under
+core/view/audio/include/pulp/view/*.hpp, must have a row in docs/reference/widgets.md
 (its class name in backticks). When a new primitive is added, the catalog has
 to grow with it — otherwise the live list of "what's possible" silently drifts.
 
@@ -20,7 +21,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-HEADERS = ROOT / "core" / "view" / "include" / "pulp" / "view"
+HEADER_DIRS = (
+    ROOT / "core" / "view" / "include" / "pulp" / "view",
+    ROOT / "core" / "view" / "audio" / "include" / "pulp" / "view",
+)
 DOC = ROOT / "docs" / "reference" / "widgets.md"
 
 # Direct View subclasses that are NOT developer-facing design-system primitives
@@ -44,7 +48,7 @@ CLASS_RE = re.compile(r"^class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*public\s+View\b"
 
 def find_primitives() -> set[str]:
     names: set[str] = set()
-    for hpp in sorted(HEADERS.glob("*.hpp")):
+    for hpp in sorted(h for d in HEADER_DIRS for h in d.glob("*.hpp")):
         names.update(CLASS_RE.findall(hpp.read_text(encoding="utf-8", errors="ignore")))
     return names
 

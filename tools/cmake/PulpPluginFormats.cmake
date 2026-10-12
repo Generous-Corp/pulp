@@ -387,6 +387,18 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/LV2/${name}.lv2"
         PREFIX ""
     )
+
+    # Runtime sidecars: editorless LV2 modules link only the audio adapter and
+    # therefore need no renderer runtime; editor-enabled modules must stage the
+    # same runtime dependencies as the other hosted formats. Keep this call
+    # before the manifest/control shipping hooks so every LV2 bundle follows
+    # the same configure-time assertion and post-build staging path.
+    if(PULP_${target}_NO_EDITOR)
+        _pulp_mark_editorless_runtime(${target}_LV2)
+    else()
+        pulp_stage_runtime_dependencies(${target}_LV2)
+    endif()
+    pulp_assert_runtime_dependencies_staged(${target}_LV2)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_LV2)
     _pulp_attach_control_shipping(${target} ${target}_LV2 LV2)
 

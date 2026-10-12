@@ -4401,6 +4401,7 @@
    "inputs": [
     "core/runtime/CMakeLists.txt",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/view/audio/include",
     "inspect/include",
     "inspect/include/pulp",
     "inspect/include/pulp/inspect",
@@ -4423,6 +4424,7 @@
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
     "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
     "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+    "core/view/audio/include",
     "inspect/include",
     "inspect/include/pulp",
     "inspect/include/pulp/inspect",
@@ -4725,9 +4727,16 @@
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
     "core/platform",
+    "core/platform/include",
     "core/runtime",
+    "core/runtime/include",
     "core/simd",
-    "tools/scripts/foundation_include_lint.py"
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "tools/scripts/foundation_include_lint.py",
+    "tools/scripts/include_boundary.py"
    ],
    "kind": "python"
   },
@@ -4807,10 +4816,14 @@
    "entry": "tools/scripts/test_gate_common.py",
    "inputs": [
     ".github/workflows",
+    ".github/workflows/build.yml",
     "tools/cli",
     "tools/cli/cmd_doctor.cpp",
+    "tools/scripts",
     "tools/scripts/gate_common.py",
-    "tools/scripts/test_gate_common.py"
+    "tools/scripts/skill_path_map.json",
+    "tools/scripts/test_gate_common.py",
+    "tools/scripts/versioning.json"
    ],
    "kind": "python"
   },
@@ -6174,6 +6187,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-external-asset-localized": {
+   "entry": "test/test_import_design_external_asset.py",
+   "inputs": [
+    "test/test_import_design_external_asset.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-asset-escape": {
    "entry": "test/test_design_ir_observe_asset_escape.py",
    "inputs": [
@@ -6592,6 +6612,13 @@
     "tools/ci/test_macos_merge_group_bootstrap.py"
    ],
    "kind": "python"
+  },
+  "macos-plugin-bundle-signing": {
+   "entry": "tools/scripts/check_apple_bundle_signing.sh",
+   "inputs": [
+    "tools/scripts/check_apple_bundle_signing.sh"
+   ],
+   "kind": "shell"
   },
   "measure-min-os-selftest": {
    "entry": "tools/scripts/test_measure_min_os.py",
@@ -7217,6 +7244,46 @@
    "entry": "tools/scripts/test_pulp_uninstall.py",
    "inputs": [
     "tools/scripts/test_pulp_uninstall.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-audio-symbol-floor": {
+   "entry": "tools/scripts/view_audio_symbol_floor.py",
+   "inputs": [
+    "tools/scripts/view_audio_symbol_floor.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-audio-symbol-floor-negative-contract": {
+   "entry": "tools/scripts/test_view_audio_symbol_floor.py",
+   "inputs": [
+    "tools/scripts/test_view_audio_symbol_floor.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-core-include-boundary": {
+   "entry": "tools/scripts/include_boundary.py",
+   "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "tools/scripts/include_boundary.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-view-core-include-boundary-negative-contract": {
+   "entry": "tools/scripts/test_include_boundary.py",
+   "inputs": [
+    "core/audio/include/pulp/audio/buffer.hpp",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/src/view.cpp",
+    "tools/scripts/test_include_boundary.py"
    ],
    "kind": "python"
   },
@@ -9338,6 +9405,7 @@
   "status-tone-signal-lint": {
    "entry": "tools/scripts/status_tone_signal_lint.py",
    "inputs": [
+    "core/view/audio/src",
     "core/view/src",
     "tools/scripts/status_tone_signal_lint.py"
    ],
@@ -9346,6 +9414,8 @@
   "status-tone-signal-lint-selftest": {
    "entry": "tools/scripts/test_status_tone_signal_lint.py",
    "inputs": [
+    "core/view/audio/src",
+    "core/view/src",
     "tools/scripts/test_status_tone_signal_lint.py"
    ],
    "kind": "python"
@@ -9658,6 +9728,8 @@
   "token-key-correctness": {
    "entry": "tools/scripts/token_key_check.py",
    "inputs": [
+    "core/view/audio/src",
+    "core/view/audio/src/widgets",
     "core/view/src",
     "core/view/src/theme_presets.cpp",
     "core/view/src/widgets",
@@ -9789,6 +9861,21 @@
     "tools/scripts/test_vellum_boundary_lint.py",
     "tools/ui-build",
     "tools/ui-build/pulp-package.json"
+   ],
+   "kind": "python"
+  },
+  "vellum-inheritance-ledger": {
+   "entry": "tools/scripts/vellum_inheritance_ledger_check.py",
+   "inputs": [
+    ".github/vellum-change-events",
+    "tools/scripts/vellum_inheritance_ledger_check.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-inheritance-ledger-negative-contract": {
+   "entry": "tools/scripts/test_vellum_inheritance_ledger_check.py",
+   "inputs": [
+    "tools/scripts/test_vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"
   },

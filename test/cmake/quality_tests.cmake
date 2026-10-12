@@ -93,6 +93,19 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(foundation-include-lint foundation-include-lint-negative-contract
         PROPERTIES LABELS "pr" TIMEOUT 60)
 
+    # Inheritance entries are one file per change event so concurrent pull
+    # requests do not conflict; the checker keeps the older single-file ledger
+    # frozen and requires an entry for every event carrying the inheritance
+    # prefix. The self-test plants each violation and must turn red.
+    add_test(NAME vellum-inheritance-ledger
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_inheritance_ledger_check.py")
+    add_test(NAME vellum-inheritance-ledger-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_inheritance_ledger_check.py")
+    set_tests_properties(vellum-inheritance-ledger vellum-inheritance-ledger-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
     # Keep one checked-in, license-free source fixture on the same instrument
     # as the importer output gate. The companion unittest plants every lint
     # class and must turn red, so a vacuous clean fixture cannot make this gate

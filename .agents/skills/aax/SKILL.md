@@ -345,10 +345,11 @@ produce a misleading artifact. These checks are deliberately redundant:
    known build directory. Record its SHA-256 before signing and record the
    post-signing SHA-256 separately; never overwrite the only unsigned copy.
 4. **Seal the bundle shape before Apple signing.** Arbitrary JSON evidence files
-   under `Contents/MacOS` are treated as nested code by `codesign`. Relocate
-   Pulp's `*.inspector-capabilities.json`, `*.control-shipping.json`, and
-   `*.control-shipping-report.json` sidecars to `Contents/Resources` before
-   signing, then fail if any of those files remain under `Contents/MacOS`.
+   under `Contents/MacOS` are treated as nested code by `codesign`. The build
+   writes Pulp's `*.inspector-capabilities.json`, `*.control-shipping.json`, and
+   `*.control-shipping-report.json` sidecars to `Contents/Resources`; still
+   fail if any of those files remain under `Contents/MacOS` (a bundle from an
+   older SDK, or a stale copy).
 5. **Use ordered gates.** The only valid order is: build, inspect bundle shape,
    Apple/PACE sign, `wraptool verify`, `codesign --verify --deep --strict`,
    AAX Validator, install the exact verified bundle, then prove discovery and

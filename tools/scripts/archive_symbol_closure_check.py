@@ -30,7 +30,10 @@ from pathlib import Path
 # definitions (W/V) are left out: an inline function emitted in both archives
 # is not a dependency of one on the other.
 DEFINED_TYPES = set("TDBRSCG")
-UNDEFINED_TYPES = set("U")
+# GNU/LLVM nm use lowercase `w`/`v` for weak undefined references. They are
+# still relocations that may resolve from a forbidden archive, so dropping
+# them makes the closure gate accept a real dependency.
+UNDEFINED_TYPES = set("Uwv")
 
 
 def read_symbols(nm: str, archive: Path) -> tuple[set[str], set[str]]:
