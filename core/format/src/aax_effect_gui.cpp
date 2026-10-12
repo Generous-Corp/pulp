@@ -32,6 +32,11 @@
 #include <optional>
 #include <functional>
 #include <string>
+#include <atomic>
+
+#if defined(__APPLE__)
+#include <dispatch/dispatch.h>
+#endif
 
 namespace pulp::format::aax {
 
@@ -52,9 +57,17 @@ constexpr int32_t kHostableContainerType =
 class PulpAaxEffectGUI final : public AAX_CEffectGUI {
 public:
     PulpAaxEffectGUI()
-        : aax_scale_(aax_display_scale(nullptr)) {}
+#if defined(__APPLE__)
+        : initial_size_sync_alive_(std::make_shared<std::atomic<bool>>(true)),
+#else
+        :
+#endif
+          aax_scale_(aax_display_scale(nullptr)) {}
 
     ~PulpAaxEffectGUI() override {
+#if defined(__APPLE__)
+        initial_size_sync_alive_->store(false, std::memory_order_release);
+#endif
         // The SDK calls DeleteViewContainer from SetViewContainer(null), but a
         // host that drops the GUI without that call would otherwise leak the
         // bridge and strand Processor::on_view_closed.
@@ -218,12 +231,24 @@ private:
             host_->set_fixed_aspect_ratio(plan.aspect_ratio);
         }
 
-        // AAX owns the initial outer editor frame. Do not call SetViewSize
-        // during CreateViewContainer: Pro Tools may still be constructing its
-        // wrapper, and an early write can leave the wrapper and native child in
-        // different coordinate spaces. GetViewSize supplies the preferred
-        // frame during insertion; SetViewSize is reserved for later explicit
-        // editor resize requests.
+        // Publish the logical preferred size during the container-creation
+        // transaction.  Pro Tools can size its outer wrapper from this call;
+        // relying only on GetViewSize() leaves some hosts with their default
+        // wrapper while the child view stays at the authored 990x645 frame.
+        // Keep this to one synchronous publication: the old repeated timer
+        // loop caused host re-entrancy/crashes and is deliberately gone.
+        if (auto* view_container = GetViewContainer()) {
+            AAX_Point initial_size(static_cast<float>(plan.height),
+                                   static_cast<float>(plan.width));
+            if (view_container->SetViewSize(initial_size) != AAX_SUCCESS) {
+                runtime::log_error("AAX editor: initial SetViewSize rejected ({}x{})",
+                                   plan.width, plan.height);
+            }
+        }
+
+        // Mirror the same logical size into the native child and bridge after
+        // the AAX transaction. This keeps the first paint and the host's
+        // preferred frame in the same coordinate space.
         host_->set_size(plan.width, plan.height);
 
         bridge_->notify_attached();
@@ -231,6 +256,16 @@ private:
         // Content-first: the first composited frame is the mounted document
         // (ViewBridge::prepare_first_frame()).
         bridge_->prepare_first_frame(*host_);
+
+#if defined(__APPLE__)
+        // Pro Tools can finish installing its wrapper frame after
+        // CreateViewContainer returns.  In that case it ignores the initial
+        // GetViewSize result and leaves a stale (often 2x) outer frame around
+        // the correctly sized child.  A single next-run-loop publication is
+        // enough to reconcile that lifecycle race; repeated timers fought
+        // host/user resizes and were the source of the earlier crash loop.
+        schedule_initial_size_sync(plan.width, plan.height);
+#endif
 
         runtime::log_info("AAX editor: attached ({}x{}, mode={}, gpu={})",
                           plan.width, plan.height, gpu.mode, host_->is_gpu_backed());
@@ -360,10 +395,33 @@ private:
         }
     }
 
+#if defined(__APPLE__)
+    void schedule_initial_size_sync(uint32_t width, uint32_t height) {
+        auto alive = std::weak_ptr<std::atomic<bool>>(initial_size_sync_alive_);
+        auto* owner = this;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            auto token = alive.lock();
+            if (!token || !token->load(std::memory_order_acquire)) return;
+            if (!owner->bridge_ || !owner->host_) return;
+            auto* container = owner->GetViewContainer();
+            if (!container) return;
+            AAX_Point size(
+                static_cast<float>(aax_host_dimension(height, owner->aax_scale_)),
+                static_cast<float>(aax_host_dimension(width, owner->aax_scale_)));
+            (void)container->SetViewSize(size);
+            owner->host_->set_size(width, height);
+            owner->bridge_->resize(width, height);
+        });
+    }
+#endif
+
     std::unique_ptr<ViewBridge> bridge_;
     std::unique_ptr<view::PluginViewHost> host_;
     std::function<void()> idle_pump_;
     view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding_;
+#if defined(__APPLE__)
+    std::shared_ptr<std::atomic<bool>> initial_size_sync_alive_;
+#endif
     float aax_scale_ = 1.0f;
 };
 
