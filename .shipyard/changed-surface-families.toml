@@ -4982,11 +4982,7 @@ risk_class = "low"
 
 [[families]]
 name = "script-readers-6e96bb3eb00d"
-paths = [
-  "tools/scripts/test_vellum_closure.py",
-  "tools/scripts/test_vellum_closure.py",
-  "tools/scripts/test_vellum_closure.py",
-]
+paths = ["tools/scripts/test_vellum_closure.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-inventory",
@@ -5588,11 +5584,7 @@ risk_class = "low"
 
 [[families]]
 name = "script-readers-1d89419f9562"
-paths = [
-  "tools/scripts/vellum_closure.py",
-  "tools/scripts/vellum_closure.py",
-  "tools/scripts/vellum_closure.py",
-]
+paths = ["tools/scripts/vellum_closure.py"]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-inventory",
