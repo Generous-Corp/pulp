@@ -88,6 +88,15 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
     platform simd runtime music timebase timeline timeline_editor timeline_view
     canvas view audio midi format)
 
+# TimelinePluginProof is a complete packaged editor. Its CLAP adapter's
+# symbol-level preset path legitimately reaches the format support modules
+# below the editor rung, so this proof-specific bound names that measured
+# closure directly instead of carrying an unbounded debt exception.
+set(PULP_LINK_FLOOR_TIER_timeline-plugin-proof
+    platform simd runtime music timebase timeline timeline_editor timeline_view
+    canvas view audio midi format content events graph native-components
+    sample_bank_manifest signal state)
+
 # ── Debt ─────────────────────────────────────────────────────────────────────
 # What a target's link closure drags in beyond its tier, recorded per target.
 # An entry is a fact about the artifact, not a permission to build on: it says
@@ -136,8 +145,7 @@ set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
 # modules as direct lower bounds. The tier includes the view and canvas rungs
 # that the concrete piano roll necessarily reaches. Format packaging contributes
 # the remaining modules by the same routes as the step-sequencer plugin.
-set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
-    content events graph native-components sample_bank_manifest signal state)
+set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP)
 
 # Entries whose edge only exists in some configurations, appended under the
 # condition that creates them. Appending rather than exempting is deliberate:

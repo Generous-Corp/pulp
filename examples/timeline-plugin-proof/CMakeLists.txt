@@ -23,7 +23,7 @@ target_link_libraries(TimelinePluginProof_Core INTERFACE
 if(TARGET TimelinePluginProof_CLAP AND COMMAND pulp_assert_link_floor)
     pulp_report_link_closure(TimelinePluginProof_CLAP)
     pulp_assert_link_floor(TimelinePluginProof_CLAP
-        TIER    sequencer-plugin-editor
+        TIER    timeline-plugin-proof
         REQUIRE format timeline timeline_editor timeline_view)
 endif()
 

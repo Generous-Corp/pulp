@@ -1,0 +1,49 @@
+{
+  "id": "timeline-plugin-proof-link-floor",
+  "title": "TimelinePluginProof CLAP link floor matches its measured closure",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "r7-timeline-plugin-proof-link-floor-20261012",
+  "owned_paths": [
+    "docs/status/sequencer-exposure/rows/timeline-plugin-proof-link-floor.json",
+    "examples/timeline-plugin-proof/CMakeLists.txt",
+    "tools/cmake/PulpLinkFloor.cmake"
+  ],
+  "evidence": [
+    {
+      "path": "examples/timeline-plugin-proof/CMakeLists.txt",
+      "needles": [
+        "timeline-plugin-proof"
+      ]
+    },
+    {
+      "path": "tools/cmake/PulpLinkFloor.cmake",
+      "needles": [
+        "timeline-plugin-proof",
+        "TimelinePluginProof_CLAP"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The change only constrains the example link floor; it adds no installed SDK header, target, symbol, or artifact."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI verb, flag, or output contract changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The example link-floor gate does not expose a runtime operation or control."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability manifest or agent-facing surface changes."
+    }
+  }
+}
