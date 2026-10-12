@@ -231,10 +231,11 @@ against a batch name that was not the culprit.
 Three facts make that possible, and all three are worth knowing before you
 diagnose a stalled queue:
 
-**A pull-request head does not run the test suite at all.** The `Test
-(non-Windows)` step is gated `github.event_name != 'pull_request'`. Tests run
-in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
-the PR head. So "the PR was green" never meant its tests passed.
+**An ordinary pull-request head does not run the full test suite.** The
+`Test (non-Windows)` step runs the fast tier for ordinary heads, while an
+armed head selected by `pr_suite == full` runs the full suite as a required
+queue-admission signal. Tests also run in the merge queue, on push, and on
+Shipyard's `workflow_dispatch`.
 
 **`main`'s macOS health is the merge group's `macos` job, not a push run.**
 The queue lands with the MERGE method, so the commit on `main` IS the
