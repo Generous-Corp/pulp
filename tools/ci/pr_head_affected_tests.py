@@ -54,6 +54,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
 
 import affected_targets  # noqa: E402
+import build_time_report  # noqa: E402
 import changed_surface_inventory as inventory  # noqa: E402
 import cmake_registration_impact as registration_impact  # noqa: E402
 
@@ -221,6 +222,50 @@ def own_tests(build: Path, root: Path, paths: list[str]) -> list[str]:
                    if any(os.path.normpath(c) in artifacts for c in e.command)})
 
 
+def rebuilt_binary_tests(build: Path) -> list[str]:
+    """Tests whose executable was rebuilt by the current Ninja invocation.
+
+    Source projection misses tests whose binary is rebuilt through a CMake or
+    dependency edge, which is exactly how a rebuilt migration-index test was
+    omitted from a PR head. Ninja's latest log invocation is the build's own
+    ground truth for outputs actually produced. Map those executable outputs
+    back through the CTest command inventory.
+    """
+    log = build / ".ninja_log"
+    if not log.is_file() or not inventory.codemodel_reply_available(build):
+        return []
+    try:
+        runs = build_time_report.parse_ninja_log(log.read_text(encoding="utf-8", errors="replace"))
+        model = inventory.load_codemodel_targets(build)
+        entries = inventory.load_projection_ctest_entries(build) or []
+    except (OSError, ValueError, inventory.InventoryError):
+        return []
+    if not runs:
+        return []
+
+    def key(path: str) -> str:
+        value = Path(path)
+        if not value.is_absolute():
+            value = build / value
+        return os.path.normpath(str(value))
+
+    built = {key(entry.output) for entry in runs[-1]}
+    executable_artifacts = {
+        key(artifact)
+        for target in model.targets.values()
+        if target.type == "EXECUTABLE"
+        for artifact in target.artifacts
+    }
+    rebuilt = built & executable_artifacts
+    if not rebuilt:
+        return []
+    selected = []
+    for entry in entries:
+        if any(key(command) in rebuilt for command in entry.command):
+            selected.append(entry.name)
+    return sorted(set(selected))
+
+
 def registration_tests(build: Path, paths: list[str], root: Path = REPO_ROOT,
                        changes: dict[str, tuple[set[int], list[str]]] | None = None
                        ) -> list[str]:
@@ -328,6 +373,9 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
         plan["reason"] = "the diff is empty"
         return plan
     chosen: list[str] = []
+    rebuilt = rebuilt_binary_tests(build)
+    plan["rebuilt_binaries"] = len(rebuilt)
+    chosen.extend(rebuilt)
     # Declared script inputs are exact, so they apply even where the build
     # projection does not (a docs/status file a census test parses).
     inputs = script_input_tests(paths, root)
@@ -543,7 +591,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     plan = select(build, paths, names, changes=changes)
     print(f"pr-head-affected-tests: {len(plan['tests'])} extra test(s); mode={plan['mode']} "
-          f"({plan['reason']}); families={plan['families']}", flush=True)
+          f"({plan['reason']}); rebuilt-binary-tests={plan.get('rebuilt_binaries', 0)}; "
+          f"families={plan['families']}", flush=True)
     if args.dry_run:
         print(json.dumps(plan, indent=2))
         return 0

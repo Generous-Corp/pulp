@@ -35,16 +35,19 @@ NAMES = {
     "wide-non-native-selftest": set(), "other": set(),
     "pulp-gpu-host-mapped-pointer-probe": set(), "pulp-gpu-audio-provider-identity": set(),
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
+    "pulp-test-cli-migration-index": set(),
 }
 
 
 class SelectionTests(unittest.TestCase):
     def plan(self, paths: list[str], projected: step.inventory.Selection,
-             *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = ()) -> dict:
+             *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = (),
+             rebuilt: list[str] = ()) -> dict:
         with mock.patch.object(step, "project", return_value=projected) as project, \
                 mock.patch.object(step, "script_reference_tests", return_value=list(scripts)), \
                 mock.patch.object(step, "script_input_tests", return_value=list(inputs)), \
                 mock.patch.object(step, "own_tests", return_value=list(own)), \
+                mock.patch.object(step, "rebuilt_binary_tests", return_value=list(rebuilt)), \
                 mock.patch.object(step, "registration_tests", return_value=[]):
             plan = step.select(Path("/b"), paths, NAMES)
         plan["_projected"] = project.called
@@ -109,6 +112,11 @@ class SelectionTests(unittest.TestCase):
     def test_control_a_focused_projection_does_not_add_own_tests_twice(self) -> None:
         plan = self.plan(["test/test_a.cpp"], selection("focused", ["unit-a"]), own=["unit-b"])
         self.assertEqual(plan["tests"], ["unit-a"])
+
+    def test_rebuilt_binary_tests_are_added_even_without_source_projection(self) -> None:
+        plan = self.plan(["core/other.cpp"], selection("focused", []),
+                         rebuilt=["pulp-test-cli-migration-index"])
+        self.assertEqual(plan["tests"], ["pulp-test-cli-migration-index"])
 
     def test_an_unrelated_tools_change_does_not_reach_the_families(self) -> None:
         plan = self.plan(["tools/scripts/other.py"], selection("focused", ["other"]))
@@ -192,6 +200,32 @@ class DirectEdgeTests(unittest.TestCase):
                 ' "other": {"inputs": ["y.json"]}}}')
             self.assertEqual(step.script_input_tests(["docs/status/a.yaml"], root), ["census"])
             self.assertEqual(step.script_input_tests(["docs/statusx"], root), [])
+
+    def test_rebuilt_binary_output_reaches_its_registered_test(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            build.mkdir()
+            (build / ".ninja_log").write_text(
+                "# ninja log v5\n0\t12\t0\tbin/pulp-test-cli-migration-index\t1\n",
+                encoding="utf-8")
+            model = step.inventory.CodeModel(
+                targets={"pulp-test-cli-migration-index": step.inventory.Target(
+                    "pulp-test-cli-migration-index", "EXECUTABLE", "", "",
+                    ["test/migration.cpp"], artifacts=[str(build / "bin/pulp-test-cli-migration-index")])},
+                source_root=str(REPO), build_root=str(build))
+            entries = [step.inventory.CTestEntry(
+                "migration-round-trip", [str(build / "bin/pulp-test-cli-migration-index"), "--check"], {})]
+            with mock.patch.object(step.inventory, "codemodel_reply_available", return_value=True), \
+                    mock.patch.object(step.inventory, "load_codemodel_targets", return_value=model), \
+                    mock.patch.object(step.inventory, "load_projection_ctest_entries", return_value=entries):
+                self.assertEqual(step.rebuilt_binary_tests(build), ["migration-round-trip"])
+
+    def test_rebuilt_binary_without_a_ninja_log_is_not_claimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            build.mkdir()
+            with mock.patch.object(step.inventory, "codemodel_reply_available", return_value=True):
+                self.assertEqual(step.rebuilt_binary_tests(build), [])
 
     def model(self) -> step.inventory.CodeModel:
         T = step.inventory.Target

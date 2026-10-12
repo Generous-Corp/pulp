@@ -9,7 +9,6 @@ paths = [
   "tools/scripts/action_pin_lint.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
-  "tools/scripts/build_time_report.py",
   "tools/scripts/check_au_component_preflight.py",
   "tools/scripts/check_codecov_receipts.py",
   "tools/scripts/check_daw_bench_evidence.py",
@@ -282,6 +281,37 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-b46a29d50c94"
+paths = ["tools/scripts/build_time_report.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
 ]
