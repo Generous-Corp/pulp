@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-scripted-ui-time-source-watch",
+  "created_at": "2026-10-10T22:47:34Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds WidgetBridge::set_time_source / ScriptedUiSession::set_time_source, an injectable clock for script timers, performance.now() and the requestAnimationFrame timestamp (default steady_clock, so hosts are unchanged; performance.now() origin becomes per bridge), and drives scripted UIs in the development-only pulp-ui-frames-observe from its schedule's host clock (--timer-clock schedule|wall) with a timer fixture and tests, plus an import-design skill note. Generic scripted-UI runtime behavior that Vellum's JS UI runtime inherits (vellum-move ledger M-matrix timer clock); no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 test/test_ui_frames_observe.py",
+    "ctest --test-dir build -R pulp-test-widget-bridge-animation",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

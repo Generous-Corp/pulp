@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import pathlib
 import re
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -562,6 +564,132 @@ class QuotedTrailerIsNotABypassTests(unittest.TestCase):
         self.assertNotIn("release", got)
         self.assertNotIn("version-bump", got)
         self.assertIn("release-note", got)
+
+
+class DependabotUsesOnlyDiffTests(unittest.TestCase):
+    SCRIPT = REPO_ROOT / "tools" / "scripts" / "skill_sync_check.py"
+
+    @staticmethod
+    def _git(repo: pathlib.Path, *args: str, env: dict[str, str] | None = None) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True,
+            encoding="utf-8", env=env,
+        )
+        return result.stdout.strip()
+
+    def _fixture_result(self, shape: str) -> int:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            self._git(repo, "init", "-q", "-b", "main")
+            self._git(repo, "config", "user.name", "Gate Fixture")
+            self._git(repo, "config", "user.email", "gate-fixture@example.com")
+            (repo / ".agents/skills/ci").mkdir(parents=True)
+            (repo / ".github/workflows").mkdir(parents=True)
+            (repo / ".agents/skills/ci/SKILL.md").write_text("# CI\n", encoding="utf-8")
+            (repo / "tools/scripts").mkdir(parents=True)
+            (repo / "tools/scripts/versioning.json").write_text(
+                '{"skills":{"skills_dir":".agents/skills","path_map":"tools/scripts/skill_path_map.json"}}\n',
+                encoding="utf-8",
+            )
+            (repo / "tools/scripts/skill_path_map.json").write_text(
+                '{"skills":{"ci":{"paths":[".github/workflows/**"]}}}\n',
+                encoding="utf-8",
+            )
+            workflow = repo / ".github/workflows/build.yml"
+            workflow.write_text(
+                "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v5\n",
+                encoding="utf-8",
+            )
+            self._git(repo, "add", ".")
+            self._git(repo, "commit", "-qm", "base")
+            base = self._git(repo, "rev-parse", "HEAD")
+
+            self._git(repo, "checkout", "-qb", "dependabot")
+            workflow.write_text(
+                "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v7\n",
+                encoding="utf-8",
+            )
+            bot_env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "dependabot[bot]",
+                "GIT_AUTHOR_EMAIL": "49699333+dependabot[bot]@users.noreply.github.com",
+                "GIT_COMMITTER_NAME": "dependabot[bot]",
+                "GIT_COMMITTER_EMAIL": "49699333+dependabot[bot]@users.noreply.github.com",
+            }
+            self._git(repo, "add", ".github/workflows/build.yml")
+            self._git(repo, "commit", "-qm", "build(deps): bump checkout", env=bot_env)
+
+            self._git(repo, "checkout", "-q", "main")
+            if shape == "conflicting-merge":
+                workflow.write_text(
+                    "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v6\n",
+                    encoding="utf-8",
+                )
+                self._git(repo, "add", ".github/workflows/build.yml")
+            else:
+                (repo / "README.md").write_text("main advanced\n", encoding="utf-8")
+                self._git(repo, "add", "README.md")
+            self._git(repo, "commit", "-qm", "main advances")
+            base = self._git(repo, "rev-parse", "HEAD")
+            self._git(repo, "checkout", "-q", "dependabot")
+
+            if shape in {"clean-merge", "evil-merge", "conflicting-merge"}:
+                if shape == "evil-merge":
+                    self._git(repo, "merge", "--no-commit", "--no-ff", "main")
+                    workflow.write_text(
+                        "jobs:\n  build:\n    steps:\n      - uses: evil/backdoor@main\n",
+                        encoding="utf-8",
+                    )
+                    self._git(repo, "add", ".github/workflows/build.yml")
+                    self._git(repo, "commit", "-qm", "merge main")
+                elif shape == "conflicting-merge":
+                    merge = subprocess.run(
+                        ["git", "merge", "--no-commit", "--no-ff", "main"],
+                        cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                    )
+                    self.assertNotEqual(merge.returncode, 0)
+                    self._git(repo, "checkout", "--ours", ".github/workflows/build.yml")
+                    self._git(repo, "add", ".github/workflows/build.yml")
+                    self._git(repo, "commit", "-qm", "merge main with obvious resolution")
+                else:
+                    self._git(repo, "merge", "--no-edit", "--no-ff", "main")
+            elif shape == "non-merge":
+                workflow.write_text(
+                    "jobs:\n  build:\n    steps:\n      - uses: evil/backdoor@main\n",
+                    encoding="utf-8",
+                )
+                self._git(repo, "add", ".github/workflows/build.yml")
+                self._git(repo, "commit", "-qm", "human rewrite")
+            else:
+                raise AssertionError(shape)
+
+            result = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--base", base, "--head", "HEAD",
+                 "--repo-root", str(repo), "--config", str(repo / "tools/scripts/versioning.json"),
+                 "--mode=report"],
+                cwd=repo, capture_output=True, text=True, encoding="utf-8",
+            )
+            return result.returncode
+
+    def test_clean_update_branch_merge_passes(self) -> None:
+        self.assertEqual(self._fixture_result("clean-merge"), 0)
+
+    def test_evil_merge_fails_closed(self) -> None:
+        self.assertEqual(self._fixture_result("evil-merge"), 1)
+
+    def test_non_merge_rewrite_fails_closed(self) -> None:
+        self.assertEqual(self._fixture_result("non-merge"), 1)
+
+    def test_conflicting_merge_with_resolution_fails_closed(self) -> None:
+        self.assertEqual(self._fixture_result("conflicting-merge"), 1)
+
+    def test_workflow_helper_rejects_core_change_before_line_scan(self) -> None:
+        names = subprocess.CompletedProcess(
+            args=["git"], returncode=0,
+            stdout=".github/workflows/a.yml\ncore/timeline/x.cpp\n", stderr=""
+        )
+        with mock.patch.object(gc.subprocess, "run", return_value=names):
+            self.assertFalse(gc.workflow_uses_only_diff("origin/main"))
 
 
 if __name__ == "__main__":

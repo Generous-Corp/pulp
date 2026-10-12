@@ -24,39 +24,29 @@ permissions:
 # coverage is the Tier-2 nightly's native-Intel job.
 
 on:
+  schedule:
+    - cron: '41 3 * * *'
   pull_request:
-    branches: [main, develop]
-    # Only run when the touched code can plausibly differ across arch. Mirrors
-    # the sanitizers.yml paths-filter style, scoped to the arch-sensitive set.
-    paths:
-      - 'core/runtime/**'
-      - 'core/signal/**'
-      - 'core/platform/**'
-      - 'tools/cmake/**'
-      - 'tools/deps/manifest.json'
-      - 'tools/deps/min_os.json'
-      - 'tools/scripts/fetch_*'
-      - 'ship/**'
-      - '.github/workflows/intel-portability.yml'
+    types: [auto_merge_enabled]
   workflow_dispatch:
 
 concurrency:
-  group: intel-portability-${{ github.ref }}
+  group: intel-portability-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
   x86_64-build-test:
     name: x86_64 build + test (Rosetta, advisory)
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     # Fork PRs run on the same free GitHub-hosted runner; only skip scheduled
-    # noise on forks (this workflow has no schedule, so the guard is a no-op
-    # today and kept for parity with the nightly).
+    # noise on forks. Scheduled refreshes run only in the primary repository.
     runs-on: macos-15
     timeout-minutes: 90
     env:
       BUILD_DIR: build-intel-x86_64
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 

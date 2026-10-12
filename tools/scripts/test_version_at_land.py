@@ -799,6 +799,64 @@ class PrRouteTest(unittest.TestCase):
             ["git", "-C", str(self.origin), "merge-base", "--is-ancestor",
              main_sha, tip]).returncode, 0)
 
+    def _push_covering_bump_branch(self) -> str:
+        """Leave a bump commit cut FROM the current main on the bump branch, as
+        a PR that already covers the latest merge would, and return its SHA."""
+        _git(self.clone, "checkout", "-q", "-b", "covering-bump", "HEAD")
+        (self.clone / "COVERING_BUMP.txt").write_text("red bump PR head\n",
+                                                     encoding="utf-8")
+        _git(self.clone, "add", "--", "COVERING_BUMP.txt")
+        _git(self.clone, "commit", "--no-verify", "-q", "-m", "covering bump")
+        _git(self.clone, "push", "-q", "origin", f"HEAD:{val.BUMP_BRANCH}")
+        sha = _git(self.clone, "rev-parse", "HEAD").strip()
+        _git(self.clone, "switch", "-q", "main")
+        return sha
+
+    def test_heal_replaces_a_covering_bump_pr_with_a_failed_required_check(self) -> None:
+        """A bump PR that covers main but went red never enqueues; re-arming it
+        waited for nothing until main moved (median 17 min, up to 124, from red
+        check to close, e.g. #9719). With the heal it is replaced at once."""
+        covering_sha = self._push_covering_bump_branch()
+        fake = _FakeGh(open_prs_seq=[1, 0], covers=True, armed=True,
+                       checks=[_check("macos", "FAILURE"),
+                               _check("drift-fast", "SUCCESS")])
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "pr-opened", plan)
+        close = [c for c in fake.calls if c[:2] == ("pr", "close")]
+        self.assertEqual([c[2] for c in close], ["1"])
+        self.assertIn("already covers", close[0][-1])
+        self.assertIn("macos", close[0][-1])
+        self.assertTrue(fake.did("pr", "create"))
+        self.assertIn("--merge", fake.calls[-1])
+        tip = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
+            capture_output=True, text=True, encoding="utf-8",
+            check=True).stdout.strip()
+        self.assertNotEqual(tip, covering_sha)
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+
+    def test_heal_rearms_a_covering_bump_pr_that_is_not_confirmed_red(self) -> None:
+        """Queued, green, pending, unknown, or heal-off covering PRs are re-armed
+        and deferred to, never closed."""
+        red = [_check("macos", "FAILURE")]
+        cases = (({"in_queue": True, "checks": red}, True),
+                 ({"checks": [_check("macos", None)]}, True),
+                 ({"checks": [_check("macos", "SUCCESS")]}, True),
+                 ({"checks": None}, True),
+                 ({"graphql_rc": 1}, True),
+                 ({"checks": red}, False))
+        for kwargs, heal in cases:
+            with self.subTest(heal=heal, **{k: str(v) for k, v in kwargs.items()}):
+                fake = _FakeGh(open_prs=1, covers=True, armed=True, **kwargs)
+                val._gh = fake
+                status, _ = val.apply_via_pr(self.clone, self._cfg(),
+                                             heal_stale=heal)
+                self.assertEqual(status, "pending")
+                self.assertFalse(fake.did("pr", "close"))
+                self.assertFalse(fake.did("pr", "create"))
+                self.assertTrue(fake.did("pr", "merge"))
+
     def test_heal_keeps_a_never_queued_stale_bump_pr(self) -> None:
         """A stale bump PR that was never in the merge queue is not "ejected".
 
@@ -1257,6 +1315,25 @@ class BumpPrLivenessTest(unittest.TestCase):
         self.assertEqual(state, "dead")
         self.assertIn("ejected", reason)
 
+    def test_failed_required_check_is_red_ahead_of_other_dead_ends(self) -> None:
+        for conclusion in ("FAILURE", "CANCELLED", "TIMED_OUT"):
+            with self.subTest(conclusion=conclusion):
+                self._assert_red(conclusion)
+
+    def _assert_red(self, conclusion: str) -> None:
+        pr = {"state": "OPEN", "isDraft": False, "isInMergeQueue": False,
+              "autoMergeRequest": None,
+              "timelineItems": _ejection_timeline(True),
+              "commits": {"nodes": [{"commit": {"statusCheckRollup": {
+                  "contexts": {"pageInfo": {"hasNextPage": False},
+                               "nodes": [_check("macos", conclusion)]}}}}]}}
+        out = json.dumps({"data": {"repository": {"pullRequest": pr}}})
+        val._gh = lambda repo, *a, check=True: subprocess.CompletedProcess(
+            a, 0, stdout=out, stderr="")
+        state, reason = val._bump_pr_liveness(Path("."), "1")
+        self.assertEqual(state, "red")
+        self.assertIn("macos", reason)
+
     def test_unknown_or_errored_history_fails_closed(self) -> None:
         for timeline in (_MISSING, None, {"totalCount": 8},
                          {"nodes": None}, {"nodes": [{}]}, {"nodes": ["x"]}):
@@ -1268,6 +1345,129 @@ class BumpPrLivenessTest(unittest.TestCase):
 
 
 _MISSING = object()
+
+
+WORKFLOW = HERE.parent.parent / ".github" / "workflows" / "version-at-land.yml"
+
+
+def _folded(text: str, key: str, until: str) -> str:
+    """The folded (`>-`) scalar after `key` in the workflow, as one line."""
+    block = text.split(f"{key} >-\n", 1)[1].split(until, 1)[0]
+    joined = " ".join(line.strip() for line in block.splitlines()
+                      if line.strip() and not line.strip().startswith("#"))
+    return joined.removeprefix("${{").removesuffix("}}").strip()
+
+
+def _evaluate(expr: str, ctx: dict) -> object:
+    """Evaluate the GitHub expression subset the workflow uses: string
+    literals, dotted context paths, `==`, `!=`, `&&`, `||`, parentheses and
+    `format()`. `&&` / `||` return an operand, as GitHub's do and Python's
+    `and` / `or` do; a missing context path is null."""
+    import re
+    tokens = re.findall(r"'[^']*'|&&|\|\||==|!=|[()]|,|[A-Za-z_][\w.-]*", expr)
+    if "".join(tokens) != re.sub(r"\s+", "", expr):
+        raise ValueError(f"unsupported expression syntax: {expr}")
+    out = []
+    for tok in tokens:
+        if tok == "&&":
+            out.append(" and ")
+        elif tok == "||":
+            out.append(" or ")
+        elif tok == "format":
+            out.append("_fmt")
+        elif tok[0].isalpha() or tok[0] == "_":
+            out.append(f"_ctx({tok!r})")
+        else:
+            out.append(tok)
+
+    def _ctx(path: str) -> object:
+        return ctx.get(path)
+
+    def _fmt(template: str, *args: object) -> str:
+        for i, a in enumerate(args):
+            template = template.replace("{%d}" % i, str(a))
+        return template
+    return eval("".join(out), {"__builtins__": {}},
+                {"_ctx": _ctx, "_fmt": _fmt})
+
+
+class WorkflowConcurrencyTest(unittest.TestCase):
+    """Only an event whose drain job runs may join the PR-route serial group.
+
+    A concurrency group keeps ONE pending run and a new arrival cancels it, so
+    every run that enters the group and then skips its job can cancel a pending
+    push drain: after the heal events were added, 10 push drains were cancelled
+    in 3.9 days by `pull_request: dequeued` for unrelated PRs and by green
+    bump-branch `workflow_run` completions."""
+
+    REPO = "Generous-Corp/pulp"
+    BUMP = "release/version-bump"
+
+    def setUp(self) -> None:
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.group = _folded(text, "group:", "cancel-in-progress")
+        self.job_if = _folded(text, "    if:", "    runs-on:")
+
+    def _events(self):
+        base = {"github.repository": self.REPO, "github.run_id": "4242",
+                "vars.PULP_PRIMARY_REPO": self.REPO}
+        yield "push", {**base, "github.event_name": "push"}
+        yield "dispatch", {**base, "github.event_name": "workflow_dispatch"}
+        yield "schedule", {**base, "github.event_name": "schedule"}
+        yield "schedule-fork", {**base, "github.event_name": "schedule",
+                                "github.repository": "someone/pulp"}
+        for ref, repo in ((self.BUMP, self.REPO), (self.BUMP, "fork/pulp"),
+                          ("feature/x", self.REPO)):
+            yield f"dequeued {ref} {repo}", {
+                **base, "github.event_name": "pull_request",
+                "github.event.pull_request.head.ref": ref,
+                "github.event.pull_request.head.repo.full_name": repo}
+        for conclusion in ("success", "skipped", "neutral", "failure",
+                           "cancelled", "timed_out"):
+            for repo in (self.REPO, "fork/pulp"):
+                yield f"workflow_run {conclusion} {repo}", {
+                    **base, "github.event_name": "workflow_run",
+                    "github.event.workflow_run.conclusion": conclusion,
+                    "github.event.workflow_run.head_repository.full_name": repo}
+
+    def test_serial_group_holds_exactly_the_runs_whose_job_runs(self) -> None:
+        for route in ("pr", ""):
+            for name, ctx in self._events():
+                ctx = {**ctx, "vars.PULP_BUMP_ROUTE": route}
+                with self.subTest(route=route, event=name):
+                    runs = bool(_evaluate(self.job_if, ctx))
+                    group = _evaluate(self.group, ctx)
+                    if route == "pr":
+                        self.assertEqual(group == "version-at-land-serial",
+                                         runs, group)
+                    if not runs:
+                        # A skipped run must never share a group with anything.
+                        self.assertIn("4242", group)
+
+    def test_drain_triggers_keep_their_groups(self) -> None:
+        cases = {("pr", "push"): "version-at-land-serial",
+                 ("pr", "dispatch"): "version-at-land-serial",
+                 ("pr", "schedule"): "version-at-land-serial",
+                 ("", "push"): "version-at-land-push",
+                 ("", "schedule"): "version-at-land-schedule",
+                 ("", "dispatch"): "version-at-land-workflow_dispatch"}
+        events = dict(self._events())
+        for (route, name), expected in cases.items():
+            with self.subTest(route=route, event=name):
+                ctx = {**events[name], "vars.PULP_BUMP_ROUTE": route}
+                self.assertEqual(_evaluate(self.group, ctx), expected)
+                self.assertTrue(_evaluate(self.job_if, ctx))
+
+    def test_heal_events_that_run_share_the_serial_group(self) -> None:
+        events = dict(self._events())
+        for name in (f"dequeued {self.BUMP} {self.REPO}",
+                     f"workflow_run failure {self.REPO}",
+                     f"workflow_run cancelled {self.REPO}"):
+            with self.subTest(event=name):
+                ctx = {**events[name], "vars.PULP_BUMP_ROUTE": "pr"}
+                self.assertTrue(_evaluate(self.job_if, ctx))
+                self.assertEqual(_evaluate(self.group, ctx),
+                                 "version-at-land-serial")
 
 
 class RefreshDerivedTest(unittest.TestCase):

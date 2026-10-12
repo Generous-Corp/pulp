@@ -33,6 +33,26 @@ add_executable(pulp-native-link-floor-jsc-control jsc_control.mm)
 target_link_libraries(pulp-native-link-floor-jsc-control PRIVATE
     "-framework JavaScriptCore")
 
+# wgpu-native positive control (defined by test/fixtures/render_provider_floor):
+# the scanner must see a libwgpu_native load command in an image that really
+# links it before it asserts the native artifacts load none.
+set(_native_link_floor_wgpu_control_args "")
+set(_native_link_floor_wgpu_control_target "")
+if(TARGET pulp-render-provider-floor-wgpu-control)
+    set(_native_link_floor_wgpu_control_args
+        -DWGPU_POSITIVE_CONTROL=$<TARGET_FILE:pulp-render-provider-floor-wgpu-control>)
+    set(_native_link_floor_wgpu_control_target pulp-render-provider-floor-wgpu-control)
+endif()
+
+# Skia normally supplies Dawn, but the supported native fallback is the
+# imported wgpu-native provider when the Skia bundle has no Dawn archive.
+# Pass the selected provider to the artifact scanner so it checks the actual
+# configuration rather than assuming that every Skia build contains Dawn.
+set(_native_link_floor_provider_args -DEXPECT_DAWN=OFF)
+if(PULP_HAS_SKIA AND EXISTS "${DAWN_LIBRARY}")
+    set(_native_link_floor_provider_args -DEXPECT_DAWN=ON)
+endif()
+
 # Target-graph contract: mutating NATIVE_UI back to the legacy view umbrella,
 # or moving WebKit onto a native dependency, fails at configure time before
 # dead stripping can conceal the regression in the final binary.
@@ -67,12 +87,15 @@ add_custom_target(pulp-native-link-floor-proof
         -DWEBKIT_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-webkit-control>
         -DJSC_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-jsc-control>
         -DEXPECT_JSC=${PULP_HAS_JSC_ACTUAL}
+        ${_native_link_floor_provider_args}
+        ${_native_link_floor_wgpu_control_args}
         -P "${_native_link_floor_scan}"
     DEPENDS
         PulpNativeLinkFloor_Standalone
         PulpNativeLinkFloor_CLAP
         pulp-native-link-floor-webkit-control
         pulp-native-link-floor-jsc-control
+        ${_native_link_floor_wgpu_control_target}
     VERBATIM)
 
 add_test(NAME native-ui-link-floor-artifacts
@@ -82,6 +105,8 @@ add_test(NAME native-ui-link-floor-artifacts
         -DWEBKIT_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-webkit-control>
         -DJSC_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-jsc-control>
         -DEXPECT_JSC=${PULP_HAS_JSC_ACTUAL}
+        ${_native_link_floor_provider_args}
+        ${_native_link_floor_wgpu_control_args}
         -P "${_native_link_floor_scan}")
 set_tests_properties(native-ui-link-floor-artifacts PROPERTIES
     LABELS "view;link-contract;artifact" TIMEOUT 30)

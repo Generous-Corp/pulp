@@ -783,6 +783,9 @@ TEST_CASE("mac GPU resize keeps a pinned root and presents before returning",
     CHECK_FALSE(live_resize.cover_before);
     CHECK(live_resize.cover_after_present);
     CHECK_FALSE(live_resize.cover_after_compositor_interval);
+    // The cover must outlive one compositor interval (64 ms) so the stretched
+    // last frame stays on screen until the resized drawable is presented.
+    CHECK(live_resize.cover_release_ms >= 64);
     CHECK(callback_bounds == Rect{0.0f, 0.0f, 640.0f, 480.0f});
     CHECK(root.bounds() == Rect{0.0f, 0.0f, 640.0f, 480.0f});
     CHECK(root.paint_count > paints_before);

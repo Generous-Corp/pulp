@@ -633,7 +633,13 @@ must be safe sibling basenames, and an exact-named sidecar must still match the
 artifact filename (with the supported `.exe` form) before consent is bound. Keep
 canonical sidecar stems equal to their manifest target, never use a
 marker-bearing sibling fallback for canonical evidence, and exclude
-plugin-format subtrees from standalone scanning in every traversal. Keep
+plugin-format subtrees from standalone scanning in every traversal. A macOS
+`.app` keeps its sidecars in `Contents/Resources`, not beside the executable in
+`Contents/MacOS` (Apple reserves it for code and a non `--deep` signature fails
+on JSON there); resolve sidecar locations only through
+`pulp::inspect::control_sidecar_directories()` and
+`control_sidecar_executable_directory()`, which also keep the legacy location
+readable, rather than joining paths onto the executable's directory. Keep
 `cmd_inspect.cpp`, `cmd_inspect_unavailable.cpp`, `inspector_shipping_report.*`,
 `docs/guides/development-inspector-shipping.md`, `docs/reference/cli.md`, and
 `docs/status/cli-commands.yaml` aligned. It intentionally has no MCP tool until
@@ -2044,6 +2050,18 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search all skills: `grep -r "pulp <name>" .agents/skills/`
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
+
+## The macOS CLI force-load list names implementation archives, not modules
+
+`tools/cli/CMakeLists.txt` force-loads a fixed list of static archives into
+`pulp-cli` on Apple, because helper objects that become needed while ld64 is
+already scanning an archive are otherwise skipped and the installed CLI links
+with undefined symbols. The list is of TARGETS, so when code the CLI uses moves
+into its own archive the new target must join the list. The design importer is
+the example: it left `pulp-view-core` for `pulp-design-import`, and only
+force-loading `pulp-view-core` would no longer pull the importer's objects.
+Guard each entry with `if(TARGET …)` (the importer target exists only with
+`PULP_ENABLE_DESIGN_IMPORT=ON`).
 
 ## CLI Git/CMake shell helpers
 
@@ -3835,3 +3853,11 @@ command contract and run the paired UI build and clean-output lint tests. Keep
 the CLI dispatch, Rust/C++ help summaries, command documentation, and the
 clean-output manifest-role rules synchronized. A generated or vendor fixture
 must be hash-verified even when it is excluded from authored-source linting.
+
+## Advisory lane dispatch
+
+The `pulp pr` wrapper invokes `tools/scripts/dispatch_advisory_lanes.sh` only
+after a successful delegated Shipyard arm/ship path, and deliberately skips
+`--no-arm`. Keep this hook after arming so advisory workflow dispatches bind to
+the approved head; direct `shipyard pr` remains an interim gap until Shipyard
+provides a native arm hook.

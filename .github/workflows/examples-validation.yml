@@ -21,15 +21,18 @@
 name: Example validation
 
 on:
-  pull_request:
+  schedule:
+    - cron: '53 3 * * *'
   # Deliberately NOT run on `merge_group` — see header-self-contained.yml for the
   # full rationale. Neither `Validate examples (macOS)` nor `example-validation`
   # is a required context, and the macOS leg claimed a self-hosted runner on
   # every queue entry, starving the required `macos` gate.
+  pull_request:
+    types: [auto_merge_enabled]
   workflow_dispatch:
 
 concurrency:
-  group: example-validation-${{ github.ref }}
+  group: example-validation-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -38,19 +41,20 @@ permissions:
 jobs:
   changes:
     name: Detect example changes
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     # Advisory bookkeeping must never wait behind the required macOS gate.
     runs-on: ubuntu-latest
     outputs:
       examples: ${{ steps.filter.outputs.examples }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # Apply the policy already accepted on the base branch so a classifier
       # change takes effect after it lands. This is rollout consistency, not a
       # security boundary: pull_request workflow YAML remains PR-controlled.
       - name: Check out base-pinned example-path policy
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           path: .base-ci-control
@@ -100,11 +104,12 @@ jobs:
 
   resolve-advisory-macos:
     name: Resolve isolated advisory macOS runner
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     outputs:
       selector_json: ${{ steps.resolve.outputs.selector_json }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - id: resolve
         shell: bash
         env:
@@ -125,7 +130,7 @@ jobs:
     runs-on: ${{ fromJSON(needs.resolve-advisory-macos.outputs.selector_json) }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Fetch Skia (darwin-arm64)
         shell: bash
         run: |
@@ -204,7 +209,7 @@ jobs:
     runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install Linux build dependencies
         uses: ./.github/actions/install-linux-build-deps
       - name: Fetch Skia (linux-x64)

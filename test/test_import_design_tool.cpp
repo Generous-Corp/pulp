@@ -2,6 +2,7 @@
 #include "fig_lane.hpp"
 #include "node_runtime.hpp"
 #include "render_artifact_path.hpp"
+#include "zip_entry_policy.hpp"
 #include "support/isolated_pulp_home.hpp"
 #include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
@@ -1534,6 +1535,82 @@ TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
     REQUIRE(js.find("createKnob('Cutoff_Knob") != std::string::npos);
     REQUIRE(js.find("setValue('Cutoff_Knob") != std::string::npos);
     REQUIRE(js.find("880") != std::string::npos);
+}
+
+TEST_CASE("zip member policy: members that land on one file collide",
+          "[import-design][zip][fail-closed]") {
+    using pulp::import_design::ZipMemberSet;
+    ZipMemberSet members;
+    CHECK_FALSE(members.claim("scene.pulp.json"));
+    CHECK_FALSE(members.claim("assets/swatch.png"));
+    CHECK_FALSE(members.claim("assets/other.png"));
+    // Exact repeat, a case variant (one file on a case-insensitive volume)
+    // and an equivalent spelling all name the earlier member.
+    CHECK(members.claim("scene.pulp.json") == std::optional<std::string>("scene.pulp.json"));
+    CHECK(members.claim("Scene.Pulp.json") == std::optional<std::string>("scene.pulp.json"));
+    CHECK(members.claim("./assets//swatch.png") == std::optional<std::string>("assets/swatch.png"));
+
+    using pulp::import_design::unsafe_zip_entry_reason;
+    CHECK(unsafe_zip_entry_reason("a/../../etc/x"));
+    CHECK(unsafe_zip_entry_reason("/etc/passwd"));
+    CHECK(unsafe_zip_entry_reason("C:foo"));
+    CHECK(unsafe_zip_entry_reason("\\foo"));
+    CHECK_FALSE(unsafe_zip_entry_reason("assets/swatch.png"));
+}
+
+TEST_CASE("pulp-import-design refuses a .pulp.zip whose members collide",
+          "[cli][import-design][tool][zip][fail-closed]") {
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "asset_manifest": { "version": 1, "assets": [] },
+        "diagnostics": [],
+        "root": { "type": "frame", "name": "Root", "figma_node_id": "1:1",
+                  "style": { "width": 120, "height": 80 }, "children": [] }
+    })JSON";
+    const std::string other =
+        std::string(envelope).replace(envelope.find("\"Root\""), 6, "\"Evil\"");
+    const std::vector<std::uint8_t> other_bytes(other.begin(), other.end());
+
+    struct Case {
+        const char* label;
+        std::vector<std::pair<std::string, std::vector<std::uint8_t>>> extra;
+    };
+    const std::vector<Case> cases = {
+        {"exact duplicate document", {{"scene.pulp.json", other_bytes}}},
+        {"case-variant document", {{"Scene.pulp.json", other_bytes}}},
+        {"duplicate asset spelled differently",
+         {{"assets/swatch.png", tiny_png_bytes()}, {"./assets/swatch.png", tiny_png_bytes()}}},
+    };
+    TempDir tmp("pulp-import-design-tool-zip-duplicate");
+    int index = 0;
+    for (const auto& c : cases) {
+        INFO(c.label);
+        const auto zip = tmp.path / ("dup" + std::to_string(index) + ".pulp.zip");
+        const auto output = tmp.path / ("ui" + std::to_string(index++) + ".js");
+        REQUIRE(make_pulp_zip(zip, envelope, c.extra));
+        auto r = run_import_design(
+            {"--from", "figma-plugin", "--file", zip.string(), "--output", output.string()});
+        REQUIRE_FALSE(r.timed_out);
+        INFO("stderr: " << r.stderr_output);
+        CHECK(r.exit_code != 0);
+        CHECK(r.stderr_output.find("duplicate zip member") != std::string::npos);
+        CHECK_FALSE(fs::exists(output));
+    }
+
+    // Control: the same archive without the colliding member imports.
+    const auto zip = tmp.path / "clean.pulp.zip";
+    const auto output = tmp.path / "clean.js";
+    REQUIRE(make_pulp_zip(zip, envelope, {{"assets/swatch.png", tiny_png_bytes()}}));
+    auto r = run_import_design(
+        {"--from", "figma-plugin", "--file", zip.string(), "--output", output.string()});
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    CHECK(r.exit_code == 0);
+    CHECK(r.stderr_output.find("duplicate zip member") == std::string::npos);
 }
 
 TEST_CASE("pulp-import-design --param-binding-manifest: wiring + error paths",

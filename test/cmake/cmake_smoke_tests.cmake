@@ -27,6 +27,18 @@ if(APPLE AND NOT PULP_IOS)
             LABELS "cmake;ios"
             TIMEOUT 180)
 
+        # The ad-hoc signing check the iOS gate runs on the bundles it builds
+        # unsigned, against clang-built shallow and deep bundles: the layouts
+        # codesign rejects (a top-level Resources/ in a shallow bundle, data in
+        # Contents/MacOS) must fail it, the sealed ones must pass.
+        add_test(NAME apple-bundle-signing-check
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_apple_bundle_signing.py")
+        set_tests_properties(apple-bundle-signing-check PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "cmake;ios;signing"
+            TIMEOUT 180)
+
         # Shadow-mode identity of an iOS gate run: the digest over the gate's
         # input set + toolchain, the artifact lookup, and the annotation that
         # build.yml's Build step emits. No gating depends on it.
@@ -127,6 +139,16 @@ set_tests_properties(cmake-js-engine-selection PROPERTIES
     LABELS "cmake;view;js-engine"
     TIMEOUT 30)
 
+# ARM64EC selects the scalar SIMD backend. The detection runs under `cmake -P`
+# against the real module, so every host checks the ARM64EC, ARM64 and x64
+# classifications without a Windows ARM64EC toolchain.
+add_test(NAME pulp-simd-arm64ec-detect
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_simd_support.cmake)
+set_tests_properties(pulp-simd-arm64ec-detect PROPERTIES
+    LABELS "cmake;simd"
+    TIMEOUT 30)
+
 # The Linux CLI's Scene3D archives need a render/scene rescan without placing
 # the higher-level recipe archive in that group. The latter depends back through
 # view and gpu-audio, which makes CMake reject the generated target graph.
@@ -218,6 +240,32 @@ add_test(NAME cmake-registered-runtime-staging
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_registered_runtime_staging.cmake)
 set_tests_properties(cmake-registered-runtime-staging PROPERTIES
     LABELS "cmake;sdk;runtime;bundle"
+    TIMEOUT 120)
+
+# Installed-SDK consumer: the wgpu-native runtime is staged (and expected by
+# the staged-runtime check) exactly when the exported Pulp::render links it,
+# read from the IMPORTED target's INTERFACE_LINK_LIBRARIES. Covers the Skia-off
+# SDK (staged) and the Skia-on SDK (not staged) against a fake SDK prefix.
+add_test(NAME cmake-installed-wgpu-runtime-staging
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_wgpu_runtime_staging.cmake)
+set_tests_properties(cmake-installed-wgpu-runtime-staging PROPERTIES
+    LABELS "cmake;sdk;runtime;bundle"
+    PASS_REGULAR_EXPRESSION "installed_wgpu_runtime_staging_verified=skia-off,skia-on"
+    TIMEOUT 120)
+
+# Installed SDK consumers expose the renderer as Pulp::render (capital P).
+# Keep a focused fixture for the target-name/provider lookup so a source-build
+# target alias cannot hide a regression in downstream runtime staging.
+add_test(NAME cmake-installed-render-runtime-staging
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_render_runtime_staging.cmake)
+set_tests_properties(cmake-installed-render-runtime-staging PROPERTIES
+    LABELS "cmake;sdk;runtime;bundle;provider"
     TIMEOUT 120)
 
 if(APPLE)
@@ -1091,6 +1139,14 @@ add_test(NAME cmake-inspector-shipping-scanner
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_inspector_shipping_scanner.cmake)
 set_tests_properties(cmake-inspector-shipping-scanner PROPERTIES
     LABELS "cmake;inspect;ship" TIMEOUT 30)
+
+add_test(NAME cmake-pulp-add-plugin-unknown-args
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-add-plugin-unknown-args
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_plugin_unknown_args.cmake)
+set_tests_properties(cmake-pulp-add-plugin-unknown-args PROPERTIES
+    LABELS "cmake;format" TIMEOUT 120)
 
 add_test(NAME cmake-control-shipping-matrix
     COMMAND ${CMAKE_COMMAND}

@@ -9,6 +9,8 @@ Type=oneshot
 ExecStart=/usr/local/sbin/pulp-ephemeral-reap.sh --yes
 # After each pass, prove the installed CI files still match the repository and
 # no pool slot is stuck failed. A finding fails this unit, so drift surfaces in
-# `systemctl --failed` instead of running unnoticed.
-ExecStartPost=/usr/local/sbin/pulp-proxmox-host-health.sh
+# `systemctl --failed` instead of running unnoticed. The same result is written
+# as JSON for fleet monitoring, which reads the file rather than running the
+# check as root.
+ExecStartPost=/usr/local/sbin/pulp-proxmox-host-health.sh --json-out /run/pulp-ci-host/health.json
 User=root

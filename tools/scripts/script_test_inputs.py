@@ -148,10 +148,35 @@ def _cache_values(build_dir: Path) -> dict[str, str] | None:
     return out
 
 
-def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
+def _jsx_runtime_registration_reason(build_dir: Path, cache: dict[str, str],
+                                     inventory: dict | list[dict] | None) -> str | None:
+    """Require both materialized-runtime tests when configure found Node."""
+    tests = ((inventory or {}).get("tests", []) if isinstance(inventory, dict) else inventory) \
+        if inventory is not None else []
+    names = {str(t.get("name", "")) for t in tests}
+    node_found = any(
+        any(Path(str(arg)).name in ("node", "nodejs") for arg in (t.get("command") or []))
+        for t in tests
+    )
+    if not node_found:
+        node_value = cache.get("_PULP_NODE_FOR_TESTS", "").strip()
+        node_found = bool(node_value) and not node_value.endswith("-NOTFOUND")
+    if not node_found:
+        return None
+    required = {"pulp-materialized-runtime-conformance", "pulp-materialized-runtime-node-dependencies"}
+    missing = sorted(required - names)
+    if not missing:
+        return None
+    return ("jsx-runtime npm dependencies are missing from this configure; registered Node tests omit "
+            f"{', '.join(missing)}. Run `npm ci --prefix tools/import-design/jsx-runtime` "
+            "then reconfigure the build")
+
+
+def outside_gate_profile_build(build_dir: Path | None,
+                               inventory: dict | list[dict] | None = None) -> list[str]:
     """Why this build's compiled entries cannot stand for the gate's: each
     switch whose value differs from the gate's configure (examples off, a
-    Release build, no sanitizer). Empty for a gate-shaped build, and for one
+    Release build, no sanitizer, the exact-provider proof off). Empty for a gate-shaped build, and for one
     with no CMakeCache.txt to read (no build tree, no compiled entries)."""
     cache = _cache_values(build_dir) if build_dir else None
     if cache is None:
@@ -165,12 +190,21 @@ def outside_gate_profile_build(build_dir: Path | None) -> list[str]:
     build_type = cache.get("CMAKE_BUILD_TYPE", "")
     if build_type and build_type != "Release":
         reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
+    # The GPU-audio exact-provider proof registers its probes only when ON;
+    # the gate configures it OFF, so a list written ON names tests the gate
+    # never has.
+    proof = cache.get("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF", "OFF")
+    if not off(proof):
+        reasons.append(f"PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF={proof} (the gate configures OFF)")
     # Without a format SDK the configure registers none of that format's
     # tests or plugin targets, so the list it writes silently drops their
     # inputs. A cache from before a flag existed omits it and is not judged.
     for flag, sdk in (("PULP_HAS_VST3", "external/vst3sdk"), ("PULP_HAS_AUSDK", "external/AudioUnitSDK")):
         if flag in cache and off(cache[flag]):
             reasons.append(f"{flag}={cache[flag]} (the gate configures with {sdk} checked out)")
+    jsx_reason = _jsx_runtime_registration_reason(build_dir, cache, inventory)
+    if jsx_reason:
+        reasons.append(jsx_reason)
     return reasons
 
 
@@ -1118,7 +1152,7 @@ def touch_reasons(root: Path, base: str, list_path: Path | None = None) -> list[
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     ap.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[2]))
     ap.add_argument("--build-dir")
     ap.add_argument("--inventory-json", help="a saved `ctest --show-only=json-v1` document (tests)")
@@ -1157,13 +1191,14 @@ def main(argv: list[str]) -> int:
               "this is a skip, not a pass.")
         return SKIP_EXIT
     current = build_list(inventory, root, build_dir)
-    off_profile = outside_gate_profile_build(build_dir) if "executables" in current else []
+    off_profile = outside_gate_profile_build(build_dir, inventory)
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
     if a.write and off_profile:
         print("script-test-inputs: refusing to write: the compiled entries depend on the configuration and "
               "this build is not the gate's: " + "; ".join(off_profile) + ".\nRegenerate from a gate-profile "
-              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
+              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER, "
+              "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF OFF).",
               file=sys.stderr)
         return 2
     if a.write:

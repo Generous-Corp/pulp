@@ -120,6 +120,11 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
 class LinuxRuntimeNodeProvisioningTest(unittest.TestCase):
     """The Linux matrix must provision Node before materialized-runtime npm ci."""
 
+    _SUPPORTED_SETUP_NODE_USES = {
+        "actions/setup-node@v4",
+        "actions/setup-node@v7",
+    }
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.steps = _build_steps()
@@ -128,7 +133,7 @@ class LinuxRuntimeNodeProvisioningTest(unittest.TestCase):
 
     def test_setup_node_is_linux_only_and_pinned(self) -> None:
         self.assertEqual(self.setup["if"], "runner.os == 'Linux'")
-        self.assertEqual(self.setup["uses"], "actions/setup-node@v4")
+        self.assertIn(self.setup["uses"], self._SUPPORTED_SETUP_NODE_USES)
         self.assertEqual(self.setup["with"]["node-version"], "22.15.0")
         self.assertEqual(self.setup["with"]["cache"], "npm")
         self.assertEqual(
@@ -156,6 +161,11 @@ class LinuxRuntimeNodeProvisioningTest(unittest.TestCase):
 class SanitizerRuntimeNodeProvisioningTest(unittest.TestCase):
     """ASan and UBSan provision JSX runtime dependencies before CTest."""
 
+    _SUPPORTED_SETUP_NODE_USES = {
+        "actions/setup-node@v4",
+        "actions/setup-node@v7",
+    }
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = _sanitizers_workflow()
@@ -171,7 +181,7 @@ class SanitizerRuntimeNodeProvisioningTest(unittest.TestCase):
                 self.assertIn(install_name, names)
                 setup = next(step for step in steps if step.get("name") == setup_name)
                 install = next(step for step in steps if step.get("name") == install_name)
-                self.assertEqual(setup.get("uses"), "actions/setup-node@v4")
+                self.assertIn(setup.get("uses"), self._SUPPORTED_SETUP_NODE_USES)
                 self.assertEqual(setup["with"].get("node-version"), "22.15.0")
                 self.assertEqual(setup["with"].get("cache"), "npm")
                 self.assertEqual(
@@ -555,6 +565,21 @@ class ArtifactUploadResilienceTest(unittest.TestCase):
         self.assertIs(retry.get("overwrite"), True)
         # Consumers rely on the artifact: a job that never published it fails.
         self.assertNotIn("continue-on-error", retry_step)
+
+    def test_unread_uploads_never_red_the_gate(self) -> None:
+        # Nothing gates on these: the plugin bundles are a human download and
+        # a lost iOS marker only costs a later rebuild.
+        for name in ("Upload plugin bundles (macOS)", "Record iOS gate digest"):
+            with self.subTest(step=name):
+                self.assertIs(self.steps[name].get("continue-on-error"), True)
+
+    def test_evidence_publishes_still_fail_the_job(self) -> None:
+        # Receipts and verification evidence are read by merge decisions; a
+        # job that did not publish them must not look green.
+        for name in ("Publish exact protected-validation receipt",
+                     "Publish A2T structural verification"):
+            with self.subTest(step=name):
+                self.assertNotIn("continue-on-error", self.steps[name])
 
 if __name__ == "__main__":
     unittest.main()

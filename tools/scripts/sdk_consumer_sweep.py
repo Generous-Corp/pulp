@@ -224,9 +224,21 @@ def sdk_floor(sdk_prefix: Path) -> str | None:
     return None
 
 
-def _run(cmd: list[str], cwd: Path | None = None, log: Path | None = None) -> tuple[int, str]:
+def _run(cmd: list[str], cwd: Path | None = None, log: Path | None = None,
+         env: dict[str, str] | None = None) -> tuple[int, str]:
     """Run a command, capturing combined output (also teed to `log` if given)."""
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    child_env = None
+    if env:
+        child_env = os.environ.copy()
+        child_env.update(env)
+    proc = subprocess.run(
+        cmd,
+        cwd=cwd,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
     out = proc.stdout + proc.stderr
     if log:
         log.write_text(out)
@@ -290,10 +302,15 @@ def build_one(plan: Plan, sdk_prefix: Path, checkout: Path, jobs: int,
         result["notes"].append(f"configure failed (see {plan.name}.configure.log)")
         return result
 
-    build = ["cmake", "--build", str(build_dir), "-j", str(jobs)]
+    governed_build = REPO / "tools" / "ci" / "governed-build.sh"
+    build = ["bash", str(governed_build), "cmake", "--build", str(build_dir)]
     if plan.build_target:
         build += ["--target", plan.build_target]
-    rc, _ = _run(build, log=logdir / f"{plan.name}.build.log")
+    rc, _ = _run(
+        build,
+        log=logdir / f"{plan.name}.build.log",
+        env={"PULP_BUILD_JOBS": str(jobs)},
+    )
     result["build"] = rc == 0
     if rc != 0:
         result["notes"].append(f"build failed (see {plan.name}.build.log)")

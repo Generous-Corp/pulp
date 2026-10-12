@@ -304,6 +304,58 @@ These are the patterns that have shown up in Pulp migration notes. When
 you spot one, suggest the exact grep / replacement to the user instead
 of leaving them to figure it out from a prose paragraph.
 
+### Link-target splits (a module's code moves to a new imported target)
+
+**Pattern.** Code that used to live inside one installed archive moves to a
+new `Pulp::*` target, e.g. the design importers leaving `Pulp::view-core` for
+`Pulp::design-import`. Umbrella targets (`Pulp::view`) usually keep linking the
+new target, so only consumers that link the narrower target directly break,
+and they break at LINK time with undefined `pulp::...` symbols, not at compile
+time.
+
+**What to do.** Find the consumer's direct links to the narrowed target and add
+the new one (or switch to the umbrella):
+
+```bash
+grep -rn "Pulp::view-core" --include=CMakeLists.txt --include=*.cmake .
+```
+
+**Authoring such a note.** Versions are assigned after merge
+(`post_merge_assignment`), so the release number a split lands in is unknown
+while its PR is open. Write the note in a follow-up once the split has merged
+and the number is predictable from the pending bump, and verify it with
+`pulp upgrade --notes --json --from <prev> --to <next>`.
+
+### A transitive link edge removed (a target stops bringing another one)
+
+**Pattern.** A target keeps its name and its code, but stops linking a
+dependency it used to pass through. For example, 0.946.0 `Pulp::gpu-audio`
+links `Pulp::gpu-device` instead of `Pulp::render`. A consumer that leaned on
+the old edge still compiles, because the headers sit on a shared include
+directory, and then fails at LINK time with undefined symbols from the
+dependency it never named.
+
+**What to do.** Find code that uses the dependency's types while linking only
+the narrowed target, and link the dependency explicitly:
+
+```bash
+grep -rln "pulp/render/\(skia_surface\|headless_surface\|render_loop\|renderer3d\)" --include=*.cpp --include=*.hpp .
+```
+
+### Umbrella headers narrowed (an include stops arriving transitively)
+
+**Pattern.** An umbrella header drops an `#include` that most of its users
+never needed. For example, 0.943.0 `<pulp/view/widgets.hpp>` stopped
+including `<pulp/view/visualizers.hpp>`. Unlike a link split, this breaks at
+COMPILE time with an undeclared identifier, and the fix is an `#include`, not
+a CMake edit.
+
+**What to do.** Grep for the types the note names and add the header it lists:
+
+```bash
+grep -rln "SpectrogramView\|MultiMeter\|CorrelationMeter" --include=*.cpp --include=*.hpp .
+```
+
 ### CMake macro renames
 
 **Pattern.** A `pulp_add_*` function in `tools/cmake/Pulp*.cmake` is

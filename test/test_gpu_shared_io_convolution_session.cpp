@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -229,7 +230,8 @@ struct Fixture {
     FakeProvider* provider = nullptr;
     Session session;
 
-    void prepare(std::uint32_t slots = 2, std::uint32_t channels = 1) {
+    void prepare(std::uint32_t slots = 2, std::uint32_t channels = 1,
+                 bool capture_callback_timing = false, std::uint32_t prediction_samples = 0) {
         auto owner = std::make_unique<FakeProvider>(state);
         provider = owner.get();
         auto program = std::make_unique<FakeProgram>(*provider, state);
@@ -238,8 +240,12 @@ struct Fixture {
                                               .channels = channels,
                                               .block_size = 2,
                                               .fft_size = 2,
-                                              .ir_length = 1},
-                                 .slots = slots}));
+                                              .ir_length = 1,
+                                              .capture_callback_timing = capture_callback_timing},
+                                 .slots = slots,
+                                 .sample_rate = capture_callback_timing ? 48'000u : 0u,
+                                 .prediction = {.enabled = prediction_samples != 0,
+                                                .minimum_samples = prediction_samples}}));
     }
 };
 
@@ -313,6 +319,81 @@ TEST_CASE("shared convolution session packs provider slots and delivers exact pr
     CHECK(callback(fixture.session, b, output).stamp.sequence == 2);
     CHECK(output == a);
     CHECK(fixture.state->submits == 2);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared convolution session forwards the callback block deadline to admission",
+          "[gpu_audio][shared_io][session][deadline]") {
+    Fixture fixture;
+    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    fixture.provider = owner.get();
+    auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
+    REQUIRE(fixture.session.prepare({std::move(owner), std::move(program)},
+                                    {.pipeline = {.capacity = 8,
+                                                  .channels = 1,
+                                                  .block_size = 2,
+                                                  .fft_size = 2,
+                                                  .ir_length = 1,
+                                                  .capture_callback_timing = true},
+                                     .slots = 1,
+                                     .sample_rate = 48'000}));
+
+    std::array<float, 2> output{};
+    const auto callback_record = fixture.session.begin_callback(a, 0, 1'000'000'000ull);
+    REQUIRE(callback_record.valid());
+    fixture.session.consume_output(callback_record, output);
+
+    // The one-block budget is about 41.6 us, so this service time is after the
+    // propagated deadline. A zero deadline would leave late_completions at 0.
+    REQUIRE(fixture.session.service(1'002'000'000ull).submitted == 1);
+    CHECK(fixture.session.telemetry().late_completions == 1);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared convolution session turns predictor refusal into a terminal drop",
+          "[gpu_audio][shared_io][session][deadline]") {
+    Fixture fixture;
+    fixture.prepare(1, 1, true, 1);
+    std::array<float, 2> output{};
+    const auto record = fixture.session.begin_callback(a, 0, 1'000'000'000ull);
+    REQUIRE(record.valid());
+    fixture.session.consume_output(record, output);
+    const auto refused = fixture.session.service(1'000'000'001ull);
+    CHECK(refused.refused == 1);
+    CHECK(refused.dropped_ingress == 1);
+    CHECK(refused.terminal_records == 1);
+    CHECK(fixture.session.service(1'000'000'002ull).submitted == 0);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared convolution session fails closed for unknown callback timing",
+          "[gpu_audio][shared_io][session][deadline]") {
+    Fixture fixture;
+    fixture.prepare(1, 1, true);
+    std::array<float, 2> output{};
+    const auto record = fixture.session.begin_callback(a);
+    REQUIRE(record.valid());
+    fixture.session.consume_output(record, output);
+    const auto refused = fixture.session.service(1);
+    CHECK(refused.refused == 1);
+    CHECK(refused.dropped_ingress == 1);
+    CHECK(refused.terminal_records == 1);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared convolution session fails closed on callback deadline overflow",
+          "[gpu_audio][shared_io][session][deadline]") {
+    Fixture fixture;
+    fixture.prepare(1, 1, true);
+    std::array<float, 2> output{};
+    const auto record = fixture.session.begin_callback(
+        a, 0, std::numeric_limits<std::uint64_t>::max() - 500'000ull);
+    REQUIRE(record.valid());
+    fixture.session.consume_output(record, output);
+    const auto refused = fixture.session.service(std::numeric_limits<std::uint64_t>::max());
+    CHECK(refused.refused == 1);
+    CHECK(refused.dropped_ingress == 1);
+    CHECK(refused.terminal_records == 1);
     REQUIRE(fixture.session.release());
 }
 

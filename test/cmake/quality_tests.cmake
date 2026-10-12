@@ -60,6 +60,13 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_mlx_named_model_harness.py")
 
+    # The installed-SDK projection validator is a source-only downstream
+    # consumer check. Keep it on the build-free required lane so a public
+    # header or validator regression cannot hide behind native build results.
+    add_test(NAME dspx07-projection-installed-sdk-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_dspx07_projection_installed_sdk.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
@@ -71,6 +78,32 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_boundary_lint.py")
     set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
+    # The foundation layer (core/platform, core/runtime, core/simd) must not
+    # include audio, view, format or any other upper-layer header. Lexical and
+    # build-free; the self-test plants each crossing kind and must turn red.
+    add_test(NAME foundation-include-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/foundation_include_lint.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME foundation-include-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_foundation_include_lint.py")
+    set_tests_properties(foundation-include-lint foundation-include-lint-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 60)
+
+    # Inheritance entries are one file per change event so concurrent pull
+    # requests do not conflict; the checker keeps the older single-file ledger
+    # frozen and requires an entry for every event carrying the inheritance
+    # prefix. The self-test plants each violation and must turn red.
+    add_test(NAME vellum-inheritance-ledger
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_inheritance_ledger_check.py")
+    add_test(NAME vellum-inheritance-ledger-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_inheritance_ledger_check.py")
+    set_tests_properties(vellum-inheritance-ledger vellum-inheritance-ledger-negative-contract
         PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
 
     # Keep one checked-in, license-free source fixture on the same instrument
@@ -743,6 +776,12 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pr-head-affected-tests-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
         set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
+        # The diff-scoped drift checks must carry PULP_DIFF_SCOPED in this
+        # configure's inventory, or their base re-run is believed again.
+        add_test(NAME pr-head-diff-scoped-registrations COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/pr_head_affected_tests.py"
+            --build-dir "${CMAKE_BINARY_DIR}" --check-diff-scoped)
+        set_tests_properties(pr-head-diff-scoped-registrations PROPERTIES TIMEOUT 60)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
         # Shadow flake-exoneration verdict the merge-group macos job annotates
         # after a failed ctest (OCCURS_ON_OTHER_CLS from other heads' ctest-logs
@@ -843,6 +882,9 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_build_dir_lock.py")
         set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
             PROPERTIES TIMEOUT 120)
+        add_test(NAME pulp-worktree-creation-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_pulp_worktree_creation.py")
+        set_tests_properties(pulp-worktree-creation-selftest PROPERTIES TIMEOUT 120)
     endif()
 
     # Shadow-mode affected-test set the merge-group macos job annotates after
@@ -862,6 +904,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME executable-keys-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_executable_keys.py")
     set_tests_properties(executable-keys-selftest PROPERTIES TIMEOUT 120)
+
+    # Which dependencies a pin-file change moved on one platform, for the
+    # key's dependency_pin reason.
+    add_test(NAME dependency-pins-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_dependency_pins.py")
+    set_tests_properties(dependency-pins-selftest PROPERTIES TIMEOUT 60)
 
     # The selection over a key manifest: would-skip set, seeded sample, and
     # the tests and build targets left to run, as canonical bytes.
@@ -1394,8 +1442,9 @@ if(Python3_Interpreter_FOUND)
             add_test(NAME changed-surface-script-families-drift COMMAND ${Python3_EXECUTABLE}
                 "${CMAKE_SOURCE_DIR}/tools/scripts/changed_surface_script_families.py"
                 --repo-root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}" --check)
+            # Diff-scoped like script-test-inputs-drift; see PULP_DIFF_SCOPED there.
             set_tests_properties(changed-surface-script-families-drift PROPERTIES
-                TIMEOUT 120 SKIP_RETURN_CODE 77)
+                TIMEOUT 120 SKIP_RETURN_CODE 77 PULP_DIFF_SCOPED TRUE)
             # A bounded run's base configure is FetchContent-disconnected, so a
             # marked dependency must download only through FetchContent. This
             # configured tree must hold its source, so an absent tree fails.
@@ -1565,6 +1614,11 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
         # Stages live processes and worktrees on the host it runs on.
         set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
+        add_test(NAME clean-worktree-planning-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_planning
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(clean-worktree-planning-selftest PROPERTIES TIMEOUT 300)
+        set_property(TEST clean-worktree-planning-selftest APPEND PROPERTY LABELS environment-bound)
 
         # clean_worktrees.sh removes whole worktrees, so its guard is the one
         # that must never be merely present: the suite stages a live process and

@@ -349,6 +349,9 @@ class BaseRedTests(unittest.TestCase):
             {"name": "script-flake", "command": ["/usr/bin/python3", str(REPO / "tools/scripts/b.py")]},
             {"name": "script-new", "command": ["/usr/bin/python3", str(REPO / "tools/scripts/c.py")]},
             {"name": "compiled", "command": [str(binary), "Some case"]},
+            {"name": "script-diff-scoped",
+             "command": ["/usr/bin/python3", str(REPO / "tools/scripts/d.py"), "--check"],
+             "properties": [{"name": "PULP_DIFF_SCOPED", "value": "TRUE"}]},
         ]}
         bindir = self.tmp / "bin"
         bindir.mkdir()
@@ -364,8 +367,11 @@ class BaseRedTests(unittest.TestCase):
         self.lane.run.side_effect = lambda entries, **kw: [
             {"name": e["name"], "returncode": 0 if e["name"] == "script-flake" else 1,
              "output": "FAIL: t (m.T.t)\n"} for e in entries]
+        # A diff-scoped check sees an empty diff on the base checkout, so its
+        # base re-run passes whatever the base's state.
         self.lane.rerun_on_base.side_effect = lambda still, entries, ref: {
-            r["name"]: (r["name"] == "script-red", "why") for r in still}
+            r["name"]: ((False, "passes on the base") if r["name"] == "script-diff-scoped"
+                        else (r["name"] == "script-red", "why")) for r in still}
         self.modules = mock.patch.dict(sys.modules, {"source_selftests": self.lane})
         self.modules.start()
 
@@ -385,6 +391,58 @@ class BaseRedTests(unittest.TestCase):
         # The base re-run is asked only about scripts still failing here.
         still = self.lane.rerun_on_base.call_args[0][0]
         self.assertEqual(sorted(r["name"] for r in still), ["script-new", "script-red"])
+
+
+    def test_a_diff_scoped_check_is_not_judged_by_its_base_rerun(self) -> None:
+        verdicts = step.label_base_failures(
+            self.build, ["script-red", "script-diff-scoped"], "HEAD^1")
+        self.assertEqual(verdicts["script-diff-scoped"], (False, step.NOT_COMPARABLE))
+        self.assertIn("not comparable", verdicts["script-diff-scoped"][1])
+        self.assertNotIn("passes on the base", verdicts["script-diff-scoped"][1])
+        # Neither re-run here nor on the base: no run can speak for it.
+        ran = [e["name"] for call in self.lane.run.call_args_list for e in call[0][0]]
+        self.assertEqual(ran, ["script-red"])
+        still = self.lane.rerun_on_base.call_args[0][0]
+        self.assertEqual([r["name"] for r in still], ["script-red"])
+        self.assertEqual(verdicts["script-red"][0], True)
+
+    def test_control_without_the_property_the_base_rerun_decides(self) -> None:
+        inventory = __import__("json").loads((self.tmp / "inv.json").read_text(encoding="utf-8"))
+        for test in inventory["tests"]:
+            test.pop("properties", None)
+        (self.tmp / "inv.json").write_text(__import__("json").dumps(inventory), encoding="utf-8")
+        verdicts = step.label_base_failures(self.build, ["script-diff-scoped"], "HEAD^1")
+        self.assertEqual(verdicts["script-diff-scoped"], (False, "passes on the base"))
+
+
+class DiffScopedRegistrationTests(unittest.TestCase):
+    @staticmethod
+    def registration(name: str, marked: bool | None) -> dict:
+        props = [] if marked is None else [{"name": "PULP_DIFF_SCOPED",
+                                             "value": "TRUE" if marked else "FALSE"}]
+        return {"name": name, "properties": props}
+
+    def test_both_marked_is_clean(self) -> None:
+        tests = [self.registration(n, True) for n in step.DIFF_SCOPED_TESTS]
+        self.assertEqual(step.diff_scoped_registration_problems(tests), [])
+
+    def test_an_unmarked_registration_is_named(self) -> None:
+        for missing in (None, False):
+            with self.subTest(missing=missing):
+                tests = [self.registration("script-test-inputs-drift", True),
+                         self.registration("changed-surface-script-families-drift", missing)]
+                problems = step.diff_scoped_registration_problems(tests)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("changed-surface-script-families-drift", problems[0])
+
+    def test_a_check_this_configure_does_not_register_is_not_judged(self) -> None:
+        tests = [self.registration("script-test-inputs-drift", True)]
+        self.assertEqual(step.diff_scoped_registration_problems(tests), [])
+
+    def test_control_an_inventory_without_the_anchor_check_fails(self) -> None:
+        problems = step.diff_scoped_registration_problems([self.registration("other", None)])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("wrong build directory", problems[0])
 
 
 class ExitCodeTests(unittest.TestCase):

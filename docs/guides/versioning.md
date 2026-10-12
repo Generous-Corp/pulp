@@ -164,6 +164,28 @@ PULP_SKIP_PREPUSH=1 git push                   # skip ALL gates (true emergencie
 
 The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env vars are accepted as silent no-ops — they used to *promote* advisory warnings to hard failures, which is now the default. Setting them just confirms what you already get.
 
+### A push to a queued PR is refused
+
+A PR in the merge queue never needs a rebase or a merge of main: the queue
+builds it on top of current main. GitHub also refuses pushes to a queued
+branch, so pushing one anyway only ran the multi-minute pre-push build before
+the rejection, and led agents to dequeue and retry in a loop. The hook
+therefore runs `tools/scripts/prepush_queue_rebase_hint.py --refuse-queued`
+first, before every gate and the diff-coverage build, and refuses the push when
+GraphQL shows the branch's open PR in the queue.
+
+| Setting | Effect |
+|---------|--------|
+| (default) | refuse a push to a queued PR; armed-but-not-queued only gets the advisory hint |
+| `PULP_QUEUE_REBASE_TIMEOUT` | lookup budget in seconds (default 3) |
+
+There is no override, and `PULP_SKIP_PREPUSH=1` does not bypass the refusal:
+an override recreates the dequeue loop. To change a queued PR, either open a new
+PR, or dequeue it through the guarded `ghapp` path with a stated reason
+(`GHAPP_QUEUE_REMOVAL_REASON=defect-fix`) and then push. A lookup that cannot answer
+(no `ghapp`/`gh`, auth, network, timeout, bad JSON) prints
+`queued-PR check skipped` and lets the push continue.
+
 ---
 
 ## CI workflow
@@ -177,8 +199,19 @@ repository-scoped `PULP_LOCAL_LINUX_RUNS_ON_JSON` lane. Keeping those selectors
 distinct prevents automatic branch content from matching the less-isolated
 repository runner through GitHub's subset-based label selection.
 
-Every gate in this workflow compares HEAD against the **merge-base** of the
-base branch and HEAD, which the "Resolve diff base" step computes once. The
+Every gate in this workflow compares HEAD against one diff base, which the
+"Resolve diff base" step computes once through `tools/scripts/ci_diff_base.py`
+(tests: `tools/scripts/test_ci_diff_base.py`, run by the same workflow).
+
+- On `merge_group` the base is the queue entry's own
+  `github.event.merge_group.base_sha`. A merge-group commit is built on top of
+  every entry ahead of it, so a merge-base with `origin/main` would put those
+  entries' commits in this entry's range. A `fix:` touching no surface in an
+  entry ahead would then eject the innocent entry behind it while the offender
+  merged. A run with no `base_sha`, or one that is not an ancestor of HEAD,
+  fails closed instead of falling back.
+- On `pull_request` and manual dispatch the base is the **merge-base** of the
+  base branch and HEAD. The
 base tip is the wrong anchor for any gate that reads a file *at* the base
 (`node_abi_gate.py`'s virtual order, `skill_path_map_lint.py`'s co-claim map,
 `hotspot_size_guard.py`'s new-file list): a PR merely behind `main` would be
@@ -662,3 +695,10 @@ v0.80.4 keeps Git-over-SSH pushes alive during Pulp's long pre-push proof while
 preserving any explicitly configured SSH identity or proxy command. Without it,
 a successful local proof can still end in an expired SSH connection and waste
 the entire validation cycle.
+
+### Coverage cadence
+
+The hosted macOS Coverage workflow is advisory and runs on the main schedule or
+through an arm-time `workflow_dispatch` of the approved PR head. It does not
+start for every pull request push; the required version and skill checks remain
+unchanged.

@@ -343,6 +343,18 @@ if(TARGET pulp::inspect)
     target_include_directories(pulp-control-installed-host-e2e-fixture PRIVATE
         ${CMAKE_SOURCE_DIR}/test)
     pulp_stage_runtime_dependencies(pulp-control-installed-host-e2e-fixture)
+    # The closure carriage under test needs one real runtime library beside the
+    # host. A dedicated stand-in keeps the test independent of which GPU
+    # runtime (if any) the renderer links.
+    add_library(pulp-control-e2e-runtime-dependency SHARED
+        fixtures/control_e2e_runtime_dependency.cpp)
+    set_target_properties(pulp-control-e2e-runtime-dependency PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:pulp-control-installed-host-e2e-fixture>")
+    add_dependencies(pulp-control-installed-host-e2e-fixture pulp-control-e2e-runtime-dependency)
+    foreach(_e2e_target pulp-control-installed-host-e2e-fixture pulp-test-control-trusted-host-e2e)
+        target_compile_definitions(${_e2e_target} PRIVATE
+            PULP_CONTROL_E2E_RUNTIME_DEPENDENCY="$<TARGET_FILE_NAME:pulp-control-e2e-runtime-dependency>")
+    endforeach()
     target_compile_definitions(pulp-test-control-trusted-host-e2e PRIVATE
         PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-installed-host-e2e-fixture>")
     add_dependencies(pulp-test-control-trusted-host-e2e pulp-control-installed-host-e2e-fixture)
@@ -1024,6 +1036,13 @@ pulp_add_test_suite(pulp-test-text-overflow GROUP pulp-test-group-view-widgets L
 
 # Editor bridge tests for the renderer-agnostic envelope/dispatcher
 pulp_add_test_suite(pulp-test-editor-bridge GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+# The generated TypeScript bridge proof imports the checked-in bridge through
+# Node, locating the checkout by walking up from its working directory.
+pulp_test_data(pulp-test-editor-bridge NO_DEFINE
+    PATHS tools/bridge/generated_editor_bridge.ts)
+# Only test_editor_bridge.cpp spawns in this group (spawning_sources), so the
+# group-level NONE covers exactly that process call.
+pulp_test_spawns(pulp-test-group-view-widgets NONE REASON "its only spawn runs the system node interpreter on the checked-in bridge, nothing the tree builds")
 
 # Input events tests
 pulp_add_test_suite(pulp-test-input-events GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)

@@ -27,34 +27,27 @@ permissions:
 # never did.
 
 on:
+  schedule:
+    - cron: '47 3 * * *'
   pull_request:
-    branches: [main, develop]
-    paths:
-      - 'core/scene/**'
-      - 'core/render/**'
-      - 'tools/scene3d/**'
-      - 'test/test_scene3d*'
-      - 'test/test_renderer3d*'
-      - 'test/cmake/scene3d*'
-      - 'test/cmake/renderer3d*'
-      - 'test/fixtures/scene3d/**'
-      - '.github/workflows/scene3d-advisory.yml'
+    types: [auto_merge_enabled]
   workflow_dispatch:
 
 concurrency:
-  group: scene3d-advisory-${{ github.ref }}
+  group: scene3d-advisory-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
   scene3d-build-test:
     name: SCENE3D build + test (advisory)
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: macos-15
     timeout-minutes: 90
     env:
       BUILD_DIR: build-scene3d
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 

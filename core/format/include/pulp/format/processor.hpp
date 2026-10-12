@@ -140,7 +140,7 @@ public:
         detail::editor_resize_handlers().erase(this);
         detail::standalone_processors().erase(this);
     }
-    virtual ~Processor() = default;
+    virtual ~Processor();
 
     /// Whether this processor runs inside a plug-in host or the Pulp
     /// standalone app. Every plug-in format adapter leaves the default,

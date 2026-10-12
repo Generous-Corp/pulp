@@ -10,6 +10,8 @@ same instrument returns nothing when the lanes agree.
 
 from __future__ import annotations
 
+import argparse
+import contextlib
 import io
 import json
 import os
@@ -17,6 +19,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -297,6 +300,77 @@ class RunTests(unittest.TestCase):
                 json.dumps({"schema_version": 1, "tests": [entry("a", ["{repo}/a.py"])]})
             )
             self.assertEqual(lane.main(["run", "--manifest", str(path), "--min-count", "2"]), 1)
+
+
+class SkipAccountingTests(unittest.TestCase):
+    """A skip is reported as a skip: never counted as passed, never a green
+    run on its own."""
+
+    def _report(self, root: pathlib.Path, entries: list[dict]) -> tuple[int, str]:
+        args = argparse.Namespace(jobs=2, label_base_failures=False, changed_from=None)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = lane._run_and_report(args, argparse.ArgumentParser(), entries, time.monotonic())
+        return rc, out.getvalue()
+
+    def _tree(self, root: pathlib.Path) -> None:
+        (root / "ok.py").write_text("print('ran')\n", encoding="utf-8")
+        (root / "exit77.py").write_text("raise SystemExit(77)\n", encoding="utf-8")
+        (root / "says_skip.py").write_text(
+            "print('thing_skipped=no plan')\nraise SystemExit(1)\n", encoding="utf-8")
+
+    def test_a_skip_return_code_is_skipped_not_passed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._tree(root)
+            (result,) = lane.run([entry("s", ["{repo}/exit77.py"], skip_return_code=77)],
+                                 repo=root, stream=io.StringIO())
+        self.assertEqual((result["returncode"], result["skipped"]), (0, True))
+
+    def test_a_skip_regex_with_a_failing_exit_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._tree(root)
+            stream = io.StringIO()
+            (result,) = lane.run([entry("s", ["{repo}/says_skip.py"],
+                                        skip_regex=["thing_skipped="])],
+                                 repo=root, stream=stream)
+        self.assertEqual((result["returncode"], result["skipped"]), (0, True))
+        self.assertIn("... Skipped", stream.getvalue())
+        self.assertNotIn("Passed", stream.getvalue())
+
+    def test_an_executed_pass_is_not_marked_skipped(self) -> None:
+        # The control: without it the checks above could pass with every
+        # result marked skipped.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._tree(root)
+            (result,) = lane.run([entry("p", ["{repo}/ok.py"], skip_return_code=77)],
+                                 repo=root, stream=io.StringIO())
+        self.assertEqual((result["returncode"], result["skipped"]), (0, False))
+
+    def test_summary_counts_skips_apart_from_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._tree(root)
+            rc, out = self._report(root, [
+                entry("p", [str(root / "ok.py")]),
+                entry("s", [str(root / "exit77.py")], skip_return_code=77),
+            ])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("1 passed, 1 skipped, 0 failed", out)
+
+    def test_an_all_skipped_selection_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._tree(root)
+            rc, out = self._report(root, [
+                entry("s1", [str(root / "exit77.py")], skip_return_code=77),
+                entry("s2", [str(root / "says_skip.py")], skip_regex=["thing_skipped="]),
+            ])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("0 passed, 2 skipped", out)
+        self.assertIn("nothing was executed", out)
 
 
 class RepositoryTests(unittest.TestCase):
@@ -622,6 +696,11 @@ class CtestLaneTests(unittest.TestCase):
         self.assertEqual(lane.ctest_verdict({"will_fail": True}, 1, ""), 0)
         self.assertEqual(lane.ctest_verdict({"will_fail": True}, 0, ""), 1)
         self.assertEqual(lane.ctest_verdict({}, 2, ""), 2)
+        # SKIP_REGULAR_EXPRESSION is a skip whatever the exit code or pass regex.
+        skip = {"skip_regex": ["thing_skipped="], "pass_regex": ["thing_verified="]}
+        self.assertEqual(lane.ctest_verdict(skip, 1, "thing_skipped=no plan"), 0)
+        self.assertEqual(lane.ctest_verdict(skip, 1, "thing_failed"), 1)
+        self.assertEqual(lane.ctest_verdict(skip, 0, "thing_verified=1"), 0)
 
     def test_build_paths_stay_absolute_for_a_base_rerun(self) -> None:
         repo = pathlib.Path("/work/branch")
@@ -688,7 +767,9 @@ class CtestLaneTests(unittest.TestCase):
         (root / "test" / "cmake" / "pr_fast_tests.cmake").write_text(
             "add_test(NAME fast-one COMMAND ${Python3_EXECUTABLE}\n"
             '    "${CMAKE_SOURCE_DIR}/tools/fast.py" --flag)\n'
-            "set_tests_properties(fast-one PROPERTIES TIMEOUT 42 SKIP_RETURN_CODE 77)\n"
+            "set_tests_properties(fast-one PROPERTIES TIMEOUT 42 SKIP_RETURN_CODE 77\n"
+            "    # A host without the plan skips.\n"
+            '    SKIP_REGULAR_EXPRESSION "fast_skipped=")\n'
             "add_test(NAME fast-needs-build COMMAND ${Python3_EXECUTABLE}\n"
             '    "${CMAKE_SOURCE_DIR}/tools/inv.py" --build-dir "${CMAKE_BINARY_DIR}")\n'
             "set(PULP_PR_FAST_TESTS\n    fast-one\n    fast-needs-build  # comment\n)\n")
@@ -708,6 +789,7 @@ class CtestLaneTests(unittest.TestCase):
         self.assertEqual([e["name"] for e in entries], ["fast-one"])
         self.assertEqual(entries[0]["argv"][1:], ["{repo}/tools/fast.py", "--flag"])
         self.assertEqual((entries[0]["timeout"], entries[0]["skip_return_code"]), (42.0, 77))
+        self.assertEqual(entries[0]["skip_regex"], ["fast_skipped="])
         self.assertIn("CMAKE_BINARY_DIR", not_checked["fast-needs-build"])
 
     def test_python_ctests_exclude_the_other_lanes(self) -> None:

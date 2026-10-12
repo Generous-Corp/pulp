@@ -143,7 +143,7 @@ def canonical(selection: dict) -> bytes:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     ap.add_argument("--manifest", required=True, type=Path)
     ap.add_argument("--head-codemodel", required=True, type=Path)
     ap.add_argument("--ctest-json", required=True, type=Path)

@@ -943,6 +943,10 @@ def _main(argv, resources: contextlib.ExitStack):
                     help=("install the resulting .vcvplugin in this directory; "
                           "useful for isolated headless acceptance runs"))
     a = ap.parse_args(argv[1:])
+    # Before any work: a second generation installing into the same Rack
+    # plugin directory would overwrite this one.
+    import generation_lock
+    generation_lock.acquire_or_exit(a.install_dir or plugin_dir())
     if a.keep_on_fail:
         raise SystemExit(
             "--keep-on-fail is disabled: a failed attempt must not poison the "

@@ -1,0 +1,104 @@
+{
+ "dependencies": [
+  {
+   "name": "Skia",
+   "category": "canvas",
+   "license": "BSD-3-Clause",
+   "version": "chrome/m153",
+   "source_kind": "prebuilt-toolchain",
+   "repository": "https://skia.googlesource.com/skia.git",
+   "upstream": {
+    "kind": "none"
+   },
+   "documented_in_dependencies_md": true,
+   "documented_in_notice_md": true,
+   "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, and Skia.xcframework slices the upstream does not ship. The chrome/m153 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+   "determinism": {
+    "skia_branch": "chrome/m153",
+    "skia_commit": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+    "built_dawn": "f91da75afe31d4d6f47a6da307e1fbabd1b1691a",
+    "skia_builder_ref": "1f8c8d2c343f360a653bce92d11f8ded9a515208",
+    "skia_builder_fork": "https://github.com/danielraffel/skia-builder",
+    "skia_python_smoke_version": "144.0.post2",
+    "release_assets": {
+     "ios-device-arm64": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-ios-device-arm64-gpu-release.zip",
+      "sha256": "0edf6728aec9986508c5f99255188bad7889276b4aa286478a5d2947bc37c39a"
+     },
+     "ios-simulator-arm64-x86_64": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
+      "sha256": "428750198cca64307914ebec5adac41be5ae7e07c3ab3c2ddcba047838cbdc3b"
+     },
+     "linux-arm64": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-linux-arm64-gpu-release.zip",
+      "sha256": "a829984ce35141ac1e8f608e29496f69ad24bd2e5215f2899a071dc6c2e0ed0e"
+     },
+     "linux-x64": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-linux-x64-gpu-release.zip",
+      "sha256": "b132db47979f116a2b35720c6e4e8c7128505499e52b218cc64546f87b0bb363"
+     },
+     "mac-arm64": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-mac-universal-gpu-release.zip",
+      "sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9"
+     },
+     "mac-universal": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-mac-universal-gpu-release.zip",
+      "sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9"
+     },
+     "mac-x86_64": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-mac-x86_64-gpu-release.zip",
+      "sha256": "0aeb3a4879d59bf42bb4a42a21cda292b6c5401fa24377b241623a600664471d"
+     },
+     "wasm-wasm32": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-wasm-wasm32-gpu-release.zip",
+      "sha256": "a5218b84266b0d79dd9c1ce514be6d06f8898085aaa9309a9830442f29ca4887"
+     },
+     "win-x64": {
+      "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-x64-gpu-release.zip",
+      "sha256": "9480972c67f07d0762183e962ec3483210eb446ff10ca4e9ddf83ad188f0d11b"
+     }
+    },
+    "web_toolchain": {
+     "emscripten": "6.0.2",
+     "wasi_sdk": "25.0",
+     "note": "Skia's C++ headers and Emscripten's webgpu_cpp.h are not stable APIs. The wasm slice is only validated against this toolchain tuple; bump the tuple and the Skia pin together."
+    },
+    "rebuild_triggers": [
+     "Skia branch or commit changes",
+     "Dawn, HarfBuzz, or ICU DEPS revision changes",
+     "skia-builder ref or release asset digest changes",
+     "Bundled font file, version, or fallback order changes",
+     "Visual harness sampler, color type, alpha type, DPI, or surface backend changes"
+    ]
+   },
+   "source_files": [
+    "CMakeLists.txt",
+    "tools/build-skia.sh",
+    "tools/cmake/FindSkia.cmake",
+    "external/skia-build/VERSION.md",
+    "docs/reference/text-shaping.md",
+    "tools/harness/visual/README.md",
+    "tools/harness/visual/docker-build.sh",
+    "ci/visual-harness.Dockerfile",
+    ".github/workflows/visual-harness.yml"
+   ]
+  },
+  {
+   "name": "Yoga",
+   "category": "view",
+   "license": "MIT",
+   "version": "v3.2.1",
+   "source_kind": "fetchcontent",
+   "repository": "https://github.com/facebook/yoga.git",
+   "upstream": {
+    "kind": "git-tag",
+    "ref": "v3.2.1"
+   },
+   "documented_in_dependencies_md": true,
+   "documented_in_notice_md": true,
+   "source_files": [
+    "CMakeLists.txt"
+   ]
+  }
+ ]
+}

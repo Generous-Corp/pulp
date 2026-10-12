@@ -9,6 +9,18 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME audio-glitch-trace-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/audio/test_glitch_trace.py")
     set_tests_properties(audio-glitch-trace-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # catch_test_name_guard.py: CTest runs each Catch2 case as
+    # `<binary> "<name>"`, and Catch2 reads that argument as a test spec. A
+    # name starting with `~` is an exclusion, so its entry runs every OTHER
+    # case in the binary and never its own; a leading or trailing `*` is a
+    # wildcard that pulls in siblings. The selftest proves the scan reads real
+    # names (an empty scan is an error, not a pass).
+    add_test(NAME catch-test-name-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/catch_test_name_guard.py")
+    set_tests_properties(catch-test-name-guard PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME catch-test-name-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_catch_test_name_guard.py")
+    set_tests_properties(catch-test-name-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     # macos_merge_group_bootstrap.sh: the merge-group `macos` verdict. A failed
     # or missing dependency fails closed; a cancelled classify (never given a
     # runner) is classified in-job, and the verdict proceeds on that answer.

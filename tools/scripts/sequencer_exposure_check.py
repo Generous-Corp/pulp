@@ -17,7 +17,11 @@ from gate_common import (
     git_comparison_receipt,
     read_git_path,
     resolve_git_comparison,
+    dependabot_uses_only_diff,
 )
+
+
+_USES_ONLY_LINE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*\S+(?:\s+#.*)?\s*$")
 
 
 CLASSIFICATIONS = {
@@ -136,6 +140,13 @@ SHARED_REGISTRY_PATHS = {
     "docs/status/pulp-tooling-disposition.json",
     "tools/scripts/skill_path_map.json",
 }
+# The config-doc gate (tools/scripts/config_doc_check.py) makes every change to
+# a mapped CI/release config surface also edit one of the guides this map
+# names. A row that owns one of those guides is its only owner, so the whole
+# guide becomes a watched sequencer path and every such config change fails
+# this gate without a row of its own: two required gates demanding opposite
+# things. A row proves its lines in a mapped guide with an evidence needle.
+CONFIG_DOC_MAP_PATH = "tools/scripts/config_doc_map.json"
 # Files the version bot rewrites wholesale on every bump, mapped to the keys it
 # may rewrite. Excluding one WHOLE would drop real coverage, because the
 # semantic scan below only reaches core/state, core/view, core/midi and
@@ -500,9 +511,40 @@ def _validate_surface(
     return kinds
 
 
+def config_doc_targets(repo_root: Path) -> tuple[set[str], list[str]]:
+    """(every guide the config-doc gate maps, errors reading its map).
+
+    A checkout without the map (a fixture root) has no mapped guide; a map that
+    exists but cannot be read is an error, never an empty set.
+    """
+    path = repo_root / CONFIG_DOC_MAP_PATH
+    if not path.is_file():
+        return set(), []
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        docs = {doc for entry in document["entries"] for doc in entry["docs"]}
+    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError) as error:
+        return set(), [f"{CONFIG_DOC_MAP_PATH}: unreadable config-doc map: {error}"]
+    if not docs or not all(_is_nonempty_string(doc) for doc in docs):
+        return set(), [f"{CONFIG_DOC_MAP_PATH}: config-doc map names no guide"]
+    return docs, []
+
+
+def _refuse_config_doc_owner(path: str, where: str, config_docs: set[str],
+                             errors: list[str]) -> None:
+    if path in config_docs:
+        errors.append(
+            f"{where}: a guide the config-doc gate maps is edited by every change to its "
+            "config surface and cannot be exclusively owned; prove the row's lines in it "
+            f"with an evidence needle instead: {path}"
+        )
+
+
 def validate_document(document: Any, repo_root: Path) -> list[str]:
     """Return every ledger error. An empty list means the document is valid."""
     errors: list[str] = []
+    config_docs, config_doc_errors = config_doc_targets(repo_root)
+    errors.extend(config_doc_errors)
     writer_profiles, writer_refusal_codes, vocabulary_errors = _load_writer_profile_vocabulary(
         repo_root
     )
@@ -620,6 +662,9 @@ def validate_document(document: Any, repo_root: Path) -> list[str]:
                         "be exclusively owned; own the entry with an evidence needle "
                         f"instead: {path}"
                     )
+                _refuse_config_doc_owner(
+                    path, f"{where}.owned_paths[{path_index}]", config_docs, errors
+                )
         if row.get("classification") not in CLASSIFICATIONS:
             errors.append(f"{where}.classification: missing or invalid classification")
         release = row.get("release")
@@ -701,6 +746,9 @@ def validate_document(document: Any, repo_root: Path) -> list[str]:
                         "be exclusively owned; own the entry with an evidence needle "
                         f"instead: {path}"
                     )
+                _refuse_config_doc_owner(
+                    path, f"{where}.owned_paths[{path_index}]", config_docs, errors
+                )
         state = tombstone.get("delivery_state")
         removed_in_merge = tombstone.get("removed_in_merge")
         if state not in DELIVERY_STATES:
@@ -1153,6 +1201,15 @@ def is_sequencer_owned_path(path: str) -> bool:
     )
 
 
+def sequencer_paths_after_dependabot_exemption(
+    base: str, head: str, changed_paths: list[str]
+) -> list[str]:
+    """Drop paths only for a proven Dependabot uses-only workflow range."""
+    if dependabot_uses_only_diff(base, head):
+        return []
+    return changed_paths
+
+
 def _rows_by_id(document: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(document, dict) or not isinstance(document.get("rows"), list):
         return {}
@@ -1258,12 +1315,12 @@ def validate_transition(
     sequencer_changes = sorted(
         path for path in changed
         if not is_ledger_path(path) and path not in E0_INFRASTRUCTURE_PATHS and
+        path not in (mechanical_version_paths or set()) and
         (
             is_sequencer_owned_path(path) or
             path in (semantic_added_paths or set()) or
             (
                 path in watched
-                and path not in (mechanical_version_paths or set())
             )
         )
     )
@@ -1499,6 +1556,34 @@ def _mechanical_version_paths(
                 mechanical = False
                 break
         if mechanical:
+            matched.add(path)
+    return matched, errors
+
+
+def _mechanical_workflow_paths(
+    repo_root: Path, base: str, changed_paths: list[str], head: str = "HEAD"
+) -> tuple[set[str], list[str]]:
+    """Classify workflow files whose complete diff only changes ``uses:`` lines."""
+    matched: set[str] = set()
+    errors: list[str] = []
+    for path in changed_paths:
+        if not path.startswith(".github/workflows/"):
+            continue
+        diff = _git(
+            repo_root, "diff", "--no-renames", "--no-ext-diff", "--unified=0",
+            f"{base}...{head}", "--", path,
+        )
+        if diff.returncode != 0:
+            errors.append(
+                f"transition: cannot scan workflow action change in {path}: "
+                f"{diff.stderr.strip()}"
+            )
+            continue
+        body = [
+            line for line in diff.stdout.splitlines()
+            if line[:1] in {"+", "-"} and not line.startswith(("+++", "---"))
+        ]
+        if body and all(_USES_ONLY_LINE_RE.fullmatch(line[1:]) for line in body):
             matched.add(path)
     return matched, errors
 
@@ -1887,14 +1972,29 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root, comparison_base, changed_paths,
                 comparison.resolved_head or "HEAD",
             )
+            workflow_mechanical_paths, workflow_mechanical_errors = _mechanical_workflow_paths(
+                repo_root, comparison_base, changed_paths,
+                comparison.resolved_head or "HEAD",
+            )
+            mechanical_paths |= workflow_mechanical_paths
+            if dependabot_uses_only_diff(args.base, comparison.resolved_head or "HEAD"):
+                # An action-only workflow bump has no sequencer semantic change,
+                # even when a workflow filename contains timeline/playback.
+                changed_paths = sequencer_paths_after_dependabot_exemption(
+                    args.base, comparison.resolved_head or "HEAD", changed_paths
+                )
+                trailer_ids, semantic_paths, mechanical_paths = [], set(), set()
+                print("sequencer exposure: Dependabot uses-only workflow diff")
         else:
             trailer_ids, trailer_errors = [], []
             semantic_paths, semantic_errors = set(), []
             mechanical_paths, mechanical_errors = set(), []
+            workflow_mechanical_errors = []
         errors.extend(transition_errors)
         errors.extend(trailer_errors)
         errors.extend(semantic_errors)
         errors.extend(mechanical_errors)
+        errors.extend(workflow_mechanical_errors)
         errors.extend(
             validate_transition(
                 base_document,

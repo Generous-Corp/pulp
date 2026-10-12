@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261009-governed-visual-harness-20261009-watch",
+  "created_at": "2026-10-09T00:42:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Route the visual harness target build through tools/ci/governed-build.sh. The change preserves the existing pulp-test-visual target, Release configuration, Yoga golden verification, and artifact behavior; it changes only build scheduling and adds a static governance regression. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 -m unittest tools.ci.test_build_governance_paths.BuildGovernancePathTests.test_visual_harness_build_uses_governor",
+    "actionlint .github/workflows/visual-harness.yml",
+    "tools/scripts/gates.sh origin/main",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

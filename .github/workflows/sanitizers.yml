@@ -4,7 +4,7 @@ permissions:
   contents: read
 
 # ASan + UBSan on every relevant PR and nightly, TSan advisory, RTSan on-demand.
-# Non-Apple RTSan needs Clang 18 from apt.llvm.org.
+# Non-Apple RTSan needs LLVM 20 or newer from apt.llvm.org.
 # Local equivalents: scripts/run_asan.sh, scripts/run_tsan.sh.
 #
 # Each sanitizer job's runs-on is routable via three signals (priority order):
@@ -22,20 +22,12 @@ permissions:
 on:
   pull_request:
     branches: [main, develop]
+    types: [opened, synchronize, ready_for_review]
     # Path filter: only run sanitizers when the touched code can
     # plausibly affect memory safety / threading. Docs-only and
     # workflow-YAML-only PRs skip the 30-min matrix. #412 step 5.
     paths:
       - 'core/**'
-      - 'inspect/**'
-      - 'examples/**'
-      - 'tools/cli/**'
-      - 'test/**'
-      - 'CMakeLists.txt'
-      - 'tools/cmake/**'
-      - '.github/workflows/sanitizers.yml'
-      - 'setup.sh'
-      - 'external/**'
   # A nightly run is an independent backstop for advisory sanitizer coverage.
   # Running the same four-job matrix after every merge competes with the next
   # merge group's required checks while duplicating the relevant-PR run.
@@ -79,7 +71,7 @@ jobs:
       ubsan_runs_on: ${{ steps.resolve.outputs.ubsan_runs_on }}
       rtsan_runs_on: ${{ steps.resolve.outputs.rtsan_runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
@@ -170,13 +162,27 @@ jobs:
 
   asan:
     needs: resolve-runners
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.asan_runs_on) }}
     name: AddressSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
+
+      - name: Fetch protected capability base
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
 
       - name: Hydrate bounded GPU provenance commits
         shell: bash
@@ -318,13 +324,27 @@ jobs:
 
   tsan:
     needs: resolve-runners
+    if: github.event_name != 'pull_request'
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.tsan_runs_on) }}
     name: ThreadSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
+
+      - name: Fetch protected capability base
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
 
       - name: Set up Namespace macOS cache
         if: contains(needs.resolve-runners.outputs.tsan_runs_on, 'namespace-profile')
@@ -383,13 +403,27 @@ jobs:
 
   ubsan:
     needs: resolve-runners
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.ubsan_runs_on) }}
     name: UndefinedBehaviorSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
+
+      - name: Fetch protected capability base
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
 
       - name: Hydrate bounded GPU provenance commits
         shell: bash
@@ -469,37 +503,56 @@ jobs:
   rtsan:
     needs: resolve-runners
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.rtsan_runs_on) }}
-    name: RealtimeSanitizer (Linux x86_64, Clang 18)
-    # RTSan requires upstream LLVM Clang 18+. Not available in Apple Clang.
+    name: RealtimeSanitizer (Linux x86_64, Clang 20)
+    # RTSan first shipped in upstream LLVM 20 and is not available in Apple Clang.
     # See: https://clang.llvm.org/docs/RealtimeSanitizer.html
     #
-    # Advisory-only: the apt.llvm.org Clang 18 package on ubuntu-24.04
-    # ships without the compiler-rt realtime runtime, so
-    # `-fsanitize=realtime` errors with "unsupported argument". Until
-    # the runtime is available in that channel (or we vendor a build),
-    # the job runs on workflow_dispatch only so it doesn't block PRs.
+    # Advisory-only: keep RTSan dispatch-only while its findings baseline is
+    # triaged and its relatively expensive Linux lane is run on demand.
+    # Configure and Build are validated by the workflow_dispatch proof lane.
     if: github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
           lfs: false
+
+      - name: Fetch protected capability base
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            # workflow_dispatch checkouts are depth-1; fetch this exact head
+            # with bounded history so merge-base can resolve without fetching
+            # every repository ref.
+            git fetch --no-tags --depth=64 origin "$GITHUB_SHA"
+            git fetch --no-tags --depth=64 origin main:refs/remotes/origin/main
+            protected_base="$(git merge-base HEAD origin/main)"
+            git update-ref refs/remotes/origin/main "$protected_base"
+          fi
 
       - name: Hydrate bounded GPU provenance commits
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
 
-      - name: Install Clang 18
+      - name: Install Clang 20
         # apt.llvm.org intermittently 5xx's during release cuts; retry
         # the whole install rather than bubble a transient up. #418.
         uses: ./.github/actions/retry
         with:
-          label: 'Install Clang 18'
+          label: 'Install Clang 20'
           run: |
+            sudo apt-get update
+            sudo apt-get install -y lsb-release
             wget https://apt.llvm.org/llvm.sh
             chmod +x llvm.sh
-            sudo ./llvm.sh 18
-            sudo apt-get install -y clang-18 lld-18
+            sudo ./llvm.sh 20
+            sudo apt-get install -y clang-20 lld-20
 
       - name: Install Linux dev headers
         uses: ./.github/actions/install-linux-build-deps
@@ -509,16 +562,20 @@ jobs:
 
       - name: Configure with RTSan
         run: |
+          # Clang 20 RTSan's instrumentation changes the AST PIE mode;
+          # disable only the shared test PCH so every test still compiles.
           cmake -S . -B build-rtsan \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_COMPILER=clang-18 \
-            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_C_COMPILER=clang-20 \
+            -DCMAKE_CXX_COMPILER=clang++-20 \
             -DCMAKE_CXX_FLAGS="-fsanitize=realtime -fno-omit-frame-pointer" \
             -DCMAKE_C_FLAGS="-fsanitize=realtime -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=realtime" \
+            -DPULP_TEST_PCH=OFF \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_GPU=OFF
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_TEST_TIMEOUT_SCALE=4
 
       - name: Build
         run: tools/ci/governed-build.sh cmake --build build-rtsan
@@ -530,4 +587,17 @@ jobs:
         run: bash tools/ci/install_visual_python_deps.sh build-rtsan
 
       - name: Test with RTSan
-        run: ctest --test-dir build-rtsan --output-on-failure -j$(nproc) --exclude-regex "GpuSurface|compileShader"
+        run: |
+          # PULP_ENABLE_GPU=OFF: GPU-health tests cannot exercise a provider.
+          # No Skia is installed: Skia-render fixtures have no implementation.
+          # No capture provider is present: browser-capture fixtures are inapplicable.
+          # SDK-consumer/install-layout fixtures are slow-fixture coverage, not RTSan.
+          # PULP_TEST_TIMEOUT_SCALE=4 covers sanitizer slowdown (including FDN reverb).
+          # Validation, benchmark, and performance labels measure unavailable lane
+          # services or wall-clock throughput rather than RTSan findings.
+          # Native Skia/capture names below are likewise provider-backed fixtures.
+          ctest --test-dir build-rtsan --output-on-failure \
+            -j$(nproc) \
+            --timeout 600 \
+            --label-exclude 'validation|slow|performance|bench|quality-lab|skia|browser-capture|gpu-health|slow-affected|agent-capability-installed-sdk' \
+            --exclude-regex 'sdk-consumer|install-layout|clean-consumer|project-package-compile-out|cmake-pulp-install|GpuSurface|compileShader|realtime factor reported|GPU health|native tree draws|IR text|serialized DesignIR resolves portable capture|filter list without blur|zero or negative blur radius'

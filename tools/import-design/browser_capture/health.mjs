@@ -22,10 +22,18 @@ const HEALTH_EXPRESSION = `(() => {
       paintedSurfaces++;
     }
   }
+  // A face the page declared and the browser could not decode. Its text
+  // still paints, in a fallback face, so nothing else here notices.
+  const failedFonts = document.fonts
+    ? [...new Set([...document.fonts]
+        .filter((face) => face.status === 'error')
+        .map((face) => face.family.replace(/^["']|["']$/g, '')))].sort()
+    : [];
   return {
     visible_elements: visibleElements,
     visible_text_characters: visibleTextCharacters,
-    painted_surfaces: paintedSurfaces
+    painted_surfaces: paintedSurfaces,
+    failed_fonts: failedFonts
   };
 })()`;
 
@@ -111,6 +119,7 @@ export async function verifyCaptureHealth(
     visible_elements: visual.visible_elements ?? 0,
     visible_text_characters: visual.visible_text_characters ?? 0,
     painted_surfaces: visual.painted_surfaces ?? 0,
+    failed_fonts: Array.isArray(visual.failed_fonts) ? visual.failed_fonts : [],
     runtime_exceptions: monitor.runtime_exceptions,
     log_errors: monitor.log_errors,
     failed_responses: monitor.failed_responses,

@@ -193,7 +193,7 @@ TEST_CASE("output stays finite and bounded at extremes",
     }
 }
 
-TEST_CASE("every control the panel declares resolves to a parameter",
+TEST_CASE("every control the instrument panel declares resolves to a parameter",
           "[design-panel-instrument][binding]") {
     // The failure this catches is silent by construction: a control whose key
     // matches nothing renders, turns, and moves no parameter. No screenshot

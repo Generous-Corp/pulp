@@ -349,6 +349,15 @@ bool ScriptedUiSession::load_now(std::string* error) {
         });
     }
 
+    // Bound controls show their parameters from the frame the document mounts
+    // in. The per-frame binding service otherwise first runs on the NEXT
+    // poll(), and a deferred mount is presented before that poll: by poll()
+    // itself, and by a content-first open straight after
+    // complete_pending_load(). That frame painted every bindWidgetToParam
+    // control at its construction default, then jumped to the parameter.
+    if (bridge_)
+        bridge_->service_param_bindings();
+
     last_theme_exists_ = std::filesystem::exists(theme_path_);
     last_theme_write_time_ = last_theme_exists_ ? safe_last_write_time(theme_path_) : std::nullopt;
     root_.request_repaint();
@@ -543,6 +552,12 @@ void ScriptedUiSession::set_host_kind(std::string kind) {
     if (bridge_) bridge_->set_host_kind(host_kind_);
 }
 
+void ScriptedUiSession::set_time_source(WidgetBridge::TimeSource source) {
+    time_source_ = std::move(source);
+    if (bridge_)
+        bridge_->set_time_source(time_source_);
+}
+
 void ScriptedUiSession::set_post_evaluation_reset_callback(
     std::function<void()> cb) {
     post_evaluation_reset_callback_ = std::move(cb);
@@ -718,6 +733,7 @@ bool ScriptedUiSession::rebuild_from_code(
             probe_bridge->set_asset_roots(asset_roots_);
             probe_bridge->set_script_base_dir(source_path.parent_path());
             probe_bridge->set_host_kind(host_kind_);
+            probe_bridge->set_time_source(time_source_);
             load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
         }
         const auto t_probe = clock::now();
@@ -785,6 +801,7 @@ bool ScriptedUiSession::rebuild_from_code(
         next_bridge->set_asset_roots(asset_roots_);
         next_bridge->set_script_base_dir(source_path.parent_path());
         next_bridge->set_host_kind(host_kind_);
+        next_bridge->set_time_source(time_source_);
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);
         }

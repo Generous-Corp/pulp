@@ -27,7 +27,7 @@ jobs:
     # repository-wide buildless extraction routinely exceeds a PR job budget.
     # PR compilation/security coverage remains in the required native gates;
     # CodeQL is advisory and must not monopolize the PR fleet.
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ${{ matrix.runner }}
     # Native autobuild can exceed 45 minutes on the hosted macOS/Linux images;
     # canceling before `analyze` produces a false-red required check.
@@ -60,7 +60,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Initialize CodeQL
         if: matrix.language != 'c-cpp' || github.event_name != 'pull_request'

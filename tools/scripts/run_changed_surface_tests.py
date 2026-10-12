@@ -1993,7 +1993,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--selection-receipt-b64", required=True)
     parser.add_argument("--selection-receipt-sha256", required=True)
     parser.add_argument("--build-dir", default=REPO_ROOT / "build", type=Path)

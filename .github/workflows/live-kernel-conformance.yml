@@ -52,14 +52,14 @@ jobs:
     name: Build + per-node null test + RT-safety gates
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
       - name: Set up emsdk (pinned 6.0.2)
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
         with:
           version: 6.0.2
           actions-cache-folder: "emsdk-cache-602"

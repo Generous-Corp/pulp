@@ -165,15 +165,21 @@ optional standalone app leaves plugin-only installs stale. Hooks must be
 executable, must resolve the active console user safely, and must treat a
 missing cache or already-stopped registrar as success.
 
-**Control-shipping sidecars are relocated for you.** CMake emits
-`*.inspector-capabilities.json` / `*.control-shipping*.json` beside the target,
-which for a bundle target lands in `Contents/MacOS` — where Apple permits code
-only, so `codesign` fails with `code object is not signed at all / In
-subcomponent: ….json`. `deep_sign()` moves them to
-`Contents/Resources/pulp-control-shipping-evidence` before signing, preserving
-the receipts. A consumer `package.sh` that *deletes* them first is both
-redundant and lossy: it destroys build provenance the installer would have
-sealed into the bundle.
+**Control-shipping sidecars live in `Contents/Resources`.** The build writes
+`*.inspector-capabilities.json` / `*.control-shipping*.json` for a macOS bundle
+into `Contents/Resources` (`_pulp_control_sidecar_dir` in
+`PulpControlShipping.cmake`), never `Contents/MacOS`, where Apple permits code
+only: there `codesign` (non `--deep`, as `pulp ship sign` signs) fails with
+`code object is not signed at all / In subcomponent: ….json`. The POST_BUILD
+step also deletes copies an older SDK left in `Contents/MacOS`, so incremental
+build trees heal. Readers find them through
+`pulp::inspect::control_sidecar_directories()` (Resources first, then the
+legacy location). `build_combined_installer.sh` refuses, before any signing, a
+bundle that still has them in `Contents/MacOS`; it no longer moves them, since a
+file moved at sign time is not the file the build verified. A consumer
+`package.sh` must not delete them: they are build provenance sealed into the
+bundle. `macos-plugin-bundle-signing` (ctest) signs the fixture's Standalone,
+VST3, CLAP and AU copies non-deep and verifies them strictly.
 
 `deep_sign()` also walks `Contents/Helpers` before sealing a bundle. Products
 may carry nested helper apps there, including their own executables and
@@ -475,12 +481,10 @@ lookup too. Guarded by the `vst3-bundle-layout` ctest
 (`tools/cmake/scripts/check_vst3_bundle_layout.py`).
 
 The same Apple rule applies inside `Contents/MacOS/`: only code belongs there.
-Pulp's control-shipping JSON is intentionally emitted beside an unsigned build
-target so the scanner can bind its proof to that exact binary. Before Developer
-ID signing, `build_combined_installer.sh` preserves those manifests and reports
-under `Contents/Resources/pulp-control-shipping-evidence/`; leaving them beside
-the Mach-O makes `codesign` report the JSON as an unsigned subcomponent. The
-signer also resolves `CFBundleExecutable` from `Info.plist` for every bundle
+Pulp's control-shipping JSON is therefore emitted into `Contents/Resources` of
+a macOS bundle (beside the binary for plain executables and iOS shallow
+bundles); leaving it beside the Mach-O makes `codesign` report the JSON as an
+unsigned subcomponent. The signer also resolves `CFBundleExecutable` from `Info.plist` for every bundle
 kind. Do not derive the main executable by stripping only `.app`: doing so
 double-signs the main binary in `.component`, `.vst3`, and `.clap` bundles and
 can trigger the same misleading subcomponent failure.
@@ -488,7 +492,8 @@ can trigger the same misleading subcomponent failure.
 ### Every bundle carries `pulp-build-info.json` — read it before guessing
 
 `pulp_add_plugin()` writes `Contents/Resources/pulp-build-info.json`
-(`pulp.build-info.v1`) into every bundle it makes, POST_BUILD, so the record is
+(`pulp.build-info.v1`; `<bundle>/pulp-build-info.json` in a shallow iOS-family
+bundle) into every bundle it makes, POST_BUILD, so the record is
 sealed by `pulp ship sign` like any other resource. It names the product
 version and source commit, build type/archs/min-OS, the SDK version, and embeds
 the SDK's `share/pulp/runtime-pins.json` (Skia release + commit + asset digest,

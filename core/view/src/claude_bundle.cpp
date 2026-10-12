@@ -470,11 +470,15 @@ bool parse_materialized_binding_map(const choc::value::ValueView& root, ClaudeBu
                 !member.value.isObject() || !member.value.hasObjectMember("id") ||
                 !member.value["id"].isString() || member.value["id"].getString() != id)
                 return false;
-            if (member.value.hasObjectMember("kind")) {
-                const auto declared = member.value["kind"];
-                if (!declared.isString() || declared.getString() != kind)
-                    return false;
-            }
+            // `kind` is payload data for semantic bindings (for example
+            // `button` or `slider`), rather than the structural map name.
+            // The importer emits those semantic roles in this field. The
+            // enclosing `bindings_by_id.<kind>` map already establishes the
+            // binding stream, so do not compare the payload role to that map
+            // name. Keep rejecting a present non-string value so malformed
+            // metadata cannot cross the native boundary.
+            if (member.value.hasObjectMember("kind") && !member.value["kind"].isString())
+                return false;
             bundle.materialized_bindings.push_back(
                 {id, std::string(kind), choc::json::toString(member.value, false)});
             if (++total > max_total)

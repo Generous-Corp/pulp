@@ -275,13 +275,13 @@ def cmd_parse(a: argparse.Namespace) -> int:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("collect")
+    c = sub.add_parser("collect", allow_abbrev=False)
     c.add_argument("--build-dir", required=True)
     c.add_argument("--out", required=True)
     c.set_defaults(func=cmd_collect)
-    p = sub.add_parser("parse")
+    p = sub.add_parser("parse", allow_abbrev=False)
     p.add_argument("--objects", required=True)
     p.add_argument("--args")
     p.add_argument("--build-root", required=True)

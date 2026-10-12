@@ -13,7 +13,9 @@ What must hold:
 - the SDK legs configure with Ninja when it is on PATH and with Xcode when it
   is not, and the GPU leg always configures with Xcode;
 - the SDK-leg checks accept Ninja's object output for the OBJECT-library
-  shared-client contract, and still fail when it is absent.
+  shared-client contract, and still fail when it is absent;
+- the GPU leg ad-hoc signs the AUv3 extension it built without signing, and a
+  bundle codesign rejects fails the gate.
 
 Run:
     python3 tools/scripts/test_ios_compile_gate_legs.py
@@ -57,7 +59,8 @@ if [ "${1:-}" = "--build" ]; then
     case "$dir" in
         *-gpu)
             if [ -n "${STUB_GPU_SLEEP:-}" ]; then sleep "$STUB_GPU_SLEEP"; fi
-            mkdir -p "$dir/AUv3/PulpGpuSmoke.appex";;
+            mkdir -p "$dir/AUv3/PulpGpuSmoke.appex"
+            [ -n "${STUB_OMIT_HOST_APP:-}" ] || mkdir -p "$dir/AUv3/PulpGpuSmoke.app";;
         *)
             for lib in __LIBS__; do
                 mkdir -p "$dir/lib"; : >"$dir/lib/lib$lib.a"
@@ -118,6 +121,17 @@ exec "$REAL_PYTHON3" "$@"
 """
 
 
+# codesign stub: record the call; STUB_FAIL=codesign rejects every signature.
+CODESIGN_STUB = r"""#!/usr/bin/env bash
+echo "codesign $*" >>"$STUB_LOG"
+if [ "${STUB_FAIL:-}" = "codesign" ]; then
+    echo "stub: code object is not signed at all" >&2
+    exit 1
+fi
+exit 0
+"""
+
+
 def _write_exe(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -133,6 +147,7 @@ class GateHarness:
         _write_exe(self.bin / "cmake", CMAKE_STUB)
         _write_exe(self.bin / "xcrun", XCRUN_STUB)
         _write_exe(self.bin / "python3", PYTHON_STUB)
+        _write_exe(self.bin / "codesign", CODESIGN_STUB)
         if with_ninja:
             _write_exe(self.bin / "ninja", "#!/usr/bin/env bash\nexit 0\n")
 
@@ -184,6 +199,31 @@ class GateLegTests(unittest.TestCase):
         builds = [c for c in harness.calls() if c.startswith("build ")]
         self.assertEqual(len(builds), 3, harness.calls())
 
+    def test_gpu_leg_signs_the_auv3_extension(self) -> None:
+        harness = self.harness()
+        proc = harness.run()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        signs = [c for c in harness.calls() if c.startswith("codesign --force --sign -")]
+        self.assertTrue(any(c.endswith("/PulpGpuSmoke.appex") for c in signs), harness.calls())
+        self.assertTrue(any(c.endswith("/PulpGpuSmoke.app") for c in signs), harness.calls())
+        self.assertFalse(any("--deep" in c for c in signs), signs)
+        self.assertTrue(any(c.startswith("codesign --verify --deep --strict") for c in harness.calls()))
+        self.assertIn("OK: iOS AUv3 extension and host app sign ad hoc", proc.stdout)
+
+    def test_missing_host_app_fails_the_gate(self) -> None:
+        harness = self.harness()
+        proc = harness.run(STUB_OMIT_HOST_APP="1")
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("did not produce PulpGpuSmoke.app", proc.stdout + proc.stderr)
+
+    def test_unsignable_extension_fails_the_gate(self) -> None:
+        harness = self.harness()
+        proc = harness.run(STUB_FAIL="codesign")
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        # The GPU leg logs to its own file, which the gate echoes on stdout.
+        self.assertIn("AUv3 ad-hoc signing failed", proc.stdout + proc.stderr)
+        self.assertIn("iOS GPU leg failed", proc.stderr)
+
     def test_legs_report_elapsed_seconds(self) -> None:
         """Every leg step prints its elapsed seconds, and the GPU leg's total
         names how long the gate waited on it after the SDK legs finished, so a
@@ -200,6 +240,7 @@ class GateLegTests(unittest.TestCase):
             "iOS simulator Skia GPU slice fetch",
             "iphonesimulator GPU configure",
             "iphonesimulator GPU example build",
+            "iphonesimulator AUv3 ad-hoc signing",
         ):
             self.assertIn(step, done, proc.stdout)
         self.assertGreaterEqual(int(done["iphonesimulator GPU example build"]), 2)

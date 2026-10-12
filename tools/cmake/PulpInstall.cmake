@@ -116,13 +116,14 @@ function(_pulp_attach_plugin_runtime_manifest target format_target)
             VERBATIM
         )
     elseif(APPLE AND PULP_IOS)
+        # A shallow iOS bundle keeps its resources at the root. A top-level
+        # Resources/ directory makes codesign reject the whole bundle, so the
+        # extension could not be signed or installed.
         add_custom_command(TARGET ${format_target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                "$<TARGET_BUNDLE_DIR:${format_target}>/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${_manifest}"
-                "$<TARGET_BUNDLE_DIR:${format_target}>/Resources/pulp.plugin-runtime.json"
-            COMMENT "Embedding pulp.plugin-runtime.json into ${format_target} flat bundle resources"
+                "$<TARGET_BUNDLE_DIR:${format_target}>/pulp.plugin-runtime.json"
+            COMMENT "Embedding pulp.plugin-runtime.json into ${format_target} flat bundle root"
             VERBATIM
         )
     elseif(APPLE)

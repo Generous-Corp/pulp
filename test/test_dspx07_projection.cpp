@@ -1,16 +1,31 @@
-#include "../core/format/src/projection_capability.hpp"
-#include <cassert>
+#include <catch2/catch_test_macros.hpp>
 
-int main() {
+#include <pulp/format/projection_capability.hpp>
+
+#include <array>
+#include <string_view>
+
+TEST_CASE("DSPX-07 bounded baked projections cover native and browser surfaces",
+          "[dspx-07][projection]") {
     using namespace pulp::format;
-    assert(projection_capability(ProjectionSurface::clap, true, true).supported());
-    assert(projection_capability(ProjectionSurface::wam, true, true).supported());
-    assert(!projection_capability(ProjectionSurface::clap, false, true).supported());
-    assert(!projection_capability(ProjectionSurface::vst3, true, false).supported());
-    assert(projection_capability(ProjectionSurface::au, true, true).supported());
-    // Capability admission remains fail-closed for the two cases that cannot
-    // be projected by any format adapter.
-    assert(!projection_capability(ProjectionSurface::au, false, true).supported());
-    assert(!projection_capability(ProjectionSurface::au, true, false).supported());
-    return 0;
+    constexpr std::array supported = {ProjectionSurface::clap,  ProjectionSurface::vst3,
+                                      ProjectionSurface::lv2,   ProjectionSurface::wam,
+                                      ProjectionSurface::wclap, ProjectionSurface::au};
+    for (const auto surface : supported) {
+        const auto result = projection_capability(surface, true, true);
+        REQUIRE(result.supported());
+        REQUIRE(result.reason.empty());
+    }
+}
+
+TEST_CASE("DSPX-07 refuses unsupported projection inputs with typed reasons",
+          "[dspx-07][projection][negative]") {
+    using namespace pulp::format;
+    const auto graph_only = projection_capability(ProjectionSurface::clap, false, true);
+    REQUIRE_FALSE(graph_only.supported());
+    REQUIRE(graph_only.reason == "graph-only descriptor has no baked Processor projection");
+
+    const auto unbounded = projection_capability(ProjectionSurface::wclap, true, false);
+    REQUIRE_FALSE(unbounded.supported());
+    REQUIRE(unbounded.reason == "descriptor bounds are missing or exceed adapter limits");
 }

@@ -33,3 +33,15 @@ TEST_CASE("pulp::simd resolves to the inline scalar kernels without the library"
     const std::array<double, 3> xd{0.5, 0.25, -1.0};
     CHECK(pulp::simd::sum(xd.data(), xd.size()) == -0.25);
 }
+
+// Without Highway (the header-only build here, and an ARM64EC target, where
+// Highway cannot configure) the lane queries are the scalar width, usable in
+// constant expressions.
+static_assert(pulp::simd::float_lanes() == 1);
+static_assert(pulp::simd::double_lanes() == 1);
+
+TEST_CASE("pulp::simd lane queries report the scalar width without Highway",
+          "[simd][header-fallback]") {
+    CHECK(pulp::simd::float_lanes() == 1);
+    CHECK(pulp::simd::double_lanes() == 1);
+}

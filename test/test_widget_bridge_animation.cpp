@@ -618,6 +618,75 @@ TEST_CASE("WidgetBridge host idle pump fires setInterval callbacks repeatedly",
     REQUIRE(engine.evaluate("hits").getWithDefault<int>(-1) >= 3);
 }
 
+// Script time follows an injected clock: a harness that drives frames from a
+// fixed schedule gets timers that fire on the frame whose time passes their
+// deadline, never on how long the machine took to render.
+TEST_CASE("WidgetBridge script timers and performance.now follow an injected time source",
+          "[view][bridge][time-source]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    const auto base = std::chrono::steady_clock::time_point{} + std::chrono::hours(1);
+    auto fake_now = base;
+    bridge.set_time_source([&fake_now] { return fake_now; });
+    const auto advance = [&](int ms) { fake_now += std::chrono::milliseconds(ms); };
+
+    bridge.load_script(R"(
+        var fired = 0;
+        var hits = 0;
+        var t0 = performance.now();
+        setTimeout(function () { fired += 1; }, 50);
+        var id = setInterval(function () { hits += 1; if (hits >= 3) clearInterval(id); }, 20);
+    )");
+    REQUIRE(engine.evaluate("t0").getWithDefault<double>(-1.0) == 0.0);
+
+    // Real time passing does not move script time.
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    host_idle_pump(bridge);
+    CHECK(engine.evaluate("fired").getWithDefault<int>(-1) == 0);
+    CHECK(engine.evaluate("hits").getWithDefault<int>(-1) == 0);
+
+    advance(49);
+    host_idle_pump(bridge);
+    CHECK(engine.evaluate("fired").getWithDefault<int>(-1) == 0);
+    // One flush fires an overdue interval once and re-arms it past now (60).
+    CHECK(engine.evaluate("hits").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("performance.now()").getWithDefault<double>(-1.0) == 49.0);
+
+    advance(1); // exactly the 50 ms deadline
+    host_idle_pump(bridge);
+    CHECK(engine.evaluate("fired").getWithDefault<int>(-1) == 1);
+
+    advance(10); // 60 ms: the re-armed interval
+    host_idle_pump(bridge);
+    CHECK(engine.evaluate("hits").getWithDefault<int>(-1) == 2);
+    advance(100); // third tick, then cleared
+    host_idle_pump(bridge);
+    advance(100);
+    host_idle_pump(bridge);
+    CHECK(engine.evaluate("hits").getWithDefault<int>(-1) == 3);
+    CHECK(engine.evaluate("fired").getWithDefault<int>(-1) == 1);
+}
+
+TEST_CASE("WidgetBridge performance.now origin is per bridge", "[view][bridge][time-source]") {
+    ScriptEngine engine_a;
+    ScriptEngine engine_b;
+    View root_a;
+    View root_b;
+    StateStore store;
+    WidgetBridge a(engine_a, root_a, store);
+    auto clock = std::chrono::steady_clock::time_point{} + std::chrono::hours(2);
+    a.set_time_source([&clock] { return clock; });
+    clock += std::chrono::milliseconds(500);
+    WidgetBridge b(engine_b, root_b, store);
+    b.set_time_source([&clock] { return clock; });
+    CHECK(engine_a.evaluate("performance.now()").getWithDefault<double>(-1.0) == 500.0);
+    CHECK(engine_b.evaluate("performance.now()").getWithDefault<double>(-1.0) == 0.0);
+}
+
 TEST_CASE("WidgetBridge host idle pump drains rAF + setTimeout in same call",
           "[view][bridge][issue-1412]") {
     ScriptEngine engine;

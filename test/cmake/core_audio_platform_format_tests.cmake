@@ -32,6 +32,13 @@ pulp_add_test_suite(pulp-test-wav-metadata GROUP pulp-test-group-cap-audio
 pulp_add_test_suite(pulp-test-offline-processor-edges GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# DSPX-07 projection is a public SDK header contract. Keep this suite on the
+# ordinary format test lane so source builds exercise the same header installed
+# consumers include, with explicit native/browser positives and typed refusals.
+pulp_add_test_suite(pulp-test-dspx07-projection
+    SOURCES test_dspx07_projection.cpp
+    LIBRARIES pulp::format-core)
+
 # Offline-render DSP tracing (Perfetto, dev-only). Config-agnostic: OFF verifies
 # the no-op contract; ON byte-checks the flushed .pftrace for the dsp / dsp.node
 # offline span names. Links pulp::format + the PulpCompressor example header so
@@ -158,6 +165,46 @@ pulp_add_test_suite(pulp-test-tuning GROUP pulp-test-group-cap-midi
 pulp_add_test_suite(pulp-test-state
     SOURCES test_state.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state pulp::events)
+
+add_test(
+    NAME pulp-state-link-closure
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/core/state/pulp_state_link_closure.cmake
+)
+set_tests_properties(pulp-state-link-closure PROPERTIES LABELS "state;link-closure")
+
+# Symbol-level closure for the same archive: no object in pulp-state may call
+# into pulp-content or the audio/DSP/MIDI archives, whatever its link edges say.
+# The events and runtime archives are the controls: pulp-state calls into
+# events (MainThreadDispatcher, EventLoop), so a run that resolves nothing
+# there means nm read nothing.
+if(CMAKE_NM AND NOT MSVC)
+    set(_pulp_state_symbol_forbidden)
+    foreach(_forbidden pulp-content pulp-audio pulp-sample-bank-manifest pulp-midi pulp-signal)
+        if(TARGET ${_forbidden})
+            get_target_property(_forbidden_type ${_forbidden} TYPE)
+            if(_forbidden_type STREQUAL "STATIC_LIBRARY")
+                list(APPEND _pulp_state_symbol_forbidden --forbidden "$<TARGET_FILE:${_forbidden}>")
+            endif()
+        endif()
+    endforeach()
+    add_test(
+        NAME pulp-state-symbol-closure
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/archive_symbol_closure_check.py"
+            --nm "${CMAKE_NM}"
+            --subject "$<TARGET_FILE:pulp-state>"
+            ${_pulp_state_symbol_forbidden}
+            --control "$<TARGET_FILE:pulp-events>"
+            --control "$<TARGET_FILE:pulp-runtime>")
+    set_tests_properties(pulp-state-symbol-closure PROPERTIES LABELS "state;link-closure")
+    unset(_pulp_state_symbol_forbidden)
+    unset(_forbidden_type)
+endif()
+add_test(
+    NAME archive-symbol-closure-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_archive_symbol_closure_check.py")
+set_tests_properties(archive-symbol-closure-selftest PROPERTIES LABELS "state;link-closure")
 
 # The one parameter payload (param_json) and the pin that keeps its wire field
 # set from drifting — the bridge and the inspector both serialize through it.

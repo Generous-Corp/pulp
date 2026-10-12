@@ -23,10 +23,10 @@ SPEC.loader.exec_module(lint)
 
 
 class LintTest(unittest.TestCase):
-    def _scan(self, name: str, text: str) -> list:
+    def _scan(self, name: str, text: str, subdir: str = "core/view/src") -> list:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
-            src = root / "core" / "view" / "src"
+            src = root / subdir
             src.mkdir(parents=True)
             (src / name).write_text(text, encoding="utf-8")
             return lint.violations(root)
@@ -37,6 +37,15 @@ class LintTest(unittest.TestCase):
             "Color c() { return resolve_color(tone_token(tone_)); }\n")
         self.assertEqual([str(p) for p, _l in found],
                          ["core/view/src/banner.cpp"])
+
+    def test_audio_widget_sources_are_scanned(self):
+        # The audio widgets live in their own target under core/view/audio.
+        found = self._scan(
+            "meter.cpp",
+            "Color c() { return resolve_color(tone_token(tone_)); }\n",
+            subdir="core/view/audio/src")
+        self.assertEqual([str(p) for p, _l in found],
+                         ["core/view/audio/src/meter.cpp"])
 
     def test_colour_from_tone_with_a_mark_is_clean(self):
         """The control. Without it the check above could be firing on any file

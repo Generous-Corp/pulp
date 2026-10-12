@@ -48,14 +48,18 @@ float peak = pulp::simd::max_abs(a, 256);
 pulp::simd::correlate(history, reversed_taps, result, 256, 64);
 ```
 
-Every kernel has up to three backends, all compiled into the library:
+Every kernel has up to three backends, compiled when the target supports them:
 `pulp::simd::backend::scalar` (sequential reference loops),
 `backend::highway` (Google Highway with run-time dispatch to SSE2 through
 AVX-512 on x86 and NEON on arm64) and `backend::accelerate` (vDSP, Apple only).
 The unqualified names alias the backend chosen by the `PULP_SIMD_BACKEND`
-CMake option: `auto` (default; Accelerate on Apple, Highway elsewhere),
-`accelerate`, `highway` or `scalar`. The alias is resolved at compile time, so
-a call carries no backend branch; `pulp::simd::active_backend_name` reports it.
+CMake option: `auto` (default; Accelerate on Apple, Highway elsewhere, scalar
+when Highway is unavailable), `accelerate`, `highway` or `scalar`. The alias is
+resolved at compile time, so a call carries no backend branch;
+`pulp::simd::active_backend_name` reports it. MSVC ARM64EC targets use the
+scalar fallback because Highway 1.2.0 rejects the compiler's combined ARM64
+and x64 architecture macros; selecting `highway` for such a target fails at
+configure time with an actionable error.
 
 Backends agree to rounding, not to the bit: reductions accumulate in each
 backend's own order, and Accelerate changes with the OS. Compare against the
@@ -2480,6 +2484,27 @@ that composition for every requested format and uses
 `pulp::standalone-native` for Standalone. Baked UI code that constructs `View`
 trees directly and does not evaluate JS can link `pulp::view-core`.
 
+`pulp::view-core` links no audio, signal or host target. The audio-dependent
+widgets are in `pulp::view-audio`, which links `pulp::audio`, `pulp::signal`
+and `pulp::midi` but never `pulp::host`:
+- meters, waveform and spectrum visualizers;
+- the EQ curve;
+- the audio inspector and MIDI binding;
+- the plug-in manager panel;
+- the waveform GPU helpers.
+
+Both view umbrellas link `pulp::view-audio`. A target that links only
+`pulp::view-core` and uses one of those widgets adds `pulp::view-audio`.
+
+`GraphEditorView` (`<pulp/view/widgets/graph_editor_view.hpp>`), which draws and
+edits a host `SignalGraph`, is the one view widget that depends on
+`pulp::host`. It lives in its own target, `pulp::view-graph-editor`, which none
+of the view umbrellas link, so an ordinary view or plug-in UI never pulls in
+the plug-in host stack. Link `pulp::view-graph-editor` to use it. It is not
+built on iOS, where `pulp::host` is absent. An installed-SDK consumer that
+previously reached `GraphEditorView` through `Pulp::host` now links
+`Pulp::view-graph-editor` instead.
+
 ### Creating a UI
 
 ```cpp
@@ -2660,6 +2685,17 @@ external designs into Pulp's import IR for `pulp import-design`.
 (YAML-frontmatter + Markdown body) into a DTCG `tokens.json`;
 yaml-cpp (MIT, vendored via CMake FetchContent) provides the
 frontmatter parse. See [`reference/imports/designmd.md`](imports/designmd.md).
+
+The design subsystem is three link targets. `pulp::design-ir` is the
+header-only DesignIR value model (`design_ir.hpp`, `design_source_types.hpp`);
+view-core links it, so generic widgets can carry IR values. `pulp::design-import`
+holds the importers and codegen above view-core and is built only with
+`PULP_ENABLE_DESIGN_IMPORT=ON`; code that calls an importer or the IR JSON
+round-trip (`design_ir_io.hpp`) without the JS runtime links it alongside
+`pulp::view-core`. `pulp::design-import-audio-pack` is the built-in Pulp Figma
+Library of audio controls for the recognition resolver
+(`recognition_resolver_with_builtin_library()`). `pulp::view` and
+`pulp::view-native` link all three when design import is enabled.
 
 ### JS-scripted UI
 

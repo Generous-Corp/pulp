@@ -70,6 +70,7 @@ import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
 import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mjs";
+import { buildMaterializedPseudoBindings } from "./materialized_pseudo_bindings.mjs";
 import {
   normalizeMaterializedBindingDocument,
 } from "../jsx-runtime/materialized_binding_contract.mjs";
@@ -1723,23 +1724,38 @@ async function runCapture(options) {
       validateCaptureDimensions(
         finalExtent.width, finalExtent.height, dpr,
         "settled capture viewport");
-      const settledWidth = Math.max(resolvedViewportWidth, finalExtent.width);
-      const settledHeight = Math.max(resolvedViewportHeight, finalExtent.height);
-      await setCaptureViewport(cdp, settledWidth, settledHeight, dpr);
-      resolvedViewportWidth = settledWidth;
-      resolvedViewportHeight = settledHeight;
-      await waitForStable(cdp, {
-        networkIdle: () => pendingNetwork.size === 0,
-      });
-      finalExtent = await measureDocumentExtent(cdp);
-      if (finalExtent.width > resolvedViewportWidth ||
-          finalExtent.height > resolvedViewportHeight) {
-        const error = new Error(
-          `document extent ${finalExtent.width}x${finalExtent.height} ` +
-          `grew beyond settled viewport ${resolvedViewportWidth}x` +
-          `${resolvedViewportHeight}`);
-        error.code = "capture-extent-not-contained";
-        throw error;
+      let settledWidth = Math.max(resolvedViewportWidth, finalExtent.width);
+      let settledHeight = Math.max(resolvedViewportHeight, finalExtent.height);
+      // A responsive shell can reveal a second, slightly larger extent after
+      // the first viewport resize (for example a min-height that resolves
+      // against the new viewport).  Follow that fixed point a bounded number
+      // of times instead of publishing an incomplete capture or allowing an
+      // unbounded resize loop.  The maximum logical/device-pixel checks still
+      // apply on every iteration.
+      const MAX_EXTENT_SETTLE_RESIZES = 3;
+      let extentResizeCount = 0;
+      while (true) {
+        await setCaptureViewport(cdp, settledWidth, settledHeight, dpr);
+        resolvedViewportWidth = settledWidth;
+        resolvedViewportHeight = settledHeight;
+        await waitForStable(cdp, {
+          networkIdle: () => pendingNetwork.size === 0,
+        });
+        finalExtent = await measureDocumentExtent(cdp);
+        if (finalExtent.width <= resolvedViewportWidth &&
+            finalExtent.height <= resolvedViewportHeight) break;
+        if (++extentResizeCount >= MAX_EXTENT_SETTLE_RESIZES) {
+          const error = new Error(
+            `document extent ${finalExtent.width}x${finalExtent.height} ` +
+            `grew beyond settled viewport ${resolvedViewportWidth}x` +
+            `${resolvedViewportHeight} after ${extentResizeCount} resizes`);
+          error.code = "capture-extent-not-contained";
+          throw error;
+        }
+        settledWidth = Math.max(resolvedViewportWidth, finalExtent.width);
+        settledHeight = Math.max(resolvedViewportHeight, finalExtent.height);
+        validateCaptureDimensions(
+          settledWidth, settledHeight, dpr, "settled capture viewport");
       }
       await verifyCanvasRasterSignatures(
         cdp, captureExtentCanvasSignatures,
@@ -1934,6 +1950,11 @@ async function runCapture(options) {
       materializedDocument.paint_bindings = buildMaterializedPaintBindings(
         { ...snapshot, computedStyleNames: COMPUTED_STYLES },
         materializedDocument.coordinate_space);
+      const pseudoEvidence = buildMaterializedPseudoBindings(
+        { ...snapshot, computedStyleNames: COMPUTED_STYLES },
+        materializedDocument.coordinate_space);
+      materializedDocument.pseudo_bindings = pseudoEvidence.bindings;
+      materializedDocument.pseudo_diagnostics = pseudoEvidence.diagnostics;
     }
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);

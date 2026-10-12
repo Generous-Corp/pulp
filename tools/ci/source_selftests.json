@@ -167,6 +167,16 @@
       "timeout": 600.0
     },
     {
+      "name": "clean-worktree-planning-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_clean_worktree_planning"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 300.0
+    },
+    {
       "name": "clean-worktrees-selftest",
       "argv": [
         "-m",
@@ -247,6 +257,12 @@
       ]
     },
     {
+      "name": "dsp-capability-registry-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_dsp_capability_registry.py"
+      ]
+    },
+    {
       "name": "dsp-provenance-audit-selftest",
       "argv": [
         "{repo}/tools/scripts/test_dsp_provenance_audit.py"
@@ -257,6 +273,13 @@
       "argv": [
         "{repo}/tools/test_dsp_vocabulary.py"
       ]
+    },
+    {
+      "name": "evidence-archive-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_evidence_archive.py"
+      ],
+      "timeout": 60.0
     },
     {
       "name": "fleet-remote-probe-selftest",
@@ -609,6 +632,13 @@
       "timeout": 60.0
     },
     {
+      "name": "pulp-worktree-creation-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_pulp_worktree_creation.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "queue-batch-attribute-selftest",
       "argv": [
         "{repo}/tools/scripts/test_queue_batch_attribute.py"
@@ -941,6 +971,18 @@
       "name": "tmp-leak-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_tmp_leak_guard.py"
+      ]
+    },
+    {
+      "name": "toolchain-mise_profile-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_mise_profile.py"
+      ]
+    },
+    {
+      "name": "toolchain-test_generate-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_generate.py"
       ]
     },
     {

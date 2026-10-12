@@ -480,6 +480,7 @@ inline constexpr std::string_view browser_capture_runtime_files[]{
     "materialized_layout_bindings.mjs",
     "materialized_coordinate_space.mjs",
     "materialized_paint_bindings.mjs",
+    "materialized_pseudo_bindings.mjs",
     "materialized_text_bindings.mjs",
     "network_dependencies.mjs",
     // The capture imports this for the per-node platform-font answer; an

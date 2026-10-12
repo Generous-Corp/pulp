@@ -5,6 +5,18 @@ description: The measurement surface for ALL Pulp DSP and audio-pipeline work â€
 
 # Audio harness (observability + validation)
 
+## Windows ARM64/ARM64EC adapter boundary
+
+The Windows audio harness remains an offline evidence lane: run it against a
+deterministic WAV rendered by the plugin host and retain the exact binary,
+sample rate, block size, and artifact hash. A native ARM64 or ARM64EC/ARM64X
+plugin load check does not prove DAW compatibility. REAPER ARM64 is an
+ARM64X/ARM64EC host, so its scan, failed-scan list, real instance, render, and
+desktop screenshot must be recorded separately; a cache entry or
+`LoadLibrary`/factory result is discovery evidence only. If the host instance
+cannot be observed, report the DAW rung as unverified and do not promote the
+audio-lab result to plugin acceptance.
+
 Pulp's agent-first way to turn "I can't hear it" / "does this sound right?" into
 **inspectable, deterministic signal evidence** â€” without a device, speakers, or a
 debugger. You are reading this skill because you need to prove, measure, debug, or

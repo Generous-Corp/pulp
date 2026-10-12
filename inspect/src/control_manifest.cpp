@@ -12,6 +12,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <set>
 #include <sstream>
 
@@ -882,6 +883,38 @@ std::string serialize_control_registry() {
         out << "\n  ";
     out << "]\n}\n";
     return out.str();
+}
+
+namespace {
+
+std::filesystem::path without_trailing_separator(const std::filesystem::path& directory) {
+    auto normal = directory.lexically_normal();
+    return normal.has_filename() ? normal : normal.parent_path();
+}
+
+// "<bundle>/Contents/<leaf>" with a non-empty bundle component.
+bool bundle_contents_child(const std::filesystem::path& normal, std::string_view leaf) {
+    const auto contents = normal.parent_path();
+    return normal.filename() == leaf && contents.filename() == "Contents" &&
+           !contents.parent_path().filename().empty();
+}
+
+} // namespace
+
+std::vector<std::filesystem::path>
+control_sidecar_directories(const std::filesystem::path& executable_directory) {
+    const auto normal = without_trailing_separator(executable_directory);
+    if (bundle_contents_child(normal, "MacOS"))
+        return {normal.parent_path() / "Resources", executable_directory};
+    return {executable_directory};
+}
+
+std::filesystem::path
+control_sidecar_executable_directory(const std::filesystem::path& sidecar_directory) {
+    const auto normal = without_trailing_separator(sidecar_directory);
+    if (bundle_contents_child(normal, "Resources"))
+        return normal.parent_path() / "MacOS";
+    return sidecar_directory;
 }
 
 } // namespace pulp::inspect

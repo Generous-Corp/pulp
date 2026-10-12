@@ -16,6 +16,14 @@ description: |
 - Building or routing nodes in `SignalGraph`.
 - Writing tests that need to load a real plug-in binary.
 
+When narrowing a public SignalGraph header, keep `signal_graph.hpp` as the
+compatibility umbrella and make each implementation file include the focused
+processor adapter header when it calls adapter methods. If a lifetime helper
+needs an incomplete adapter type, define its destructor out of line in the
+host implementation. Build both `pulp-host` and the focused header-compile
+target so the dependency reduction does not silently break existing umbrella
+consumers.
+
 ## Mental model
 
 `PluginSlot` is the uniform interface. Each format backend is a single
@@ -1714,7 +1722,7 @@ Keep these host graph invariants covered by tests:
 
 `pulp::view::PluginManagerPanel` sits on top of the scanner backend and
 gives host apps a ready-made "manage plugins" UI. The widget is
-header-only (`core/view/include/pulp/view/plugin_manager_panel.hpp`)
+header-only (`core/view/audio/include/pulp/view/plugin_manager_panel.hpp`)
 and drives everything through `PluginManagerModel`:
 
 - Tests use `InMemoryPluginManagerModel` — pre-populate `scanned_rows`,

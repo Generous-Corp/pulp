@@ -8,7 +8,10 @@ description: Route repository-qualified changes across Pulp and Vellum using Pul
 ## Design-import refactor event contract
 
 The design-import refactor keeps generic importer, compiler, bridge-contract,
-and SDK work in Pulp until Vellum is activated. Two independent event kinds
+and SDK work in Pulp until each target flips: the exception ends for a target in
+the same Pulp change that switches it to an exact installed Vellum package and
+freezes its Pulp copy (see `docs/contracts/vellum-extraction-freeze.md`). Source
+authority being `active` in `.github/vellum-ownership.json` does not end it. Two independent event kinds
 remain in force: a **watch** event under
 `.github/vellum-expansion-watch-events/` for watched capability-family paths,
 and a **change** event under `.github/vellum-change-events/` for a transferred
@@ -18,8 +21,13 @@ starts with the exact prefix:
 `design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)`
 
 The watch event has `disposition: watch-only-no-authority` and
-`authority_effect: none`. Record every change event in
-`docs/contracts/vellum-inheritance-ledger.md`; do not use
+`authority_effect: none`. Record every such change event as its own entry file
+`docs/contracts/vellum-inheritance-ledger/<event_id>.json` (schema in that
+directory's README; `slices` must equal the event's). The older
+`docs/contracts/vellum-inheritance-ledger.md` is frozen: one shared file made
+concurrent pull requests conflict, so `vellum_inheritance_ledger_check.py` (ctest
+`vellum-inheritance-ledger`) rejects any change to it and any prefixed event
+without an entry. Do not use
 `emergency-exception` or `framework-backport` for this planned program.
 
 Run from the Pulp repository root. Treat the projection as authority; do not
@@ -105,6 +113,15 @@ failure and reads as a rejected event.
 The event's `capability_families` must equal the affected set exactly, and its
 `rationale` should name the single line that crossed the selector, so a reader
 can tell a manifest registration apart from a real harness change.
+
+## The inventory step can fail without anything being stale
+
+`vellum_watch_preflight.py --inventories` runs the `Vellum freeze`
+verifiers. A verifier that exits 3 could not run at all (for example,
+`pulp_tooling_disposition.py` under a python3 without PyYAML). The preflight
+reports it as "could not be verified" with exit 13, and never prints a
+regenerate command for it. Fix the interpreter and push again; do not
+regenerate the inventory.
 
 ## GPU doctor boundary
 

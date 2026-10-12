@@ -118,6 +118,7 @@ CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 LIVE_BUILD_CHECK="$ROOT/tools/scripts/live_build_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
+FOUNDATION_INCLUDE_LINT="$ROOT/tools/scripts/foundation_include_lint.py"
 SAFE_PATH_LINT="$ROOT/tools/scripts/safe_path_guard_lint.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
@@ -223,7 +224,8 @@ fi
 # the authority — a local refusal can only stop what CI would also refuse.
 # `--inventories` also runs the freeze job's inventory verifiers (cut manifest,
 # ownership projection, tooling disposition) and prints the regenerate command
-# for a stale one (exit 11). It also runs the job's change-event checker,
+# for a stale one (exit 11), or names the interpreter when a verifier cannot
+# run at all, e.g. without PyYAML (exit 13). It also runs the job's change-event checker,
 # `vellum_freeze_check.py`: a touched path in a transferred slice of
 # `.github/vellum-ownership.json` owes a `.github/vellum-change-events/` event,
 # and the script prints that JSON (or writes it with `--write-change-event
@@ -233,7 +235,8 @@ if [ -f "$VELLUM_HINT" ]; then
     echo "▸ vellum watch-event coverage (merge-base $BASE..HEAD)" >&2
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
-    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
+    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ] ||
+       [ "$vellum_rc" -eq 13 ]; then
         fail=1
     fi
 fi
@@ -751,6 +754,18 @@ if [ -f "$WIN32_INCLUDE_LINT" ]; then
     fi
 fi
 
+# ── 9c. foundation include lint (core/platform, runtime, simd stay bottom) ──
+# The foundation layer is linked by every other subsystem, so an upper-layer
+# include here (audio, view, format, ...) leaks that layer into audio-free
+# consumers. Lexical, whole-tree, sub-second.
+if [ -f "$FOUNDATION_INCLUDE_LINT" ]; then
+    echo "" >&2
+    echo "▸ foundation include lint (no upper-layer includes in core/platform|runtime|simd)" >&2
+    if ! "$PYTHON" "$FOUNDATION_INCLUDE_LINT" --root "$ROOT" >&2; then
+        fail=1
+    fi
+fi
+
 if [ -f "$SAFE_PATH_LINT" ]; then
     echo "" >&2
     echo "▸ safe-path guard lint (untrusted paths screened by the shared helper)" >&2
@@ -1030,7 +1045,7 @@ if [ -n "${PULP_SKIP_PREQUEUE_GUARDS:-}" ]; then
     echo "  A skip is not a pass — both still run as ctests in the required gate." >&2
 else
     prequeue_changed="$(git diff --name-only "$BASE"...HEAD 2>/dev/null || true)"
-    for prequeue_guard in catch_discover_timeout_guard.py clock_only_temp_key_guard.py check_skip_not_pass.py; do
+    for prequeue_guard in catch_discover_timeout_guard.py catch_test_name_guard.py clock_only_temp_key_guard.py check_skip_not_pass.py; do
         prequeue_path="$ROOT/tools/scripts/$prequeue_guard"
         [ -f "$prequeue_path" ] || continue
         echo "" >&2

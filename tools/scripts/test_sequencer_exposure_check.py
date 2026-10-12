@@ -8,6 +8,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+from unittest import mock
 from pathlib import Path
 
 from sequencer_exposure_check import (
@@ -24,8 +25,10 @@ from sequencer_exposure_check import (
     _load_sequencer_trailers,
     _read_ledger_at_anchor,
     _mechanical_version_paths,
+    _mechanical_workflow_paths,
     _semantic_added_paths,
     assemble_ledger,
+    config_doc_targets,
     is_ledger_path,
     is_sequencer_owned_path,
     load_ledger_from_worktree,
@@ -37,7 +40,9 @@ from sequencer_exposure_check import (
     validate_schema_contract,
     validate_tombstone_provenance,
     validate_transition,
+    sequencer_paths_after_dependabot_exemption,
 )
+import sequencer_exposure_check
 
 
 SHA_A = "1" * 40
@@ -327,6 +332,19 @@ def initialize_history(root: Path) -> tuple[str, str, str, str]:
 
 
 def main() -> int:
+    mixed_paths = [".github/workflows/timeline-fuzz.yml", "core/timeline/x.cpp"]
+    with mock.patch.object(
+        sequencer_exposure_check, "dependabot_uses_only_diff", return_value=False
+    ):
+        retained = sequencer_paths_after_dependabot_exemption(
+            "origin/main", "HEAD", mixed_paths
+        )
+    if retained != mixed_paths:
+        raise AssertionError(
+            "mixed workflow plus core/timeline diff was incorrectly exempted"
+        )
+    _CHECK_TALLY["clean"] += 1
+
     negative = _ancestry_problem(
         subprocess.CompletedProcess([], 1, stdout="", stderr=""),
         "not ancestor", "history unavailable",
@@ -1313,6 +1331,111 @@ def main() -> int:
         )
     _CHECK_TALLY["calibrated"] += 1
 
+    # ── A guide the config-doc gate maps cannot be owned ─────────────────────
+    # config_doc_check.py makes every change to a mapped CI/release config also
+    # edit one of the guides its map names. A row that owned one such guide was
+    # its only owner, so every PR changing that config failed this gate unless
+    # it carried a ledger row. The map decides which guides are refused.
+    def config_doc_errors(document: dict, at: Path) -> list[str]:
+        return [error for error in validate_document(document, at)
+                if "config-doc gate maps" in error or "config-doc map" in error]
+
+    fixture_guide = "docs/guides/fixture-config-guide.md"
+    with tempfile.TemporaryDirectory(prefix="pulp-config-doc-guide-") as guide_directory:
+        guide_root = Path(guide_directory)
+        fixture_map = guide_root / "tools/scripts/config_doc_map.json"
+        owning_guide = copy.deepcopy(valid)
+        owning_guide["rows"][0]["owned_paths"] = [
+            *valid["rows"][0]["owned_paths"], fixture_guide
+        ]
+        # CONTROL: without a map, the same row is clean, so the refusal below comes
+        # from the map and not from the path's shape.
+        if config_doc_errors(owning_guide, guide_root):
+            raise AssertionError("a guide was refused with no config-doc map present")
+        # The owned guide sits in the SECOND entry, so a reader that stops at
+        # the first entry is caught.
+        write(guide_root, "tools/scripts/config_doc_map.json", json.dumps({"entries": [
+            {"paths": ["other.yml"], "docs": ["docs/guides/other-guide.md"], "why": "fixture"},
+            {"paths": ["fixture.yml"], "docs": [fixture_guide], "why": "fixture"},
+        ]}))
+        planted = config_doc_errors(owning_guide, guide_root)
+        if not any(fixture_guide in error and "owned_paths" in error for error in planted):
+            raise AssertionError(f"a row owning a mapped guide was accepted: {planted}")
+        _CHECK_TALLY["calibrated"] += 1
+
+        owning_guide_tombstone = copy.deepcopy(valid)
+        owning_guide_tombstone["tombstones"] = [
+            {
+                "id": "retired-guide-annexation",
+                "delivery_state": "pending",
+                "claim_id": "0c6a2e2b-8b1f-4c41-9d0e-3f3c6a1d2b7e",
+                "owned_paths": [fixture_guide],
+                "rationale": "A tombstone may not own a mapped guide either.",
+            }
+        ]
+        tombstone_refusals = config_doc_errors(owning_guide_tombstone, guide_root)
+        if not any(fixture_guide in error for error in tombstone_refusals):
+            raise AssertionError("a tombstone owning a mapped guide was accepted")
+        _CHECK_TALLY["calibrated"] += 1
+        # CONTROL: the valid fixture, which owns no mapped guide, stays clean with
+        # the map present.
+        if config_doc_errors(valid, guide_root):
+            raise AssertionError("the map refused a row that owns no mapped guide")
+        # A map that names no guide is an error, not a refusal of nothing.
+        for empty in ({"entries": []}, {"entries": [{"paths": ["x.yml"], "docs": [], "why": "x"}]}):
+            fixture_map.write_text(json.dumps(empty), encoding="utf-8")
+            empty_map = config_doc_errors(valid, guide_root)
+            if not any("config-doc map names no guide" in error for error in empty_map):
+                raise AssertionError(f"an empty config-doc map was accepted: {empty} {empty_map}")
+        _CHECK_TALLY["calibrated"] += 1
+        fixture_map.write_text("{not json", encoding="utf-8")
+        unreadable_map = config_doc_errors(valid, guide_root)
+        if not any("unreadable config-doc map" in error for error in unreadable_map):
+            raise AssertionError("an unreadable config-doc map was read as no mapped guide")
+        _CHECK_TALLY["calibrated"] += 1
+        fixture_map.unlink()
+
+    # The checked-in map refuses its own guides, and no shipped row or
+    # tombstone owns one. The real map and ledger are the control, because the
+    # failure mode is a row landing in the checked-in tree. The expected guides
+    # are read from the raw map here, not through config_doc_targets(): a set
+    # taken from the function under test would shrink with its bug.
+    raw_entries = json.loads(
+        (checkout_root / "tools/scripts/config_doc_map.json").read_text(encoding="utf-8")
+    )["entries"]
+    mapped_guides = {doc for entry in raw_entries for doc in entry["docs"]}
+    entry_docs = [set(entry["docs"]) for entry in raw_entries]
+    distinct_entries = sum(
+        1 for index, docs in enumerate(entry_docs)
+        if docs - set().union(*entry_docs[:index], *entry_docs[index + 1:])
+    )
+    if distinct_entries < 2:
+        raise AssertionError(
+            "the real map has fewer than two entries naming a guide no other entry "
+            "names, so the loop below cannot catch a first-entry-only reader"
+        )
+    _, map_errors = config_doc_targets(checkout_root)
+    if map_errors:
+        raise AssertionError(f"the checked-in config-doc map is unreadable: {map_errors}")
+    shipped_rows, _, load_errors = load_ledger_from_worktree(checkout_root)
+    if load_errors or not shipped_rows or not shipped_rows["rows"]:
+        raise AssertionError(f"shipped ledger did not load: {load_errors}")
+    owned_guides = sorted(
+        (entry["id"], path)
+        for entry in [*shipped_rows["rows"], *shipped_rows["tombstones"]]
+        for path in entry.get("owned_paths", [])
+        if path in mapped_guides
+    )
+    if owned_guides:
+        raise AssertionError(f"shipped ledger owns config-doc guides: {owned_guides}")
+    # Every guide the checked-in map names is refused, not only the first.
+    for real_guide in sorted(mapped_guides):
+        owning_real = copy.deepcopy(valid)
+        owning_real["rows"][0]["owned_paths"] = [*valid["rows"][0]["owned_paths"], real_guide]
+        if not any(real_guide in error for error in config_doc_errors(owning_real, checkout_root)):
+            raise AssertionError(f"the checked-in map did not refuse its own guide {real_guide}")
+    _CHECK_TALLY["calibrated"] += 1
+
     # ── The ledger is carried as one file per row ────────────────────────────
     # A single document has one append point, so two branches that each add a
     # row rewrite the same bytes and conflict with EACH OTHER while each merges
@@ -1614,6 +1737,38 @@ def main() -> int:
             )
         _CHECK_TALLY["calibrated"] += 1
 
+        # Workflow action refs are mechanical per path, regardless of author.
+        workflow_path = ".github/workflows/timeline-fuzz.yml"
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "seed workflow")
+        workflow_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v5\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "workflow action bump")
+        action_paths, action_errors = _mechanical_workflow_paths(
+            mech_root, workflow_base, [workflow_path], "HEAD"
+        )
+        if action_errors or workflow_path not in action_paths:
+            raise AssertionError(
+                f"uses-only sequencer workflow was not mechanical: {action_paths}, {action_errors}"
+            )
+        _CHECK_TALLY["clean"] += 1
+
+        # CONTROL: a run change in the same workflow remains sequencer-owned.
+        run_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, workflow_path, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - run: ctest\n")
+        git(mech_root, "add", workflow_path)
+        git(mech_root, "commit", "-q", "-m", "workflow run change")
+        run_paths, run_errors = _mechanical_workflow_paths(
+            mech_root, run_base, [workflow_path], "HEAD"
+        )
+        if run_errors or workflow_path in run_paths:
+            raise AssertionError(
+                f"control: run change was treated as mechanical: {run_paths}, {run_errors}"
+            )
+        _CHECK_TALLY["calibrated"] += 1
+
         # 3. CONTROL: an undeclared path is never mechanical, however it changes.
         other = "docs/status/some-other-artifact.json"
         other_base = git(mech_root, "rev-parse", "HEAD").strip()
@@ -1654,6 +1809,28 @@ def main() -> int:
         raise AssertionError(
             f"a mechanical version rewrite still demanded a ledger row: {green}"
         )
+
+    # A uses-only change in a sequencer-owned workflow is mechanical per path,
+    # while a run change in the same file still requires transition coverage.
+    sequencer_workflow = ".github/workflows/timeline-fuzz.yml"
+    workflow_green = validate_transition(
+        mech_base_doc, mech_current, [sequencer_workflow],
+        mechanical_version_paths={sequencer_workflow},
+    )
+    if any(sequencer_workflow in error for error in workflow_green):
+        raise AssertionError(
+            f"a uses-only sequencer workflow still demanded a ledger row: {workflow_green}"
+        )
+    workflow_red = validate_transition(
+        mech_base_doc, mech_current, [sequencer_workflow],
+        mechanical_version_paths=set(),
+    )
+    if not any(sequencer_workflow in error for error in workflow_red):
+        raise AssertionError(
+            "control: a run change in a sequencer workflow was not exposed"
+        )
+    _CHECK_TALLY["clean"] += 1
+    _CHECK_TALLY["calibrated"] += 1
 
     print(
         "sequencer exposure checker selftest: OK "

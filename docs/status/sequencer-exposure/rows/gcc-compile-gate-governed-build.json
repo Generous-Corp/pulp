@@ -6,7 +6,6 @@
   "claim_id": "governed-gcc-compile-20261008",
   "owned_paths": [
     ".github/workflows/gcc-compile-gate.yml",
-    "docs/guides/local-ci.md",
     "docs/status/sequencer-exposure/rows/gcc-compile-gate-governed-build.json",
     "tools/ci/test_build_governance_paths.py"
   ],
@@ -21,6 +20,12 @@
       "path": "tools/ci/test_build_governance_paths.py",
       "needles": [
         "test_gcc_compile_workflow_builds_use_governor"
+      ]
+    },
+    {
+      "path": "docs/guides/local-ci.md",
+      "needles": [
+        "`tools/ci/governed-build.sh cmake --build build-gcc --target $(cat targets.txt)`,"
       ]
     }
   ],

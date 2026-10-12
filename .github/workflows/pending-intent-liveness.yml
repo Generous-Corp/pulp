@@ -33,7 +33,7 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0  # need history back to the last applied marker

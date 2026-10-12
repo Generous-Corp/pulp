@@ -59,6 +59,17 @@ if(EXISTS "${_pulp_sdk_provenance}")
                 "or unsafe contract; refusing to consume it.")
         endif()
         set(PULP_SDK_DEVELOPMENT TRUE)
+    elseif(_pulp_sdk_kind STREQUAL "source-install")
+        string(JSON _pulp_sdk_dirty ERROR_VARIABLE _pulp_sdk_dirty_error
+               GET "${_pulp_sdk_provenance_json}" source_git_dirty)
+        string(JSON _pulp_sdk_dirty_type ERROR_VARIABLE _pulp_sdk_dirty_type_error
+               TYPE "${_pulp_sdk_provenance_json}" source_git_dirty)
+        if(_pulp_sdk_eligible OR _pulp_sdk_dirty_error OR
+           _pulp_sdk_dirty_type_error OR
+           NOT _pulp_sdk_dirty_type STREQUAL "BOOLEAN")
+            message(FATAL_ERROR "Pulp source install provenance is unsafe at ${_pulp_sdk_provenance}")
+        endif()
+        set(PULP_SDK_DEVELOPMENT TRUE)
     elseif(_pulp_sdk_kind STREQUAL "release")
         string(JSON _pulp_sdk_profile ERROR_VARIABLE _pulp_sdk_profile_error
                GET "${_pulp_sdk_provenance_json}" profile)

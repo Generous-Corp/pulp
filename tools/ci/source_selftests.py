@@ -204,23 +204,31 @@ class _Slots:
             self.cond.notify_all()
 
 
-def ctest_verdict(entry: dict[str, Any], returncode: int, output: str) -> int:
-    """The exit status ctest would record, given the test's properties.
+def ctest_outcome(entry: dict[str, Any], returncode: int, output: str) -> tuple[int, bool]:
+    """(exit status, skipped) as ctest would record them, given the test's properties.
 
-    PASS_REGULAR_EXPRESSION decides pass/fail by output alone, a
-    SKIP_RETURN_CODE exit is a skip (reported as a pass, marked in the
-    output), and WILL_FAIL inverts the result, all as ctest does.
+    A SKIP_RETURN_CODE exit or SKIP_REGULAR_EXPRESSION match is a skip: status
+    0 and ``skipped`` true, so a caller can keep skips out of its pass count.
+    Otherwise PASS_REGULAR_EXPRESSION decides pass/fail by output alone, and
+    WILL_FAIL inverts the result, all as ctest does.
     """
     skip = entry.get("skip_return_code")
     if skip is not None and returncode == int(skip):
-        return 0
+        return 0, True
+    # A CMake regex `.` also matches a newline.
+    if any(re.search(p, output or "", re.DOTALL) for p in entry.get("skip_regex") or []):
+        return 0, True
     patterns = entry.get("pass_regex") or []
     if patterns:
-        # A CMake regex `.` also matches a newline.
         returncode = 0 if any(re.search(p, output or "", re.DOTALL) for p in patterns) else 1
     if entry.get("will_fail"):
         returncode = 0 if returncode != 0 else 1
-    return returncode
+    return returncode, False
+
+
+def ctest_verdict(entry: dict[str, Any], returncode: int, output: str) -> int:
+    """The exit status ctest would record; a skip is 0 (see ctest_outcome)."""
+    return ctest_outcome(entry, returncode, output)[0]
 
 
 def _run_one(
@@ -272,8 +280,8 @@ def _run_one(
                     timeout=timeout,
                     check=False,
                 )
-                result.update(returncode=ctest_verdict(entry, proc.returncode, proc.stdout),
-                              output=proc.stdout)
+                verdict, skipped = ctest_outcome(entry, proc.returncode, proc.stdout)
+                result.update(returncode=verdict, skipped=skipped, output=proc.stdout)
             except subprocess.TimeoutExpired as exc:
                 out = exc.stdout or ""
                 if isinstance(out, bytes):
@@ -325,7 +333,9 @@ def run(
             res = future.result()
             results.append(res)
             verdict = "Passed" if res["returncode"] == 0 else "***Failed"
-            if res["returncode"] == 0 and res["attempts"] > 1:
+            if res["returncode"] == 0 and res.get("skipped"):
+                verdict = "Skipped"
+            elif res["returncode"] == 0 and res["attempts"] > 1:
                 verdict = "Passed (after retry)"
             print(
                 f"{index:4d}/{len(entries)} {res['name']} ... {verdict} "
@@ -557,6 +567,9 @@ def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
         entry["pass_regex"] = value if isinstance(value, list) else str(value).split(";")
     if props.get("SKIP_RETURN_CODE") not in (None, ""):
         entry["skip_return_code"] = int(props["SKIP_RETURN_CODE"])
+    if props.get("SKIP_REGULAR_EXPRESSION"):
+        value = props["SKIP_REGULAR_EXPRESSION"]
+        entry["skip_regex"] = value if isinstance(value, list) else str(value).split(";")
     if str(props.get("WILL_FAIL", "")).upper() in ("1", "ON", "TRUE", "YES"):
         entry["will_fail"] = True
     if props.get("ENVIRONMENT"):
@@ -757,17 +770,24 @@ def _cmake_calls(source: str, command: str) -> list[list[str]]:
     """Argument lists of every ``command(...)`` call, parentheses balanced."""
     calls = []
     for match in re.finditer(r"(?im)^\s*" + command + r"\s*\(", source):
-        depth, index = 1, match.end()
+        # A line comment inside the call is not an argument: its words would
+        # shift every later PROPERTIES key/value pair.
+        depth, index, quoted, kept = 1, match.end(), False, []
         while index < len(source) and depth:
             char = source[index]
-            if char == "#" and (index == 0 or source[index - 1] != "\\"):
+            if char == '"' and source[index - 1] != "\\":
+                quoted = not quoted
+            elif not quoted and char == "#":
                 index = source.find("\n", index)
                 if index < 0:
                     break
                 continue
-            depth += {"(": 1, ")": -1}.get(char, 0)
+            elif not quoted:
+                depth += {"(": 1, ")": -1}.get(char, 0)
+            if depth:
+                kept.append(char)
             index += 1
-        calls.append(_cmake_args(source[match.end():index - 1]))
+        calls.append(_cmake_args("".join(kept)))
     return calls
 
 
@@ -1188,11 +1208,19 @@ def _run_and_report(args: argparse.Namespace, parser: argparse.ArgumentParser,
     for res in caused:
         print(f"\n===== {res['name']} (exit {res['returncode']}) =====")
         print(res.get("output", "")[-6000:])
+    skipped = [r for r in results if r["returncode"] == 0 and r.get("skipped")]
+    passed = len(results) - len(failed) - len(skipped)
     print(
-        f"\nsource-selftests: {len(results) - len(failed)} passed, "
+        f"\nsource-selftests: {passed} passed, {len(skipped)} skipped, "
         f"{len(caused)} failed, {len(preexisting)} pre-existing on base, "
         f"out of {len(results)} in {time.monotonic() - start:.1f}s"
     )
+    if results and passed == 0 and not failed:
+        # Every selected entry skipped: nothing was executed, so the lane has
+        # no evidence either way and must not report green.
+        print("source-selftests: every selected entry skipped; nothing was executed",
+              flush=True)
+        return 1
     return 1 if caused or len(results) != len(entries) else 0
 
 

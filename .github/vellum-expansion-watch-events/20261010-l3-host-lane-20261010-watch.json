@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261010-l3-host-lane-20261010-watch",
+  "created_at": "2026-10-10T21:52:11Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Adds pulp-host-lane-probe under tools/editor-open (plus its wrapper, registry entry and two ctest registrations): a development probe that loads built plug-in bundles into one host process and records load, audio, editor lifecycle read-back and the dyld image census for the Vellum parity host lane. It reads existing Pulp host APIs only; no design-import, Chromium, rendering, packaging or plug-in output changes, and no authority moves between Pulp and Vellum.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

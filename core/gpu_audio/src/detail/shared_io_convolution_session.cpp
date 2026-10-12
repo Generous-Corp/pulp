@@ -329,6 +329,7 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
         // provider and let explicit release()/destruction retry its barrier.
         return false;
     }
+    plan_.set_prediction_policy(config.prediction);
     if (!pipeline_.prepare(config.pipeline, plan_.preparation_epoch())) {
         (void)plan_.release();
         return false;
@@ -384,6 +385,25 @@ bool SharedIoConvolutionSession::pack_input(const SharedIoConvolutionPipeline::L
         }
     }
     return true;
+}
+
+std::optional<std::uint64_t> SharedIoConvolutionSession::callback_deadline_ns(
+    const SharedIoConvolutionPipeline::Lease& ingress) const noexcept {
+    const auto callback_start_ns = ingress.callback_ingress_ns();
+    if (!config_.pipeline.capture_callback_timing)
+        return std::uint64_t{0};
+    if (callback_start_ns == 0 || config_.sample_rate == 0)
+        return std::nullopt;
+
+    // Match the private convolution callback's existing one-block budget. A
+    // A minimum keeps low-rate or very small blocks from becoming an immediate
+    // admission refusal. Unknown or overflowing timestamps fail closed.
+    const auto block_ns =
+        (std::uint64_t(config_.pipeline.block_size) * 1'000'000'000ull) / config_.sample_rate;
+    const auto budget_ns = std::max<std::uint64_t>(1'000'000ull, block_ns);
+    if (callback_start_ns > std::numeric_limits<std::uint64_t>::max() - budget_ns)
+        return std::nullopt;
+    return callback_start_ns + budget_ns;
 }
 
 bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
@@ -490,13 +510,38 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
                 pipeline.end_worker_admission();
             }
         } admission{pipeline_};
-        auto input = plan_.acquire_input(pending_ingress_->stamp().sequence, 0);
+
+        const auto deadline = callback_deadline_ns(*pending_ingress_);
+        const auto prediction_refusals = plan_.telemetry().prediction_refusals;
+        auto input = deadline ? plan_.acquire_input(pending_ingress_->stamp().sequence, *deadline)
+                              : std::optional<SharedIoArena::WriteLease>{};
         if (!input) {
-            if (plan_.available_slots() == 0)
+            const bool refused =
+                !deadline || plan_.telemetry().prediction_refusals > prediction_refusals;
+            if (!refused && plan_.available_slots() == 0)
                 ++provider_starved_;
-            return true; // retain the bridge lease until a physical slot retires.
+            if (!refused)
+                return true; // retain the bridge lease until a physical slot retires.
+
+            const auto stamp = pending_ingress_->stamp();
+            const bool released = pipeline_.release_input(*pending_ingress_);
+            if (!released)
+                return false;
+            pending_ingress_.reset();
+            ++result.refused;
+            ++result.dropped_ingress;
+            if (!pipeline_.record_terminal(stamp, SharedIoConvolutionPipeline::Terminal::Failed,
+                                           {})) {
+                fail_closed();
+                return false;
+            }
+            ++result.terminal_records;
+            pipeline_.drain_terminals();
+            continue;
         }
-        const auto submit = SharedIoComputePlan::SubmitToken{input->token, 0};
+
+        const auto deadline_ns = *deadline;
+        const auto submit = SharedIoComputePlan::SubmitToken{input->token, deadline_ns};
         trace_admit(input->token);
         trace_stage(input->token, SharedIoTraceStage::EncodeBegin);
         if (!pack_input(*pending_ingress_, *input)) {

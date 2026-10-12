@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261009-runtime-canvas-readiness-20261009-watch",
+  "created_at": "2026-10-09T13:32:46Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Adds a browser-capture regression fixture that waits for an asynchronous analyzer_frame callback and a planted timeout negative; it changes test evidence only and moves no design-import, Chromium, rendering, packaging, or authority boundary.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/capture.integration.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

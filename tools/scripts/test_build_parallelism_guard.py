@@ -345,6 +345,26 @@ class WorkflowAuthorOwnsWholeMachineTest(unittest.TestCase):
                 self.assertIn("tools/ci/governed-build.sh", context,
                               f"timeline hardening build is not governed: {stripped}")
 
+    def test_install_consumer_smoke_builds_use_the_governor(self):
+        """The install-consumer lane builds both Pulp and its external probe.
+
+        Both run on a matrix that can resolve to shared self-hosted runners;
+        keep the governor on each command so the install smoke cannot bypass
+        lease and build-directory policy.
+        """
+        import re
+        path = guard.REPO_ROOT / ".github/workflows/install-consumer-smoke.yml"
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if re.search(r"cmake\s+--build", stripped):
+                context = "\n".join(lines[max(0, index - 2):index + 1])
+                self.assertIn("tools/ci/governed-build.sh", context,
+                              f"install-consumer workflow build is not governed: {stripped}")
+
 
 NINJA_CONFIGURE = (
     'cmake -S "$src" -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release\n')

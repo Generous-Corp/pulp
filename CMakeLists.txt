@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.936.3
+    VERSION 0.955.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -408,6 +408,7 @@ add_subdirectory(core/timeline_editor)
 add_subdirectory(core/playback)
 add_subdirectory(core/events)
 add_subdirectory(core/sample_bank_manifest)
+add_subdirectory(core/content)
 add_subdirectory(core/state)
 add_subdirectory(core/audio)
 if(PULP_ENABLE_AUTHORING_CAPSULE)
@@ -429,7 +430,7 @@ endif()
 if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
 endif()
-# After core/render so the GPU convolver node can link pulp::render when GPU is
+# After core/render so the GPU convolver node can link pulp::gpu-device when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
@@ -548,6 +549,65 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "For a stripped build set -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF.")
     endif()
     enable_testing()
+    # The file-api query is retained in the build tree so the Vellum closure
+    # receipt can be regenerated from the exact configured target graph. The
+    # gate is enforcing; only explicitly pending P4/P12/P13/P17 debts remain
+    # allowlisted and are removed as those carve PRs land.
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
+    file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME pulp.vellum-closure-boundary
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+            manifest
+            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --build-dir "${CMAKE_BINARY_DIR}"
+            --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+            --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+    set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-gate
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+            gate
+            --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+            --allowlist "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_allowlist.json"
+            --generate
+            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --build-dir "${CMAKE_BINARY_DIR}"
+            --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
+    set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+        DEPENDS pulp.vellum-closure-boundary
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-gate-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json"
+            --break "perl -0pi -e 's/pulp::runtime/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
+    set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-external-input-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json"
+            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60/unresolved/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
+    set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-edge-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json"
+            --break "perl -0pi -e 's/pulp::view-audio/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allow pulp::view-audio")
+    set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-policy-selftest
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/test_vellum_closure.py")
+    set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
+        LABELS "pr")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
     FetchContent_Declare(
@@ -678,8 +738,10 @@ endif()
 # ordinary unit-test owners above intentionally load before those public helper
 # modules.
 if(PULP_BUILD_TESTS)
-    add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/bundle_name_quoting)
+    add_subdirectory(test/fixtures/render_provider_floor)
+    add_subdirectory(test/fixtures/native_ui_link_floor)
+    add_subdirectory(test/fixtures/no_editor_link_floor)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
@@ -876,7 +938,8 @@ endif()
 if(ANDROID)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
-        core/platform/src/android/jni_motion.cpp
+        core/view/platform/android/jni_motion.cpp
+        core/audio/platform/android/audio_jni.cpp
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
     target_include_directories(pulp-jni PRIVATE
@@ -901,6 +964,16 @@ if(ANDROID)
         android
         log
     )
+    # The Android app shell: it owns the GPU surface, drives the view hierarchy
+    # and the widget bridge, and plays the demo synth, so it sits at the top of
+    # the closure with the JNI bridge rather than inside pulp-render.
+    if(TARGET pulp-render AND PULP_ENABLE_GPU)
+        target_sources(pulp-jni PRIVATE
+            core/render/platform/android/gpu_surface_android.cpp
+            core/render/platform/android/gpu_surface_android_jni.cpp
+        )
+        target_link_libraries(pulp-jni PRIVATE pulp::render)
+    endif()
     # Ensure all static library symbols are included (needed for JNI registration)
     # Ensure JNI exports from static libs are included in the shared lib.
     # Without --whole-archive, the linker strips "unused" JNI_OnLoad and
@@ -910,6 +983,7 @@ if(ANDROID)
         $<TARGET_FILE:pulp-platform>
         $<TARGET_FILE:pulp-audio>
         $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
+        $<$<TARGET_EXISTS:pulp-gpu-device>:$<TARGET_FILE:pulp-gpu-device>>
         -Wl,--no-whole-archive)
 
     # TalkBack accessibility JNI entry points live in pulp-view
@@ -938,6 +1012,20 @@ endif()
 # ── SDK Install Rules ──────────────────────────────────────────────────────
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
+
+# Match the target names exported by find_package(Pulp) for source consumers.
+# Aliases are global targets, so the parent of add_subdirectory(Pulp) sees them.
+foreach(_pulp_export_target IN LISTS PULP_SDK_TARGETS)
+    if(TARGET "${_pulp_export_target}")
+        get_target_property(_pulp_export_name "${_pulp_export_target}" EXPORT_NAME)
+        if(NOT _pulp_export_name)
+            string(REGEX REPLACE "^pulp-" "" _pulp_export_name "${_pulp_export_target}")
+        endif()
+        if(NOT TARGET "Pulp::${_pulp_export_name}")
+            add_library("Pulp::${_pulp_export_name}" ALIAS "${_pulp_export_target}")
+        endif()
+    endif()
+endforeach()
 
 # Build-specific Forge metadata is separate from the statically audited public
 # header install surface. The catalog module installs only share/pulp JSON.

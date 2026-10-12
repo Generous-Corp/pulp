@@ -484,7 +484,7 @@
         "apple/Tests/PulpSwiftTests/PulpMotionTests.swift",
         "test/test_motion_swift_bridge.cpp",
         "core/platform/include/pulp/platform/android/motion_bridge.h",
-        "core/platform/src/android/jni_motion.cpp",
+        "core/view/platform/android/jni_motion.cpp",
         "android/app/src/main/kotlin/com/pulp/motion/**",
         "android/app/src/test/kotlin/com/pulp/motion/**",
         "test/test_motion_android_bridge.cpp"
