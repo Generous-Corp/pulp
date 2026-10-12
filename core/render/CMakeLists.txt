@@ -197,8 +197,13 @@ foreach(_pulp_gpu_target IN ITEMS pulp-gpu-device pulp-render)
         set(_pulp_gpu_provider_scope PUBLIC)
         set(_pulp_gpu_provider_def_scope PUBLIC)
     endif()
+    # A native Skia slice owns the Dawn implementation when its archive is
+    # present. Check the file itself rather than relying on the legacy
+    # NOTFOUND sentinel: cross-platform configure scopes can leave the normal
+    # variable unset even though FindSkia selected a valid archive. Linking
+    # wgpu-native as well produces duplicate wgpu* symbols on Windows.
     if(PULP_HAS_WEBGPU AND TARGET webgpu
-       AND NOT (PULP_HAS_SKIA AND NOT DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND"))
+       AND NOT (PULP_HAS_SKIA AND EXISTS "${DAWN_LIBRARY}"))
         target_link_libraries(${_pulp_gpu_target} ${_pulp_gpu_provider_scope} webgpu)
     endif()
     if(PULP_HAS_WEBGPU)
