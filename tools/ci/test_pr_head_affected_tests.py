@@ -152,9 +152,28 @@ class SelectionTests(unittest.TestCase):
         plan = self.plan(["test/test_a.cpp"], selection("focused", ["unit-a"]), own=["unit-b"])
         self.assertEqual(plan["tests"], ["unit-a"])
 
-    def test_an_unrelated_tools_change_does_not_reach_the_families(self) -> None:
-        plan = self.plan(["tools/scripts/other.py"], selection("focused", ["other"]))
-        self.assertEqual(plan["tests"], ["other"])
+    def test_an_unrelated_tools_change_fails_open_to_all_script_tests(self) -> None:
+        with mock.patch.object(step, "all_script_tests", return_value=["unit-a", "unit-b"]):
+            plan = self.plan(["tools/scripts/unknown_reader.py"], selection("focused", []))
+        self.assertEqual(plan["tests"], ["unit-a", "unit-b"])
+        self.assertEqual(plan["script_fail_open"], 2)
+
+    def test_sample_region_include_closure_paths_select_the_baseline(self) -> None:
+        for path in ("core/host/include/pulp/host/custom_node_type.hpp",
+                     "core/host/include/pulp/host/signal_graph.hpp",
+                     "test/sample_region_compat/compat_runner.cpp"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", []),
+                                 inputs=["sample-region-compat-baseline"])
+                self.assertIn("sample-region-compat-baseline", plan["tests"])
+
+
+    def test_budget_skips_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with mock.patch.object(step.time, "monotonic", side_effect=[0.0, 2.0, 2.0]):
+                result = step.run_budgeted(Path("/build"), ["unit-a"], 1.0, 1, "", root, 1)
+        self.assertEqual(result["skipped"], ["unit-a"])
 
 
 MANIFEST = """\

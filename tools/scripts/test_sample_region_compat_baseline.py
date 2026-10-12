@@ -9,6 +9,17 @@ import sample_region_compat_baseline as baseline
 
 
 class BaselineTests(unittest.TestCase):
+    def test_selector_inputs_cover_compiler_include_closure(self):
+        required = {
+            "test/fixtures/sample-region-compat",
+            "test/sample_region_compat/compat_runner.cpp",
+            "core/host/include/pulp/host/custom_node_type.hpp",
+            "core/host/include/pulp/host/signal_graph.hpp",
+        }
+        inputs = set(baseline.COMPAT_INPUTS)
+        self.assertTrue(required & inputs)
+        self.assertIn("core/host/include/pulp/host", inputs)
+
     def test_frozen_receipt_includes_sdk_build_type_configure_input(self):
         repo = Path(__file__).resolve().parents[2]
         receipt = json.loads((repo / "test" / "fixtures" / "sample-region-compat" /

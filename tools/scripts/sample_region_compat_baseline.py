@@ -24,7 +24,22 @@ SDK_RECEIPT = "installed-sdk-0.837.0.json"
 SDK_RECEIPT_SHA256 = "a32cb189965e0150cb473cacdb0568f9bf686667dc7be49e293f0b73d0bb62ed"
 # Runtime inputs of the compatibility probe. These literals are consumed by
 # script_test_inputs.py and keep fixture and public ABI edits on the selector.
-COMPAT_FIXTURES = "test/fixtures/sample-region-compat"
+# Generated from the compiler include closure of test/sample_region_compat/compat_runner.cpp
+# and old_installed_sdk_consumer.cpp. Directory entries keep every transitive
+# public header (including enum and sizeof inputs) visible to the PR selector.
+COMPAT_INPUTS = (
+    "test/fixtures/sample-region-compat",
+    "test/sample_region_compat/compat_runner.cpp",
+    "core/audio/include/pulp/audio",
+    "core/format/include/pulp/format",
+    "core/graph/include/pulp/graph",
+    "core/host/include/pulp/host",
+    "core/midi/include/pulp/midi",
+    "core/native-components/include/pulp/native_components",
+    "core/runtime/include/pulp/runtime",
+    "core/state/include/pulp/state",
+)
+COMPAT_FIXTURES = COMPAT_INPUTS[0]
 PROCESSOR_HEADER = "core/format/include/pulp/format/processor.hpp"
 PLUGIN_SLOT_HEADER = "core/host/include/pulp/host/plugin_slot.hpp"
 

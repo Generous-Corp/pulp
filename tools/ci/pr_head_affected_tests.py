@@ -291,6 +291,15 @@ def script_reference_tests(paths: list[str], root: Path = REPO_ROOT) -> list[str
         sys.path.pop(0)
 
 
+def all_script_tests(root: Path = REPO_ROOT) -> list[str]:
+    """Fail open when a script path has no reliable declared-input edge."""
+    try:
+        import source_selftests as lane
+        return sorted(e["name"] for e in lane.python_ctest_entries(root))
+    except Exception:  # noqa: BLE001 - selection must remain fail-open
+        return []
+
+
 def project(build: Path, root: Path, paths: list[str]) -> inventory.Selection:
     """`pulp affected`'s projection of these paths onto the configured build.
 
@@ -346,6 +355,13 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     scripts = script_reference_tests(paths, root)
     plan["script_references"] = len(scripts)
     chosen.extend(scripts)
+    # Unknown or undeclared script inputs are unsafe to skip. Run every
+    # script-driven test when a tools/ script changed without a known edge.
+    script_paths = [p for p in paths if p.startswith(("tools/ci/", "tools/scripts/"))]
+    if script_paths and not inputs and not scripts:
+        fallback = all_script_tests(root)
+        plan["script_fail_open"] = len(fallback)
+        chosen.extend(fallback)
     registered = registration_tests(build, paths, root, changes)
     plan["registrations"] = len(registered)
     chosen.extend(registered)
@@ -601,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
     for test in results["failed"]:
         print(f"::error title=pr-head-affected-tests::{test} failed on this pull request head; "
               "it is a test this diff reaches, and it would fail the merge group too")
-    return 1 if results["failed"] else 0
+    return 1 if results["failed"] or results["skipped"] else 0
 
 
 if __name__ == "__main__":
