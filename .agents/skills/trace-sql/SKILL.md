@@ -701,3 +701,16 @@ it: `script_precompile` / `scripted_ui_prewarm` on the worker, and only
 `script_bytecode_read` (no `script_compile`) for the same script inside
 `editor_first_frame` on the main thread. Join `slice` → `thread_track` →
 `thread` (stable `utid`) rather than assuming one track per process.
+
+## How much of the window survived
+
+```sql
+SELECT (MAX(ts + dur) - MIN(ts)) / 1e9 AS covered_s,
+       (MIN(ts) - (SELECT int_value FROM metadata WHERE name = 'tracing_started_ns')) / 1e9 AS first_event_after_start_s
+FROM slice;
+```
+
+Compare `covered_s` with the requested `PULP_TRACE_SECONDS`. A 240 s capture
+that covers 19 s with a `traced_buf_incremental_sequences_dropped` stat is a
+wrapped ring, not a short session (Pulp's session now re-emits incremental
+state every 5 s, so this reads as at most a few seconds lost after a wrap).
