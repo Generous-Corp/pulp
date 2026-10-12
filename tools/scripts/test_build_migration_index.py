@@ -184,17 +184,38 @@ class EntryConsistency(unittest.TestCase):
         res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
                             'applies_if = "cli_version_from < 0.943.1 && cli_version_to >= 0.943.1"')
         self.assertEqual(res.returncode, 2)
-        self.assertIn("ends before 0.945.2", res.stderr)
+        self.assertIn("must be exactly", res.stderr)
 
     def test_applies_if_never_crosses_the_version(self):
         res = self._codegen("v0.945.2.md", 'version = "0.945.2"\napplies_if = "cli_version_to < 0.1.0"')
         self.assertEqual(res.returncode, 2)
-        self.assertIn("does not select an upgrade that crosses", res.stderr)
+        self.assertIn("must be exactly", res.stderr)
 
     def test_applies_if_that_does_not_parse(self):
         res = self._codegen("v0.945.2.md", 'version = "0.945.2"\napplies_if = "from < 0.945.2"')
         self.assertEqual(res.returncode, 2)
-        self.assertIn("does not parse", res.stderr)
+        self.assertIn("must be exactly", res.stderr)
+
+    def test_applies_if_that_also_selects_an_unrelated_hop(self):
+        # Crosses 0.945.2 and not its predecessor, so a boundary probe passes
+        # it, yet the `||` arm also selects every hop inside 1.0.x.
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
+                            'applies_if = "cli_version_from < 0.945.2 && cli_version_to >= 0.945.2'
+                            ' || cli_version_from >= 1.0.0 && cli_version_to < 1.1.0"')
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("must be exactly", res.stderr)
+        self.assertIn("nothing else", res.stderr)
+
+    def test_canonical_applies_if_with_other_spacing_passes(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
+                            'applies_if = "  cli_version_from<0.945.2  &&  cli_version_to>=0.945.2 "')
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_canonical_shape_with_mismatched_bounds_is_rejected(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
+                            'applies_if = "cli_version_from < 0.945.2 && cli_version_to >= 0.946.0"')
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("must be exactly", res.stderr)
 
     def test_empty_applies_if_and_free_form_names_are_allowed(self):
         res = self._codegen("notes.md", 'version = "0.31.0"')

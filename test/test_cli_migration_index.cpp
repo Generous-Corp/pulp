@@ -313,7 +313,7 @@ TEST_CASE("build_migration_index.py - frontmatter -> embedded C++ round-trip",
         f << "---\n";
         f << "version = \"9.9.9\"\n";
         f << "breaking = true\n";
-        f << "applies_if = \"cli_version_to >= 9.9.9\"\n";
+        f << "applies_if = \"cli_version_from < 9.9.9 && cli_version_to >= 9.9.9\"\n";
         f << "summary = \"synthetic fixture for round-trip test\"\n";
         f << "---\n\n";
         f << "Body text with \"quotes\" and a backslash \\ for escape coverage.\n";
