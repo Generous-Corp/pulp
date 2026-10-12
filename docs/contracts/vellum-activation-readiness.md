@@ -9,8 +9,9 @@ Authority activation is blocked until all of the following are true:
 
 - the older `danielraffel/burl` experiment is recorded at an immutable commit
   as `superseded-frozen`, mechanically disjoint, or the chosen extraction seed;
-- the private Vellum repository can enforce required checks (the current
-  Generous-Corp GitHub Free plan cannot enforce rulesets on private repos);
+- the Vellum repository enforces required checks on `main` through branch
+  protection (`gpu-macos-arm64`, `product-quality`, `provenance-verify`,
+  `clean-release`);
 - the pinned Vellum reader App (`3878000`) is installed on only Vellum and its
   private key is stored as `VELLUM_READER_APP_PRIVATE_KEY`; the trusted gate
   mints a short-lived one-repository read token and an independently verified
