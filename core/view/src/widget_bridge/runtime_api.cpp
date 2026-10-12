@@ -51,11 +51,21 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "    ? globalThis.__pulpBatchUpdates__ : undefined;"
             "  return (typeof batch === 'function') ? batch(fn, arg) : fn(arg);"
             "}"
+            // Each frame callback runs inside a `js` span named after the
+            // function, so a trace attributes the rAF flush to the callbacks
+            // that spent it (a Pro Tools capture showed 2 ms per flush with
+            // nothing below `raf_flush` to say where). `__traceBegin__` returns
+            // false when the span stack refused the open, and only an opened
+            // span is closed. With tracing off the hooks keep depth
+            // bookkeeping only.
             "function __invokeFrame__(id, now) {"
             "  var fn = __frameCallbacks__[id];"
             "  if (fn) {"
             "    delete __frameCallbacks__[id];"
-            "    __pulpRunHostCallback__(fn, now);"
+            "    var traced = (typeof __traceBegin__ === 'function')"
+            "      && __traceBegin__('raf:' + (fn.name || 'anonymous')) === true;"
+            "    try { __pulpRunHostCallback__(fn, now); }"
+            "    finally { if (traced) __traceEnd__(); }"
             "  }"
             "}"
             // Timer registry for native setTimeout / setInterval. Callbacks
