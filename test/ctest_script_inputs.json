@@ -6174,6 +6174,13 @@
    ],
    "kind": "shell"
   },
+  "import-design-external-asset-localized": {
+   "entry": "test/test_import_design_external_asset.py",
+   "inputs": [
+    "test/test_import_design_external_asset.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-asset-escape": {
    "entry": "test/test_design_ir_observe_asset_escape.py",
    "inputs": [
