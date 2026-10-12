@@ -254,6 +254,7 @@ class CombinedInstallerTest(unittest.TestCase):
         analyze_omits_relocatable: bool = False,
         embed_framework_in: str | None = None,
         embed_helper_in: str | None = None,
+        legacy_evidence: bool = False,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -408,12 +409,17 @@ class CombinedInstallerTest(unittest.TestCase):
                         bundle.symlink_to(real_bundle, target_is_directory=True)
                     else:
                         raise AssertionError(f"unknown D15 fixture: {d15_fixture}")
+                # The build writes control evidence to Contents/Resources;
+                # legacy_evidence models a bundle from an SDK that wrote it
+                # beside the binary.
+                evidence_dir = macos if legacy_evidence else bundle / "Contents" / "Resources"
+                evidence_dir.mkdir(parents=True, exist_ok=True)
                 for evidence_name in (
                     f"{plugin_name}.inspector-capabilities.json",
                     f"{plugin_name}.{kind}.control-shipping.json",
                     f"{plugin_name}.{kind}.control-shipping-report.json",
                 ):
-                    (macos / evidence_name).write_text("{}\n")
+                    (evidence_dir / evidence_name).write_text("{}\n", encoding="utf-8")
                 plugin_bundles.append(bundle)
                 args.extend(("--plugin", kind, str(bundle)))
                 if (plugin_name, kind) in (scripted_plugins or set()):
@@ -540,10 +546,9 @@ class CombinedInstallerTest(unittest.TestCase):
                 if productsign_argv_capture.is_file()
                 else ""
             )
-            self._last_plugin_evidence_relocated = all(
+            self._last_plugin_evidence_in_resources = all(
                 not list((bundle / "Contents" / "MacOS").glob("*.json"))
-                and len(list((bundle / "Contents" / "Resources" /
-                              "pulp-control-shipping-evidence").glob("*.json"))) == 3
+                and len(list((bundle / "Contents" / "Resources").glob("*.json"))) == 3
                 for bundle in plugin_bundles
             )
             self._last_plugin_main_paths = [
@@ -561,6 +566,12 @@ class CombinedInstallerTest(unittest.TestCase):
                     expect_success=False,
                 )
                 self.assertIn("development-only Vellum D15", output)
+
+    def test_control_evidence_beside_the_binary_is_refused_before_signing(self) -> None:
+        output, _ = self._run_installer(
+            [("Kick", "clap")], legacy_evidence=True, expect_success=False)
+        # expect_success=False also asserts that no signing tool ran.
+        self.assertIn("carries control evidence outside Resources", output)
 
     def test_the_product_archive_is_signed_by_productsign_not_productbuild(
         self,
@@ -610,7 +621,7 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertNotIn('choice="plugin-0">', xml)
         self.assertIn('<line choice="plugin-0-au"/>', xml)
         self.assertIn('<line choice="plugin-0-clap"/>', xml)
-        self.assertTrue(self._last_plugin_evidence_relocated)
+        self.assertTrue(self._last_plugin_evidence_in_resources)
         for main_path in self._last_plugin_main_paths:
             self.assertFalse(any(
                 line.endswith(main_path)
