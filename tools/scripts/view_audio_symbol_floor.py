@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         command.extend(["--check", item])
     for item in args.debt:
         command.extend(["--debt", item])
-    proc = subprocess.run(command, capture_output=True, text=True)
+    proc = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
     if proc.stdout:
         print(proc.stdout, end="")
     if proc.stderr:
