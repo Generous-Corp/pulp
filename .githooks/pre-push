@@ -872,7 +872,7 @@ elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
         bash "$DIFF_COVER_SH" >/dev/null 2>&1
     _diff_cover_preflight_rc=$?
     if [ "$_diff_cover_preflight_rc" -eq 0 ]; then
-        echo "[pre-push] diff coverage skipped: exact diff has no potentially coverable C/C++ lines." >&2
+        echo "[pre-push] diff coverage skipped: no changed file has a line diff-cover measures (coverage_config.json exclusions/native surface)." >&2
     else
         # LOUD banner + heartbeat: this step runs a full local configure +
             # compile, which can take several MINUTES with little output. That

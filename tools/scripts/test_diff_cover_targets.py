@@ -390,6 +390,59 @@ class ShellWiringTests(unittest.TestCase):
                              forced.stdout + forced.stderr)
 
 
+    def test_configured_excluded_native_file_skips_before_any_build_command(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td).resolve() / "wt"
+            (root / "tools" / "scripts").mkdir(parents=True)
+            (root / "tools" / "ci").mkdir(parents=True)
+            (root / "scripts").mkdir()
+            for src, dst in ((SHELL, "tools/scripts/local_diff_cover.sh"),
+                             (HELPER, "tools/ci/diff_cover_targets.py"),
+                             (CTEST_POLICY, "scripts/coverage_ctest_policy.sh"),
+                             (GOVERNED_BUILD, "tools/ci/governed-build.sh")):
+                (root / dst).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            (root / "tools" / "scripts" / "coverage_config.json").write_text(
+                json.dumps({"diff_coverage_fail_under": 75, "compare_branch": "base",
+                            "min_free_disk_gib": 0, "diff_cover_excludes": ["generated.cpp"]}),
+                encoding="utf-8")
+            _git(root, "init", "-q", "-b", "main")
+            _git(root, "config", "user.email", "f@example.com")
+            _git(root, "config", "user.name", "F")
+            source = root / "core" / "generated.cpp"
+            source.parent.mkdir(parents=True)
+            source.write_text("int generated() { return 1; }\n", encoding="utf-8")
+            _git(root, "add", ".")
+            _git(root, "commit", "-qm", "base")
+            _git(root, "branch", "base")
+            source.write_text("int generated() { return 2; }\n", encoding="utf-8")
+            spy = root / "spy"
+            spy.mkdir()
+            marker = root / "ran"
+            for cmd in ("df", "cmake", "ctest", "clang", "llvm-cov", "llvm-profdata"):
+                shim = spy / cmd
+                shim.write_text(f"#!/bin/sh\necho {cmd} >> '{marker}'\nexit 97\n",
+                                encoding="utf-8")
+                shim.chmod(0o755)
+            env = {k: v for k, v in os.environ.items()
+                   if not k.startswith("PULP_DIFF_COVER") and k != "PULP_SKIP_DIFF_COVER"}
+            env["PATH"] = f"{spy}{os.pathsep}{env['PATH']}"
+            env["PULP_DIFF_COVER_COMPARE_BRANCH"] = "base"
+            result = subprocess.run(["bash", str(root / "tools/scripts/local_diff_cover.sh")],
+                                    cwd=root, env=env, capture_output=True, text=True,
+                                    encoding="utf-8",
+                                    timeout=120)
+            out = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, out)
+            self.assertIn("coverage_config.json exclusions", out)
+            self.assertFalse(marker.exists())
+
+    def test_pre_push_uses_the_same_preflight_skip_and_keeps_gates(self) -> None:
+        hook = (SCRIPTS.parent.parent / ".githooks" / "pre-push").read_text(encoding="utf-8")
+        self.assertIn("PULP_DIFF_COVER_PREFLIGHT_ONLY=1", hook)
+        self.assertIn("no changed file has a line diff-cover measures", hook)
+        self.assertIn("run_gate_captured", hook)
+
+
 class ContractTests(unittest.TestCase):
     def _widen(self, tier: str, select: str) -> subprocess.CompletedProcess:
         """Call the real widen_if_likely with exec stubbed out."""

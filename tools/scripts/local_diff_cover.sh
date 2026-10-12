@@ -372,14 +372,17 @@ require_free_disk() {
 # outside the native coverage surface.
 diff_cover_has_no_coverable_lines() {
     local compare_branch="$1"
-    python3 - "${REPO_ROOT}" "${compare_branch}" <<'PY'
+    python3 - "${REPO_ROOT}" "${compare_branch}" "${CONFIG_JSON}" <<'PY'
 import pathlib
 import re
+import fnmatch
+import json
 import subprocess
 import sys
 
 repo = pathlib.Path(sys.argv[1])
 compare_branch = sys.argv[2]
+config_json = pathlib.Path(sys.argv[3])
 coverable_suffixes = {
     ".c", ".cc", ".cpp", ".cxx", ".m", ".mm",
     ".h", ".hh", ".hpp", ".hxx", ".inc", ".inl", ".ipp", ".tpp",
@@ -409,9 +412,32 @@ def git(*args: str) -> bytes:
 
 
 def potentially_coverable(path: str) -> bool:
+    # Keep this preflight aligned with diff-cover's configured exclusions:
+    # excluded native files contribute no measured lines, so configuring a
+    # coverage build for them is pure cost.
+    base = pathlib.PurePosixPath(path).name
+    try:
+        with config_json.open(encoding="utf-8") as stream:
+            excludes = json.load(stream).get("diff_cover_excludes", [])
+    except (OSError, ValueError, TypeError, AttributeError):
+        # An unreadable policy is uncertainty; retain the coverage gate.
+        return True
+    if any(fnmatch.fnmatch(base, pattern) or fnmatch.fnmatch(path, pattern)
+           or (pattern.startswith("**/") and fnmatch.fnmatch(base, pattern[3:]))
+           for pattern in excludes):
+        return False
     lowered = path.lower()
     suffixes = pathlib.PurePosixPath(lowered).suffixes
     return any(suffix in coverable_suffixes for suffix in suffixes)
+
+
+def excluded_by_config(path: str) -> bool:
+    base = pathlib.PurePosixPath(path).name
+    with open(config_json, encoding="utf-8") as stream:
+        excludes = json.load(stream).get("diff_cover_excludes", [])
+    return any(fnmatch.fnmatch(base, pattern) or fnmatch.fnmatch(path, pattern)
+               or (pattern.startswith("**/") and fnmatch.fnmatch(base, pattern[3:]))
+               for pattern in excludes)
 
 
 def definitely_non_native(path: str) -> bool:
@@ -596,6 +622,13 @@ try:
                 raise RuntimeError(f"truncated {layer} name-status record")
             path = raw[i].decode("utf-8", "surrogateescape")
             i += 1
+            if excluded_by_config(path):
+                print(
+                    f"[local_diff_cover] preflight: {layer} path {path} is excluded by "
+                    "coverage_config.json",
+                    file=sys.stderr,
+                )
+                continue
             if potentially_coverable(path):
                 print(
                     f"[local_diff_cover] preflight: potentially coverable native "
@@ -750,7 +783,7 @@ fi
 # Pre-push uses preflight-only mode to avoid printing its long-build banner when
 # this script already knows no native coverage can be attributed.
 if [ "${COMPARE_REF_READY}" = "1" ] && diff_cover_has_no_coverable_lines "${COMPARE_BRANCH}"; then
-    echo "[local_diff_cover] skipped: exact diff has no potentially coverable C/C++ lines" >&2
+    echo "[local_diff_cover] skipped: no changed file has a line diff-cover measures (coverage_config.json exclusions/native surface)" >&2
     exit 0
 fi
 # Target selection. The default narrows the build and the CTest run to the part

@@ -801,7 +801,7 @@ class NativeDiffPreflightTests(unittest.TestCase):
         )
         out = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, out)
-        self.assertIn("no potentially coverable C/C++ lines", out)
+        self.assertIn("no changed file has a line diff-cover measures", out)
         self.assertFalse(
             marker.exists(),
             f"preflight invoked an expensive/post-proof command: "
