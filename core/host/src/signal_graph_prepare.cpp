@@ -11,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/host/anticipation_eligibility.hpp>
 #include <pulp/host/anticipation_partition.hpp>
 #include <pulp/host/anticipation_subgraph.hpp>
