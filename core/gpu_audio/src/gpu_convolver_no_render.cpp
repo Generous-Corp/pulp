@@ -111,6 +111,8 @@ GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
     : block_(block_size), sample_rate_(sample_rate), irs_(std::move(irs)),
       num_ir_(static_cast<uint32_t>(irs_.size())) {}
 
+GpuMultiConvolver::~GpuMultiConvolver() = default;
+
 GpuAudioNodeDescriptor GpuMultiConvolver::descriptor() const {
     GpuAudioNodeDescriptor d;
     d.name = "gpu-multi-convolver";

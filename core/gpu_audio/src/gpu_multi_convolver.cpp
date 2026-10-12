@@ -13,6 +13,8 @@ std::string GpuMultiConvolver::backend() const {
     return gpu_ ? gpu_->capabilities().backend : std::string();
 }
 
+GpuMultiConvolver::~GpuMultiConvolver() = default;
+
 GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                                      std::vector<std::vector<float>> irs)
     : block_(block_size), sample_rate_(sample_rate), irs_(std::move(irs)),

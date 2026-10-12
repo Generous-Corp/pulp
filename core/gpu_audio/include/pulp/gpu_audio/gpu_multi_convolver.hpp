@@ -59,6 +59,7 @@ public:
     /// fixed processing block (power of two recommended).
     GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                       std::vector<std::vector<float>> irs);
+    ~GpuMultiConvolver() override;
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
