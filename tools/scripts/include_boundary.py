@@ -74,6 +74,10 @@ ALLOWED: dict[str, dict[tuple[str, str], str]] = {name: {} for name in BOUNDARIE
 ALLOWED["view-core"].update({
     ("core/view/src/reload_exports.cpp", "pulp/view/register_audio_widgets.hpp"):
         "P19 reload registration export",
+    ("core/view/include/pulp/view/widgets.hpp", "pulp/view/audio_widgets.hpp"):
+        "P19 guarded compatibility include; Phase-6 debt",
+    ("core/view/src/reload_exports.cpp", "pulp/view/audio_widgets.hpp"):
+        "P19 reload audio display retention",
 })
 
 

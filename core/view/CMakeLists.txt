@@ -74,9 +74,7 @@ target_link_libraries(pulp-view-native PUBLIC pulp::view-audio)
 # a whole-archive force-load of view-core would. Self-contained: links view-core.
 add_library(pulp-view-reload-exports STATIC src/reload_exports.cpp)
 add_library(pulp::view-reload-exports ALIAS pulp-view-reload-exports)
-target_link_libraries(pulp-view-reload-exports PUBLIC pulp-view-core)
-target_include_directories(pulp-view-reload-exports PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/audio/include)
+target_link_libraries(pulp-view-reload-exports PUBLIC pulp::view-audio)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
@@ -272,6 +270,8 @@ endif()
 # include path + link.
 target_link_libraries(pulp-view-core PUBLIC pulp::runtime)
 target_link_libraries(pulp-view-script PRIVATE pulp::runtime)
+# view-script still consumes view-core headers in native-only/design-import-off builds.
+target_link_libraries(pulp-view-script PUBLIC pulp::view-core pulp::state)
 
 # Design units (DesignIR value types below view-core; the importer and its
 # Pulp-owned audio-control recognition pack above it). Directory scope: the

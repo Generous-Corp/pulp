@@ -782,6 +782,10 @@ void emit_node(std::ostringstream& out,
     if (!faithful)
         emit_line(out, depth, ctx.opts.indent_spaces,
                   "auto " + var + " = " + widget_make_expr(node, resolved, ctx.manifest) + ";");
+    // Optional provider displays can be absent when the audio seam is not linked.
+    // Keep generated editors materializable by falling back to the core View.
+    emit_line(out, depth, ctx.opts.indent_spaces,
+              "if (!" + var + ") " + var + " = std::make_unique<pulp::view::View>();");
     emit_line(out, depth, ctx.opts.indent_spaces,
               var + "->set_id(" + cpp_string_literal(resolved.id) + ");");
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())

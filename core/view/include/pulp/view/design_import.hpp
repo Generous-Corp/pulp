@@ -249,6 +249,7 @@ public:
         (void)display;
         (void)descriptor;
     }
+    [[deprecated("override bind_level_display instead")]]
     virtual void bind_meter(Meter& meter, const NativeImportMeterBindingDescriptor& descriptor) {
         (void)meter;
         (void)descriptor;
@@ -271,6 +272,7 @@ public:
         (void)display;
         (void)descriptor;
     }
+    [[deprecated("override bind_series_display instead")]]
     virtual void bind_waveform_display(WaveformView& waveform,
                                        const NativeImportWaveformBindingDescriptor& descriptor) {
         (void)waveform;

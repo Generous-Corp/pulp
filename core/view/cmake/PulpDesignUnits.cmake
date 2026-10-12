@@ -113,6 +113,10 @@ set_property(TARGET pulp-design-import PROPERTY PULP_UNIT_HEADERS ${PULP_DESIGN_
 # Native materialization binds imported data displays through the view-core
 # facets; pulp-view-audio supplies concrete factories when it is registered.
 target_link_libraries(pulp-design-import PUBLIC pulp::design-ir pulp::view-core)
+if(PULP_ENABLE_DESIGN_IMPORT)
+    # Audio import binders live in view-audio and call the design-import-owned registry.
+    target_link_libraries(pulp-view-audio PUBLIC pulp::design-import)
+endif()
 # yaml-cpp (MIT) — DESIGN.md frontmatter parsing. Public Pulp headers expose no
 # YAML types, but pulp-design-import is static: its parser object retains YAML
 # symbols that the final consumer link must resolve. Keep yaml-cpp private in

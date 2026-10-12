@@ -1218,6 +1218,7 @@
     "core/view/audio/include": [
       "pulp/view/audio_inspector_panel.hpp",
       "pulp/view/audio_inspector_window.hpp",
+      "pulp/view/audio_widgets.hpp",
       "pulp/view/eq_curve_view.hpp",
       "pulp/view/hosted_editor_attachment.hpp",
       "pulp/view/midi_binding.hpp",
@@ -1256,7 +1257,6 @@
       "pulp/view/aria_roles.hpp",
       "pulp/view/asset_manager.hpp",
       "pulp/view/audio_bridge.hpp",
-      "pulp/view/audio_widgets.hpp",
       "pulp/view/auto_ui.hpp",
       "pulp/view/binding_diagnostics.hpp",
       "pulp/view/breadcrumb.hpp",
@@ -1632,7 +1632,7 @@
           },
           {
             "exported_as": "Pulp::view-audio",
-            "closure_node_count": 74
+            "closure_node_count": 76
           },
           {
             "exported_as": "Pulp::design-import-audio-pack",
@@ -7535,11 +7535,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 74,
+            "node_count": 76,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
               "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
@@ -7571,11 +7572,12 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 55,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7589,6 +7591,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "yaml-cpp",
               "yogacore"
             ],
             "prebuilt_archives": [
@@ -7648,6 +7651,7 @@
           },
           "direct_dependencies": [
             "pulp-audio",
+            "pulp-design-import",
             "pulp-midi",
             "pulp-signal",
             "pulp-view-core"
@@ -8171,7 +8175,9 @@
           "direct_dependencies": [
             "pulp-design-import",
             "pulp-render",
-            "pulp-runtime"
+            "pulp-runtime",
+            "pulp-state",
+            "pulp-view-core"
           ]
         },
         "vst3-sdk": {
