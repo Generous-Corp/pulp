@@ -1032,6 +1032,13 @@ all native tests stayed green, but the required WebCLAP build failed at `wasm-ld
 `_PULP_WEBUI_VIEW_SOURCES`. Treat every new out-of-line dependency of an already-listed wasm UI
 source as a paired `PulpWebUi.cmake` edit, even when the helper has no web-specific code.
 
+A MOVE breaks it at configure time instead: the list names paths, so a TU that moves directory
+leaves a path that no longer exists, and configure fails with `Cannot find source file` and `No
+SOURCES given to target`. The audio widgets moving to `core/view/audio/` (the `pulp-view-audio`
+target) did this to `eq_curve_view.cpp` and the split `widgets/visualizers.cpp`. When you move a
+`core/view/**` file, grep `PulpWebUi.cmake` for its old path, and add any new include directory
+to `_PULP_WEBUI_INCLUDES` (here `core/view/audio/include`).
+
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build
 compiles** (`core/view/CMakeLists.txt`, `core/canvas/…`) rather than adding files piecemeal —

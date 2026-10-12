@@ -598,6 +598,74 @@ pulp_add_test_suite(pulp-test-editor-open-stages
     INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../tools/editor-open
     LABELS "view;editor-open;tools")
 
+# View-core must remain independent of product audio/host edges, the view
+# umbrellas carry the host-free audio widgets but never the host-linked graph
+# editor, and the audio widgets never reach pulp::host. The source lint excludes
+# core/view/audio, whose targets own the audio-dependent headers.
+if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio)
+    set(_pulp_view_boundary_args)
+    foreach(_pulp_view_boundary_pair
+            "pulp-view-core;PULP_VIEW_CORE_LINKS"
+            "pulp-view;PULP_VIEW_LINKS"
+            "pulp-view-native;PULP_VIEW_NATIVE_LINKS"
+            "pulp-view-audio;PULP_VIEW_AUDIO_LINKS")
+        list(GET _pulp_view_boundary_pair 0 _pulp_view_boundary_target)
+        list(GET _pulp_view_boundary_pair 1 _pulp_view_boundary_var)
+        get_target_property(_pulp_view_boundary_links
+            ${_pulp_view_boundary_target} LINK_LIBRARIES)
+        if(NOT _pulp_view_boundary_links)
+            set(_pulp_view_boundary_links "")
+        endif()
+        string(REPLACE ";" "|" _pulp_view_boundary_links "${_pulp_view_boundary_links}")
+        list(APPEND _pulp_view_boundary_args
+            "-D${_pulp_view_boundary_var}=${_pulp_view_boundary_links}")
+    endforeach()
+    add_test(NAME pulp-view-core-audio-free
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            ${_pulp_view_boundary_args}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_core_audio_free.cmake)
+    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "view;gate")
+endif()
+
+# The include half of the same boundary: no core/view source outside
+# core/view/audio may reach an audio, signal, host, midi or format header, or an
+# audio widget's header, in any spelling (angle, quoted, #import, relative).
+# The self-test plants each spelling and must turn red.
+add_test(NAME pulp-view-core-include-boundary
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/include_boundary.py"
+        --boundary view-core --root "${CMAKE_SOURCE_DIR}")
+add_test(NAME pulp-view-core-include-boundary-negative-contract
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_include_boundary.py")
+set_tests_properties(pulp-view-core-include-boundary
+    pulp-view-core-include-boundary-negative-contract
+    PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+
+# The symbol half: neither header nor link checks see an object that needs
+# another library's code (a dynamic_cast to Meter compiles against a view-core
+# header but needs Meter's typeinfo from pulp-view-audio). This reads the
+# archives. view-script and design-import still bind audio widgets directly;
+# those edges are tracked debts, removed by the audio-widget seam (P19).
+if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET pulp-design-import)
+    add_test(NAME pulp-view-audio-symbol-floor
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/view_audio_symbol_floor.py"
+            --audio "$<TARGET_FILE:pulp-view-audio>"
+            --check "view-core=$<TARGET_FILE:pulp-view-core>"
+            --check "view-script=$<TARGET_FILE:pulp-view-script>"
+            --check "design-import=$<TARGET_FILE:pulp-design-import>"
+            --debt "view-script=view-script-view-audio-link (P19)"
+            --debt "design-import=design-import-view-audio-link (P19)")
+    add_test(NAME pulp-view-audio-symbol-floor-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_view_audio_symbol_floor.py")
+    set_tests_properties(pulp-view-audio-symbol-floor
+        pulp-view-audio-symbol-floor-negative-contract
+        PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+endif()
+
 # pulp-host-lane-probe (tools/editor-open/host_lane_probe.mm) must refuse to
 # run without plug-ins and must report an unloadable bundle as a setup error
 # (exit 2), never as written observations. The functional lane needs built
