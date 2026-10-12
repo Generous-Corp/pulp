@@ -78,41 +78,21 @@ def main(argv: list[str] | None = None) -> int:
                         help="a library allowed to need them while a tracked edge is removed")
     args = parser.parse_args(argv)
 
-    checks = dict(item.split("=", 1) for item in args.check)
-    debts = dict(item.split("=", 1) for item in args.debt)
-    if not checks:
+    if not args.check:
         print("view-audio-symbol-floor: no --check library given", file=sys.stderr)
         return 2
-    try:
-        audio_defined, _ = parse(nm_listing(args.nm, args.audio))
-        if not audio_defined:
-            print(f"view-audio-symbol-floor: {args.audio} defines no symbols; "
-                  "refusing to report a clean result", file=sys.stderr)
-            return 2
-        failed = False
-        for name, archive in checks.items():
-            _, undefined = parse(nm_listing(args.nm, pathlib.Path(archive)))
-            hits = offenders(audio_defined, undefined)
-            if name in debts:
-                if hits:
-                    print(f"view-audio-symbol-floor: {name}: {len(hits)} reference(s), "
-                          f"allowed as debt: {debts[name]}")
-                else:
-                    print(f"view-audio-symbol-floor: {name}: debt '{debts[name]}' no longer "
-                          "matches anything; remove it")
-                    failed = True
-                continue
-            if hits:
-                failed = True
-                print(f"view-audio-symbol-floor: {name} needs pulp-view-audio code:")
-                for (obj, _), pretty in zip(hits, demangle([s for _, s in hits])):
-                    print(f"  {obj}: {pretty}")
-            else:
-                print(f"view-audio-symbol-floor: {name}: clean")
-    except RuntimeError as exc:
-        print(f"view-audio-symbol-floor: {exc}", file=sys.stderr)
-        return 2
-    return 1 if failed else 0
+    checker = pathlib.Path(__file__).with_name("archive_symbol_closure_check.py")
+    command = [sys.executable, str(checker), "--nm", args.nm, "--forbidden", str(args.audio), "--no-control"]
+    for item in args.check:
+        command.extend(["--check", item])
+    for item in args.debt:
+        command.extend(["--debt", item])
+    proc = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
+    if proc.stdout:
+        print(proc.stdout, end="")
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr)
+    return proc.returncode
 
 
 if __name__ == "__main__":
