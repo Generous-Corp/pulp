@@ -23,6 +23,14 @@ struct GpuConvolver::SharedIoState {};
 
 GpuConvolver::~GpuConvolver() = default;
 
+bool GpuConvolver::gpu_available() const {
+    return false;
+}
+
+std::string GpuConvolver::backend() const {
+    return {};
+}
+
 bool GpuConvolver::set_provider_policy(ProviderPolicy policy) noexcept {
     if (prepared_)
         return false;
@@ -114,6 +122,10 @@ GpuAudioNodeDescriptor GpuMultiConvolver::descriptor() const {
     d.miss_policy = MissPolicy::Silence;
     d.supports_cpu_fallback = false;
     return d;
+}
+
+std::string GpuMultiConvolver::backend() const {
+    return {};
 }
 
 bool GpuMultiConvolver::prepare() {
