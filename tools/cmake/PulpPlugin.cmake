@@ -161,6 +161,10 @@ function(pulp_add_plugin target)
     # AAX_HEADLESS: a processor-only AAX artifact (no custom EffectGUI). Its
     # core links the editor-less format library the same way NO_EDITOR does.
     if(PLUGIN_AAX_HEADLESS)
+        if(NOT _PULP_FORMAT_CORE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target} AAX_HEADLESS): this Pulp SDK does not export Pulp::format-core")
+        endif()
         set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
     endif()
 
