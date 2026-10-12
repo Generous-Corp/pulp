@@ -226,6 +226,8 @@
       "pulp/format/aax_midi_node.hpp",
       "pulp/format/aax_midi_packets.hpp",
       "pulp/format/aax_model.hpp",
+      "pulp/format/aax_native_view.hpp",
+      "pulp/format/aax_runtime_testing.hpp",
       "pulp/format/adapter_boundary.hpp",
       "pulp/format/app_updates.hpp",
       "pulp/format/app_updates_bridge.hpp",
