@@ -306,9 +306,11 @@ each host instead:
    cycle ends in `Shipyard admission failed before clone`, `VM DHCP … breaker
    open`, `SCAN BLIND`, or a lease refusal, that line names the blocker.
 2. **Admission verdict** — `~/.tartci/state/macos-fleet/<lane>/*.admission-precheck.json`
-   holds Shipyard's full error (`verdict`, `reason`, `error`). Reproduce it by
-   hand only with the lane's environment, or `ghapp` refuses for an unrelated
-   reason ("exact repository provenance is required"):
+   holds Shipyard's last verdict (`verdict`, `reason`, plus the error text
+   when admission failed). Check `observed_at` first: the file is rewritten
+   only when Shipyard produces output, so a silent crash leaves an old verdict
+   behind. Reproduce it by hand with the lane's environment so `ghapp` resolves
+   the same repository the lane uses:
    ```bash
    SHIPYARD_GH_APP_REPO=Generous-Corp/pulp GH_REPO=Generous-Corp/pulp \
      shipyard runner admission-clean --repo Generous-Corp/pulp --base main \
@@ -355,10 +357,14 @@ Never update every host at once. Update ONE host, run the lane-path check above
 (admission must return `admit` or `defer`, never an observation error), confirm
 a gate VM clones there, then update the rest. A version check is not a
 functional check. Emergency rollback: `shipyard update --to vX.Y.Z` on each host
-works even when `shipyard runner fleet-update` refuses. On m1 an unaccepted
-Xcode license turns `/usr/bin/python3` and `/usr/bin/git` into shims that exit
-69, which breaks `fleet-update` and several tartci commands until someone runs
-`sudo xcodebuild -license accept` there.
+works even when `shipyard runner fleet-update` refuses. A rollback does not
+hold on its own: tartci's tool-freshness watchdog sees the host as behind and
+reinstalls the newest soaked release (the bad one) within hours. On every
+rolled-back host, also set `auto_apply = false` under `[tools.shipyard]` in
+`~/.config/tartci/tool-freshness.toml`, and remove it once a fixed release
+ships. An unaccepted Xcode license turns `/usr/bin/python3` and `/usr/bin/git`
+into shims that exit 69, which breaks `fleet-update` and several tartci
+commands until someone runs `sudo xcodebuild -license accept` on that host.
 
 ## Gotchas (hard-won)
 - **Dynamic event classes require dynamic registration authority, not just

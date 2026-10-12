@@ -6568,8 +6568,9 @@ Two consequences:
   `tools/install-shipyard.sh`. Always `--to` the pin.
 - **Coming back to the pin needs `tools/install-shipyard.sh`**, which installs
   the pinned version unconditionally (via the upstream, checksum-verifying
-  `install.sh`). Routing a downgrade through `shipyard update` is a silent
-  no-op, so an ahead-of-pin machine would never converge.
+  `install.sh`). Older Shipyard releases ignore a downgrade through
+  `shipyard update --to`, so on an unknown version use the installer rather
+  than relying on `update` to converge.
 
 Never trust either path's exit code alone — re-read `shipyard --version`.
 
