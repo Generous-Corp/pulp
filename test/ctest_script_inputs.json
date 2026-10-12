@@ -6757,6 +6757,54 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/design_cpp_tree_codegen.cpp",
     "docs/status/p19-phase6-debts.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/fixtures/native_ui_link_floor",
+    "test/test_design_import_cpp_core_link.cpp",
+    "test/test_hot_reload_morph.cpp",
+    "tools/scripts/test_p19_audio_widget_proofs.py"
+   ],
+   "kind": "python"
+  },
+  "p19-f2-proof": {
+   "entry": "tools/scripts/test_p19_audio_widget_proofs.py",
+   "inputs": [
+    "core/canvas/include",
+    "core/format/src/standalone.cpp",
+    "core/format/src/view_bridge.cpp",
+    "core/runtime/include",
+    "core/view/CMakeLists.txt",
+    "core/view/audio/include",
+    "core/view/include",
+    "core/view/include/pulp/view/design_import.hpp",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/design_cpp_tree_codegen.cpp",
+    "docs/status/p19-phase6-debts.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/fixtures/native_ui_link_floor",
+    "test/test_design_import_cpp_core_link.cpp",
+    "test/test_hot_reload_morph.cpp",
+    "tools/scripts/test_p19_audio_widget_proofs.py"
+   ],
+   "kind": "python"
+  },
+  "p19-link-floor-proof": {
+   "entry": "tools/scripts/test_p19_audio_widget_proofs.py",
+   "inputs": [
+    "core/canvas/include",
+    "core/format/src/standalone.cpp",
+    "core/format/src/view_bridge.cpp",
+    "core/runtime/include",
+    "core/view/CMakeLists.txt",
+    "core/view/audio/include",
+    "core/view/include",
+    "core/view/include/pulp/view/design_import.hpp",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/design_cpp_tree_codegen.cpp",
+    "docs/status/p19-phase6-debts.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/fixtures/native_ui_link_floor",
+    "test/test_design_import_cpp_core_link.cpp",
+    "test/test_hot_reload_morph.cpp",
     "tools/scripts/test_p19_audio_widget_proofs.py"
    ],
    "kind": "python"
@@ -6775,6 +6823,54 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/design_cpp_tree_codegen.cpp",
     "docs/status/p19-phase6-debts.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/fixtures/native_ui_link_floor",
+    "test/test_design_import_cpp_core_link.cpp",
+    "test/test_hot_reload_morph.cpp",
+    "tools/scripts/test_p19_audio_widget_proofs.py"
+   ],
+   "kind": "python"
+  },
+  "p19-m6-3-proof": {
+   "entry": "tools/scripts/test_p19_audio_widget_proofs.py",
+   "inputs": [
+    "core/canvas/include",
+    "core/format/src/standalone.cpp",
+    "core/format/src/view_bridge.cpp",
+    "core/runtime/include",
+    "core/view/CMakeLists.txt",
+    "core/view/audio/include",
+    "core/view/include",
+    "core/view/include/pulp/view/design_import.hpp",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/design_cpp_tree_codegen.cpp",
+    "docs/status/p19-phase6-debts.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/fixtures/native_ui_link_floor",
+    "test/test_design_import_cpp_core_link.cpp",
+    "test/test_hot_reload_morph.cpp",
+    "tools/scripts/test_p19_audio_widget_proofs.py"
+   ],
+   "kind": "python"
+  },
+  "p19-p7-proof": {
+   "entry": "tools/scripts/test_p19_audio_widget_proofs.py",
+   "inputs": [
+    "core/canvas/include",
+    "core/format/src/standalone.cpp",
+    "core/format/src/view_bridge.cpp",
+    "core/runtime/include",
+    "core/view/CMakeLists.txt",
+    "core/view/audio/include",
+    "core/view/include",
+    "core/view/include/pulp/view/design_import.hpp",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/design_cpp_tree_codegen.cpp",
+    "docs/status/p19-phase6-debts.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/fixtures/native_ui_link_floor",
+    "test/test_design_import_cpp_core_link.cpp",
+    "test/test_hot_reload_morph.cpp",
     "tools/scripts/test_p19_audio_widget_proofs.py"
    ],
    "kind": "python"
@@ -6793,6 +6889,10 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/design_cpp_tree_codegen.cpp",
     "docs/status/p19-phase6-debts.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/fixtures/native_ui_link_floor",
+    "test/test_design_import_cpp_core_link.cpp",
+    "test/test_hot_reload_morph.cpp",
     "tools/scripts/test_p19_audio_widget_proofs.py"
    ],
    "kind": "python"

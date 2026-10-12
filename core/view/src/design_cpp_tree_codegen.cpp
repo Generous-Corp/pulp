@@ -789,7 +789,7 @@ void emit_node(std::ostringstream& out,
     const bool provider_display = resolved.kind == NativeWidgetKind::meter ||
                                   resolved.kind == NativeWidgetKind::waveform ||
                                   resolved.kind == NativeWidgetKind::spectrum;
-    if (provider_display)
+    if (provider_display && !faithful)
         emit_line(out, depth, ctx.opts.indent_spaces,
                   "if (!" + var + ") " + var + " = std::make_unique<pulp::view::View>();");
     emit_line(out, depth, ctx.opts.indent_spaces,

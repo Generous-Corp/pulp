@@ -8,6 +8,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/register_audio_widgets.hpp>
 
 #include <cmath>
 #include <vector>
@@ -40,6 +41,7 @@ std::vector<float> render_block(const examples::MorphVariant& v) {
 }  // namespace
 
 TEST_CASE("morph reload swaps the EDITOR (UI axis)", "[examples][hot-reload-morph]") {
+    pulp::view::register_audio_widgets();
     MorphDsp warm(kMorphWarm), harsh(kMorphHarsh);
     auto vw = warm.create_view();
     auto vh = harsh.create_view();

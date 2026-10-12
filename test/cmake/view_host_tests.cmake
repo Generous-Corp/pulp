@@ -645,7 +645,7 @@ set_tests_properties(pulp-view-core-include-boundary
 
 # G2c P19 seam proofs: the extracted-unit M4 controls, F3/A4 codegen guard,
 # P7 interface-definition/debt checks, and installed/plugin prerequisites.
-foreach(_p19_case m4 contracts runtime)
+foreach(_p19_case m4 contracts runtime m6-3 f2 link-floor p7)
     add_test(NAME "p19-${_p19_case}-proof"
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_p19_audio_widget_proofs.py"

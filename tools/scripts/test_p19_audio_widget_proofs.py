@@ -78,12 +78,45 @@ def runtime(source_root: pathlib.Path) -> None:
         raise AssertionError("M6.2 built-plugin proof has no validator plugin artifact")
 
 
+def m63(source_root: pathlib.Path) -> None:
+    text = (source_root / "test/test_hot_reload_morph.cpp").read_text(encoding="utf-8")
+    if "hot-reload" not in text or "register_audio_widgets" not in text:
+        raise AssertionError("M6.3 hot-reload proof is not wired to audio registration")
+
+
+def f2(source_root: pathlib.Path) -> None:
+    text = (source_root / "test/test_design_import_cpp_core_link.cpp").read_text(encoding="utf-8")
+    if "bind_meter" not in text or "bind_waveform_display" not in text:
+        raise AssertionError("F2 old-only/new-only virtual binding coverage is missing")
+    if "view-core only" not in text:
+        raise AssertionError("F2 core-only link proof is missing")
+
+
+def link_floor(source_root: pathlib.Path) -> None:
+    fixture = source_root / "test/fixtures/native_ui_link_floor"
+    if not (fixture / "native_ui_link_floor.cpp").exists():
+        raise AssertionError("link-floor placeholder fixture is missing")
+    cmake = (source_root / "CMakeLists.txt").read_text(encoding="utf-8")
+    if "native_ui_link_floor" not in cmake:
+        raise AssertionError("link-floor fixture is not registered")
+
+
+def p7(source_root: pathlib.Path) -> None:
+    if not (source_root / "V-package").exists():
+        # The sterile-consumer lane is pending until the V-package is present.
+        return
+    cmake = (source_root / "core/view/CMakeLists.txt").read_text(encoding="utf-8")
+    if "PULP_VIEW_HAS_AUDIO_WIDGETS=1" not in cmake:
+        raise AssertionError("P7 sterile consumer gate is not published")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root", type=pathlib.Path, required=True)
-    parser.add_argument("--case", choices=("m4", "contracts", "runtime"), required=True)
+    parser.add_argument("--case", choices=("m4", "contracts", "runtime", "m6-3", "f2", "link-floor", "p7"), required=True)
     args = parser.parse_args()
-    {"m4": m4, "contracts": contracts, "runtime": runtime}[args.case](args.source_root)
+    {"m4": m4, "contracts": contracts, "runtime": runtime,
+     "m6-3": m63, "f2": f2, "link-floor": link_floor, "p7": p7}[args.case](args.source_root)
     return 0
 
 

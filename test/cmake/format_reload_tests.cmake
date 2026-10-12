@@ -26,7 +26,7 @@ pulp_add_test_group(pulp-test-group-fmt-ship LIBRARIES pulp::ship pulp::runtime)
 pulp_add_test_group(pulp-test-group-fmt-httplib LIBRARIES pulp::runtime pulp-cpp-httplib)
 pulp_add_test_group(pulp-test-group-fmt-reload-view LIBRARIES pulp::view)
 pulp_add_test_group(pulp-test-group-fmt-format-view
-    LIBRARIES pulp::view pulp::state pulp::format pulp::midi pulp::audio)
+    LIBRARIES pulp::view pulp::view-audio pulp::state pulp::format pulp::midi pulp::audio)
 
 # AudioFocusRegistry — cross-platform observer for OS audio-focus
 # signals (Android AudioManager.OnAudioFocusChangeListener,
@@ -207,7 +207,7 @@ pulp_add_test_suite(pulp-test-hot-reload-synth GROUP pulp-test-group-fmt-format
     LIBRARIES pulp::format
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/hot-reload-synth)
 pulp_add_test_suite(pulp-test-hot-reload-morph GROUP pulp-test-group-fmt-format-view
-    LIBRARIES pulp::format pulp::view
+    LIBRARIES pulp::format pulp::view pulp::view-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/hot-reload-morph)
 pulp_add_test_suite(pulp-test-reloadable-shell LIBRARIES pulp::format)
 add_dependencies(pulp-test-reloadable-shell
