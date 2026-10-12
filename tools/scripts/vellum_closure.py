@@ -24,6 +24,7 @@ FORBIDDEN_INCLUDE = re.compile(r"^pulp/(?:audio|signal|host|midi|music|format|co
 FORBIDDEN_ROOTS = tuple(f"core/{name}/" for name in ("audio", "signal", "host", "midi", "music", "format", "content"))
 TEXT_EXTS = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".m", ".mm", ".cmake"}
 RESOURCE_EXTS = {".sksl", ".glsl", ".frag", ".vert", ".ttf", ".otf", ".woff", ".woff2"}
+FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def run(*cmd: str, cwd: Path | None = None) -> str:
@@ -167,6 +168,60 @@ def build_external_input(rel: str, pins: dict[str, dict[str, str]]) -> dict[str,
     if metadata is None:
         return {"path": rel, "source": "build-tree", "pin": "unresolved"}
     return {"path": rel, **metadata}
+
+
+def external_input_violations(data: dict) -> list[str]:
+    """Reject build-tree inputs without a known immutable FetchContent owner."""
+    source_root = data.get("source_root")
+    if source_root == ".":
+        source_root = str(Path(__file__).resolve().parents[2])
+    pins = fetchcontent_pins(Path(source_root)) if source_root else {}
+    violations: list[str] = []
+    for row in data.get("external_inputs", []):
+        if not isinstance(row, dict):
+            violations.append("external input is not an object")
+            continue
+        path = str(row.get("path", ""))
+        if not path.startswith("@build/_deps/"):
+            continue
+        match = re.search(
+            r"(?:^|/)(?:pulp-mutable-)?(?P<name>[^/]+?)(?:-(?:src|build))(?:/|$)",
+            path.removeprefix("@build/"),
+        )
+        name = match.group("name").lower() if match else ""
+        expected = pins.get(name)
+        source = row.get("source")
+        pin = row.get("pin")
+        if source == "build-tree" or pin == "unresolved":
+            violations.append(f"unresolved build-tree external input {path}")
+            continue
+        if expected is None:
+            violations.append(f"unknown FetchContent external input {path}")
+            continue
+        if source != expected["source"]:
+            violations.append(f"external input repository mismatch {path}: {source!r}")
+        if not isinstance(pin, str) or not FULL_SHA_RE.fullmatch(pin):
+            violations.append(f"external input pin is not a full 40-hex SHA {path}: {pin!r}")
+        elif pin != expected["pin"]:
+            violations.append(f"external input pin mismatch {path}: {pin}")
+    return violations
+
+
+def receipt_path_violations(receipt: dict) -> list[str]:
+    """Receipt path fields must never contain host absolute paths."""
+    violations: list[str] = []
+    for collection in ("files", "external_inputs", "generated_inputs"):
+        for row in receipt.get(collection, []):
+            if not isinstance(row, dict):
+                continue
+            for key in ("path", "pulp_path", "mirror_path"):
+                value = row.get(key)
+                if isinstance(value, str) and (Path(value).is_absolute() or value.startswith("~")):
+                    violations.append(f"absolute host path in {collection}.{key}: {value}")
+            for value in row.get("producer_paths", []):
+                if isinstance(value, str) and (Path(value).is_absolute() or value.startswith("~")):
+                    violations.append(f"absolute host path in {collection}.producer_paths: {value}")
+    return violations
 
 
 def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
@@ -369,8 +424,32 @@ def cmd_js_manifest(args: argparse.Namespace) -> int:
     print(f"closure_manifest={args.output} files={len(result['files'])} external_inputs={len(result['external_inputs'])}")
     return 0
 
+
+def unit_manifest_targets(path: Path) -> list[str]:
+    """Return unique CMake targets named by the checked-in D3 unit manifest."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"invalid Vellum unit manifest {path}: {exc}") from exc
+    if payload.get("schema") != "pulp.vellum.d3-units.v1":
+        raise SystemExit(f"invalid Vellum unit manifest schema: {path}")
+    units = payload.get("units")
+    if not isinstance(units, list) or not units:
+        raise SystemExit("Vellum unit manifest must contain units")
+    targets: list[str] = []
+    for unit in units:
+        if not isinstance(unit, dict) or not isinstance(unit.get("name"), str):
+            raise SystemExit("Vellum unit manifest units require a name")
+        unit_targets = unit.get("targets")
+        if not isinstance(unit_targets, list) or not unit_targets or not all(isinstance(t, str) for t in unit_targets):
+            raise SystemExit(f"Vellum unit {unit['name']} requires non-empty targets")
+        targets.extend(unit_targets)
+    return list(dict.fromkeys(targets))
+
+
 def cmd_manifest(args: argparse.Namespace) -> int:
-    result = target_manifest(Path(args.source_root).resolve(), Path(args.build_dir).resolve(), args.target)
+    targets = unit_manifest_targets(Path(args.unit_manifest)) if args.unit_manifest else args.target
+    result = target_manifest(Path(args.source_root).resolve(), Path(args.build_dir).resolve(), targets)
     Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"closure_manifest={args.output} files={len(result['files'])} missing={len(result['missing_targets'])}")
     return 0
@@ -389,17 +468,84 @@ def symbol_closure(undefined: Iterable[str], allowed: Iterable[str] = ()) -> lis
     return sorted(symbol for symbol in undefined if symbol not in allowed_set and re.search(r"(?:audio|signal|host|midi|music|format|content|ContentRegistry)", symbol, re.I))
 
 
+def load_allowlist(path: Path) -> list[dict]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema") != "pulp.vellum.closure.allowlist.v1":
+        raise SystemExit(f"invalid closure allowlist schema: {path}")
+    entries = payload.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise SystemExit("closure allowlist must contain entries")
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or not {"id", "owner", "debt_id", "kind", "match"} <= set(entry):
+            raise SystemExit("closure allowlist entries require id, owner, debt_id, kind, and match")
+        if entry["id"] in seen:
+            raise SystemExit(f"duplicate closure allowlist id: {entry['id']}")
+        seen.add(entry["id"])
+        if entry["kind"] not in {"edge", "target", "include", "root"}:
+            raise SystemExit(f"invalid closure allowlist kind: {entry['kind']}")
+        if entry["kind"] == "edge" and (
+            not isinstance(entry.get("exit_criterion"), str) or not entry["exit_criterion"].strip()
+        ):
+            raise SystemExit(f"edge allowlist entry requires exit_criterion: {entry['id']}")
+    return entries
+
+
+def allowlist_match(entries: list[dict], kind: str, value: str, used: set[str]) -> bool:
+    for entry in entries:
+        if entry["kind"] != kind:
+            continue
+        match_type = entry.get("match_type", "exact")
+        matched = value.startswith(entry["match"]) if match_type == "prefix" else value == entry["match"]
+        if matched:
+            used.add(entry["id"])
+            return True
+    return False
+
+
+def edge_key(source: str, target: str) -> str:
+    # The current Pulp graph calls the retained P4 target pulp-audio; the D3
+    # ledger calls that boundary pulp-view-audio.
+    target = target.removeprefix("pulp::")
+    target = "pulp-view-audio" if target in {"pulp-audio", "audio"} else target
+    return f"{source.removeprefix('pulp::')}->{target.removeprefix('pulp::')}"
+
+
 def cmd_gate(args: argparse.Namespace) -> int:
     failed = False
+    allowlist = load_allowlist(Path(args.allowlist)) if args.allowlist else None
+    used_allowlist: set[str] = set()
+    generated_targets = unit_manifest_targets(Path(args.unit_manifest)) if args.unit_manifest else args.target
     for raw in args.manifest:
+        manifest_path = Path(raw)
+        if not manifest_path.is_file() and args.generate:
+            if not args.source_root or not args.build_dir or not generated_targets:
+                raise SystemExit("--generate requires --source-root, --build-dir, and --target")
+            api_reply = Path(args.build_dir) / ".cmake/api/v1/reply"
+            if not list(api_reply.glob("index-*.json")):
+                subprocess.run(
+                    ["cmake", "-S", args.source_root, "-B", args.build_dir],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                )
+            generated = target_manifest(
+                Path(args.source_root).resolve(), Path(args.build_dir).resolve(), generated_targets
+            )
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(json.dumps(generated, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         data = json.loads(Path(raw).read_text(encoding="utf-8"))
         name = Path(raw).name
         violations: list[str] = []
+        violations.extend(external_input_violations(data))
         if data.get("missing_targets"):
             violations.extend("missing target: " + x for x in data["missing_targets"])
         for target in data.get("targets", []):
             for link in target.get("link_targets", []):
-                if policy_target_forbidden(link) and link not in args.allow:
+                allowed = link in args.allow
+                if allowlist:
+                    allowed = allowed or allowlist_match(allowlist, "edge", edge_key(target["name"], link), used_allowlist)
+                    allowed = allowed or allowlist_match(allowlist, "target", link, used_allowlist)
+                if policy_target_forbidden(link) and not allowed:
                     violations.append(f"forbidden link {target['name']} -> {link}")
         for symbol in data.get("undefined_symbols", []):
             if symbol_closure([symbol]):
@@ -407,8 +553,12 @@ def cmd_gate(args: argparse.Namespace) -> int:
         for path in data.get("files", []):
             if path.startswith("@build/"):
                 continue
-            if path.startswith(FORBIDDEN_ROOTS) and not any(path.startswith(prefix) for prefix in args.allow_root_prefix):
-                violations.append(f"forbidden closure root {path}")
+            if path.startswith(FORBIDDEN_ROOTS):
+                allowed_root = any(path.startswith(prefix) for prefix in args.allow_root_prefix)
+                if allowlist:
+                    allowed_root = allowed_root or allowlist_match(allowlist, "root", path, used_allowlist)
+                if not allowed_root:
+                    violations.append(f"forbidden closure root {path}")
                 continue
             full = Path(data["source_root"]) / path
             if full.suffix.lower() in TEXT_EXTS and full.is_file():
@@ -417,8 +567,15 @@ def cmd_gate(args: argparse.Namespace) -> int:
                     match = re.search(r'#\s*include\s*[<\"]([^>\"]+)[>\"]', line)
                     if match and policy_include_forbidden(match.group(1)):
                         include_name = match.group(1)
-                        allowed = any(path == allowed_path or path.startswith(prefix) for allowed_path in args.allow_include_path for prefix in (allowed_path,))
+                        # A path exemption is only valid for the explicitly named edge. Never let
+                        # one legacy file exemption accept every forbidden include in that file.
+                        allowed = any(
+                            path == allowed_path and include_name == allowed_include
+                            for allowed_path, allowed_include in getattr(args, "allow_include_edge", [])
+                        )
                         allowed = allowed or any(path.startswith(prefix) for prefix in args.allow_include_prefix)
+                        if allowlist:
+                            allowed = allowed or allowlist_match(allowlist, "include", f"{path}:{include_name}", used_allowlist)
                         if not allowed:
                             violations.append(f"forbidden include {path}:{line_no}: {line.strip()}")
         status = "PASS" if not violations else ("REPORT-ONLY" if args.report_only else "FAIL")
@@ -426,6 +583,11 @@ def cmd_gate(args: argparse.Namespace) -> int:
         for violation in violations:
             print(f"  {violation}")
         failed |= bool(violations)
+    if allowlist:
+        unused = sorted(set(entry["id"] for entry in allowlist) - used_allowlist)
+        for entry in unused:
+            print(f"allowlist entry unused: {entry}")
+        failed |= bool(unused)
     return 1 if failed and not args.report_only else 0
 
 
@@ -536,6 +698,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         "tool": {"path": "tools/scripts/vellum_closure.py", "pulp_blob": tool_rows[0]["blob"] if tool_rows else ""},
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    path_violations = receipt_path_violations(receipt)
+    if path_violations:
+        raise SystemExit("receipt contains host paths: " + "; ".join(path_violations))
     if args.dry_run:
         receipt["dry_run"] = True
     receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
@@ -564,12 +729,20 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+def _include_edge(value: str) -> tuple[str, str]:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("expected PATH=INCLUDE")
+    path, include = value.split("=", 1)
+    return path, include
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append", required=True); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
+    p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
     p = sub.add_parser("js-manifest"); p.add_argument("--source-root", required=True); p.add_argument("--unit", default="design-import"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_js_manifest)
-    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--report-only", action="store_true"); p.set_defaults(func=cmd_gate)
+    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
+    p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=True)
     p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.set_defaults(func=cmd_export)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
     args = parser.parse_args()

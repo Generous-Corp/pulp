@@ -21,8 +21,13 @@ starts with the exact prefix:
 `design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)`
 
 The watch event has `disposition: watch-only-no-authority` and
-`authority_effect: none`. Record every change event in
-`docs/contracts/vellum-inheritance-ledger.md`; do not use
+`authority_effect: none`. Record every such change event as its own entry file
+`docs/contracts/vellum-inheritance-ledger/<event_id>.json` (schema in that
+directory's README; `slices` must equal the event's). The older
+`docs/contracts/vellum-inheritance-ledger.md` is frozen: one shared file made
+concurrent pull requests conflict, so `vellum_inheritance_ledger_check.py` (ctest
+`vellum-inheritance-ledger`) rejects any change to it and any prefixed event
+without an entry. Do not use
 `emergency-exception` or `framework-backport` for this planned program.
 
 Run from the Pulp repository root. Treat the projection as authority; do not

@@ -93,12 +93,10 @@ view) and historical trend graphs.
 
 This section records the coverage behavior that must remain true when the
 workflow or Codecov configuration changes. The workflow is intentionally
-advisory: ordinary pull requests run the macOS producer only, while pushes to
-`main`, the scheduled refresh, and an explicit `workflow_dispatch` run the
-full native matrix. The scheduled refresh runs three times per day in its own
-non-cancelling concurrency group. This keeps normal builds fast while ensuring
-that a cancelled or failed push does not become the dashboard's only recent
-state.
+advisory: scheduled refreshes and explicit `workflow_dispatch` runs execute
+the full native matrix on the canonical repository and approved heads. The scheduled refresh runs three times per day in its own
+non-cancelling concurrency group. This keeps the dashboard fresh even when a
+prior run is cancelled or fails.
 
 The dashboard is built from independent producer uploads. A complete refresh
 has these reliable receipts for the same commit and workflow attempt:
@@ -378,10 +376,10 @@ quirks — that mechanism is for thin dispatchers exercised end-to-end
 via shell-out tests, not for "the tooling is confused." File a
 follow-up issue if a new mis-attribution class shows up.
 
-## How to interpret "my PR's coverage"
+## How to interpret coverage
 
-Every PR gets a comment from Codecov once the Coverage workflow
-finishes. The comment layout is `reach, diff, flags, tree`:
+Scheduled and explicitly dispatched runs publish a Codecov comment when the
+Coverage workflow finishes. The comment layout is `reach, diff, flags, tree`:
 
 - **reach** — lines this PR's tests exercised.
 - **diff** — of the N lines this PR adds/modifies, K are covered by
@@ -391,22 +389,17 @@ finishes. The comment layout is `reach, diff, flags, tree`:
 - **tree** — per-file drilldown. Click through to see exactly which
   lines are uncovered.
 
-Project-level and patch-level coverage numbers are informational — they
-surface on every PR but don't block merges on their own.
+Project-level and patch-level coverage numbers are informational and do not
+block merges on their own.
 
-**Diff-coverage gate (required).** Every PR also receives a "Diff
-coverage (required)" comment from the `coverage-diff-gate` job. It
-answers "of the lines this PR adds or modifies, how many are covered?"
-at a **75%** floor. Sub-threshold diff coverage hard-fails this check
-and blocks the merge — adding untested code means either adding tests
-or splitting the untested portion into its own PR.
+**Diff-coverage gate (retired for this workflow).** The `coverage-diff-gate`
+job is guarded for pull-request events, but the Coverage workflow no longer
+has a pull-request trigger. It therefore does not run in scheduled or
+dispatched Coverage runs and does not block merges.
 
-On pull requests the native coverage matrix is intentionally macOS-only.
-Linux and Windows native coverage are collected on push-to-main,
-workflow dispatch, and the nightly cross-platform lane. A docs/planning
-PR that the classifier marks skip-safe does not allocate native coverage
-runners at all; the required diff-coverage gate reports a fast green
-skip instead.
+The native coverage matrix runs the full Linux, macOS, and Windows set on
+the scheduled refresh and on explicit workflow dispatch. The nightly
+cross-platform lane supplies an additional non-macOS signal.
 
 For local pre-submit checks, run `tools/scripts/local_diff_cover.sh`
 (the pre-push hook runs the same thing). With no arguments it builds
@@ -636,10 +629,8 @@ Still out of scope today:
 
 ## Cross-platform matrix
 
-The native coverage matrix is event-conditional. On pull requests, it
-runs only the macOS leg when `tools/scripts/classify_changes.py` says
-native coverage is required. On push-to-main and workflow dispatch, it
-runs `{ubuntu-latest, macos-latest, windows-latest}` so the Codecov
+The native coverage matrix runs `{ubuntu-latest, macos-latest,
+windows-latest}` on scheduled refreshes and workflow dispatch so the Codecov
 branch record receives the full cross-OS picture.
 
 Each OS leg produces its own `coverage.cobertura.xml` and uploads to

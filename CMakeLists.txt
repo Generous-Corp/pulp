@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.950.1
+    VERSION 0.955.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -562,36 +562,23 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             manifest
             --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
             --build-dir "${CMAKE_BINARY_DIR}"
-            --target pulp-canvas
-            --target pulp-render
-            --target pulp-view-core
-            --target pulp-view-script
-            --target pulp-platform
-            --target pulp-runtime
-            --target pulp-simd
+            --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
             --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
     set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
-        LABELS "validation")
+        LABELS "pr")
     add_test(NAME pulp.vellum-closure-gate
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
             gate
             --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
-            --allow pulp-audio
-            --allow pulp-midi
-            --allow pulp-view-audio
-            --allow pulp-content
-            --allow-include-prefix core/view/include/pulp/view/
-            --allow-include-prefix core/view/src/
-            --allow-include-prefix core/audio/include/pulp/audio/
-            --allow-include-prefix core/signal/include/pulp/signal/
-            --allow-include-path core/platform/src/android/jni_motion.cpp
-            --allow-include-prefix core/render/platform/android/gpu_surface_android
-            --allow-root-prefix core/audio/
-            --allow-root-prefix core/signal/)
+            --allowlist "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_allowlist.json"
+            --generate
+            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --build-dir "${CMAKE_BINARY_DIR}"
+            --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
     set_tests_properties(pulp.vellum-closure-gate PROPERTIES
         DEPENDS pulp.vellum-closure-boundary
-        LABELS "validation")
+        LABELS "pr")
     add_test(NAME pulp.vellum-closure-gate-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
             --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json"
@@ -599,12 +586,28 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
     set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
-        LABELS "validation")
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-external-input-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json"
+            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60/unresolved/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
+    set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-edge-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json"
+            --break "perl -0pi -e 's/pulp::view-audio/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allow pulp::view-audio")
+    set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
+        LABELS "pr")
     add_test(NAME pulp.vellum-closure-policy-selftest
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/test_vellum_closure.py")
     set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
-        LABELS "validation")
+        LABELS "pr")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
     FetchContent_Declare(
@@ -1009,6 +1012,20 @@ endif()
 # ── SDK Install Rules ──────────────────────────────────────────────────────
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
+
+# Match the target names exported by find_package(Pulp) for source consumers.
+# Aliases are global targets, so the parent of add_subdirectory(Pulp) sees them.
+foreach(_pulp_export_target IN LISTS PULP_SDK_TARGETS)
+    if(TARGET "${_pulp_export_target}")
+        get_target_property(_pulp_export_name "${_pulp_export_target}" EXPORT_NAME)
+        if(NOT _pulp_export_name)
+            string(REGEX REPLACE "^pulp-" "" _pulp_export_name "${_pulp_export_target}")
+        endif()
+        if(NOT TARGET "Pulp::${_pulp_export_name}")
+            add_library("Pulp::${_pulp_export_name}" ALIAS "${_pulp_export_target}")
+        endif()
+    endif()
+endforeach()
 
 # Build-specific Forge metadata is separate from the statically audited public
 # header install surface. The catalog module installs only share/pulp JSON.

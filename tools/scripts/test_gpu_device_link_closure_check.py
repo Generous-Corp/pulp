@@ -26,7 +26,9 @@ def baseline_properties(root: Path) -> dict[str, str]:
         "api.type": "INTERFACE_LIBRARY",
         "api.interface_link": "",
         "device.type": "STATIC_LIBRARY",
-        "device.link": "pulp::gpu-device-api;pulp::runtime;-framework Metal;skia::skia;skia::dawn",
+        "device.link": "pulp::gpu-device-api;pulp::runtime;-framework Metal;"
+                       "$<LINK_ONLY:skia::skia>;$<LINK_ONLY:skia::dawn>",
+        "device.interface_link": "$<LINK_ONLY:skia::skia>;$<LINK_ONLY:skia::dawn>",
         "device.sources": "src/gpu_compute.cpp;src/gpu_surface_dawn.cpp",
         "device.source_dir": str(root / "render"),
         "render.link": "pulp::runtime;pulp::canvas;pulp::gpu-device-api;pulp::gpu-device;skia::skia",
@@ -110,6 +112,10 @@ class LinkClosureRules(unittest.TestCase):
     def test_device_linking_canvas_fails(self) -> None:
         self.props["device.link"] += ";pulp::canvas"
         self.assertEqual(self.codes(), ["device-reaches-up"])
+
+    def test_device_provider_public_fails(self) -> None:
+        self.props["device.interface_link"] = "skia::skia"
+        self.assertEqual(self.codes(), ["device-provider-public"])
 
     def test_device_without_api_fails(self) -> None:
         self.props["device.link"] = "pulp::runtime"

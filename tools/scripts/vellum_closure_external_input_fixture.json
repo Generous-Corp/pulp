@@ -1,0 +1,14 @@
+{
+  "source_root": ".",
+  "missing_targets": [],
+  "targets": [],
+  "files": [],
+  "external_inputs": [
+    {
+      "path": "@build/_deps/choc-src/include/choc/value_tree/value_tree.h",
+      "source": "https://github.com/danielraffel/choc.git",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60"
+    }
+  ],
+  "generated_inputs": []
+}

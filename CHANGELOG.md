@@ -9,6 +9,76 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09551"></a>
+## [0.955.1] - 2026-10-12
+
+- release/version bump ([#10136](https://github.com/Generous-Corp/pulp/pull/10136))
+- codex/wgpu portability replacement 20261011 ([#10065](https://github.com/Generous-Corp/pulp/pull/10065))
+
+<a id="v09550"></a>
+## [0.955.0] - 2026-10-12
+
+- release/version bump ([#10134](https://github.com/Generous-Corp/pulp/pull/10134))
+- feature/vellum export f8f7 ([#10114](https://github.com/Generous-Corp/pulp/pull/10114))
+- fix/hosted macos advisory arm 20261011 ([#10100](https://github.com/Generous-Corp/pulp/pull/10100))
+- docs/keyed canary followup ([#10049](https://github.com/Generous-Corp/pulp/pull/10049))
+- codex/rtsan dispatch cleanup 2026 10 11 ([#10074](https://github.com/Generous-Corp/pulp/pull/10074))
+- docs/keyed same base canary 20261011 v2 ([#10076](https://github.com/Generous-Corp/pulp/pull/10076))
+- fix/pulp install origin aliases 20261010 ([#10058](https://github.com/Generous-Corp/pulp/pull/10058))
+- fix/dependabot merge exemption 20261012 ([#10130](https://github.com/Generous-Corp/pulp/pull/10130))
+
+<a id="v09540"></a>
+## [0.954.0] - 2026-10-12
+
+- release/version bump ([#10132](https://github.com/Generous-Corp/pulp/pull/10132))
+- fix/native authored pseudo paint 20261011 ([#10131](https://github.com/Generous-Corp/pulp/pull/10131))
+
+<a id="v09530"></a>
+## [0.953.0] - 2026-10-12
+
+- codex/enforcement gates audit 20261011 ([#10091](https://github.com/Generous-Corp/pulp/pull/10091))
+- release/version bump ([#10129](https://github.com/Generous-Corp/pulp/pull/10129))
+- fix/no editor link floor linux gpu marker ([#10121](https://github.com/Generous-Corp/pulp/pull/10121))
+- docs/vellum inheritance ledger shards 20261010 ([#10071](https://github.com/Generous-Corp/pulp/pull/10071))
+- fix/macos bundle sidecars ([#10101](https://github.com/Generous-Corp/pulp/pull/10101))
+
+<a id="v09520"></a>
+## [0.952.0] - 2026-10-12
+
+- release/version bump ([#10128](https://github.com/Generous-Corp/pulp/pull/10128))
+- feature/vellum carve P2 ([#10030](https://github.com/Generous-Corp/pulp/pull/10030))
+- release/version bump ([#10126](https://github.com/Generous-Corp/pulp/pull/10126))
+- fix/lv2 runtime staging ([#10125](https://github.com/Generous-Corp/pulp/pull/10125))
+- codex/govern timeline hardening 20261010 ([#10063](https://github.com/Generous-Corp/pulp/pull/10063))
+- codex/dependabot contracts all 20261011 ([#10117](https://github.com/Generous-Corp/pulp/pull/10117))
+- feature/design import external asset copy ([#10120](https://github.com/Generous-Corp/pulp/pull/10120))
+- fix/source selftests count skips ([#10119](https://github.com/Generous-Corp/pulp/pull/10119))
+- fix/p6 gpu device private providers ([#10116](https://github.com/Generous-Corp/pulp/pull/10116))
+
+<a id="v09510"></a>
+## [0.951.0] - 2026-10-11
+
+- release/version bump ([#10123](https://github.com/Generous-Corp/pulp/pull/10123))
+- fix/materialized pseudo runtime manifest 20261011 ([#10113](https://github.com/Generous-Corp/pulp/pull/10113))
+- feature/design import fail closed f4 ([#10075](https://github.com/Generous-Corp/pulp/pull/10075))
+- codex/dependabot test contracts 20261011 ([#10108](https://github.com/Generous-Corp/pulp/pull/10108))
+
+<a id="v09501"></a>
+## [0.950.1] - 2026-10-11
+
+- release/version bump ([#10112](https://github.com/Generous-Corp/pulp/pull/10112))
+- release/version bump ([#10109](https://github.com/Generous-Corp/pulp/pull/10109))
+- fix/design ir asset path lexical ([#10077](https://github.com/Generous-Corp/pulp/pull/10077))
+- feat/pseudo materialized import 20261011 ([#10084](https://github.com/Generous-Corp/pulp/pull/10084))
+- fix/vellum inventory pyyaml message ([#10096](https://github.com/Generous-Corp/pulp/pull/10096))
+- codex/gate host build poka yoke ([#10088](https://github.com/Generous-Corp/pulp/pull/10088))
+- codex/dependabot actions 20261010 ([#10042](https://github.com/Generous-Corp/pulp/pull/10042))
+- release/version bump ([#10105](https://github.com/Generous-Corp/pulp/pull/10105))
+- release/version bump ([#10104](https://github.com/Generous-Corp/pulp/pull/10104))
+- fix/ios shallow bundle signing ([#10097](https://github.com/Generous-Corp/pulp/pull/10097))
+- feature/vellum p14 wgpu native skia off ([#10053](https://github.com/Generous-Corp/pulp/pull/10053))
+- release/version bump ([#10102](https://github.com/Generous-Corp/pulp/pull/10102))
+
 <a id="v09500"></a>
 ## [0.950.0] - 2026-10-11
 
@@ -10447,6 +10517,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.955.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.955.1
+[0.955.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.955.0
+[0.954.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.954.0
+[0.953.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.953.0
+[0.952.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.952.0
+[0.951.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.951.0
+[0.950.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.950.1
 [0.950.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.950.0
 [0.949.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.949.0
 [0.948.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.948.0

@@ -330,12 +330,22 @@ def _predecessor(version: str) -> str:
 
 FILENAME_VERSION_RE = re.compile(r"^v?(\d+\.\d+\.\d+)$")
 
+# The only `applies_if` a note may carry: the half-open interval of hops that
+# cross its own version. Probing an expression at a few hops cannot prove it
+# selects nothing else (an `||` arm can add any unrelated range), so the shape
+# is fixed instead.
+CANONICAL_APPLIES_IF_RE = re.compile(
+    r"^\s*cli_version_from\s*<\s*(\d+\.\d+\.\d+)\s*&&\s*"
+    r"cli_version_to\s*>=\s*(\d+\.\d+\.\d+)\s*$")
+
 
 def check_entry_consistency(entry: "Entry") -> None:
     """A note must describe the release it is filed under. Two ways it can
     silently not: a `vX.Y.Z.md` file whose `version` names another release,
     and an `applies_if` that does not select exactly the hops crossing that
-    version (the note would show for the wrong upgrade or never)."""
+    version (the note would show for the wrong upgrade or never). The latter
+    is enforced by shape: only the canonical single interval is accepted, and
+    it is still evaluated at the boundary hops as a second check."""
     path = entry.source_path
     own = semver_key(entry.version)
     name = FILENAME_VERSION_RE.match(path.stem)
@@ -344,6 +354,11 @@ def check_entry_consistency(entry: "Entry") -> None:
                      "rename the file or fix the version")
     if not entry.applies_if:
         return
+    canonical = f"cli_version_from < {entry.version} && cli_version_to >= {entry.version}"
+    shape = CANONICAL_APPLIES_IF_RE.match(entry.applies_if)
+    if not shape or {shape.group(1), shape.group(2)} != {entry.version}:
+        _fatal(path, f"`applies_if` must be exactly {canonical!r} (the hops crossing "
+                     f"{entry.version}, and nothing else); got {entry.applies_if!r}")
     try:
         crosses = evaluate_applies_if(entry.applies_if, "0.0.0", entry.version)
         before = evaluate_applies_if(entry.applies_if, "0.0.0", _predecessor(entry.version))

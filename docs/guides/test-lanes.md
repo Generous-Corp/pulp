@@ -23,6 +23,14 @@ about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
 runs). Keeping it
 lean is why the two label groups below are excluded from it.
 
+The **ThreadSanitizer lane** keeps its SignalGraph selection exact and
+bounded. It includes the compile-first lifecycle case, the mutation-lock and
+prepare/swap publication cases, and the two re-prepare/process race hammers for
+the executor and parallel paths. It does not select the full graph parity
+matrix: ordinary lanes own parity coverage, while TSan owns these concurrent
+publication and rendering cases. Keep the case names and this selection in
+sync when adding another lifecycle race proof.
+
 ### Where the required gate's wall-clock goes
 
 Measured per-step medians over the same sample, across the 40 runs that
@@ -561,3 +569,22 @@ has a positive pattern, and the `[#<stem>]` term is one, so a member whose own
 changed-surface selector all keep working, since they address tests by name.
 The one visible difference is `--target`: build the group
 (`pulp-test-group-view-widgets`), not the old per-suite target.
+
+### Hosted macOS advisory lanes and arm-time dispatch
+
+Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
+native matrix are advisory hosted-macOS lanes. They run from the nightly
+`schedule` on `main` and from `workflow_dispatch` on an approved PR head; they
+do not start on every `pull_request` push. The `pulp pr` wrapper calls
+`tools/scripts/dispatch_advisory_lanes.sh` after its delegated Shipyard arm/ship
+path succeeds. Direct `shipyard pr` invocations do not yet call that Pulp hook,
+so nightly main runs are the interim signal until the Shipyard arm hook lands.
+The sanitizer workflow keeps ASan and UBSan on non-draft PRs that touch
+`core/**`, while TSan is nightly or explicitly dispatched. Coverage is the only
+matrix with a `max-parallel: 2` cap; sanitizer legs are independent named jobs,
+not one matrix, so no aggregate cap is claimed. These lanes remain advisory and
+do not replace the required Vellum checks.
+
+The files under `docs/evidence/hosted-macos-advisory/` are labeled pre-change
+baselines. A post-merge follow-up must capture hosted-macOS running plus queued
+jobs and the Vellum required-check queue wait at the same hour of day.
