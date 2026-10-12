@@ -4816,10 +4816,14 @@
    "entry": "tools/scripts/test_gate_common.py",
    "inputs": [
     ".github/workflows",
+    ".github/workflows/build.yml",
     "tools/cli",
     "tools/cli/cmd_doctor.cpp",
+    "tools/scripts",
     "tools/scripts/gate_common.py",
-    "tools/scripts/test_gate_common.py"
+    "tools/scripts/skill_path_map.json",
+    "tools/scripts/test_gate_common.py",
+    "tools/scripts/versioning.json"
    ],
    "kind": "python"
   },

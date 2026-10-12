@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import pathlib
 import re
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -565,64 +567,100 @@ class QuotedTrailerIsNotABypassTests(unittest.TestCase):
 
 
 class DependabotUsesOnlyDiffTests(unittest.TestCase):
-    PATCH = (
-        "diff --git a/.github/workflows/a.yml b/.github/workflows/a.yml\n"
-        "@@ -1 +1 @@\n"
-        "-      uses: actions/checkout@v5\n"
-        "+      uses: actions/checkout@v7\n"
-    )
+    SCRIPT = REPO_ROOT / "tools" / "scripts" / "skill_sync_check.py"
 
-    def check(self, authors: str, actor: str = "github-merge-queue[bot]", patch: str | None = None) -> bool:
-        diff = patch or self.PATCH
+    @staticmethod
+    def _git(repo: pathlib.Path, *args: str, env: dict[str, str] | None = None) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True,
+            encoding="utf-8", env=env,
+        )
+        return result.stdout.strip()
 
-        def run(args, **kwargs):
-            if "--name-only" in args:
-                return subprocess.CompletedProcess(args, 0, ".github/workflows/a.yml\n", "")
-            if "log" in args:
-                return subprocess.CompletedProcess(args, 0, authors, "")
-            return subprocess.CompletedProcess(args, 0, diff, "")
+    def _fixture_result(self, shape: str) -> int:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            self._git(repo, "init", "-q", "-b", "main")
+            (repo / ".agents/skills/ci").mkdir(parents=True)
+            (repo / ".github/workflows").mkdir(parents=True)
+            (repo / ".agents/skills/ci/SKILL.md").write_text("# CI\n", encoding="utf-8")
+            (repo / "tools/scripts").mkdir(parents=True)
+            (repo / "tools/scripts/versioning.json").write_text(
+                '{"skills":{"skills_dir":".agents/skills","path_map":"tools/scripts/skill_path_map.json"}}\n',
+                encoding="utf-8",
+            )
+            (repo / "tools/scripts/skill_path_map.json").write_text(
+                '{"skills":{"ci":{"paths":[".github/workflows/**"]}}}\n',
+                encoding="utf-8",
+            )
+            workflow = repo / ".github/workflows/build.yml"
+            workflow.write_text(
+                "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v5\n",
+                encoding="utf-8",
+            )
+            self._git(repo, "add", ".")
+            self._git(repo, "commit", "-qm", "base")
+            base = self._git(repo, "rev-parse", "HEAD")
 
-        with mock.patch.object(gc.subprocess, "run", side_effect=run):
-            return gc.dependabot_uses_only_diff("origin/main", actor=actor)
+            self._git(repo, "checkout", "-qb", "dependabot")
+            workflow.write_text(
+                "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v7\n",
+                encoding="utf-8",
+            )
+            bot_env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "dependabot[bot]",
+                "GIT_AUTHOR_EMAIL": "49699333+dependabot[bot]@users.noreply.github.com",
+                "GIT_COMMITTER_NAME": "dependabot[bot]",
+                "GIT_COMMITTER_EMAIL": "49699333+dependabot[bot]@users.noreply.github.com",
+            }
+            self._git(repo, "add", ".github/workflows/build.yml")
+            self._git(repo, "commit", "-qm", "build(deps): bump checkout", env=bot_env)
 
-    def test_uses_only_workflow_diff_passes(self) -> None:
-        self.assertTrue(self.check("dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n"))
+            self._git(repo, "checkout", "-q", "main")
+            (repo / "README.md").write_text("main advanced\n", encoding="utf-8")
+            self._git(repo, "add", "README.md")
+            self._git(repo, "commit", "-qm", "main advances")
+            base = self._git(repo, "rev-parse", "HEAD")
+            self._git(repo, "checkout", "-q", "dependabot")
 
-    def test_merge_group_actor_is_not_authoritative(self) -> None:
-        self.assertTrue(self.check(
-            "dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n",
-            actor="github-merge-queue[bot]",
-        ))
-
-    def test_update_branch_merge_commit_does_not_void_dependabot_range(self) -> None:
-        commands: list[list[str]] = []
-
-        def run(args, **kwargs):
-            commands.append(args)
-            if "--name-only" in args:
-                return subprocess.CompletedProcess(args, 0, ".github/workflows/a.yml\n", "")
-            if "log" in args:
-                # `--no-merges` is what removes the structural app merge;
-                # the remaining authored commit is the Dependabot update.
-                self.assertIn("--no-merges", args)
-                return subprocess.CompletedProcess(
-                    args, 0,
-                    "dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n",
-                    "",
+            if shape in {"clean-merge", "evil-merge"}:
+                if shape == "evil-merge":
+                    self._git(repo, "merge", "--no-commit", "--no-ff", "main")
+                    workflow.write_text(
+                        "jobs:\n  build:\n    steps:\n      - uses: evil/backdoor@main\n",
+                        encoding="utf-8",
+                    )
+                    self._git(repo, "add", ".github/workflows/build.yml")
+                    self._git(repo, "commit", "-qm", "merge main")
+                else:
+                    self._git(repo, "merge", "--no-edit", "--no-ff", "main")
+            elif shape == "non-merge":
+                workflow.write_text(
+                    "jobs:\n  build:\n    steps:\n      - uses: evil/backdoor@main\n",
+                    encoding="utf-8",
                 )
-            return subprocess.CompletedProcess(args, 0, self.PATCH, "")
+                self._git(repo, "add", ".github/workflows/build.yml")
+                self._git(repo, "commit", "-qm", "human rewrite")
+            else:
+                raise AssertionError(shape)
 
-        with mock.patch.object(gc.subprocess, "run", side_effect=run):
-            self.assertTrue(gc.dependabot_uses_only_diff("origin/main"))
+            result = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--base", base, "--head", "HEAD",
+                 "--repo-root", str(repo), "--config", str(repo / "tools/scripts/versioning.json"),
+                 "--mode=report"],
+                cwd=repo, capture_output=True, text=True, encoding="utf-8",
+            )
+            return result.returncode
 
-    def test_human_authored_uses_only_diff_does_not_bypass(self) -> None:
-        self.assertFalse(self.check("Daniel Raffel\x00daniel@example.com\n"))
+    def test_clean_update_branch_merge_passes(self) -> None:
+        self.assertEqual(self._fixture_result("clean-merge"), 0)
 
-    def test_mixed_author_range_does_not_bypass(self) -> None:
-        self.assertFalse(self.check(
-            "dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n"
-            "Daniel Raffel\x00daniel@example.com\n"
-        ))
+    def test_evil_merge_fails_closed(self) -> None:
+        self.assertEqual(self._fixture_result("evil-merge"), 1)
+
+    def test_non_merge_rewrite_fails_closed(self) -> None:
+        self.assertEqual(self._fixture_result("non-merge"), 1)
 
     def test_workflow_helper_rejects_core_change_before_line_scan(self) -> None:
         names = subprocess.CompletedProcess(
