@@ -651,8 +651,9 @@ set_tests_properties(pulp-view-core-include-boundary
 if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET pulp-design-import)
     add_test(NAME pulp-view-audio-symbol-floor
         COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/scripts/view_audio_symbol_floor.py"
-            --audio "$<TARGET_FILE:pulp-view-audio>"
+            "${CMAKE_SOURCE_DIR}/tools/scripts/archive_symbol_closure_check.py"
+            --nm "${CMAKE_NM}"
+            --forbidden "$<TARGET_FILE:pulp-view-audio>" --no-control
             --check "view-core=$<TARGET_FILE:pulp-view-core>"
             --check "view-script=$<TARGET_FILE:pulp-view-script>"
             --check "design-import=$<TARGET_FILE:pulp-design-import>"

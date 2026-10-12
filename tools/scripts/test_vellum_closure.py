@@ -5,6 +5,8 @@ import tempfile
 from pathlib import Path
 from argparse import Namespace
 from vellum_closure import (
+    cmd_gate,
+    fetchcontent_pins,
     external_input_violations,
     edge_key,
     load_allowlist,
@@ -79,6 +81,85 @@ class ClosurePolicyTests(unittest.TestCase):
                 source_root=None, build_dir=None,
             )
             self.assertEqual(__import__("vellum_closure").cmd_gate(args), 1)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CHOC_PATH = "@build/_deps/choc-src/include/choc/value_tree/value_tree.h"
+
+
+class ExternalInputBranchTests(unittest.TestCase):
+    """Each provenance branch is exercised by changing one field of a valid row."""
+
+    def setUp(self):
+        self.expected = fetchcontent_pins(REPO_ROOT)["choc"]
+
+    def violations(self, **changes):
+        row = {"path": CHOC_PATH, "source": self.expected["source"], "pin": self.expected["pin"]}
+        row.update(changes)
+        return external_input_violations({"source_root": str(REPO_ROOT), "external_inputs": [row]})
+
+    def test_valid_row_passes(self):
+        self.assertEqual(self.violations(), [])
+
+    def test_wrong_repository_is_rejected(self):
+        found = self.violations(source="https://github.com/example/choc.git")
+        self.assertEqual(len(found), 1)
+        self.assertIn("repository mismatch", found[0])
+
+    def test_short_pin_is_rejected(self):
+        found = self.violations(pin=self.expected["pin"][:12])
+        self.assertEqual(len(found), 1)
+        self.assertIn("full 40-hex SHA", found[0])
+
+    def test_non_hex_pin_is_rejected(self):
+        found = self.violations(pin="z" * 40)
+        self.assertEqual(len(found), 1)
+        self.assertIn("full 40-hex SHA", found[0])
+
+    def test_different_full_pin_is_rejected(self):
+        other = "0" * 40 if self.expected["pin"] != "0" * 40 else "1" * 40
+        found = self.violations(pin=other)
+        self.assertEqual(len(found), 1)
+        self.assertIn("pin mismatch", found[0])
+
+    def test_unknown_dependency_is_rejected(self):
+        found = self.violations(path="@build/_deps/rogue-src/include/rogue.hpp")
+        self.assertEqual(len(found), 1)
+        self.assertIn("unknown FetchContent", found[0])
+
+    def test_build_tree_source_is_rejected(self):
+        found = self.violations(source="build-tree")
+        self.assertEqual(len(found), 1)
+        self.assertIn("unresolved build-tree", found[0])
+
+    def test_unresolved_pin_is_rejected(self):
+        found = self.violations(pin="unresolved")
+        self.assertEqual(len(found), 1)
+        self.assertIn("unresolved build-tree", found[0])
+
+
+class AllowlistGateTests(unittest.TestCase):
+    def test_unused_allowlist_entry_fails_the_gate(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "source_root": str(root), "files": [], "targets": [],
+                "undefined_symbols": [], "external_inputs": [],
+            }), encoding="utf-8")
+            allowlist = root / "allowlist.json"
+            allowlist.write_text(json.dumps({
+                "schema": "pulp.vellum.closure.allowlist.v1",
+                "entries": [{"id": "stale", "owner": "test", "debt_id": "stale",
+                             "kind": "root", "match": "core/nothing/"}],
+            }), encoding="utf-8")
+            args = Namespace(
+                manifest=[str(manifest)], allow=[], allow_include_path=[], allow_include_edge=[],
+                allow_include_prefix=[], allow_root_prefix=[], report_only=False,
+                allowlist=str(allowlist), generate=False, unit_manifest=None, target=None,
+                source_root=None, build_dir=None,
+            )
+            self.assertEqual(cmd_gate(args), 1)
 
 
 if __name__ == "__main__":
