@@ -6609,13 +6609,6 @@
    ],
    "kind": "python"
   },
-  "macos-plugin-bundle-signing": {
-   "entry": "tools/scripts/check_apple_bundle_signing.sh",
-   "inputs": [
-    "tools/scripts/check_apple_bundle_signing.sh"
-   ],
-   "kind": "shell"
-  },
   "measure-min-os-selftest": {
    "entry": "tools/scripts/test_measure_min_os.py",
    "inputs": [
@@ -9863,21 +9856,6 @@
     "tools/scripts/test_vellum_boundary_lint.py",
     "tools/ui-build",
     "tools/ui-build/pulp-package.json"
-   ],
-   "kind": "python"
-  },
-  "vellum-inheritance-ledger": {
-   "entry": "tools/scripts/vellum_inheritance_ledger_check.py",
-   "inputs": [
-    ".github/vellum-change-events",
-    "tools/scripts/vellum_inheritance_ledger_check.py"
-   ],
-   "kind": "python"
-  },
-  "vellum-inheritance-ledger-negative-contract": {
-   "entry": "tools/scripts/test_vellum_inheritance_ledger_check.py",
-   "inputs": [
-    "tools/scripts/test_vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"
   },

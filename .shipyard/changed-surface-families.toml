@@ -4,7 +4,7 @@
 # Resolve a merge conflict in this file by regenerating, never by hand.
 
 [[families]]
-name = "script-readers-f1ef48adc26c"
+name = "script-readers-e52ecaf89c25"
 paths = [
   "tools/scripts/action_pin_lint.py",
   "tools/scripts/build_speed_proxies.py",
@@ -220,7 +220,6 @@ paths = [
   "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
-  "tools/scripts/test_sdk_development_provenance.py",
   "tools/scripts/test_sdk_provenance.py",
   "tools/scripts/test_shell_portability_check.py",
   "tools/scripts/test_shipyard_duplicate_pr_heads.py",
@@ -284,6 +283,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -293,7 +293,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1105a6e9aea7"
+name = "script-readers-9145c078f686"
 paths = ["tools/scripts/archive_symbol_closure_check.py"]
 tests = [
   "archive-symbol-closure-selftest",
@@ -314,6 +314,7 @@ tests = [
   "prepush-refresh-push",
   "pulp-state-symbol-closure",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = [
   "pulp-audio",
@@ -332,7 +333,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-09d7ee9c1ce3"
+name = "script-readers-e90df8734b7d"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
   "build-parallelism-guard",
@@ -352,6 +353,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -361,7 +363,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-db193ee99ba3"
+name = "script-readers-bcc969fb23d1"
 paths = ["tools/scripts/check_inspector_protocol_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -382,6 +384,7 @@ tests = [
   "inspector-protocol-registry-complete",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -391,7 +394,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6b64b134181c"
+name = "script-readers-00762449cd88"
 paths = ["tools/scripts/check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -412,6 +415,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "visual-python-deps-present",
   "visual-python-deps-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -421,7 +425,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1fd3a184085a"
+name = "script-readers-32af41359117"
 paths = ["tools/scripts/ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -442,6 +446,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -451,7 +456,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1bf4604327fb"
+name = "script-readers-8c0bd50589fa"
 paths = ["tools/scripts/ctest_inventory_parity.py"]
 tests = [
   "build-parallelism-guard",
@@ -471,6 +476,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -480,7 +486,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0c5f80cf6b96"
+name = "script-readers-579b9769672b"
 paths = ["tools/scripts/ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -501,6 +507,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -510,7 +517,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-71fbe815c062"
+name = "script-readers-d497e710f198"
 paths = ["tools/scripts/design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -531,6 +538,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -540,7 +548,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c2cadf1193e5"
+name = "script-readers-82dfaabc6d8d"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -560,6 +568,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -569,7 +578,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-da78c257fcb6"
+name = "script-readers-af092b925167"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -594,6 +603,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "source-selftest-lane-contract",
   "source-selftest-lane-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -603,7 +613,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9e24d1291cf2"
+name = "script-readers-c951e36ba9a2"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
   "build-parallelism-guard",
@@ -623,6 +633,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -632,7 +643,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e043b9c7d51d"
+name = "script-readers-2742a6ac83ba"
 paths = ["tools/scripts/mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -653,6 +664,7 @@ tests = [
   "mac-objc-source-list-guard-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -662,7 +674,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-eb2019ebcd2b"
+name = "script-readers-9c093800d3df"
 paths = ["tools/scripts/msvc_string_literal_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -682,6 +694,7 @@ tests = [
   "msvc-string-literal-guard",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -691,7 +704,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e275f5941b1d"
+name = "script-readers-db951fc56957"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -713,6 +726,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "test-pch-wiring",
   "test-pch-wiring-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -722,7 +736,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-36e97d162933"
+name = "script-readers-f22dfc40329a"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -742,6 +756,7 @@ tests = [
   "pr-fast-tier-contract",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -751,7 +766,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e412a98ec74e"
+name = "script-readers-af60ba060c3d"
 paths = [
   "tools/scripts/queue_admission_guard.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -774,6 +789,7 @@ tests = [
   "prepush-refresh-push",
   "queue-batch-attribute-selftest",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -783,7 +799,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0446d52bff68"
+name = "script-readers-9d7037d78566"
 paths = ["tools/scripts/raw_this_async_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -804,6 +820,7 @@ tests = [
   "raw-this-async-check",
   "raw-this-async-selftest",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -813,7 +830,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e5b9fb4e5b5e"
+name = "script-readers-299a790a248e"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -834,6 +851,7 @@ tests = [
   "relay-contract-hosts",
   "relay-contract-hosts-selftest",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -843,7 +861,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1b1930d77ab4"
+name = "script-readers-e45504ccbce2"
 paths = ["tools/scripts/render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -864,6 +882,7 @@ tests = [
   "render-upward-edge-check",
   "render-upward-edge-check-rules",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -873,7 +892,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5848c7dd4679"
+name = "script-readers-50b464124cfd"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -894,6 +913,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "rust-cli-build-edge",
   "rust-cli-build-edge-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -903,7 +923,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f79f25b7945c"
+name = "script-readers-e14534de3585"
 paths = ["tools/scripts/sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
@@ -924,6 +944,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline",
   "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -933,7 +954,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cbdee0475689"
+name = "script-readers-265d21f5669f"
 paths = ["tools/scripts/sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -954,6 +975,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "sequencer-control-skill-coverage",
   "sequencer-control-skill-coverage-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -963,7 +985,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-348213e97501"
+name = "script-readers-1e492413b18c"
 paths = ["tools/scripts/setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -983,6 +1005,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "setup-bootstrap-plan-guard",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -992,7 +1015,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1c2efa5486c9"
+name = "script-readers-d719f200646e"
 paths = ["tools/scripts/shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1013,6 +1036,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "test-shared-objects",
   "test-shared-objects-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1022,7 +1046,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4b59ada42a96"
+name = "script-readers-42f213b348dd"
 paths = ["tools/scripts/status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -1042,6 +1066,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "status-tone-signal-lint",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1051,7 +1076,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c2046fd975ce"
+name = "script-readers-4208993b146c"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
   "advisory-macos-runner-policy",
@@ -1071,6 +1096,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1080,7 +1106,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f2f80797791d"
+name = "script-readers-512efd02b270"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
@@ -1100,6 +1126,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1109,7 +1136,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b07c05ee330f"
+name = "script-readers-c55b0b556fbd"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
@@ -1129,6 +1156,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1138,7 +1166,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d00128fdcec3"
+name = "script-readers-4dc877f43f05"
 paths = ["tools/scripts/test_archive_symbol_closure_check.py"]
 tests = [
   "archive-symbol-closure-selftest",
@@ -1158,6 +1186,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1167,7 +1196,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-46b13e9bfcd6"
+name = "script-readers-b97ba14ead11"
 paths = ["tools/scripts/test_build_combined_installer.py"]
 tests = [
   "build-parallelism-guard",
@@ -1187,6 +1216,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1196,7 +1226,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7c0945ccffc5"
+name = "script-readers-6d898fdd1e02"
 paths = ["tools/scripts/test_build_parallelism_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1216,6 +1246,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1225,7 +1256,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9de5b2c50730"
+name = "script-readers-3d5023a2470c"
 paths = ["tools/scripts/test_build_speed_proxies.py"]
 tests = [
   "build-parallelism-guard",
@@ -1245,6 +1276,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1254,7 +1286,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0de82d5e77c4"
+name = "script-readers-d501f1aa6c4b"
 paths = ["tools/scripts/test_build_speed_scorecard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1274,6 +1306,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1283,7 +1316,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f7a27f54ba0b"
+name = "script-readers-e46f5d35ddbe"
 paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -1304,6 +1337,7 @@ tests = [
   "pr-head-affected-tests-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1313,7 +1347,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c59e6529425b"
+name = "script-readers-55ac85bd495e"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -1333,6 +1367,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1342,7 +1377,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e3636b850dba"
+name = "script-readers-41b24fbed035"
 paths = ["tools/scripts/test_catch_discover_timeout_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1362,6 +1397,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1371,7 +1407,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-28f5b2d1a752"
+name = "script-readers-01ffc9618534"
 paths = ["tools/scripts/test_catch_multilabel_properties.py"]
 tests = [
   "build-parallelism-guard",
@@ -1391,6 +1427,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1400,7 +1437,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ab715922371b"
+name = "script-readers-22a1b75988cb"
 paths = ["tools/scripts/test_catch_test_name_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1420,6 +1457,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1429,7 +1467,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2526cc5b457b"
+name = "script-readers-d69a63a8f63d"
 paths = ["tools/scripts/test_ccache_pch_isolation.py"]
 tests = [
   "build-parallelism-guard",
@@ -1449,6 +1487,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1458,7 +1497,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fef7022e89e0"
+name = "script-readers-3f8b0a3f09bf"
 paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
 tests = [
   "build-parallelism-guard",
@@ -1478,6 +1517,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1487,7 +1527,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b81ac549c92a"
+name = "script-readers-582dd5f8d7c3"
 paths = ["tools/scripts/test_check_apple_bundle_signing.py"]
 tests = [
   "apple-bundle-signing-check",
@@ -1507,6 +1547,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1516,7 +1557,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5d023dbea308"
+name = "script-readers-196ad4737ac1"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
@@ -1536,6 +1577,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1545,7 +1587,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-490b541bc702"
+name = "script-readers-f934483251d0"
 paths = ["tools/scripts/test_check_canvas_path_flush.py"]
 tests = [
   "build-parallelism-guard",
@@ -1565,6 +1607,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1574,7 +1617,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dabeafffebcc"
+name = "script-readers-c5d78b4ac6ae"
 paths = ["tools/scripts/test_check_installed_rpaths.py"]
 tests = [
   "build-parallelism-guard",
@@ -1594,6 +1637,7 @@ tests = [
   "install-rpath-closure",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1603,7 +1647,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-858f9f153aad"
+name = "script-readers-68f798c54c43"
 paths = ["tools/scripts/test_check_skip_not_pass.py"]
 tests = [
   "build-parallelism-guard",
@@ -1623,6 +1667,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "skip-not-pass-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1632,7 +1677,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f349c9f4f742"
+name = "script-readers-42b54637a4ea"
 paths = ["tools/scripts/test_check_test_file_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -1652,6 +1697,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "test-file-paths-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1661,7 +1707,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5ef04bb03703"
+name = "script-readers-a131d52cfc0c"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
   "build-parallelism-guard",
@@ -1681,6 +1727,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "transient-interaction-trace-budget-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1690,7 +1737,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-71d49e84d2e8"
+name = "script-readers-a1ddb594fc0c"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -1710,6 +1757,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "visual-python-deps-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1719,7 +1767,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c0724ccbda95"
+name = "script-readers-b4c39ca6429d"
 paths = ["tools/scripts/test_check_yoga_oracle_pin.py"]
 tests = [
   "build-parallelism-guard",
@@ -1738,6 +1786,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
   "yoga-oracle-pin-lockstep-selftest",
 ]
 build_targets = ["pulp-cli"]
@@ -1748,7 +1797,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-154e24419d71"
+name = "script-readers-532f2991f227"
 paths = ["tools/scripts/test_ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -1768,6 +1817,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1777,7 +1827,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4eb4af2fa557"
+name = "script-readers-431916e3b466"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
   "build-parallelism-guard",
@@ -1797,6 +1847,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1806,7 +1857,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-98ca624d42ac"
+name = "script-readers-00158007b07b"
 paths = ["tools/scripts/test_clean_worktree_builds.py"]
 tests = [
   "build-parallelism-guard",
@@ -1826,6 +1877,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1835,7 +1887,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12e5541282f6"
+name = "script-readers-f8750fc62967"
 paths = ["tools/scripts/test_clean_worktrees.py"]
 tests = [
   "build-parallelism-guard",
@@ -1855,6 +1907,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1864,7 +1917,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3737a5561d5d"
+name = "script-readers-64d6c8bfad4b"
 paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1884,6 +1937,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1893,7 +1947,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f1adfb05bc3f"
+name = "script-readers-eefd211f793a"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
   "build-parallelism-guard",
@@ -1913,6 +1967,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1922,7 +1977,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-602a60906def"
+name = "script-readers-67c971c09ece"
 paths = ["tools/scripts/test_configure_check_cache.py"]
 tests = [
   "build-parallelism-guard",
@@ -1942,6 +1997,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1951,7 +2007,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d172a058abc2"
+name = "script-readers-cb797f150255"
 paths = ["tools/scripts/test_connected_git_history.py"]
 tests = [
   "build-parallelism-guard",
@@ -1971,6 +2027,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1980,7 +2037,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-be7928947ae4"
+name = "script-readers-b3ab52b1687a"
 paths = ["tools/scripts/test_consumption_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -2000,6 +2057,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2009,7 +2067,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-715a728fc622"
+name = "script-readers-8ce4392de61f"
 paths = ["tools/scripts/test_consumption_census_contract_note.py"]
 tests = [
   "build-parallelism-guard",
@@ -2029,6 +2087,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2038,7 +2097,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-79f94b4e3421"
+name = "script-readers-5a2b089b558c"
 paths = ["tools/scripts/test_control_profile_downgrade_is_announced.py"]
 tests = [
   "build-parallelism-guard",
@@ -2058,6 +2117,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2067,7 +2127,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c2ab9b7ab9e0"
+name = "script-readers-a5a5eff8105f"
 paths = ["tools/scripts/test_ctest_duplicate_registration.py"]
 tests = [
   "build-parallelism-guard",
@@ -2087,6 +2147,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2096,7 +2157,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e7723393b704"
+name = "script-readers-037b5e5b9cf9"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2116,6 +2177,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2125,7 +2187,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e85341551ba2"
+name = "script-readers-c2c2eed3377c"
 paths = ["tools/scripts/test_ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2145,6 +2207,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2154,7 +2217,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e5459fd0ae36"
+name = "script-readers-2076bc234ada"
 paths = ["tools/scripts/test_design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2174,6 +2237,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2183,7 +2247,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-57a3e9cac0a7"
+name = "script-readers-2816e74141e3"
 paths = ["tools/scripts/test_doxygen_installed_header_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2203,6 +2267,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2212,7 +2277,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-29b919dda0eb"
+name = "script-readers-b69b85ba63e7"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -2233,6 +2298,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2242,7 +2308,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2c8147bfcbca"
+name = "script-readers-5c6a55d4fd0e"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -2262,6 +2328,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2271,7 +2338,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-665d329eb074"
+name = "script-readers-6d70735cd163"
 paths = ["tools/scripts/test_example_validation_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2291,6 +2358,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2300,7 +2368,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12f269eede19"
+name = "script-readers-6921e093a858"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
   "build-parallelism-guard",
@@ -2320,6 +2388,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2329,7 +2398,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ff1f789db730"
+name = "script-readers-43e7504b47aa"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
   "build-parallelism-guard",
@@ -2349,6 +2418,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2358,7 +2428,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4b54ca2df12c"
+name = "script-readers-54cddd5a3143"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
   "build-parallelism-guard",
@@ -2378,6 +2448,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2387,7 +2458,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ed9ef359f25d"
+name = "script-readers-b688723f3f9f"
 paths = ["tools/scripts/test_format_baseline_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -2407,6 +2478,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2416,7 +2488,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-140d290c0230"
+name = "script-readers-8b8b16134693"
 paths = ["tools/scripts/test_foundation_include_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -2436,6 +2508,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2445,7 +2518,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6f809f246ecd"
+name = "script-readers-3e4259b81c07"
 paths = ["tools/scripts/test_gallery_visual_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -2465,6 +2538,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2474,7 +2548,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3dc3e5fbcfac"
+name = "script-readers-c10e875d7fde"
 paths = ["tools/scripts/test_gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2494,6 +2568,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2503,7 +2578,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1e2b390d1798"
+name = "script-readers-1429aa2478b6"
 paths = ["tools/scripts/test_gate_suite_executed.py"]
 tests = [
   "build-parallelism-guard",
@@ -2523,6 +2598,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2532,7 +2608,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-adf85e5b1edb"
+name = "script-readers-6c3604ca8dc4"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2555,6 +2631,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "source-selftest-lane-contract",
   "source-selftest-lane-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2564,7 +2641,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0b927838fbe0"
+name = "script-readers-7a9514c572bc"
 paths = ["tools/scripts/test_git_read_memo.py"]
 tests = [
   "build-parallelism-guard",
@@ -2584,6 +2661,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2593,7 +2671,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b5bd6ccd6287"
+name = "script-readers-5a3a212a01fc"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
   "build-parallelism-guard",
@@ -2613,6 +2691,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2622,7 +2701,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-620c8d2a77bb"
+name = "script-readers-dc347da2be77"
 paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
 tests = [
   "build-parallelism-guard",
@@ -2642,6 +2721,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2651,7 +2731,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-36033a86ba54"
+name = "script-readers-41a412dfd62e"
 paths = ["tools/scripts/test_gpu_audio_p2_host_preflight.py"]
 tests = [
   "build-parallelism-guard",
@@ -2671,6 +2751,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2680,7 +2761,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fc0351a9812d"
+name = "script-readers-64bcd29958bc"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -2700,6 +2781,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2709,7 +2791,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cfd6c7077db2"
+name = "script-readers-cbbe234f38e9"
 paths = ["tools/scripts/test_gpu_clean_agent_journey.py"]
 tests = [
   "build-parallelism-guard",
@@ -2729,6 +2811,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2738,7 +2821,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2693e784ebff"
+name = "script-readers-db117e07a5c3"
 paths = ["tools/scripts/test_gpu_device_link_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2758,6 +2841,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2767,7 +2851,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7d965fcff002"
+name = "script-readers-3c8e8f3dd8b7"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
   "build-parallelism-guard",
@@ -2787,6 +2871,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2796,7 +2881,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ecdf127ca72b"
+name = "script-readers-61dd3575355d"
 paths = ["tools/scripts/test_gpu_dpr_pulp_native_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -2816,6 +2901,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2825,7 +2911,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bd68b5bb8b05"
+name = "script-readers-fab437a9bc52"
 paths = ["tools/scripts/test_gpu_dpr_v2_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -2845,6 +2931,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2854,7 +2941,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4dee7995c7e4"
+name = "script-readers-3057874fb800"
 paths = ["tools/scripts/test_gpu_dpr_web_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -2874,6 +2961,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2883,7 +2971,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bfbff96df796"
+name = "script-readers-cd54387853a7"
 paths = ["tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -2903,6 +2991,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2912,7 +3001,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-251c653870e8"
+name = "script-readers-29d1d929574f"
 paths = ["tools/scripts/test_gpu_handoff_pin_freshness.py"]
 tests = [
   "build-parallelism-guard",
@@ -2932,6 +3021,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2941,7 +3031,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fd202f2a1559"
+name = "script-readers-8409c514e969"
 paths = ["tools/scripts/test_gpu_health_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -2961,6 +3051,7 @@ tests = [
   "gpu-health-contract-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2970,7 +3061,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9868455c807a"
+name = "script-readers-062f5e6285ef"
 paths = ["tools/scripts/test_gpu_health_read_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -2990,6 +3081,7 @@ tests = [
   "gpu-health-read-contract-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2999,7 +3091,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8e82e4b774b3"
+name = "script-readers-3c18d7d11730"
 paths = ["tools/scripts/test_gpu_health_run_attestation.py"]
 tests = [
   "build-parallelism-guard",
@@ -3019,6 +3111,7 @@ tests = [
   "gpu-health-run-attestation",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3028,7 +3121,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-52b62b76ca7a"
+name = "script-readers-8806ec04cce1"
 paths = ["tools/scripts/test_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -3048,6 +3141,7 @@ tests = [
   "gpu-probe-terminal-recorder-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3057,7 +3151,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f9d9698c95e7"
+name = "script-readers-d456fde58108"
 paths = ["tools/scripts/test_gpu_recipe_catalog.py"]
 tests = [
   "build-parallelism-guard",
@@ -3077,6 +3171,7 @@ tests = [
   "gpu-recipe-catalog-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3086,7 +3181,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6c149b38db21"
+name = "script-readers-3046fc7004ea"
 paths = ["tools/scripts/test_gpu_test_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -3106,6 +3201,7 @@ tests = [
   "gpu-test-resource-locks",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3115,7 +3211,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7e1c9be2f9e0"
+name = "script-readers-e240cf397fb4"
 paths = ["tools/scripts/test_hydrate_gpu_provenance_commits.py"]
 tests = [
   "build-parallelism-guard",
@@ -3135,6 +3231,7 @@ tests = [
   "gpu-provenance-hydration-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3144,7 +3241,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-48637d3df52e"
+name = "script-readers-b7c0c0a1a922"
 paths = ["tools/scripts/test_hydrate_real_git.py"]
 tests = [
   "build-parallelism-guard",
@@ -3164,6 +3261,7 @@ tests = [
   "gpu-provenance-hydration-real-git-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3173,7 +3271,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13fbfbc1d05b"
+name = "script-readers-2470a0fdf6bc"
 paths = ["tools/scripts/test_include_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -3193,6 +3291,7 @@ tests = [
   "prepush-refresh-push",
   "pulp-view-core-include-boundary-negative-contract",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3202,7 +3301,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-80436f18961a"
+name = "script-readers-8d51fe449975"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3222,6 +3321,7 @@ tests = [
   "inspector-truth-check-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3231,7 +3331,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ea04b6917bde"
+name = "script-readers-327eb49955cc"
 paths = ["tools/scripts/test_install_sha256sums.py"]
 tests = [
   "build-parallelism-guard",
@@ -3251,6 +3351,7 @@ tests = [
   "install-sha256sums-current",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3260,7 +3361,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fe11d52d3614"
+name = "script-readers-fcbcfacf1fd2"
 paths = ["tools/scripts/test_install_shipyard_queue_repair.py"]
 tests = [
   "build-parallelism-guard",
@@ -3280,6 +3381,7 @@ tests = [
   "install-shipyard-queue-repair",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3289,7 +3391,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3f884d2c7f49"
+name = "script-readers-9316c29c3767"
 paths = ["tools/scripts/test_live_build_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3309,6 +3411,7 @@ tests = [
   "live-build-check-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3318,7 +3421,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a47849eb3392"
+name = "script-readers-4e52b9e4af9f"
 paths = ["tools/scripts/test_mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3338,6 +3441,7 @@ tests = [
   "mac-objc-source-list-guard-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3347,7 +3451,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-09fd253a34c0"
+name = "script-readers-bfc322ae7b10"
 paths = ["tools/scripts/test_measure_min_os.py"]
 tests = [
   "build-parallelism-guard",
@@ -3367,6 +3471,7 @@ tests = [
   "measure-min-os-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3376,7 +3481,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7aa1e6763ccf"
+name = "script-readers-c2055a2bf1a1"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
   "build-parallelism-guard",
@@ -3396,6 +3501,7 @@ tests = [
   "minos-registry-absent-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3405,7 +3511,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-062d60e511cc"
+name = "script-readers-b290b505c4ce"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
   "build-parallelism-guard",
@@ -3425,6 +3531,7 @@ tests = [
   "param-designator-order",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3434,7 +3541,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-632f63c7d662"
+name = "script-readers-3368de2b9a20"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3454,6 +3561,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "test-pch-wiring-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3463,7 +3571,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-15a3d6b4eff7"
+name = "script-readers-24a8de97ba81"
 paths = ["tools/scripts/test_planning_gitlink_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3483,6 +3591,7 @@ tests = [
   "planning-gitlink-guard-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3492,7 +3601,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ccfc7981e413"
+name = "script-readers-84d36443fa7c"
 paths = ["tools/scripts/test_pr_batch_advisor.py"]
 tests = [
   "build-parallelism-guard",
@@ -3512,6 +3621,7 @@ tests = [
   "pr-batch-advisor",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3521,7 +3631,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-885e1299627f"
+name = "script-readers-478735ab29bb"
 paths = ["tools/scripts/test_pr_check_triage.py"]
 tests = [
   "build-parallelism-guard",
@@ -3541,6 +3651,7 @@ tests = [
   "pr-check-triage-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3550,7 +3661,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-022de6bed82a"
+name = "script-readers-bd1f89027afa"
 paths = ["tools/scripts/test_pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3570,6 +3681,7 @@ tests = [
   "pr-fast-tier-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3579,7 +3691,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bbcd1e4828b5"
+name = "script-readers-6ba2afba414b"
 paths = ["tools/scripts/test_pr_flow_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -3599,6 +3711,7 @@ tests = [
   "pr-flow-audit-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3608,7 +3721,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c49937a2111b"
+name = "script-readers-926aa4eb4b52"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -3628,6 +3741,7 @@ tests = [
   "prepush-format-gate-wiring",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3637,7 +3751,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b7aacdb7c046"
+name = "script-readers-38e9dfc50983"
 paths = ["tools/scripts/test_prepush_gate_output.py"]
 tests = [
   "build-parallelism-guard",
@@ -3657,6 +3771,7 @@ tests = [
   "prepush-gate-output",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3666,7 +3781,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-62f71d0d11da"
+name = "script-readers-35a3ec542a7f"
 paths = ["tools/scripts/test_prepush_queue_rebase_hint.py"]
 tests = [
   "build-parallelism-guard",
@@ -3686,6 +3801,7 @@ tests = [
   "prepush-queue-rebase-hint",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3695,7 +3811,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d9dab51c650d"
+name = "script-readers-2d2fba09ee59"
 paths = ["tools/scripts/test_protected_merge_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -3716,6 +3832,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "test-receipts-shadow-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3725,7 +3842,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f4d9673b13c8"
+name = "script-readers-d888fc346eb0"
 paths = ["tools/scripts/test_pulp_test_data_cmake.py"]
 tests = [
   "build-parallelism-guard",
@@ -3745,6 +3862,7 @@ tests = [
   "prepush-refresh-push",
   "pulp-test-data-cmake-selftest",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3754,7 +3872,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e6bec361c7c8"
+name = "script-readers-7d2220aa90ff"
 paths = ["tools/scripts/test_pulp_test_group.py"]
 tests = [
   "build-parallelism-guard",
@@ -3774,6 +3892,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3783,7 +3902,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b3bb4aa892de"
+name = "script-readers-c0e1c821dfc2"
 paths = ["tools/scripts/test_pulp_uninstall.py"]
 tests = [
   "build-parallelism-guard",
@@ -3803,6 +3922,7 @@ tests = [
   "prepush-refresh-push",
   "pulp-uninstaller-contract",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3812,7 +3932,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-231088a9d59e"
+name = "script-readers-f91601e0f6be"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3832,6 +3952,7 @@ tests = [
   "prepush-refresh-push",
   "relay-contract-hosts-selftest",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3841,7 +3962,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8cbfa5668949"
+name = "script-readers-3d23f367ae09"
 paths = ["tools/scripts/test_release_trailer_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3861,6 +3982,7 @@ tests = [
   "prepush-refresh-push",
   "release-trailer-guard-selftest",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3870,7 +3992,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d9d613f9d2f3"
+name = "script-readers-4a9f11862029"
 paths = ["tools/scripts/test_render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3890,6 +4012,7 @@ tests = [
   "prepush-refresh-push",
   "render-upward-edge-check-rules",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3899,7 +4022,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a0238b3b9c2d"
+name = "script-readers-806785959cdc"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
   "build-parallelism-guard",
@@ -3919,6 +4042,7 @@ tests = [
   "prepush-refresh-push",
   "repo-source-scan",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3928,7 +4052,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13f32d914ece"
+name = "script-readers-9bdee848ec5b"
 paths = ["tools/scripts/test_resolve_classify_base.py"]
 tests = [
   "build-parallelism-guard",
@@ -3948,6 +4072,7 @@ tests = [
   "prepush-refresh-push",
   "resolve-classify-base-selftest",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3957,7 +4082,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8049cb22b4bf"
+name = "script-readers-93fbbc63cc78"
 paths = ["tools/scripts/test_run_changed_surface_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -3977,6 +4102,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3986,7 +4112,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7f793a363530"
+name = "script-readers-d6bedcda2a20"
 paths = ["tools/scripts/test_runner_topology_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4006,6 +4132,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "runner-topology-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4015,7 +4142,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-40ca027c9186"
+name = "script-readers-a52adda7da89"
 paths = ["tools/scripts/test_runner_topology_static.py"]
 tests = [
   "build-parallelism-guard",
@@ -4035,6 +4162,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "runner-topology-static-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4044,7 +4172,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6976b88f713f"
+name = "script-readers-5cadb50fc575"
 paths = ["tools/scripts/test_rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4064,6 +4192,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "rust-cli-build-edge-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4073,7 +4202,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ceab16ccfadf"
+name = "script-readers-a0999a9ae4b8"
 paths = ["tools/scripts/test_sample_region_catalogs.py"]
 tests = [
   "build-parallelism-guard",
@@ -4093,6 +4222,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-catalog-contract",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4102,7 +4232,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68c2108557b4"
+name = "script-readers-8ec772a14b12"
 paths = ["tools/scripts/test_sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
@@ -4122,6 +4252,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4131,7 +4262,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-239e1895180d"
+name = "script-readers-ba00319d3d33"
 paths = ["tools/scripts/test_schema_drift_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4151,6 +4282,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "timeline-schema-drift-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4160,7 +4292,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fd3c10be3aa1"
+name = "script-readers-60d4853e9519"
 paths = ["tools/scripts/test_script_argv.py"]
 tests = [
   "build-parallelism-guard",
@@ -4180,6 +4312,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "script-argv-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4189,7 +4322,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9879c9e29d9b"
+name = "script-readers-03109928029e"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
   "build-parallelism-guard",
@@ -4209,6 +4342,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "script-test-inputs-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4218,7 +4352,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-53827336f220"
+name = "script-readers-48edb27e2d9f"
 paths = ["tools/scripts/test_sdk_capability_handoff.py"]
 tests = [
   "agent-capability-sdk-handoff-selftest",
@@ -4238,6 +4372,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4247,7 +4382,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d987aa15dead"
+name = "script-readers-d8b7ec25e8df"
 paths = ["tools/scripts/test_sdk_consumer_sweep.py"]
 tests = [
   "build-parallelism-guard",
@@ -4267,6 +4402,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sdk-consumer-sweep-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4276,7 +4412,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-59b0853e5040"
+name = "script-readers-95ca397d6dc9"
 paths = ["tools/scripts/test_sdk_consumer_update.py"]
 tests = [
   "build-parallelism-guard",
@@ -4296,6 +4432,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sdk-consumer-update-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4305,7 +4442,37 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-452160b3eebd"
+name = "script-readers-b4d65da7dfe5"
+paths = ["tools/scripts/test_sdk_development_provenance.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-11d550379006"
 paths = ["tools/scripts/test_sdk_plist_templates_installed.py"]
 tests = [
   "build-parallelism-guard",
@@ -4325,6 +4492,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sdk-plist-templates-installed",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4334,7 +4502,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c0ebba1f0715"
+name = "script-readers-c977e9f35e44"
 paths = ["tools/scripts/test_seed_build_dir.py"]
 tests = [
   "build-parallelism-guard",
@@ -4354,6 +4522,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "seed-build-dir-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4363,7 +4532,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-af1e6516f62e"
+name = "script-readers-e0ed0bfb9b66"
 paths = ["tools/scripts/test_sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4383,6 +4552,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sequencer-control-skill-coverage-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4392,7 +4562,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1730437880a2"
+name = "script-readers-67f795096a06"
 paths = ["tools/scripts/test_setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4412,6 +4582,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "setup-bootstrap-plan-guard-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4421,7 +4592,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a35c7912d5bf"
+name = "script-readers-3563c38fea72"
 paths = ["tools/scripts/test_shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4441,6 +4612,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "test-shared-objects-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4450,7 +4622,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-435062654415"
+name = "script-readers-46b09bfdfb14"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4470,6 +4642,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "silent-revert-guard-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4479,7 +4652,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7e3151cc7419"
+name = "script-readers-8222af046367"
 paths = ["tools/scripts/test_skills_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4499,6 +4672,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "skills-doc-check-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4508,7 +4682,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3856591f26ca"
+name = "script-readers-9e1a96b87757"
 paths = ["tools/scripts/test_status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4528,6 +4702,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "status-tone-signal-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4537,7 +4712,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e1c476e5b059"
+name = "script-readers-2c50312eb52c"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
   "build-parallelism-guard",
@@ -4557,6 +4732,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "tart-home-resolution",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4566,7 +4742,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-06184cf30247"
+name = "script-readers-c6a0c057a6e5"
 paths = ["tools/scripts/test_timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4586,6 +4762,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "timeline-fixture-coverage-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4595,7 +4772,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fcfc1ab347e6"
+name = "script-readers-23b4bbb5f404"
 paths = ["tools/scripts/test_tmp_leak_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4615,6 +4792,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "tmp-leak-guard-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4624,7 +4802,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7a9a575d2a89"
+name = "script-readers-0be72a1e6f8d"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4644,6 +4822,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "tools-registry-check-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4653,7 +4832,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2064accdecca"
+name = "script-readers-3fd675680340"
 paths = ["tools/scripts/test_trace_frame_cost.py"]
 tests = [
   "build-parallelism-guard",
@@ -4673,6 +4852,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "trace-frame-cost-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4682,7 +4862,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-38180ae80034"
+name = "script-readers-2574bfeb5bfb"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4702,6 +4882,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "trace-span-category-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4711,7 +4892,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6e0c2c8de3b0"
+name = "script-readers-58b0a0b9cfef"
 paths = ["tools/scripts/test_unbounded_wait_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4731,6 +4912,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "unbounded-wait-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4740,7 +4922,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1eeed5131236"
+name = "script-readers-443192b27798"
 paths = ["tools/scripts/test_unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4760,6 +4942,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "unregistered-tests-check-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4769,7 +4952,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-97ff1d9bcd16"
+name = "script-readers-e9e145bf3d16"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
   "build-parallelism-guard",
@@ -4789,6 +4972,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4798,7 +4982,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1046d804e458"
+name = "script-readers-25158200ab22"
 paths = ["tools/scripts/test_vellum_boundary_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4818,6 +5002,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "vellum-boundary-lint-negative-contract",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4827,36 +5012,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-07c86e2fdd80"
-paths = ["tools/scripts/test_vellum_inheritance_ledger_check.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "vellum-inheritance-ledger-negative-contract",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-027c956c7abb"
+name = "script-readers-827f1167f5a4"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
   "build-parallelism-guard",
@@ -4876,6 +5032,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "vellum-trusted-merge-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4885,7 +5042,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ad6f8a129acf"
+name = "script-readers-36b1cbdd3e37"
 paths = ["tools/scripts/test_vellum_watch_preflight.py"]
 tests = [
   "build-parallelism-guard",
@@ -4905,6 +5062,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4914,7 +5072,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-19e4c2b8d25e"
+name = "script-readers-9749816190b8"
 paths = ["tools/scripts/test_vellum_workflow_dispatch.py"]
 tests = [
   "build-parallelism-guard",
@@ -4934,6 +5092,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "vellum-workflow-dispatch",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4943,7 +5102,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a1fa22f63750"
+name = "script-readers-5d66e90646eb"
 paths = ["tools/scripts/test_verify_create_templates.py"]
 tests = [
   "build-parallelism-guard",
@@ -4963,6 +5122,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4972,7 +5132,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2dc321cfed49"
+name = "script-readers-488640570d95"
 paths = ["tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -4992,6 +5152,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5001,7 +5162,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-94d4f35b7e3a"
+name = "script-readers-dc39263ccbc3"
 paths = ["tools/scripts/test_verify_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -5021,6 +5182,7 @@ tests = [
   "gpu-probe-acceptance-verifier-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5030,7 +5192,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3326248c6a1e"
+name = "script-readers-c6a5ed26998c"
 paths = ["tools/scripts/test_verify_rendered_panel.py"]
 tests = [
   "build-parallelism-guard",
@@ -5050,6 +5212,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "verify-rendered-panel-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5059,7 +5222,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8b75ff9ebfd7"
+name = "script-readers-b44715b43c2f"
 paths = ["tools/scripts/test_version_at_land.py"]
 tests = [
   "build-parallelism-guard",
@@ -5079,6 +5242,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "version-at-land-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5088,7 +5252,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9526fb27d8c9"
+name = "script-readers-932f277a9f82"
 paths = ["tools/scripts/test_view_audio_symbol_floor.py"]
 tests = [
   "build-parallelism-guard",
@@ -5108,6 +5272,7 @@ tests = [
   "prepush-refresh-push",
   "pulp-view-audio-symbol-floor-negative-contract",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5117,7 +5282,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-86a427870a0c"
+name = "script-readers-30e556451bd8"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5137,6 +5302,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "web-timeline-source-closure-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5146,7 +5312,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e0389a2a0c93"
+name = "script-readers-3a4e64b484c6"
 paths = ["tools/scripts/test_windows_posix_shims.py"]
 tests = [
   "build-parallelism-guard",
@@ -5165,6 +5331,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
   "windows-posix-shims-selftest",
 ]
 build_targets = ["pulp-cli"]
@@ -5175,7 +5342,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c0278800750d"
+name = "script-readers-07536f80071a"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5195,6 +5362,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "timeline-command-doc-coverage",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5204,7 +5372,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0430d6ec798d"
+name = "script-readers-d80d03580128"
 paths = ["tools/scripts/timeline_engine_dependency_floor_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5225,6 +5393,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "timeline-engine-dependency-floor",
   "timeline-engine-dependency-floor-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5234,7 +5403,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e2629893d0a7"
+name = "script-readers-18f4c003ade9"
 paths = ["tools/scripts/timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5254,6 +5423,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "timeline-fixture-coverage",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5263,7 +5433,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-74cb2521a887"
+name = "script-readers-eb9070ac79a1"
 paths = ["tools/scripts/token_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5283,6 +5453,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "token-coverage-ratchet",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5292,7 +5463,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3264cadc934d"
+name = "script-readers-f0c52d3436f7"
 paths = ["tools/scripts/token_key_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5312,6 +5483,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "token-key-correctness",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5321,7 +5493,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-73c5fdfcb355"
+name = "script-readers-06d58d2ccc00"
 paths = ["tools/scripts/trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -5341,6 +5513,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "trace-span-category-lint",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5350,7 +5523,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4725620f7866"
+name = "script-readers-b565bc5740d0"
 paths = ["tools/scripts/unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5371,6 +5544,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "unregistered-tests-check",
   "unregistered-tests-check-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5380,36 +5554,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-275b603dd178"
-paths = ["tools/scripts/vellum_inheritance_ledger_check.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "vellum-inheritance-ledger",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-1fd3de4b61de"
+name = "script-readers-4eed75148c96"
 paths = ["tools/scripts/verify_downstream_consumers.py"]
 tests = [
   "build-parallelism-guard",
@@ -5430,6 +5575,7 @@ tests = [
   "refactor-downstream-consumers-manifest",
   "refactor-downstream-consumers-negative-contract",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5439,7 +5585,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a0faadb4340f"
+name = "script-readers-256398f5ed5a"
 paths = ["tools/scripts/verify_downstream_consumers_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5459,6 +5605,7 @@ tests = [
   "prepush-refresh-push",
   "refactor-downstream-consumers-negative-contract",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5468,7 +5615,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b1d39ebbf0bf"
+name = "script-readers-7aac3114f774"
 paths = ["tools/scripts/verify_refactor_baselines.py"]
 tests = [
   "build-parallelism-guard",
@@ -5489,6 +5636,7 @@ tests = [
   "refactor-baseline-manifest",
   "refactor-baseline-manifest-negative-contract",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5498,7 +5646,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8d6311c6cc6b"
+name = "script-readers-2a1c7aa4e22c"
 paths = ["tools/scripts/verify_refactor_baselines_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5518,6 +5666,7 @@ tests = [
   "prepush-refresh-push",
   "refactor-baseline-manifest-negative-contract",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5527,7 +5676,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5471e63cfe7b"
+name = "script-readers-26e0a7286df0"
 paths = ["tools/scripts/verify_timeline_launcher_resource_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5549,6 +5698,7 @@ tests = [
   "timeline-launcher-bulk-build-contract",
   "timeline-launcher-resource-contract-mutation-control",
   "timeline-launcher-retained-size-contract",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5558,7 +5708,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7acd6e0f81f3"
+name = "script-readers-dec8e42b0c74"
 paths = ["tools/scripts/verify_timeline_live_capture.py"]
 tests = [
   "build-parallelism-guard",
@@ -5578,6 +5728,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "timeline-live-capture-verifier-self-test",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5587,7 +5738,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-03b122e398ae"
+name = "script-readers-99d725234f34"
 paths = ["tools/scripts/verify_timeline_transaction_launcher_complexity.py"]
 tests = [
   "build-parallelism-guard",
@@ -5608,6 +5759,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "timeline-transaction-launcher-complexity",
   "timeline-transaction-launcher-complexity-mutation-control",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5617,7 +5769,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7efa79399846"
+name = "script-readers-7af8ce02b6c7"
 paths = ["tools/scripts/verify_wasm_skia_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -5638,6 +5790,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "wasm-skia-fetch-mapping",
   "wasm-skia-slice-invariants",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5647,7 +5800,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2c816f38fca2"
+name = "script-readers-535fca4053b6"
 paths = ["tools/scripts/view_audio_symbol_floor.py"]
 tests = [
   "build-parallelism-guard",
@@ -5667,6 +5820,7 @@ tests = [
   "prepush-refresh-push",
   "pulp-view-audio-symbol-floor",
   "reuse-policy-replay-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = [
   "pulp-cli",
@@ -5682,7 +5836,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-412708482ddd"
+name = "script-readers-1b161ba6d921"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5703,6 +5857,7 @@ tests = [
   "reuse-policy-replay-selftest",
   "web-timeline-source-closure",
   "web-timeline-source-closure-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -6201,7 +6356,6 @@ paths = [
   "tools/scripts/test_vellum_closure.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
-  "tools/scripts/test_vellum_inheritance_ledger_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
   "tools/scripts/test_vellum_watch_preflight.py",
   "tools/scripts/test_vellum_workflow_dispatch.py",
@@ -6238,7 +6392,6 @@ paths = [
   "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
-  "tools/scripts/vellum_inheritance_ledger_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",
@@ -6745,7 +6898,6 @@ paths = [
   "tools/scripts/test_vellum_closure.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
-  "tools/scripts/test_vellum_inheritance_ledger_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
   "tools/scripts/test_vellum_watch_preflight.py",
   "tools/scripts/test_vellum_workflow_dispatch.py",
@@ -6782,7 +6934,6 @@ paths = [
   "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
-  "tools/scripts/vellum_inheritance_ledger_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",
