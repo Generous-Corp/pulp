@@ -1,22 +1,32 @@
-// Thin hot-reload logic whose editor holds a level meter. Built against headers
-// only; every pulp symbol, the display registry included, resolves from the
-// host at dlopen. The meter is made through the view-core registry and
-// configured through LevelDisplay inside this module, so the cast below uses
-// the host's typeinfo for the interface.
+// Thin hot-reload logic whose editor is an imported design holding a level
+// meter. Built against headers only; every pulp symbol, the importer and the
+// display registry included, resolves from the host at dlopen. The module
+// configures the meter through LevelDisplay, so that cast uses the host's
+// typeinfo for the interface.
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/reload/reload_abi.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/data_display.hpp>
+#include <pulp/view/design_import.hpp>
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <string_view>
 
 using namespace pulp;
 
 namespace {
+
+view::View* find_anchor(view::View& root, std::string_view anchor) {
+    if (root.anchor_id() == anchor) return &root;
+    for (std::size_t i = 0; i < root.child_count(); ++i)
+        if (auto* hit = find_anchor(*root.child_at(i), anchor)) return hit;
+    return nullptr;
+}
+
 class MeterLogic final : public format::Processor {
 public:
     format::PluginDescriptor descriptor() const override {
@@ -40,22 +50,26 @@ public:
         }
     }
     std::unique_ptr<view::View> create_view() override {
-        auto root = std::make_unique<view::View>();
-        root->set_bounds({0.0f, 0.0f, 120.0f, 120.0f});
-        auto meter = view::make_data_display("pulp.level");
-        if (!meter) {
-            root->set_id("meter-unavailable");
-            return root;
+        view::DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.stable_anchor_id = "reload-panel";
+        ir.root.style.width = 120.0f;
+        ir.root.style.height = 120.0f;
+        view::IRNode meter;
+        meter.type = "frame";
+        meter.stable_anchor_id = "reload-meter";
+        meter.style.width = 24.0f;
+        meter.style.height = 100.0f;
+        meter.audio_widget = view::AudioWidgetType::meter;
+        ir.root.children.push_back(meter);
+
+        auto root = view::build_native_view_tree(ir, ir.asset_manifest);
+        if (!root) return root;
+        auto* imported = find_anchor(*root, "reload-meter");
+        if (auto* level = imported ? dynamic_cast<view::LevelDisplay*>(imported) : nullptr) {
+            level->set_levels(0.5f, 0.75f);
+            imported->set_id("module-configured-level");
         }
-        auto* level = dynamic_cast<view::LevelDisplay*>(meter.get());
-        if (!level) {
-            root->set_id("meter-not-level-display");
-            return root;
-        }
-        level->set_levels(0.5f, 0.75f);
-        meter->set_id("reload-meter");
-        root->set_id("meter-ready");
-        root->add_child(std::move(meter));
         return root;
     }
 };
