@@ -3,6 +3,7 @@
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_convolver.hpp>
+#include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 
 #include "detail/realtime_gpu_audio_path.hpp"
 
@@ -860,4 +861,19 @@ TEST_CASE("GpuConvolver delta fallback preserves the due block after a rejected 
                 CHECK(std::abs(sample) < 1.0e-5f);
         }
     }
+}
+
+TEST_CASE("GPU-off convolver nodes expose fail-closed provider status",
+          "[gpu_audio][convolver][provider-boundary]") {
+    GpuConvolver convolver(1, 32, 48000, {1.0f});
+    REQUIRE(convolver.prepare());
+    if (convolver.gpu_available())
+        SKIP("GPU provider enabled");
+    REQUIRE_FALSE(convolver.gpu_available());
+    REQUIRE(convolver.backend().empty());
+
+    GpuMultiConvolver multi(32, 48000, {{1.0f}});
+    REQUIRE_FALSE(multi.prepare());
+    REQUIRE_FALSE(multi.gpu_available());
+    REQUIRE(multi.backend().empty());
 }
