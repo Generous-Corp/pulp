@@ -3282,6 +3282,34 @@
    ],
    "kind": "python"
   },
+  "build-governance-paths-selftest": {
+   "entry": "tools/ci/test_build_governance_paths.py",
+   "inputs": [
+    ".github/workflows/android.yml",
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/cross-platform-check.yml",
+    ".github/workflows/gcc-compile-gate.yml",
+    ".github/workflows/intel-portability.yml",
+    ".github/workflows/sanitizers.yml",
+    ".github/workflows/timeline-fuzz.yml",
+    ".github/workflows/visual-harness.yml",
+    ".github/workflows/wclap-cloudflare.yml",
+    ".github/workflows/web-plugins.yml",
+    ".github/workflows/windows-cli-compile.yml",
+    "test/cmake/gpu_audio_web_tests.cmake",
+    "tools/ci/governed-build.sh",
+    "tools/ci/tart-run-job.sh",
+    "tools/ci/test_build_governance_paths.py",
+    "tools/ci/wasm-fixture-lane.sh",
+    "tools/cli/cmd_design.cpp",
+    "tools/mcp/mcp_tools.cpp",
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/contributor_check.sh",
+    "tools/scripts/release-cli-local.sh",
+    "tools/scripts/sdk_consumer_sweep.py"
+   ],
+   "kind": "python"
+  },
   "build-matrix-contract": {
    "entry": "tools/ci/test_build_matrix_contract.py",
    "inputs": [

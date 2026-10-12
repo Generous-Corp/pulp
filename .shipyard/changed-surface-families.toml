@@ -5967,6 +5967,7 @@ tests = [
   "agent-hook-paths",
   "base-poison-detector-selftest",
   "binary-identity-shadow-selftest",
+  "build-governance-paths-selftest",
   "build-parallelism-guard",
   "build-parallelism-guard-selftest",
   "capability-contract-gate-wiring",
